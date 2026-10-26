@@ -10,6 +10,7 @@ const chat_transcript = @import("chat_transcript.zig");
 const chat_style = @import("chat_style.zig");
 const chat_options = @import("chat_options.zig");
 const chat_drop = @import("chat_drop.zig");
+const chat_keynav = @import("chat_keynav.zig");
 const DragQueryFileW = @import("win32.zig").DragQueryFileW;
 const DragFinish = @import("win32.zig").DragFinish;
 const chat_code = @import("chat_code.zig");
@@ -4798,6 +4799,22 @@ fn chatPaintReadDivider(hdc: HANDLE, width: i32) void {
     _ = chatDrawText(hdc, L("New"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
+fn chatPaintNavRing(hdc: HANDLE, rc: RECT) void {
+    const brush = CreateSolidBrush(customColorOr("accent", RGB(110, 175, 245)));
+    defer _ = DeleteObject(brush);
+    const t = @max(2, uiScaled(2));
+    const grow = uiScaled(2);
+    const outer = RECT{ .left = rc.left - grow, .top = rc.top - grow, .right = rc.right + grow, .bottom = rc.bottom + grow };
+    var top = RECT{ .left = outer.left, .top = outer.top, .right = outer.right, .bottom = outer.top + t };
+    var bottom = RECT{ .left = outer.left, .top = outer.bottom - t, .right = outer.right, .bottom = outer.bottom };
+    var left = RECT{ .left = outer.left, .top = outer.top, .right = outer.left + t, .bottom = outer.bottom };
+    var right = RECT{ .left = outer.right - t, .top = outer.top, .right = outer.right, .bottom = outer.bottom };
+    _ = FillRect(hdc, &top, brush);
+    _ = FillRect(hdc, &bottom, brush);
+    _ = FillRect(hdc, &left, brush);
+    _ = FillRect(hdc, &right, brush);
+}
+
 pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) void {
     var client_rc = RECT{ .left = 0, .top = 0, .right = w, .bottom = h };
     var canvas = @import("smooth.zig").Canvas.init(mem_dc);
@@ -4808,6 +4825,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
     if (app_state.active_shell < app_state.shell_count) {
         const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
         const first = if (chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], app_state.g_chat_scroll_y)) |anchor| anchor.index else app_state.g_chat_block_count;
+        const nav_index = chatNavIndex();
         for (first..app_state.g_chat_block_count) |i| {
             if (app_state.g_chat_blocks[i].role == .tool or g_reaction_view.hides(i)) continue;
             var rc = app_state.g_chat_layout_rects[i];
@@ -4824,6 +4842,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             g_bubble_span = null;
             chatPaintBlockImages(mem_dc, i, body_rc);
             chatPaintReactions(mem_dc, g_reaction_view.mask(i), rc);
+            if (nav_index != null and nav_index.? == i) chatPaintNavRing(mem_dc, body_rc);
             @import("chat_find_ui.zig").paintMatch(mem_dc, app_state.g_chat_blocks[i], rc);
             if (app_state.g_voice_state == .speaking and app_state.g_voice_highlight != null and
                 i >= app_state.g_voice_highlight.?.start and i < app_state.g_voice_highlight.?.end)
@@ -4876,6 +4895,232 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
     chatPaintTopFade(mem_dc, w);
     chatPaintScrollUi(&canvas, mem_dc, w, @max(1, h - app_state.g_chat_bottom_inset));
     @import("chat_find_ui.zig").paint(mem_dc, w);
+}
+
+fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_block: ?usize) LRESULT {
+    const menu = CreatePopupMenu();
+    if (menu == null) return 0;
+    defer _ = DestroyMenu(menu);
+    const link_text: ?[]u16 = if (keyboard_block != null) null else if (chatContextLinkText(app_state.g_chat_capture[0..app_state.g_chat_last_len], chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp)))) |text|
+        std.heap.page_allocator.dupe(u16, text) catch {
+            showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+            return 0;
+        }
+    else
+        null;
+    defer if (link_text) |text| std.heap.page_allocator.free(text);
+    const echo_id = if (keyboard_block != null) null else chatEchoAt(GET_X(lp), GET_Y(lp));
+    const echo_index = if (echo_id) |id| chatOutboxIndexById(id) else null;
+    const unsent_actions = if (echo_index) |ei| chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again else false;
+    const block_at = keyboard_block orelse chatTranscriptBlockAtPoint(GET_Y(lp));
+    const selection_text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
+        showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+        return 0;
+    };
+    defer std.heap.page_allocator.free(selection_text);
+    const message_text: []u16 = if (block_at) |idx| chatCopyTextAlloc(std.heap.page_allocator, app_state.g_chat_blocks[idx]) catch {
+        showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+        return 0;
+    } else if (echo_index) |ei| std.heap.page_allocator.dupe(u16, app_state.g_chat_outbox.items[ei].text) catch {
+        showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
+        return 0;
+    } else &.{};
+    defer std.heap.page_allocator.free(message_text);
+    var reply_text: ?[]u16 = null;
+    if (block_at) |idx| {
+        const block = app_state.g_chat_blocks[idx];
+        if (block.role != .tool and block.len > 0) {
+            const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
+            const disp = chatBlockDisplayRange(buf, block);
+            reply_text = std.heap.page_allocator.dupe(u16, buf[disp.start .. disp.start + disp.len]) catch null;
+        }
+    }
+    if (block_at == null and echo_index != null and message_text.len > 0) reply_text = std.heap.page_allocator.dupe(u16, message_text) catch null;
+    defer if (reply_text) |text| std.heap.page_allocator.free(text);
+    const reaction_identity = chatFileIdentity();
+    var reaction_sid = reaction_identity.sid;
+    if (chatHistoryEntry(reaction_identity)) |entry| reaction_sid = entry.history.sid;
+    const reaction_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+    const reaction_reference = if (block_at) |index| app_state.g_chat_blocks[index].reaction_reference else 0;
+    var items = chatContextMenuItems(keyboard_block == null and chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions);
+    if (block_at) |index| {
+        const role = app_state.g_chat_blocks[index].role;
+        if ((role == .prose or role == .code) and reply_text != null and @import("chat_composer.zig").chatAcAgent() == .claude) {
+            const Item = @import("fonts.zig").MessageMenuItem;
+            std.mem.copyBackwards(Item, items.items[3..][0..items.len], items.items[0..items.len]);
+            @memcpy(items.items[0..3], &[_]Item{ .reaction_like, .reaction_dislike, .reaction_heart });
+            items.len += 3;
+        }
+    }
+    var menu_log: [128]u8 = undefined;
+    var menu_log_len: usize = 0;
+    for (items.items[0..items.len], 0..) |item, i| {
+        _ = AppendMenuW(menu, MF_STRING, @intFromEnum(item), item.text());
+        const label = std.fmt.bufPrint(menu_log[menu_log_len..], "{s}{s}", .{ if (i == 0) @as([]const u8, "[chat] message menu items=") else ",", item.label() }) catch unreachable;
+        menu_log_len += label.len;
+    }
+    debugLog(menu_log[0..menu_log_len]);
+    var pt = POINT{ .x = GET_X(lp), .y = GET_Y(lp) };
+    _ = ClientToScreen(hwnd, &pt);
+    _ = SetForegroundWindow(app_state.g_main_hwnd);
+    const cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null);
+    switch (cmd) {
+        8, 9, 10 => if (reply_text) |quote| {
+            const current_identity = chatFileIdentity();
+            var current_sid = current_identity.sid;
+            if (chatHistoryEntry(current_identity)) |entry| current_sid = entry.history.sid;
+            if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != reaction_shell_id or !std.meta.eql(reaction_identity, current_identity) or !std.mem.eql(u8, &reaction_sid, &current_sid)) {
+                showHeaderNoticeAscii("Conversation changed; open the menu again", 3500, true);
+                return 0;
+            }
+            chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
+        },
+        7 => if (link_text) |text| chatCopyTextToClipboard(text),
+        1 => chatCopyTextToClipboard(if (items.copy_target == .selection) selection_text else message_text),
+        5 => if (echo_id) |id| chatEchoSendAgain(id),
+        6 => if (echo_id) |id| chatEchoRemove(id),
+        4 => if (reply_text) |text| {
+            app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
+            chatNavClear();
+            @import("chat_composer.zig").selectChatReply(text);
+        },
+        else => {},
+    }
+    return 0;
+}
+
+
+fn chatNavEligible(index: usize) bool {
+    const block = app_state.g_chat_blocks[index];
+    return block.role != .tool and block.len > 0 and !g_reaction_view.hides(index);
+}
+
+pub fn chatNavClear() void {
+    if (!app_state.g_chat_nav_active) return;
+    app_state.g_chat_nav_active = false;
+    if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+}
+
+fn chatNavIndex() ?usize {
+    if (!app_state.g_chat_nav_active) return null;
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != app_state.g_chat_nav_shell_id) {
+        app_state.g_chat_nav_active = false;
+        return null;
+    }
+    const count = app_state.g_chat_block_count;
+    const allocator = std.heap.page_allocator;
+    const sources = allocator.alloc(u64, count) catch return null;
+    defer allocator.free(sources);
+    const segments = allocator.alloc(u64, count) catch return null;
+    defer allocator.free(segments);
+    const stamps = allocator.alloc(i64, count) catch return null;
+    defer allocator.free(stamps);
+    for (app_state.g_chat_blocks[0..count], 0..) |block, i| {
+        sources[i] = block.source_offset;
+        segments[i] = block.segment;
+        stamps[i] = block.stamp_ms;
+    }
+    const anchor = chat_keynav.Anchor{ .source = app_state.g_chat_nav_source, .segment = app_state.g_chat_nav_segment, .stamp = app_state.g_chat_nav_stamp };
+    const found = chat_keynav.resolve(anchor, app_state.g_chat_nav_index, sources, segments, stamps) orelse return null;
+    app_state.g_chat_nav_index = found;
+    return found;
+}
+
+fn chatNavFocus(index: usize) void {
+    const block = app_state.g_chat_blocks[index];
+    if (app_state.active_shell >= app_state.shell_count) return;
+    app_state.g_chat_nav_active = true;
+    app_state.g_chat_nav_shell_id = app_state.shells[app_state.active_shell].shell_id;
+    app_state.g_chat_nav_index = index;
+    app_state.g_chat_nav_source = block.source_offset;
+    app_state.g_chat_nav_segment = block.segment;
+    app_state.g_chat_nav_stamp = block.stamp_ms;
+    chatNavReveal(index);
+    if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+}
+
+fn chatNavReveal(index: usize) void {
+    var client: RECT = std.mem.zeroes(RECT);
+    chatViewClientRect(&client);
+    const rect = app_state.g_chat_layout_rects[index];
+    const top = rect.top - app_state.g_chat_scroll_y;
+    const bottom = rect.bottom - app_state.g_chat_scroll_y;
+    const margin = uiScaled(8);
+    const view_top = client.top + (if (app_state.g_chat_find_open) uiScaled(app_state.CHAT_FIND_TOP_H) else 0) + margin;
+    const view_bottom = client.bottom - margin;
+    if (top < view_top) {
+        chatScrollBy(view_top - top);
+    } else if (bottom > view_bottom) {
+        const delta = view_bottom - bottom;
+        if (top + delta < view_top) chatScrollBy(view_top - top) else chatScrollBy(delta);
+    }
+}
+
+pub fn chatNavStart() void {
+    if (app_state.g_chat_transcript_hwnd == null) return;
+    const count = app_state.g_chat_block_count;
+    if (count == 0) return;
+    var last: ?usize = null;
+    var i = count;
+    while (i > 0) {
+        i -= 1;
+        if (chatNavEligible(i)) {
+            last = i;
+            break;
+        }
+    }
+    if (last) |index| chatNavFocus(index);
+}
+
+pub fn chatNavKey(action: chat_keynav.Action) bool {
+    switch (action) {
+        .none => return false,
+        .start => {
+            chatNavStart();
+            return app_state.g_chat_nav_active;
+        },
+        .leave => {
+            chatNavClear();
+            return true;
+        },
+        .up, .down => {
+            const current = chatNavIndex() orelse {
+                chatNavClear();
+                return true;
+            };
+            const count = app_state.g_chat_block_count;
+            const allocator = std.heap.page_allocator;
+            const eligible = allocator.alloc(bool, count) catch return true;
+            defer allocator.free(eligible);
+            for (0..count) |i| eligible[i] = chatNavEligible(i);
+            switch (chat_keynav.step(current, action == .up, eligible)) {
+                .focus => |index| chatNavFocus(index),
+                .leave => chatNavClear(),
+                .stay => {},
+            }
+            return true;
+        },
+        .open => {
+            const index = chatNavIndex() orelse {
+                chatNavClear();
+                return true;
+            };
+            const hwnd = app_state.g_chat_transcript_hwnd orelse return true;
+            chatNavReveal(index);
+            var client: RECT = std.mem.zeroes(RECT);
+            chatViewClientRect(&client);
+            const rect = app_state.g_chat_layout_rects[index];
+            const x = std.math.clamp(app_state.g_chat_content_left + rect.left + uiScaled(24), client.left, client.right - 1);
+            const y = std.math.clamp(rect.top - app_state.g_chat_scroll_y + uiScaled(12), client.top, client.bottom - 1);
+            const packed_pos: u32 = ((@as(u32, @intCast(y)) & 0xffff) << 16) | (@as(u32, @intCast(x)) & 0xffff);
+            const lp: LPARAM = @intCast(packed_pos);
+            _ = chatMessageMenu(hwnd, WM_KEYDOWN, 0x0D, lp, index);
+            if (app_state.g_chat_nav_active) {
+                if (chatNavIndex()) |after| chatNavFocus(after) else chatNavClear();
+            }
+            return true;
+        },
+    }
 }
 
 fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
@@ -4983,6 +5228,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 chatImageReady();
                 return 0;
             }
+            chatNavClear();
             if (chatTableMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatEchoRetryAt(GET_X(lp), GET_Y(lp))) return 0;
             if (chatChoiceAt(GET_X(lp), GET_Y(lp))) |index| {
@@ -5091,94 +5337,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_RBUTTONDOWN => {
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
-            const menu = CreatePopupMenu();
-            if (menu == null) return 0;
-            defer _ = DestroyMenu(menu);
-            const link_text: ?[]u16 = if (chatContextLinkText(app_state.g_chat_capture[0..app_state.g_chat_last_len], chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp)))) |text|
-                std.heap.page_allocator.dupe(u16, text) catch {
-                    showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
-                    return 0;
-                }
-            else
-                null;
-            defer if (link_text) |text| std.heap.page_allocator.free(text);
-            const echo_id = chatEchoAt(GET_X(lp), GET_Y(lp));
-            const echo_index = if (echo_id) |id| chatOutboxIndexById(id) else null;
-            const unsent_actions = if (echo_index) |ei| chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again else false;
-            const block_at = chatTranscriptBlockAtPoint(GET_Y(lp));
-            const selection_text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
-                showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
-                return 0;
-            };
-            defer std.heap.page_allocator.free(selection_text);
-            const message_text: []u16 = if (block_at) |idx| chatCopyTextAlloc(std.heap.page_allocator, app_state.g_chat_blocks[idx]) catch {
-                showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
-                return 0;
-            } else if (echo_index) |ei| std.heap.page_allocator.dupe(u16, app_state.g_chat_outbox.items[ei].text) catch {
-                showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
-                return 0;
-            } else &.{};
-            defer std.heap.page_allocator.free(message_text);
-            var reply_text: ?[]u16 = null;
-            if (block_at) |idx| {
-                const block = app_state.g_chat_blocks[idx];
-                if (block.role != .tool and block.len > 0) {
-                    const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
-                    const disp = chatBlockDisplayRange(buf, block);
-                    reply_text = std.heap.page_allocator.dupe(u16, buf[disp.start .. disp.start + disp.len]) catch null;
-                }
-            }
-            if (block_at == null and echo_index != null and message_text.len > 0) reply_text = std.heap.page_allocator.dupe(u16, message_text) catch null;
-            defer if (reply_text) |text| std.heap.page_allocator.free(text);
-            const reaction_identity = chatFileIdentity();
-            var reaction_sid = reaction_identity.sid;
-            if (chatHistoryEntry(reaction_identity)) |entry| reaction_sid = entry.history.sid;
-            const reaction_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
-            const reaction_reference = if (block_at) |index| app_state.g_chat_blocks[index].reaction_reference else 0;
-            var items = chatContextMenuItems(chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions);
-            if (block_at) |index| {
-                const role = app_state.g_chat_blocks[index].role;
-                if ((role == .prose or role == .code) and reply_text != null and @import("chat_composer.zig").chatAcAgent() == .claude) {
-                    const Item = @import("fonts.zig").MessageMenuItem;
-                    std.mem.copyBackwards(Item, items.items[3..][0..items.len], items.items[0..items.len]);
-                    @memcpy(items.items[0..3], &[_]Item{ .reaction_like, .reaction_dislike, .reaction_heart });
-                    items.len += 3;
-                }
-            }
-            var menu_log: [128]u8 = undefined;
-            var menu_log_len: usize = 0;
-            for (items.items[0..items.len], 0..) |item, i| {
-                _ = AppendMenuW(menu, MF_STRING, @intFromEnum(item), item.text());
-                const label = std.fmt.bufPrint(menu_log[menu_log_len..], "{s}{s}", .{ if (i == 0) @as([]const u8, "[chat] message menu items=") else ",", item.label() }) catch unreachable;
-                menu_log_len += label.len;
-            }
-            debugLog(menu_log[0..menu_log_len]);
-            var pt = POINT{ .x = GET_X(lp), .y = GET_Y(lp) };
-            _ = ClientToScreen(hwnd, &pt);
-            _ = SetForegroundWindow(app_state.g_main_hwnd);
-            const cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null);
-            switch (cmd) {
-                8, 9, 10 => if (reply_text) |quote| {
-                    const current_identity = chatFileIdentity();
-                    var current_sid = current_identity.sid;
-                    if (chatHistoryEntry(current_identity)) |entry| current_sid = entry.history.sid;
-                    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != reaction_shell_id or !std.meta.eql(reaction_identity, current_identity) or !std.mem.eql(u8, &reaction_sid, &current_sid)) {
-                        showHeaderNoticeAscii("Conversation changed; open the menu again", 3500, true);
-                        return 0;
-                    }
-                    chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
-                },
-                7 => if (link_text) |text| chatCopyTextToClipboard(text),
-                1 => chatCopyTextToClipboard(if (items.copy_target == .selection) selection_text else message_text),
-                5 => if (echo_id) |id| chatEchoSendAgain(id),
-                6 => if (echo_id) |id| chatEchoRemove(id),
-                4 => if (reply_text) |text| {
-                    app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
-                    @import("chat_composer.zig").selectChatReply(text);
-                },
-                else => {},
-            }
-            return 0;
+            return chatMessageMenu(hwnd, msg, wp, lp, null);
         },
         WM_MOUSEWHEEL, WM_MOUSEHWHEEL => {
             if (chatTableWheel(hwnd, msg, wp, lp)) return 0;

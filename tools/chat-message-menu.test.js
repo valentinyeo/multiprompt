@@ -37,7 +37,7 @@ test('IGSH-718 production pure item expressions preserve ordering and selection 
 });
 
 test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons, mnemonics and existing contextual actions', () => {
-  const handler = chat.slice(chat.indexOf('        WM_RBUTTONDOWN => {'), chat.indexOf('        WM_MOUSEWHEEL, WM_MOUSEHWHEEL => {'));
+  const handler = chat.slice(chat.indexOf('fn chatMessageMenu('), chat.indexOf('fn chatNavEligible('));
   assert.doesNotMatch(handler, /Copy Message|Select All|2 => chatSelectAll|3 => chatCopyTextToClipboard/);
   assert.match(chat, /const TrackPopupMenu = @import\("fonts.zig"\).trackMessagePopupMenu/);
   assert.match(handler, /reply_text != null, link_text != null, unsent_actions/);
