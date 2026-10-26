@@ -98,13 +98,8 @@ Wine's built-in GDI+ accepts smoothing settings without anti-aliasing shapes. Th
 
 ## Reopen automatically reverted tasks
 
-Run the board watcher on an authenticated runner. Credentials stay outside GitHub Actions.
+The Auto-revert master workflow reopens the task itself, in the same job that opens the revert pull request. Nothing runs on a server and nothing polls GitHub.
 
-1. Copy `tools/auto-revert-board.js` to `~/.local/lib/multiprompt/`.
-2. Copy `tools/systemd/multiprompt-revert-board.*` to `~/.config/systemd/user/`.
-3. Set `CEO_HT` in `~/.config/multiprompt-revert-board.env`. Use your authenticated board-agent command's absolute path. Set `CEO_AGENT` there when your command requires an identity. Never put credentials in this file.
-4. Run `systemctl --user daemon-reload`.
-5. Run `systemctl --user enable --now multiprompt-revert-board.timer`.
-6. Check `journalctl --user -u multiprompt-revert-board.service`. Successful scans print `BOARD_RECONCILED`.
+After the revert pull request is open, `tools/auto-revert-board.js` moves a Done task back to Todo (other columns stay) and posts one comment with the failed journeys and the failed run link. A retry finds the run link in the comments and posts nothing more.
 
-The watcher validates bot-created rollback requests against their failed master run. It reopens completed tasks and posts the failed journeys. Repeated scans preserve active work and avoid duplicate comments. No board credentials reach GitHub Actions.
+GitHub calls in the job use the job's own `GITHUB_TOKEN`. The board call uses the repository secret `HYPERTASK_AGENT_TOKEN`, the "Multiprompt Auto-Revert" board agent, limited to board 2060. If the board call fails, the job opens a GitHub issue naming the task to reopen by hand and ends red.
