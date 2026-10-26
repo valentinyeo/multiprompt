@@ -538,7 +538,7 @@ test('auto-revert workflow grants contents and pull-request writes with the exis
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
 });
 
-test('PR smoke, full master matrix and the release tag trigger stay wired', () => {
+test('PR smoke and full master matrix stay wired without duplicate release-tag journeys', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
   const release = fs.readFileSync(`${__dirname}/../.github/workflows/release.yml`, 'utf8');
   assert.match(verify, /pull_request' && fromJSON\('\["appearance"\]'\)/);
@@ -547,7 +547,7 @@ test('PR smoke, full master matrix and the release tag trigger stay wired', () =
   assert.equal(matrices[1].length, 18);
   assert.ok(matrices[1].includes('chat-dictation'));
   assert.ok(matrices[1].includes('remind-me'));
-  assert.match(verify, /^  push:\n    branches: \[master\]\n    tags: \['v\*'\]/m);
+  assert.match(verify, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
 });
 

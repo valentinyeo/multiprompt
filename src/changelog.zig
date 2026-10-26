@@ -59,6 +59,14 @@ pub const CHANGELOG = blk: {
 };
 
 const SOURCE_CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.881", .items = &.{
+        .{ .text = "Pasted text keeps its line breaks when sent.", .ticket = "IGSH-895" },
+    } },
+    .{ .ver = "0.28.880", .items = &.{
+        .{ .text = "Screenshots sent from the standard browser profile and from a workspace's own browser profile now have an automatic end-to-end check.", .ticket = "IGSH-894" },
+        .{ .text = "Updates now wait until Multiprompt has been closed and reopened three times on saved sessions without listing any session twice.", .ticket = "IGSH-900" },
+        .{ .text = "Ctrl+Enter now sends your Chat View message once.", .ticket = "IGSH-911" },
+    } },
     .{ .ver = "0.28.879", .items = &.{
         .{ .text = "The Chat View scrollbar now has no visible track. Only a small dark gray pill shows, and only while you scroll; it fades out shortly after.", .ticket = "IGSH-897" },
     } },

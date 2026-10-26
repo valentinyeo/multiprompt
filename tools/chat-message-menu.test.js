@@ -99,7 +99,9 @@ test('IGSH-718 journey requires real owned mouse input, exact new log, popup dis
   assert.match(control, /new System.Drawing.Bitmap\(image\)/);
   assert.match(control, /Math.Max\(c.R, Math.Max\(c.G, c.B\)\) - Math.Min\(c.R, Math.Min\(c.G, c.B\)\) > 12 \|\| c.ToArgb\(\) == bg.ToArgb\(\)/);
   assert.doesNotMatch(control, /grey-buttons-stop|\$greyCheck\.empty/);
-  assert.equal((control.match(/\[VerifyNative\]::GreyButtonPixels\(/g) || []).length, 1);
+  assert.equal((control.match(/\[VerifyNative\]::GreyButtonPixels\(/g) || []).length, 3);
+  assert.match(control, /GreyButtonPixels\(\(Join-Path \$Evidence 'stop-in-box\.png'\), \$script:window, \$empty\.card, \$empty\.stop, \$null\)/);
+  assert.match(control, /GreyButtonPixels\(\(Join-Path \$Evidence 'composer-working-empty\.png'\), \$script:window, \$empty\.card, \$empty\.stop, \$null\)/);
   assert.match(control, /GreyButtonPixels\(\(Join-Path \$Evidence 'grey-buttons\.png'\), \$script:window, \$typed\.card, \$typed\.stop, \$typed\.send\)/);
   assert.match(control, /\$stopCheck\.reason = \$_\.Exception\.Message\s*throw\s*\}\s*try \{\s*\$greyCheck\.typed = \[VerifyNative\]::GreyButtonPixels/);
   assert.match(control, /Snapshot 'grey-buttons'/);
