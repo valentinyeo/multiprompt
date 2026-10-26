@@ -40,6 +40,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 90)
     throw "Timed out: $Description"
 }
 function Shot([string]$Name) {
+    Start-Sleep -Milliseconds 2000
     $bitmap = [Drawing.Bitmap]::new([ReconnectDesktop]::GetSystemMetrics(0), [ReconnectDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Output/$Name.png", [Drawing.Imaging.ImageFormat]::Png) }
