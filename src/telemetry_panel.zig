@@ -1030,7 +1030,7 @@ fn createAiUsageMenu(snapshot: AiPaceSnapshot) HANDLE {
             var wide: [257]u16 = @splat(0);
             const length = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], line) catch continue;
             wide[length] = 0;
-            _ = w.AppendMenuW(menu, w.MF_STRING, 1 + slot * lines.len + index, &wide);
+            _ = w.AppendMenuW(menu, w.MF_STRING, 1 + slot * lines.len + index, wide[0..length :0].ptr);
         }
     }
     return menu;
