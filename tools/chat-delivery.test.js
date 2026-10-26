@@ -358,6 +358,24 @@ test "delivery: IGSH-442 busy channel waits past both budgets without retransmis
     try std.testing.expectEqual(@as(usize, 1), g_chat_confirmed.items.len);
     try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
 }
+test "delivery: IGSH-969 exact acceptance receipt does not accept the next queued message" {
+    defer clear();
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("first message"), .delivered);
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("next message"), .delivered);
+    for (g_chat_outbox.items) |*entry| entry.channel_sent = true;
+    shells[0].activity = .active;
+    try history_entry.history.rows.appendSlice(std.heap.page_allocator,
+        "{\\"role\\":\\"assistant\\",\\"text\\":\\"\\",\\"timestamp\\":\\"1970-01-01T00:00:02Z\\",\\"settlement\\":{\\"operation\\":\\"enqueue\\",\\"content\\":\\"first message\\"}}\\n" ++
+        "{\\"role\\":\\"assistant\\",\\"text\\":\\"\\",\\"timestamp\\":\\"1970-01-01T00:00:02Z\\",\\"settlement\\":{\\"operation\\":\\"enqueue\\",\\"content\\":\\"next message\\"}}\\n" ++
+        "{\\"role\\":\\"assistant\\",\\"text\\":\\"\\",\\"timestamp\\":\\"1970-01-01T00:00:03Z\\",\\"settlement\\":{\\"operation\\":\\"remove\\",\\"content\\":\\"first message\\"}}\\n");
+    chatTmuxSettle();
+    try std.testing.expectEqual(@as(usize, 2), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(i64, 3000), g_chat_outbox.items[0].delivery_watch.removed_ms);
+    try std.testing.expect(!g_chat_outbox.items[0].transcript_queued);
+    try std.testing.expectEqual(@as(i64, 0), g_chat_outbox.items[1].delivery_watch.removed_ms);
+    try std.testing.expect(g_chat_outbox.items[1].transcript_queued);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
+}
 test "delivery: IGSH-442 channel idle settlement requires grace and fresh transcript without retyping" {
     defer clear();
     try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("please check the build"), .delivered);

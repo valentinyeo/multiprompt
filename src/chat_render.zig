@@ -3162,7 +3162,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     _ = chatFlowText(hdc, e.text, text_rc, false, true, null, offset, null, null, true);
-    if (e.state == .delivered) chatDimQueuedBubble(hdc, bubble);
+    if (e.state == .delivered and e.delivery_watch.removed_ms == 0) chatDimQueuedBubble(hdc, bubble);
     chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
     if (!app_state.clean_chat and actions.send_again) {
         const old = SelectObject(hdc, chatMetadataFont());
@@ -5293,6 +5293,7 @@ const CleanChatScene = enum {
     unconfirmed,
     confirmed_bubble,
     queued_bubble,
+    accepted_bubble,
     sending_bubble,
     shell_bubble,
     retry,
@@ -5390,7 +5391,7 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             app_state.shells[0].disconnected = scene == .waiting;
             chatPaintEchoStatus(dc, entry, .{ .left = 0, .top = 0, .right = width, .bottom = 24 });
         },
-        .confirmed_bubble, .queued_bubble, .sending_bubble, .shell_bubble => {
+        .confirmed_bubble, .queued_bubble, .accepted_bubble, .sending_bubble, .shell_bubble => {
             const rc = chatMeasureEchoRect(dc, text, width, 0, false);
             if (scene == .confirmed_bubble) {
                 chatPaintBlock(dc, text, block, .single, rc);
@@ -5399,7 +5400,8 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
                 @memcpy(row.text[0..text.len], text);
                 chatPaintShellRow(dc, &row, rc);
             } else {
-                entry.state = if (scene == .queued_bubble) .delivered else .sending;
+                entry.state = if (scene == .queued_bubble or scene == .accepted_bubble) .delivered else .sending;
+                if (scene == .accepted_bubble) entry.delivery_watch.evidence(.{ .removed_ms = 1234 }, 2000);
                 chatPaintEcho(dc, entry, rc, 0);
             }
             crop.bottom = rc.bottom;
@@ -5555,6 +5557,16 @@ test "IGSH-872 queued bubbles are half opacity and shell queues use the same ren
         }
         try std.testing.expect(changed > 0);
         try std.testing.expectEqualSlices(u32, queued, shell);
+    }
+}
+
+test "IGSH-969 accepted queue receipt restores normal bubble before user transcript arrives" {
+    for ([_]bool{ false, true }) |clean| {
+        const accepted = try cleanChatPixels(.accepted_bubble, clean);
+        defer std.testing.allocator.free(accepted);
+        const normal = try cleanChatPixels(.confirmed_bubble, clean);
+        defer std.testing.allocator.free(normal);
+        try std.testing.expectEqualSlices(u32, normal, accepted);
     }
 }
 
