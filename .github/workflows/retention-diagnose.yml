@@ -10,41 +10,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-      - name: Expose relevant failure diagnostics
+      - name: Read signed release journey evidence
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run view 40309362340 --repo valentinyeo/multiprompt --log-failed > failed.log
+          gh run download 40322784787 --repo valentinyeo/multiprompt -n verify-chat-full-history --dir proof
           python3 - <<'PY'
+          import json,re
           from pathlib import Path
-          import re
-          lines = Path('failed.log').read_text().splitlines()
-          jobs = {}
-          for line in lines:
-              jobs.setdefault(line.split('\t', 1)[0], []).append(line)
-          for job, entries in jobs.items():
-              blocks = []
-              for i, line in enumerate(entries):
-                  if re.search(r'not ok |\.\.\.FAIL|error: expected|error:.*has no member', line, re.I):
-                      blocks.extend(entries[i:i + 18])
-              blocks.extend(entries[-75:])
-              context = ('JOB ' + job + '\n' + '\n'.join(blocks))[:50000]
-              print('::error::' + context.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
-          PY
-      - name: Expose retention outcomes
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download 40306742465 --repo valentinyeo/multiprompt -n verify-chat-full-history --dir red-proof
-          gh run download 40309362390 --repo valentinyeo/multiprompt -n verify-chat-full-history --dir green-proof
-          python3 - <<'PY'
-          from pathlib import Path
-          import json
-          red = json.loads(Path('red-proof/full-history/observation.json').read_text(encoding='utf-8-sig'))
-          green = Path('green-proof/retention.json').read_text()
-          print('::notice::RED_RESULT ' + str(red['error']))
-          print('::notice::GREEN_RESULT ' + green.replace('\n', '%0A'))
+          root=Path('proof')
+          files=['retention.json','result.json','build.json','full-history/observation.json']
+          for file in files:
+              path=root/file
+              if path.exists():
+                  value=json.loads(path.read_text(encoding='utf-8-sig'))
+                  if file.endswith('observation.json'): value={k:value[k] for k in ['error','steps'] if k in value}
+                  print('::notice::'+file+' '+json.dumps(value).replace('%','%25'))
+          path=root/'full-history/debug.log'
+          if path.exists():
+              log=path.read_text(encoding='utf-8-sig')
+              arrivals=re.findall(r'PERF\[chat\]: receive to paint ms=(\d+) size=(\d+)',log)
+              switches=re.findall(r'\[switch\] chat painted in (\d+) ms',log)
+              print('::notice::TIMINGS '+json.dumps(dict(arrivals=arrivals,switches=switches)))
           PY
