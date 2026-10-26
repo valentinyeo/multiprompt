@@ -134,7 +134,8 @@ function Get-TranscriptBounds {
     $rightEdge = [ChatDeliveryDesktop]::ScreenPoint($main, [int]$g[3].Value, [int]$g[4].Value)
     if ($leftEdge.X -ne $nativeRect.Left -or $rightEdge.X -ne $nativeRect.Right -or $leftEdge.Y -le $nativeRect.Top -or $leftEdge.Y -gt $nativeRect.Bottom) { throw 'Owned transcript viewport does not fit its HWND' }
     $nativeRect.Bottom = $leftEdge.Y
-    return $nativeRect
+    $contentTop = [ChatDeliveryDesktop]::ScreenPoint($main, [int]$g[1].Value, [int]$g[2].Value)
+    return ($nativeRect | Add-Member -NotePropertyName VisibleTop -NotePropertyValue ([math]::Max($nativeRect.Top, $contentTop.Y)) -PassThru)
 }
 function Step([string]$Name, [scriptblock]$Check, [int]$Seconds = 20) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -812,7 +813,7 @@ foreach ($plan in $plans) {
             $viewH = [int]$bounds.Height
             $dividerProof.reopened = Wait-For 'scroll up until the unread line is painted above the first unread message' {
                 $f = Divider-State $upLogStart
-                if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll -and $f.y -lt $f.scroll + $viewH - 40) { return $f }
+                if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll + $bounds.VisibleTop - $bounds.Top + 2 * ($f.lineY - $f.y) -and $f.y -lt $f.scroll + $viewH - 40) { return $f }
                 [void](Scroll-Transcript 120)
                 $null
             }
