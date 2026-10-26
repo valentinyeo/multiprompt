@@ -46,6 +46,15 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
+if (args[0] === 'run' && args[1] === 'view') {
+  console.log(JSON.stringify({ jobs: [{ name: 'verify (relaunch-saved-sessions)', conclusion: process.env.VERIFY_CONCLUSION || 'success' }] }));
+  process.exit(0);
+}
+if (args[0] === 'run' && args.includes('verify.yml')) {
+  const sha = args[args.indexOf('--commit') + 1];
+  console.log(JSON.stringify(sha === process.env.TESTED_SHA ? [{ databaseId: 700, event: 'push', status: 'completed', conclusion: 'success' }] : []));
+  process.exit(0);
+}
 if (args[0] === 'run') {
   const sha = args[args.indexOf('--commit') + 1];
   console.log(JSON.stringify(sha === process.env.TESTED_SHA ? [{ databaseId: 1, event: 'push', status: 'completed', conclusion: process.env.TEST_CONCLUSION || 'success' }] : []));
@@ -296,7 +305,7 @@ test('automatic admission fixtures reject unsafe heads', { skip: process.platfor
 
 test('automatic release only tags a tested master and reuses signed release jobs', () => {
   const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
-  assert.match(auto, /workflows: \[Tests\]/);
+  assert.match(auto, /workflows: \[Tests, Verify desktop\]/);
   assert.match(auto, /branches: \[master\]/);
   assert.match(auto, /github.event.workflow_run.conclusion == 'success'/);
   assert.match(auto, /github.event.workflow_run.head_repository.full_name == github.repository/);
@@ -364,10 +373,11 @@ test('auto-release pushes only a tag on the tested commit under a branch-rejecti
   assert.equal(f.git('diff', 'HEAD', '--', 'src', 'changelog.d'), '');
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'master'), tested);
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v1.2.9'), tested);
-  assert.deepEqual(f.calls(), [[
-    'run', 'list', '-R', 'example/multiprompt', '-w', 'test.yml', '-b', 'master',
-    '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion',
-  ]]);
+  assert.deepEqual(f.calls(), [
+    ['run', 'list', '-R', 'example/multiprompt', '-w', 'test.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
+    ['run', 'list', '-R', 'example/multiprompt', '-w', 'verify.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
+    ['run', 'view', '700', '-R', 'example/multiprompt', '--json', 'jobs'],
+  ]);
   const second = f.admit();
   assert.equal(second.status, 0, second.stderr);
   assert.equal(second.stdout, '');
