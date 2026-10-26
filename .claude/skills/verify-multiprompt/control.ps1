@@ -4664,7 +4664,7 @@ try {
         }
         'chat-first-paint' {
             $launchLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            function Read-LaunchLog { try { return [IO.File]::ReadAllText($launchLog) } catch { return '' } }
+            function Read-LaunchLog { try { return Read-SharedText -Path $launchLog } catch { return '' } }
             function Capture-Window([string]$Name) {
                 [void][VerifyNative]::DwmFlush()
                 $rect = New-Object VerifyNative+Rect
