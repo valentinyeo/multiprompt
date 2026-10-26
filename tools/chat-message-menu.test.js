@@ -47,11 +47,12 @@ test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons
   assert.match(handler, /\[chat\] message menu items=/);
   assert.match(fonts, /pub fn trackPopupMenu\([^]*?return trackThemedPopupMenu\(menu, flags, x, y, reserved, owner, rect, false\);/);
   assert.match(fonts, /pub fn trackMessagePopupMenu\([^]*?return trackThemedPopupMenu\(menu, flags, x, y, reserved, owner, rect, true\);/);
-  assert.match(fonts, /chat_style.menuLook\(themes.themeConsoleBg\(\)\)/);
+  assert.match(fonts, /chat_style.menuLook\(if \(bound\) \|theme\| theme.background\(\) else unboundBackground\(\)\)/);
+  assert.match(read('src/main.zig'), /bindMenuTheme\(\.\{\s*\.background = &@import\("themes.zig"\).themeConsoleBg,\s*\.foreground = &@import\("themes.zig"\).themeConsoleFg,\s*\.fill_round_rect = &@import\("smooth.zig"\).fillRoundRect/);
   assert.match(fonts, /DWMWCP_ROUND/);
   assert.match(fonts, /mask: u32 = 2/);
   assert.match(fonts, /SetMenuInfo\(menu, &info\)/);
-  assert.match(fonts, /themeConsoleFg\(\)/);
+  assert.match(fonts, /theme.foreground\(\)/);
   assert.match(fonts, /previous_style = message_menu_style[^]*?defer message_menu_style = previous_style/);
   assert.match(fonts, /GetTextFaceW[^]*?Segoe Fluent Icons[^]*?Segoe MDL2 Assets/);
   for (const [item, glyph] of [['reply', 'E97A'], ['copy', 'E8C8'], ['copy_link', 'E71B'], ['send_again', 'E724'], ['remove', 'E74D']]) {

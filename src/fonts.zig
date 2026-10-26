@@ -229,15 +229,37 @@ const DWMWA_COLOR_NONE: w.DWORD = 0xFFFFFFFE;
 
 var smooth_fill_round_rect: ?*const fn (w.HANDLE, w.RECT, i32, u32) void = null;
 
+pub const MenuTheme = struct {
+    background: *const fn () w.DWORD,
+    foreground: *const fn () w.DWORD,
+    fill_round_rect: *const fn (w.HANDLE, w.RECT, i32, u32) void,
+};
+
+var menu_theme: ?MenuTheme = null;
+
+pub fn bindMenuTheme(theme: MenuTheme) void {
+    menu_theme = theme;
+}
+
+fn unboundBackground() w.DWORD {
+    return 0x1E1E1E;
+}
+
+fn unboundForeground() w.DWORD {
+    return 0xFFFFFF;
+}
+
 fn fillMenuRow(dc: w.HANDLE, row: w.RECT, radius: i32, color: w.DWORD) void {
     if (smooth_fill_round_rect) |fill| return fill(dc, row, radius, color);
     const brush = w.CreateSolidBrush(color);
     defer _ = w.DeleteObject(brush);
-    const old_brush = w.SelectObject(dc, brush);
-    defer _ = w.SelectObject(dc, old_brush);
-    const old_pen = w.SelectObject(dc, w.GetStockObject(8));
-    defer _ = w.SelectObject(dc, old_pen);
-    _ = w.RoundRect(dc, row.left, row.top, row.right, row.bottom, 2 * radius, 2 * radius);
+    var y = row.top;
+    while (y < row.bottom) : (y += 1) {
+        const from_edge = @min(y - row.top, row.bottom - 1 - y);
+        const inset = if (from_edge >= radius) 0 else radius - @as(i32, @intFromFloat(@sqrt(@as(f32, @floatFromInt(radius * radius - (radius - from_edge - 1) * (radius - from_edge - 1))))));
+        const span = w.RECT{ .left = row.left + inset, .top = y, .right = row.right - inset, .bottom = y + 1 };
+        _ = w.FillRect(dc, &span, brush);
+    }
 }
 
 fn roundMenuWindow(hwnd: w.HANDLE) bool {
@@ -270,17 +292,17 @@ fn mixColor(a: w.DWORD, b: w.DWORD) w.DWORD {
 }
 
 fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, show_icons: bool) w.BOOL {
-    const themes = @import("themes.zig");
     const chat_style = @import("chat_style.zig");
-    const look = chat_style.menuLook(themes.themeConsoleBg());
+    const bound = menu_theme;
+    const look = chat_style.menuLook(if (bound) |theme| theme.background() else unboundBackground());
     const background = w.CreateSolidBrush(look.fill);
     defer _ = w.DeleteObject(background);
     const icons = messageMenuIconFont();
     defer _ = w.DeleteObject(icons);
     const info = MenuInfo{ .background = background };
     _ = SetMenuInfo(menu, &info);
-    const ink = themes.themeConsoleFg();
-    smooth_fill_round_rect = &@import("smooth.zig").fillRoundRect;
+    const ink = if (bound) |theme| theme.foreground() else unboundForeground();
+    smooth_fill_round_rect = if (bound) |theme| theme.fill_round_rect else null;
     const previous_hook = menu_window_hook;
     menu_window_hook = w.SetWindowsHookExW(5, &menuWindowHook, null, w.GetCurrentThreadId());
     defer {
