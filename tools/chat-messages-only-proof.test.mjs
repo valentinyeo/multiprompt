@@ -90,9 +90,9 @@ function assertScrollJourney(driver, desktop, boundary) {
   assert.doesNotMatch(driver, /Stop-Process|taskkill|PostMessage|SetFocus|SetWindowText|::Click|::Activate|Invoke-Expression/);
   assert.match(driver, /\$observedStates = \[regex\]::Matches\(\$log.Substring\(\$LogStart\),/);
   assert.match(driver, /\$v = New-MessageState \$LogStart; if \(\$v -and \$v.count -eq \$Count -and \$v.visible -eq \$Visible -and \$v.up -eq \$Up\)/);
-  assert.match(driver, /Wait-For 'filled transcript exceeds viewport'[\s\S]*?\$log.Substring\(\$layoutLogStart\)[\s\S]*?\.Groups\[1\].Value -gt \$views\[0\].Current.BoundingRectangle.Height/);
+  assert.match(driver, /Wait-For 'filled transcript exceeds viewport'[\s\S]*?\$log.Substring\(\$layoutLogStart\)[\s\S]*?\.Groups\[1\].Value -gt \(Get-TranscriptBounds\).Height/);
   const scroll = driver.slice(driver.indexOf('function Scroll-Transcript('), driver.indexOf('function Click-NewMessages('));
-  assert.match(scroll, /Doctor\s+\$bounds = \$views\[0\].Current.BoundingRectangle/);
+  assert.match(scroll, /Doctor\s+\$bounds = \(Get-TranscriptBounds\)/);
   assert.doesNotMatch(scroll, /FocusOwnedWindow|Press @|Start-Sleep/);
   assert.match(scroll, /\$logStart = \(Read-Shared "\$settings\/debug.log"\).Length[\s\S]*::WheelTranscript\(\$main, \$app.Id, \$view, \$x, \$y, \$Delta\)\s+\$logStart/);
   for (const [count, visible, up, name, marker] of [
@@ -131,7 +131,7 @@ test('IGSH-813 wheel journey requires overflow and fresh strict app-log states w
   for (const [source, before, after] of [
     [0, '$log.Substring($LogStart)', '$log'],
     [0, '$v.count -eq $Count', '$true'],
-    [0, ".Value -gt $views[0].Current.BoundingRectangle.Height", '.Value -gt 0'],
+    [0, ".Value -gt (Get-TranscriptBounds).Height", '.Value -gt 0'],
     [0, "'loaded messages do not count' $scrollLogStart", "'loaded messages do not count'"],
     [0, '[ChatDeliveryDesktop]::WheelTranscript($main, $app.Id, $view, $x, $y, $Delta)', '$null'],
     [1, 'WindowFromPoint(new Point { X = x, Y = y }) != view', 'false'],
