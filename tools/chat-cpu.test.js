@@ -245,6 +245,14 @@ fn chatImgStoreLayout(_: usize, _: ChatImgLayout) void {}
 fn chatOutboxKeyForShell(_: u32, _: []u8) []const u8 { return ""; }
 fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32, _: bool) RECT { unreachable; }
 fn chatShellRowsLayout(_: HANDLE, _: i32, y: i32) i32 { return y; }
+const ChoiceStub = struct { present: bool = false, prompt: bool = false, anchor: usize = 0 };
+var g_choice: ChoiceStub = .{};
+var g_choice_sig: [5]u64 = .{ 0, 0, 0, 0, 0 };
+var g_choice_rect_count: usize = 0;
+fn chatChoicesRefresh(_: []const u16) void {}
+fn chatChoicesSig() [5]u64 { return .{ 0, 0, std.math.maxInt(u64), 0, 0 }; }
+fn chatChoicesReuseFor(_: [5]u64, _: [5]u64, reuse: usize) usize { return reuse; }
+fn chatChoicesLayout(_: i32, y: i32) i32 { return y; }
 `;
 const layoutChecks = `
 test "prefix rectangles survive repeated layout and suffix updates; resize and font changes invalidate" {
