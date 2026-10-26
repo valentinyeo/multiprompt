@@ -32,6 +32,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Features
 
+- [App icon](app-icon.md): the real exe, launched on a GitHub Windows desktop, reports the approved robot icon for its window and its file, and the full screen with the taskbar is captured; the pre-fix release is the red control.
+
 - [Inline working dots](chat-working.md): screenshot pixels prove three animated dots in the next reply slot and their disappearance after the reply.
 
 - [Chat dictation](chat-dictation.md): Ctrl+D, all three stop methods, visible microphone state, immediate native draft insertion and typing while listening, with recorded audio and offline provider-response replay.
