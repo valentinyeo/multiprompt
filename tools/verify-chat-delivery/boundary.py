@@ -478,6 +478,13 @@ def tmux():
         sys.stdout.reconfigure(newline="\n")
         sys.stdout.write(shown)
         return 0
+    if ARGS[:1] == ["send-keys"] and state().get("sendingProof") and "-l" in ARGS:
+        (ROOT / "send-blocked").touch()
+        deadline = time.monotonic() + 30
+        while not (ROOT / "release-send").exists():
+            if time.monotonic() > deadline:
+                return 96
+            time.sleep(0.05)
     if ARGS[:1] == ["send-keys"]:
         if stateful(state()):
             return box_send()
