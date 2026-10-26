@@ -1998,10 +1998,11 @@ test('IGSH-814 theme verification waits for the initialized palette and selected
 test('IGSH-905 six-line composer proof holds Shift until the native composer shows the newline and always releases it', () => {
   const start = control.indexOf('function Press-ShiftEnter(');
   assert.notEqual(start, -1, 'control.ps1 has no Press-ShiftEnter');
-  const helper = control.slice(start, control.indexOf('function Type-Text(', start));
+  const helper = control.slice(start, control.indexOf('\nfunction ', start + 1));
   const order = /\[VerifyNative\]::GetAncestor\(\$composer, 2\) -ne \$script:window -or \[VerifyNative\]::Class\(\$composer\) -cne 'Edit'[\s\S]+?\[VerifyNative\]::KeyDown\(0x10\)\s+try \{[\s\S]+?\[VerifyNative\]::KeyDown\(0x0D\)[\s\S]+?\[VerifyNative\]::KeyUp\(0x0D\)\s+Wait-Until \{ @\(\[VerifyNative\]::EditText\(\$composer\) -split "`r\?`n"\)\.Count -eq \(\$before \+ 1\) \}[^\n]*\s+\} finally \{\s+\[VerifyNative\]::KeyUp\(0x10\)\s+\}\s+Wait-Until \{ -not \[VerifyNative\]::IsDown\(0x10\) \}/;
   assert.match(helper, order);
   assert.doesNotMatch(helper, /Chord|\[VerifyNative\]::Text|Press @/);
+  assert.equal(helper.split('[VerifyNative]::KeyUp(0x10)').length - 1, 1);
   const buttons = control.slice(control.indexOf("$buttonsCheck = @{ name = 'round-bottom-composer-buttons'"), control.indexOf('$buttonsCheck.passed = $true'));
   assert.match(buttons, /Press-ShiftEnter 'Shift\+Enter: grow the owned draft without sending'\s+Type-Text \('Draft line ' \+ \$line\)/);
   assert.doesNotMatch(buttons, /Press @\(0x10, 0x0D\)/);
@@ -2012,4 +2013,6 @@ test('IGSH-905 six-line composer proof holds Shift until the native composer sho
   ]) {
     assert.doesNotMatch(broken, order);
   }
+  const earlyRelease = helper.replace('[VerifyNative]::KeyDown(0x0D)', '[VerifyNative]::KeyUp(0x10)\n        [VerifyNative]::KeyDown(0x0D)');
+  assert.notEqual(earlyRelease.split('[VerifyNative]::KeyUp(0x10)').length - 1, 1);
 });

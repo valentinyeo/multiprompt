@@ -1620,6 +1620,26 @@ function Press([int[]]$Keys, [string]$Label) {
     [VerifyNative]::Chord($Keys)
 }
 
+function Type-Text([string]$Text) {
+    Doctor
+    Assert-Foreground
+    Record ('Type ' + $Text)
+    Assert-Foreground
+    [VerifyNative]::Text($Text)
+}
+
+function Click-WorkspacePill([int]$Workspace) {
+    Wait-Until {
+        $state = Read-Session
+        $null -ne $state -and $state.single_window -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -and -not ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed) -and $Workspace -ge 0 -and $Workspace -lt $state.workspace_count -and @($state.workspaces | Where-Object { $_.PSObject.Properties['snoozed'] -and $_.snoozed }).Count -eq 0 -and (-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100)
+    } "visible unsnoozed workspace pill $Workspace at default layout"
+    Doctor
+    Assert-Foreground
+    Record ("Click workspace pill for stored workspace $Workspace")
+    [void][VerifyNative]::DwmFlush()
+    [VerifyNative]::ClickClient($script:window, (8 + ($Workspace + 1) * 29 + 12), 17)
+}
+
 function Press-ShiftEnter([string]$Label) {
     Doctor
     Wait-Foreground
@@ -1640,26 +1660,6 @@ function Press-ShiftEnter([string]$Label) {
     }
     Wait-Until { -not [VerifyNative]::IsDown(0x10) } 'Shift is released after Shift+Enter'
     Record 'Shift released after Shift+Enter'
-}
-
-function Type-Text([string]$Text) {
-    Doctor
-    Assert-Foreground
-    Record ('Type ' + $Text)
-    Assert-Foreground
-    [VerifyNative]::Text($Text)
-}
-
-function Click-WorkspacePill([int]$Workspace) {
-    Wait-Until {
-        $state = Read-Session
-        $null -ne $state -and $state.single_window -and $state.PSObject.Properties['hide_pills'] -and -not $state.hide_pills -and -not ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -and -not ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed) -and $Workspace -ge 0 -and $Workspace -lt $state.workspace_count -and @($state.workspaces | Where-Object { $_.PSObject.Properties['snoozed'] -and $_.snoozed }).Count -eq 0 -and (-not $state.PSObject.Properties['ui_scale'] -or $state.ui_scale -eq 100)
-    } "visible unsnoozed workspace pill $Workspace at default layout"
-    Doctor
-    Assert-Foreground
-    Record ("Click workspace pill for stored workspace $Workspace")
-    [void][VerifyNative]::DwmFlush()
-    [VerifyNative]::ClickClient($script:window, (8 + ($Workspace + 1) * 29 + 12), 17)
 }
 
 function Focus-Palette([string]$Query, [int]$Target) {
