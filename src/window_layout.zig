@@ -1,5 +1,6 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
+const tokens = @import("design_tokens.zig");
 const LOOK_UNIFIED = @import("main.zig").LOOK_UNIFIED;
 const DWORD = @import("win32.zig").DWORD;
 const HANDLE = @import("win32.zig").HANDLE;
@@ -221,8 +222,9 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, sto
     const hover = glyph == .stop and app_state.g_chat_stop_hover;
     const grey: u8 = if (app_state.g_light_theme) (if (hover) 128 else 104) else (if (hover) 84 else 64);
     const bg = if (enabled) RGB(grey, grey, grey) else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
-    const brush = CreateSolidBrush(bg);
-    const pen = CreatePen(0, 1, bg);
+    const fill = if (enabled and !hover and @import("themes.zig").themeReaderDark()) tokens.ReaderRaised else bg;
+    const brush = CreateSolidBrush(fill);
+    const pen = CreatePen(0, 1, fill);
     const old_brush = SelectObject(hdc, brush);
     const old_pen = SelectObject(hdc, pen);
     const radius = rc.bottom - rc.top;
@@ -321,7 +323,7 @@ pub fn chatSurfaceBorderW() i32 {
 }
 
 pub fn chatSurfaceBorderColor() DWORD {
-    return customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55));
+    return customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else if (@import("themes.zig").themeReaderDark()) tokens.ReaderOutline else RGB(41, 45, 55));
 }
 
 fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, radius: i32) void {
