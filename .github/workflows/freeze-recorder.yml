@@ -9,6 +9,11 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional published release to verify instead of a branch build
+        required: false
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -34,7 +39,18 @@ jobs:
           tar -xf $zip -C $env:RUNNER_TEMP
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Build the app
+        if: inputs.tag == ''
         run: zig build
+      - name: Download the published app
+        if: inputs.tag != ''
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
+          New-Item -ItemType Directory -Force zig-out/bin | Out-Null
+          Invoke-WebRequest "https://github.com/valentinyeo/multiprompt/releases/download/$env:RELEASE_TAG/multiprompt-x64.exe" -OutFile zig-out/bin/multiprompt.exe
+          Invoke-WebRequest "https://github.com/valentinyeo/multiprompt/releases/download/$env:RELEASE_TAG/zigshell-bridge-x64.exe" -OutFile zig-out/bin/zigshell-bridge.exe
       - name: Reject the pre-fix release
         shell: pwsh
         run: |
