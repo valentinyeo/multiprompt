@@ -522,6 +522,19 @@ test "Codex project terminal titles are not conversation renames" {
     try std.testing.expect(!codexDisplayNameIsAutomaticProjectTitle(thread, "C:\\Users\\user\\Documents\\GitHub\\zigshell", "term-123"));
 }
 
+test "IGSH-901 restored tab names survive the folder name of a restart" {
+    const github = std.unicode.utf8ToUtf16LeStringLiteral("C:\\Users\\user\\Documents\\GitHub");
+    const repo = std.unicode.utf8ToUtf16LeStringLiteral("C:\\Users\\user\\Documents\\GitHub\\zigshell");
+    var restart: usize = 0;
+    while (restart < 3) : (restart += 1) {
+        try std.testing.expect(restoredNameStaysForCwd(true, github, ""));
+        try std.testing.expect(restoredNameStaysForCwd(true, github, "c:/users/user/documents/github/"));
+        try std.testing.expect(restoredNameStaysForCwd(true, repo, "C:\\Users\\user\\Documents\\GitHub\\zigshell"));
+    }
+    try std.testing.expect(!restoredNameStaysForCwd(true, repo, "C:\\Users\\user\\Documents\\GitHub"));
+    try std.testing.expect(!restoredNameStaysForCwd(false, github, ""));
+}
+
 fn lastPathSegment(path: []const u16) struct { start: usize, end: usize } {
     var last_sep: ?usize = null;
     for (path, 0..) |c, i| {
