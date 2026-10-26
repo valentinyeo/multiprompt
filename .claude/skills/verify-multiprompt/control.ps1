@@ -5698,6 +5698,7 @@ try {
             $result.checks += @{ name = 'update-command-without-ready-keeps-session'; pid = $process.Id; scale = 100; selectedTextPixels = $selectedTextPixels }
         }
         'chat-switch-speed' {
+            function Test-TabChat($tab) { return [bool]($tab.PSObject.Properties['cv'] -and $tab.cv) }
             $sessionCount = 5
             $switchCount = 20
             $chatLimitMs = 150
@@ -5725,9 +5726,9 @@ try {
                         Palette 'new cmd'
                         Press @(0x0D) "Enter: create CMD session $tab"
                         Wait-Until { $state = Read-Session; @($state.tabs).Count -eq ($tab + 1) -and $state.active_tab -eq $tab -and $state.tabs[$tab].kind -eq 'cmd' } "CMD session $tab saved and selected"
-                        if ((Read-Session).tabs[$tab].cv) {
+                        if (Test-TabChat (Read-Session).tabs[$tab]) {
                             Press @(0x12, 0x43) "Alt+C: show the shell of session $tab before filling it"
-                            Wait-Until { -not (Read-Session).tabs[$tab].cv } "session $tab in shell view"
+                            Wait-Until { -not (Test-TabChat (Read-Session).tabs[$tab]) } "session $tab in shell view"
                         }
                     }
                     Wait-WorkspaceSurface $workspace $tab $false
@@ -5736,11 +5737,11 @@ try {
                     Press @(0x0D) "Enter: print 80 history lines in session $tab"
                     Wait-Until { Test-Path $marker } "session $tab console output complete"
                     Press @(0x12, 0x43) "Alt+C: open Chat View for session $tab"
-                    Wait-Until { (Read-Session).tabs[$tab].cv } "Chat View saved for session $tab"
+                    Wait-Until { Test-TabChat (Read-Session).tabs[$tab] } "Chat View saved for session $tab"
                     $shellIds += (Read-Session).tabs[$tab].shell_id
                 }
                 $state = Read-Session
-                if (@($state.tabs).Count -ne $sessionCount -or @($state.tabs | Where-Object { -not $_.cv }).Count -ne 0) { throw 'Not every session is in Chat View' }
+                if (@($state.tabs).Count -ne $sessionCount -or @($state.tabs | Where-Object { -not (Test-TabChat $_) }).Count -ne 0) { throw 'Not every session is in Chat View' }
                 Save-Json @{ shellIds = $shellIds; tabs = @($state.tabs) } 'chat-switch-sessions.json'
                 if ($null -ne $warmupJob) {
                     $warmupStopped = $warmupJob.Stop()
