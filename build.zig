@@ -516,6 +516,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&close_all_browser_panes_tests.step);
     const shortcuts_doc_tests = b.addSystemCommand(&.{ "node", "--test", "tools/shortcuts-doc.test.js" });
     test_step.dependOn(&shortcuts_doc_tests.step);
+    const more_menu_tests = b.addSystemCommand(&.{ "node", "--test", "tools/more-menu.test.js" });
+    test_step.dependOn(&more_menu_tests.step);
+    vps_test_step.dependOn(&more_menu_tests.step);
     const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js", "tools/chat-table-bench/bench.test.js" });
     test_step.dependOn(&chat_table_tests.step);
     vps_test_step.dependOn(&chat_table_tests.step);
