@@ -14,6 +14,7 @@ Open Chat View with Alt+C while an agent works.
 
 Dispatch `verify.yml` with `feature=chat-working`, optionally `tag=v<version>`.
 The job-only console stand-in prints a question and Claude's working line.
+The journey emits the supported ACTIVE and DONE hook notifications for that owned session, as a real hooked agent does.
 The real app detects it and paints its native transcript.
 The journey finds three separate round dots from screenshot pixels, requires a different animation frame, signals the stand-in to reply, and requires the dots to disappear.
 Inspect `working-0.png`, `working-1.png`, their crops, `after.png` and `working-proof.json`.

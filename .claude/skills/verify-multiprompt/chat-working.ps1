@@ -33,6 +33,9 @@ $probe = {
     & node (Join-Path $PSScriptRoot '../../../tools/chat-working-proof.mjs') (Join-Path $Evidence ($name + '.bmp')) (Join-Path $Evidence 'working-area.json') (Join-Path $Evidence ($name + '.json')) $state (Join-Path $Evidence 'working-0.json')
     $LASTEXITCODE -eq 0
 }
+$owned = Read-Session
+$hookTarget = $owned.tabs[$owned.active_tab].name
+& $Exe --notify ('ACTIVE:' + $hookTarget)
 Wait-Until { & $probe 'working-0' 'busy' } 'IGSH-924 inline dots painted' -Seconds 20
 $first = Get-Content (Join-Path $Evidence 'working-0.json') -Raw | ConvertFrom-Json
 $check.frames += $first
@@ -46,6 +49,7 @@ $ready = Get-Content ($prefix + '-ready.json') -Raw | ConvertFrom-Json
 $replyEvent = [Threading.EventWaitHandle]::OpenExisting(('Local\MultipromptInlineReply-' + $ready.pid))
 try { [void]$replyEvent.Set() } finally { $replyEvent.Dispose() }
 Wait-Until { Test-Path ($prefix + '-replied') } 'stand-in wrote the real reply to its console'
+& $Exe --notify ('DONE:' + $hookTarget)
 Wait-Until { & $probe 'after' 'idle' } 'IGSH-924 dots gone after reply' -Seconds 45
 $check.passed = $true
 Save-Json $check 'working-proof.json'

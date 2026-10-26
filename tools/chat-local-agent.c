@@ -74,7 +74,12 @@ int main(int argc, char **argv) {
         if (snprintf(path, sizeof(path), "%s-replied", argv[2]) >= (int)sizeof(path)) return 2;
         FILE *replied = fopen(path, "w");
         if (!replied) return 2;
-        fputs("Ready.", replied);
+        CONSOLE_SCREEN_BUFFER_INFO finished;
+        WCHAR readback[256];
+        DWORD count;
+        if (!GetConsoleScreenBufferInfo(output, &finished) || !ReadConsoleOutputCharacterW(output, readback, 256, user, &count)) return 4;
+        fprintf(replied, "row=%d cursor=%d bottom=%d width=%d chars=", user.Y, finished.dwCursorPosition.Y, finished.srWindow.Bottom, finished.dwSize.X);
+        for (DWORD i = 0; i < count; i++) fprintf(replied, "%u,", readback[i]);
         fclose(replied);
     }
     for (;;) {
