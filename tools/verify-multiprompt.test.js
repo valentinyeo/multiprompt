@@ -2021,14 +2021,22 @@ test('IGSH-905 six-line composer proof holds Shift until the native composer sho
   assert.notEqual(earlyRelease.split('[VerifyNative]::KeyUp(0x10)').length - 1, 1);
 });
 
-test('IGSH-911 native bubble scan accepts the real delivered half-opacity tone without relaxing text selection', () => {
+test('IGSH-911 native bubble and selection scans recognize exact delivered alpha tones', () => {
   const samples = JSON.parse(read('tools/fixtures/IGSH-911/bubble-tones.json'));
+  const blend = control.slice(control.indexOf('static System.Drawing.Color QueuedColor('), control.indexOf('public static Point MessageBubblePoint('));
+  for (const channel of ['R', 'G', 'B']) assert.ok(blend.includes(`(bg.${channel} * 128 + 128) / 256 + (fill.${channel} * 127 + 128) / 256`));
   const scan = control.slice(control.indexOf('public static Point MessageBubblePoint('), control.indexOf('public static Point[] SelectTranscriptText('));
-  for (const channel of ['R', 'G', 'B']) assert.ok(scan.includes(`(bg.${channel} * 128 + fill.${channel} * 127) / 255`));
+  assert.ok(scan.includes('var queuedFill = QueuedColor(bg, fill);'));
   assert.match(scan, /color == fill.ToArgb\(\) \|\| color == queuedFill.ToArgb\(\)/);
   assert.match(scan, /pixels.GetPixel\(x - 1, y\).ToArgb\(\) == color/);
   assert.match(scan, /pixels.GetPixel\(x, y - 1\).ToArgb\(\) == color/);
-  assert.notDeepEqual(samples.delivered, samples.sending);
-  assert.deepEqual(samples.background.map((value, i) => Math.floor((value * 128 + samples.sending[i] * 127) / 255)), samples.delivered);
+  const selection = control.slice(control.indexOf('public static int TranscriptSelectionPixels('), control.indexOf('public static int[] DictationMicPixels('));
+  assert.ok(selection.includes('queuedColors.Add(QueuedColor(bg, fill).ToArgb());'));
+  assert.ok(selection.includes('else if (queuedColors.Contains(c.ToArgb())) count++;'));
+  const queued = fill => samples.background.map((value, i) => Math.floor((value * 128 + 128) / 256) + Math.floor((fill[i] * 127 + 128) / 256));
+  assert.deepEqual(queued(samples.sending), samples.delivered);
+  assert.deepEqual(queued(samples.selection), samples.deliveredSelection);
+  assert.notDeepEqual(samples.selection, samples.deliveredSelection);
+  assert.notDeepEqual(samples.background.map((value, i) => Math.floor((value * 128 + samples.selection[i] * 127) / 255)), samples.deliveredSelection);
   assert.ok(read('src/chat_render.zig').includes('.source_constant_alpha = 128'));
 });

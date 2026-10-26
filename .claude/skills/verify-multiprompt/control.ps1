@@ -453,6 +453,11 @@ public static class VerifyNative {
         MouseAt(point.X, point.Y, 8);
         MouseAt(point.X, point.Y, 16);
     }
+    static System.Drawing.Color QueuedColor(System.Drawing.Color bg, System.Drawing.Color fill) {
+        return System.Drawing.Color.FromArgb((bg.R * 128 + 128) / 256 + (fill.R * 127 + 128) / 256,
+            (bg.G * 128 + 128) / 256 + (fill.G * 127 + 128) / 256,
+            (bg.B * 128 + 128) / 256 + (fill.B * 127 + 128) / 256);
+    }
     public static Point MessageBubblePoint(IntPtr hwnd) {
         Rect rect;
         if (!GetWindowRect(hwnd, out rect)) throw new InvalidOperationException("Transcript rectangle unavailable");
@@ -462,7 +467,7 @@ public static class VerifyNative {
             var bg = pixels.GetPixel(0, pixels.Height / 2);
             int shift = (2126 * bg.R + 7152 * bg.G + 722 * bg.B) / 10000 < 128 ? 53 : -26;
             var fill = System.Drawing.Color.FromArgb(Math.Max(0, Math.Min(255, bg.R + shift)), Math.Max(0, Math.Min(255, bg.G + shift)), Math.Max(0, Math.Min(255, bg.B + shift)));
-            var queuedFill = System.Drawing.Color.FromArgb((bg.R * 128 + fill.R * 127) / 255, (bg.G * 128 + fill.G * 127) / 255, (bg.B * 128 + fill.B * 127) / 255);
+            var queuedFill = QueuedColor(bg, fill);
             for (int y = pixels.Height - 2; y > 0; y--) {
                 for (int x = pixels.Width - 2; x > 0; x--) {
                     int color = pixels.GetPixel(x, y).ToArgb();
@@ -543,6 +548,16 @@ public static class VerifyNative {
             WindowFromPoint(points[0]) != hwnd || WindowFromPoint(points[1]) != hwnd)
             throw new InvalidOperationException("Selection evidence is not inside the owned transcript");
         int pad = Math.Max(8, (int)GetDpiForWindow(hwnd) / 6);
+        Rect rect;
+        if (!GetWindowRect(hwnd, out rect)) throw new InvalidOperationException("Transcript rectangle unavailable");
+        System.Drawing.Color bg;
+        using (var backdrop = new System.Drawing.Bitmap(1, 1))
+        using (var graphics = System.Drawing.Graphics.FromImage(backdrop)) {
+            graphics.CopyFromScreen(rect.Left, rect.Top + (rect.Bottom - rect.Top) / 2, 0, 0, backdrop.Size);
+            bg = backdrop.GetPixel(0, 0);
+        }
+        var queuedColors = new HashSet<int>();
+        foreach (var fill in new System.Drawing.Color[] { System.Drawing.Color.FromArgb(56, 78, 112), System.Drawing.Color.FromArgb(183, 206, 240), System.Drawing.Color.FromArgb(52, 68, 96) }) queuedColors.Add(QueuedColor(bg, fill).ToArgb());
         using (var pixels = new System.Drawing.Bitmap(points[1].X - points[0].X, pad * 2 + 1))
         using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
             DwmFlush();
@@ -553,6 +568,7 @@ public static class VerifyNative {
                     var c = pixels.GetPixel(x, y);
                     if ((c.R == 56 && c.G == 78 && c.B == 112) || (c.R == 183 && c.G == 206 && c.B == 240) ||
                         (c.R == 52 && c.G == 68 && c.B == 96)) count++;
+                    else if (queuedColors.Contains(c.ToArgb())) count++;
                 }
             }
             return count;
