@@ -1996,6 +1996,32 @@ test('IGSH-814 theme verification waits for the initialized palette and selected
   assert.match(selection, /Wait-Until \{ \(Test-Path \$path\) -and \(Get-Content \$path -Raw\)\.Trim\(\) -eq \$SavedTheme \}/);
 });
 
+test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches three times and gates the release', () => {
+  assert.match(control, /ValidateSet\([^\n)]*'relaunch-saved-sessions'/);
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'relaunch-saved-sessions'/);
+  assert.match(workflow, /fromJSON\('\["appearance", "chat-dictation", "relaunch-saved-sessions", [^\n]*\]'\)/);
+  const journey = control.slice(control.indexOf("        'relaunch-saved-sessions' {"), control.indexOf("        'session-open' {"));
+  assert.match(journey, /foreach \(\$launch in 2, 3\)/);
+  assert.match(journey, /Restart-SessionRestore "relaunch-\$launch" \$false \$false \$openPorts/);
+  assert.match(journey, /Open-NotifyPortListeners/);
+  assert.match(journey, /\$after\.selected -cne \$starred\.selected/);
+  const assertion = control.slice(control.indexOf('function Assert-RelaunchSessions('), control.indexOf('try {\n    if ($Feature -eq \'title-bar\')'));
+  assert.match(assertion, /sessions listed twice in the sidebar/);
+  assert.match(assertion, /@\(\$saved\.tabs\)\.Count -eq \$Seed\.live\.Count/);
+  assert.match(assertion, /group headers missing/);
+  assert.doesNotMatch(journey + assertion, /Set-Content|WriteAll|Stop-Process/);
+  const seed = control.slice(control.indexOf('function New-RelaunchSeed {'), control.indexOf('function Get-NotifyPorts {'));
+  assert.match(seed, /foreach \(\$i in 1\.\.14\)/);
+  assert.match(seed, /kind = 'tmux'/);
+  assert.match(seed, /starred_view = \$true/);
+  assert.match(control, /Get-NotifyPorts[\s\S]*notify_ports\.zig/);
+  const map = read(skill + 'features/relaunch-saved-sessions.md');
+  for (const required of ['seeded-state', 'occupied-ports', 'selection-kept', 'IGSH-890', 'auto-release-admit.sh']) assert.ok(map.includes(required), required);
+  assert.match(read(skill + 'features/README.md'), /\[Relaunch saved sessions\]\(relaunch-saved-sessions.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`relaunch-saved-sessions`/);
+  assert.throws(() => assert.match(control.replace("'relaunch-saved-sessions')][string]$Feature", "')][string]$Feature"), /ValidateSet\([^\n)]*'relaunch-saved-sessions'/));
+});
+
 test('IGSH-905 six-line composer proof holds Shift until the native composer shows the newline and always releases it', () => {
   const start = control.indexOf('function Press-ShiftEnter(');
   assert.notEqual(start, -1, 'control.ps1 has no Press-ShiftEnter');
