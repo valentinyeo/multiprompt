@@ -1769,14 +1769,22 @@ fn chatPaintWorking(hdc: HANDLE, now: u64) void {
     var rc = source;
     rc.top -= app_state.g_chat_scroll_y;
     rc.bottom -= app_state.g_chat_scroll_y;
-    fillRoundRectAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor());
-    const size = uiScaled(6);
-    const step = uiScaled(11);
+    chatPaintWorkingDots(hdc, rc, now);
+}
+
+const WORKING_DOT_SIZE = 4;
+const WORKING_DOT_STEP = 8;
+const WORKING_DOT_ALPHA: u8 = 102;
+
+fn chatPaintWorkingDots(hdc: HANDLE, rc: RECT, now: u64) void {
+    const size = uiScaled(WORKING_DOT_SIZE);
+    const step = uiScaled(WORKING_DOT_STEP);
     const active = (now / 250) % 3;
+    const color = @import("chat_scrollbar.zig").blend(themeConsoleBg(), customColorOr("text", themeConsoleFg()), WORKING_DOT_ALPHA);
     for (0..3) |i| {
         const x = rc.left + uiScaled(CHAT_AGENT_PAD_X) + @as(i32, @intCast(i)) * step;
-        const y = rc.top + @divTrunc(rc.bottom - rc.top - size, 2) - (if (i == active) uiScaled(3) else @as(i32, 0));
-        @import("smooth.zig").fillEllipse(hdc, .{ .left = x, .top = y, .right = x + size, .bottom = y + size }, customColorOr("text", themeConsoleFg()));
+        const y = rc.top + @divTrunc(rc.bottom - rc.top - size, 2) - (if (i == active) uiScaled(2) else @as(i32, 0));
+        @import("smooth.zig").fillEllipse(hdc, .{ .left = x, .top = y, .right = x + size, .bottom = y + size }, color);
     }
 }
 
@@ -6136,6 +6144,62 @@ test "IGSH-897 scrollbar draws no track, only a narrow fixed thumb while scrolli
             if (state == .faded) try scrollProofSave(L("scrollbar-faded.bmp"), bytes, info.header);
         }
     }
+}
+
+test "IGSH-959 working dots have no bubble and are small and dim" {
+    const w = @import("win32.zig");
+    const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(dc);
+    const width = 400;
+    const height = 120;
+    const info: w.BITMAPINFO = .{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    const background = themeConsoleBg();
+    var area = RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+    const brush = CreateSolidBrush(background);
+    defer _ = DeleteObject(brush);
+    _ = FillRect(dc, &area, brush);
+    const rc = RECT{ .left = 20, .top = 30, .right = 380, .bottom = 30 + uiScaled(48) };
+    chatPaintWorkingDots(dc, rc, 0);
+    const pixels: [*]const u32 = @ptrCast(@alignCast(bits.?));
+    const bg_rgb = ((background & 0xFF) << 16) | (background & 0xFF00) | ((background >> 16) & 0xFF);
+    const fg = customColorOr("text", themeConsoleFg());
+    const fg_rgb = ((fg & 0xFF) << 16) | (fg & 0xFF00) | ((fg >> 16) & 0xFF);
+    var painted: usize = 0;
+    var brightest: u32 = 0;
+    var min_x: i32 = width;
+    var max_x: i32 = 0;
+    var y: i32 = 0;
+    while (y < height) : (y += 1) {
+        var x: i32 = 0;
+        while (x < width) : (x += 1) {
+            const px = pixels[@intCast(y * width + x)] & 0xFFFFFF;
+            if (px == bg_rgb) continue;
+            painted += 1;
+            min_x = @min(min_x, x);
+            max_x = @max(max_x, x);
+            brightest = @max(brightest, channelDistance(px, bg_rgb));
+        }
+    }
+    const full = channelDistance(fg_rgb, bg_rgb);
+    try std.testing.expect(painted > 0);
+    try std.testing.expect(painted <= 3 * @as(usize, @intCast((uiScaled(WORKING_DOT_SIZE) + 2) * (uiScaled(WORKING_DOT_SIZE) + 2))));
+    try std.testing.expect(max_x - min_x < 3 * uiScaled(WORKING_DOT_STEP));
+    try std.testing.expect(brightest * 100 <= full * 50);
+}
+
+fn channelDistance(a: u32, b: u32) u32 {
+    var out: u32 = 0;
+    inline for ([_]u5{ 0, 8, 16 }) |shift| {
+        const x: i32 = @intCast((a >> shift) & 0xFF);
+        const y: i32 = @intCast((b >> shift) & 0xFF);
+        out = @max(out, @as(u32, @intCast(@abs(x - y))));
+    }
+    return out;
 }
 
 test "IGSH-924 working dots reserve the next reply rectangle and disappear for idle or input" {
