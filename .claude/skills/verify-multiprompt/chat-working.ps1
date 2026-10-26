@@ -37,6 +37,7 @@ $owned = Read-Session
 $hookTarget = $owned.tabs[$owned.active_tab].name
 & $Exe --notify ('ACTIVE:' + $hookTarget)
 Wait-Until { & $probe 'working-0' 'busy' } 'IGSH-924 inline dots painted' -Seconds 20
+Snapshot 'action'
 $first = Get-Content (Join-Path $Evidence 'working-0.json') -Raw | ConvertFrom-Json
 $check.frames += $first
 Wait-Until {

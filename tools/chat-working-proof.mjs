@@ -62,6 +62,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   fs.writeFileSync(output, JSON.stringify({ dots: found, area, replyPixels }, null, 2));
   if ((state === 'busy') !== !!found) throw new Error(`IGSH-924 ${state === 'busy' ? 'missing inline dots' : 'dots remain after reply'}`);
-  if (found) writeCrop(image, { left: Math.max(area.left, found[0].left - 8), top: Math.max(area.top, Math.min(...found.map(d => d.top)) - 8), right: Math.min(area.right, found[2].right + 8), bottom: Math.min(area.bottom, Math.max(...found.map(d => d.bottom)) + 8) }, 4, output.replace(/\.json$/, '.png'));
+  if (found) writeCrop(image, { left: Math.max(area.left, found[0].left - 8), top: Math.max(area.top, Math.min(...found.map(d => d.top)) - 8), right: Math.min(area.right, found[2].right + 8), bottom: Math.min(area.bottom, Math.max(...found.map(d => d.bottom)) + 8) }, 4, output.replace(/\.json$/, '-crop.png'));
   console.log(state === 'busy' ? 'INLINE_DOTS_VISIBLE' : 'INLINE_DOTS_ABSENT');
 }

@@ -40,11 +40,13 @@ test('Windows screenshot command accepts the driver UTF-8 BOM and rejects absent
     image.pixels.copy(bmp, 54);
     const file = path.join(dir, 'frame.bmp'), json = path.join(dir, 'area.json'), out = path.join(dir, 'out.json');
     fs.writeFileSync(file, bmp);
+    fs.writeFileSync(path.join(dir, 'out.png'), 'existing screenshot');
     fs.writeFileSync(json, '\uFEFF' + JSON.stringify(area));
     const run = () => spawnSync(process.execPath, ['tools/chat-working-proof.mjs', file, json, out, 'busy'], { encoding: 'utf8' });
     const visible = run();
     assert.equal(visible.status, 0, visible.stderr);
     assert.match(visible.stdout, /INLINE_DOTS_VISIBLE/);
+    assert.equal(fs.readFileSync(path.join(dir, 'out.png'), 'utf8'), 'existing screenshot');
     frame().pixels.copy(bmp, 54); fs.writeFileSync(file, bmp);
     const absent = run();
     assert.notEqual(absent.status, 0);
