@@ -37,19 +37,19 @@ pub fn collectHoles(out: *HoleList) void {
     const window_layout = @import("window_layout.zig");
     const drawing = @import("drawing.zig");
     const layout = chat_composer.chatViewLayout();
-    out.add(layout.composer_card, window_layout.chatSurfaceRadius());
+    out.addFloating(layout.composer_card, window_layout.chatSurfaceRadius());
     var main_rc: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = w32.GetClientRect(app_state.g_main_hwnd, &main_rc);
     if (drawing.chatTitleHoleRect(main_rc.right - main_rc.left)) |band| {
         out.add(band, 0);
     } else if (drawing.chatTitleLayout()) |title| {
-        out.add(title.pill, @divTrunc(title.pill.bottom - title.pill.top, 2));
-        if (title.has_meta) out.add(title.meta_pill, @divTrunc(title.meta_pill.bottom - title.meta_pill.top, 2));
+        out.addFloating(title.pill, @divTrunc(title.pill.bottom - title.pill.top, 2));
+        if (title.has_meta) out.addFloating(title.meta_pill, @divTrunc(title.meta_pill.bottom - title.meta_pill.top, 2));
     }
-    if (chat_composer.chatNewMessagesRect()) |pill| out.add(pill, drawing.uiScaled(13));
+    if (chat_composer.chatNewMessagesRect()) |pill| out.addFloating(pill, drawing.uiScaled(13));
     if (window_layout.chatPermissionVisible()) {
         for (std.meta.tags(@import("chat_permission.zig").Action)) |action| {
-            if (window_layout.chatPermissionRect(action)) |rc| out.add(rc, drawing.uiScaled(6));
+            if (window_layout.chatPermissionRect(action)) |rc| out.addFloating(rc, drawing.uiScaled(6));
         }
     }
 }
