@@ -131,6 +131,7 @@ jobs:
           node tools/chat-perf-table.mjs table rows > table.md
           cat table.md >> "$GITHUB_STEP_SUMMARY"
           cat table.md
+          echo "::notice title=chat-perf-table::$(sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g' table.md)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: chat-perf-table
