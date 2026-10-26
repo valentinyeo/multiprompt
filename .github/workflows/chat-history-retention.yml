@@ -1,0 +1,20 @@
+name: Retained chat history
+on:
+  pull_request:
+    paths:
+      - src/chat_history.zig
+      - src/chat_session.zig
+      - src/app_state.zig
+      - tools/verify-chat-delivery/**
+      - tools/chat-history-retention-proof.mjs
+      - .github/workflows/verify.yml
+      - .github/workflows/chat-history-retention.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  retention:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-full-history
+      chat_retention_proof: true
