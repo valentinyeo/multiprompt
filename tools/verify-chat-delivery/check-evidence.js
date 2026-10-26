@@ -100,6 +100,7 @@ function evaluateSendCase(context) {
     assert.equal(send.n, i + 1);
     assert.equal(send.text, sendTexts[i]);
     assert.equal(send.reappeared, null, `send ${i + 1} came back into the box: ${JSON.stringify(send.reappeared)}`);
+    assert.equal(send.reached, true, `send ${i + 1} did not reach the agent within 10 seconds`);
   });
   const failed = observation.steps.filter(step => step.ok !== true).map(step => step.name);
   assert.ok(failed.length === 0, `journey steps failed: ${failed.join(', ')}`);
@@ -112,6 +113,7 @@ function evaluateSendCase(context) {
   assert.deepEqual(joined, [], 'sent text came back into the box and was sent again joined to the next message');
   const lost = sendTexts.filter(text => !enqueued.includes(text) && !pending.includes(text));
   assert.deepEqual(lost, [], 'every sent message was either queued by Claude or is still pending in the Chat View outbox, none was dropped');
+  assert.deepEqual(enqueued.filter(text => sendTexts.includes(text)), sendTexts, 'every sent text reached the agent exactly once and in send order');
   const cleanup = json(`${name}/cleanup.json`);
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.scratch_removed, true);

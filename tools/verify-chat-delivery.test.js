@@ -229,6 +229,40 @@ test('fake Claude box applies Ctrl+U by wrapped screen row and by trailing line 
   assert.match(drive, /if \(\$plan.ContainsKey\('leftover'\)\) \{ \$seed.leftover = \$plan.leftover/);
 });
 
+test('fake attach wraps every drawn line below the console width so a long draft cannot crash the redraw', () => {
+  const boundary = path.join(root, 'tools/verify-chat-delivery/boundary.py');
+  const script = String.raw`
+import ast, json, pathlib, sys
+source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+tree = ast.parse(source)
+selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "console_rows"]
+namespace = {}
+exec(compile(ast.Module(body=selected, type_ignores=[]), sys.argv[1], "exec"), namespace)
+fixtures = json.load(sys.stdin)
+print(json.dumps([namespace["console_rows"](case["lines"], case["width"]) for case in fixtures]))
+`;
+  const long = 'send 12 ' + 'long message about the weekly plan that keeps wrapping '.repeat(3).trim();
+  assert.ok(long.length > 150);
+  const cases = [
+    { lines: ['Claude Code', '', '> ' + long, '-'.repeat(50)], width: 79 },
+    { lines: ['  Queued: ' + long], width: 79 },
+    { lines: ['', 'x'.repeat(79), 'y'.repeat(80)], width: 79 },
+    { lines: ['abc'], width: 0 },
+  ];
+  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, boundary], { input: JSON.stringify(cases), encoding: 'utf8', timeout: 60000 }));
+  for (const [index, rows] of result.entries()) {
+    const width = Math.max(1, cases[index].width);
+    assert.ok(rows.every(row => row.length <= width), `case ${index}`);
+  }
+  assert.equal(result[0].join(''), cases[0].lines.join(''));
+  assert.equal(result[0].length, 2 + Math.ceil(('> ' + long).length / 79) + 1);
+  assert.deepEqual(result[2], ['', 'x'.repeat(79), 'y'.repeat(79), 'y']);
+  assert.deepEqual(result[3], ['a', 'b', 'c']);
+  const source = read('tools/verify-chat-delivery/boundary.py');
+  assert.match(source, /lines = console_rows\(shown.splitlines\(\), info.size.X - 1\)/);
+  assert.match(source, /text = "\\r\\n".join\(lines\) \+ "\\r\\n"/);
+});
+
 test('boundary runs the actual supplied Python bootstrap and logs raw fake tmux writes without fabricating text', () => {
   const boundary = read('tools/verify-chat-delivery/boundary.py');
   assert.match(boundary, /shlex.split\(command\[python.start\(\):\]\)/);
@@ -868,14 +902,25 @@ test('send-stays-gone evidence fails when a sent message comes back or a send is
   stale.steps[3].ok = false;
   files.set(observationFile, JSON.stringify(stale));
   assert.match(row().detail, /journey steps failed: send-stays-gone/);
+  const late = JSON.parse(original);
+  late.sends[11].reached = false;
+  files.set(observationFile, JSON.stringify(late));
+  assert.match(row().detail, /send 12 did not reach the agent within 10 seconds/);
   files.set(observationFile, original);
   const transcriptFile = path.join(base, `${sendName}/transcript.jsonl`);
   const transcript = files.get(transcriptFile);
   files.set(transcriptFile, transcript.split('\n').slice(0, -1).join('\n'));
   assert.match(row().detail, /none was dropped/);
+  const lines = transcript.split('\n');
+  const swapped = [...lines];
+  const [first, second] = [swapped.findIndex(l => l.includes('send 1 short note')), swapped.findIndex(l => l.includes('send 2 short note'))];
+  [swapped[first], swapped[second]] = [swapped[second], swapped[first]];
+  files.set(transcriptFile, swapped.join('\n'));
+  assert.match(row().detail, /exactly once and in send order/);
+  files.set(transcriptFile, transcript.split('\n').slice(0, -1).join('\n'));
   const outboxFile = path.join(base, `${sendName}/outbox-final.json`);
   files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: sendTexts[19], s: 2 }] }] }));
-  assert.deepEqual(row().detail, { sends: 20, watchedSeconds: 10, longMessages: 5, delivered: 19, pending: 1, outboxStates: { 2: 1 } });
+  assert.match(row().detail, /exactly once and in send order/);
   files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: sendTexts[19], s: 3 }] }] }));
   assert.match(row().detail, /none was dropped/);
   files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: 'unrelated text', s: 3 }] }] }));
