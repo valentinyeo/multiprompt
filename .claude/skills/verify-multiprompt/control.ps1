@@ -488,6 +488,16 @@ public static class VerifyNative {
             Thread.Sleep(15);
         }
     }
+    public static void ClickBrowserContent(IntPtr pane, IntPtr owner) {
+        Rect rect;
+        if (!GetClientRect(pane, out rect)) throw new InvalidOperationException("Browser client rectangle unavailable");
+        Point point = new Point { X = rect.Right / 2, Y = rect.Bottom / 2 };
+        if (!ClientToScreen(pane, ref point)) throw new InvalidOperationException("Browser screen rectangle unavailable");
+        RequireBrowserStrip(pane, owner, point);
+        MouseAt(point.X, point.Y, 0);
+        MouseAt(point.X, point.Y, 2);
+        MouseAt(point.X, point.Y, 4);
+    }
     public static void ClickClient(IntPtr hwnd, int x, int y) {
         Point point = new Point { X = x, Y = y };
         if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Pill is not in the owned window");

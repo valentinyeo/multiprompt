@@ -83,7 +83,7 @@ Type-Text 'data:text/html,<title>Corner control</title><body style="margin:0;bac
 Press @(0x0D) 'Enter: render white corner control page'
 Wait-Until { [VerifyNative]::Title($browser) -match 'Corner control' } 'synthetic white page loaded' 20
 Press @(0x11, 0x31) 'Ctrl+1: select browser-owning first session'
-Palette 'new cmd'
+Focus-Palette 'new cmd' 2000
 Press @(0x0D) 'Enter: create second session for real chat switches'
 Wait-Until { @((Read-Session).tabs).Count -eq 2 } 'two real sessions for switching'
 Press @(0x11, 0x31) 'Ctrl+1: restore browser-owning session'
@@ -94,12 +94,11 @@ for ($cycle = 0; $cycle -lt 20; $cycle++) {
     switch ($cycle % 4) {
         0 {
             Focus-LockedBrowser $browser
-            $rect = New-Object VerifyNative+Rect
-            if (-not [VerifyNative]::GetClientRect($browser, [ref]$rect)) { throw 'Browser click rectangle unavailable' }
             Record "Corner cycle $cycle`: click browser content"
-            [VerifyNative]::ClickClient($browser, [int]($rect.Right / 2), [int]($rect.Bottom / 2))
+            [VerifyNative]::ClickBrowserContent($browser, $script:window)
         }
         1 {
+            Activate-OwnedFrame
             Press @(0x11, 0x32) 'Ctrl+2: switch away from browser session'
             Wait-Until { (Read-Session).active_tab -eq 1 } 'second session selected'
             Press @(0x11, 0x31) 'Ctrl+1: switch back to browser session'
