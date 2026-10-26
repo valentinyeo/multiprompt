@@ -1567,7 +1567,18 @@ fn captureDictationPcm(audio: *dictation_audio.Audio) void {
         const n = readDictationFixture("goforward.pcm", audio.buf);
         audio.len = n;
         dictationAudit("fixture-audio-bytes", n);
-        while (app_state.g_dictation_recording.load(.acquire)) Sleep(1);
+        const step: usize = (DICTATION_SAMPLE_RATE / 10) * 2;
+        var at: usize = 0;
+        while (app_state.g_dictation_recording.load(.acquire)) {
+            if (n >= step) {
+                if (at + step > n) at = 0;
+                const samples = std.mem.bytesAsSlice(i16, audio.buf[at .. at + step]);
+                app_state.g_dictation_level.store(@intFromFloat(pcmFrameRms(samples)), .release);
+                at += step;
+            }
+            Sleep(100);
+        }
+        app_state.g_dictation_level.store(0, .release);
         return;
     }
 
@@ -1613,6 +1624,7 @@ fn captureDictationPcm(audio: *dictation_audio.Audio) void {
             if (n > 0 and headers[i].lpData != null) {
                 const src = headers[i].lpData.?[0..n];
                 if (!audio.append(std.heap.page_allocator, src)) app_state.g_dictation_recording.store(false, .release);
+                if (n >= 2) app_state.g_dictation_level.store(@intFromFloat(pcmFrameRms(std.mem.bytesAsSlice(i16, src[0 .. n - (n % 2)]))), .release);
                 if (app_state.g_voice_listening_active.load(.acquire) and n >= 2) {
                     const samples = std.mem.bytesAsSlice(i16, src[0 .. n - (n % 2)]);
                     const frame_ms: u32 = @intCast((n * 1000) / (2 * DICTATION_SAMPLE_RATE));
@@ -1630,6 +1642,7 @@ fn captureDictationPcm(audio: *dictation_audio.Audio) void {
     }
 
     app_state.g_dictation_recording.store(false, .release);
+    app_state.g_dictation_level.store(0, .release);
     _ = waveInStop(hw);
     _ = waveInReset(hw);
     for (0..DICTATION_BUFFER_COUNT) |i| {

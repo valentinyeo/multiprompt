@@ -7057,6 +7057,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 @import("chat_composer.zig").chatStopSlotSync();
                 return 0;
             }
+            if (wp == app_state.TIMER_CHAT_DICTATION) {
+                @import("chat_composer.zig").chatDictationSync();
+                @import("chat_composer.zig").chatDictationWaveTick();
+                return 0;
+            }
             if (wp == app_state.TIMER_CHAT_FIND) {
                 @import("chat_find_ui.zig").tick();
                 return 0;

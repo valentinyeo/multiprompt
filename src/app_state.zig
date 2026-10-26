@@ -1649,6 +1649,7 @@ pub var g_shot_paste_tail: usize = 0;
 pub var g_shot_paste_count: usize = 0;
 
 pub var g_dictation_recording = std.atomic.Value(bool).init(false);
+pub var g_dictation_level = std.atomic.Value(u32).init(0);
 pub var g_dictation_running = std.atomic.Value(bool).init(false);
 pub var g_dictation_enter_stop_queued = std.atomic.Value(bool).init(false);
 pub var g_dictation_send_queued = std.atomic.Value(bool).init(false);
@@ -2009,6 +2010,7 @@ pub var g_account_dirty_at: u64 = 0;
 pub var g_account_status: []const u8 = "Sign in to multiprompt to open your workspaces.";
 pub const TIMER_ACCOUNT: usize = 170;
 pub const TIMER_FONT_SYNC: usize = 190;
+pub const TIMER_CHAT_DICTATION: usize = 191;
 pub const TIMER_UPDATE_CHECK: usize = 172;
 pub const TIMER_ACCOUNT_SAVE: usize = 171;
 pub const AccountJobKind = enum { startup, login, pull, push, devices, revoke, signout, device_keys, decide_keys, remove_host };

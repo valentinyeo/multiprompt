@@ -214,6 +214,50 @@ pub const DictationState = enum { idle, listening, finishing };
 pub var chat_dictation_state: DictationState = .idle;
 var chat_dictation_engine_toggle: *const fn () void = @import("voice.zig").toggleDictation;
 
+pub const DICTATION_WAVE_BARS = 14;
+pub var chat_dictation_started_ms: u64 = 0;
+pub var chat_dictation_wave: [DICTATION_WAVE_BARS]u8 = [_]u8{0} ** DICTATION_WAVE_BARS;
+
+pub fn chatDictationElapsedText(buf: *[8]u16, elapsed_ms: u64) []const u16 {
+    const total: u64 = elapsed_ms / 1000;
+    const minutes: u64 = @min(total / 60, 99);
+    const seconds: u64 = total % 60;
+    var at: usize = 0;
+    if (minutes >= 10) {
+        buf[at] = @intCast('0' + minutes / 10);
+        at += 1;
+    }
+    buf[at] = @intCast('0' + minutes % 10);
+    buf[at + 1] = ':';
+    buf[at + 2] = @intCast('0' + seconds / 10);
+    buf[at + 3] = @intCast('0' + seconds % 10);
+    return buf[0 .. at + 4];
+}
+
+pub fn chatDictationLevelBar(level: u32) u8 {
+    const capped: u32 = @min(level, 4000);
+    return @intCast((capped * 255) / 4000);
+}
+
+pub fn chatDictationElapsedNow() u64 {
+    if (chat_dictation_started_ms == 0) return 0;
+    return @import("win32.zig").GetTickCount64() -| chat_dictation_started_ms;
+}
+
+pub fn chatDictationWaveTick() void {
+    if (chat_dictation_state != .listening) return;
+    std.mem.copyForwards(u8, chat_dictation_wave[0 .. DICTATION_WAVE_BARS - 1], chat_dictation_wave[1..DICTATION_WAVE_BARS]);
+    chat_dictation_wave[DICTATION_WAVE_BARS - 1] = chatDictationLevelBar(app_state.g_dictation_level.load(.acquire));
+    if (app_state.g_main_hwnd != null) {
+        const rc = chatViewLayout().mic_btn;
+        _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
+    }
+}
+
+pub fn chatDictationMicWidth(state: DictationState) i32 {
+    return if (state == .idle) uiScaled(32) else uiScaled(116);
+}
+
 pub fn chatDictationSync() void {
     const next: DictationState = if (app_state.g_dictation_draft_owner_len == 0 or !app_state.g_dictation_running.load(.acquire))
         .idle
@@ -222,7 +266,16 @@ pub fn chatDictationSync() void {
     else
         .finishing;
     if (next == chat_dictation_state) return;
+    const was_idle = chat_dictation_state == .idle;
     chat_dictation_state = next;
+    if (was_idle and next != .idle) {
+        chat_dictation_started_ms = @import("win32.zig").GetTickCount64();
+        chat_dictation_wave = [_]u8{0} ** DICTATION_WAVE_BARS;
+        if (app_state.g_main_hwnd != null) _ = @import("win32.zig").SetTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION, 100, null);
+    } else if (next == .idle) {
+        chat_dictation_started_ms = 0;
+        if (app_state.g_main_hwnd != null) _ = @import("win32.zig").KillTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION);
+    }
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
@@ -294,7 +347,7 @@ pub fn chatViewLayout() ChatViewLayout {
     const slots = chatSendSlots(composer_card, send_size, send_margin, @import("window_layout.zig").chatStopVisible(), chatComposerHasText() or chat_dictation_state != .idle);
     const send_btn = slots.send;
     const mic_btn = RECT{
-        .left = slots.left - uiScaled(6) - send_size,
+        .left = slots.left - uiScaled(6) - chatDictationMicWidth(chat_dictation_state),
         .top = send_btn.top,
         .right = slots.left - uiScaled(6),
         .bottom = send_btn.bottom,
@@ -2728,4 +2781,58 @@ test "IGSH-884 every composer button stays on one bottom line for multiline draf
             }
         }
     }
+}
+
+test "IGSH-887 the elapsed timer counts up as minutes and seconds" {
+    var buf: [8]u16 = undefined;
+    const cases = [_]struct { ms: u64, text: []const u8 }{
+        .{ .ms = 0, .text = "0:00" },
+        .{ .ms = 2400, .text = "0:02" },
+        .{ .ms = 59999, .text = "0:59" },
+        .{ .ms = 65000, .text = "1:05" },
+        .{ .ms = 605000, .text = "10:05" },
+    };
+    for (cases) |c| {
+        const out = chatDictationElapsedText(&buf, c.ms);
+        try std.testing.expectEqual(c.text.len, out.len);
+        for (c.text, out) |want, got| try std.testing.expectEqual(@as(u16, want), got);
+    }
+}
+
+test "IGSH-887 the mic is a round button when idle and a wide pill while dictating" {
+    try std.testing.expectEqual(uiScaled(32), chatDictationMicWidth(.idle));
+    try std.testing.expect(chatDictationMicWidth(.listening) > chatDictationMicWidth(.idle) * 3);
+    try std.testing.expectEqual(chatDictationMicWidth(.listening), chatDictationMicWidth(.finishing));
+    const saved = chat_dictation_state;
+    defer chat_dictation_state = saved;
+    chat_dictation_state = .idle;
+    const idle = chatViewLayout();
+    try std.testing.expectEqual(idle.mic_btn.bottom - idle.mic_btn.top, idle.mic_btn.right - idle.mic_btn.left);
+    chat_dictation_state = .listening;
+    const live = chatViewLayout();
+    try std.testing.expectEqual(chatDictationMicWidth(.listening), live.mic_btn.right - live.mic_btn.left);
+    try std.testing.expectEqual(idle.mic_btn.right, live.mic_btn.right);
+    try std.testing.expect(live.composer.right < idle.composer.right);
+    try std.testing.expect(live.mic_btn.left > live.composer.right);
+}
+
+test "IGSH-887 the wave follows the voice level and shifts left each tick" {
+    try std.testing.expectEqual(@as(u8, 0), chatDictationLevelBar(0));
+    try std.testing.expectEqual(@as(u8, 255), chatDictationLevelBar(40000));
+    try std.testing.expect(chatDictationLevelBar(1000) < chatDictationLevelBar(2000));
+    const saved = chat_dictation_state;
+    const wave = chat_dictation_wave;
+    defer {
+        chat_dictation_state = saved;
+        chat_dictation_wave = wave;
+        app_state.g_dictation_level.store(0, .release);
+    }
+    chat_dictation_state = .listening;
+    chat_dictation_wave = [_]u8{0} ** DICTATION_WAVE_BARS;
+    app_state.g_dictation_level.store(2000, .release);
+    chatDictationWaveTick();
+    app_state.g_dictation_level.store(0, .release);
+    chatDictationWaveTick();
+    try std.testing.expectEqual(chatDictationLevelBar(2000), chat_dictation_wave[DICTATION_WAVE_BARS - 2]);
+    try std.testing.expectEqual(@as(u8, 0), chat_dictation_wave[DICTATION_WAVE_BARS - 1]);
 }
