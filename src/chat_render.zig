@@ -1827,6 +1827,7 @@ pub fn chatRelayout(client_width: i32) void {
         }
     }
     const reaction_blocks = if (@import("chat_composer.zig").chatAcAgent() == .claude) app_state.g_chat_blocks[0..app_state.g_chat_block_count] else &.{};
+    g_reaction_view.context = std.hash.Wyhash.hash(app_state.active_shell, reaction_key);
     const reactions_changed = g_reaction_view.build(std.heap.page_allocator, reaction_blocks, buf, reaction_pending[0..reaction_count]) catch failed: {
         g_reaction_view.deinit(std.heap.page_allocator);
         break :failed true;

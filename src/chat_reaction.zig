@@ -114,6 +114,7 @@ pub const View = struct {
     badges: std.ArrayList(u8) = .empty,
     pending: std.ArrayList(u64) = .empty,
     hash: u64 = 0,
+    context: u64 = 0,
 
     pub fn deinit(self: *View, a: std.mem.Allocator) void {
         self.hidden.deinit(a);
@@ -167,8 +168,16 @@ pub const View = struct {
             self.badges.items[target] |= reaction.emoji.bit();
         }
         var hash = std.hash.Wyhash.init(0);
-        for (self.hidden.items) |hidden| hash.update(&[_]u8{@intFromBool(hidden)});
-        hash.update(self.badges.items);
+        for (self.hidden.items, 0..) |hidden, index| {
+            if (hidden) hash.update(std.mem.asBytes(&index));
+        }
+        for (self.badges.items, 0..) |mask_value, index| {
+            if (mask_value == 0) continue;
+            hash.update(std.mem.asBytes(&self.context));
+            hash.update(std.mem.asBytes(&index));
+            hash.update(std.mem.asBytes(&blocks[index].reaction_reference));
+            hash.update(&.{mask_value});
+        }
         hash.update(std.mem.sliceAsBytes(self.pending.items));
         const next = hash.final();
         const changed = next != self.hash;
@@ -257,4 +266,17 @@ test "IGSH-975 repeated prefixes keep their provider target through rebuild and 
     const wrong = format(.dislike, reference("msg_second"), std.unicode.utf8ToUtf16LeStringLiteral("Wrong quote"), &unknown).?;
     _ = try view.build(a, blocks[0..2], capture, &.{.{ .id = 456, .text = wrong }});
     try std.testing.expect(!view.hidesPending(456));
+}
+
+test "IGSH-975 ordinary history changes do not invalidate an unchanged reaction presentation" {
+    const a = std.testing.allocator;
+    var view: View = .{};
+    defer view.deinit(a);
+    const blocks = [_]md.Block{
+        .{ .start = 0, .len = 1, .role = .prose },
+        .{ .start = 0, .len = 1, .role = .prose },
+    };
+    _ = try view.build(a, blocks[0..1], &.{'x'}, &.{});
+    view.context = 999;
+    try std.testing.expect(!try view.build(a, &blocks, &.{'x'}, &.{}));
 }
