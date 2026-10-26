@@ -87,7 +87,7 @@ jobs:
             $sampled = Get-Content evidence/remote-switch/observation.json -Raw | ConvertFrom-Json
             if ($sampled.switches) {
               $worstSwitch = ($sampled.switches | Measure-Object switchMs -Maximum).Maximum
-              $worstGap = ($sampled.switches | ForEach-Object { $_.frames } | Measure-Object gapMs -Maximum).Maximum
+              $worstGap = ($sampled.switches | ForEach-Object { $_.probe.frames } | Measure-Object gapMs -Maximum).Maximum
               $worstCpu = ($sampled.switches | ForEach-Object { 100 * $_.cpuMs / $_.elapsedMs } | Measure-Object -Maximum).Maximum
               Write-Host "::notice::switches=$(@($sampled.switches).Count) max_switch_ms=$worstSwitch max_frame_gap_ms=$worstGap max_one_core_cpu_percent=$worstCpu"
             }
@@ -98,7 +98,7 @@ jobs:
             if ($status -eq 0) { throw 'Baseline unexpectedly passes every performance budget' }
             $v = Get-Content evidence/remote-switch/observation.json -Raw | ConvertFrom-Json
             if ($v.error -or @($v.switches).Count -ne 40) { throw "Baseline failed setup, not performance: $($v.error)" }
-            $bad = @($v.switches | Where-Object { $_.switchMs -ge 150 -or 100 * $_.cpuMs / $_.elapsedMs -ge 25 -or @($_.frames | Where-Object { $_.gapMs -gt 50 }).Count -gt 0 })
+            $bad = @($v.switches | Where-Object { $_.switchMs -ge 150 -or $_.return.switchMs -ge 150 -or $_.probe.switchMs -ge 150 -or 100 * $_.cpuMs / $_.elapsedMs -ge 25 -or 100 * $_.return.cpuMs / $_.return.elapsedMs -ge 25 -or @($_.probe.frames | Where-Object { $_.gapMs -gt 50 }).Count -gt 0 })
             if ($bad.Count -eq 0) { throw 'Baseline did not fail a switching performance budget' }
             Write-Host 'RED_PROVEN remote-switch on pre-fix master'
           }

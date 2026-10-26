@@ -45,40 +45,55 @@ Press @(0x11, 0x09) 'Ctrl+Tab: leave read remote visit'
 Bind-Transcript
 $observation.messages = $messages.Count
 $observation.switches = [Collections.Generic.List[object]]::new()
-function Measure-Frames([scriptblock]$Action, [int]$MinimumMs) {
+function Measure-CPU([scriptblock]$Action, [int]$MinimumMs) {
     Doctor
-    $view = [IntPtr]$views[0].Current.NativeWindowHandle
     $app.Refresh()
     $cpuStart = $app.TotalProcessorTime.TotalMilliseconds
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    $sampler = [RemoteSwitchFrames]::new($view, $app.Id)
-    try {
-        & $Action
-        [void](Wait-For 'measurement interval completed' { $timer.ElapsedMilliseconds -ge $MinimumMs } 10)
-    } finally {
-        $frames = @($sampler.Finish())
-        $elapsed = $timer.Elapsed.TotalMilliseconds
-        $app.Refresh()
-        $cpuMs = $app.TotalProcessorTime.TotalMilliseconds - $cpuStart
-        $sampler.Dispose()
-    }
-    if ($frames.Count -eq 0) { throw 'Actual transcript paint samples missing' }
-    @{elapsedMs=$elapsed; cpuMs=$cpuMs; cpuPercent=100 * $cpuMs / $elapsed; frames=$frames}
+    & $Action
+    [void](Wait-For 'measurement interval completed' { $timer.ElapsedMilliseconds -ge $MinimumMs } 10)
+    $elapsed = $timer.Elapsed.TotalMilliseconds
+    $app.Refresh()
+    $cpuMs = $app.TotalProcessorTime.TotalMilliseconds - $cpuStart
+    @{elapsedMs=$elapsed; cpuMs=$cpuMs; cpuPercent=100 * $cpuMs / $elapsed}
 }
-$observation.idleBefore = Measure-Frames {} 2000
-for ($i = 0; $i -lt 20; $i++) {
+function Measure-Frames([scriptblock]$Action, [int]$MinimumMs) {
+    $view = [IntPtr]$views[0].Current.NativeWindowHandle
+    $sampler = [RemoteSwitchFrames]::new($view, $app.Id)
+    try { $sample = Measure-CPU $Action $MinimumMs }
+    finally { $frames = @($sampler.Finish()); $sampler.Dispose() }
+    if ($frames.Count -eq 0) { throw 'Actual transcript paint samples missing' }
+    $sample.frames = $frames
+    $sample
+}
+function Switch-Sample([int[]]$Keys, [bool]$Workspace, [bool]$Probe) {
     $offset = (Read-Shared "$settings/debug.log").Length
-    $sample = Measure-Frames {
-        [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
+    $workspaceBefore = (Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).active_workspace
+    $action = {
+        [ChatDeliveryDesktop]::Chord($Keys)
         [void](Wait-For 'switched conversation painted' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[switch\] chat painted in \d+ ms, browser pending \(shell \d+\)' } 5)
-    } 250
+    }
+    $sample = if ($Probe) { Measure-Frames $action 250 } else { Measure-CPU $action 250 }
     $log = (Read-Shared "$settings/debug.log").Substring($offset)
     $paint = [regex]::Matches($log, '\[switch\] chat painted in (\d+) ms, browser pending \(shell (\d+)\)')
     if ($paint.Count -ne 1) { throw 'Each sample requires exactly one painted session switch' }
-    $sample.mode = 'session'
-    $sample.index = $i
     $sample.switchMs = [int]$paint[0].Groups[1].Value
     $sample.shell = [int]$paint[0].Groups[2].Value
+    if ($Workspace) {
+        if ($log -notmatch 'switchToWorkspace: \d+ -> \d+') { throw 'Each workspace sample requires an actual workspace switch' }
+        $sample.workspaceBefore = $workspaceBefore
+        $sample.workspaceAfter = (Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).active_workspace
+        if ($sample.workspaceBefore -eq $sample.workspaceAfter) { throw 'Workspace did not change' }
+    }
+    $sample
+}
+$observation.idleBefore = Measure-CPU {} 2000
+for ($i = 0; $i -lt 20; $i++) {
+    $sample = Switch-Sample @(0x11, 0x09) $false $false
+    $sample.return = Switch-Sample @(0x11, 0x09) $false $false
+    $sample.probe = Switch-Sample @(0x11, 0x09) $false $true
+    $sample.mode = 'session'
+    $sample.index = $i
     $observation.switches.Add($sample)
     Save $observation "$caseDir/observation.json"
 }
@@ -89,32 +104,23 @@ Press @(0x11, 0x4E) 'Ctrl+N: create the local fixture workspace'
 $expectedShells = 2
 [void](Wait-For 'two distinct saved workspaces' {
     $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
-    $saved.workspace_count -eq 2 -and @($saved.tabs).Count -eq 2 -and @($saved.tabs | Select-Object -ExpandProperty workspace -Unique).Count -eq 2
+    $slots = @($saved.tabs | ForEach-Object { if ($_.PSObject.Properties['workspace']) { [int]$_.workspace } else { 0 } } | Select-Object -Unique)
+    $saved.workspace_count -eq 2 -and @($saved.tabs).Count -eq 2 -and $slots.Count -eq 2
 })
 Switch-Palette 'chat view on everywhere'
 Bind-Transcript
 for ($i = 0; $i -lt 20; $i++) {
-    $offset = (Read-Shared "$settings/debug.log").Length
-    $workspaceBefore = (Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).active_workspace
     $keys = if ($i % 2 -eq 0) { @(0x12, 0x25) } else { @(0x12, 0x27) }
-    $sample = Measure-Frames {
-        [ChatDeliveryDesktop]::Chord($keys)
-        [void](Wait-For 'workspace conversation painted' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[switch\] chat painted in \d+ ms, browser pending \(shell \d+\)' } 5)
-    } 250
-    $log = (Read-Shared "$settings/debug.log").Substring($offset)
-    $paint = [regex]::Matches($log, '\[switch\] chat painted in (\d+) ms, browser pending \(shell (\d+)\)')
-    if ($paint.Count -ne 1 -or $log -notmatch 'switchToWorkspace: \d+ -> \d+') { throw 'Each workspace sample requires one actual painted workspace switch' }
+    $reverse = if ($i % 2 -eq 0) { @(0x12, 0x27) } else { @(0x12, 0x25) }
+    $sample = Switch-Sample $keys $true $false
+    $sample.return = Switch-Sample $reverse $true $false
+    $sample.probe = Switch-Sample $keys $true $true
     $sample.mode = 'workspace'
     $sample.index = $i
-    $sample.switchMs = [int]$paint[0].Groups[1].Value
-    $sample.shell = [int]$paint[0].Groups[2].Value
-    $sample.workspaceBefore = $workspaceBefore
-    $sample.workspaceAfter = (Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).active_workspace
-    if ($sample.workspaceBefore -eq $sample.workspaceAfter) { throw 'Workspace did not change' }
     $observation.switches.Add($sample)
     Save $observation "$caseDir/observation.json"
 }
-$observation.idleAfter = Measure-Frames {} 2000
+$observation.idleAfter = Measure-CPU {} 2000
 Bind-Transcript
 Shot 'remote-switch-complete'
 Save $observation "$caseDir/observation.json"
