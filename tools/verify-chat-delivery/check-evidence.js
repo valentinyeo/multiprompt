@@ -95,14 +95,14 @@ function evaluateSendCase(context) {
   assert.equal(observation.name, name);
   assert.equal(observation.error, null, observation.error || 'driver error');
   assert.deepEqual(observation.steps.map(step => step.name), sendSteps, 'every journey step ran in order');
-  const failed = observation.steps.filter(step => step.ok !== true).map(step => step.name);
-  assert.ok(failed.length === 0, `journey steps failed: ${failed.join(', ')}`);
   assert.equal(observation.sends.length, sendTexts.length);
   observation.sends.forEach((send, i) => {
     assert.equal(send.n, i + 1);
     assert.equal(send.text, sendTexts[i]);
     assert.equal(send.reappeared, null, `send ${i + 1} came back into the box: ${JSON.stringify(send.reappeared)}`);
   });
+  const failed = observation.steps.filter(step => step.ok !== true).map(step => step.name);
+  assert.ok(failed.length === 0, `journey steps failed: ${failed.join(', ')}`);
   const entered = json('actions.json').filter(action => action.case === name && action.input === 'Enter: send composer');
   assert.equal(entered.length, sendTexts.length, 'one real Enter per message');
   const enqueued = lines(`${name}/transcript.jsonl`).filter(row => row.type === 'queue-operation' && row.operation === 'enqueue').map(row => row.content);
