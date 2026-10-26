@@ -579,7 +579,7 @@ public static class VerifyNative {
         using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
             graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, pixels.Size);
             int bx = bubble.X - rect.Left, by = bubble.Y - rect.Top;
-            int fill = pixels.GetPixel(bx, by).ToArgb();
+            var seed = pixels.GetPixel(bx, by);
             var seen = new bool[pixels.Width, pixels.Height];
             var pending = new Queue<Point>();
             pending.Enqueue(new Point { X = bx, Y = by });
@@ -594,12 +594,13 @@ public static class VerifyNative {
                     int x = p.X + dx[i], y = p.Y + dy[i];
                     if (x < 0 || y < 0 || x >= pixels.Width || y >= pixels.Height || seen[x, y]) continue;
                     seen[x, y] = true;
-                    if (pixels.GetPixel(x, y).ToArgb() == fill) pending.Enqueue(new Point { X = x, Y = y });
+                    var near = pixels.GetPixel(x, y);
+                    if (Math.Max(Math.Abs(near.R - seed.R), Math.Max(Math.Abs(near.G - seed.G), Math.Abs(near.B - seed.B))) <= 10) pending.Enqueue(new Point { X = x, Y = y });
                 }
             }
             int inset = Math.Max(4, Math.Min(right - left, bottom - top) / 5);
             int glyphLeft = right, glyphRight = left, glyphTop = -1, glyphBottom = -1;
-            var background = System.Drawing.Color.FromArgb(fill);
+            var background = seed;
             for (int y = top + inset; y <= bottom - inset; y++) {
                 bool ink = false;
                 for (int x = left + inset; x <= right - inset; x++) {
