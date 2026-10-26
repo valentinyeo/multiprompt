@@ -316,6 +316,11 @@ function Assert-FullHistory([string]$Stage) {
     Save @{stage=$Stage; blocks=74; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 function Retention-Copy([string]$Stage, [int]$Count) {
+    if ($Stage.StartsWith('burst-') -and [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains('receive to paint')) {
+        [void](Wait-For 'ordinary arrival reaches native paint before font measurement' {
+            (Read-Shared "$settings/debug.log") -match ('PERF\[chat\]: receive to paint ms=\d+ size=' + $Count + '(?:\r?\n|$)')
+        })
+    }
     $offset = (Read-Shared "$settings/debug.log").Length
     $complete = Step "IGSH-934 $Stage keeps $Count messages" {
         Press @(0x11, 0x30) 'Ctrl+0: measure retained conversation'

@@ -1,5 +1,7 @@
 name: Retained chat history
 on:
+  push:
+    branches: [ceo/IGSH-934-qa]
   pull_request:
     paths:
       - src/chat_history.zig
@@ -18,3 +20,4 @@ jobs:
     with:
       feature: chat-full-history
       chat_retention_proof: true
+      tag: v0.28.924
