@@ -58,7 +58,24 @@ function main() {
   const repository = process.env.GITHUB_REPOSITORY;
   if (repository !== 'valentinyeo/multiprompt') throw new Error('Unexpected repository');
   const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trimEnd();
-  const api = (path, ...args) => JSON.parse(execFileSync('gh', ['api', path, ...args], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
+  const gh = (...args) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+      } catch (error) {
+        const message = error.stderr?.toString() || error.message;
+        if (attempt >= 3 || !/API rate limit exceeded|secondary rate limit/i.test(message)) throw error;
+        let delay = 60000 * (attempt + 1);
+        if (/API rate limit exceeded/i.test(message)) {
+          const limits = JSON.parse(execFileSync('gh', ['api', 'rate_limit'], { encoding: 'utf8' }));
+          delay = Math.max(delay, limits.resources.core.reset * 1000 - Date.now() + 1000);
+        }
+        console.error(`::warning::GitHub rate limit; retrying in ${Math.ceil(delay / 1000)} seconds`);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+      }
+    }
+  };
+  const api = (path, ...args) => JSON.parse(gh('api', path, ...args));
   const run = api(`repos/${repository}/actions/runs/${runId}`);
   if (String(run.id) !== runId) throw new Error('Run id mismatch');
   const runJobs = candidate => api(`repos/${repository}/actions/runs/${candidate.id}/attempts/${candidate.run_attempt}/jobs?per_page=100`, '--paginate', '--slurp').flatMap(page => page.jobs);
@@ -109,7 +126,6 @@ function main() {
     const key = decision.duplicate?.match(/\bIGSH-\d+\b/)?.[0];
     const journeys = decision.duplicate?.match(/^Failed journeys: (.+)$/m)?.[1];
     if (key && journeys) reopenBoard(key, journeys, decision.reason);
-    else notify(decision.reason);
     return;
   }
   if (decision.action === 'refuse') {
@@ -121,13 +137,13 @@ function main() {
   const journeyText = decision.journeys.join(', ');
   const enableMerge = pull => {
     for (const workflow of ['gitleaks.yml', 'no-comments.yml', 'test.yml']) {
-      execFileSync('gh', ['workflow', 'run', workflow, '--repo', repository, '--ref', branch], { encoding: 'utf8' });
+      gh('workflow', 'run', workflow, '--repo', repository, '--ref', branch);
     }
-    execFileSync('gh', ['workflow', 'run', 'verify.yml', '--repo', repository, '--ref', branch, '-f', 'feature=appearance'], { encoding: 'utf8' });
-    execFileSync('gh', ['pr', 'merge', pull, '--repo', repository, '--auto', '--squash'], { encoding: 'utf8' });
+    gh('workflow', 'run', 'verify.yml', '--repo', repository, '--ref', branch, '-f', 'feature=appearance');
+    gh('pr', 'merge', pull, '--repo', repository, '--auto', '--squash');
   };
   const earlier = git('ls-remote', '--heads', 'origin', branch)
-    ? JSON.parse(execFileSync('gh', ['pr', 'list', '--repo', repository, '--head', branch, '--state', 'all', '--json', 'url,state'], { encoding: 'utf8' }) || '[]')[0]
+    ? JSON.parse(gh('pr', 'list', '--repo', repository, '--head', branch, '--state', 'all', '--json', 'url,state') || '[]')[0]
     : null;
   if (earlier) {
     if (earlier.state === 'CLOSED') {
@@ -153,7 +169,7 @@ function main() {
     git('revert', '--no-commit', ...(decision.mainline ? ['-m', String(decision.mainline)] : []), decision.sha);
     git('commit', '-m', `Revert "${subject}"`, '-m', `This reverts commit ${decision.sha}.\n\n${decision.marker}\nFailed journeys: ${decision.journeys.join(', ')}\nVerify run: ${run.html_url}`);
     git('-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential', 'push', 'origin', `HEAD:refs/heads/${branch}`);
-    pullRequest = execFileSync('gh', ['pr', 'create', '--repo', repository, '--base', 'master', '--head', branch, '--title', `Revert ${subject}`, '--body', `This reverts commit ${decision.sha}.\n\n${decision.marker}\nFailed journeys: ${decision.journeys.join(', ')}\nVerify run: ${run.html_url}`], { encoding: 'utf8' }).trimEnd();
+    pullRequest = gh('pr', 'create', '--repo', repository, '--base', 'master', '--head', branch, '--title', `Revert ${subject}`, '--body', `This reverts commit ${decision.sha}.\n\n${decision.marker}\nFailed journeys: ${decision.journeys.join(', ')}\nVerify run: ${run.html_url}`).trimEnd();
     enableMerge(pullRequest);
   } catch (error) {
     notify(`Auto-revert could not prepare or enable squash auto-merge for ${decision.sha}: ${error.message}\n\nstdout:\n${error.stdout?.toString() || ''}\n\nstderr:\n${error.stderr?.toString() || ''}`);

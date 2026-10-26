@@ -610,7 +610,7 @@ for (const [name, errors] of [
   const count = errors.length;
   const result = runtime(fixture(), 'workflow_dispatch', null, [...errors]);
   assert.equal(result.process.exitCode, 0, result.output);
-  assert.equal(JSON.parse(result.output).action, 'revert');
+  assert.equal(JSON.parse(result.output.slice(result.output.indexOf('{'))).action, 'revert');
   assert.equal(result.waits.length, count);
   assert.ok(result.waits.every(ms => ms >= 60000 && ms <= 121000));
   assert.equal(result.calls.filter(call => call[0] === 'gh' && call[2] === `repos/${repository}/actions/runs/40195971037`).length, count + 1);
