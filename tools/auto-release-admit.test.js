@@ -52,6 +52,12 @@ if (args[0] === 'run' && args[1] === 'view') {
   console.log(JSON.stringify(jobs || { jobs: [{ name: 'verify (relaunch-saved-sessions)', conclusion: 'success' }, { name: 'verify (appearance)', conclusion: 'failure' }] }));
   process.exit(0);
 }
+if (args[0] === 'api') {
+  const field = name => args.find(a => a.startsWith(name + '=')).slice(name.length + 1);
+  const git = require('node:child_process').spawnSync('git', ['--git-dir', process.env.REMOTE_GIT, 'update-ref', field('ref'), field('sha'), ''], { encoding: 'utf8' });
+  if (git.status !== 0) { console.error(git.stderr); process.exit(1); }
+  process.exit(0);
+}
 const sha = args[args.indexOf('--commit') + 1];
 if (args[args.indexOf('-w') + 1] === 'release-gate.yml') {
   console.log(JSON.stringify(JSON.parse(process.env.GATE_RUNS || '{}')[sha] || []));
@@ -66,7 +72,7 @@ console.log(JSON.stringify(JSON.parse(process.env.TEST_RUNS)[sha] || []));
 `, { mode: 0o755 });
   const success = [{ databaseId: 1, event: 'push', status: 'completed', conclusion: 'success' }];
   const run = (command, args, env = {}) => spawnSync(command, args, { cwd: dir, encoding: 'utf8', env: {
-    ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GH_LOG: log,
+    ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GH_LOG: log, REMOTE_GIT: remote,
     GITHUB_EVENT_NAME: 'workflow_run', TESTED_SHA: green, GITHUB_REPOSITORY: 'example/multiprompt',
     TEST_RUNS: JSON.stringify({ [older]: success, [green]: success }), ...env,
   } });
@@ -94,8 +100,10 @@ function skipped(f, env = {}) {
 test('HEAD moved past green commits: publishes newest green SHA, not HEAD, and no branch', t => {
   const f = fixture(t);
   selected(f.admit([]), f.green);
-  assert.equal(f.git('rev-parse', 'v0.0.2^{commit}'), f.green);
+  assert.equal(f.git('tag', '--list', 'v0.0.2'), '');
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v0.0.2^{commit}'), f.green);
+  f.git('fetch', '--tags', 'origin');
+  assert.equal(f.git('rev-parse', 'v0.0.2^{commit}'), f.green);
   assert.equal(f.git('rev-parse', 'master'), f.tip);
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'master'), f.green);
   const list = (workflow, sha) => [
@@ -108,6 +116,7 @@ test('HEAD moved past green commits: publishes newest green SHA, not HEAD, and n
     list('release-gate.yml', f.green),
     list('verify.yml', f.green),
     ['run', 'view', '700', '-R', 'example/multiprompt', '--json', 'jobs'],
+    ['api', '-X', 'POST', 'repos/example/multiprompt/git/refs', '-f', 'ref=refs/tags/v0.0.2', '-f', `sha=${f.green}`],
   ]);
   skipped(f);
 });
@@ -312,4 +321,10 @@ test('the release gate workflow runs the journey once per master commit without 
   assert.match(verify, /workflow_call:/);
   assert.match(verify, /inputs\.feature && github\.event_name == 'push' && format\('-gate-\{0\}', github\.sha\)/);
   assert.match(verify, /inputs\.feature && github\.event_name == 'push' && fromJSON\(format\('\["\{0\}"\]', inputs\.feature\)\)/);
+});
+
+test('the release tag is created through the git refs API and never pushed with git, so workflow-file commits cannot block it', () => {
+  const script = fs.readFileSync(path.join(root, 'tools/auto-release-admit.sh'), 'utf8');
+  assert.match(script, /gh api -X POST "repos\/\$GITHUB_REPOSITORY\/git\/refs" -f "ref=refs\/tags\/\$release_tag" -f "sha=\$sha"/);
+  assert.doesNotMatch(script, /git push/);
 });

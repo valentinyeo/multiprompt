@@ -64,6 +64,11 @@ if (args[0] === 'run') {
   console.log(JSON.stringify(sha === process.env.TESTED_SHA ? [{ databaseId: 1, event: 'push', status: 'completed', conclusion: process.env.TEST_CONCLUSION || 'success' }] : []));
   process.exit(0);
 }
+if (args[0] === 'api') {
+  const field = name => args.find(a => a.startsWith(name + '=')).slice(name.length + 1);
+  execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', field('ref'), field('sha'), ''], { stdio: 'ignore' });
+  process.exit(0);
+}
 if (args[1] === 'view') process.exit(process.env.RELEASE_EXISTS === '1' ? 0 : 1);
 if (args[1] !== 'create') process.exit(2);
 execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/tags/' + args[2], process.env.BUILT_SHA]);
@@ -74,7 +79,7 @@ execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/t
         TAG: tag, BUILT_SHA: sha, REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } }),
     admit: (env = {}) => spawnSync('bash', ['tools/auto-release-admit.sh'], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_REPOSITORY: 'example/multiprompt',
-        GH_LOG: log, TESTED_SHA: git('rev-parse', 'HEAD'), ...env } }),
+        GH_LOG: log, TEST_REMOTE: remote, TESTED_SHA: git('rev-parse', 'HEAD'), ...env } }),
     calls: () => fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)),
   };
 }
@@ -321,8 +326,8 @@ test('automatic release only tags a tested master and reuses signed release jobs
   assert.match(auto, /bash tools\/auto-release-admit\.sh >> "\$GITHUB_OUTPUT"/);
   const admit = fs.readFileSync(path.join(root, 'tools/auto-release-admit.sh'), 'utf8');
   assert.match(admit, /node tools\/release-version\.mjs --next "\$last_tag"/);
-  assert.match(admit, /git tag "\$release_tag" "\$sha"/);
-  assert.deepEqual(admit.split('\n').filter(line => /\bgit push\b/.test(line)).map(line => line.trim()), ['git push origin "refs/tags/$release_tag" >&2']);
+  assert.match(admit, /gh api -X POST "repos\/\$GITHUB_REPOSITORY\/git\/refs" -f "ref=refs\/tags\/\$release_tag" -f "sha=\$sha" >&2/);
+  assert.doesNotMatch(admit, /\bgit (?:push|tag "\$release_tag")/);
   assert.doesNotMatch(auto, /git (?:commit|add|config)|stampTree|fs\.(?:writeFileSync|unlinkSync)|HEAD:refs\/heads\/master/);
   assert.match(auto, /uses: \.\/\.github\/workflows\/release.yml/);
   assert.doesNotMatch(auto, /zig build|gh pr create|gh release create/);
@@ -363,7 +368,7 @@ test('release builds inject the tag, stage matching notes and reject wrong embed
   }
 });
 
-test('auto-release pushes only a tag on the tested commit under a branch-rejecting remote', { skip: process.platform === 'win32' }, t => {
+test('auto-release creates only a tag ref on the tested commit under a branch-rejecting remote', { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   f.git('tag', 'v1.2.8');
   f.git('commit', '--allow-empty', '-m', 'tested improvement');
@@ -382,7 +387,9 @@ test('auto-release pushes only a tag on the tested commit under a branch-rejecti
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'release-gate.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'verify.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
     ['run', 'view', '700', '-R', 'example/multiprompt', '--json', 'jobs'],
+    ['api', '-X', 'POST', 'repos/example/multiprompt/git/refs', '-f', 'ref=refs/tags/v1.2.9', '-f', `sha=${tested}`],
   ]);
+  f.git('fetch', '--tags', 'origin');
   const second = f.admit();
   assert.equal(second.status, 0, second.stderr);
   assert.equal(second.stdout, '');
