@@ -940,7 +940,7 @@ pub fn unlockBrowserForeground() void {
     keybd_event(0xE8, 0, 0, 0);
     keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);
     keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);
-    app_state.g_native_browser_alt_unlocked = true;
+    app_state.g_native_browser_alt_unlocked_at = GetTickCount64();
 }
 
 pub fn focusActiveBrowserPane() void {
@@ -949,7 +949,7 @@ pub fn focusActiveBrowserPane() void {
 }
 
 pub fn focusActiveBrowserPaneUnlocked() void {
-    app_state.g_native_browser_alt_unlocked = false;
+    app_state.g_native_browser_alt_unlocked_at = 0;
     const bh = activeBrowserHwndLive() orelse return;
     if (!focusGuard(bh)) return;
     const phys_alt = (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
@@ -982,7 +982,7 @@ pub fn cancelPendingNativeBrowserFocus() void {
     app_state.g_native_browser_focus_pending_shell_id = 0;
     app_state.g_native_browser_focus_retries = 0;
     app_state.g_native_browser_focus_attempts = 0;
-    app_state.g_native_browser_alt_unlocked = false;
+    app_state.g_native_browser_alt_unlocked_at = 0;
     if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_NATIVE_BROWSER_FOCUS);
 }
 
@@ -998,7 +998,7 @@ test "IGSH-724 browser foreground unlock masks lone Alt menu activation" {
         "keybd_event(0xE8, 0, 0, 0);",
         "keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);",
         "keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);",
-        "app_state.g_native_browser_alt_unlocked = true;",
+        "app_state.g_native_browser_alt_unlocked_at = GetTickCount64();",
     }) |statement| {
         const position = std.mem.indexOfPos(u8, unlock, unlock_cursor, statement);
         try std.testing.expect(position != null);
@@ -1059,8 +1059,8 @@ pub fn requestNativeBrowserFocus() void {
     app_state.g_native_browser_focus_pending_shell_id = app_state.shells[app_state.active_shell].shell_id;
     app_state.g_native_browser_focus_retries = 500;
     app_state.g_native_browser_focus_attempts = 12;
-    app_state.g_native_browser_alt_unlocked = false;
-    if (foregroundIsOurs() and !activeBrowserHasForegroundFocus()) unlockBrowserForeground();
+    app_state.g_native_browser_alt_unlocked_at = 0;
+    if (activeBrowserHwndLive() != null and foregroundIsOurs() and !activeBrowserHasForegroundFocus()) unlockBrowserForeground();
     _ = KillTimer(app_state.g_main_hwnd, TIMER_NATIVE_BROWSER_FOCUS);
     _ = SetTimer(app_state.g_main_hwnd, TIMER_NATIVE_BROWSER_FOCUS, 30, null);
     altqLog("request_native armed sid={} retries={} attempts={} chat={}", .{ app_state.g_native_browser_focus_pending_shell_id, app_state.g_native_browser_focus_retries, app_state.g_native_browser_focus_attempts, app_state.g_chat_active });

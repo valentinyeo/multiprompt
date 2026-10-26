@@ -631,7 +631,7 @@ function assertsPageFocus(focus, main, pane, driver) {
     'keybd_event(0xE8, 0, 0, 0);',
     'keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);',
     'keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);',
-    'app_state.g_native_browser_alt_unlocked = true;',
+    'app_state.g_native_browser_alt_unlocked_at = GetTickCount64();',
   ]) {
     const position = unlock.indexOf(statement, unlockCursor);
     assert.ok(position >= 0, statement);
@@ -656,7 +656,7 @@ function assertsPageFocus(focus, main, pane, driver) {
   assert.equal((handoff.match(/keybd_event\(|SendInput\(/g) ?? []).length, 0);
   assert.match(read('src/shortcuts.zig'), /kb\.vkCode != 0xFF and kb\.vkCode != 0xE8 and\n\s+foregroundIsOurs\(\)\)/);
   const timer = main.slice(main.indexOf('if (wp == TIMER_NATIVE_BROWSER_FOCUS)'), main.indexOf('if (wp == TIMER_WEBVIEW2_FOCUS)'));
-  const unlockTick = timer.indexOf('if (!app_state.g_native_browser_alt_unlocked and !activeBrowserHasForegroundFocus()) {\n                    unlockBrowserForeground();');
+  const unlockTick = timer.indexOf('if ((app_state.g_native_browser_alt_unlocked_at == 0 or GetTickCount64() -| app_state.g_native_browser_alt_unlocked_at > 100) and !activeBrowserHasForegroundFocus()) {\n                    unlockBrowserForeground();');
   const activation = timer.indexOf('focusActiveBrowserPaneUnlocked();');
   assert.ok(unlockTick >= 0 && unlockTick < activation && activation < timer.indexOf('if (activeBrowserHasForegroundFocus())'));
   assert.match(pane, /if \(idx == app_state.active_shell\) @import\("focus.zig"\)\.requestNativeBrowserFocus\(\);/);
@@ -682,7 +682,7 @@ test('IGSH-724 native handoff targets Chrome web contents and real keys distingu
   const main = read('src/main.zig');
   assertsPageFocus(focus, main, browser, journey);
   const unlock = focus.slice(focus.indexOf('pub fn unlockBrowserForeground()'), focus.indexOf('pub fn focusActiveBrowserPane()'));
-  for (const statement of ['if (phys_alt) return;', 'keybd_event(VK_MENU, 0, 0, 0);', 'keybd_event(0xE8, 0, 0, 0);', 'keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);', 'keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);', 'app_state.g_native_browser_alt_unlocked = true;']) {
+  for (const statement of ['if (phys_alt) return;', 'keybd_event(VK_MENU, 0, 0, 0);', 'keybd_event(0xE8, 0, 0, 0);', 'keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);', 'keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);', 'app_state.g_native_browser_alt_unlocked_at = GetTickCount64();']) {
     assert.throws(() => assertsPageFocus(focus.replace(unlock, unlock.replace(statement, '')), main, browser, journey));
   }
   const neutral = '    keybd_event(0xE8, 0, 0, 0);\n    keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);\n';
