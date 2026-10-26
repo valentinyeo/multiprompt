@@ -381,7 +381,7 @@ foreach ($plan in $plans) {
         if ($isHistory) { Shell-Run @('history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
-        if ($Feature -eq 'chat-skills') { $savedSession.tabs[0].claude_sid = 'a1b2c3d4-0923-4000-8000-000000000923' }
+        if ($Feature -eq 'chat-skills') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         Save $savedSession "$settings/session.json"
         if ($isRemote) {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json

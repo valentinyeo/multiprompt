@@ -6,6 +6,14 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
+test('IGSH-923 isolated remote fixture uses the actual persisted agent identity key', () => {
+  const parser = fs.readFileSync('src/json_reader.zig', 'utf8');
+  const key = parser.match(/tab\.claude_sid_len = copyString\(obj, "([^"]+)"/)[1];
+  const driver = fs.readFileSync('tools/verify-chat-delivery/drive.ps1', 'utf8');
+  assert.ok(driver.includes('$savedSession.tabs[0].' + key + ' ='));
+  assert.ok(!driver.includes('$savedSession.tabs[0].claude_sid ='));
+});
+
 test('IGSH-923 reopening refreshes both triggers, errors back off, and failed responses preserve selectable cached skills', () => {
   const source = fs.readFileSync('src/chat_composer.zig', 'utf8');
   const state = fs.readFileSync('src/app_state.zig', 'utf8');
@@ -145,7 +153,7 @@ test "reload requested during an inflight response runs afterward" {
     try std.testing.expect(!app_state.g_chat_ac_slots[0].refresh_pending);
 }
 `);
-    const result = spawnSync('zig', ['test', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 90000 });
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig'], { cwd: dir, encoding: 'utf8', timeout: 90000 });
     assert.equal(result.status, 0, JSON.stringify({ error: result.error?.message, signal: result.signal, stdout: result.stdout, stderr: result.stderr }));
     assert.match(result.stderr, /All \d+ tests passed/);
   } finally {
