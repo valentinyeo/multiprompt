@@ -11,7 +11,7 @@ import uuid
 rows = [json.loads(line) for line in Path(sys.argv[1]).read_text(encoding='utf-8-sig').splitlines() if line.strip()]
 record = next(row for row in rows if row.get('kind') == 'attach' and 'tmux if-shell -F -t ' in row.get('command', ''))
 parts = shlex.split(record['command'][record['command'].index('tmux if-shell -F -t '):])
-assert len(parts) == 8 and parts[:5] == ['tmux', 'if-shell', '-F', '-t', '=workspace'], parts
+assert len(parts) == 8 and parts[:5] == ['tmux', 'if-shell', '-F', '-t', '=workspace:'], parts
 match = re.fullmatch(r'#\{==:#\{start_time\}:#\{pid\}:#\{session_id\},([0-9]+:[0-9]+:\$[0-9]+)\}', parts[5])
 assert match, parts
 old_identity = match[1]
@@ -43,7 +43,8 @@ with tempfile.TemporaryDirectory(prefix='igsh985-') as scratch:
     try:
         tmux('new-session', '-d', '-s', 'workspace', 'cat')
         before = tmux('list-sessions', '-F', '#{session_name}').splitlines()
-        identity = tmux('display-message', '-p', '-t', '=workspace', '#{start_time}:#{pid}:#{session_id}')
+        identity = tmux('display-message', '-p', '-t', '=workspace:', '#{start_time}:#{pid}:#{session_id}')
+        assert re.fullmatch(r'[0-9]+:[0-9]+:\$[0-9]+', identity), identity
         session_id = identity.rsplit(':', 1)[1]
         hook = 'run-shell ' + shlex.quote('touch ' + shlex.quote(str(marker))) + ' ; detach-client'
         tmux('set-hook', '-g', 'client-attached', hook)
@@ -55,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix='igsh985-') as scratch:
         assert positive.returncode == 0 and marker.exists(), positive.stdout
         tmux('rename-session', '-t', session_id, 'original-renamed')
         tmux('new-session', '-d', '-s', 'workspace', 'cat')
-        replacement = tmux('display-message', '-p', '-t', '=workspace', '#{start_time}:#{pid}:#{session_id}')
+        replacement = tmux('display-message', '-p', '-t', '=workspace:', '#{start_time}:#{pid}:#{session_id}')
         assert replacement != identity
         legacy = run([*base, 'attach-session', '-t', 'workspace'])
         assert legacy.returncode == 0 and marker.exists(), legacy.stdout

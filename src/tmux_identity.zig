@@ -55,7 +55,7 @@ pub fn attachCommand(buf: []u8, session: []const u8, identity: []const u8, creat
         try check.writeAll(identity);
         try check.writeByte('}');
         try writer.writeAll("tmux if-shell -F -t ");
-        try quote(&writer, try std.fmt.bufPrint(&target, "={s}", .{session}));
+        try quote(&writer, try std.fmt.bufPrint(&target, "={s}:", .{session}));
         try writer.writeByte(' ');
         try quote(&writer, check.buffered());
         try writer.writeByte(' ');
@@ -147,7 +147,7 @@ test "IGSH-985 generation probe is exact, validated and not overwritten by a pre
 test "IGSH-985 guarded attach checks generation and addresses immutable session ID in one server command" {
     var buf: [2048]u8 = undefined;
     const command = try attachCommand(&buf, "remote", "1700:123:$7", true);
-    try std.testing.expect(std.mem.startsWith(u8, command, "tmux if-shell -F -t '=remote' "));
+    try std.testing.expect(std.mem.startsWith(u8, command, "tmux if-shell -F -t '=remote:' "));
     try std.testing.expect(std.mem.indexOf(u8, command, "#{==:#{start_time}:#{pid}:#{session_id},1700:123:$7}") != null);
     try std.testing.expect(std.mem.indexOf(u8, command, "attach-session -t ") != null);
     try std.testing.expect(std.mem.indexOf(u8, command, "new-session") == null);
