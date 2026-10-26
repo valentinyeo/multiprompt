@@ -406,7 +406,7 @@ public static class VerifyNative {
         if (!SwitchReady(owner, sourceConsole, sourceSuffix, sourceBrowser, sourceDock, composer, sourceDraft)) throw new InvalidOperationException("Source session is not the visible foreground session before Ctrl+Tab");
         if (SwitchReady(owner, targetConsole, targetSuffix, targetBrowser, targetDock, composer, targetDraft)) throw new InvalidOperationException("Target session is already visible before Ctrl+Tab; this sample would not be a switch");
     }
-    static bool PaintMatches(Rect dock, int rgb, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
+    static bool PaintMatchesCore(Rect dock, int rgb, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
         if (dock.Right - dock.Left < 16 || dock.Bottom - dock.Top < 200) throw new InvalidOperationException("Browser content area is too small");
         int x = dock.Left + (dock.Right - dock.Left) / 2;
         int y = dock.Top + (dock.Bottom - dock.Top) * 3 / 4;
@@ -419,6 +419,19 @@ public static class VerifyNative {
         }
         return true;
     }
+    public static int PollCount;
+    public static double PollMaxMs;
+    public static double PollLastMs;
+    public static void ResetPollStats() { PollCount = 0; PollMaxMs = 0; PollLastMs = 0; }
+    static bool PaintMatches(Rect dock, int rgb, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        bool matched = PaintMatchesCore(dock, rgb, pixels, graphics);
+        double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        PollCount++;
+        if (ms > PollMaxMs) PollMaxMs = ms;
+        PollLastMs = ms;
+        return matched;
+    }
     public static bool PagePainted(Rect dock, int rgb) {
         using (var pixels = new System.Drawing.Bitmap(3, 3))
         using (var graphics = System.Drawing.Graphics.FromImage(pixels)) return PaintMatches(dock, rgb, pixels, graphics);
@@ -429,9 +442,6 @@ public static class VerifyNative {
             double visible = -1;
             double painted = -1;
             double awake = -1;
-            double matchStart = -1;
-            double captureMax = 0;
-            int polls = 0;
             bool frozen = !String.IsNullOrEmpty(frozenMarker);
             if (frozen && (!System.IO.File.Exists(frozenMarker) || System.IO.File.ReadAllText(frozenMarker).Trim() != "1")) throw new InvalidOperationException("Target freeze marker missing before input");
             var timer = BeginSessionSwitch();
@@ -439,20 +449,10 @@ public static class VerifyNative {
                 if (frozen && awake < 0 && !System.IO.File.Exists(frozenMarker)) awake = timer.Elapsed.TotalMilliseconds;
                 if (SwitchReady(owner, console, suffix, browser, dock, composer, draft)) {
                     if (visible < 0) visible = timer.Elapsed.TotalMilliseconds;
-                    if (painted < 0) {
-                        if (browser == IntPtr.Zero) painted = timer.Elapsed.TotalMilliseconds;
-                        else {
-                            double captureStart = timer.Elapsed.TotalMilliseconds;
-                            bool matched = PaintMatches(dock, rgb, pixels, graphics);
-                            double captureEnd = timer.Elapsed.TotalMilliseconds;
-                            polls++;
-                            if (captureEnd - captureStart > captureMax) captureMax = captureEnd - captureStart;
-                            if (matched) { painted = captureEnd; matchStart = captureStart; }
-                        }
-                    }
+                    if (painted < 0 && (browser == IntPtr.Zero || PaintMatches(dock, rgb, pixels, graphics))) painted = timer.Elapsed.TotalMilliseconds;
                     if (painted >= 0 && (!frozen || awake >= 0)) {
                         timer.Stop();
-                        return new double[] { painted, visible, awake, matchStart, captureMax, polls };
+                        return new double[] { painted, visible, awake };
                     }
                 }
                 Thread.Sleep(1);
@@ -5254,7 +5254,7 @@ try {
             $traces = @{}
             foreach ($mode in $modes) {
                 $sampleCount = if ($mode.Contains('frozen_')) { 5 } else { 20 }
-                $timings[$mode] = @{ samples_ms = @($null) * $sampleCount; median_ms = $null; window_visible_ms = @($null) * $sampleCount; window_visible_median_ms = $null; paint_poll_start_ms = @($null) * $sampleCount; paint_poll_max_ms = @($null) * $sampleCount; paint_polls = @($null) * $sampleCount }
+                $timings[$mode] = @{ samples_ms = @($null) * $sampleCount; median_ms = $null; window_visible_ms = @($null) * $sampleCount; window_visible_median_ms = $null; paint_polls = @($null) * $sampleCount; paint_poll_max_ms = @($null) * $sampleCount; paint_poll_last_ms = @($null) * $sampleCount }
                 $timings.steps[$mode] = $null
                 $traces[$mode] = @()
             }
@@ -5505,12 +5505,13 @@ try {
                         Record ("Ctrl+Tab timing $mode sample=$sample target=$target shellId=" + $shellIds[$target])
                         $logStart = ((Get-Content $log -Raw) -join '').Length
                         $frozenMarker = if ($frozen) { Join-Path $scratch ("roaming/ZigShell/panehib-zss-$($shellIds[$target]).flag") } else { $null }
+                        [VerifyNative]::ResetPollStats()
                         $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $rgb[$target], $frozenMarker)
                         $timings[$mode].samples_ms[$sample] = $measurement[0]
                         $timings[$mode].window_visible_ms[$sample] = $measurement[1]
-                        $timings[$mode].paint_poll_start_ms[$sample] = $measurement[3]
-                        $timings[$mode].paint_poll_max_ms[$sample] = $measurement[4]
-                        $timings[$mode].paint_polls[$sample] = $measurement[5]
+                        $timings[$mode].paint_polls[$sample] = [VerifyNative]::PollCount
+                        $timings[$mode].paint_poll_max_ms[$sample] = [VerifyNative]::PollMaxMs
+                        $timings[$mode].paint_poll_last_ms[$sample] = [VerifyNative]::PollLastMs
                         if ($frozen) {
                             $freeze.window_visible_ms = $measurement[1]
                             $freeze.wake_flag_cleared_ms = $measurement[2]
