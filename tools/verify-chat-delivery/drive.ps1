@@ -848,13 +848,14 @@ foreach ($plan in $plans) {
             if ($view.Count -ne 1) { throw 'Expected one visible owned transcript' }
             $bounds = $view[0].Current.BoundingRectangle
             $observation.area = @{left=[int]$bounds.Left; top=[int]$bounds.Top; right=[int]$bounds.Right; bottom=[int]$bounds.Bottom}
+            Start-Sleep -Milliseconds 200
             Shot 'accepted-queued'
             Shell-Run @('accept')
             $frames = [Collections.Generic.List[object]]::new()
             for ($i = 0; $i -lt 16; $i++) {
                 $name = 'accepted-frame-' + $i
-                $captureMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
                 Shot $name
+                $captureMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
                 $frames.Add(@{name=$name; ms=$captureMs})
                 Start-Sleep -Milliseconds 80
             }

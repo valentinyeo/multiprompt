@@ -78,7 +78,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       }
       return { ...frame, normal: normalBubble(image, bubble), dots: !!working };
     });
-    const latencyMs = evaluateFrames(frames, receipt.ms);
+    const acceptance = events.find(e => e.type === 'queue-operation' && e.operation === 'remove' && e.content === observation.text);
+    const latencyMs = evaluateFrames(frames, Date.parse(acceptance.timestamp));
     const first = frames.find(frame => frame.normal);
     writeCrop(queued, { ...observation.area, top: bubble.top - 8 }, 1, path.join(root, 'accepted-before.png'));
     writeCrop(readBmp(path.join(root, first.name + '.bmp')), { ...observation.area, top: bubble.top - 8 }, 1, path.join(root, 'accepted-after.png'));
