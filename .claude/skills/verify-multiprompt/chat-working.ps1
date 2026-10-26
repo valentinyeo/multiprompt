@@ -56,6 +56,20 @@ $screen = -join @($codes | ForEach-Object { [char][int]$_ })
 if ($screen -notmatch 'Ready\.' -or $screen -match 'interrupt') { throw ('Stand-in did not replace its working line: ' + $screen) }
 & $Exe --notify ('DONE:' + $hookTarget)
 Wait-Until { & $probe 'after' 'idle' } 'IGSH-924 dots gone after reply' -Seconds 45
+Add-Type -AssemblyName System.Windows.Forms
+$transcriptHandle = [IntPtr]::new([int64]$script:workingTranscript[0].Current.NativeWindowHandle)
+if ($script:workingTranscript[0].Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($transcriptHandle, 2) -ne $script:window) { throw 'Reply copy requires the owned transcript' }
+Wait-Until {
+    [System.Windows.Forms.Clipboard]::Clear()
+    [VerifyNative]::ClickClient($transcriptHandle, 20, 20)
+    Press @(0x11, 0x41) 'Ctrl+A: select the visible conversation'
+    Press @(0x11, 0x43) 'Ctrl+C: read the actual conversation'
+    $copied = [System.Windows.Forms.Clipboard]::GetText()
+    Save-Json @{ text = $copied; replyVisible = ($copied -match '\bReady\.') } 'working-copy.json'
+    $copied -match '\bReady\.'
+} 'IGSH-924 actual reply exists in the visible conversation' -Seconds 45
+[VerifyNative]::ClickClient($transcriptHandle, 20, 20)
+Snapshot 'after'
 $check.passed = $true
 Save-Json $check 'working-proof.json'
 $referencePath = Join-Path $env:TEMP 'inline-working-reference.png'
