@@ -530,6 +530,14 @@ def console_kernel():
     return kernel
 
 
+def console_rows(lines, width):
+    width = max(1, width)
+    rows = []
+    for line in lines:
+        rows.extend(line[start:start + width] for start in range(0, max(len(line), 1), width))
+    return rows
+
+
 def attach_fake(session):
     kernel = console_kernel()
     handle = kernel.GetStdHandle(-11)
@@ -544,7 +552,7 @@ def attach_fake(session):
         geometry = (info.size.X, info.size.Y, info.window.Top, info.window.Bottom)
         if (claude, geometry) != previous:
             shown = fake_screen(claude, False)
-            lines = shown.splitlines()
+            lines = console_rows(shown.splitlines(), info.size.X - 1)
             top = max(0, info.window.Bottom - len(lines))
             row = next(i for i, line in enumerate(lines) if line.startswith("❯"))
             size = info.size.X * info.size.Y
@@ -553,7 +561,7 @@ def attach_fake(session):
             kernel.FillConsoleOutputAttribute(handle, 7, size, COORD(0, 0), ctypes.byref(count))
             kernel.SetConsoleCursorPosition(handle, COORD(0, top))
             kernel.SetConsoleTextAttribute(handle, 7)
-            text = shown.replace("\n", "\r\n")
+            text = "\r\n".join(lines) + "\r\n"
             if not kernel.WriteConsoleW(handle, text, len(text), ctypes.byref(count), None):
                 raise ctypes.WinError(ctypes.get_last_error())
             grey = fake_suggestion_shown(claude)
