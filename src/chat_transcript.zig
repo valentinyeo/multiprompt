@@ -618,7 +618,7 @@ test "status row parses model context and bounded todos without treating free te
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("one line next"), result.todos[0].text[0..result.todos[0].len]);
     var label: [256]u16 = undefined;
     const len = result.label(&label);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Opus 5.5 · 62% context left · 3 of 7 done"), label[0..len]);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("3 of 7 done"), label[0..len]);
 }
 
 test "status row label omits missing parts and old responses parse identically" {
