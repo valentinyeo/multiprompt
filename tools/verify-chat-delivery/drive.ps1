@@ -728,6 +728,7 @@ foreach ($plan in $plans) {
             $pillOrigin = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.left, $pill.top)
             $pillEnd = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.right, $pill.bottom)
             if ($pill.bottom -le $pill.top -or $pill.left -ge $pill.right -or $pillOrigin.Y -lt $bounds.Bottom -or [math]::Abs(($pillOrigin.X + $pillEnd.X) / 2 - ($bounds.Left + $bounds.Right) / 2) -gt 2) { throw 'New-message pill overlaps the transcript or is not centered' }
+            if ($env:CHAT_UNREAD_PROOF -eq '1') { $observation.badgeTranscript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height} }
             Shot 'new-messages-visible'
             $scrollLogStart = Scroll-Transcript -120
             [void](Require-NewMessages 2 1 1 'scrolling retains count' $scrollLogStart)

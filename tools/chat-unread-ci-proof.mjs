@@ -48,7 +48,7 @@ try {
   assert.ok(actions.some(action => action.input === 'two new arrivals while reading' && action.state.count === 2 && action.state.visible === 1 && action.state.up === 1));
   assert.ok(actions.some(action => action.input === 'Ctrl+Tab: return to the unread tab'));
   const badgeImage = readBmp(path.join(root, 'new-messages-visible.bmp'));
-  const transcript = observation.transcript;
+  const transcript = observation.badgeTranscript;
   let blue = 0;
   for (let y = transcript.top + transcript.height - 100; y < transcript.top + transcript.height; y++) {
     for (let x = transcript.left + transcript.width - 60; x < transcript.left + transcript.width; x++) {
