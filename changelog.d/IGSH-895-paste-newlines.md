@@ -1,1 +1,1 @@
-Pasted text keeps its original line breaks when sent.
+Pasted text keeps its line breaks when sent.
