@@ -6,6 +6,10 @@ const RECT = w32.RECT;
 const RGN_DIFF: i32 = 4;
 const MAX_HOLES = 4 + std.meta.tags(@import("chat_permission.zig").Action).len;
 
+pub fn moat() i32 {
+    return @import("drawing.zig").uiScaled(6);
+}
+
 pub const Hole = struct {
     rect: RECT,
     radius: i32,
@@ -20,6 +24,11 @@ pub const HoleList = struct {
         std.debug.assert(self.len < MAX_HOLES);
         self.items[self.len] = .{ .rect = rect, .radius = radius };
         self.len += 1;
+    }
+
+    pub fn addFloating(self: *HoleList, rect: RECT, radius: i32) void {
+        const gap = moat();
+        self.add(.{ .left = rect.left - gap, .top = rect.top - gap, .right = rect.right + gap, .bottom = rect.bottom + gap }, radius + gap);
     }
 };
 
