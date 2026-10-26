@@ -527,7 +527,7 @@ fn chatFileFailed(entry: *ChatHistoryEntry) void {
 }
 
 fn chatFilePollInterval() u64 {
-    return 1000;
+    return 500;
 }
 
 fn chatHistoryChannelClose(ch: *ChatHistoryChannel) void {
