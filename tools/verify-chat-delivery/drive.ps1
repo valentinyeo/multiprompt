@@ -353,11 +353,10 @@ function Retention-Top {
     if ($rows.Count -ne 1) { throw 'Retained transcript ownership missing' }
     $retainedView = [IntPtr]$rows[0].Current.NativeWindowHandle
     [void](Wait-For 'owned retained transcript focus before scrolling' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $retainedView) })
+    Press @(0x24) 'Home: restore first retained message after proof copy'
     [void](Wait-For 'restore first message after the proof copy moved selection to the bottom' {
         $position = Divider-State
-        if ($position -and $position.scroll -eq 0) { return $true }
-        [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $retainedView, 30000)
-        $false
+        $position -and $position.scroll -eq 0
     })
 }
 function Assert-Retention {
