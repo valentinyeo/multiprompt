@@ -1773,7 +1773,7 @@ fn chatPaintWorking(hdc: HANDLE, now: u64) void {
 }
 
 const WORKING_DOT_SIZE = 4;
-const WORKING_DOT_STEP = 7;
+const WORKING_DOT_STEP = 8;
 const WORKING_DOT_ALPHA: u8 = 102;
 
 fn chatPaintWorkingDots(hdc: HANDLE, rc: RECT, now: u64) void {

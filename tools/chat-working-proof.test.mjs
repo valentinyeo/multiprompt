@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dots } from './chat-working-proof.mjs';
 
-function frame(centers = []) {
+function frame(centers = [], fill = 200, radius = 3) {
   const image = { width: 200, height: 100, pixels: Buffer.alloc(200 * 100 * 4, 24) };
   for (const [cx, cy] of centers) for (let y = 0; y < 100; y++) for (let x = 0; x < 200; x++) {
-    if ((x - cx) ** 2 + (y - cy) ** 2 > 9) continue;
+    if ((x - cx) ** 2 + (y - cy) ** 2 > radius * radius) continue;
     const n = (y * 200 + x) * 4;
-    image.pixels.fill(200, n, n + 3);
+    image.pixels.fill(fill, n, n + 3);
   }
   return image;
 }
@@ -23,6 +23,11 @@ test('visible three-dot frames are distinguished from idle, one dot and separate
   assert.equal(first.length, 3);
   assert.notDeepEqual(first, second);
   assert.throws(() => dots(frame(), { ...area, right: 201 }), /Invalid transcript/);
+});
+
+test('small dim dots are still found', () => {
+  const found = dots(frame([[20.5, 50.5], [28.5, 48.5], [36.5, 50.5]], 70, 2), area);
+  assert.equal(found.length, 3);
 });
 
 test('Windows screenshot command accepts the driver UTF-8 BOM and rejects absent dots', async () => {

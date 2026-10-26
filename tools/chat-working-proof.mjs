@@ -12,7 +12,7 @@ export function dots(image, area) {
   const bg = rgb(area.left, area.top);
   const seen = new Set();
   const blobs = [];
-  const ink = (x, y) => Math.max(...rgb(x, y).map((v, i) => Math.abs(v - bg[i]))) > 75;
+  const ink = (x, y) => Math.max(...rgb(x, y).map((v, i) => Math.abs(v - bg[i]))) > 30;
   for (let y = area.top; y < area.bottom; y++) for (let x = area.left; x < Math.min(area.right, area.left + 180); x++) {
     const key = y * image.width + x;
     if (seen.has(key) || !ink(x, y)) continue;
