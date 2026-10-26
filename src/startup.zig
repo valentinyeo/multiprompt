@@ -289,6 +289,16 @@ pub fn parseAdoptArgs() void {
                 const tlen = @min(tmux_end - tmux_start, 63);
                 @memcpy(app_state.g_adopt_tmux[0..tlen], haystack[tmux_start .. tmux_start + tlen]);
                 app_state.g_adopt_tmux_len = @intCast(tlen);
+                if (cur < len) cur += 1;
+            }
+            while (cur < len and haystack[cur] == ' ') cur += 1;
+            if (cur < len and haystack[cur] == '"') {
+                cur += 1;
+                const identity_start = cur;
+                while (cur < len and haystack[cur] != '"') cur += 1;
+                const identity_len = @min(cur - identity_start, 63);
+                @memcpy(app_state.g_adopt_tmux_identity[0..identity_len], haystack[identity_start .. identity_start + identity_len]);
+                app_state.g_adopt_tmux_identity_len = @intCast(identity_len);
             }
 
             return;

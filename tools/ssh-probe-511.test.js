@@ -169,8 +169,11 @@ test('ISSUE-521 ended overlay and palette restart the same named host session ex
   assert.match(drawing, /"Session ended"/);
   assert.match(drawing, /L\("Start new session"\)/);
   const cmd = body('makeCmdLine', read('console.zig'));
-  assert.match(cmd, /if \(new_session\) "tmux new-session -A -s " else "tmux attach -t "/);
-  assert.match(cmd, /appendWideRemoteShellSingleQuoted\(buf, &pos, tmux_session\.\?\)/);
+  assert.match(cmd, /tmux_identity\.zig"\)\.attachCommand\(&attach_buf, tmux_session\.\?, tmux_identity, new_session\)/);
+  const attach = body('attachCommand', read('tmux_identity.zig'));
+  assert.match(attach, /if \(create\) "tmux new-session -A -s " else "tmux attach -t "/);
+  assert.match(attach, /try quote\(&writer,/);
+  assert.match(body('sshReconnectNow', send), /if \(was_ended\) shell\.tmux_identity_len = 0/);
   assert.match(body('respawnShellInPlace', read('console.zig')), /saved_ssh_reconnect\.create_session/);
   assert.match(body('manual', reconnect), /self\.phase == \.ended/);
   const startId = state.match(/SEARCH_TABCTX_START_SESSION: usize = (\d+)/);

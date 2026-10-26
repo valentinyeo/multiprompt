@@ -1813,6 +1813,7 @@ pub fn sshReconnectNow(idx: u32) void {
     if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return;
     if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .reconnecting) return;
     const was_ended = shell.ssh_reconnect.phase == .ended;
+    if (was_ended) shell.tmux_identity_len = 0;
     shell.ssh_reconnect.manual(GetTickCount64());
     shell.disconnected = true;
     if (was_ended) @import("drawing.zig").invalidateReconnectContent(idx);
@@ -1922,7 +1923,7 @@ fn sshSessionEnded(idx: u32) void {
 }
 
 const SshProbeJob = struct {
-    const Item = struct { id: u32, host: u8, session: [64]u8, len: u32, spawn_tick: u64 = 0, attached: bool = false, session_gone: bool = false };
+    const Item = struct { id: u32, host: u8, session: [64]u8, len: u32, identity: [64]u8 = @splat(0), identity_len: u32 = 0, spawn_tick: u64 = 0, attached: bool = false, session_gone: bool = false };
     items: [256]Item = undefined,
     count: usize = 0,
     healthy: [256]bool = @splat(false),
@@ -1984,11 +1985,11 @@ fn sshProbeThread(job: *SshProbeJob) void {
         if (!@import("console.zig").appendSshExe(&wide, &pos)) continue;
         if (!@import("console.zig").appendWideAscii(&wide, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2 ")) continue;
         if (!@import("console.zig").appendWideAscii(&wide, &pos, @import("console.zig").tmuxSshTarget(item.host))) continue;
-        if (!@import("console.zig").appendWideAscii(&wide, &pos, " \"tmux list-clients -F '#{session_name}' 2>/dev/null; listing=$(tmux list-sessions -F '@@S #{session_name}' 2>&1); if [ $? -eq 0 ]; then printf '%s\\n' \\\"$listing\\\"; printf '@@LS_OK@@\\n'; else case $listing in *'no server running'*|*'error connecting to'*'No such file or directory'*) printf '@@LS_OK@@\\n';; *) printf '%s\\n' \\\"$listing\\\" >&2;; esac; fi; printf '@@MP_LIVE@@\\n'\"")) continue;
+        if (!@import("console.zig").appendWideAscii(&wide, &pos, " \"tmux list-clients -F '#{session_name}' 2>/dev/null; tmux list-sessions -F '@@I #{session_name}|#{start_time}:#{pid}:#{session_id}' 2>/dev/null; listing=$(tmux list-sessions -F '@@S #{session_name}' 2>&1); if [ $? -eq 0 ]; then printf '%s\\n' \\\"$listing\\\"; printf '@@LS_OK@@\\n'; else case $listing in *'no server running'*|*'error connecting to'*'No such file or directory'*) printf '@@LS_OK@@\\n';; *) printf '%s\\n' \\\"$listing\\\" >&2;; esac; fi; printf '@@MP_LIVE@@\\n'\"")) continue;
         const a = std.heap.page_allocator;
         const cmd = std.unicode.utf16LeToUtf8Alloc(a, wide[0..pos]) catch continue;
         defer a.free(cmd);
-        var output: [32768]u8 = undefined;
+        var output: [131072]u8 = undefined;
         const started = GetTickCount64();
         const result = @import("vps.zig").sshOneShotCaptureInput(cmd, &output, null, 10_000);
         const probe = &job.results[item.host];
@@ -2003,6 +2004,10 @@ fn sshProbeThread(job: *SshProbeJob) void {
             if (candidate.host != item.host) continue;
             candidate.attached = @import("ssh_reconnect.zig").attached(output[0..result.len], candidate.session[0..candidate.len]);
             candidate.session_gone = @import("ssh_reconnect.zig").sessionGone(output[0..result.len], candidate.session[0..candidate.len], result.success, result.exit_code);
+            if (@import("tmux_identity.zig").fromProbe(output[0..result.len], candidate.session[0..candidate.len])) |identity| {
+                @memcpy(candidate.identity[0..identity.len], identity);
+                candidate.identity_len = @intCast(identity.len);
+            }
         }
     }
 }
@@ -2041,6 +2046,17 @@ fn sshProbeFinish() void {
         if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended or shell.spawn_tick != item.spawn_tick or shell.tmux_host != item.host or
             !std.mem.eql(u8, shell.tmux_session[0..shell.tmux_session_len], item.session[0..item.len])) continue;
         const process_alive = shell.process != null and shellProcessAliveForRead(idx);
+        if (job.healthy[item.host] and item.identity_len > 0) {
+            const identity = item.identity[0..item.identity_len];
+            if (shell.tmux_identity_len == 0 and item.attached and process_alive) {
+                @memcpy(shell.tmux_identity[0..identity.len], identity);
+                shell.tmux_identity_len = @intCast(identity.len);
+                saveSession();
+            } else if (shell.tmux_identity_len > 0 and !std.mem.eql(u8, identity, shell.tmux_identity[0..shell.tmux_identity_len])) {
+                debugLog("ssh-probe: saved terminal identity changed; retaining the original binding");
+                continue;
+            }
+        }
         if (shell.ssh_reconnect.observeGone(item.session_gone, process_alive, GetTickCount64())) {
             sshSessionEnded(idx);
             continue;

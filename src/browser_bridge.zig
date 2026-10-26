@@ -2346,18 +2346,23 @@ fn zsbTabRebind(argv: []const []const u8, out: []u8, comptime ops: type) usize {
     const old_host = shell.tmux_host;
     const old_session = shell.tmux_session;
     const old_session_len = shell.tmux_session_len;
+    const old_identity = shell.tmux_identity;
+    const old_identity_len = shell.tmux_identity_len;
     const old_reconnect = shell.ssh_reconnect;
     const changed = old_host != host or old_session_len != tmux.len or !std.mem.eql(u8, old_session[0..old_session_len], tmux);
     shell.kind = .tmux;
     shell.tmux_host = host;
     @memcpy(shell.tmux_session[0..tmux.len], tmux);
     shell.tmux_session_len = @intCast(tmux.len);
+    if (changed) shell.tmux_identity_len = 0;
     shell.ssh_reconnect.create_session = false;
     if (!ops.respawn(idx)) {
         shell.kind = old_kind;
         shell.tmux_host = old_host;
         shell.tmux_session = old_session;
         shell.tmux_session_len = old_session_len;
+        shell.tmux_identity = old_identity;
+        shell.tmux_identity_len = old_identity_len;
         shell.ssh_reconnect = old_reconnect;
         return zsbWorkspaceError(out, "spawn_failed");
     }
@@ -2997,11 +3002,18 @@ test "session-rebind points a tab at another session and refuses duplicates lock
     try zsbTabTestOpen("runner-7", &out);
     try zsbTabTestOpen("runner-8", &out);
     const active = app_state.active_shell;
+    const identity = "1700:123:$7";
+    @memcpy(app_state.shells[2].tmux_identity[0..identity.len], identity);
+    app_state.shells[2].tmux_identity_len = identity.len;
     try std.testing.expectEqualStrings("{\"ok\":true,\"rebound\":true,\"tab\":43,\"state\":\"connecting\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-9" }, &out));
     try std.testing.expectEqualStrings("runner-9", app_state.shells[2].tmux_session[0..app_state.shells[2].tmux_session_len]);
     try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.respawned);
     try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
+    try std.testing.expectEqual(@as(u32, 0), app_state.shells[2].tmux_identity_len);
+    @memcpy(app_state.shells[2].tmux_identity[0..identity.len], identity);
+    app_state.shells[2].tmux_identity_len = identity.len;
     try std.testing.expectEqualStrings("{\"ok\":true,\"rebound\":true,\"tab\":43,\"state\":\"connecting\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-9", "--host", "remote-1" }, &out));
+    try std.testing.expectEqualStrings(identity, app_state.shells[2].tmux_identity[0..app_state.shells[2].tmux_identity_len]);
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"duplicate_session\",\"tab\":42}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-7" }, &out));
     try std.testing.expectEqualStrings("runner-9", app_state.shells[2].tmux_session[0..app_state.shells[2].tmux_session_len]);
     try std.testing.expectEqual(@as(usize, 2), ZsbTabTestOps.respawned);
@@ -3014,6 +3026,7 @@ test "session-rebind points a tab at another session and refuses duplicates lock
     ZsbTabTestOps.respawn_ok = false;
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"spawn_failed\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10" }, &out));
     try std.testing.expectEqualStrings("runner-9", app_state.shells[2].tmux_session[0..app_state.shells[2].tmux_session_len]);
+    try std.testing.expectEqualStrings(identity, app_state.shells[2].tmux_identity[0..app_state.shells[2].tmux_identity_len]);
     ZsbTabTestOps.respawn_ok = true;
     app_state.g_account_locked = true;
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"account_locked\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10" }, &out));

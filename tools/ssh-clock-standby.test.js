@@ -48,6 +48,7 @@ const Shell = struct {
     kind: ShellKind = .tmux, console_inflight: bool = false, disconnected: bool = false, process: ?*anyopaque = @ptrFromInt(1),
     hwnd: ?*anyopaque = null, pid: u32 = 7, activity: enum { idle, active } = .idle,
     needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
+    tmux_identity_len: u32 = 0,
     spawn_tick: u64 = 1, shell_id: u32 = 42, tmux_host: u8 = 0,
     ssh_reconnect: State = .{}, ssh_reconnect_attempts: u8 = 0, ssh_reconnect_next_tick: u64 = 0,
 };

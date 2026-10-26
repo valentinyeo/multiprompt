@@ -119,6 +119,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.kind = if (std.mem.eql(u8, kind, "pwsh")) .pwsh else if (std.mem.eql(u8, kind, "vps")) .vps else if (std.mem.eql(u8, kind, "tmux")) .tmux else if (std.mem.eql(u8, kind, "vps2")) .vps2 else if (std.mem.eql(u8, kind, "bash")) .bash else if (std.mem.eql(u8, kind, "gitbash")) .gitbash else .cmd;
         tab.name_len = copyWide(obj, "name", &tab.name);
         tab.tmux_session_len = copyString(obj, "tmux_session", &tab.tmux_session);
+        tab.tmux_identity_len = copyString(obj, "tmux_identity", &tab.tmux_identity);
         if (tab.kind == .tmux and tab.tmux_session_len == 0) continue;
         tab.cwd_len = copyString(obj, "cwd", &tab.cwd);
         tab.favicon_path_len = copyString(obj, "favicon_path", &tab.favicon_path);

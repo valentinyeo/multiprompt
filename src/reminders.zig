@@ -169,6 +169,7 @@ pub fn loadRemindersIfNeeded() void {
         var e = ReminderEntry{};
         e.name_len = json_reader.copyString(obj, "name", &e.name);
         e.tmux_session_len = json_reader.copyString(obj, "tmux_session", &e.tmux_session);
+        e.tmux_identity_len = json_reader.copyString(obj, "tmux_identity", &e.tmux_identity);
         e.claude_sid_len = json_reader.copyString(obj, "csid", &e.claude_sid);
         e.claude_cwd_len = json_reader.copyString(obj, "ccwd", &e.claude_cwd);
         e.workspace_id_len = json_reader.copyString(obj, "wid", &e.workspace_id);
@@ -241,6 +242,10 @@ fn saveReminders() bool {
         @memcpy(json_buf[pos .. pos + ts_pre.len], ts_pre);
         pos += ts_pre.len;
         appendJsonEscaped(&json_buf, &pos, e.tmux_session[0..e.tmux_session_len]);
+        const identity_prefix = "\",\"tmux_identity\":\"";
+        @memcpy(json_buf[pos .. pos + identity_prefix.len], identity_prefix);
+        pos += identity_prefix.len;
+        appendJsonEscaped(&json_buf, &pos, e.tmux_identity[0..e.tmux_identity_len]);
         const h_pre = "\",\"host\":";
         @memcpy(json_buf[pos .. pos + h_pre.len], h_pre);
         pos += h_pre.len;
@@ -431,6 +436,8 @@ fn reminderFromShell(idx: usize, due_at: u64) ?ReminderEntry {
     e.due_at = due_at;
     e.created_at = nowFileTime();
     e.tmux_host = app_state.shells[idx].tmux_host;
+    e.tmux_identity = app_state.shells[idx].tmux_identity;
+    e.tmux_identity_len = app_state.shells[idx].tmux_identity_len;
     e.tmux_persisted = true;
     e.favorite = app_state.shells[idx].favorite;
     e.starred_group_id = app_state.shells[idx].starred_group_id;
@@ -531,6 +538,9 @@ fn restoreReminderEntry(e: *const ReminderEntry) bool {
         app_state.g_active_workspace = target_slot;
         updateMainWindowTitle();
     }
+    const previous_identity = app_state.g_pending_tmux_identity;
+    app_state.g_pending_tmux_identity = e.tmux_identity[0..e.tmux_identity_len];
+    defer app_state.g_pending_tmux_identity = previous_identity;
     app_state.g_pending_tmux_host = e.tmux_host;
     const kind: ShellKind = if (e.local_kind > 0) @enumFromInt(e.local_kind - 1) else .tmux;
     const cwd: ?[]const u8 = if (e.local_kind > 0 and e.claude_cwd_len > 0) e.claude_cwd[0..e.claude_cwd_len] else null;
