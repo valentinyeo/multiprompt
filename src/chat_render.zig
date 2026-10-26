@@ -1790,7 +1790,7 @@ const ChoiceState = struct {
     present: bool = false,
     prompt: bool = false,
     anchor: usize = 0,
-    ordinal: usize = 0,
+    origin: usize = 0,
     answered_below: bool = false,
     live: bool = false,
     chosen: ?usize = null,
@@ -1826,8 +1826,8 @@ fn chatChoiceStripH() i32 {
     return uiScaled(CHOICE_GAP) + title + cards * uiScaled(CHOICE_CARD_H) + (cards - 1) * uiScaled(CHOICE_GAP);
 }
 
-fn chatChoiceKey(group: *const chat_options.Group, prompt: bool, ordinal: usize) u64 {
-    return if (prompt) group.hash() else group.hash() *% 31 +% ordinal;
+fn chatChoiceKey(group: *const chat_options.Group, prompt: bool, origin: usize) u64 {
+    return if (prompt) group.hash() else group.hash() *% 31 +% origin;
 }
 
 fn chatChoiceUserText(buf: []const u16, block: ChatBlock) []const u16 {
@@ -1866,10 +1866,6 @@ fn chatChoicesFind(buf: []const u16, found: *ChoiceState) bool {
         }
         if (role != .tool) anchor = j;
     }
-    var ordinal: usize = 0;
-    for (blocks[0 .. lp + 1]) |block| {
-        if (block.role == .prose) ordinal += 1;
-    }
     var chunks: [64]chat_options.Chunk = undefined;
     var n: usize = 0;
     for (blocks[start .. lp + 1]) |block| {
@@ -1885,9 +1881,9 @@ fn chatChoicesFind(buf: []const u16, found: *ChoiceState) bool {
     found.present = true;
     found.prompt = false;
     found.anchor = anchor;
-    found.ordinal = ordinal;
+    found.origin = start;
     found.answered_below = user_after != null;
-    const key = chatChoiceKey(&found.group, false, ordinal);
+    const key = chatChoiceKey(&found.group, false, start);
     if (chatChoicePickFor(key)) found.chosen = g_choice_pick_index;
     if (found.chosen == null) {
         if (user_after) |ui| {
@@ -1963,7 +1959,7 @@ fn chatChoiceAt(x: i32, y: i32) ?usize {
 fn chatChoiceClick(index: usize) void {
     const chat_send = @import("chat_send.zig");
     const group = &g_choice.group;
-    const key = chatChoiceKey(group, g_choice.prompt, g_choice.ordinal);
+    const key = chatChoiceKey(group, g_choice.prompt, g_choice.origin);
     if (g_choice.prompt) {
         const digit = if (index < group.count) group.options[index].digit else group.other;
         if (!chat_send.chatQuestionAnswer(app_state.active_shell, digit, group.hash())) return;
@@ -2021,7 +2017,7 @@ fn chatChoicesLog() void {
     }
     debugLog(log[0..len]);
     var diag: [160]u8 = undefined;
-    const text = std.fmt.bufPrint(&diag, "CHAT_CHOICES_DIAG anchor={d} ordinal={d} answered_below={d} echo={d} pick_set={d}", .{ g_choice.anchor, g_choice.ordinal, @intFromBool(g_choice.answered_below), app_state.g_chat_echo_layout_count, @intFromBool(g_choice_pick_set) }) catch return;
+    const text = std.fmt.bufPrint(&diag, "CHAT_CHOICES_DIAG anchor={d} origin={d} answered_below={d} echo={d} pick_set={d}", .{ g_choice.anchor, g_choice.origin, @intFromBool(g_choice.answered_below), app_state.g_chat_echo_layout_count, @intFromBool(g_choice_pick_set) }) catch return;
     debugLog(text);
 }
 
