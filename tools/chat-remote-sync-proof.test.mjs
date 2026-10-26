@@ -12,7 +12,7 @@ test('remote proof rejects stale sessions, missing rendered turns and late deliv
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value));
   };
-  const turns = [1, 2, 3].map(turn => ({ turn, loadedMs: 100, session: turn < 3 ? 'first' : 'resumed', question: `Remote question ${turn}`, answer: `Remote answer ${turn}` }));
+  const turns = [1, 2, 3].map(turn => ({ turn, renderedMs: 100, session: turn < 3 ? 'first' : 'resumed', question: `Remote question ${turn}`, answer: `Remote answer ${turn}` }));
   const observation = { error: null, remoteHome: 'remote/home', clientHome: 'client/home', turns };
   try {
     write('remote-sync/observation.json', observation);
@@ -28,10 +28,10 @@ test('remote proof rejects stale sessions, missing rendered turns and late deliv
     write('remote-sync/observation.json', observation);
     assert.throws(() => verifyRemoteSync(root), /resume changes session identity/);
     turns[2].session = 'resumed';
-    turns[2].loadedMs = 2001;
+    turns[2].renderedMs = 2001;
     write('remote-sync/observation.json', observation);
     assert.throws(() => verifyRemoteSync(root), /two-second/);
-    turns[2].loadedMs = 100;
+    turns[2].renderedMs = 100;
     write('remote-sync/observation.json', observation);
     write('remote-sync/turn-3-copied.txt', 'Remote question 2\nRemote answer 2');
     assert.throws(() => verifyRemoteSync(root), /rendered question and answer/);

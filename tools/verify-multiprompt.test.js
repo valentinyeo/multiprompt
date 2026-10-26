@@ -162,7 +162,7 @@ test('G1: workflow and harness allow session-open and Windows parses the driver'
   allowsSessionOpen(workflow);
   assert.match(control, /ValidateSet\([^\n)]*'session-open'/);
   assert.match(workflow, /Language\.Parser\]::ParseFile/);
-  assert.match(workflow, /run: node --test tools\/verify-multiprompt\.test\.js/);
+  assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt\.test\.js/);
   assert.match(workflow, /paths:[\s\S]*?- tools\/verify-multiprompt\.test\.js/);
   assert.throws(() => allowsSessionOpen(workflow.replace(", 'session-open'", '')));
 });
@@ -983,7 +983,7 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.match(setup, /'isolated browser rendered setup page before the pane adoption deadline starts' 60/);
   assert.doesNotMatch(setup, /Assert-BrowserPane|PaneLayoutProof|Start-Sleep/);
   assert.match(control, /\$warmupStopped = \$warmupJob.Stop\(\)/);
-  assert.match(workflow, /run: node --test tools\/verify-multiprompt.test.js/);
+  assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt.test.js/);
   assert.ok(workflow.includes('- tools/verify-scratch.test.ps1'));
 });
 

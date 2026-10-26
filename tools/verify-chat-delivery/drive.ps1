@@ -542,28 +542,26 @@ foreach ($plan in $plans) {
                 Shell-Run @('turn', [string]$turn)
                 $question = "Remote question $turn"
                 $answer = "Remote answer $turn"
-                [void](Wait-For 'newest remote question and answer loaded within two seconds' {
-                    @(Get-ChildItem "$settings/chatcache/*.jsonl" -ErrorAction SilentlyContinue | Where-Object {
-                        $text = Read-Shared $_.FullName
-                        $text.Contains($question) -and $text.Contains($answer)
-                    }).Count -gt 0
+                [void](Wait-For 'newest rendered remote question and answer within two seconds' {
+                    $paletteStart = (Read-Shared "$settings/debug.log").Length
+                    Press @(0x11, 0x4B) 'Ctrl+K: select remote conversation'
+                    [void](Wait-For 'remote palette ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+                    $query = 'chat view select all'
+                    foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+                    [void](Wait-For 'remote select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+                    Press @(0x0D) 'Enter: select remote conversation'
+                    Press @(0x11, 0x43) 'Ctrl+C: copy rendered remote conversation'
+                    $script:remoteCopied = [Windows.Forms.Clipboard]::GetText()
+                    $script:remoteCopied.Contains($question) -and $script:remoteCopied.Contains($answer)
                 } 2)
-                $loadedMs = [int]$timer.ElapsedMilliseconds
-                if ($loadedMs -gt 2000) { throw "Remote turn $turn exceeded two seconds: $loadedMs" }
-                $paletteStart = (Read-Shared "$settings/debug.log").Length
-                Press @(0x11, 0x4B) 'Ctrl+K: select remote conversation'
-                [void](Wait-For 'remote palette ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-                $query = 'chat view select all'
-                foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-                [void](Wait-For 'remote select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
-                Press @(0x0D) 'Enter: select remote conversation'
-                Press @(0x11, 0x43) 'Ctrl+C: copy rendered remote conversation'
-                $copied = [Windows.Forms.Clipboard]::GetText()
+                $renderedMs = [int]$timer.ElapsedMilliseconds
+                if ($renderedMs -gt 2000) { throw "Remote turn $turn exceeded two seconds: $renderedMs" }
+                $copied = $script:remoteCopied
                 [IO.File]::WriteAllText("$caseDir/turn-$turn-copied.txt", $copied)
                 if (-not $copied.Contains($question) -or -not $copied.Contains($answer)) { throw "Remote turn $turn missing from rendered conversation" }
                 if ($turn -eq 3 -and $copied.Contains('Remote answer 2')) { throw 'Resumed conversation still contains stale session rows' }
                 Press @(0x1B) 'Esc: clear remote selection'
-                $observation.turns.Add(@{turn=$turn; loadedMs=$loadedMs; question=$question; answer=$answer; session=(Get-Content "$state/state.json" -Raw | ConvertFrom-Json).sid})
+                $observation.turns.Add(@{turn=$turn; renderedMs=$renderedMs; question=$question; answer=$answer; session=(Get-Content "$state/state.json" -Raw | ConvertFrom-Json).sid})
                 Shot "remote-turn-$turn-chat"
                 Press @(0x12, 0x43) 'Alt+C: show remote terminal'
                 [void](Wait-For 'remote terminal frame painted' { (Read-Shared "$state/frames.jsonl").Contains($answer) })
