@@ -47,7 +47,17 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
 if (process.env.GH_FAIL === 'true') process.exit(1);
+if (args[0] === 'run' && args[1] === 'view') {
+  const jobs = JSON.parse(process.env.VERIFY_JOBS || '{}')[args[2]];
+  console.log(JSON.stringify(jobs || { jobs: [{ name: 'verify (relaunch-saved-sessions)', conclusion: 'success' }, { name: 'verify (appearance)', conclusion: 'failure' }] }));
+  process.exit(0);
+}
 const sha = args[args.indexOf('--commit') + 1];
+if (args[args.indexOf('-w') + 1] === 'verify.yml') {
+  const verify = JSON.parse(process.env.VERIFY_RUNS || '{}')[sha];
+  console.log(JSON.stringify(verify || [{ databaseId: 700, event: 'push', status: 'completed', conclusion: 'failure' }]));
+  process.exit(0);
+}
 console.log(JSON.stringify(JSON.parse(process.env.TEST_RUNS)[sha] || []));
 `, { mode: 0o755 });
   const success = [{ databaseId: 1, event: 'push', status: 'completed', conclusion: 'success' }];
@@ -84,10 +94,16 @@ test('HEAD moved past green commits: publishes newest green SHA, not HEAD, and n
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v0.0.2^{commit}'), f.green);
   assert.equal(f.git('rev-parse', 'master'), f.tip);
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'master'), f.green);
-  assert.deepEqual(f.calls(), [f.tip, f.green].map(sha => [
-    'run', 'list', '-R', 'example/multiprompt', '-w', 'test.yml', '-b', 'master',
+  const list = (workflow, sha) => [
+    'run', 'list', '-R', 'example/multiprompt', '-w', workflow, '-b', 'master',
     '--commit', sha, '--limit', '100', '--json', 'databaseId,event,status,conclusion',
-  ]));
+  ];
+  assert.deepEqual(f.calls(), [
+    list('test.yml', f.tip),
+    list('test.yml', f.green),
+    list('verify.yml', f.green),
+    ['run', 'view', '700', '-R', 'example/multiprompt', '--json', 'jobs'],
+  ]);
   skipped(f);
 });
 
@@ -205,4 +221,48 @@ test('a non-release tag between the last release and the green commit does not c
   const f = fixture(t);
   f.git('tag', 'nightly-marker', f.older);
   selected(f.admit(), f.green);
+});
+
+const journey = 'verify (relaunch-saved-sessions)';
+const verifyPush = id => [{ databaseId: id, event: 'push', status: 'completed', conclusion: 'success' }];
+
+function releaseEnv(f, runs, jobs) {
+  return { VERIFY_RUNS: JSON.stringify(runs), VERIFY_JOBS: JSON.stringify(jobs) };
+}
+
+test('a red relaunch journey on the newest green commit releases the older green commit instead', t => {
+  const f = fixture(t);
+  selected(f.admit(['--dry-run'], releaseEnv(f,
+    { [f.green]: verifyPush(801), [f.older]: verifyPush(802) },
+    { 801: { jobs: [{ name: journey, conclusion: 'failure' }] }, 802: { jobs: [{ name: journey, conclusion: 'success' }] } })), f.older);
+});
+
+for (const [label, runs, jobs] of [
+  ['red journey', verifyPush(801), { 801: { jobs: [{ name: journey, conclusion: 'failure' }] } }],
+  ['cancelled journey', verifyPush(801), { 801: { jobs: [{ name: journey, conclusion: 'cancelled' }] } }],
+  ['unfinished journey', verifyPush(801), { 801: { jobs: [{ name: journey, conclusion: null }] } }],
+  ['journey missing from the run', verifyPush(801), { 801: { jobs: [{ name: 'verify (appearance)', conclusion: 'success' }] } }],
+  ['no verify run at all', [], {}],
+  ['verify run for a pull request only', [{ databaseId: 801, event: 'pull_request', status: 'completed', conclusion: 'success' }], { 801: { jobs: [{ name: journey, conclusion: 'success' }] } }],
+]) {
+  test(`${label} on every green commit blocks the release`, t => {
+    const f = fixture(t);
+    const result = skipped(f, releaseEnv(f, { [f.green]: runs, [f.older]: runs }, jobs));
+    assert.match(result.stderr, /relaunch-saved-sessions/);
+  });
+}
+
+test('an unrelated red journey does not block the release', t => {
+  const f = fixture(t);
+  selected(f.admit(['--dry-run'], releaseEnv(f, { [f.green]: verifyPush(801) },
+    { 801: { jobs: [{ name: journey, conclusion: 'success' }, { name: 'verify (chat-focus)', conclusion: 'failure' }] } })), f.green);
+});
+
+test('the admit script names the journey the verify workflow runs on every master push', () => {
+  const admit = fs.readFileSync(path.join(root, 'tools/auto-release-admit.sh'), 'utf8');
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  const autoRelease = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
+  assert.match(admit, /RELEASE_JOURNEY=relaunch-saved-sessions/);
+  assert.match(workflow, /fromJSON\('\["relaunch-saved-sessions", "appearance", [^\n]*\]'\)/);
+  assert.match(autoRelease, /workflows: \[Tests, Verify desktop\]/);
 });

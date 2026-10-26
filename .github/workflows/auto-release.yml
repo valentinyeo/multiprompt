@@ -2,7 +2,7 @@ name: auto-release
 
 on:
   workflow_run:
-    workflows: [Tests]
+    workflows: [Tests, Verify desktop]
     types: [completed]
     branches: [master]
   workflow_dispatch:
@@ -22,9 +22,14 @@ jobs:
     if: >-
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') ||
-      (github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.name == 'Tests' &&
+       github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
-       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')) ||
+      (github.event.workflow_run.name == 'Verify desktop' &&
+       (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:

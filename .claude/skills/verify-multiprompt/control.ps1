@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -1759,7 +1759,7 @@ function Prepare-SessionRestoreGroupOrder([string]$Stage) {
     Save-Json @{ savedIndex = $middle; normalizedIndex = ($middle - 1); selected = 'Restore middle'; wrongAtSavedIndex = 'Restore last'; session = $saved } ($Stage + '-group-order.json')
 }
 
-function Restart-SessionRestore([string]$Stage, [bool]$Crash, [bool]$Updater = $false) {
+function Restart-SessionRestore([string]$Stage, [bool]$Crash, [bool]$Updater = $false, [scriptblock]$BeforeStart = $null) {
     Doctor
     if ($process.MainWindowHandle -ne $script:window) { throw 'Refusing to close a different window' }
     Save-Json (Read-Inbox) ($Stage + '-before.inbox.json')
@@ -1793,6 +1793,7 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash, [bool]$Updater = $
     $script:process = $null
     $script:job = $null
     $script:window = [IntPtr]::Zero
+    if ($null -ne $BeforeStart) { & $BeforeStart }
     if ($Updater) {
         Wait-Until {
             $state = Read-Inbox
@@ -2117,6 +2118,92 @@ function Assert-ChatTyping([string]$Text, [string]$Step, [scriptblock]$TypingAct
     Save-Json @{ WM_GETTEXT = [VerifyNative]::EditText($handle); handle = $composer.Current.NativeWindowHandle; pid = $composer.Current.ProcessId } ($Step + '.text.json')
 }
 
+function New-RelaunchSeed {
+    $groups = @(@{ id = 1; name = 'Hypertask' }, @{ id = 2; name = 'Software Factory' }, @{ id = 3; name = 'inne' })
+    $tabs = New-Object System.Collections.ArrayList
+    $live = New-Object System.Collections.ArrayList
+    $shellId = 100
+    foreach ($i in 1..14) {
+        $name = 'Relaunch {0:00}' -f $i
+        $group = ($i % 3) + 1
+        $tab = [ordered]@{ kind = 'cmd'; name = $name; shell_id = $shellId; workspace = $(if ($i -le 10) { 0 } else { 1 }); group_id = $group }
+        if ($i -le 12) { $tab.favorite = $true; $tab.starred_group_id = $group }
+        [void]$tabs.Add($tab)
+        [void]$live.Add($name)
+        $shellId++
+    }
+    foreach ($i in 1, 3, 5, 7, 9, 11) {
+        $name = 'Relaunch {0:00}' -f $i
+        $group = ($i % 3) + 1
+        [void]$tabs.Add([ordered]@{ kind = 'tmux'; name = $name; shell_id = $shellId; workspace = $(if ($i -le 10) { 0 } else { 1 }); favorite = $true; starred_group_id = $group })
+        $shellId++
+    }
+    $selected = 'Relaunch 07'
+    $selectedIndex = 0
+    foreach ($index in 0..($tabs.Count - 1)) { if ($tabs[$index].name -ceq $selected -and $tabs[$index].kind -eq 'cmd') { $selectedIndex = $index } }
+    $document = [ordered]@{
+        single_window = $true
+        active_workspace = 0
+        workspace_count = 2
+        workspaces = @(@{ name = 'Main'; wid = 'relaunch-main' }, @{ name = 'Work'; wid = 'relaunch-work' })
+        starred_view = $true
+        active_tab = $selectedIndex
+        active_shell_id = $tabs[$selectedIndex].shell_id
+        groups = $groups
+        tabs = @($tabs.ToArray())
+    }
+    return @{ document = $document; live = @($live.ToArray()); savedTabs = $tabs.Count; ghosts = 6; groups = @($groups | ForEach-Object { $_.name }); selected = $selected }
+}
+
+function Get-NotifyPorts {
+    $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../src/notify_ports.zig'))
+    $first = [regex]::Match($source, 'pub const FIRST_PORT: u16 = (\d+);')
+    $count = [regex]::Match($source, 'pub const PORT_COUNT: usize = (\d+);')
+    if (-not $first.Success -or -not $count.Success) { throw 'Notification port range missing' }
+    return @([int]$first.Groups[1].Value..([int]$first.Groups[1].Value + [int]$count.Groups[1].Value - 1))
+}
+
+function Open-NotifyPortListeners {
+    $opened = New-Object System.Collections.ArrayList
+    foreach ($port in Get-NotifyPorts) {
+        $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $port)
+        $listener.Start()
+        [void]$opened.Add($listener)
+    }
+    return $opened
+}
+
+function Assert-RelaunchSessions([string]$Stage, $Seed) {
+    Wait-Until {
+        $state = Read-Inbox
+        if ($null -eq $state) { return $false }
+        $names = @($state.shells | ForEach-Object { $_.name })
+        @($Seed.live | Where-Object { $_ -cnotin $names }).Count -eq 0
+    } "$Stage every live saved session is published" 60
+    Start-Sleep -Seconds 3
+    $state = Read-Inbox
+    Save-Json $state ($Stage + '.inbox.json')
+    $published = @($state.shells | ForEach-Object { $_.name })
+    $listedTwice = @($published | Group-Object -CaseSensitive | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name + ' x' + $_.Count })
+    if ($listedTwice.Count -gt 0) { throw "$Stage sessions listed twice in the sidebar: $($listedTwice -join ', ')" }
+    $extra = @($published | Where-Object { $_ -cnotin $Seed.live })
+    if ($extra.Count -gt 0) { throw "$Stage sidebar lists sessions that were never saved: $($extra -join ', ')" }
+    Wait-Until {
+        $saved = Read-Session
+        $null -ne $saved -and @($saved.tabs).Count -eq $Seed.live.Count
+    } "$Stage saved file holds exactly the $($Seed.live.Count) live sessions, with no cached copies" 30
+    $saved = Read-Session
+    Save-Json $saved ($Stage + '.session.json')
+    $savedTwice = @(@($saved.tabs | ForEach-Object { $_.name }) | Group-Object -CaseSensitive | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name + ' x' + $_.Count })
+    if ($savedTwice.Count -gt 0) { throw "$Stage saved file lists sessions twice: $($savedTwice -join ', ')" }
+    $savedGroups = @($saved.groups | ForEach-Object { $_.name })
+    $missingGroups = @($Seed.groups | Where-Object { $_ -cnotin $savedGroups })
+    if ($missingGroups.Count -gt 0) { throw "$Stage group headers missing: $($missingGroups -join ', ')" }
+    $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
+    if ($selected.Count -ne 1) { throw "$Stage selected chat is not one published session" }
+    return @{ stage = $Stage; published = $published.Count; saved = @($saved.tabs).Count; groups = $savedGroups.Count; selected = $selected[0].name; starred_view = [bool]$state.starred_view }
+}
+
 try {
     if ($Feature -eq 'title-bar') {
         Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot 'title-bar-native.cs')
@@ -2208,6 +2295,12 @@ try {
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'browser-own-profile') {
+        $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
+    } elseif ($Feature -eq 'relaunch-saved-sessions') {
+        $relaunchSeed = New-RelaunchSeed
+        New-Item -ItemType Directory -Force (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $relaunchSeed.document -Depth 8), (New-Object Text.UTF8Encoding $false))
+        Save-Json $relaunchSeed.document 'seed-session.json'
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } else {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
@@ -3080,6 +3173,45 @@ try {
             Save-Json (Read-Session) 'session-starred-muted.json'
             Snapshot 'starred-muted'
             $result.checks += @{ name = 'favorites-keeps-muted-starred'; starred_group_id = $favoritesGroupId; tab = $tabIndex; muted = $true }
+        }
+        'relaunch-saved-sessions' {
+            $script:relaunchListeners = $null
+            $openPorts = {
+                if ($null -eq $script:relaunchListeners) {
+                    $script:relaunchListeners = Open-NotifyPortListeners
+                    Record "All $(@($script:relaunchListeners).Count) notification ports occupied by owned fixture sockets"
+                }
+            }
+            try {
+                $launches = @()
+                $launchLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+                Wait-Until {
+                    $trace = [IO.File]::ReadAllText($launchLog)
+                    $trace -match 'launch step=browser' -and $trace -match 'installHook: KEYBOARD_LL installed'
+                } 'launch-1 restore finished and keyboard hook installed' 60
+                $first = Assert-RelaunchSessions 'launch-1' $relaunchSeed
+                if ($first.selected -cne $relaunchSeed.selected -or -not $first.starred_view) { throw "launch-1 did not restore the saved selection $($relaunchSeed.selected) in Starred, got $($first.selected)" }
+                $launches += $first
+                Snapshot 'launch-1'
+                foreach ($launch in 2, 3) {
+                    Press @(0x12, 0x32) 'Alt+2: home before quitting'
+                    Wait-Until { $state = Read-Inbox; $null -ne $state -and -not $state.starred_view } 'home view before quitting'
+                    [void](Assert-RelaunchSessions "home-before-launch-$launch" $relaunchSeed)
+                    Press @(0x12, 0x31) 'Alt+1: Starred before quitting'
+                    Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.starred_view } 'Starred view before quitting'
+                    $starred = Assert-RelaunchSessions "starred-before-launch-$launch" $relaunchSeed
+                    Restart-SessionRestore "relaunch-$launch" $false $false $openPorts
+                    $after = Assert-RelaunchSessions "launch-$launch" $relaunchSeed
+                    if ($after.selected -cne $starred.selected) { throw "launch-$launch selected chat changed from $($starred.selected) to $($after.selected)" }
+                    if (-not $after.starred_view) { throw "launch-$launch lost the Starred view" }
+                    Snapshot "launch-$launch"
+                    $launches += $after
+                }
+                Save-Json $launches 'relaunch-launches.json'
+                $result.checks += @{ name = 'relaunch-saved-sessions'; launches = 3; sessions = $relaunchSeed.live.Count; ghostsSeeded = $relaunchSeed.ghosts; groups = $relaunchSeed.groups.Count; occupiedPorts = @($script:relaunchListeners).Count }
+            } finally {
+                if ($null -ne $script:relaunchListeners) { foreach ($listener in $script:relaunchListeners) { $listener.Stop() } }
+            }
         }
         'session-open' {
             $result.sshBoundary = @{ verified = $false; expected = 'No remote credentials or tmux server are supplied; background tab creation, idempotency and failed connection status are verified'; observed = 'pending'; tabRemoved = $null }
