@@ -2,7 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 public static class ChatDeliveryDesktop {
-    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; public int Width { get { return Right - Left; } } public int Height { get { return Bottom - Top; } } }
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] struct Message { public IntPtr Hwnd; public uint Id; public UIntPtr WParam; public IntPtr LParam; public uint Time; public Point Position; public uint Private; }
     [StructLayout(LayoutKind.Sequential)] public struct Gui { public uint Size, Flags; public IntPtr Active, Focus, Capture, Menu, Move, Caret; public Rect CaretRect; }
@@ -106,6 +106,13 @@ public static class ChatDeliveryDesktop {
         inputs[1].Data.Mouse.Flags = 2;
         inputs[2].Data.Mouse.Flags = 4;
         if (SendInput(3, inputs, Marshal.SizeOf(typeof(Input))) != 3) throw new InvalidOperationException("Mouse SendInput failed");
+    }
+    public static Rect TranscriptBounds(IntPtr main, uint pid, IntPtr transcript) {
+        Rect rect;
+        if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
+            Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||
+            !IsWindowVisible(transcript) || !GetWindowRect(transcript, out rect)) throw new InvalidOperationException("Transcript bounds ownership mismatch");
+        return rect;
     }
     public static void WheelOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int delta) {
         Rect rect;
