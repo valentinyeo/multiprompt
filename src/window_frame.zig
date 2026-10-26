@@ -103,7 +103,7 @@ pub fn handle(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) ?w.LRESUL
                     .maximize => if (w.IsZoomed(hwnd) != 0) 0xF120 else w.SC_MAXIMIZE,
                     .close => 0xF060,
                 };
-                _ = w.PostMessageW(hwnd, w.WM_SYSCOMMAND, command, 0);
+                _ = @import("focus.zig").PostMessageW(hwnd, w.WM_SYSCOMMAND, command, 0);
             }
             hover(hwnd, null);
             return 0;
