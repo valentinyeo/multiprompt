@@ -1756,6 +1756,18 @@ function Doctor {
     Save-Json @{ pid = $process.Id; hwnd = $script:window.ToInt64(); title = $title; class = $element.Current.ClassName; version = $ExpectedVersion; sha256 = $ExpectedHash; shellCount = @($state.shells).Count; data = $scratch } 'doctor.json'
 }
 
+function WindowShot([string]$Name) {
+    [void][VerifyNative]::DwmFlush()
+    $rect = New-Object VerifyNative+Rect
+    if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$rect)) { throw 'Window rectangle unavailable' }
+    $bitmap = New-Object Drawing.Bitmap(($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top))
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
+        $bitmap.Save((Join-Path $Evidence ($Name + '.png')), [Drawing.Imaging.ImageFormat]::Png)
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
+
 function Snapshot([string]$Name) {
     Write-Host "Evidence: snapshot $Name, focused UI Automation element"
     $foreground = [VerifyNative]::GetForegroundWindow()
@@ -3026,6 +3038,8 @@ try {
             if ($composer.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($handle, 2) -ne $script:window) { throw 'Dictation requires the owned composer' }
             $mic = Get-DictationMic $handle
             Assert-DictationMic $mic $false 'dictation-idle'
+            $micLive = @(($mic[0] - 84), $mic[1], $mic[2], $mic[3])
+            if (($mic[2] - $mic[0]) -ne ($mic[3] - $mic[1])) { throw 'IGSH-887 the idle microphone must be a round button' }
             Snapshot 'before'
             $auditPath = Join-Path $scratch 'roaming/ZigShell/dictation-audit.log'
             $iteration = 0
@@ -3039,12 +3053,31 @@ try {
                 Wait-Until {
                     (Test-Path $auditPath) -and @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
                 } 'recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
-                Assert-DictationMic $mic $true ($stop + '-listening')
+                Assert-DictationMic $micLive $true ($stop + '-listening')
+                if ($stop -ceq 'enter') {
+                    $pillTimer = @(($micLive[0] + 26), $micLive[1], ($micLive[0] + 64), $micLive[3])
+                    $pillWave = @(($micLive[0] + 68), ($micLive[1] + 6), ($micLive[2] - 16), ($micLive[3] - 6))
+                    WindowShot 'recording-0'
+                    $script:pillShot = 0
+                    $script:timerDiff = 0
+                    $script:waveDiff = 0
+                    Wait-Until {
+                        $script:pillShot++
+                        WindowShot ('recording-' + $script:pillShot)
+                        $first = Join-Path $Evidence 'recording-0.png'
+                        $later = Join-Path $Evidence ('recording-' + $script:pillShot + '.png')
+                        $script:timerDiff = [VerifyNative]::RegionDiff($first, $later, $script:window, $pillTimer[0], $pillTimer[1], $pillTimer[2], $pillTimer[3])
+                        $script:waveDiff = [VerifyNative]::RegionDiff($first, $later, $script:window, $pillWave[0], $pillWave[1], $pillWave[2], $pillWave[3])
+                        $script:timerDiff -gt 20 -and $script:waveDiff -gt 20
+                    } 'IGSH-887 the recording pill timer counts up and the wave moves' -Seconds 6 -PollMilliseconds 250
+                    Copy-Item (Join-Path $Evidence ('recording-' + $script:pillShot + '.png')) (Join-Path $Evidence 'recording-pill.png')
+                    $result.micPill = @{ passed = $true; timerDiffPixels = $script:timerDiff; waveDiffPixels = $script:waveDiff; pillRect = $micLive }
+                }
                 $typed = 'typing-' + $stop
                 Type-Text $typed
                 Wait-Until { [VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-812 typing is accepted while listening' -Seconds 1 -PollMilliseconds 10
                 if ([VerifyNative]::GetFocusedWindow($script:window) -ne $handle) { throw 'Dictation stole native composer typing focus' }
-                Assert-DictationMic $mic $true ($stop + '-typed-listening')
+                Assert-DictationMic $micLive $true ($stop + '-typed-listening')
                 Snapshot ($stop + '-listening')
                 if ($stop -ceq 'enter') { Snapshot 'action' }
                 Doctor
@@ -3081,7 +3114,7 @@ try {
             Wait-Until {
                 @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
             } 'IGSH-846 cancellation recording reached the real capture worker' -Seconds 2 -PollMilliseconds 20
-            Assert-DictationMic $mic $true 'escape-listening'
+            Assert-DictationMic $micLive $true 'escape-listening'
             Type-Text ' keep this'
             $draft += ' keep this'
             Wait-Until { [VerifyNative]::EditText($handle) -ceq $draft } 'IGSH-846 draft includes typing during recording'
@@ -3101,7 +3134,7 @@ try {
             Wait-Until {
                 @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
             } 'IGSH-846 a new recording starts after cancellation' -Seconds 2 -PollMilliseconds 20
-            Assert-DictationMic $mic $true 'escape-restarted'
+            Assert-DictationMic $micLive $true 'escape-restarted'
             if ([VerifyNative]::EditText($handle) -cne $draft) { throw 'IGSH-846 cancelled transcript arrived late' }
             $audit = @((Read-DictationAudit $auditPath))
             foreach ($stage in @('fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
@@ -3134,7 +3167,7 @@ try {
                 Wait-Until {
                     @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
                 } 'IGSH-965 recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
-                Assert-DictationMic $mic $true ($way + '-listening')
+                Assert-DictationMic $micLive $true ($way + '-listening')
                 $typed = 'typing-' + $way
                 Type-Text $typed
                 Wait-Until { [VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-965 typing is accepted while listening' -Seconds 1 -PollMilliseconds 10
