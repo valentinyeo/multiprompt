@@ -33,7 +33,7 @@ function assertsNative(source) {
   assert.match(measure, /Bitmap\(3, 3\)[\s\S]*double visible = -1;[\s\S]*var timer = BeginSessionSwitch\(\);/);
   assert.match(measure, /if \(SwitchReady\(owner, console, suffix, browser, dock, composer, draft\)\)/);
   assert.match(measure, /if \(visible < 0\) visible = timer.Elapsed.TotalMilliseconds;/);
-  assert.match(measure, /if \(painted < 0 && \(browser == IntPtr.Zero \|\| PaintMatches\(dock, rgb, pixels, graphics\)\)\) painted = timer.Elapsed.TotalMilliseconds;/);
+  assert.match(measure, /if \(painted < 0 && Painted\(dock, rgb, patch, pixels, graphics\)\) painted = timer.Elapsed.TotalMilliseconds;/);
   assert.match(measure, /if \(painted >= 0 && \(!frozen \|\| awake >= 0\)\) \{\s+timer.Stop\(\);\s+return new double\[\] \{ painted, visible, awake \};/);
   assert.match(measure, /Thread.Sleep\(1\);[\s\S]*timer.ElapsedMilliseconds < 20000/);
   assert.doesNotMatch(source, /AutomationElement|SetForegroundWindow|::Chord|SendMessage\(|PostMessage|DwmFlush/);
@@ -41,11 +41,11 @@ function assertsNative(source) {
 
 test('timed input and native polling stay in one call without UIA or PowerShell dispatch latency', () => {
   assertsNative(native);
-  for (const before of ['GetForegroundWindow() != console', '!IsWindowVisible(console)', '!Title(console).EndsWith(suffix, StringComparison.Ordinal)', 'GetProp(browser, "ZigShellPaneOwner") != owner', 'actual.Left != dock.Left', 'EditText(composer) != draft', 'timer.Stop();', 'Thread.Sleep(1);', 'PaintMatches(dock, rgb, pixels, graphics)']) {
+  for (const before of ['GetForegroundWindow() != console', '!IsWindowVisible(console)', '!Title(console).EndsWith(suffix, StringComparison.Ordinal)', 'GetProp(browser, "ZigShellPaneOwner") != owner', 'actual.Left != dock.Left', 'EditText(composer) != draft', 'timer.Stop();', 'Thread.Sleep(1);', 'Painted(dock, rgb, patch, pixels, graphics)']) {
     assert.throws(() => assertsNative(native.replaceAll(before, 'false')));
   }
   const sample = journey.slice(journey.indexOf('$measurement ='), journey.indexOf("$pattern = 'switch-timing"));
-  assert.match(sample, /MeasureSessionSwitch\(\$script:window, \$consoles\[\$target\], \('ZigShell-' \+ \$shellIds\[\$target\]\), \$browsers\[\$target\], \$docks\[\$target\], \$composerHandle, \$drafts\[\$target\], \$rgb\[\$target\], \$frozenMarker\)/);
+  assert.match(sample, /MeasureSessionSwitch\(\$script:window, \$consoles\[\$target\], \('ZigShell-' \+ \$shellIds\[\$target\]\), \$browsers\[\$target\], \$docks\[\$target\], \$composerHandle, \$drafts\[\$target\], \$paintRgb\[\$target\], \$frozenMarker, \$paintPatch\[\$target\]\)/);
   assert.match(sample, /samples_ms\[\$sample\] = \$measurement\[0\]/);
   assert.match(sample, /window_visible_ms\[\$sample\] = \$measurement\[1\]/);
   assert.ok(sample.indexOf('Wait-WorkspaceSurface') > sample.indexOf('window_visible_ms'));
@@ -55,7 +55,8 @@ function assertsPaint(source, driver) {
   assert.match(source, /dock.Bottom - dock.Top < 200/);
   assert.match(source, /int x = dock.Left \+ \(dock.Right - dock.Left\) \/ 2;/);
   assert.match(source, /int y = dock.Top \+ \(dock.Bottom - dock.Top\) \* 3 \/ 4;/);
-  assert.match(source, /graphics.CopyFromScreen\(x, y, 0, 0, pixels.Size\)/);
+  assert.match(source, /BitBlt\(target, 0, 0, pixels.Width, pixels.Height, screen, x, y, 0x00CC0020\)/);
+  assert.doesNotMatch(source.slice(source.indexOf('static void ReadPatch'), source.indexOf('public static double[] MeasureSessionSwitch')), /CopyFromScreen/);
   assert.match(source, /row < pixels.Height/);
   assert.match(source, /col < pixels.Width/);
   for (const channel of ['R', 'G', 'B']) assert.match(source, new RegExp(`Math.Abs\\(pixel\\.${channel} - [^;]+ > 8`));
@@ -70,12 +71,44 @@ function assertsPaint(source, driver) {
   assert.match(driver, /::Text\(\$pageUrl\)/);
   assert.match(driver, /::Chord\(@\(0x0D\)\)/);
   assert.match(driver, /PagePainted\(\$dock, \$rgb\[\$tab\]\)/);
-  assert.match(driver, /PagePainted\(\$docks\[0\], \$rgb\[0\]\)/);
+  assert.match(driver, /PagePainted\(\$docks\[0\], \$paintRgb\[0\], \$paintPatch\[0\]\)/);
 }
+
+function assertsOffProbe(source, driver) {
+  assert.doesNotMatch(source, /CopyFromScreen/);
+  const measure = source.slice(source.indexOf('public static double[] MeasureSessionSwitch'));
+  assert.doesNotMatch(measure, /browser == IntPtr.Zero \|\|/);
+  assert.match(measure, /Painted\(dock, rgb, patch, pixels, graphics\)/);
+  for (const literal of [
+    "$consoleCodes = @('1F', '2F')",
+    "Type-Text ('color ' + $consoleCodes[$tab])",
+    '[VerifyNative]::SolidPatch($consoleArea)',
+    '$docks[$tab] = $consoleArea',
+    '$paintRgb = if ($browserOn) { $rgb } else { $consoleRgb }',
+    "$paintPatch = if ($mode -eq 'chat_browser_off') { $patches } else { @($null, $null) }",
+    '$regions[$tab] = [VerifyNative]::CaptureComposerStart($composerHandle)',
+    '$patches = [VerifyNative]::CalibratePatches($regions[0], $regions[1])',
+    "throw 'Timing console colors are not distinct'",
+  ]) assert.ok(driver.includes(literal), literal);
+  assert.doesNotMatch(driver, /if \(\$browserOn\) \{ Wait-Until \{ \[VerifyNative\]::PagePainted/);
+  assert.match(driver, /Wait-Until \{ \[VerifyNative\]::PagePainted\(\$docks\[0\], \$paintRgb\[0\], \$paintPatch\[0\]\) \} 'first session color before measurement'/);
+  const drafts = driver.match(/\$drafts = @\('([^']+)', '([^']+)'\)/).slice(1);
+  assert.notEqual(drafts[0][0], drafts[1][0]);
+}
+
+test('browser-off waits on a target-specific pixel read by the same BitBlt probe as browser-on', () => {
+  assertsOffProbe(native, journey);
+  assert.throws(() => assertsOffProbe(native.replace('if (painted < 0 && Painted(dock, rgb, patch, pixels, graphics))', 'if (painted < 0 && (browser == IntPtr.Zero || Painted(dock, rgb, patch, pixels, graphics)))'), journey));
+  assert.throws(() => assertsOffProbe(native.replace('BitBlt(target, 0, 0, pixels.Width', 'graphics.CopyFromScreen(x, y, 0, 0, pixels.Size); BitBlt(target, 0, 0, pixels.Width'), journey));
+  assert.throws(() => assertsOffProbe(native, journey.replaceAll('[VerifyNative]::SolidPatch($consoleArea)', '$plainRgb')));
+  assert.throws(() => assertsOffProbe(native, journey.replace('$paintRgb = if ($browserOn) { $rgb } else { $consoleRgb }', '$paintRgb = $rgb')));
+  assert.throws(() => assertsOffProbe(native, journey.replace("$drafts = @('Wswitch-paint-0', '.switch-paint-1')", "$drafts = @('switch-paint-0', 'switch-paint-1')")));
+  assert.throws(() => assertsOffProbe(native, journey.replace("Wait-Until { [VerifyNative]::PagePainted($docks[0], $paintRgb[0], $paintPatch[0]) }", "if ($browserOn) { Wait-Until { [VerifyNative]::PagePainted($docks[0], $paintRgb[0], $paintPatch[0]) }")));
+});
 
 test('paint is an actual target-colored 3x3 screen patch below the toolbar, reached by real native omnibox input', () => {
   assertsPaint(native, journey);
-  for (const before of ['graphics.CopyFromScreen(x, y, 0, 0, pixels.Size)', 'row < pixels.Height', 'col < pixels.Width', 'dock.Bottom - dock.Top < 200']) {
+  for (const before of ['BitBlt(target, 0, 0, pixels.Width, pixels.Height, screen, x, y, 0x00CC0020)', 'row < pixels.Height', 'col < pixels.Width', 'dock.Bottom - dock.Top < 200']) {
     assert.throws(() => assertsPaint(native.replace(before, 'false'), journey));
   }
   for (const before of ["Palette 'jump browser'", '0x26B8D4', 'width:100%;height:100%', 'PagePainted($dock, $rgb[$tab])']) {
@@ -213,9 +246,10 @@ function assertsSwitchStart(source, driver) {
     'sourceConsole == targetConsole', 'sourceBrowser == targetBrowser && sourceBrowser != IntPtr.Zero', 'sourceSuffix == targetSuffix', 'sourceDraft == targetDraft',
     '!SwitchReady(owner, sourceConsole, sourceSuffix, sourceBrowser, sourceDock, composer, sourceDraft)',
     'if (SwitchReady(owner, targetConsole, targetSuffix, targetBrowser, targetDock, composer, targetDraft)) throw new InvalidOperationException("Target session is already visible before Ctrl+Tab',
+    '!PagePainted(sourceDock, sourceRgb, sourcePatch)', 'PagePainted(targetDock, targetRgb, targetPatch)',
   ]) assert.ok(start.includes(check), check);
   const sample = driver.slice(driver.indexOf('for ($sample = 0;'), driver.indexOf('foreach ($mode in $modes) { $timings[$mode].median_ms'));
-  assert.match(sample, /\$source = 1 - \$target\s+\[VerifyNative\]::RequireSwitchStart\(\$script:window, \$composerHandle, \$consoles\[\$source\], \('ZigShell-' \+ \$shellIds\[\$source\]\), \$browsers\[\$source\], \$docks\[\$source\], \$drafts\[\$source\], \$consoles\[\$target\], \('ZigShell-' \+ \$shellIds\[\$target\]\), \$browsers\[\$target\], \$docks\[\$target\], \$drafts\[\$target\]\)\s+Record \("Ctrl\+Tab timing/);
+  assert.match(sample, /\$source = 1 - \$target\s+\[VerifyNative\]::RequireSwitchStart\(\$script:window, \$composerHandle, \$consoles\[\$source\], \('ZigShell-' \+ \$shellIds\[\$source\]\), \$browsers\[\$source\], \$docks\[\$source\], \$drafts\[\$source\], \$consoles\[\$target\], \('ZigShell-' \+ \$shellIds\[\$target\]\), \$browsers\[\$target\], \$docks\[\$target\], \$drafts\[\$target\], \$paintRgb\[\$source\], \$paintRgb\[\$target\], \$paintPatch\[\$source\], \$paintPatch\[\$target\]\)\s+Record \("Ctrl\+Tab timing/);
   assert.ok(sample.indexOf('RequireSwitchStart(') < sample.indexOf('$measurement ='));
   assert.ok(sample.indexOf('worker_finished_utc') < sample.indexOf('RequireSwitchStart('));
   assert.match(sample, /if \(\$frozenText -notmatch \('\(\?s\)browser freeze confirmed: ' \+ \$idPattern \+ '\.\*hook: Ctrl\\\+Tab shift=0 -> NEXT_TAB\.\*browser wake sent: ' \+ \$idPattern \+ '\.\*switchToShell: ' \+ \(1 - \$target\) \+ ' -> ' \+ \$target \+ ' '\)\) \{ throw "Frozen target/);
@@ -228,6 +262,8 @@ test('a sample whose target is already visible, whose source is not visible, or 
     ['sourceConsole == targetConsole || ', ''], ['|| sourceSuffix == targetSuffix', ''], ['|| sourceDraft == targetDraft', ''],
     ['if (!SwitchReady(owner, sourceConsole, sourceSuffix, sourceBrowser, sourceDock, composer, sourceDraft)) throw', 'if (false) throw'],
     ['if (SwitchReady(owner, targetConsole, targetSuffix, targetBrowser, targetDock, composer, targetDraft)) throw', 'if (false) throw'],
+    ['if (!PagePainted(sourceDock, sourceRgb, sourcePatch)) throw', 'if (false) throw'],
+    ['if (PagePainted(targetDock, targetRgb, targetPatch)) throw', 'if (false) throw'],
   ]) assert.throws(() => assertsSwitchStart(native.replace(before, after), journey), before);
   for (const [before, after] of [
     ['[VerifyNative]::RequireSwitchStart(', '[VerifyNative]::Chord('], ['$frozenText -notmatch', '$frozenText -match'],
