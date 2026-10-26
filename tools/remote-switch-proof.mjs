@@ -11,7 +11,8 @@ export function verifyRemoteSwitch(root) {
   assert.equal(JSON.parse(read('remote-switch/seed-session.json')).tabs[0].tmux_host, 2, 'second host');
   const messages = [...read('remote-switch/long-history-copied.txt').matchAll(/IGSH954 message (\d{4})/g)].map(match => Number(match[1]));
   assert.deepEqual([...new Set(messages)], Array.from({ length: 2000 }, (_, i) => i), 'complete rendered long conversation');
-  assert.equal(value.switches.length, 20, 'twenty measured switches');
+  assert.equal(value.switches.length, 40, 'twenty measured switches per surface');
+  assert.deepEqual(value.switches.map(sample => sample.mode), [...Array(20).fill('session'), ...Array(20).fill('workspace')], 'session and workspace coverage');
   const shells = new Set(value.switches.map(sample => sample.shell));
   assert.equal(shells.size, 2, 'two distinct sessions');
   const frameSet = sample => {
@@ -33,8 +34,9 @@ export function verifyRemoteSwitch(root) {
     return cpu;
   };
   for (const [i, sample] of value.switches.entries()) {
-    assert.equal(sample.index, i);
-    if (i) assert.notEqual(sample.shell, value.switches[i - 1].shell, 'real alternating switches');
+    assert.equal(sample.index, i % 20);
+    if (sample.mode === 'workspace') assert.notEqual(sample.workspaceBefore, sample.workspaceAfter, 'actual workspace change');
+    if (i % 20) assert.notEqual(sample.shell, value.switches[i - 1].shell, 'real alternating switches');
     assert.ok(Number.isFinite(sample.switchMs) && sample.switchMs >= 0 && sample.switchMs < 150, '150 ms switch budget');
     frameSet(sample);
   }

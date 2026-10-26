@@ -13,7 +13,7 @@ test('remote switch proof rejects each broken acceptance condition', () => {
     fs.writeFileSync(file, typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value));
   };
   const interval = elapsedMs => ({ elapsedMs, cpuMs: 1, frames: Array.from({ length: Math.floor(elapsedMs / 10) }, (_, i) => ({ painted: true, completedMs: (i + 1) * 10, gapMs: 10, paintMs: 1 })) });
-  const observation = { error: null, remoteHome: 'second/home', clientHome: 'local/home', idleBefore: interval(2000), idleAfter: interval(2000), switches: Array.from({ length: 20 }, (_, i) => ({ ...interval(250), shell: i % 2 + 1, index: i, switchMs: 10 })) };
+  const observation = { error: null, remoteHome: 'second/home', clientHome: 'local/home', idleBefore: interval(2000), idleAfter: interval(2000), switches: Array.from({ length: 40 }, (_, i) => ({ ...interval(250), mode: i < 20 ? 'session' : 'workspace', workspaceBefore: i % 2, workspaceAfter: 1 - i % 2, shell: i % 2 + 1, index: i % 20, switchMs: 10 })) };
   try {
     write('remote-switch/observation.json', observation);
     write('remote-switch/seed-session.json', { tabs: [{ tmux_host: 2 }] });
@@ -36,6 +36,7 @@ test('remote switch proof rejects each broken acceptance condition', () => {
     reject(value => { value.switches[1].shell = 1; }, /real alternating/);
     reject(value => { value.switches.pop(); }, /twenty measured/);
     reject(value => { value.idleAfter.cpuMs = 150; }, /returns to idle/);
+    reject(value => { value.switches[20].workspaceAfter = value.switches[20].workspaceBefore; }, /actual workspace/);
     reject(value => { value.remoteHome = value.clientHome; }, /alternate remote/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

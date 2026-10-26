@@ -400,20 +400,20 @@ jobs:
           node tools/chat-composer-text-proof.mjs evidence --native
           if ($nativeExit -ne 0 -or $LASTEXITCODE -ne 0) { throw 'IGSH-731 native composer tests or edge proof failed' }
       - name: Run messages-only native layout regressions
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         run: zig build test-main --summary all
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         with:
           persist-credentials: false
           ref: 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f
           path: negative-source
       - name: Build the pre-fix commit 42cecfd3 negative control
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         working-directory: negative-source
         run: zig build
       - name: Require pre-fix 42cecfd3 to show activity rows with the identical journey
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'

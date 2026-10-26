@@ -482,6 +482,7 @@ foreach ($plan in $plans) {
         if ($isRemote) {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
             $saved.tabs[0].tmux_host = 2
+            if ($isSwitch) { $saved.single_window = $true }
             Save $saved "$settings/session.json"
         }
         Copy-Item "$settings/session.json" "$caseDir/seed-session.json"

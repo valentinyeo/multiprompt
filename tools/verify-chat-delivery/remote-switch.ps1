@@ -75,9 +75,42 @@ for ($i = 0; $i -lt 20; $i++) {
     $log = (Read-Shared "$settings/debug.log").Substring($offset)
     $paint = [regex]::Matches($log, '\[switch\] chat painted in (\d+) ms, browser pending \(shell (\d+)\)')
     if ($paint.Count -ne 1) { throw 'Each sample requires exactly one painted session switch' }
+    $sample.mode = 'session'
     $sample.index = $i
     $sample.switchMs = [int]$paint[0].Groups[1].Value
     $sample.shell = [int]$paint[0].Groups[2].Value
+    $observation.switches.Add($sample)
+    Save $observation "$caseDir/observation.json"
+}
+Press @(0x11, 0x57) 'Ctrl+W: close the owned local fixture tab'
+$expectedShells = 1
+[void](Wait-For 'local fixture tab closed' { @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count -eq 1 })
+Press @(0x11, 0x4E) 'Ctrl+N: create the local fixture workspace'
+$expectedShells = 2
+[void](Wait-For 'two distinct saved workspaces' {
+    $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+    $saved.workspace_count -eq 2 -and @($saved.tabs).Count -eq 2 -and @($saved.tabs | Select-Object -ExpandProperty workspace -Unique).Count -eq 2
+})
+Switch-Palette 'chat view on everywhere'
+Bind-Transcript
+for ($i = 0; $i -lt 20; $i++) {
+    $offset = (Read-Shared "$settings/debug.log").Length
+    $workspaceBefore = (Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).active_workspace
+    $keys = if ($i % 2 -eq 0) { @(0x12, 0x25) } else { @(0x12, 0x27) }
+    $sample = Measure-Frames {
+        [ChatDeliveryDesktop]::Chord($keys)
+        [void](Wait-For 'workspace conversation painted' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[switch\] chat painted in \d+ ms, browser pending \(shell \d+\)' } 5)
+    } 250
+    $log = (Read-Shared "$settings/debug.log").Substring($offset)
+    $paint = [regex]::Matches($log, '\[switch\] chat painted in (\d+) ms, browser pending \(shell (\d+)\)')
+    if ($paint.Count -ne 1 -or $log -notmatch 'switchToWorkspace: \d+ -> \d+') { throw 'Each workspace sample requires one actual painted workspace switch' }
+    $sample.mode = 'workspace'
+    $sample.index = $i
+    $sample.switchMs = [int]$paint[0].Groups[1].Value
+    $sample.shell = [int]$paint[0].Groups[2].Value
+    $sample.workspaceBefore = $workspaceBefore
+    $sample.workspaceAfter = (Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).active_workspace
+    if ($sample.workspaceBefore -eq $sample.workspaceAfter) { throw 'Workspace did not change' }
     $observation.switches.Add($sample)
     Save $observation "$caseDir/observation.json"
 }
