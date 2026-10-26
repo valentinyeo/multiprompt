@@ -5191,7 +5191,7 @@ try {
                             [VerifyNative]::Chord(@(0x11, 0x4C))
                             if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.ClassName -ne 'OmniboxViewViews') { throw 'Ctrl+L did not focus the browser address bar' }
                             [VerifyNative]::Chord(@(0x12, 0x51))
-                            if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw 'IGSH-724 Alt+Q did not restore the session input' }
+                            Wait-Until { [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab]) } 'IGSH-724 Alt+Q did not restore the session input'
                             [VerifyNative]::Chord(@(0x12, 0x51))
                             $pageKeys = 0
                             foreach ($key in @(0x20, 0x28, 0x4A, 0x4B)) {
@@ -5199,6 +5199,18 @@ try {
                                 [VerifyNative]::Chord(@($key))
                                 $pageKeys++
                                 if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw 'IGSH-724 Alt+Q sent a page key to browser chrome' }
+                            }
+                            Record 'IGSH-972: repeated Alt+Q round trips deliver every page key'
+                            foreach ($round in 1..5) {
+                                [VerifyNative]::Chord(@(0x12, 0x51))
+                                Wait-Until { [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab]) } ('IGSH-972 round ' + $round + ' Alt+Q did not restore the session input')
+                                [VerifyNative]::Chord(@(0x12, 0x51))
+                                foreach ($key in @(0x20, 0x28, 0x4A, 0x4B)) {
+                                    if ([VerifyNative]::GetForegroundWindow() -ne $browser -or [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw ('IGSH-972 round ' + $round + ' refusing page key outside the owned browser') }
+                                    [VerifyNative]::Chord(@($key))
+                                    $pageKeys++
+                                    if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw ('IGSH-972 round ' + $round + ' Alt+Q sent a page key to the browser menu') }
+                                }
                             }
                             Record 'IGSH-724: F6 still reaches browser chrome'
                             [VerifyNative]::Chord(@(0x75))
@@ -5211,7 +5223,7 @@ try {
                             $pageKeys++
                             if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw 'IGSH-724 opening a pane sent Space to browser chrome' }
                             [VerifyNative]::Chord(@(0x12, 0x51))
-                            if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw 'IGSH-724 page-to-input return lost session typing focus' }
+                            Wait-Until { [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab]) } 'IGSH-724 page-to-input return lost session typing focus'
                             $result.checks += @{ name = 'IGSH-724 browser-page-focus'; mode = $mode; tab = $tab; pageKeys = $pageKeys; ctrlL = $true; f6 = $true; inputReturn = $true }
                             $browsers[$tab] = $browser
                             $docks[$tab] = $dock

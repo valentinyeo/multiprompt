@@ -573,6 +573,7 @@ pub var g_browser_focus_mode: bool = false;
 pub var g_native_browser_focus_pending_shell_id: u32 = 0;
 pub var g_native_browser_focus_retries: u16 = 0;
 pub var g_native_browser_focus_attempts: u8 = 0;
+pub var g_native_browser_alt_unlocked_at: u64 = 0;
 pub const BROWSER_BLANK_APP_URL = "data:text/html,<style>body{background:%23000;margin:0}</style>";
 pub var g_edge_user_data_dir_buf: [512]u8 = undefined;
 pub var g_edge_user_data_dir_len: usize = 0;

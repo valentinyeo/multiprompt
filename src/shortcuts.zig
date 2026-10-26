@@ -636,7 +636,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) focusGuardNoteInput(surface, GetTickCount64(), true);
             if (foregroundHwndIsOurs(fg)) app_state.g_focus_user_action_tick = app_state.g_focus_input_tick;
         } else if ((wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) and
-            kb.vkCode != VK_MENU and kb.vkCode != 0xA4 and kb.vkCode != 0xA5 and kb.vkCode != 0xFF and
+            kb.vkCode != VK_MENU and kb.vkCode != 0xA4 and kb.vkCode != 0xA5 and kb.vkCode != 0xFF and kb.vkCode != 0xE8 and
             foregroundIsOurs())
         {
             app_state.g_focus_authorized_hwnd = null;

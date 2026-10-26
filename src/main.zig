@@ -947,7 +947,8 @@ const VK_MENU = @import("app_state.zig").VK_MENU;
 const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const activeShellHasForegroundFocus = @import("focus.zig").activeShellHasForegroundFocus;
-const focusActiveBrowserPane = @import("focus.zig").focusActiveBrowserPane;
+const focusActiveBrowserPaneUnlocked = @import("focus.zig").focusActiveBrowserPaneUnlocked;
+const unlockBrowserForeground = @import("focus.zig").unlockBrowserForeground;
 const cancelPendingNativeBrowserFocus = @import("focus.zig").cancelPendingNativeBrowserFocus;
 const requestNativeBrowserFocus = @import("focus.zig").requestNativeBrowserFocus;
 const requestShellRefocus = @import("focus.zig").requestShellRefocus;
@@ -7223,7 +7224,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
 
-                focusActiveBrowserPane();
+                if ((app_state.g_native_browser_alt_unlocked_at == 0 or GetTickCount64() -| app_state.g_native_browser_alt_unlocked_at > 100) and !activeBrowserHasForegroundFocus()) {
+                    unlockBrowserForeground();
+                    if (app_state.g_native_browser_alt_unlocked_at != 0) _ = SetTimer(hwnd, TIMER_NATIVE_BROWSER_FOCUS, 10, null);
+                    return 0;
+                }
+                focusActiveBrowserPaneUnlocked();
+                _ = SetTimer(hwnd, TIMER_NATIVE_BROWSER_FOCUS, 30, null);
                 if (activeBrowserHasForegroundFocus()) {
                     cancelPendingNativeBrowserFocus();
                     app_state.g_browser_focus_mode = true;
