@@ -22,7 +22,7 @@ function decide({ run, repository, commits, jobs, history = [] }) {
   if (!failed.length && run.conclusion === 'cancelled') return { action: 'ignore', reason: 'Cancelled run has no failed journey' };
   const marker = `Auto-Revert-Run: ${run.id}`;
   const duplicate = commits.find(commit => commit.commit.message.split('\n').includes(marker));
-  if (duplicate) return { action: 'skip', reason: `Run already reverted by ${duplicate.sha}` };
+  if (duplicate) return { action: 'skip', reason: `Run already reverted by ${duplicate.sha}`, duplicate: duplicate.commit.message };
   const target = commits.find(commit => commit.sha === run.head_sha);
   if (!target) return refuse('Run head is not on the first-parent history of master');
   const subject = target.commit.message.split('\n')[0];
@@ -98,8 +98,18 @@ function main() {
     console.error('::error::Board ticket not reopened; the GitHub issue records the cause and the required manual reopening.');
     process.exitCode = 1;
   };
+  const reopenBoard = (key, journeys, context) => {
+    try {
+      execFileSync('node', ['tools/auto-revert-board.js', key, run.html_url, journeys], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000 });
+    } catch (error) {
+      notify(`${context}, but the board ticket was not reopened: ${error.stderr?.toString().trim() || error.message}`);
+    }
+  };
   if (decision.action === 'skip') {
-    notify(decision.reason);
+    const key = decision.duplicate?.match(/\bIGSH-\d+\b/)?.[0];
+    const journeys = decision.duplicate?.match(/^Failed journeys: (.+)$/m)?.[1];
+    if (key && journeys) reopenBoard(key, journeys, decision.reason);
+    else notify(decision.reason);
     return;
   }
   if (decision.action === 'refuse') {
@@ -108,6 +118,14 @@ function main() {
   }
   const branch = `auto-revert/${runId}`;
   const subject = commits.find(commit => commit.sha === decision.sha).commit.message.split('\n')[0];
+  const journeyText = decision.journeys.join(', ');
+  if (git('ls-remote', '--heads', 'origin', branch)) {
+    const openPull = execFileSync('gh', ['pr', 'list', '--repo', repository, '--head', branch, '--state', 'all', '--json', 'url', '--jq', '.[0].url'], { encoding: 'utf8' }).trim();
+    if (openPull) {
+      reopenBoard(ticket, journeyText, `Revert pull request ${openPull} already exists`);
+      return;
+    }
+  }
   let pullRequest;
   try {
     if (git('rev-parse', 'HEAD') !== tip || git('status', '--porcelain')) throw new Error('Checkout is not a clean current master; refusing to revert');
@@ -128,11 +146,7 @@ function main() {
     notify(`Auto-revert could not prepare or enable squash auto-merge for ${decision.sha}: ${error.message}\n\nstdout:\n${error.stdout?.toString() || ''}\n\nstderr:\n${error.stderr?.toString() || ''}`);
     throw error;
   }
-  try {
-    execFileSync('node', ['tools/auto-revert-board.js', ticket, run.html_url, decision.journeys.join(', ')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  } catch (error) {
-    notify(`Opened ${pullRequest} to revert only ${decision.sha} with squash auto-merge enabled, but the board ticket was not reopened: ${error.stderr?.toString().trim() || error.message}`);
-  }
+  reopenBoard(ticket, journeyText, `Opened ${pullRequest} to revert only ${decision.sha} with squash auto-merge enabled`);
 }
 
 module.exports = { decide };

@@ -9,6 +9,7 @@ function boardApi(credential, base = boardBase) {
       method,
       headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(30000),
     });
     const result = await response.json().catch(() => null);
     if (!response.ok || result?.success !== true) throw new Error(`Board ${method} ${path.split('?')[0]} failed with status ${response.status}`);
@@ -26,8 +27,8 @@ async function reopenTicket({ api, ticket, runUrl, journeys }) {
     const page = await api('GET', `/comments?ticket_number=${encodeURIComponent(ticket)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
     if (!Array.isArray(page.comments)) throw new Error('Invalid board comment response');
     comments.push(...page.comments);
-    cursor = page.has_more ? page.nextCursor : null;
-    if (page.has_more && (!cursor || cursors.has(cursor))) throw new Error('Incomplete board comment history');
+    cursor = page.nextCursor || null;
+    if (cursor && cursors.has(cursor)) throw new Error('Incomplete board comment history');
     if (cursor) cursors.add(cursor);
   } while (cursor);
   if (comments.some(comment => comment.text?.includes(runUrl))) return 'already reopened';

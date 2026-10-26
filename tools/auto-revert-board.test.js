@@ -24,8 +24,8 @@ async function fakeBoard(t, initial = {}) {
       if (req.method === 'GET' && url.pathname === '/projects/2060/sections') return reply(200, { success: true, sections });
       if (req.method === 'POST' && url.pathname === '/tasks/update') { state.section = sections.find(section => section.id === body.sectionId).section_title; return reply(200, { success: true }); }
       if (req.method === 'GET' && url.pathname === '/comments') {
-        if (state.pages && !url.searchParams.get('cursor')) return reply(200, { success: true, comments: [], has_more: true, nextCursor: 'next' });
-        return reply(200, { success: true, comments: state.comments, has_more: false, nextCursor: null });
+        if (state.pages && !url.searchParams.get('cursor')) return reply(200, { success: true, comments: [], nextCursor: 'next' });
+        return reply(200, { success: true, comments: state.comments, nextCursor: null });
       }
       if (req.method === 'POST' && url.pathname === '/comments') {
         if (state.failComment) return reply(500, { success: false });

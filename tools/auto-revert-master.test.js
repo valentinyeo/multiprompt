@@ -58,6 +58,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null) {
       if (command === 'gh') {
         if (args[0] === 'pr' && args[1] === 'create') return `https://github.com/${repository}/pull/351\n`;
         if (args[0] === 'pr' && args[1] === 'merge') return '';
+        if (args[0] === 'pr' && args[1] === 'list') return input.existingPull ? input.existingPull + '\n' : '\n';
         if (args[0] === 'workflow' && args[1] === 'run') return '';
         assert.equal(args[0], 'api');
         if (args.includes('POST')) return JSON.stringify({ number: 1 });
@@ -78,6 +79,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null) {
       assert.equal(command, 'git');
       if (args[0] === 'log') return input.commits.map(commit => `${commit.sha}\0${commit.parents.map(parent => parent.sha).join(' ')}\0${commit.commit.message}\n\0`).join('');
       if (args[0] === 'rev-parse') return input.commits[0].sha;
+      if (args[0] === 'ls-remote') return input.existingPull ? 'abc\trefs/heads/x' : '';
       return '';
     } };
   };
@@ -433,6 +435,27 @@ test('duplicate red workflow path never pushes a second revert', () => {
   const result = runtime(input, 'workflow_run');
   assert.ok(result.calls.every(call => !call.includes('revert') && !call.includes('push')));
   assert.match(result.output, /already reverted/);
+  assert.ok(result.calls.every(call => call[0] !== 'node'));
+  assert.ok(result.calls.some(call => call.includes('POST')));
+});
+
+test('a re-run after the revert merged still reopens the board ticket once more through the idempotent step', () => {
+  const input = fixture();
+  input.commits.unshift(commit(reverted, `Revert "IGSH-812: restore appearance"\n\nThis reverts commit ${sha}.\n\nAuto-Revert-Run: ${input.run.id}\nFailed journeys: session-restore\nVerify run: ${input.run.html_url}`));
+  const result = runtime(input, 'workflow_run');
+  assert.ok(result.calls.every(call => !call.includes('revert') && !call.includes('push')));
+  assert.deepEqual(result.calls.find(call => call[0] === 'node'), ['node', 'tools/auto-revert-board.js', 'IGSH-812', input.run.html_url, 'session-restore']);
+  assert.equal(result.calls.filter(call => call.includes('POST')).length, 0);
+  assert.equal(result.process.exitCode, 0);
+});
+
+test('a re-run while the revert pull request is still open reaches the board without pushing again', () => {
+  const input = fixture();
+  input.existingPull = `https://github.com/${repository}/pull/351`;
+  const result = runtime(input, 'workflow_run');
+  assert.ok(result.calls.every(call => !call.includes('push') && !(call[0] === 'git' && call[1] === 'revert') && !(call[1] === 'pr' && (call[2] === 'create' || call[2] === 'merge'))));
+  assert.deepEqual(result.calls.find(call => call[0] === 'node'), ['node', 'tools/auto-revert-board.js', 'IGSH-812', input.run.html_url, 'session-restore, chat-focus']);
+  assert.equal(result.process.exitCode, 0);
 });
 
 test('ticket-less red workflow opens an issue but never reverts or pushes', () => {
