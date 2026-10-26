@@ -328,17 +328,25 @@ fn shellWorkspaceIdForOwnProfile(idx: u32) []const u8 {
     return "";
 }
 
+fn shellWorkspaceNameForOwnProfile(idx: u32) []const u8 {
+    const ws = app_state.shells[idx].workspace;
+    if (ws < app_state.g_lws_count and app_state.g_ws_name_len[ws] > 0) return app_state.g_ws_names[ws][0..app_state.g_ws_name_len[ws]];
+    if (!app_state.g_single_window and app_state.g_window_display_name_u8_len > 0) return app_state.g_window_display_name_u8[0..app_state.g_window_display_name_u8_len];
+    return "";
+}
+
 fn ownProfileTokenForLaunch(idx: u32, buf: *[browser_own_profile.TOKEN_LEN]u8) ?[]const u8 {
     const workspace_id = shellWorkspaceIdForOwnProfile(idx);
-    if (workspace_id.len == 0) return null;
+    const workspace_name = shellWorkspaceNameForOwnProfile(idx);
+    if (workspace_id.len == 0 and workspace_name.len == 0) return null;
     var config_buf: [512]u8 = undefined;
     const config_path = ownProfileConfigPath(&config_buf) orelse return null;
     const h = win32OpenRead(config_path) orelse return null;
     var listing: [4096]u8 = undefined;
     const listing_len = win32ReadAll(h, &listing);
     _ = CloseHandle(h);
-    if (!browser_own_profile.listed(listing[0..listing_len], workspace_id)) return null;
-    return browser_own_profile.token(buf, workspace_id) catch null;
+    const profile_seed = browser_own_profile.seed(listing[0..listing_len], workspace_id, workspace_name) orelse return null;
+    return browser_own_profile.token(buf, profile_seed) catch null;
 }
 
 fn assignBrowserProfileForLaunch(idx: u32) void {
