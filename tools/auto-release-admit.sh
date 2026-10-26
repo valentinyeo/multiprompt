@@ -53,8 +53,7 @@ for sha in $commits; do
         exit 1
     fi
     if [ "$dry_run" = false ]; then
-        git tag "$release_tag" "$sha"
-        git push origin "refs/tags/$release_tag" >&2
+        gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$release_tag" -f "sha=$sha" >&2
     fi
     printf 'tag=%s\nsha=%s\n' "$release_tag" "$sha"
     exit 0
