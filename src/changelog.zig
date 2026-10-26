@@ -59,6 +59,10 @@ pub const CHANGELOG = blk: {
 };
 
 const SOURCE_CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.882", .items = &.{
+        .{ .text = "Dictation checks finish reliably and retain pictures when blocked.", .ticket = "IGSH-893" },
+        .{ .text = "Updates are checked on saved sessions for every new version, so a release no longer waits for the long full check to reach it.", .ticket = "IGSH-900" },
+    } },
     .{ .ver = "0.28.881", .items = &.{
         .{ .text = "Pasted text keeps its line breaks when sent.", .ticket = "IGSH-895" },
     } },
