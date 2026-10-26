@@ -9,7 +9,7 @@
 
 ## How to get to it (user POV)
 
-- Start with one CMD. Pick Ctrl+K `tab order`, Tab Order Manual, so Ctrl+1 to Ctrl+5 follow creation order. Create four more with Ctrl+K `new cmd`, Enter. In each, print 80 numbered lines through a real `cmd /c "for /L ..."` command, then press Alt+C to open Chat View.
+- Start with one CMD. Pick Ctrl+K `tab order`, Tab Order Manual, so Ctrl+1 to Ctrl+5 follow creation order. Create four more with Ctrl+K `new cmd`, Enter. In each, print 3000 long numbered lines through a real `cmd /c "for /L ..."` command, then press Alt+C to open Chat View.
 - Switch with Ctrl+1 to Ctrl+5. For the pane-open set, open each session's browser with Ctrl+K `open browser`, Enter.
 
 ## Driving it with control.ps1

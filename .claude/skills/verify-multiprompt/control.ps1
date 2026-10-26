@@ -5743,8 +5743,8 @@ try {
                     }
                     Wait-WorkspaceSurface $workspace $tab $false
                     $marker = Join-Path $scratch "fill-$tab.txt"
-                    Type-Text ('cmd /c "for /L %i in (1,1,80) do @echo session-' + $tab + ' history line %i" && echo done>"' + $marker + '"')
-                    Press @(0x0D) "Enter: print 80 history lines in session $tab"
+                    Type-Text ('cmd /c "for /L %i in (1,1,3000) do @echo session-' + $tab + ' history line %i with enough words to wrap across the chat width like a real long assistant answer does" && echo done>"' + $marker + '"')
+                    Press @(0x0D) "Enter: print 3000 history lines in session $tab"
                     Wait-Until { Test-Path $marker } "session $tab console output complete"
                     Press @(0x12, 0x43) "Alt+C: open Chat View for session $tab"
                     Wait-Until { Test-TabChat (Read-Session).tabs[$tab] } "Chat View saved for session $tab"
