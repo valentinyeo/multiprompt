@@ -2286,7 +2286,7 @@ fn positionReconnectedConsole(idx: u32) bool {
     var rc: RECT = std.mem.zeroes(RECT);
     if (GetClientRect(app_state.g_main_hwnd, &rc) == 0) return false;
     rc = @import("window_layout.zig").activePaneContentRect(rc);
-    rc.top += pane.threadTitleHeight();
+    rc.top = @max(rc.top + pane.threadTitleHeight(), @import("window_frame.zig").controlsRect(rc.right).bottom);
     if (!shell.full_width) {
         const col = pane.centeredConsoleColumn(rc.right, rc.left, 0, pane.consoleCellW());
         rc.left = col.left;

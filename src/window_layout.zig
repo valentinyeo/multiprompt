@@ -121,7 +121,10 @@ pub fn paneRects(client: RECT, sidebar_w: i32, browser: bool, split_permille: u3
 }
 
 pub fn activePaneRects(client: RECT) PaneRects {
-    return paneRects(client, SIDEBAR_W(), browserSlotReserved(), @import("browser_pane.zig").browserSplitPermilleForActiveShell(), uiScaled(if (app_state.g_sidebar_collapsed) app_state.SIDEBAR_STICKY_CARD_COLLAPSED_H else app_state.SIDEBAR_STICKY_CARD_H));
+    var panes = paneRects(client, SIDEBAR_W(), browserSlotReserved(), @import("browser_pane.zig").browserSplitPermilleForActiveShell(), uiScaled(if (app_state.g_sidebar_collapsed) app_state.SIDEBAR_STICKY_CARD_COLLAPSED_H else app_state.SIDEBAR_STICKY_CARD_H));
+    panes.browser.top = @import("window_frame.zig").controlsRect(client.right).bottom + paneOuterMargin();
+    panes.splitter.top = panes.browser.top;
+    return panes;
 }
 
 pub fn activePaneContentRect(client: RECT) RECT {
@@ -175,7 +178,7 @@ pub fn repositionActive() void {
     if (LOOK_UNIFIED) {
         ensureDevThemeInitialized();
         const pane = activePaneContentRect(rc);
-        const con_top = pane.top + threadTitleHeight();
+        const con_top = @max(pane.top + threadTitleHeight(), @import("window_frame.zig").controlsRect(rc.right).bottom);
         const h = pane.bottom - con_top;
         const sh = app_state.shells[app_state.active_shell].hwnd;
         var st = GetWindowLongPtrW(sh, GWL_STYLE);

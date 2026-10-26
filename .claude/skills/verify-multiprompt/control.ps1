@@ -6208,7 +6208,7 @@ try {
             }
         }
     }
-    if ($Feature -eq 'window-controls') {
+    if ($Feature -in @('title-bar', 'window-controls')) {
         if (-not $result.windowControls.closed -or -not $process.HasExited) { throw 'Window control journey did not prove normal close' }
     } else { Doctor }
     $result.status = 'passed'

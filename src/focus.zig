@@ -196,7 +196,7 @@ pub fn focusGuardDispatchTick(msg: UINT, wp: WPARAM, lp: LPARAM) u64 {
         }
     }
     const native_input = switch (msg) {
-        WM_KEYDOWN, WM_SYSKEYDOWN, 0x0102, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK, WM_RBUTTONDOWN, 0x0205, WM_MOUSEWHEEL => true,
+        WM_KEYDOWN, WM_SYSKEYDOWN, 0x0102, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK, @import("win32.zig").WM_NCLBUTTONDOWN, WM_RBUTTONDOWN, 0x0205, WM_MOUSEWHEEL => true,
         else => false,
     };
     return if (native_input and app_state.g_focus_input_tick != 0 and now -| app_state.g_focus_input_tick <= 1500 and foregroundIsOurs()) app_state.g_focus_input_tick else 0;
