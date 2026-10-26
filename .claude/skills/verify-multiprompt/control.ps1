@@ -422,9 +422,23 @@ public static class VerifyNative {
     public static int PollCount;
     public static double PollMaxMs;
     public static double PollLastMs;
+    [DllImport("user32.dll", EntryPoint = "GetDC")] static extern IntPtr ProbeGetDC(IntPtr hwnd);
+    [DllImport("user32.dll", EntryPoint = "ReleaseDC")] static extern int ProbeReleaseDC(IntPtr hwnd, IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "BitBlt")] static extern bool ProbeBitBlt(IntPtr dest, int dx, int dy, int w, int h, IntPtr src, int sx, int sy, int rop);
+    public static double ProbeBltFirstMs;
+    public static double ProbeBltSecondMs;
+    static double TimedBlt(int px, int py, System.Drawing.Graphics graphics) {
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        IntPtr screen = ProbeGetDC(IntPtr.Zero);
+        IntPtr dest = graphics.GetHdc();
+        ProbeBitBlt(dest, 0, 0, 3, 3, screen, px, py, 0x00CC0020);
+        graphics.ReleaseHdc(dest);
+        ProbeReleaseDC(IntPtr.Zero, screen);
+        return (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+    }
     public static double ProbeFirstMs;
     public static double ProbeSecondMs;
-    public static void ResetPollStats() { PollCount = 0; PollMaxMs = 0; PollLastMs = 0; ProbeFirstMs = -1; ProbeSecondMs = -1; }
+    public static void ResetPollStats() { PollCount = 0; PollMaxMs = 0; PollLastMs = 0; ProbeFirstMs = -1; ProbeSecondMs = -1; ProbeBltFirstMs = -1; ProbeBltSecondMs = -1; }
     static double TimedCapture(int px, int py, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         graphics.CopyFromScreen(px, py, 0, 0, pixels.Size);
@@ -436,6 +450,8 @@ public static class VerifyNative {
         else { Rect r; if (!GetWindowRect(console, out r)) return; x = r.Left + (r.Right - r.Left) / 2; y = r.Top + (r.Bottom - r.Top) * 3 / 4; }
         ProbeFirstMs = TimedCapture(x, y, pixels, graphics);
         ProbeSecondMs = TimedCapture(x, y, pixels, graphics);
+        ProbeBltFirstMs = TimedBlt(x, y, graphics);
+        ProbeBltSecondMs = TimedBlt(x, y, graphics);
     }
     static bool PaintMatches(Rect dock, int rgb, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -5269,7 +5285,7 @@ try {
             $traces = @{}
             foreach ($mode in $modes) {
                 $sampleCount = if ($mode.Contains('frozen_')) { 5 } else { 20 }
-                $timings[$mode] = @{ samples_ms = @($null) * $sampleCount; median_ms = $null; window_visible_ms = @($null) * $sampleCount; window_visible_median_ms = $null; paint_polls = @($null) * $sampleCount; paint_poll_max_ms = @($null) * $sampleCount; paint_poll_last_ms = @($null) * $sampleCount; probe_first_ms = @($null) * $sampleCount; probe_second_ms = @($null) * $sampleCount }
+                $timings[$mode] = @{ samples_ms = @($null) * $sampleCount; median_ms = $null; window_visible_ms = @($null) * $sampleCount; window_visible_median_ms = $null; paint_polls = @($null) * $sampleCount; paint_poll_max_ms = @($null) * $sampleCount; paint_poll_last_ms = @($null) * $sampleCount; probe_first_ms = @($null) * $sampleCount; probe_second_ms = @($null) * $sampleCount; probe_blt_first_ms = @($null) * $sampleCount; probe_blt_second_ms = @($null) * $sampleCount }
                 $timings.steps[$mode] = $null
                 $traces[$mode] = @()
             }
@@ -5529,6 +5545,8 @@ try {
                         $timings[$mode].paint_poll_last_ms[$sample] = [VerifyNative]::PollLastMs
                         $timings[$mode].probe_first_ms[$sample] = [VerifyNative]::ProbeFirstMs
                         $timings[$mode].probe_second_ms[$sample] = [VerifyNative]::ProbeSecondMs
+                        $timings[$mode].probe_blt_first_ms[$sample] = [VerifyNative]::ProbeBltFirstMs
+                        $timings[$mode].probe_blt_second_ms[$sample] = [VerifyNative]::ProbeBltSecondMs
                         if ($frozen) {
                             $freeze.window_visible_ms = $measurement[1]
                             $freeze.wake_flag_cleared_ms = $measurement[2]
