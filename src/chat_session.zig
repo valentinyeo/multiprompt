@@ -876,6 +876,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
                 chatPerf("cache write", write_start, bytes.len);
             } else |_| debugLog("[chat] transcript cache encode failed");
         }
+        history.received_ms = if (!entry.staged and !entry.unchanged) parse_start else 0;
         entry.result = history;
     } else {
         history.deinit(a);
@@ -956,6 +957,7 @@ pub fn chatFileOnReady() void {
                 entry.history.deinit(std.heap.page_allocator);
                 entry.history = history;
             }
+            if (!disk and history.received_ms != 0) entry.history.received_ms = history.received_ms;
             if (belongs_to_active and app_state.g_chat_active and !disk and !history.more) app_state.g_chat_read_open_ready = true;
             if (belongs_to_active and app_state.g_chat_active and added > 0) {
                 const had_messages = app_state.g_chat_new_messages.count() != 0;
@@ -1302,6 +1304,14 @@ pub fn chatDeferTranscriptLoad() void {
 }
 
 pub fn chatSwitchDidPaint() void {
+    if (app_state.g_chat_active and app_state.g_chat_blocks_from_file) {
+        if (chatHistoryEntry(chatCacheIdentity())) |entry| {
+            if (entry.history.received_ms != 0) {
+                chatPerf("receive to paint", entry.history.received_ms, app_state.g_chat_block_count);
+                entry.history.received_ms = 0;
+            }
+        }
+    }
     if (app_state.g_chat_switch_preparing or !app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
     if (!app_state.g_chat_browser_swap.didPaint(app_state.shells[app_state.active_shell].shell_id)) return;
     app_state.g_chat_switch_painted_ms = GetTickCount64() -| app_state.g_chat_switch_started;

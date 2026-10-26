@@ -10,13 +10,15 @@ pub const ISSUE_349_STRICT_DEQUEUE = true;
 pub const MAX_CACHE_BYTES = 16 * 1024 * 1024;
 pub const TAIL_BYTES = 512 * 1024;
 pub const CACHE_WRITE_MS = 30_000;
-const Header = struct { version: u8 = 6, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", partial: bool = false };
+const Header = struct { version: u8 = 6, start: u64 = 0, inode: u64, offset: u64, sid: []const u8, host: u8, codex: bool, tmux: []const u8, mtime: u64 = 0, probe: []const u8 = "", read_sid: []const u8 = "", partial: bool = false };
 pub const History = struct {
     status: transcript.Status = .{},
     rows: std.ArrayList(u8) = .empty,
     text: std.ArrayList(u16) = .empty,
     blocks: std.ArrayList(md.Block) = .empty,
     sid: [40]u8 = @splat(0),
+    read_sid: [40]u8 = @splat(0),
+    received_ms: u64 = 0,
     inode: u64 = 0,
     offset: u64 = 0,
     start: u64 = 0,
@@ -39,7 +41,7 @@ pub const History = struct {
     }
 
     pub fn clone(self: History, a: std.mem.Allocator) !History {
-        var result: History = .{ .status = self.status, .sid = self.sid, .inode = self.inode, .offset = self.offset, .mtime = self.mtime, .probe = self.probe, .more = self.more, .restore_full = self.restore_full, .start = self.start, .revision = self.revision, .last_row = self.last_row, .last_text = self.last_text, .last_block = self.last_block, .changed_from = self.changed_from };
+        var result: History = .{ .status = self.status, .sid = self.sid, .read_sid = self.read_sid, .inode = self.inode, .offset = self.offset, .mtime = self.mtime, .probe = self.probe, .more = self.more, .restore_full = self.restore_full, .start = self.start, .revision = self.revision, .last_row = self.last_row, .last_text = self.last_text, .last_block = self.last_block, .changed_from = self.changed_from };
         errdefer result.deinit(a);
         try result.rows.appendSlice(a, self.rows.items);
         try result.text.appendSlice(a, self.text.items);
@@ -59,7 +61,7 @@ pub const History = struct {
         self.blocks.items.len += message.count;
         const recorded = style.timestamp(stamp);
         for (self.blocks.items[first_block..]) |*block| block.stamp_ms = @import("chat_echo.zig").stampMs(stamp);
-        const message_id = if (id.len == 0) 0 else std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, &self.sid), id);
+        const message_id = if (id.len == 0) 0 else std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, if (self.read_sid[0] != 0) &self.read_sid else &self.sid), id);
         for (self.blocks.items[first_block..]) |*block| {
             block.message_id = message_id;
             block.source_offset = source_offset;
@@ -288,7 +290,7 @@ pub const History = struct {
     }
 
     pub fn cursor(self: History) History {
-        return .{ .status = self.status, .sid = self.sid, .inode = self.inode, .offset = self.offset, .start = self.start, .mtime = self.mtime, .probe = self.probe, .more = self.more, .revision = self.revision };
+        return .{ .status = self.status, .sid = self.sid, .read_sid = self.read_sid, .inode = self.inode, .offset = self.offset, .start = self.start, .mtime = self.mtime, .probe = self.probe, .more = self.more, .revision = self.revision };
     }
 
     pub fn updateCursor(self: *History, other: History) void {
@@ -336,6 +338,67 @@ pub const History = struct {
         self.updateCursor(next.*);
     }
 
+    fn retainRows(self: *History, a: std.mem.Allocator, previous: History) !void {
+        var arena = std.heap.ArenaAllocator.init(a);
+        defer arena.deinit();
+        const scratch = arena.allocator();
+        var incoming = std.StringHashMap(struct { rows: std.ArrayList(u8) = .empty, used: bool = false, known: bool = false, index: usize }).init(scratch);
+        var order: std.ArrayList([]const u8) = .empty;
+        var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            const key = try rowIdentity(scratch, line);
+            const slot = try incoming.getOrPut(key);
+            if (!slot.found_existing) {
+                slot.value_ptr.* = .{ .index = order.items.len };
+                try order.append(scratch, key);
+            }
+            try slot.value_ptr.rows.appendSlice(scratch, line);
+            try slot.value_ptr.rows.append(scratch, '\n');
+        }
+        lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            if (incoming.getPtr(try rowIdentity(scratch, line))) |entry| entry.known = true;
+        }
+        var rows: std.ArrayList(u8) = .empty;
+        errdefer rows.deinit(a);
+        var cursor_index: usize = 0;
+        lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            const key = try rowIdentity(scratch, line);
+            if (incoming.getPtr(key)) |replacement| {
+                while (cursor_index <= replacement.index) : (cursor_index += 1) {
+                    const added = incoming.getPtr(order.items[cursor_index]).?;
+                    if (!added.known and !added.used) {
+                        try rows.appendSlice(a, added.rows.items);
+                        added.used = true;
+                    }
+                }
+                if (!replacement.used) try rows.appendSlice(a, replacement.rows.items);
+                replacement.used = true;
+            } else {
+                try rows.appendSlice(a, line);
+                try rows.append(a, '\n');
+            }
+        }
+        for (order.items) |key| {
+            const entry = incoming.getPtr(key).?;
+            if (!entry.used) try rows.appendSlice(a, entry.rows.items);
+        }
+        self.rows.deinit(a);
+        self.rows = rows;
+    }
+
+    fn rowIdentity(a: std.mem.Allocator, line: []const u8) ![]const u8 {
+        const parsed = try std.json.parseFromSlice(Message, a, line, .{ .ignore_unknown_fields = true });
+        defer parsed.deinit();
+        const m = parsed.value;
+        const id = m.read_id orelse m.id;
+        return std.json.Stringify.valueAlloc(a, .{ m.role, id, m.segment, if (id.len == 0) m.timestamp else "", if (id.len == 0) m.text else "", if (id.len == 0) m.settlement else null }, .{});
+    }
+
     pub fn encode(self: History, a: std.mem.Allocator, key: transcript.Identity) ![]u8 {
         var start: usize = 0;
         const budget = TAIL_BYTES - 512;
@@ -343,7 +406,7 @@ pub const History = struct {
             start = self.rows.items.len - budget;
             start += if (std.mem.indexOfScalar(u8, self.rows.items[start..], '\n')) |n| n + 1 else self.rows.items.len - start;
         }
-        const header = try std.json.Stringify.valueAlloc(a, Header{ .inode = self.inode, .offset = self.offset, .start = self.start, .sid = std.mem.sliceTo(&self.sid, 0), .host = key.host, .codex = key.codex, .tmux = std.mem.sliceTo(&key.tmux, 0), .mtime = self.mtime, .probe = std.mem.sliceTo(&self.probe, 0), .partial = start > 0 or self.restore_full }, .{});
+        const header = try std.json.Stringify.valueAlloc(a, Header{ .inode = self.inode, .offset = self.offset, .start = self.start, .sid = std.mem.sliceTo(&self.sid, 0), .host = key.host, .codex = key.codex, .tmux = std.mem.sliceTo(&key.tmux, 0), .mtime = self.mtime, .probe = std.mem.sliceTo(&self.probe, 0), .read_sid = std.mem.sliceTo(&self.read_sid, 0), .partial = start > 0 or self.restore_full }, .{});
         defer a.free(header);
         if (header.len + 1 > 512) return error.InvalidHistory;
         return std.fmt.allocPrint(a, "{s}\n{s}", .{ header, self.rows.items[start..] });
@@ -355,12 +418,14 @@ pub const History = struct {
         const parsed = try std.json.parseFromSlice(Header, a, bytes[0..end], .{});
         defer parsed.deinit();
         const h = parsed.value;
-        if ((h.version < 2 or h.version > 6) or h.sid.len == 0 or h.sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
+        if ((h.version < 2 or h.version > 6) or h.sid.len == 0 or h.sid.len >= 40 or h.read_sid.len >= 40 or bytes[bytes.len - 1] != '\n' or
             (h.probe.len != 0 and h.probe.len != 64) or h.host != key.host or h.codex != key.codex or !std.mem.eql(u8, h.tmux, std.mem.sliceTo(&key.tmux, 0)) or
             (key.sid[0] != 0 and !std.mem.eql(u8, h.sid, std.mem.sliceTo(&key.sid, 0)))) return error.InvalidHistory;
         var result: History = .{ .inode = h.inode, .offset = h.offset, .mtime = h.mtime, .restore_full = h.partial or h.version < 6, .start = h.start, .revision = 1 };
         errdefer result.deinit(a);
         @memcpy(result.sid[0..h.sid.len], h.sid);
+        const read_sid = if (h.read_sid.len > 0) h.read_sid else h.sid;
+        @memcpy(result.read_sid[0..read_sid.len], read_sid);
         @memcpy(result.probe[0..h.probe.len], h.probe);
         var tail = bytes[end + 1 ..];
         if (tail.len > TAIL_BYTES - 512) {
@@ -410,6 +475,7 @@ pub const History = struct {
         @memcpy(next.probe[0..probe.len], probe);
         errdefer next.deinit(a);
         @memcpy(next.sid[0..sid.len], sid);
+        next.read_sid = if (self.read_sid[0] != 0) self.read_sid else if (self.sid[0] != 0) self.sid else next.sid;
         var ended = false;
         while (lines.next()) |line| {
             if (std.mem.eql(u8, line, "@@MP_END@@")) {
@@ -444,25 +510,19 @@ pub const History = struct {
             next.deinit(a);
             return;
         }
-        if (!append and !prepend and mode != null and !self.restore_full and self.rows.items.len > 0 and
-            inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and oldest > self.start and oldest <= self.offset)
-        {
-            if (end < self.offset) return error.InvalidHistory;
-            var prefix: usize = 0;
-            var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
-            while (previous.next()) |line| {
-                if (line.len == 0) break;
-                const parsed = try std.json.parseFromSlice(Message, a, line, .{ .ignore_unknown_fields = true });
-                defer parsed.deinit();
-                if (parsed.value.offset >= oldest) break;
-                if (parsed.value.end == 0 or parsed.value.end > oldest) return error.InvalidHistory;
-                prefix += line.len + 1;
-            }
-            try next.rows.insertSlice(a, 0, self.rows.items[0..prefix]);
-            next.start = self.start;
+        if (!prepend and mode != null and self.rows.items.len > 0) {
+            if (inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and end < self.offset) return error.InvalidHistory;
+            try next.retainRows(a, self.*);
+            if (inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0))) next.start = @min(next.start, self.start);
         }
         if (prepend) {
-            try next.rows.appendSlice(a, self.rows.items);
+            var tail = self.cursor();
+            defer tail.deinit(a);
+            try tail.rows.appendSlice(a, self.rows.items);
+            try tail.retainRows(a, next);
+            next.rows.deinit(a);
+            next.rows = tail.rows;
+            tail.rows = .empty;
             next.updateCursor(self.*);
         }
         if (!self.defer_render) try next.render(a);
@@ -501,7 +561,13 @@ pub const Backfill = struct {
             i -= 1;
             result.rows.appendSliceAssumeCapacity(self.pages.items[i]);
         }
-        result.rows.appendSliceAssumeCapacity(tail.rows.items);
+        var recent = tail.cursor();
+        defer recent.deinit(a);
+        try recent.rows.appendSlice(a, tail.rows.items);
+        try recent.retainRows(a, result);
+        result.rows.deinit(a);
+        result.rows = recent.rows;
+        recent.rows = .empty;
         result.start = self.start;
         result.revision +%= 1;
         try result.render(a);
@@ -1484,7 +1550,8 @@ test "IGSH-815 tail reconciliation retains prepended rows through cache restart 
         try std.testing.expectEqual(@as(usize, 3), history.blocks.items.len);
         try history.apply(a, "@mp\t4\thistory\tok\tsid\t100\t200\t10\t0\tclaude\tterm-1\t3\t\ttail\t100\n" ++
             "{\"role\":\"assistant\",\"text\":\"replacement\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 4, key);
-        try std.testing.expectEqual(@as(usize, 1), history.blocks.items.len);
+        try std.testing.expectEqual(@as(usize, 4), history.blocks.items.len);
+        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstlastnewreplacement"), history.text.items);
         try std.testing.expectEqual(@as(u64, 100), history.start);
     }
 }
@@ -1628,4 +1695,113 @@ test "IGSH-815 staged older pages keep the visible tail stable and materialize e
     try std.testing.expectEqual(@as(usize, 50), restored.blocks.items.len);
     try std.testing.expectEqualStrings(complete.rows.items, restored.rows.items);
     try std.testing.expect(std.mem.startsWith(u8, restored.rows.items, "{\"role\":\"assistant\",\"text\":\"message 0\"}"));
+}
+
+test "IGSH-934 rewritten sources retain messages, update overlaps and keep read identities" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(934, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t300\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"one\",\"text\":\"first\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"two\",\"text\":\"partial\",\"offset\":100,\"end\":200}\n" ++
+        "{\"role\":\"user\",\"id\":\"three\",\"text\":\"third\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 1, key);
+    const first_id = h.blocks.items[0].message_id;
+    try h.apply(a, "@mp\t2\thistory\tok\tnew-sid\t0\t200\t10\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"two\",\"text\":\"complete\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"four\",\"text\":\"fourth\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 4), h.blocks.items.len);
+    try std.testing.expectEqual(first_id, h.blocks.items[0].message_id);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstcompletethirdfourth"), h.text.items);
+    const encoded = try h.encode(a, key);
+    defer a.free(encoded);
+    var restored = try History.decode(a, encoded, key);
+    defer restored.deinit(a);
+    try std.testing.expectEqual(first_id, restored.blocks.items[0].message_id);
+    try std.testing.expectError(error.EmptyReset, h.apply(a, "@mp\t3\thistory\tok\tnew-sid\t0\t0\t11\t0\tclaude\tterm-1\t0\t\ttail\t0\n@@MP_END@@\n", 3, key));
+    try std.testing.expectEqual(@as(usize, 4), h.blocks.items.len);
+    try std.testing.expectError(error.InvalidHistory, h.apply(a, "@mp\t3\thistory\tok\tnew-sid\t0\t100\t10\t0\tclaude\tterm-1\t0\t\ttail\t0\n{\"role\":\"user\",\"id\":\"one\",\"text\":\"stale\"}\n@@MP_END@@\n", 3, key));
+}
+
+test "IGSH-934 backfill after a source rewrite deduplicates already retained messages" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(934, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t300\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"one\",\"text\":\"first\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"two\",\"text\":\"second\",\"offset\":100,\"end\":200}\n" ++
+        "{\"role\":\"user\",\"id\":\"three\",\"text\":\"third\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t200\t400\t10\t0\tclaude\tterm-1\t0\t\ttail\t200\n" ++
+        "{\"role\":\"user\",\"id\":\"three\",\"text\":\"third\",\"offset\":200,\"end\":300}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"four\",\"text\":\"fourth\",\"offset\":300,\"end\":400}\n@@MP_END@@\n", 2, key);
+    var page = h.cursor();
+    defer page.deinit(a);
+    try page.apply(a, "@mp\t3\thistory\tok\tsid\t0\t200\t10\t0\tclaude\tterm-1\t0\t\tolder\t0\n" ++
+        "{\"role\":\"user\",\"id\":\"one\",\"text\":\"first\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"two\",\"text\":\"second\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 3, key);
+    var backfill: Backfill = .{};
+    defer backfill.deinit(a);
+    try backfill.stage(a, &page);
+    var complete = try backfill.finish(a, h);
+    defer complete.deinit(a);
+    try std.testing.expectEqual(@as(usize, 4), complete.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstsecondthirdfourth"), complete.text.items);
+}
+
+test "IGSH-934 2000 messages survive 200 burst arrivals with rewritten and empty refreshes" {
+    const a = std.testing.allocator;
+    const fixture = struct {
+        fn wire(alloc: std.mem.Allocator, first_index: usize, count: usize, base: u64, inode: u64, mode: []const u8) !std.ArrayList(u8) {
+            var bytes: std.ArrayList(u8) = .empty;
+            errdefer bytes.deinit(alloc);
+            const header = try std.fmt.allocPrint(alloc, "@mp\t1\thistory\tok\tsid\t{d}\t{d}\t{d}\t0\tclaude\tterm-1\t0\t\t{s}\t0\n", .{ base, base + count * 100, inode, mode });
+            defer alloc.free(header);
+            try bytes.appendSlice(alloc, header);
+            for (first_index..first_index + count) |i| {
+                const line = try std.fmt.allocPrint(alloc, "{{\"role\":\"assistant\",\"id\":\"message-{d}\",\"text\":\"message {d}\",\"offset\":{d},\"end\":{d}}}\n", .{ i, i, base + (i - first_index) * 100, base + (i - first_index + 1) * 100 });
+                defer alloc.free(line);
+                try bytes.appendSlice(alloc, line);
+            }
+            try bytes.appendSlice(alloc, "@@MP_END@@\n");
+            return bytes;
+        }
+    };
+    const key = transcript.Identity.initTmux(934, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    var initial = try fixture.wire(a, 0, 2000, 0, 9, "tail");
+    defer initial.deinit(a);
+    try h.apply(a, initial.items, 1, key);
+    const first_id = h.blocks.items[0].message_id;
+    for (0..10) |burst| {
+        if (burst == 6) {
+            try std.testing.expectError(error.EmptyReset, h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t0\t11\t0\tclaude\tterm-1\t0\t\ttail\t0\n@@MP_END@@\n", 1, key));
+        }
+        var incoming = try fixture.wire(a, 2000 + burst * 20, 20, if (burst == 3) 0 else h.offset, if (burst >= 3) 10 else 9, if (burst == 3) "tail" else "delta");
+        defer incoming.deinit(a);
+        try h.apply(a, incoming.items, 1, key);
+        try std.testing.expectEqual(@as(usize, 2020) + burst * 20, h.blocks.items.len);
+        try std.testing.expectEqual(first_id, h.blocks.items[0].message_id);
+        for (h.blocks.items, 0..) |block, i| {
+            const expected = try std.fmt.allocPrint(a, "message {d}", .{i});
+            defer a.free(expected);
+            const wide = try std.unicode.utf8ToUtf16LeAlloc(a, expected);
+            defer a.free(wide);
+            try std.testing.expectEqualSlices(u16, wide, h.text.items[block.start..][0..block.len]);
+        }
+    }
+}
+
+test "IGSH-934 a reset with a wider window inserts unseen older messages before the known overlap" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(934, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t0\t\ttail\t100\n{\"role\":\"user\",\"id\":\"two\",\"text\":\"second\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t0\t300\t10\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"one\",\"text\":\"first\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"user\",\"id\":\"two\",\"text\":\"second\",\"offset\":100,\"end\":200}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"three\",\"text\":\"third\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstsecondthird"), h.text.items);
 }
