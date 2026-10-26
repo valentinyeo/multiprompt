@@ -1743,8 +1743,8 @@ pub fn chatWorkingSync() void {
     if (app_state.g_chat_transcript_hwnd == null) return;
     if ((g_working_rect != null) != @import("window_layout.zig").chatStopVisible()) {
         var rc: RECT = std.mem.zeroes(RECT);
-        _ = GetClientRect(app_state.g_chat_transcript_hwnd, &rc);
-        chatRelayoutPreservingScroll(rc.right, rc.bottom);
+        chatViewClientRect(&rc);
+        chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
         _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     } else if (g_working_rect) |source| {
         var rc = source;
