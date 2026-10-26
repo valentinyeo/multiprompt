@@ -8,6 +8,7 @@ pub const THRESHOLD_MS = 5000;
 const EVENT_COUNT = 16;
 pub const View = enum(u3) { terminal, chat, browser, inbox, search, sessions, shortcuts, changelog };
 
+extern "kernel32" fn CreateThread(?*anyopaque, usize, *const fn (?*anyopaque) callconv(.winapi) u32, ?*anyopaque, u32, ?*u32) callconv(.winapi) win.HANDLE;
 extern "kernel32" fn OpenThread(u32, i32, u32) callconv(.winapi) win.HANDLE;
 extern "kernel32" fn SuspendThread(win.HANDLE) callconv(.winapi) u32;
 extern "kernel32" fn ResumeThread(win.HANDLE) callconv(.winapi) u32;
@@ -96,7 +97,7 @@ pub fn start(window: win.HANDLE, version: []const u8) void {
         g_main_thread = null;
         return;
     }
-    g_worker = win.CreateThread(null, 256 * 1024, worker, null, 0, null);
+    g_worker = CreateThread(null, 256 * 1024, worker, null, 0, null);
     if (g_worker == null) {
         _ = win.CloseHandle(g_stop);
         _ = win.CloseHandle(g_main_thread);

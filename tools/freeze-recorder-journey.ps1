@@ -57,7 +57,7 @@ try {
     $app = Start-Process $Exe -PassThru
     $window = Wait-Window $app
     Start-Sleep -Seconds 12
-    if ((Reports).Count -ne 0) { throw 'Healthy window wrote a freeze report' }
+    if (@(Reports).Count -ne 0) { throw 'Healthy window wrote a freeze report' }
     $privateText = 'PRIVATE-FREEZE-FIXTURE-message-host-path'
     [IO.File]::AppendAllText((Join-Path $env:APPDATA 'ZigShell/debug.log'), $privateText)
     $owner = [uint32]0
@@ -66,14 +66,14 @@ try {
     $thread = [FreezeJourney]::OpenThread(2, $false, $mainThread)
     if ($thread -eq [IntPtr]::Zero) { throw 'Cannot open fixture main thread' }
     Stall
-    $reports = Reports
+    $reports = @(Reports)
     if ($reports.Count -ne 1) { throw "Ten-second stall must write exactly one report; found $($reports.Count)" }
     $text = [IO.File]::ReadAllText($reports[0].FullName)
     if ($text -notmatch '(?m)^stack_rvas:' -or $text -notmatch '(?m)^  0x[0-9A-F]+$' -or $text -notmatch '(?m)^instruction: [a-z0-9_.-]+\+0x[0-9A-F]+$') { throw 'Stuck location missing' }
     foreach ($sensitive in @($privateText, $scratch, $env:USERPROFILE, 'debug_log_tail', 'PRIVATE-')) { if ($text.Contains($sensitive)) { throw 'Private content leaked into report' } }
     Copy-Item $reports[0].FullName (Join-Path $Evidence 'first-freeze.txt')
     Stall
-    if ((Reports).Count -ne 2) { throw 'A recovered window must record its next freeze exactly once' }
+    if (@(Reports).Count -ne 2) { throw 'A recovered window must record its next freeze exactly once' }
     [void][FreezeJourney]::CloseHandle($thread)
     $thread = [IntPtr]::Zero
     Stop-Process -Id $app.Id -Force
@@ -93,7 +93,7 @@ try {
     $log = [IO.File]::ReadAllText((Join-Path $env:APPDATA 'ZigShell/debug.log'))
     if (-not $log.Contains('Multiprompt froze last time, a report was saved')) { throw 'Next-start freeze notice missing' }
     if (Test-Path (Join-Path $crashes 'freeze.marker')) { throw 'Next-start notice was not consumed' }
-    if ((Reports).Count -ne 2) { throw 'Restart created an extra freeze report' }
+    if (@(Reports).Count -ne 2) { throw 'Restart created an extra freeze report' }
     @{ healthyReports = 0; firstStallReports = 1; secondStallReports = 2; restartNotice = $true; privateTextAbsent = $true; exeHash = (Get-FileHash $Exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
     Write-Host 'FREEZE_JOURNEY_OK'
 } finally {

@@ -35,11 +35,24 @@ jobs:
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Build the app
         run: zig build
+      - name: Reject the pre-fix release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force old, freeze-evidence | Out-Null
+          Invoke-WebRequest https://github.com/valentinyeo/multiprompt/releases/download/v0.28.922/multiprompt-x64.exe -OutFile old/multiprompt.exe
+          Invoke-WebRequest https://github.com/valentinyeo/multiprompt/releases/download/v0.28.922/zigshell-bridge-x64.exe -OutFile old/zigshell-bridge.exe
+          $red = & pwsh -NoProfile -File ./tools/freeze-recorder-journey.ps1 -Exe ./old/multiprompt.exe -Evidence ./freeze-negative 2>&1
+          $redCode = $LASTEXITCODE
+          $red | Set-Content freeze-evidence/red-log.txt
+          if ($redCode -eq 0 -or ($red -join "`n") -notmatch 'Ten-second stall must write exactly one report; found 0') { throw "Pre-fix control failed for an unexpected reason: $red" }
+          Write-Host 'FREEZE_RED_CONTROL_OK'
       - name: Force real main-thread stalls
         shell: pwsh
         run: ./tools/freeze-recorder-journey.ps1 -Exe ./zig-out/bin/multiprompt.exe -Evidence ./freeze-evidence
       - name: Validate saved reports
-        run: node tools/freeze-recorder-proof.mjs freeze-evidence
+        run: |
+          node tools/freeze-recorder-proof.mjs freeze-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Freeze report proof failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
