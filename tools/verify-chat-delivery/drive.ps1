@@ -333,11 +333,16 @@ function Retention-Copy([string]$Stage, [int]$Count) {
     if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-934 retained copy missing or reordered at $Stage" }
     Press @(0x1B) 'Esc: clear retained selection'
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
-    $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chat\] divider marker=\d+ count=\d+ unknown=(\d)')
+    $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chat\] unread divider count=\d marker=\d+ index=\d+ unknown=(\d)')
     if (@($frames | Where-Object { $_.Groups[1].Value -eq '1' }).Count -gt 0) { throw 'IGSH-934 retained read position became unknown' }
 }
 function Assert-Retention {
     Retention-Copy 'open' 2000
+    Press @(0x12, 0x43) 'Alt+C: leave chat and save known read position' $true
+    Press @(0x12, 0x43) 'Alt+C: return to known chat'
+    Bind-Transcript
+    $marker = [string](Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs[0].last_read_message_id
+    if (-not $marker -or $marker -eq '0') { throw 'Retained journey has no known read marker' }
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
     $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
@@ -345,6 +350,10 @@ function Assert-Retention {
     $view = [IntPtr]$views[0].Current.NativeWindowHandle
     [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $view, 20000000)
     Shot 'retention-before'
+    $anchor = Divider-State
+    if (-not $anchor) { throw 'Retained reading anchor was not observed' }
+    $arrivalStart = (Read-Shared "$settings/debug.log").Length
+    $anchors = @()
     for ($burst = 1; $burst -le 10; $burst++) {
         if ($burst -eq 4) { Shell-Run @('retention-reset') }
         if ($burst -eq 7) {
@@ -356,10 +365,14 @@ function Assert-Retention {
         }
         Shell-Run @('retention-burst', '20')
         Retention-Copy "burst-$burst" (2000 + $burst * 20)
-        [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $view, 20000000)
+        $position = Divider-State
+        if (-not $position -or $position.unknown -ne 0 -or $position.scroll -ne $anchor.scroll) { throw "IGSH-934 reading position moved at burst $burst" }
+        $anchors += $position
         Shot "retention-burst-$burst"
     }
     Shot 'retention-after'
+    Save $anchors "$caseDir/retention-anchors.json"
+    [IO.File]::WriteAllText("$caseDir/retention-arrival.log", (Read-Shared "$settings/debug.log").Substring($arrivalStart))
     Copy-Item "$state/retention-expected.jsonl" "$caseDir/retention-expected.jsonl"
     Press @(0x11, 0x4B) 'Ctrl+K: open second tab for retained switch proof'
     foreach ($letter in 'new cmd'.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
@@ -661,9 +674,9 @@ foreach ($plan in $plans) {
             Shot 'unread-divider-reopened'
             $gapLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'forget-message' $readId
-            $dividerProof.gap = Require-Divider 1 1 'missing anchor renders an unknown-position line' $gapLogStart
+            $dividerProof.gap = Require-Divider 1 0 'known anchor survives source removal' $gapLogStart
             if ($dividerProof.gap.marker -cne $savedMarker) { throw 'History gap overwrote the saved anchor' }
-            [void](Wait-For 'resynced cache no longer contains the saved source message' { $bytes = Read-Shared $cache.FullName; $bytes.Contains($firstUnreadId) -and -not $bytes.Contains($readId) })
+            [void](Wait-For 'resynced cache retains the saved source message' { $bytes = Read-Shared $cache.FullName; $bytes.Contains($firstUnreadId) -and $bytes.Contains($readId) })
             Copy-Item $cache.FullName "$caseDir/app-cache-gap.jsonl"
             Shot 'unread-divider-gap'
             $bottomLogStart = (Read-Shared "$settings/debug.log").Length
@@ -673,7 +686,7 @@ foreach ($plan in $plans) {
                 [void](Scroll-Transcript -30000)
                 $false
             })
-            $dividerProof.bottom = Require-Divider 1 1 'bottom retains the visit divider' $bottomLogStart
+            $dividerProof.bottom = Require-Divider 1 0 'bottom retains the visit divider' $bottomLogStart
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
             Press @(0x11, 0x4B) 'Ctrl+K: open a second tab for visit proof' $true
             foreach ($letter in 'new cmd'.ToCharArray()) { Press @([int][char]::ToUpperInvariant($letter)) 'Filter New CMD Shell' }
@@ -704,7 +717,7 @@ foreach ($plan in $plans) {
             $dividerProof.allRead = Require-Divider 0 0 'all-read reopen has no divider' $allReadLogStart
             Shot 'unread-divider-all-read'
             Save $dividerProof "$caseDir/unread-divider.json"
-            $observation.unreadDivider = @{passed=$true; transitions=@('leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-unknown', 'bottom-retain', 'send-retain', 'all-read-absent')}
+            $observation.unreadDivider = @{passed=$true; transitions=@('leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-retained', 'bottom-retain', 'send-retain', 'all-read-absent')}
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isQueue) {
             $t = $queueTexts
