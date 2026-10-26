@@ -892,6 +892,7 @@ pub fn chatFileOnReady() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     const key = chatCacheIdentity();
     var active_changed = false;
+    var read_ready: ?bool = null;
     var i: usize = 0;
     while (i < app_state.g_chat_histories.items.len) {
         const entry = app_state.g_chat_histories.items[i];
@@ -958,7 +959,7 @@ pub fn chatFileOnReady() void {
                 entry.history = history;
             }
             if (!disk and history.received_ms != 0) entry.history.received_ms = history.received_ms;
-            if (belongs_to_active and app_state.g_chat_active and !disk and !history.more) app_state.g_chat_read_open_ready = foregroundIsOurs();
+            if (belongs_to_active and app_state.g_chat_active and !disk and !history.more) read_ready = foregroundIsOurs();
             if (belongs_to_active and app_state.g_chat_active and added > 0) {
                 const had_messages = app_state.g_chat_new_messages.count() != 0;
                 app_state.g_chat_new_messages.arrive(added, app_state.g_chat_scrolled_up);
@@ -1004,6 +1005,7 @@ pub fn chatFileOnReady() void {
         refreshChatTranscript(false);
         if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
+    if (read_ready) |ready| app_state.g_chat_read_open_ready = ready;
     if (app_state.g_chat_read_open_ready) _ = chatReadBoundary();
 }
 

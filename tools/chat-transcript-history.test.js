@@ -118,7 +118,7 @@ var remote_pages: []const []const u8 = &.{};
 var remote_calls: usize = 0;
 var cache_writes: usize = 0;
 var status_layout_calls: usize = 0;
-fn layoutChatControls() void { status_layout_calls += 1; }
+fn layoutChatControls() void { status_layout_calls += 1; _ = chatReadBoundary(); }
 fn chatNewMessagesChanged(_: bool) void {}
 const WM_APP_CHAT_FILE_READY = 1;
 var g_chat_cache_write_mutex: struct {
@@ -416,19 +416,49 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     try std.testing.expectEqual(@as(usize, 3), g_chat_block_count);
 }
 `;
-function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chatScrollBy')) {
+function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chatScrollBy'), boundary = 'fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh301-'));
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_history.zig', 'chat_switch.zig', 'chat_transcript.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_image.zig', 'chat_diff.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow'));
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude.replace('fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }', boundary) + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 test('executed production switch/refresh/completion/layout code keeps cached full history, scroll and stale results safe', () => {
   const run = runHarness(fn('chatDeferTranscriptLoad'));
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
+test('IGSH-871 live completion preserves the first offline reply before settling the visit', () => {
+  const cases = `
+test "cache-first switch-back IGSH-871 live completion" {
+    const a = std.heap.page_allocator;
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "") };
+    defer one.history.deinit(a);
+    try g_chat_histories.append(a, &one);
+    shell_count = 1;
+    active_shell = 0;
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    try one.history.apply(a, "@mp\\t1\\thistory\\tok\\tsid\\t0\\t100\\t9\\t0\\tclaude\\tterm-1\\n{\\"role\\":\\"assistant\\",\\"id\\":\\"read\\",\\"text\\":\\"Read reply\\",\\"offset\\":0,\\"end\\":100}\\n@@MP_END@@\\n", 1, one.key);
+    shells[0].last_read_message_id = one.history.blocks.items[0].message_id;
+    chatDeferTranscriptLoad();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_block_count);
+    one.loaded_ms = 1;
+    var incoming = try one.history.clone(a);
+    try incoming.apply(a, "@mp\\t2\\thistory\\tok\\tsid\\t100\\t200\\t9\\t0\\tclaude\\tterm-1\\n{\\"role\\":\\"assistant\\",\\"id\\":\\"unread\\",\\"text\\":\\"Offline reply\\",\\"offset\\":100,\\"end\\":200}\\n@@MP_END@@\\n", 2, one.key);
+    one.result = incoming;
+    one.ready.store(true, .release);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(usize, 2), g_chat_block_count);
+    try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases, fn('chatScrollBy'), fn('chatReadBoundary'));
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
 });
