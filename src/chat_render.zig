@@ -1709,7 +1709,7 @@ fn chatPaintShellRow(hdc: HANDLE, row: *const chat_shell_sync.Row, rc: RECT) voi
     _ = SetBkMode(hdc, TRANSPARENT);
     const sender_h = if (row.injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
     const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - sender_h };
-    fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (row.injected) chatInjectedBubbleColor() else chatUserBubbleColor());
+    fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (row.injected) chatInjectedBubbleColor() else chatUserBubbleColor(), true, true);
     if (row.injected) chatPaintTime(hdc, .{ .start = 0, .len = text.len, .role = .injected, .sender = row.sender }, chatStatusRowRect(bubble), true);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
@@ -2145,6 +2145,46 @@ fn fillBubbleAA(hdc: HANDLE, rc: RECT, radius: i32, color: DWORD, round_top: boo
     if (!round_bottom) ext.bottom += over;
     fillRoundRectAA(hdc, ext, radius, color);
     _ = RestoreDC(hdc, saved);
+}
+
+var g_bubble_span: ?[2]i32 = null;
+
+fn fillBubbleStyled(hdc: HANDLE, rc: RECT, radius: i32, fill: DWORD, round_top: bool, round_bottom: bool) void {
+    if (rc.right <= rc.left or rc.bottom <= rc.top) return;
+    const look = chat_style.bubbleLook(fill);
+    fillBubbleAA(hdc, rc, radius, look.outline, round_top, round_bottom);
+    const edge = @max(1, uiScaled(1));
+    const inner = RECT{
+        .left = rc.left + edge,
+        .top = rc.top + (if (round_top) edge else 0),
+        .right = rc.right - edge,
+        .bottom = rc.bottom - (if (round_bottom) edge else 0),
+    };
+    if (inner.right <= inner.left or inner.bottom <= inner.top) return;
+    const span = g_bubble_span orelse [2]i32{ rc.top, rc.bottom };
+    const height = @max(1, span[1] - span[0]);
+    const steps: i32 = chat_style.BUBBLE_GRADIENT_STEPS;
+    const inner_radius = @max(0, radius - edge);
+    var step: i32 = 0;
+    while (step < steps) : (step += 1) {
+        const y0 = if (step == 0) inner.top else @max(inner.top, span[0] + @divTrunc(height * step, steps));
+        const y1 = if (step == steps - 1) inner.bottom else @min(inner.bottom, span[0] + @divTrunc(height * (step + 1), steps));
+        if (y1 <= y0) continue;
+        const saved = SaveDC(hdc);
+        _ = IntersectClipRect(hdc, inner.left, y0, inner.right, y1);
+        fillBubbleAA(hdc, inner, inner_radius, chat_style.gradientColor(look, @intCast(step), chat_style.BUBBLE_GRADIENT_STEPS), round_top, round_bottom);
+        _ = RestoreDC(hdc, saved);
+    }
+}
+
+fn bubbleRunSpan(i: usize) ?[2]i32 {
+    const count = app_state.g_chat_block_count;
+    const run = chat_style.runBounds(app_state.g_chat_bubble_pos[0..count], i);
+    if (run.first == run.last) return null;
+    return .{
+        app_state.g_chat_layout_rects[run.first].top - app_state.g_chat_scroll_y,
+        app_state.g_chat_layout_rects[run.last].bottom - app_state.g_chat_scroll_y,
+    };
 }
 
 fn gdipImgLoad() bool {
@@ -3101,7 +3141,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
     const text_color = customColorOr("text", themeConsoleFg());
     _ = SetBkMode(hdc, TRANSPARENT);
     if (block.kind == .table) {
-        fillRoundRectAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor());
+        fillBubbleStyled(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), true, true);
         const pad = uiScaled(CHAT_CODE_PAD);
         const text_rc = RECT{ .left = rc.left + pad, .top = rc.top + pad, .right = rc.right - pad, .bottom = rc.bottom - pad };
         _ = chatFlowBlock(hdc, text, block, text_rc, true, null, disp.start, null);
@@ -3111,7 +3151,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
         .user, .injected => {
             const status_h = if (block.role == .injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
             const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h };
-            fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (block.role == .injected) chatInjectedBubbleColor() else chatUserBubbleColor());
+            fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (block.role == .injected) chatInjectedBubbleColor() else chatUserBubbleColor(), true, true);
             const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
@@ -3119,7 +3159,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
             if (status_h > 0) chatPaintTime(hdc, block, chatStatusRowRect(bubble), true);
         },
         .prose => {
-            fillBubbleAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
+            fillBubbleStyled(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
             const text_rc = RECT{ .left = rc.left + uiScaled(CHAT_AGENT_PAD_X), .top = rc.top + chat_style.topInset(pos, uiScaled(CHAT_AGENT_PAD_Y), uiScaled(CHAT_PARA_GAP)), .right = rc.right - uiScaled(CHAT_AGENT_PAD_X), .bottom = rc.bottom - chat_style.bottomInset(pos, uiScaled(CHAT_AGENT_PAD_Y)) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
@@ -3190,7 +3230,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     const status_h = if (!app_state.clean_chat and e.state == .not_sent) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
     const actions_h = if (!app_state.clean_chat and actions.send_again) uiScaled(26) else @as(i32, 0);
     const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h - actions_h };
-    fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor());
+    fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor(), true, true);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
@@ -4353,7 +4393,9 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             rc.bottom -= app_state.g_chat_scroll_y;
             if (rc.top > h) break;
             if (rc.bottom <= paint.top or rc.top >= paint.bottom or rc.right <= paint.left or rc.left >= paint.right) continue;
+            g_bubble_span = bubbleRunSpan(i);
             chatPaintBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], rc);
+            g_bubble_span = null;
             chatPaintBlockImages(mem_dc, i, rc);
             @import("chat_find_ui.zig").paintMatch(mem_dc, app_state.g_chat_blocks[i], rc);
             if (app_state.g_voice_state == .speaking and app_state.g_voice_highlight != null and

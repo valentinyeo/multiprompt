@@ -55,6 +55,33 @@ pub fn bubbleColors(bg: u32) BubbleColors {
     if (isDark(bg)) return .{ .user = shift(bg, 53), .agent = shift(bg, 36), .injected = 0x4F2F1E };
     return .{ .user = shift(bg, -26), .agent = shift(bg, -11), .injected = 0xF7E6D6 };
 }
+pub const BubbleLook = struct { top: u32, bottom: u32, outline: u32 };
+pub const BUBBLE_GRADIENT_STEPS = 8;
+pub fn bubbleLook(fill: u32) BubbleLook {
+    if (isDark(fill)) return .{ .top = shift(fill, 8), .bottom = fill, .outline = shift(fill, 12) };
+    return .{ .top = shift(fill, 6), .bottom = fill, .outline = shift(fill, -22) };
+}
+fn lerpChannel(a: u32, b: u32, num: u32, den: u32) u32 {
+    const av: i32 = @intCast(a);
+    const bv: i32 = @intCast(b);
+    return @intCast(av + @divTrunc((bv - av) * @as(i32, @intCast(num)), @as(i32, @intCast(den))));
+}
+pub fn gradientColor(look: BubbleLook, step: u32, steps: u32) u32 {
+    if (steps <= 1) return look.bottom;
+    const num = @min(step, steps - 1);
+    const den = steps - 1;
+    return lerpChannel(look.top & 0xFF, look.bottom & 0xFF, num, den) |
+        (lerpChannel((look.top >> 8) & 0xFF, (look.bottom >> 8) & 0xFF, num, den) << 8) |
+        (lerpChannel((look.top >> 16) & 0xFF, (look.bottom >> 16) & 0xFF, num, den) << 16);
+}
+pub const RunBounds = struct { first: usize, last: usize };
+pub fn runBounds(pos: []const BubblePos, i: usize) RunBounds {
+    var first = i;
+    while (first > 0 and (pos[first] == .middle or pos[first] == .last)) first -= 1;
+    var last = i;
+    while (last + 1 < pos.len and (pos[last] == .first or pos[last] == .middle)) last += 1;
+    return .{ .first = first, .last = last };
+}
 pub const MenuLook = struct { fill: u32, hover: u32 };
 pub const MENU_ROW_HEIGHT = 32;
 pub const MENU_ROW_INSET = 4;
@@ -295,4 +322,39 @@ test "status row geometry hides unknown state and reserves a bounded independent
     try std.testing.expectEqual(@as(i32, 196), statusHeight(true, true, 7, 600, 28, 24));
     try std.testing.expectEqual(@as(i32, 300), statusHeight(true, true, 50, 600, 28, 24));
     try std.testing.expectEqual(@as(i32, 10), statusHeight(true, true, 50, 10, 28, 24));
+}
+
+test "IGSH-983 bubbles get a thin outline and a top to bottom gradient on both themes" {
+    inline for (.{ 0x242424, 0x353535, 0xF0F0F0, 0xE5E5E5 }) |fill| {
+        const look = bubbleLook(fill);
+        try std.testing.expectEqual(@as(u32, fill), look.bottom);
+        try std.testing.expect(look.top != look.bottom);
+        try std.testing.expect(look.outline != look.bottom);
+        try std.testing.expect(look.outline != look.top);
+        try std.testing.expectEqual(look.top, gradientColor(look, 0, BUBBLE_GRADIENT_STEPS));
+        try std.testing.expectEqual(look.bottom, gradientColor(look, BUBBLE_GRADIENT_STEPS - 1, BUBBLE_GRADIENT_STEPS));
+    }
+    const dark = bubbleLook(0x1B1B1B);
+    try std.testing.expect(dark.top > dark.bottom);
+    try std.testing.expect(dark.outline > dark.top);
+    const light = bubbleLook(0xF0F0F0);
+    try std.testing.expect(light.outline < light.bottom);
+    try std.testing.expectEqual(@as(u32, 0x232323), bubbleLook(0x1B1B1B).top);
+    try std.testing.expectEqual(@as(u32, 0x272727), bubbleLook(0x1B1B1B).outline);
+}
+test "IGSH-983 gradient steps move monotonically from the top colour to the fill" {
+    const look = bubbleLook(0x1B1B1B);
+    var prev: u32 = look.top & 0xFF;
+    for (1..BUBBLE_GRADIENT_STEPS) |k| {
+        const c = gradientColor(look, @intCast(k), BUBBLE_GRADIENT_STEPS) & 0xFF;
+        try std.testing.expect(c <= prev);
+        prev = c;
+    }
+    try std.testing.expectEqual(@as(u32, 0x1B), prev);
+}
+test "IGSH-983 a split agent reply shares one gradient across its blocks" {
+    const pos = [_]BubblePos{ .single, .first, .middle, .last, .single };
+    try std.testing.expectEqual(RunBounds{ .first = 0, .last = 0 }, runBounds(&pos, 0));
+    for (1..4) |i| try std.testing.expectEqual(RunBounds{ .first = 1, .last = 3 }, runBounds(&pos, i));
+    try std.testing.expectEqual(RunBounds{ .first = 4, .last = 4 }, runBounds(&pos, 4));
 }
