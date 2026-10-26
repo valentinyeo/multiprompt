@@ -127,9 +127,12 @@ test "injected production paint metadata geometry and user-send matching" {
     for ([_]i32{ 100, 320, 800 }) |width| {
         const user_rc = chatMeasureBlockRect(0, text[0..message.len], user, .single, width, 10, null);
         const injected_rc = chatMeasureBlockRect(0, text[0..message.len], injected, .single, width, 10, null);
-        try std.testing.expect(std.meta.eql(user_rc, injected_rc));
+        try std.testing.expectEqual(injected_rc.left, user_rc.left);
+        try std.testing.expectEqual(injected_rc.top, user_rc.top);
+        try std.testing.expectEqual(injected_rc.right, user_rc.right);
+        try std.testing.expectEqual(injected_rc.bottom - CHAT_STATUS_H, user_rc.bottom);
         try std.testing.expectEqual(width, injected_rc.right);
-        try std.testing.expect(injected_rc.right - injected_rc.left <= chat_style.bubbleMaxWidth(width));
+        try std.testing.expect(injected_rc.right - injected_rc.left <= chat_style.bubbleMaxWidth(width, uiScaled(720)));
         chatPaintBlock(0, text[0..message.len], injected, .single, injected_rc);
         try std.testing.expectEqual(@as(u32, 0xFF1E2F4F), chat_style.argb(fill));
         try std.testing.expectEqual(@as(i32, 20), radius);
@@ -143,10 +146,11 @@ test "injected production paint metadata geometry and user-send matching" {
     chatPaintBlock(0, text[0..message.len], injected, .single, .{ .right = 320, .bottom = 100 });
     try std.testing.expectEqual(@as(u32, 0xFFD6E6F7), chat_style.argb(fill));
     injected.time = @splat(0);
-    chatPaintTime(0, injected, .{}, true, true);
+    chatPaintTime(0, injected, .{}, true);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("from RUNNER 7"), metadata[0..metadata_len]);
-    chatPaintTime(0, user, .{}, true, true);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("✓✓ Read"), metadata[0..metadata_len]);
+    metadata_len = 0;
+    chatPaintTime(0, user, .{}, true);
+    try std.testing.expectEqual(@as(usize, 0), metadata_len);
 
 }
 test "ISSUE-270 production folded and open diff rows fill the card without wrapping" {

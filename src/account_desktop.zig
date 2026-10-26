@@ -2230,7 +2230,7 @@ test "cloud cache rewriting preserves localized local titles in the legacy reade
 
 test "synchronized provenance is parsed independently and defaults off" {
     var tabs: [MAX_SHELLS]SavedTab = undefined;
-    const json = "{\"tabs\":[{\"kind\":\"tmux\",\"name\":\"Cloud\",\"sync_owned\":true},{\"kind\":\"cmd\",\"name\":\"Local\"}]}";
+    const json = "{\"tabs\":[{\"kind\":\"tmux\",\"name\":\"Cloud\",\"tmux_session\":\"cloud-session\",\"sync_owned\":true},{\"kind\":\"cmd\",\"name\":\"Local\"}]}";
     try std.testing.expectEqual(@as(u32, 2), parseSessionTabs(json, &tabs));
     try std.testing.expect(tabs[0].sync_owned);
     try std.testing.expect(!tabs[1].sync_owned);

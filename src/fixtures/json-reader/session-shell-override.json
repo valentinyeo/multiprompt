@@ -1,1 +1,1 @@
-{"tabs":[{"kind":"tmux","name":"Shell","cv":true,"cso":true},{"kind":"tmux","name":"Old","extra":{"cso":true}},{"kind":"tmux","name":"Chat","cso":false}]}
+{"tabs":[{"kind":"tmux","name":"Shell","cv":true,"cso":true,"tmux_session":"fixture-shell"},{"kind":"tmux","name":"Old","extra":{"cso":true},"tmux_session":"fixture-old"},{"kind":"tmux","name":"Chat","cso":false,"tmux_session":"fixture-chat"}]}

@@ -18,6 +18,11 @@ Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient,
 Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
+if ($env:CHAT_WIDTH_PROOF -eq '1') {
+    if ($Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
+    Add-Type -Path "$PSScriptRoot/layout-capture.cs"
+    [LayoutCapture]::Display()
+}
 $plans = @(
     @{name='busy-send'; mode='busy'; text='busy delivery alpha'},
     @{name='idle-suggestion'; mode='idle'; text='idle delivery beta'},
@@ -46,9 +51,27 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 60)
     throw "Timed out: $Description"
 }
 function Shot([string]$Name) {
+    if ($Name -eq 'new-messages-visible') {
+        [void](Wait-For 'unread badge reaches the screen' {
+            $bounds = $views[0].Current.BoundingRectangle
+            $probe = [Drawing.Bitmap]::new(60, 100)
+            $draw = [Drawing.Graphics]::FromImage($probe)
+            try {
+                $draw.CopyFromScreen([int]$bounds.Right - 60, [int]$bounds.Bottom - 100, 0, 0, $probe.Size)
+                $blue = 0
+                for ($y = 0; $y -lt 100; $y += 2) {
+                    for ($x = 0; $x -lt 60; $x += 2) {
+                        $pixel = $probe.GetPixel($x, $y)
+                        if ($pixel.R -lt 130 -and $pixel.G -gt 110 -and $pixel.B -gt 210) { $blue++ }
+                    }
+                }
+                $blue -gt 5
+            } finally { $draw.Dispose(); $probe.Dispose() }
+        })
+    }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -59,7 +82,8 @@ function Doctor([bool]$Chat = $false) {
     $title = $element.Current.Name
     if ($element.Current.IsOffscreen -or $element.Current.ProcessId -ne $app.Id -or $title -notmatch ('multiprompt v' + [regex]::Escape($ExpectedVersion) + '(?:\s|$)')) { throw 'Doctor: visible versioned UI Automation identity missing' }
     $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
-    if (@($published.shells).Count -ne 1 -or $published.shells[0].kind -ne 3) { throw 'Doctor: saved tmux shell was not published' }
+    if (@($published.shells).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 3 }).Count -ne 1 -or
+        ($expectedShells -eq 2 -and @($published.shells | Where-Object { $_.kind -eq 0 }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not published' }
     if ($Chat) {
         $focus = [ChatDeliveryDesktop]::Focus($main)
         if ($focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Doctor: owned composer must have foreground typing focus' }
@@ -288,6 +312,7 @@ function Assert-FullHistory([string]$Stage) {
     Save @{stage=$Stage; blocks=74; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 foreach ($plan in $plans) {
+    $expectedShells = 1
     $caseDir = "$Evidence/$($plan.name)"
     New-Item -ItemType Directory -Force $caseDir | Out-Null
     $profile = Join-Path $env:RUNNER_TEMP ('chat-delivery-' + [guid]::NewGuid().ToString('N'))
@@ -385,6 +410,33 @@ foreach ($plan in $plans) {
             Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript' $true
             Copy-Item $cache.FullName "$caseDir/app-cache-before.jsonl"
             Shot 'messages-only-before-tools'
+            if ($env:CHAT_WIDTH_PROOF -eq '1') {
+                $frames = @()
+                foreach ($size in @(@{name='wide'; width=1920}, @{name='narrow'; width=818})) {
+                    Doctor $true
+                    [void][LayoutCapture]::ShowWindow($main, 9)
+                    if (-not [LayoutCapture]::MoveWindow($main, 0, 0, $size.width, 1000, $true)) { throw 'Owned resize failed' }
+                    Press @(0x11, 0x30) 'Ctrl+0: render resized transcript' $true
+                    [void](Wait-For 'owned window reached requested width' {
+                        $r = [System.Windows.Automation.AutomationElement]::FromHandle($main).Current.BoundingRectangle
+                        [int]$r.Width -eq $size.width
+                    })
+                    Start-Sleep -Milliseconds 750
+                    Doctor $true
+                    $frame = @{name=$size.name; dpi=[LayoutCapture]::GetDpiForWindow($main); version=$ExpectedVersion; sha256=$ExpectedHash}
+                    foreach ($pair in @(@{key='window'; handle=$main}, @{key='composer'; handle=$composer})) {
+                        $r = [System.Windows.Automation.AutomationElement]::FromHandle($pair.handle).Current.BoundingRectangle
+                        $frame[$pair.key] = @{left=[int]$r.Left; top=[int]$r.Top; width=[int]$r.Width; height=[int]$r.Height}
+                    }
+                    $r = $views[0].Current.BoundingRectangle
+                    $frame.transcript = @{left=[int]$r.Left; top=[int]$r.Top; width=[int]$r.Width; height=[int]$r.Height}
+                    Shot "layout-$($size.name)"
+                    $frames += $frame
+                }
+                Save $frames "$Evidence/layout-frames.json"
+                $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+                continue
+            }
             $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Shell-Input 'activity'
             [void](Wait-For 'all twelve completed tool calls in app-written cache' {
@@ -521,7 +573,7 @@ foreach ($plan in $plans) {
             $dividerProof.reopened = Wait-For 'scroll up until the unread line is painted above the first unread message' {
                 $f = Divider-State $upLogStart
                 if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll -and $f.y -lt $f.scroll + $viewH - 40) { return $f }
-                [void](Scroll-Transcript 300)
+                [void](Scroll-Transcript 120)
                 $null
             }
             Shot 'unread-divider-reopened'
@@ -534,34 +586,43 @@ foreach ($plan in $plans) {
             Shot 'unread-divider-gap'
             $bottomLogStart = (Read-Shared "$settings/debug.log").Length
             [void](Wait-For 'scroll the full history gap to bottom' {
-                $frame = Divider-State $bottomLogStart
-                if ($frame -and $frame.count -eq 0 -and $frame.unknown -eq 0) { return $true }
+                $frame = New-MessageState $bottomLogStart
+                if ($frame -and $frame.up -eq 0) { return $true }
                 [void](Scroll-Transcript -30000)
                 $false
             })
-            $dividerProof.bottom = Require-Divider 0 0 'bottom clears the divider' $bottomLogStart
+            $dividerProof.bottom = Require-Divider 1 1 'bottom retains the visit divider' $bottomLogStart
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
-            Press @(0x12, 0x43) 'Alt+C: close the fully read chat' $true
+            Press @(0x11, 0x4B) 'Ctrl+K: open a second tab for visit proof' $true
+            foreach ($letter in 'new cmd'.ToCharArray()) { Press @([int][char]::ToUpperInvariant($letter)) 'Filter New CMD Shell' }
+            Press @(0x0D) 'Enter: create the second tab'
+            [void](Wait-For 'second tab saved and published' {
+                $tabs = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
+                $published = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
+                $tabs.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 3 }).Count -eq 1 -and @($published | Where-Object { $_.kind -eq 0 }).Count -eq 1
+            })
+            $expectedShells = 2
             $sendOffset = (Get-Item -LiteralPath $transcript).Length
             Shell-Input 'messages' '1'
             $dividerLogStart = (Read-Shared "$settings/debug.log").Length
-            Press @(0x12, 0x43) 'Alt+C: reopen before sending'
+            Press @(0x11, 0x09) 'Ctrl+Tab: return to the unread tab'
             Bind-Transcript
             $beforeSend = Require-Divider 1 0 'divider exists before sending' $dividerLogStart
+            $dividerProof.beforeSend = $beforeSend
             if ($beforeSend.offset -ne $sendOffset) { throw 'Second reopen picked the wrong unread message' }
             Clear-Composer
             Type-Composer 'read reply'
             $sendLogStart = (Read-Shared "$settings/debug.log").Length
-            Press @(0x0D) 'Enter: sending clears the unread divider' $true
-            $dividerProof.sent = Require-Divider 0 0 'sending clears the divider' $sendLogStart
-            Press @(0x12, 0x43) 'Alt+C: leave after sending' $true
+            Press @(0x0D) 'Enter: sending retains the visit divider' $true
+            $dividerProof.sent = Require-Divider 1 0 'sending retains the visit divider' $sendLogStart
+            Press @(0x11, 0x09) 'Ctrl+Tab: leave after sending' $true
             $allReadLogStart = (Read-Shared "$settings/debug.log").Length
-            Press @(0x12, 0x43) 'Alt+C: reopen with everything read'
+            Press @(0x11, 0x09) 'Ctrl+Tab: reopen with everything read'
             Bind-Transcript
             $dividerProof.allRead = Require-Divider 0 0 'all-read reopen has no divider' $allReadLogStart
             Shot 'unread-divider-all-read'
             Save $dividerProof "$caseDir/unread-divider.json"
-            $observation.unreadDivider = @{passed=$true; transitions=@('leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-unknown', 'bottom-clear', 'send-clear', 'all-read-absent')}
+            $observation.unreadDivider = @{passed=$true; transitions=@('leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-unknown', 'bottom-retain', 'send-retain', 'all-read-absent')}
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isQueue) {
             $t = $queueTexts
@@ -659,6 +720,14 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_WIDTH_PROOF -eq '1') {
+    $observed = Get-Content "$Evidence/messages-only/observation.json" -Raw | ConvertFrom-Json
+    $clean = Get-Content "$Evidence/cleanup.json" -Raw | ConvertFrom-Json
+    if ($observed.error -or $clean.remaining_owned_processes -ne 0 -or -not $clean.scratch_removed -or -not (Test-Path "$Evidence/layout-frames.json")) { throw "Layout capture failed: $($observed.error)" }
+    & node "$PSScriptRoot/../chat-width-proof.mjs" $Evidence
+    if ($LASTEXITCODE -ne 0) { throw 'IGSH-898 message width pixel proof failed' }
+    exit 0
+}
 if ($Feature -eq 'chat-full-history') {
     & node "$PSScriptRoot/../chat-full-history-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-messages-only') {

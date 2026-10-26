@@ -1152,6 +1152,8 @@ pub var g_chat_layout_dirty = false;
 pub var g_chat_content_h: i32 = 0;
 pub var g_chat_scroll_y: i32 = 0;
 pub var g_chat_scrolled_up = false;
+pub var g_chat_read_visit_shell_id: u32 = 0;
+pub var g_chat_read_visit_marker: u64 = 0;
 pub var g_chat_read_open_pending = false;
 pub var g_chat_read_open_ready = false;
 pub var g_chat_read_hold = false;
@@ -3289,8 +3291,6 @@ pub const LAST_PASTE_FALLBACK_MS: u64 = 60_000;
 pub const DICTATION_SAMPLE_RATE: DWORD = 16000;
 pub const DICTATION_CHUNK_BYTES: usize = 3200;
 pub const DICTATION_BUFFER_COUNT: usize = 4;
-const DICTATION_MAX_SECONDS: usize = 45;
-pub const DICTATION_MAX_BYTES: usize = DICTATION_SAMPLE_RATE * 2 * DICTATION_MAX_SECONDS;
 
 pub const pcmFrameRms = duplex.pcmFrameRms;
 const VadState = duplex.VadState;

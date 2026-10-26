@@ -270,9 +270,9 @@ pub fn chatViewLayout() ChatViewLayout {
     const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
     const mic_btn = RECT{
         .left = composer_card.right - send_margin - send_size,
-        .top = composer_card.top + chatReplyBarH() + send_margin,
+        .top = composer_card.bottom - send_margin - send_size,
         .right = composer_card.right - send_margin,
-        .bottom = composer_card.top + chatReplyBarH() + send_margin + send_size,
+        .bottom = composer_card.bottom - send_margin,
     };
     var action_card = composer_card;
     action_card.right = mic_btn.left - uiScaled(6) + send_margin;
@@ -1743,6 +1743,7 @@ fn composerText(buf: *[16400]u16) []const u16 {
 
 pub fn chatShellDraftPull(shell_id: u32, status: *const chat_transcript.Status) void {
     if (!status.draft_known or app_state.g_chat_composer_hwnd == null or app_state.g_chat_draft_owner_len == 0) return;
+    if (app_state.g_dictation_draft_owner_len > 0 and app_state.g_dictation_running.load(.acquire)) return;
     if (@import("chat_session.zig").chatDeliveryPending(shell_id, true)) return;
     var composer: [16400]u16 = undefined;
     const text = composerText(&composer);
@@ -1837,6 +1838,7 @@ pub fn chatDraftAppend(id: []const u8, text: []const u16) void {
         chat_draft_loading = false;
         _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x00B1, draft.len, @intCast(draft.len));
         chatComposerAutoGrow();
+        shell_draft.onComposerEdit(GetTickCount64());
     }
     chatDraftFlush();
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -2100,8 +2102,11 @@ test "IGSH-813 pill is centered outside transcript and close keeps its count and
     try std.testing.expect(chatNewMessagesRect() == null);
 }
 
-fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start, mic_stop, transcript, typing }) !void {
+fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start, mic_stop, transcript, typing, reply }) !void {
     const w = @import("win32.zig");
+    const saved_shell_draft = shell_draft;
+    defer shell_draft = saved_shell_draft;
+    shell_draft = .{};
     const Engine = struct {
         fn toggle() void {
             if (app_state.g_dictation_recording.load(.acquire)) {
@@ -2216,7 +2221,20 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
         try std.testing.expectEqualSlices(u16, std.mem.span(L("typed more")), text[0..@intCast(n)]);
         try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
     }
-    if (action == .ctrl_start or action == .mic_start or action == .typing) return;
+    if (action == .reply) {
+        const typed = std.mem.span(L("typed"));
+        const incoming = std.mem.span(L("older shell draft"));
+        shell_draft = .{ .shell_id = 7, .known = true, .shell_hash = chat_shell_sync.draftHash(std.mem.span(L("other"))), .synced_hash = chat_shell_sync.draftHash(typed) };
+        var status: chat_transcript.Status = .{ .draft_known = true, .draft_len = incoming.len };
+        @memcpy(status.draft[0..incoming.len], incoming);
+        chatShellDraftPull(7, &status);
+        const n = GetWindowTextW(edit, &text, text.len);
+        try std.testing.expectEqualSlices(u16, typed, text[0..@intCast(n)]);
+        try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
+        try std.testing.expect(app_state.g_dictation_running.load(.acquire));
+        try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
+    }
+    if (action == .ctrl_start or action == .mic_start or action == .typing or action == .reply) return;
     if (action == .enter_stop) {
         _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 1);
         var message: w.MSG = undefined;
@@ -2241,6 +2259,7 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
         try std.testing.expectEqual(DictationState.idle, chat_dictation_state);
         const after = GetWindowTextW(edit, &text, text.len);
         try std.testing.expectEqualSlices(u16, std.mem.span(L("typed! spoken")), text[0..@intCast(after)]);
+        try std.testing.expect(shell_draft.edit_pending);
         try std.testing.expect(!chatDictationKey(0x0102, 0x0D, 0, false, false, false));
     }
 }
@@ -2271,6 +2290,10 @@ test "IGSH-812 text arrives only when dictation finishes" {
 
 test "IGSH-812 typing is never blocked while listening" {
     try testChatDictation(.typing);
+}
+
+test "IGSH-885 a reply arriving while dictating leaves the draft and the recording alone" {
+    try testChatDictation(.reply);
 }
 
 test "IGSH-836 skill keyboard survives stationary hover and real movement or click takes over" {
@@ -2372,4 +2395,34 @@ test "IGSH-836 skill keyboard survives stationary hover and real movement or cli
     _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 0);
     n = GetWindowTextW(edit, &text, text.len);
     try std.testing.expectEqualSlices(u16, std.mem.span(L("/one ")), text[0..@intCast(n)]);
+}
+
+test "IGSH-884 every composer button stays on one bottom line for multiline drafts" {
+    const saved_extra = app_state.g_chat_composer_extra_h;
+    const saved_reply = app_state.g_chat_reply_len;
+    const saved_scale = app_state.g_ui_scale;
+    const saved_dpi = app_state.g_main_monitor_dpi;
+    defer app_state.g_chat_composer_extra_h = saved_extra;
+    defer app_state.g_chat_reply_len = saved_reply;
+    defer app_state.g_ui_scale = saved_scale;
+    defer app_state.g_main_monitor_dpi = saved_dpi;
+    for ([_]u32{ 96, 144, 192 }) |dpi| {
+        app_state.g_main_monitor_dpi = dpi;
+        for ([_]u32{ 100, 150 }) |scale| {
+            app_state.g_ui_scale = scale;
+            for ([_]u32{ 0, 5, 20 }) |extra_lines| {
+                app_state.g_chat_composer_extra_h = @as(i32, @intCast(extra_lines)) * chatComposerLineH();
+                for ([_]u32{ 0, 1 }) |reply| {
+                    app_state.g_chat_reply_len = reply;
+                    const layout = chatViewLayout();
+                    for ([_]RECT{ layout.attach_btn, layout.mic_btn, layout.send_btn, layout.stop_btn }) |button| {
+                        try std.testing.expectEqual(layout.send_btn.bottom, button.bottom);
+                        try std.testing.expectEqual(layout.send_btn.top, button.top);
+                        try std.testing.expectEqual(uiScaled(32), button.right - button.left);
+                        try std.testing.expectEqual(uiScaled(32), button.bottom - button.top);
+                    }
+                }
+            }
+        }
+    }
 }

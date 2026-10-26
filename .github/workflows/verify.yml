@@ -16,6 +16,11 @@ on:
         description: Optional release tag instead of building this branch
         required: false
         type: string
+      chat_width_proof:
+        description: Capture wide and narrow message geometry with the chat-messages-only journey
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - '**'
@@ -153,6 +158,7 @@ jobs:
     env:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
+      CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
@@ -163,7 +169,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Check verification contracts
-        run: node --test tools/verify-multiprompt.test.js tools/title-bar.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js
+        run: node --test tools/verify-multiprompt.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js
       - name: Check auto-revert decision contracts
         run: node --test tools/auto-revert-master.test.js
       - name: Check unread divider contracts
@@ -178,7 +184,7 @@ jobs:
           HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'relaunch-saved-sessions')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'relaunch-saved-sessions')) { throw 'Unknown feature map' }
           if ($env:FEATURE -eq 'appearance' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master' -and $env:HEAD_COMMIT_MESSAGE.Split([char]10)[0].Contains('IGSH-837 red proof') -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')) { throw 'IGSH-837 deliberate red master proof' }
           if ($env:FEATURE -eq 'chat-dictation' -and $env:RELEASE_TAG) { throw 'Chat dictation requires the branch offline fixture boundary' }
           if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed', 'title-bar') -and $env:RELEASE_TAG) { throw 'Browser emulation requires a branch build with matching extension and bridge' }
@@ -196,7 +202,7 @@ jobs:
             if ($errors.Count) { throw ($errors | Out-String) }
           }
       - name: Install Zig 0.16.0
-        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history'
+        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history'
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP/zig.zip"
@@ -259,7 +265,7 @@ jobs:
           zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/tmux.exe
           if ($LASTEXITCODE -ne 0) { throw 'Fake tmux compile failed' }
       - name: Build local Claude console stand-in
-        if: env.FEATURE == 'chat-view'
+        if: env.FEATURE == 'chat-view' || env.FEATURE == 'composer-buttons'
         run: |
           zig cc -target x86_64-windows-gnu -O2 tools/chat-local-agent.c -o verify-bin/claude.exe
           if ($LASTEXITCODE -ne 0) { throw 'Local Claude console stand-in build failed' }
@@ -321,20 +327,20 @@ jobs:
           node tools/chat-composer-text-proof.mjs evidence --native
           if ($nativeExit -ne 0 -or $LASTEXITCODE -ne 0) { throw 'IGSH-731 native composer tests or edge proof failed' }
       - name: Run messages-only native layout regressions
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
         run: zig build test-main --summary all
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
         with:
           persist-credentials: false
           ref: 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f
           path: negative-source
       - name: Build the pre-fix commit 42cecfd3 negative control
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
         working-directory: negative-source
         run: zig build
       - name: Require pre-fix 42cecfd3 to show activity rows with the identical journey
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == ''
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'

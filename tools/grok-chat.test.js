@@ -43,13 +43,14 @@ gate('ordinary sender labels are removed along with their header height', s => {
   assert.match(body(s.chat_style, 'headerHeight'), /return 0;/);
 }, 'chat_style', 'pub fn headerHeight(_: md.Block, _: i32) i32 {\n    return 0;', 'pub fn headerHeight(_: md.Block, _: i32) i32 {\n    return 22;');
 
-gate('timestamps are absent and reserve no row; attribution and read receipts survive', s => {
+gate('timestamps are absent and reserve no row; attribution survives and no Read receipt exists', s => {
   assert.doesNotMatch(body(s.chat_render, 'chatPaintTime'), /block\.time|block\.zone/);
   assert.doesNotMatch(body(s.chat_render, 'chatMeasureBlockRect'), /block\.time/);
   assert.doesNotMatch(body(s.chat_render, 'chatPaintBlock'), /block\.time/);
-  requires(body(s.chat_render, 'chatPaintTime'), 'block.sender', 'Read');
-  requires(body(s.chat_render, 'chatMeasureBlockRect'), 'chatEchoBlockConfirmed(buf, block)');
-}, 'chat_render', 'fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirmed: bool) void {', 'fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirmed: bool) void {\n    _ = block.time;');
+  requires(body(s.chat_render, 'chatPaintTime'), 'block.sender');
+  assert.doesNotMatch(body(s.chat_render, 'chatPaintTime'), /Read/);
+  assert.doesNotMatch(body(s.chat_render, 'chatMeasureBlockRect'), /chatEchoBlockConfirmed/);
+}, 'chat_render', 'fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool) void {', 'fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool) void {\n    _ = block.time;');
 
 gate('chat bubbles and composer use rounded corners rather than the old four pixels', s => {
   assert.match(s.app_state, /CHAT_BUBBLE_RADIUS = 20;/);

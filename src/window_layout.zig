@@ -250,7 +250,9 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, sto
 fn paintChatMicButton(hdc: HANDLE, rc: RECT) void {
     const active = @import("chat_composer.zig").chat_dictation_state != .idle;
     const ink = if (active) customColorOr("accent", RGB(80, 150, 255)) else customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164));
-    if (active) fillRoundRectAA(hdc, rc, uiScaled(8), customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)));
+    const base = app_state.g_chat_input_color;
+    const fill = if (active) customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)) else @import("chat_style.zig").shift(base, if (@import("chat_style.zig").isDark(base)) 22 else -14);
+    @import("smooth.zig").fillEllipse(hdc, rc, fill);
     const font = @import("fonts.zig").messageMenuIconFont();
     const old_font = SelectObject(hdc, font);
     defer {
@@ -463,6 +465,10 @@ fn logChatButtons(layout: @import("app_state.zig").ChatViewLayout) void {
     chat_buttons_logged = now;
     var log: [128]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log, "[chat] composer card {d},{d},{d},{d} size={d}", .{ card.left, card.top, card.right, card.bottom, send.right - send.left }) catch "");
+    for ([_]struct { name: []const u8, rect: RECT }{ .{ .name = "attach", .rect = layout.attach_btn }, .{ .name = "mic", .rect = layout.mic_btn } }) |button| {
+        const rect = button.rect;
+        debugLog(std.fmt.bufPrint(&log, "[chat] {s} rect {d},{d},{d},{d}", .{ button.name, rect.left, rect.top, rect.right, rect.bottom }) catch "");
+    }
     if (layout.send_shown) debugLog(std.fmt.bufPrint(&log, "[chat] send rect {d},{d},{d},{d}", .{ send.left, send.top, send.right, send.bottom }) catch "");
     if (layout.stop_shown) debugLog(std.fmt.bufPrint(&log, "[chat] stop rect {d},{d},{d},{d}", .{ stop.left, stop.top, stop.right, stop.bottom }) catch "");
 }
@@ -558,6 +564,51 @@ test "ISSUE-444 Send button keeps blended corners at 100 and 150 percent" {
             try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.top));
             try std.testing.expectEqual(background, w.GetPixel(dc, rc.right, rc.top));
             try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.bottom));
+        }
+    }
+}
+
+test "IGSH-884 attach microphone send and stop paint circular backgrounds" {
+    const w = @import("win32.zig");
+    const saved_scale = app_state.g_ui_scale;
+    const saved_dpi = app_state.g_main_monitor_dpi;
+    const saved_state = @import("chat_composer.zig").chat_dictation_state;
+    defer app_state.g_ui_scale = saved_scale;
+    defer app_state.g_main_monitor_dpi = saved_dpi;
+    defer @import("chat_composer.zig").chat_dictation_state = saved_state;
+    app_state.g_main_monitor_dpi = 96;
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = 128, .height = -128 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const area = RECT{ .left = 0, .top = 0, .right = 128, .bottom = 128 };
+    const background: DWORD = 0x112233;
+    const brush = w.CreateSolidBrush(background);
+    defer _ = w.DeleteObject(brush);
+    for ([_]u32{ 100, 150, 200 }) |scale| {
+        app_state.g_ui_scale = scale;
+        const size = uiScaled(32);
+        const rc = RECT{ .left = 8, .top = 8, .right = 8 + size, .bottom = 8 + size };
+        for (0..5) |button| {
+            _ = w.FillRect(dc, &area, brush);
+            var canvas = @import("smooth.zig").Canvas.init(dc);
+            switch (button) {
+                0 => paintChatAttachButton(dc, rc),
+                1, 2 => {
+                    @import("chat_composer.zig").chat_dictation_state = if (button == 1) .idle else .listening;
+                    paintChatMicButton(dc, rc);
+                },
+                3 => paintChatButton(dc, rc, true, .send),
+                else => paintChatButton(dc, rc, true, .stop),
+            }
+            canvas.deinit();
+            try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.top));
+            try std.testing.expectEqual(background, w.GetPixel(dc, rc.left, rc.top + @divTrunc(size, 4)));
+            try std.testing.expect(w.GetPixel(dc, rc.left + @divTrunc(size, 2), rc.top + uiScaled(2)) != background);
         }
     }
 }

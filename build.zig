@@ -432,7 +432,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(chat_complete_tests).step);
     var previous_chat_run: ?*std.Build.Step = null;
-    for ([_][]const u8{ "src/chat_drafts.zig", "src/chat_reply.zig", "src/chat_permission.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_table_measure.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_scrollbar.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_shell_sync.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig" }) |file| {
+    for ([_][]const u8{ "src/chat_drafts.zig", "src/chat_reply.zig", "src/chat_permission.zig", "src/chat_working.zig", "src/chat_markdown.zig", "src/chat_table_measure.zig", "src/chat_transcript.zig", "src/chat_switch.zig", "src/chat_history.zig", "src/chat_find.zig", "src/chat_scrollbar.zig", "src/chat_style.zig", "src/chat_code.zig", "src/chat_echo.zig", "src/chat_shell_sync.zig", "src/chat_image.zig", "src/chat_image_insert.zig", "src/chat_drop.zig", "src/chat_diff.zig", "src/dblclick_toggle.zig", "src/dictation_audio.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(file),
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -680,6 +680,7 @@ pub fn build(b: *std.Build) void {
         "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",      "extension/focus-guard.test.js",
         "tools/chat-queued-notes.test.js",         "tools/chat-unconfirmed-duplicate.test.js",
         "tools/auto-release-admit.test.js",
+        "tools/chat-unread-visit.test.js",
     });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);

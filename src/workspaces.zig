@@ -2431,6 +2431,8 @@ test "IGSH-522 session JSON round trip keeps workspace focus and ISSUE-439 last 
         app_state.shells[ws].kind = .tmux;
         app_state.shells[ws].workspace = @intCast(ws);
         app_state.shells[ws].shell_id = @intCast(41 + ws);
+        app_state.shells[ws].tmux_session[0] = @intCast('a' + ws);
+        app_state.shells[ws].tmux_session_len = 1;
         rememberWorkspaceFocus(@intCast(ws), app_state.shells[ws].shell_id, if (ws == 0) .chat else .shell);
         app_state.g_ws_names[ws][0] = @intCast('A' + ws);
         app_state.g_ws_name_len[ws] = 1;

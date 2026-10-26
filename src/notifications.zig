@@ -1668,3 +1668,15 @@ test "local listener account helper" {
     }
     return error.AccountChecksIncomplete;
 }
+
+test "IGSH-890 notification sockets cannot leak into restored console children" {
+    const w = @import("win32.zig");
+    var data: w.WSADATA = undefined;
+    try std.testing.expectEqual(@as(i32, 0), w.WSAStartup(0x0202, &data));
+    const listener = w.socket(w.AF_INET, w.SOCK_STREAM, 0);
+    try std.testing.expect(listener != w.INVALID_SOCKET);
+    defer _ = w.closesocket(listener);
+    var flags: w.DWORD = 0;
+    try std.testing.expect(w.GetHandleInformation(@ptrFromInt(listener), &flags) != 0);
+    try std.testing.expectEqual(@as(w.DWORD, 0), flags & 1);
+}

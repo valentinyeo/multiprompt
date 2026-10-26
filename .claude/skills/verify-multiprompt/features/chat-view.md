@@ -4,6 +4,8 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 
 ## Sub-features
 
+- `round-bottom-composer-buttons`: type one-line and six-line working drafts, require attach, microphone, Send and Stop to have equal square bounds and one shared bottom edge; retain both screenshots. Native pixel tests require circular backgrounds for idle and active microphones, attach, Send and Stop at each supported size.
+
 - `message-menu`: real right-click on an owned message bubble shows exactly Reply, Copy; Esc closes the native popup.
 - `grey-buttons`: the screenshot of the working composer with a typed letter shows neutral Send and Stop backgrounds distinct from the composer.
 

@@ -39,5 +39,6 @@ jobs:
       - name: Inspect failed run and revert only its master commit
         env:
           GH_TOKEN: ${{ github.token }}
+          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
           AUTO_REVERT_RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
         run: node tools/auto-revert-master.js

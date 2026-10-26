@@ -105,19 +105,19 @@ function seamContract(source) {
   const fixture = source.slice(source.indexOf('fn dictationFixtureEnabled('), source.indexOf('fn captureDictationPcm('));
   for (const required of ['"GITHUB_ACTIONS", "true"', '"RUNNER_OS", "Windows"', '"MULTIPROMPT_NO_LOGIN", "1"', '"MULTIPROMPT_DICTATION_FIXTURE"', 'win32OpenRead(file)', 'win32ReadAll(handle, out)']) assert.ok(fixture.includes(required), required);
   const capture = source.slice(source.indexOf('fn captureDictationPcm('), source.indexOf('fn deepgramTranscribePcm('));
-  assert.match(capture, /if \(dictationFixtureEnabled\(\)\) \{\s*const n = readDictationFixture\("goforward.pcm", out\);[\s\S]*?while \(app_state.g_dictation_recording.load\(.acquire\)\) Sleep\(1\);\s*return n;/);
+  assert.match(capture, /if \(dictationFixtureEnabled\(\)\) \{\s*const n = readDictationFixture\("goforward.pcm", audio.buf\);[\s\S]*?while \(app_state.g_dictation_recording.load\(.acquire\)\) Sleep\(1\);\s*return;/);
   const transcribe = source.slice(source.indexOf('fn deepgramTranscribePcm('), source.indexOf('fn dictationWorkerThread('));
   const offline = transcribe.slice(0, transcribe.indexOf('    var key_buf:'));
   for (const required of ['if (dictationFixtureEnabled())', 'readDictationFixture("goforward.pcm", expected)', '!std.mem.eql(u8, audio, expected[0..expected_len])', 'readDictationFixture("response.json", &response)', 'parseDeepgramTranscript(response[0..n], transcript_out)']) assert.ok(offline.includes(required), required);
   assert.doesNotMatch(offline, /WinHttp|dictationSetTranscript|SetWindowText|chatDraftAppend/);
   assert.match(source, /if \(!dictationFixtureEnabled\(\) and readDeepgramApiKey\(&key_buf\) == null\)/);
   const worker = source.slice(source.indexOf('fn dictationWorkerThread('), source.indexOf('pub fn synthesizeCtrlVIntoForeground('));
-  for (const required of ['captureDictationPcm(audio)', 'deepgramTranscribePcm(audio[0..audio_len], &transcript_utf8)', 'dictationSetTranscriptUtf8(', 'WM_APP_DICTATION_READY']) assert.ok(worker.includes(required), required);
+  for (const required of ['captureDictationPcm(&audio)', 'deepgramTranscribePcm(audio.slice(), &transcript_utf8)', 'dictationSetTranscriptUtf8(', 'WM_APP_DICTATION_READY']) assert.ok(worker.includes(required), required);
 }
 
 test('IGSH-812 replay replaces only hardware/provider I/O and retains the production worker and parser', () => {
   seamContract(voice);
-  for (const required of ['"GITHUB_ACTIONS", "true"', '"MULTIPROMPT_NO_LOGIN", "1"', 'readDictationFixture("goforward.pcm", out)', '!std.mem.eql(u8, audio, expected[0..expected_len])', 'parseDeepgramTranscript(response[0..n], transcript_out)', 'captureDictationPcm(audio)']) {
+  for (const required of ['"GITHUB_ACTIONS", "true"', '"MULTIPROMPT_NO_LOGIN", "1"', 'readDictationFixture("goforward.pcm", audio.buf)', '!std.mem.eql(u8, audio, expected[0..expected_len])', 'parseDeepgramTranscript(response[0..n], transcript_out)', 'captureDictationPcm(&audio)']) {
     const broken = voice.replaceAll(required, 'REMOVED');
     assert.notEqual(broken, voice);
     assert.throws(() => seamContract(broken), assert.AssertionError, required);

@@ -824,10 +824,7 @@ fn mergeStartupSelection(a: std.mem.Allocator, previous: []const u8, current: []
 
 fn selectedSavedTab(json: std.json.Value, tabs: []const SavedTab, selected: u32) ?u32 {
     for ([_]u64{ selected, json_reader.uint(json, "active_shell_id") }) |id| {
-        if (id == 0) continue;
-        for (tabs, 0..) |tab, i| {
-            if (tab.shell_id == id) return @intCast(tmux_identity.restoreWinner(tabs, i));
-        }
+        if (json_reader.restoredSessionTab(json, tabs, id)) |index| return @intCast(index);
     }
     const active = json_reader.uintDefault(json, "active_tab", std.math.maxInt(u32));
     return if (active < tabs.len) @intCast(tmux_identity.restoreWinner(tabs, @intCast(active))) else null;
@@ -1038,7 +1035,7 @@ test "session validation accepts standalone exports and rejects partial document
 }
 
 test "session IDs before names and nested fields stay attached to their own tab" {
-    const json = "{\"extra\":{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Ignore\"}]},\"tabs\":[{\"kind\":\"tmux\",\"csid\":\"correct\",\"ccwd\":\"/repo/日\",\"name\":\"Literal \\\"csid\\\":\\\"x\\\" } \\u65e5\\ud83d\\ude80\",\"extra\":{\"csid\":\"wrong\",\"favorite\":true}},{\"kind\":\"cmd\",\"name\":\"Old\"}]}";
+    const json = "{\"extra\":{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Ignore\"}]},\"tabs\":[{\"kind\":\"tmux\",\"tmux_session\":\"unicode-session\",\"csid\":\"correct\",\"ccwd\":\"/repo/日\",\"name\":\"Literal \\\"csid\\\":\\\"x\\\" } \\u65e5\\ud83d\\ude80\",\"extra\":{\"csid\":\"wrong\",\"favorite\":true}},{\"kind\":\"cmd\",\"name\":\"Old\"}]}";
     var tabs: [MAX_SHELLS]SavedTab = undefined;
     try std.testing.expectEqual(@as(u32, 2), parseSessionTabs(json, &tabs));
     try std.testing.expectEqualStrings("correct", tabs[0].claude_sid[0..tabs[0].claude_sid_len]);
@@ -1126,6 +1123,8 @@ test "ISSUE-611 session views survive session write parse and restore" {
     for (0..3) |i| {
         app_state.shells[i] = empty_shell;
         app_state.shells[i].kind = .tmux;
+        app_state.shells[i].tmux_session[0] = @intCast('a' + i);
+        app_state.shells[i].tmux_session_len = 1;
         app_state.shells[i].pinned_top = i != 1;
         restoreBrowserStateFromSavedTab(@intCast(i), &tabs[i]);
     }
@@ -2009,7 +2008,7 @@ test "ISSUE-569 saved view and selected session use the same source during start
         cache.selected_live_shell_id = prior_live;
         app_state.g_starred_workspace = prior_view;
     }
-    var parsed = try json_reader.parse(std.testing.allocator, "{\"active_shell_id\":42,\"active_tab\":1,\"active_workspace\":0,\"starred_view\":true,\"tabs\":[{\"kind\":\"tmux\",\"name\":\"A\",\"shell_id\":41},{\"kind\":\"tmux\",\"name\":\"B\",\"shell_id\":42,\"workspace\":1,\"favorite\":true}]}");
+    var parsed = try json_reader.parse(std.testing.allocator, "{\"active_shell_id\":42,\"active_tab\":1,\"active_workspace\":0,\"starred_view\":true,\"tabs\":[{\"kind\":\"tmux\",\"name\":\"A\",\"tmux_session\":\"session-a\",\"shell_id\":41},{\"kind\":\"tmux\",\"name\":\"B\",\"tmux_session\":\"session-b\",\"shell_id\":42,\"workspace\":1,\"favorite\":true}]}");
     defer parsed.deinit();
     var tabs: [2]SavedTab = undefined;
     const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
@@ -2311,4 +2310,51 @@ test "IGSH-814 saved read marker round trip restores each chat and legacy defaul
     try std.testing.expectEqual(std.math.maxInt(u64), app_state.shells[0].last_read_message_id);
     try std.testing.expectEqual(@as(u32, 1), parseSessionTabs("{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Old\"}]}", &tabs));
     try std.testing.expectEqual(@as(u64, 0), tabs[0].last_read_message_id);
+}
+
+test "IGSH-890 cached tmux ghosts restore once and keep the selected real conversation" {
+    const a = std.testing.allocator;
+    const bytes =
+        \\{"active_shell_id":42,"active_tab":2,"starred_view":true,"tabs":[
+        \\{"kind":"tmux","name":"Guide","tmux_session":"guide-a","tmux_host":1,"shell_id":51,"workspace":1,"favorite":true,"chat_id":91},
+        \\{"kind":"tmux","name":"Guide","shell_id":41,"workspace":1,"favorite":true},
+        \\{"kind":"tmux","name":"Guide","shell_id":42,"workspace":1,"favorite":true,"starred_group_id":17,"cv":true}]}
+    ;
+    const old_pending = @import("launch_cache.zig").pending;
+    defer @import("launch_cache.zig").pending = old_pending;
+    @import("launch_cache.zig").pending = false;
+    for (0..4) |_| {
+        var parsed = try json_reader.parse(a, bytes);
+        defer parsed.deinit();
+        var tabs: [4]SavedTab = undefined;
+        const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+        try std.testing.expectEqual(@as(u32, 1), count);
+        try std.testing.expectEqual(@as(?u32, 0), selectedSavedTab(parsed.value, tabs[0..count], 42));
+        try std.testing.expect(savedStarredView(parsed.value, tabs[0..count]));
+        try std.testing.expectEqual(@as(u64, 91), tabs[0].chat_id);
+        try std.testing.expect(tabs[0].cv);
+        try std.testing.expectEqual(@as(u32, 17), tabs[0].starred_group_id);
+        try std.testing.expectEqualSlices(u8, "guide-a", tabs[0].tmux_session[0..tabs[0].tmux_session_len]);
+    }
+}
+
+test "IGSH-890 recovering ghosts never guesses across hosts or drops local terminals" {
+    const a = std.testing.allocator;
+    const bytes =
+        \\{"active_shell_id":4,"tabs":[
+        \\{"kind":"tmux","name":"Guide","tmux_session":"guide-a","tmux_host":0,"shell_id":1},
+        \\{"kind":"tmux","name":"Guide","tmux_session":"guide-b","tmux_host":1,"shell_id":2},
+        \\{"kind":"cmd","name":"Local","shell_id":3},
+        \\{"kind":"tmux","name":"Guide","shell_id":4,"starred_group_id":17}]}
+    ;
+    var parsed = try json_reader.parse(a, bytes);
+    defer parsed.deinit();
+    var tabs: [4]SavedTab = undefined;
+    const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+    try std.testing.expectEqual(@as(u32, 3), count);
+    try std.testing.expectEqual(@as(?usize, null), json_reader.restoredSessionTab(parsed.value, tabs[0..count], 4));
+    try std.testing.expectEqual(@as(?usize, 2), json_reader.restoredSessionTab(parsed.value, tabs[0..count], 3));
+    try std.testing.expectEqual(@as(u32, 0), tabs[0].starred_group_id);
+    try std.testing.expectEqual(@as(u32, 0), tabs[1].starred_group_id);
+    try std.testing.expectEqual(@as(u8, 1), tabs[1].tmux_host);
 }

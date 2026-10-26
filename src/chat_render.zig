@@ -343,7 +343,7 @@ fn chatPaintSelectionRun(hdc: HANDLE, segment: []const u16, base: usize, seg_lef
 }
 
 fn chatContentRectInset(client_width: i32) struct { left: i32, right: i32 } {
-    const inset = uiScaled(24);
+    const inset = uiScaled(if (client_width <= uiScaled(768)) @as(i32, 8) else 24);
     var left = inset;
     var right = client_width - inset;
     if (right <= left) {
@@ -355,8 +355,8 @@ fn chatContentRectInset(client_width: i32) struct { left: i32, right: i32 } {
 
 test "chatContentRectInset fills wide and narrow content columns" {
     const narrow = chatContentRectInset(uiScaled(500));
-    try std.testing.expectEqual(uiScaled(24), narrow.left);
-    try std.testing.expectEqual(uiScaled(500) - uiScaled(24), narrow.right);
+    try std.testing.expectEqual(uiScaled(8), narrow.left);
+    try std.testing.expectEqual(uiScaled(500) - uiScaled(8), narrow.right);
     const wide = chatContentRectInset(uiScaled(1400));
     try std.testing.expectEqual(uiScaled(24), wide.left);
     try std.testing.expectEqual(uiScaled(1400) - uiScaled(24), wide.right);
@@ -878,27 +878,27 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
     const header_h = chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H));
     if (block.kind == .table) {
         const pad = uiScaled(CHAT_CODE_PAD);
-        const bubble_w = chat_style.agentBubbleWidth(width);
+        const bubble_w = chat_style.agentBubbleWidth(width, uiScaled(720));
         _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
         return .{ .left = 0, .top = y, .right = bubble_w, .bottom = y + header_h + flow_h + 2 * pad };
     }
     switch (block.role) {
         .user, .injected => {
             const pad = uiScaled(CHAT_BUBBLE_PAD);
-            const max_text_w = @max(1, chat_style.bubbleMaxWidth(width) - 2 * pad);
+            const max_text_w = @max(1, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
             var calc = RECT{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
             const old_font = SelectObject(hdc, ensureChatFont());
             if (block.role != .injected or !block.markdown) _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
             _ = SelectObject(hdc, old_font);
             const natural_w = if (block.role == .injected and block.markdown) chatBlockNaturalWidth(hdc, text, block, disp.start, max_text_w) else calc.right;
-            var bubble_w = chat_style.bubbleWidth(width, natural_w, pad);
+            var bubble_w = chat_style.bubbleWidth(width, natural_w, pad, uiScaled(720));
             var shown = ChatImgLayout{};
             if (imgs != null) {
-                shown = chatImgMeasure(text, chat_style.bubbleMaxWidth(width) - 2 * pad);
-                bubble_w = @max(bubble_w, @min(chat_style.bubbleMaxWidth(width), shown.max_w + 2 * pad));
+                shown = chatImgMeasure(text, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
+                bubble_w = @max(bubble_w, @min(chat_style.bubbleMaxWidth(width, uiScaled(720)), shown.max_w + 2 * pad));
             }
             _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
-            var bubble_h = flow_h + 2 * pad + (if (block.role == .injected or (!app_state.clean_chat and block.role == .user and chatEchoBlockConfirmed(buf, block))) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
+            var bubble_h = flow_h + 2 * pad + (if (block.role == .injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
             if (shown.count > 0) {
                 const gap = uiScaled(CHAT_IMG_GAP);
                 shown.origin_x = pad;
@@ -913,7 +913,7 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
             const pad_y = uiScaled(CHAT_AGENT_PAD_Y);
             const top_in = chat_style.topInset(pos, pad_y, uiScaled(CHAT_PARA_GAP));
             const bottom_in = chat_style.bottomInset(pos, pad_y);
-            const bubble_w = chat_style.agentBubbleWidth(width);
+            const bubble_w = chat_style.agentBubbleWidth(width, uiScaled(720));
             _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad_x), .bottom = 0 }, false, null, disp.start, &flow_h);
             const text_h = @max(flow_h, uiScaled(4));
             var shown = ChatImgLayout{};
@@ -940,7 +940,7 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
         },
         .code => {
             const pad = uiScaled(CHAT_CODE_PAD);
-            const bubble_w = chat_style.agentBubbleWidth(width);
+            const bubble_w = chat_style.agentBubbleWidth(width, uiScaled(720));
             _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
             return .{ .left = 0, .top = y, .right = bubble_w, .bottom = y + header_h + flow_h + 2 * pad + uiScaled(CHAT_CODE_HEADER) };
         },
@@ -949,12 +949,12 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
 
 fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32, status: bool) RECT {
     const pad = uiScaled(CHAT_BUBBLE_PAD);
-    const max_text_w = @max(1, chat_style.bubbleMaxWidth(width) - 2 * pad);
+    const max_text_w = @max(1, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
     var calc = RECT{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
     const old_font = SelectObject(hdc, ensureChatFont());
     _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
     _ = SelectObject(hdc, old_font);
-    const bubble_w = chat_style.bubbleWidth(width, calc.right, pad);
+    const bubble_w = chat_style.bubbleWidth(width, calc.right, pad, uiScaled(720));
     var flow_h: i32 = 0;
     _ = chatFlowText(hdc, text, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, false, null, 0, &flow_h, null);
     const bubble_h = flow_h + 2 * pad + (if (app_state.clean_chat or !status) @as(i32, 0) else uiScaled(CHAT_STATUS_H));
@@ -1009,7 +1009,7 @@ test "IGSH-376 short list bubble fits the visible word exactly" {
     const natural = chatTextWidth(dc, w("Done")) + uiScaled(30);
     const pad = uiScaled(CHAT_BUBBLE_PAD);
     const rect = chatMeasureBlockRect(dc, text, block, .single, 752, 0, null);
-    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad), rect.right - rect.left);
+    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad, uiScaled(720)), rect.right - rect.left);
     var one_line: i32 = 0;
     _ = chatRichText(dc, w("Done"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 0, false, null, 0, &one_line, false);
     var actual: i32 = 0;
@@ -1028,7 +1028,7 @@ test "IGSH-376 short heading bubble fits the visible word exactly" {
     const natural = chatTextWidth(dc, w("Ready")) + uiScaled(0);
     const pad = uiScaled(CHAT_BUBBLE_PAD);
     const rect = chatMeasureBlockRect(dc, text, block, .single, 752, 0, null);
-    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad), rect.right - rect.left);
+    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad, uiScaled(720)), rect.right - rect.left);
     var one_line: i32 = 0;
     _ = chatRichText(dc, w("Ready"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 1, false, null, 0, &one_line, false);
     var actual: i32 = 0;
@@ -1047,7 +1047,7 @@ test "IGSH-376 short link bubble fits the visible word exactly" {
     const natural = chatTextWidth(dc, w("docs")) + uiScaled(0);
     const pad = uiScaled(CHAT_BUBBLE_PAD);
     const rect = chatMeasureBlockRect(dc, text, block, .single, 752, 0, null);
-    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad), rect.right - rect.left);
+    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad, uiScaled(720)), rect.right - rect.left);
     var one_line: i32 = 0;
     _ = chatRichText(dc, w("docs"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 0, false, null, 0, &one_line, false);
     var actual: i32 = 0;
@@ -1497,6 +1497,34 @@ test "IGSH-678 Chat View code is Nordwand Mono two points smaller and overflowin
     }
 }
 
+test "IGSH-898 long messages fill narrow columns and stay bounded in wide columns" {
+    @setEvalBranchQuota(10000);
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("A long message with enough detail to reach the width limit in either layout. " ** 20);
+    for ([_]i32{ 550, 960, 1920 }) |column_width| {
+        const content = chatContentRectInset(uiScaled(column_width));
+        const width = content.right - content.left;
+        for ([_]ChatBlockRole{ .user, .prose, .code }) |role| {
+            const block = ChatBlock{ .start = 0, .len = text.len, .role = role, .markdown = role != .user };
+            const rect = chatMeasureBlockRect(dc, text, block, .single, width, 0, null);
+            const painted = rect.right - rect.left;
+            if (column_width == 550) {
+                try std.testing.expect(painted * 100 >= uiScaled(column_width) * 85);
+                try std.testing.expect(painted * 100 <= uiScaled(column_width) * 90);
+            } else {
+                if (role == .user) {
+                    try std.testing.expect(painted <= @divTrunc(width * 6, 10));
+                } else {
+                    try std.testing.expectEqual(@divTrunc(width * 6, 10), painted);
+                }
+            }
+            try std.testing.expectEqual(if (role == .user) width else painted, rect.right);
+            try std.testing.expectEqual(if (role == .user) width - painted else 0, rect.left);
+        }
+    }
+}
+
 test "Chat View GDI layout keeps bubble width and avatar space consistent" {
     const dc = GetDC(null) orelse return error.TestUnexpectedResult;
     defer _ = ReleaseDC(null, dc);
@@ -1504,7 +1532,7 @@ test "Chat View GDI layout keeps bubble width and avatar space consistent" {
     const user = ChatBlock{ .start = 0, .len = text.len, .role = .user };
     const bubble = chatMeasureBlockRect(dc, text, user, .single, 160, 0, null);
     try std.testing.expect(bubble.left >= 0 and bubble.right == 160);
-    try std.testing.expect(bubble.right - bubble.left <= chat_style.bubbleMaxWidth(160));
+    try std.testing.expect(bubble.right - bubble.left <= chat_style.bubbleMaxWidth(160, uiScaled(720)));
     var timed_user = user;
     timed_user.time = .{ '1', '7', ':', '3', '2' };
     var injected = timed_user;
@@ -1520,7 +1548,7 @@ test "Chat View GDI layout keeps bubble width and avatar space consistent" {
     const headed = chatMeasureBlockRect(dc, text, reply, .single, 320, 0, null);
     try std.testing.expectEqual(@as(i32, 0), headed.bottom - plain.bottom);
     for ([_]i32{ 160, 480, 960, 1440 }) |width| {
-        const cap = @divTrunc(width * 6, 10);
+        const cap = @divTrunc(width * @as(i32, if (width <= uiScaled(720)) 9 else 6), 10);
         const user_rc = chatMeasureBlockRect(dc, text, user, .single, width, 0, null);
         try std.testing.expectEqual(width, user_rc.right);
         try std.testing.expect(user_rc.right - user_rc.left <= cap);
@@ -1675,7 +1703,7 @@ fn chatPaintShellRow(hdc: HANDLE, row: *const chat_shell_sync.Row, rc: RECT) voi
     const sender_h = if (row.injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
     const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - sender_h };
     fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (row.injected) chatInjectedBubbleColor() else chatUserBubbleColor());
-    if (row.injected) chatPaintTime(hdc, .{ .start = 0, .len = text.len, .role = .injected, .sender = row.sender }, chatStatusRowRect(bubble), true, false);
+    if (row.injected) chatPaintTime(hdc, .{ .start = 0, .len = text.len, .role = .injected, .sender = row.sender }, chatStatusRowRect(bubble), true);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
@@ -1880,6 +1908,17 @@ fn chatScrollJumpBox(w: i32, h: i32) scroll_ui.Box {
     return scroll_ui.jumpButton(w, h, uiScaled(36), uiScaled(22), uiScaled(14));
 }
 
+fn chatScrollJumpBadgeBox(w: i32, h: i32) ?scroll_ui.Box {
+    var count = app_state.g_chat_new_messages.count();
+    if (!app_state.g_chat_scrolled_up or count == 0) return null;
+    var digits: i32 = 1;
+    while (count >= 10) : (count /= 10) digits += 1;
+    const button = chatScrollJumpBox(w, h);
+    const right = button.right + uiScaled(4);
+    const top = @max(0, button.top - uiScaled(10));
+    return .{ .left = @max(0, right - uiScaled(12 + digits * 8)), .top = top, .right = right, .bottom = top + uiScaled(18) };
+}
+
 fn chatScrollThumb(h: i32) ?scroll_ui.Span {
     return scroll_ui.thumb(app_state.g_chat_content_h, h, app_state.g_chat_scroll_y, h, uiScaled(28));
 }
@@ -1898,7 +1937,10 @@ fn chatScrollUiMouseDown(hwnd: HANDLE, x: i32, y: i32) bool {
     _ = GetClientRect(hwnd, &client);
     const w = client.right - client.left;
     const h = client.bottom - client.top;
-    if (app_state.g_chat_scrolled_up and scroll_ui.contains(chatScrollJumpBox(w, h), x, y)) {
+    const badge = chatScrollJumpBadgeBox(w, h);
+    if (app_state.g_chat_scrolled_up and (scroll_ui.contains(chatScrollJumpBox(w, h), x, y) or
+        (if (badge) |box| scroll_ui.contains(box, x, y) else false)))
+    {
         chatJumpToNewest();
         return true;
     }
@@ -1971,6 +2013,19 @@ fn chatPaintScrollUi(canvas: *@import("smooth.zig").Canvas, hdc: HANDLE, w: i32,
         .{ .x = cx + arm, .y = cy - drop },
     };
     canvas.strokePolyline(&points, customColorOr("text", themeConsoleFg()), @floatFromInt(@max(2, uiScaled(2))));
+    if (chatScrollJumpBadgeBox(w, h)) |badge| {
+        var rc = RECT{ .left = badge.left, .top = badge.top, .right = badge.right, .bottom = badge.bottom };
+        fillRoundRectAA(hdc, rc, uiScaled(9), customColorOr("accent", RGB(80, 150, 255)));
+        const old_font = SelectObject(hdc, chatMetadataFont());
+        defer _ = SelectObject(hdc, old_font);
+        _ = SetBkMode(hdc, TRANSPARENT);
+        _ = SetTextColor(hdc, RGB(255, 255, 255));
+        var text: [32]u8 = undefined;
+        const caption = std.fmt.bufPrint(&text, "{d}", .{app_state.g_chat_new_messages.count()}) catch unreachable;
+        var wide: [32]u16 = undefined;
+        const n = std.unicode.utf8ToUtf16Le(&wide, caption) catch unreachable;
+        _ = chatDrawText(hdc, &wide, @intCast(n), &rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    }
 }
 
 const gdipProc = @import("smooth.zig").gdipProc;
@@ -2897,7 +2952,7 @@ pub fn shotFocusTick() void {
 pub fn paintChatAttachButton(hdc: HANDLE, rc: RECT) void {
     const base = app_state.g_chat_input_color;
     const fill = chat_style.shift(base, if (chat_style.isDark(base)) 22 else -14);
-    fillRoundRectAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), fill);
+    @import("smooth.zig").fillEllipse(hdc, rc, fill);
     const cx = rc.left + @divTrunc(rc.right - rc.left, 2);
     const cy = rc.top + @divTrunc(rc.bottom - rc.top, 2);
     const arm = @max(uiScaled(5), @divTrunc(rc.right - rc.left, 5));
@@ -2915,8 +2970,8 @@ pub fn chatMetadataFont() HANDLE {
     return app_state.g_chat_rich_fonts[10];
 }
 
-fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirmed: bool) void {
-    if (block.role != .injected and (app_state.clean_chat or !confirmed)) return;
+fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool) void {
+    if (block.role != .injected) return;
     const old = SelectObject(hdc, chatMetadataFont());
     defer _ = SelectObject(hdc, old);
     var label: [96]u16 = @splat(0);
@@ -2928,16 +2983,6 @@ fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool, confirm
         const sender = std.mem.sliceTo(&block.sender, 0);
         @memcpy(label[len .. len + sender.len], sender);
         len += sender.len;
-    }
-    if (!app_state.clean_chat and confirmed and block.role == .user) {
-        const mark = std.unicode.utf8ToUtf16LeStringLiteral("\u{2713}\u{2713} Read");
-        if (len > 0) {
-            label[len] = ' ';
-            len += 1;
-        }
-        const n = @min(mark.len, label.len - len);
-        @memcpy(label[len .. len + n], mark[0..n]);
-        len += n;
     }
     _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(120, 124, 132)));
     var rc = area;
@@ -2961,14 +3006,14 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
     }
     switch (block.role) {
         .user, .injected => {
-            const status_h = if (block.role == .injected or (!app_state.clean_chat and block.role == .user and chatEchoBlockConfirmed(buf, block))) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
+            const status_h = if (block.role == .injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
             const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h };
             fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (block.role == .injected) chatInjectedBubbleColor() else chatUserBubbleColor());
             const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
             _ = chatFlowBlock(hdc, text, block, text_rc, true, null, disp.start, null);
-            if (status_h > 0) chatPaintTime(hdc, block, chatStatusRowRect(bubble), true, block.role == .user and chatEchoBlockConfirmed(buf, block));
+            if (status_h > 0) chatPaintTime(hdc, block, chatStatusRowRect(bubble), true);
         },
         .prose => {
             fillBubbleAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
@@ -4171,14 +4216,12 @@ fn chatPaintReadDivider(hdc: HANDLE, width: i32) void {
     const boundary = app_state.g_chat_read_boundary;
     if (verboseLoggingEnabled()) {
         var log: [256]u8 = undefined;
-        const marker = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].last_read_message_id else 0;
+        const marker = app_state.g_chat_read_visit_marker;
         const index = boundary.index orelse 0;
         debugLog(std.fmt.bufPrint(&log, "[chat] unread divider count={d} marker={d} index={d} unknown={d} y={d} message_y={d} scroll={d} message={d} offset={d} line_y={d}", .{
-            @intFromBool(boundary.index != null), marker, index, @intFromBool(boundary.unknown),
-            app_state.g_chat_read_divider_y, if (boundary.index != null) app_state.g_chat_layout_rects[index].top else 0,
-            app_state.g_chat_scroll_y, if (boundary.index != null) app_state.g_chat_blocks[index].message_id else 0,
-            if (boundary.index != null) app_state.g_chat_blocks[index].source_offset else 0,
-            app_state.g_chat_read_divider_y + uiScaled(14),
+            @intFromBool(boundary.index != null),                                            marker,                                                                      index,                     @intFromBool(boundary.unknown),
+            app_state.g_chat_read_divider_y,                                                 if (boundary.index != null) app_state.g_chat_layout_rects[index].top else 0, app_state.g_chat_scroll_y, if (boundary.index != null) app_state.g_chat_blocks[index].message_id else 0,
+            if (boundary.index != null) app_state.g_chat_blocks[index].source_offset else 0, app_state.g_chat_read_divider_y + uiScaled(14),
         }) catch "[chat] unread divider");
     }
     if (boundary.index == null) return;
@@ -4201,7 +4244,7 @@ fn chatPaintReadDivider(hdc: HANDLE, width: i32) void {
     var right = RECT{ .left = center + uiScaled(24), .top = y, .right = width - uiScaled(16), .bottom = y + 1 };
     _ = FillRect(hdc, &left, brush);
     _ = FillRect(hdc, &right, brush);
-    _ = chatDrawText(hdc, L("NEW"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = chatDrawText(hdc, L("New"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
 fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
@@ -5183,8 +5226,6 @@ test "IGSH-759 tool rows have no layout paint targets or hit area through stream
 
 const CleanChatScene = enum {
     blank,
-    receipt,
-    timestamp,
     sending,
     queued,
     waiting,
@@ -5213,6 +5254,7 @@ const CleanChatScene = enum {
     tool_detail,
     tool_diff,
     user,
+    user_read,
     injected,
     prose,
     code,
@@ -5279,7 +5321,6 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
     var entry = ChatOutboxEntry{ .text = @constCast(text), .state = .not_sent };
     switch (scene) {
         .blank => {},
-        .receipt, .timestamp => chatPaintTime(dc, block, .{ .left = 0, .top = 0, .right = width, .bottom = 24 }, true, scene == .receipt),
         .sending, .queued, .waiting, .not_sent, .unconfirmed => {
             entry.state = switch (scene) {
                 .sending => .sending,
@@ -5366,6 +5407,25 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
                 crop.top = uiScaled(28);
             }
             const rc = chatMeasureBlockRect(dc, text, block, .single, width, 0, null);
+            chatPaintBlock(dc, text, block, .single, rc);
+        },
+        .user_read => {
+            app_state.shells[0].chat_id = 1;
+            block.stamp_ms = 12345;
+            var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            const key = @import("chat_send.zig").chatOutboxKeyForShell(0, &key_buf);
+            var confirmed = app_state.ChatConfirmedEcho{ .key_len = @intCast(key.len), .stamp_ms = block.stamp_ms };
+            @memcpy(confirmed.key[0..key.len], key);
+            const kept = app_state.g_chat_confirmed.items.len;
+            defer app_state.g_chat_confirmed.shrinkRetainingCapacity(kept);
+            try app_state.g_chat_confirmed.append(std.heap.page_allocator, confirmed);
+            try std.testing.expect(chatEchoBlockConfirmed(text, block));
+            const rc = chatMeasureBlockRect(dc, text, block, .single, width, 0, null);
+            var unconfirmed = block;
+            unconfirmed.stamp_ms = 0;
+            try std.testing.expect(!chatEchoBlockConfirmed(text, unconfirmed));
+            const plain = chatMeasureBlockRect(dc, text, unconfirmed, .single, width, 0, null);
+            try std.testing.expectEqual(plain.bottom - plain.top, rc.bottom - rc.top);
             chatPaintBlock(dc, text, block, .single, rc);
         },
         .user, .injected, .prose, .code, .table => {
@@ -5523,15 +5583,15 @@ test "IGSH-816 CLEAN hides tool status summary details and diff rows pixels" {
     try expectCleanChatRowHidden(.tool);
 }
 
-test "IGSH-849 timestamps are absent and CLEAN still hides read ticks" {
-    const off = try cleanChatPixels(.receipt, false);
+test "IGSH-883 a confirmed sent message shows no Read line and keeps the bubble height" {
+    const off = try cleanChatPixels(.user_read, false);
     defer std.testing.allocator.free(off);
-    const on = try cleanChatPixels(.receipt, true);
+    const on = try cleanChatPixels(.user_read, true);
     defer std.testing.allocator.free(on);
-    const timestamp = try cleanChatPixels(.timestamp, false);
-    defer std.testing.allocator.free(timestamp);
-    try std.testing.expect(!std.mem.eql(u32, off, on));
-    try std.testing.expectEqualSlices(u32, timestamp, on);
+    const blank = try cleanChatPixels(.blank, true);
+    defer std.testing.allocator.free(blank);
+    try std.testing.expect(!std.mem.eql(u32, blank, off));
+    try std.testing.expectEqualSlices(u32, on, off);
 }
 
 test "IGSH-816 CLEAN preserves message markdown code tables and attribution pixels" {
@@ -5640,4 +5700,30 @@ test "IGSH-814 painter leaves all-read chats unchanged and paints one unread lin
     chatPaintReadDivider(dc, 400);
     _ = Flush.GdiFlush();
     try std.testing.expect(!std.mem.eql(u8, before, pixels));
+}
+
+test "IGSH-871 new reply badge counts arrivals and remains attached to the jump button" {
+    const saved_count = app_state.g_chat_new_messages;
+    const saved_up = app_state.g_chat_scrolled_up;
+    defer {
+        app_state.g_chat_new_messages = saved_count;
+        app_state.g_chat_scrolled_up = saved_up;
+    }
+    app_state.g_chat_scrolled_up = true;
+    app_state.g_chat_new_messages = .{};
+    try std.testing.expect(chatScrollJumpBadgeBox(800, 600) == null);
+    app_state.g_chat_new_messages.arrive(2, true);
+    app_state.g_chat_new_messages.arrive(1, true);
+    try std.testing.expectEqual(@as(usize, 3), app_state.g_chat_new_messages.count());
+    const badge = chatScrollJumpBadgeBox(800, 600) orelse return error.TestUnexpectedResult;
+    const button = chatScrollJumpBox(800, 600);
+    try std.testing.expect(badge.top < button.top and badge.bottom > button.top);
+    try std.testing.expect(badge.right >= button.right and badge.left < button.right);
+    try std.testing.expect(scroll_ui.contains(badge, badge.left + 1, badge.top + 1));
+    app_state.g_chat_new_messages.arrive(9, true);
+    const wider = chatScrollJumpBadgeBox(800, 600) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(wider.left < badge.left);
+    try std.testing.expectEqual(wider.right, badge.right);
+    app_state.g_chat_new_messages.atBottom(false);
+    try std.testing.expect(chatScrollJumpBadgeBox(800, 600) == null);
 }
