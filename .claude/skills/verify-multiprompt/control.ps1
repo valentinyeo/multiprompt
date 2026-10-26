@@ -128,12 +128,16 @@ public static class VerifyNative {
     [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, UIntPtr count, IntPtr text, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScan(char character);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
     [DllImport("dwmapi.dll")] public static extern int DwmFlush();
     static void Key(ushort key, ushort scan, uint flags) {
         Input input = new Input(); input.type = 1;
         input.data.keyboard = new Keyboard { key = key, scan = scan, flags = flags };
         if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("SendInput failed");
     }
+    public static void KeyDown(int key) { Key((ushort)key, 0, 0); }
+    public static void KeyUp(int key) { Key((ushort)key, 0, 2); }
+    public static bool IsDown(int key) { return (GetAsyncKeyState(key) & 0x8000) != 0; }
     public static void Chord(int[] keys) {
         Input[] inputs = new Input[keys.Length * 2];
         for (int i = 0; i < keys.Length; i++) {
@@ -1634,6 +1638,28 @@ function Click-WorkspacePill([int]$Workspace) {
     Record ("Click workspace pill for stored workspace $Workspace")
     [void][VerifyNative]::DwmFlush()
     [VerifyNative]::ClickClient($script:window, (8 + ($Workspace + 1) * 29 + 12), 17)
+}
+
+function Press-ShiftEnter([string]$Label) {
+    Doctor
+    Wait-Foreground
+    Record $Label
+    Assert-Foreground
+    $composer = [VerifyNative]::GetFocusedWindow($script:window)
+    if ([VerifyNative]::GetAncestor($composer, 2) -ne $script:window -or [VerifyNative]::Class($composer) -cne 'Edit') { throw 'Shift+Enter needs the owned focused composer' }
+    $before = @([VerifyNative]::EditText($composer) -split "`r?`n").Count
+    [VerifyNative]::KeyDown(0x10)
+    try {
+        Start-Sleep -Milliseconds 35
+        [VerifyNative]::KeyDown(0x0D)
+        Start-Sleep -Milliseconds 35
+        [VerifyNative]::KeyUp(0x0D)
+        Wait-Until { @([VerifyNative]::EditText($composer) -split "`r?`n").Count -eq ($before + 1) } 'native composer shows the Shift+Enter newline while Shift is held' -Tight
+    } finally {
+        [VerifyNative]::KeyUp(0x10)
+    }
+    Wait-Until { -not [VerifyNative]::IsDown(0x10) } 'Shift is released after Shift+Enter'
+    Record 'Shift released after Shift+Enter'
 }
 
 function Focus-Palette([string]$Query, [int]$Target) {
@@ -3663,7 +3689,7 @@ try {
                 foreach ($lines in @(1, 6)) {
                     if ($lines -eq 6) {
                         for ($line = 2; $line -le 6; $line++) {
-                            Press @(0x10, 0x0D) 'Shift+Enter: grow the owned draft without sending'
+                            Press-ShiftEnter 'Shift+Enter: grow the owned draft without sending'
                             Type-Text ('Draft line ' + $line)
                         }
                     }
