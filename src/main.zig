@@ -669,6 +669,9 @@ const SEARCH_VOICE_SPEED_150_OFFSET = @import("app_state.zig").SEARCH_VOICE_SPEE
 const SEARCH_VOICE_PREVIOUS_OFFSET = @import("app_state.zig").SEARCH_VOICE_PREVIOUS_OFFSET;
 const SEARCH_VOICE_NEXT_OFFSET = @import("app_state.zig").SEARCH_VOICE_NEXT_OFFSET;
 const SEARCH_CHAT_REPLY_OFFSET = @import("app_state.zig").SEARCH_CHAT_REPLY_OFFSET;
+const SEARCH_CHAT_REACT_LIKE_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_LIKE_OFFSET;
+const SEARCH_CHAT_REACT_DISLIKE_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_DISLIKE_OFFSET;
+const SEARCH_CHAT_REACT_HEART_OFFSET = @import("app_state.zig").SEARCH_CHAT_REACT_HEART_OFFSET;
 const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFSET;
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
@@ -4483,6 +4486,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     startAccountJob(.{ .kind = .devices });
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target >= SEARCH_CHAT_REACT_LIKE_OFFSET and target <= SEARCH_CHAT_REACT_HEART_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    @import("chat_render.zig").chatReactLatestAgent(@enumFromInt(target - SEARCH_CHAT_REACT_LIKE_OFFSET));
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }

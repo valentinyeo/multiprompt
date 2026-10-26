@@ -1656,6 +1656,13 @@ pub fn chatFindY(index: usize, position: ?usize) i32 {
     return rect.top + height + chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H)) + (if (detail) uiScaled(28) else @as(i32, 0));
 }
 
+const chat_reaction = @import("chat_reaction.zig");
+var g_reaction_view: chat_reaction.View = .{};
+
+fn chatShellReactionId(text: []const u16) u64 {
+    return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(text)) | (@as(u64, 1) << 63);
+}
+
 var g_shell_view: chat_shell_sync.View = .{};
 var g_shell_tracker: chat_shell_sync.Tracker = .{};
 var g_shell_rect: [chat_shell_sync.MAX_ROWS]RECT = undefined;
@@ -1724,7 +1731,7 @@ fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
     chatShellSyncBuild();
     g_shell_rect_count = 0;
     for (g_shell_view.rows[0..g_shell_view.count], 0..) |*row, row_index| {
-        if (row.local or row.sent or g_shell_rect_count >= g_shell_rect.len) continue;
+        if (row.local or row.sent or g_reaction_view.hidesPending(chatShellReactionId(row.slice())) or g_shell_rect_count >= g_shell_rect.len) continue;
         y += chatBlockGapBefore(true, .user, true, .single);
         var rc = chatMeasureEchoRect(hdc, row.slice(), width, y, false);
         if (row.injected) rc.bottom += uiScaled(CHAT_STATUS_H);
@@ -1799,6 +1806,32 @@ pub fn chatRelayout(client_width: i32) void {
     app_state.g_chat_content_left = content.left;
     const width = @max(1, content.right - content.left);
     const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
+    var reaction_pending: [app_state.CHAT_OUTBOX_MAX_PER_KEY + chat_transcript.QUEUE_MAX]chat_reaction.Pending = undefined;
+    var reaction_count: usize = 0;
+    var reaction_key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const reaction_key = chatOutboxKeyForShell(app_state.active_shell, &reaction_key_buf);
+    if (@import("chat_composer.zig").chatAcAgent() == .claude) {
+        for (app_state.g_chat_outbox.items) |entry| {
+            if (entry.state == .not_sent or !std.mem.eql(u8, entry.key[0..entry.key_len], reaction_key)) continue;
+            if (reaction_count >= reaction_pending.len) break;
+            reaction_pending[reaction_count] = .{ .id = entry.id, .text = entry.text };
+            reaction_count += 1;
+        }
+        if (chatHistoryEntry(chatFileIdentity())) |history| {
+            for (history.history.status.queue[0..history.history.status.queue_len]) |*item| {
+                if (item.injected or reaction_count >= reaction_pending.len) continue;
+                const text = item.text[0..item.len];
+                reaction_pending[reaction_count] = .{ .id = chatShellReactionId(text), .text = text };
+                reaction_count += 1;
+            }
+        }
+    }
+    const reaction_blocks = if (@import("chat_composer.zig").chatAcAgent() == .claude) app_state.g_chat_blocks[0..app_state.g_chat_block_count] else &.{};
+    const reactions_changed = g_reaction_view.build(std.heap.page_allocator, reaction_blocks, buf, reaction_pending[0..reaction_count]) catch failed: {
+        g_reaction_view.deinit(std.heap.page_allocator);
+        break :failed true;
+    };
+    if (reactions_changed) app_state.g_chat_layout_reuse = 0;
     chat_style.bubblePositions(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_bubble_pos[0..app_state.g_chat_block_count]);
     const boundary = @import("chat_session.zig").chatReadBoundary();
     if (!std.meta.eql(boundary, app_state.g_chat_read_boundary)) {
@@ -1829,7 +1862,7 @@ pub fn chatRelayout(client_width: i32) void {
         }
     }
     for (reuse..app_state.g_chat_block_count) |i| {
-        if (app_state.g_chat_blocks[i].role == .tool) {
+        if (app_state.g_chat_blocks[i].role == .tool or g_reaction_view.hides(i)) {
             app_state.g_chat_layout_rects[i] = .{ .left = 0, .top = y, .right = 0, .bottom = y };
             chatImgStoreLayout(i, .{});
             continue;
@@ -1841,7 +1874,8 @@ pub fn chatRelayout(client_width: i32) void {
         y += chatBlockGapBefore(has_previous, app_state.g_chat_blocks[i].role, app_state.g_chat_blocks[i].first, app_state.g_chat_bubble_pos[i]);
         has_previous = true;
         var block_imgs = ChatImgLayout{};
-        const rc = chatMeasureBlockRect(hdc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], width, y, if (i >= first_img_block and (!app_state.g_chat_blocks_from_file or app_state.g_chat_blocks[i].image_count > 0)) &block_imgs else null);
+        var rc = chatMeasureBlockRect(hdc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], width, y, if (i >= first_img_block and (!app_state.g_chat_blocks_from_file or app_state.g_chat_blocks[i].image_count > 0)) &block_imgs else null);
+        if (g_reaction_view.mask(i) != 0) rc.bottom += uiScaled(28);
         app_state.g_chat_layout_rects[i] = rc;
         chatImgStoreLayout(i, block_imgs);
         y = rc.bottom;
@@ -1856,7 +1890,7 @@ pub fn chatRelayout(client_width: i32) void {
         if (key.len > 0) {
             for (app_state.g_chat_outbox.items) |e| {
                 if (app_state.g_chat_echo_layout_count >= app_state.g_chat_echo_layout.len) break;
-                if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+                if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key) or g_reaction_view.hidesPending(e.id)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
                 var rc = chatMeasureEchoRect(hdc, e.text, width, y, e.state == .not_sent);
                 if (!app_state.clean_chat and chat_echo.pendingActions(e.state).send_again) rc.bottom += uiScaled(26);
@@ -2185,7 +2219,7 @@ fn bubbleRunSpan(i: usize) ?[2]i32 {
     if (run.first == run.last) return null;
     return .{
         app_state.g_chat_layout_rects[run.first].top - app_state.g_chat_scroll_y,
-        app_state.g_chat_layout_rects[run.last].bottom - app_state.g_chat_scroll_y,
+        app_state.g_chat_layout_rects[run.last].bottom - app_state.g_chat_scroll_y - (if (g_reaction_view.mask(run.last) != 0) uiScaled(28) else @as(i32, 0)),
     };
 }
 
@@ -3375,6 +3409,51 @@ pub fn chatCopyCodeKeyDown(vk: WPARAM) bool {
     return chatViewOwnsInput() and chat_code.copyKey(vk, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0);
 }
 
+pub fn chatReactToBlock(index: usize, emoji: chat_reaction.Emoji) void {
+    if (index >= app_state.g_chat_block_count or @import("chat_composer.zig").chatAcAgent() != .claude) return;
+    const block = app_state.g_chat_blocks[index];
+    if (block.role != .prose and block.role != .code) return;
+    const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
+    const display = chatBlockDisplayRange(buf, block);
+    var out: [256]u16 = undefined;
+    const line = chat_reaction.format(emoji, block.reaction_reference, buf[display.start..][0..display.len], &out) orelse return;
+    if (!@import("chat_send.zig").sendChatMessage(line)) showHeaderNoticeAscii("Could not send the reaction; try again", 3500, true);
+}
+
+pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
+    var i = app_state.g_chat_block_count;
+    while (i > 0) {
+        i -= 1;
+        if (app_state.g_chat_blocks[i].role == .prose or app_state.g_chat_blocks[i].role == .code) {
+            chatReactToBlock(i, emoji);
+            return;
+        }
+    }
+}
+
+fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
+    if (mask == 0) return;
+    if (app_state.g_chat_rich_fonts[11] == null) {
+        app_state.g_chat_rich_fonts[11] = @import("fonts.zig").create(-uiScaled(17), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, L("Segoe UI Emoji"));
+    }
+    const old = SelectObject(hdc, app_state.g_chat_rich_fonts[11]);
+    defer _ = SelectObject(hdc, old);
+    const count: i32 = @intCast(@popCount(mask));
+    var pill = RECT{ .left = rc.left + uiScaled(8), .top = rc.bottom - uiScaled(24), .right = rc.left + uiScaled(24 + count * 24), .bottom = rc.bottom - uiScaled(2) };
+    fillRoundRectAA(hdc, pill, uiScaled(11), chat_style.shift(chatAgentBubbleColor(), if (app_state.g_light_theme) -12 else 20));
+    _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
+    _ = SetBkMode(hdc, TRANSPARENT);
+    pill.left += uiScaled(8);
+    for (std.enums.values(chat_reaction.Emoji)) |emoji| {
+        if ((mask & emoji.bit()) == 0) continue;
+        var glyph_rc = pill;
+        glyph_rc.right = glyph_rc.left + uiScaled(24);
+        const text = emoji.text();
+        _ = chatDrawText(hdc, text.ptr, @intCast(text.len), &glyph_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        pill.left += uiScaled(24);
+    }
+}
+
 pub fn chatReplyToBlock(index: usize) void {
     if (index >= app_state.g_chat_block_count or app_state.g_chat_blocks[index].role == .tool) return;
     const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
@@ -4387,7 +4466,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
         const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
         const first = if (chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], app_state.g_chat_scroll_y)) |anchor| anchor.index else app_state.g_chat_block_count;
         for (first..app_state.g_chat_block_count) |i| {
-            if (app_state.g_chat_blocks[i].role == .tool) continue;
+            if (app_state.g_chat_blocks[i].role == .tool or g_reaction_view.hides(i)) continue;
             var rc = app_state.g_chat_layout_rects[i];
             rc.left += app_state.g_chat_content_left;
             rc.right += app_state.g_chat_content_left;
@@ -4395,10 +4474,13 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             rc.bottom -= app_state.g_chat_scroll_y;
             if (rc.top > h) break;
             if (rc.bottom <= paint.top or rc.top >= paint.bottom or rc.right <= paint.left or rc.left >= paint.right) continue;
+            var body_rc = rc;
+            if (g_reaction_view.mask(i) != 0) body_rc.bottom -= uiScaled(28);
             g_bubble_span = bubbleRunSpan(i);
-            chatPaintBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], rc);
+            chatPaintBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], body_rc);
             g_bubble_span = null;
-            chatPaintBlockImages(mem_dc, i, rc);
+            chatPaintBlockImages(mem_dc, i, body_rc);
+            chatPaintReactions(mem_dc, g_reaction_view.mask(i), rc);
             @import("chat_find_ui.zig").paintMatch(mem_dc, app_state.g_chat_blocks[i], rc);
             if (app_state.g_voice_state == .speaking and app_state.g_voice_highlight != null and
                 i >= app_state.g_voice_highlight.?.start and i < app_state.g_voice_highlight.?.end)
@@ -4699,7 +4781,16 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             }
             if (block_at == null and echo_index != null and message_text.len > 0) reply_text = std.heap.page_allocator.dupe(u16, message_text) catch null;
             defer if (reply_text) |text| std.heap.page_allocator.free(text);
-            const items = chatContextMenuItems(chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions);
+            var items = chatContextMenuItems(chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions);
+            if (block_at) |index| {
+                const role = app_state.g_chat_blocks[index].role;
+                if ((role == .prose or role == .code) and @import("chat_composer.zig").chatAcAgent() == .claude) {
+                    const Item = @import("fonts.zig").MessageMenuItem;
+                    std.mem.copyBackwards(Item, items.items[3..][0..items.len], items.items[0..items.len]);
+                    @memcpy(items.items[0..3], &[_]Item{ .reaction_like, .reaction_dislike, .reaction_heart });
+                    items.len += 3;
+                }
+            }
             var menu_log: [128]u8 = undefined;
             var menu_log_len: usize = 0;
             for (items.items[0..items.len], 0..) |item, i| {
@@ -4713,6 +4804,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             _ = SetForegroundWindow(app_state.g_main_hwnd);
             const cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null);
             switch (cmd) {
+                8, 9, 10 => if (block_at) |index| chatReactToBlock(index, @enumFromInt(cmd - 8)),
                 7 => if (link_text) |text| chatCopyTextToClipboard(text),
                 1 => chatCopyTextToClipboard(if (items.copy_target == .selection) selection_text else message_text),
                 5 => if (echo_id) |id| chatEchoSendAgain(id),
@@ -4880,7 +4972,7 @@ test "status row todo expansion stays on its tab and unknown tabs have no strip"
 
 const ChatContextCopyTarget = enum { selection, message, nothing };
 const ChatContextMenu = struct {
-    items: [5]@import("fonts.zig").MessageMenuItem = undefined,
+    items: [8]@import("fonts.zig").MessageMenuItem = undefined,
     len: usize = 0,
     copy_target: ChatContextCopyTarget,
 };

@@ -339,6 +339,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Double-click empty space", .b = "Switch between Chat View and the shell (without selecting text)", .header = false },
     .{ .a = "Alt+C", .b = "Toggle formatted Chat View for this tab; screen copy remains the fallback", .header = false },
     .{ .a = "+ button / Ctrl+V in Chat View", .b = "Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File)", .header = false },
+    .{ .a = "Right-click Claude message / Ctrl+K reactions", .b = "Send a quoted reaction; show its badge", .header = false },
     .{ .a = "Right-click message → Reply / Ctrl+K \"Chat View: Reply to latest agent message\"", .b = "Quote a message above your reply; select text and press Enter to quote only the selection; click × or press Esc with an empty composer to cancel", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Open or fold all tool steps\"", .b = "Open every tool step's details, or fold them all; click one tool line to toggle it", .header = false },
     .{ .a = "Ctrl+K \"Chat View: Toggle todo list\"", .b = "Show or hide this tab's agent todo list below the title; also click the todo count", .header = false },

@@ -384,6 +384,19 @@ pub fn chatSteerPrompt() void {
     sendChatPrompt();
 }
 
+pub fn sendChatMessage(text: []const u16) bool {
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or text.len == 0) return false;
+    _ = chatEchoEnqueueForShell(app_state.active_shell, text, .queued) orelse return false;
+    app_state.g_chat_read_open_pending = false;
+    app_state.g_chat_read_hold = false;
+    app_state.g_chat_read_open_ready = true;
+    _ = @import("chat_session.zig").chatReadMark(true);
+    chatOutboxTick();
+    @import("inbox.zig").stampSessionUse(app_state.active_shell, false);
+    _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
+    return true;
+}
+
 pub fn sendChatPrompt() void {
     send_latency.markPressed();
     chatAcClose();
