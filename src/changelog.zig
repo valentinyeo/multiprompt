@@ -59,6 +59,11 @@ pub const CHANGELOG = blk: {
 };
 
 const SOURCE_CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.884", .items = &.{
+        .{ .text = "The skill list stays steady while you search.", .ticket = "IGSH-922" },
+        .{ .text = "Sidebar labels such as Recents now look exactly like your own group labels, and no label shows an arrow any more.", .ticket = "IGSH-932" },
+        .{ .text = "The new tab button at the end of the sidebar list is now just a plus.", .ticket = "IGSH-932" },
+    } },
     .{ .ver = "0.28.883", .items = &.{
         .{ .text = "Right-click menus now have rounded corners, no thin border and a soft rounded highlight, matching the chat.", .ticket = "IGSH-892" },
     } },
