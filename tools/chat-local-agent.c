@@ -66,15 +66,16 @@ int main(int argc, char **argv) {
     if (inline_working) {
         if (WaitForSingleObject(reply_event, INFINITE) != WAIT_OBJECT_0) return 2;
         CloseHandle(reply_event);
-        COORD user = {0, (SHORT)(info.srWindow.Bottom - 4)};
-        const WCHAR *reply = L"\x1b[0m\x1b[2J";
-        if (!WriteConsoleW(output, reply, (DWORD)wcslen(reply), &written, NULL) || !SetConsoleCursorPosition(output, user)) return 4;
-        reply = L"\x276f Please respond.\r\n\r\n\x25cf Ready.\r\n\x276f ";
-        if (!WriteConsoleW(output, reply, (DWORD)wcslen(reply), &written, NULL)) return 4;
+        CONSOLE_SCREEN_BUFFER_INFO finished;
+        if (!GetConsoleScreenBufferInfo(output, &finished)) return 4;
+        COORD zero = {0, 0};
+        if (!FillConsoleOutputCharacterW(output, L' ', (DWORD)finished.dwSize.X * (DWORD)finished.dwSize.Y, zero, &written)) return 4;
+        COORD user = {0, (SHORT)(finished.srWindow.Bottom - 4)};
+        const WCHAR *reply = L"\x276f Please respond.\r\n\r\n\x25cf Ready.\r\n\x276f ";
+        if (!SetConsoleCursorPosition(output, user) || !WriteConsoleW(output, reply, (DWORD)wcslen(reply), &written, NULL)) return 4;
         if (snprintf(path, sizeof(path), "%s-replied", argv[2]) >= (int)sizeof(path)) return 2;
         FILE *replied = fopen(path, "w");
         if (!replied) return 2;
-        CONSOLE_SCREEN_BUFFER_INFO finished;
         WCHAR readback[256];
         DWORD count;
         if (!GetConsoleScreenBufferInfo(output, &finished) || !ReadConsoleOutputCharacterW(output, readback, 256, user, &count)) return 4;

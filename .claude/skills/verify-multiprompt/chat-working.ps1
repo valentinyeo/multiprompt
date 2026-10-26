@@ -49,6 +49,10 @@ $ready = Get-Content ($prefix + '-ready.json') -Raw | ConvertFrom-Json
 $replyEvent = [Threading.EventWaitHandle]::OpenExisting(('Local\MultipromptInlineReply-' + $ready.pid))
 try { [void]$replyEvent.Set() } finally { $replyEvent.Dispose() }
 Wait-Until { Test-Path ($prefix + '-replied') } 'stand-in wrote the real reply to its console'
+$readback = Get-Content ($prefix + '-replied') -Raw
+$codes = ($readback -split 'chars=')[1] -split ',' | Where-Object { $_ }
+$screen = -join @($codes | ForEach-Object { [char][int]$_ })
+if ($screen -notmatch 'Ready\.' -or $screen -match 'interrupt') { throw ('Stand-in did not replace its working line: ' + $screen) }
 & $Exe --notify ('DONE:' + $hookTarget)
 Wait-Until { & $probe 'after' 'idle' } 'IGSH-924 dots gone after reply' -Seconds 45
 $check.passed = $true
