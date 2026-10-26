@@ -78,6 +78,14 @@ class ChatSyncAuditTest(unittest.TestCase):
         self.assertEqual(len(candidates), 3)
         self.assertEqual([item['pane_line'] for item in candidates], [1, 3, 5])
 
+    def test_igsh921_multi_word_tool_calls_are_not_chat_messages(self):
+        capture = ['● The neutral summary is ready',
+                   '● Web Search("neutral query about sandbox testing; second neutral query")',
+                   '● Web Fetch(https://example.com/neutral/page)',
+                   '● Another neutral paragraph follows the tools'] + [''] * 8
+        candidates = audit.pane_candidates('\n'.join(capture) + '\n')
+        self.assertEqual([item['pane_line'] for item in candidates], [1, 4])
+
     def test_pane_candidates_skips_running_tool_rows(self):
         capture = ['● The neutral summary is ready',
                    '● Inspecting the neutral inventory',
