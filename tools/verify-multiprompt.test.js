@@ -121,12 +121,17 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
     for (const inputs of [undefined, { feature: 'chat-delivery', tag: 'v0.28.823' }]) {
       const current = context(event);
       current.inputs = inputs;
-      assert.equal(evaluateConcurrencyGroup(group[1], current), `${current.github.workflow}-${current.github.ref}`);
+      const gate = event === 'push' && inputs ? `-gate-${current.github.sha}` : '';
+      assert.equal(evaluateConcurrencyGroup(group[1], current), `${current.github.workflow}-${current.github.ref}${gate}`);
     }
     const first = evaluateConcurrencyGroup(group[1], context(event));
     const rerun = evaluateConcurrencyGroup(group[1], context(event, undefined, '', '2'));
     assert.notEqual(rerun, first, `${event} reruns leave the group a new push cancels`);
   }
+  const gateOne = context('push', 'relaunch-saved-sessions');
+  const gateTwo = context('push', 'relaunch-saved-sessions');
+  gateTwo.github.sha = 'def456';
+  assert.notEqual(evaluateConcurrencyGroup(group[1], gateOne), evaluateConcurrencyGroup(group[1], gateTwo), 'the release gate run of each master commit has its own group and never queues behind another commit');
 });
 
 function allowsSessionOpen(text) {

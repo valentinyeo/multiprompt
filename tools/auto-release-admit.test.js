@@ -53,6 +53,10 @@ if (args[0] === 'run' && args[1] === 'view') {
   process.exit(0);
 }
 const sha = args[args.indexOf('--commit') + 1];
+if (args[args.indexOf('-w') + 1] === 'release-gate.yml') {
+  console.log(JSON.stringify(JSON.parse(process.env.GATE_RUNS || '{}')[sha] || []));
+  process.exit(0);
+}
 if (args[args.indexOf('-w') + 1] === 'verify.yml') {
   const verify = JSON.parse(process.env.VERIFY_RUNS || '{}')[sha];
   console.log(JSON.stringify(verify || [{ databaseId: 700, event: 'push', status: 'completed', conclusion: 'failure' }]));
@@ -101,6 +105,7 @@ test('HEAD moved past green commits: publishes newest green SHA, not HEAD, and n
   assert.deepEqual(f.calls(), [
     list('test.yml', f.tip),
     list('test.yml', f.green),
+    list('release-gate.yml', f.green),
     list('verify.yml', f.green),
     ['run', 'view', '700', '-R', 'example/multiprompt', '--json', 'jobs'],
   ]);
@@ -264,5 +269,47 @@ test('the admit script names the journey the verify workflow runs on every maste
   const autoRelease = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
   assert.match(admit, /RELEASE_JOURNEY=relaunch-saved-sessions/);
   assert.match(workflow, /fromJSON\('\["appearance", "chat-dictation", "relaunch-saved-sessions", [^\n]*\]'\)/);
-  assert.match(autoRelease, /workflows: \[Tests, Verify desktop\]/);
+  assert.match(autoRelease, /workflows: \[Tests, Verify desktop, Release gate\]/);
+  assert.match(autoRelease, /workflow_run\.name == 'Release gate'/);
+});
+
+const gateJourney = 'journey / verify (relaunch-saved-sessions)';
+
+function gateEnv(gateRuns, jobs, verifyRuns = {}) {
+  return { GATE_RUNS: JSON.stringify(gateRuns), VERIFY_RUNS: JSON.stringify(verifyRuns), VERIFY_JOBS: JSON.stringify(jobs) };
+}
+
+test('a green release gate run releases the commit although its verify run was cancelled', t => {
+  const f = fixture(t);
+  selected(f.admit(['--dry-run'], gateEnv({ [f.green]: verifyPush(901) },
+    { 901: { jobs: [{ name: gateJourney, conclusion: 'success' }] }, 700: { jobs: [] } })), f.green);
+});
+
+test('a red release gate run wins over a green journey in the full verify run', t => {
+  const f = fixture(t);
+  selected(f.admit(['--dry-run'], gateEnv({ [f.green]: verifyPush(901), [f.older]: verifyPush(902) },
+    { 901: { jobs: [{ name: gateJourney, conclusion: 'failure' }] }, 902: { jobs: [{ name: gateJourney, conclusion: 'success' }] }, 801: { jobs: [{ name: journey, conclusion: 'success' }] } },
+    { [f.green]: verifyPush(801) })), f.older);
+});
+
+for (const [label, conclusion] of [['cancelled', 'cancelled'], ['unfinished', null], ['skipped', 'skipped']]) {
+  test(`a ${label} release gate journey blocks the release`, t => {
+    const f = fixture(t);
+    const result = skipped(f, gateEnv({ [f.green]: verifyPush(901), [f.older]: verifyPush(901) }, { 901: { jobs: [{ name: gateJourney, conclusion }] } }));
+    assert.match(result.stderr, /relaunch-saved-sessions/);
+  });
+}
+
+test('the release gate workflow runs the journey once per master commit without queueing behind other commits', () => {
+  const gate = fs.readFileSync(path.join(root, '.github/workflows/release-gate.yml'), 'utf8');
+  const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  assert.match(gate, /^name: Release gate$/m);
+  assert.match(gate, /push:\n    branches: \[master\]/);
+  assert.match(gate, /group: release-gate-\$\{\{ github\.event_name == 'push' && github\.sha \|\| github\.run_id \}\}/);
+  assert.match(gate, /cancel-in-progress: false/);
+  assert.match(gate, /uses: \.\/\.github\/workflows\/verify\.yml/);
+  assert.match(gate, /feature: relaunch-saved-sessions/);
+  assert.match(verify, /workflow_call:/);
+  assert.match(verify, /inputs\.feature && github\.event_name == 'push' && format\('-gate-\{0\}', github\.sha\)/);
+  assert.match(verify, /inputs\.feature && github\.event_name == 'push' && fromJSON\(format\('\["\{0\}"\]', inputs\.feature\)\)/);
 });

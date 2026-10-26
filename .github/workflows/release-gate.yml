@@ -1,0 +1,20 @@
+name: Release gate
+run-name: release gate ${{ github.sha }}
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.event_name == 'push' && github.sha || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  journey:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: relaunch-saved-sessions
