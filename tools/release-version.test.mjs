@@ -182,7 +182,7 @@ test('five Windows and three VPS jobs retain the upstream test graph with indepe
   assert.match(build, /test_step.dependOn\(&zsb_help_tests.step\)/);
 });
 
-test('lightweight workflows cancel superseded PRs, verify also cancels superseded master pushes, never tags or dispatches', () => {
+test('lightweight workflows cancel superseded PRs, a running master verify is never cancelled by the next merge, never tags or dispatches', () => {
   for (const file of ['gitleaks', 'no-comments', 'docs-site']) {
     const text = fs.readFileSync(path.join(root, `.github/workflows/${file}.yml`), 'utf8');
     assert.match(text, /^  pull_request:/m, file);
@@ -190,7 +190,7 @@ test('lightweight workflows cancel superseded PRs, verify also cancels supersede
   }
   const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   assert.match(verify, /^  pull_request:/m);
-  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\$\{\{ github\.run_attempt != '1' && format\('-rerun-\{0\}', github\.sha\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \|\| \(github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\) \}\}$/m);
+  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\$\{\{ github\.run_attempt != '1' && format\('-rerun-\{0\}', github\.sha\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m);
   const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
   assert.match(scan, /^  push:\n    branches: \[master\]\n  pull_request:/m);
   assert.match(scan, /^  schedule:/m);
