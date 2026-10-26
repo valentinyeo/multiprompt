@@ -1,0 +1,41 @@
+name: Freeze recorder
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'build.zig'
+      - 'tools/freeze-recorder*'
+      - '.github/workflows/freeze-recorder.yml'
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: freeze-recorder-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  journey:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Zig
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          tar -xf $zip -C $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build the app
+        run: zig build
+      - name: Force real main-thread stalls
+        shell: pwsh
+        run: ./tools/freeze-recorder-journey.ps1 -Exe ./zig-out/bin/multiprompt.exe -Evidence ./freeze-evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: freeze-evidence
+          path: freeze-evidence/
+          if-no-files-found: warn
