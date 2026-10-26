@@ -681,10 +681,11 @@ test "folded user reaction keeps the New divider without a user bubble" {
     blocks[0] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 1, .reaction_reference = 1 };
     blocks[1] = .{ .start = 1, .len = line.len, .role = .user, .first = true, .message_id = 3 };
     blocks[2] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 2, .reaction_reference = 2 };
-    g_chat_block_count = 3;
+    blocks[3] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 4, .reaction_reference = 4 };
+    g_chat_block_count = 4;
     chatRelayout(400);
     try std.testing.expect(g_reaction_view.hides(1));
-    try std.testing.expectEqual(@as(usize, 2), measured);
+    try std.testing.expectEqual(@as(usize, 3), measured);
     try std.testing.expectEqual(g_chat_layout_rects[0].bottom, g_chat_read_divider_y);
     try std.testing.expectEqual(g_chat_read_divider_y + 28, g_chat_layout_rects[2].top);
     try std.testing.expectEqual(g_chat_layout_rects[1].top, g_chat_layout_rects[1].bottom);
