@@ -198,6 +198,7 @@ const chatPerf = @import("chat_session.zig").chatPerf;
 const chatHistoryEntry = @import("chat_session.zig").chatHistoryEntry;
 const chatFileRequest = @import("chat_session.zig").chatFileRequest;
 const chatSwitchDidPaint = @import("chat_session.zig").chatSwitchDidPaint;
+const chatSwitchContentPainted = @import("chat_session.zig").chatSwitchContentPainted;
 const refreshChatTranscript = @import("chat_session.zig").refreshChatTranscript;
 const chatRelayoutPreservingScroll = @import("chat_session.zig").chatRelayoutPreservingScroll;
 const ChatHit = @import("app_state.zig").ChatHit;
@@ -4326,6 +4327,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             defer {
                 _ = EndPaint(hwnd, &ps);
                 if (painted) chatSwitchDidPaint();
+                if (painted) chatSwitchContentPainted();
                 if (painted) chatBenchPaint();
                 if (painted) @import("launch_cache.zig").painted(true);
             }

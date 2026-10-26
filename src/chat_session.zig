@@ -1325,6 +1325,18 @@ pub fn chatSwitchDidPaint() void {
     _ = PostMessageW(app_state.g_main_hwnd, WM_TIMER, TIMER_CHAT_BROWSER_SWAP, 0);
 }
 
+pub fn chatSwitchContentPainted() void {
+    const sid = app_state.g_chat_switch_content_sid;
+    if (sid == 0 or !app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.shells[app_state.active_shell].shell_id != sid) return;
+    if (app_state.g_chat_block_count == 0 or app_state.g_chat_layout_dirty or app_state.g_chat_cache_shell_id != sid) return;
+    app_state.g_chat_switch_content_sid = 0;
+    if (!verboseLoggingEnabled()) return;
+    var buf: [128]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "[switch] chat content shown shell={d} blocks={d} ms={d}", .{ sid, app_state.g_chat_block_count, GetTickCount64() -| app_state.g_chat_switch_started }) catch return;
+    debugLog(line);
+}
+
 pub fn chatSwitchBrowserTick() void {
     _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_BROWSER_SWAP);
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
