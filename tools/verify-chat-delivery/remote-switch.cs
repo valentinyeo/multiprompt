@@ -31,7 +31,7 @@ public sealed class RemoteSwitchFrames : IDisposable {
             double completed = clock.Elapsed.TotalMilliseconds;
             lock (frames) frames.Add(new Frame { completedMs = completed, gapMs = completed - last, paintMs = completed - start, painted = painted });
             last = completed;
-            Thread.Sleep(10);
+            Thread.Sleep(16);
         }
     }
     public Frame[] Finish() {

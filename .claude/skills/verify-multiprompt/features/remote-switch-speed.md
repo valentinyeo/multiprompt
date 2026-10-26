@@ -18,16 +18,16 @@ Use Ctrl+Tab for sessions and Alt+Left or Alt+Right for workspaces. No new app a
 Dispatch the delivery driver through the existing workflow:
 
 ```sh
-gh workflow run verify.yml --ref <branch> -f feature=chat-messages-only -f remote_switch_proof=true
+gh workflow run remote-switch.yml --ref <branch>
 ```
 
-Download `verify-chat-messages-only`. The driver uses an isolated saved remote tab on host 2, an alternate remote home, and the production embedded reader against the existing SSH/tmux boundary. It copies all 2,000 numbered messages through the real selection/copy commands before measuring. It prepares a read-divider transition, creates a local CMD through the palette, then drives 20 Ctrl+Tab switches. It closes only that owned local fixture, creates a workspace through Ctrl+N, and drives 20 Alt+Left/Alt+Right switches.
+The PR runs both sides automatically. Download `remote-switch-baseline` and `remote-switch-candidate`. The driver uses an isolated saved remote tab on host 2, an alternate remote home, and the production embedded reader against the existing SSH/tmux boundary. It copies all 2,000 numbered messages through the real selection/copy commands before measuring. It prepares a read-divider transition, creates a local CMD through the palette, then drives 20 Ctrl+Tab switches. It closes only that owned local fixture, creates a workspace through Ctrl+N, and drives 20 Alt+Left/Alt+Right switches.
 
-`remote-switch/observation.json` retains each switch's painted-shell identity, elapsed time, CPU milliseconds, and completed native paint timestamps. A separate sampler invalidates the owned transcript and requests actual WM_PAINT completion every 10 ms. Frame gaps are derived independently from completion timestamps, not copied from the driver's reported gap. CPU is process kernel/user time divided by measured wall time, never divided by logical core count. The first two seconds after the final workspace switch are the recovery interval.
+`remote-switch/observation.json` retains each switch's painted-shell identity, elapsed time, CPU milliseconds, and completed native paint timestamps. A separate sampler invalidates the owned transcript and requests actual WM_PAINT completion every 16 ms. Frame gaps are derived independently from completion timestamps, not copied from the driver's reported gap. CPU is process kernel/user time divided by measured wall time, never divided by logical core count. The first two seconds after the final workspace switch are the recovery interval.
 
 `tools/remote-switch-proof.mjs` checks every sample, session/workspace alternation, complete rendered history, screenshot signature, and owned-process cleanup. Require `REMOTE_SWITCH_OK`, `result.json` status `passed`, and successful cleanup. Inspect `remote-switch-complete.png`, `remote-switch-unread-visit.png`, copied text, action log, build identity, and raw frame records.
 
-Run the identical journey on the pre-fix app source and the fixed source. The red must finish its setup and fail a performance budget. A build, launch, incomplete-history, or ownership failure is not a performance red control. Retain both run URLs.
+The baseline builds pre-fix master `fe7ffa681d728d222479bfc93b63a932ce09c9f1`. The candidate builds the PR head. Both use the identical current journey. The red must finish its setup and fail a performance budget. A build, launch, incomplete-history, or ownership failure is not a performance red control. Retain both run URLs.
 
 ## Gotchas
 

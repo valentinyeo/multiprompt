@@ -633,6 +633,12 @@ test "twenty local and remote cached switches retain their unchanged prefix" {
     const unchanged = measured;
     chatRelayout(400);
     try std.testing.expect(measured - unchanged <= 10);
+    const cached_rects = g_chat_layout_rects[0..1000].*;
+    const cached_height = g_chat_content_h;
+    g_chat_layout_reuse = 0;
+    chatRelayout(400);
+    try std.testing.expectEqual(cached_height, g_chat_content_h);
+    try std.testing.expectEqualDeep(cached_rects, g_chat_layout_rects[0..1000].*);
 }
 `;
   const result = run(prelude + body(source, 'chatRelayout') + checks);

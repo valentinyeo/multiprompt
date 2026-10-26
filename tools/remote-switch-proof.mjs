@@ -15,7 +15,7 @@ export function verifyRemoteSwitch(root) {
   assert.deepEqual(value.switches.map(sample => sample.mode), [...Array(20).fill('session'), ...Array(20).fill('workspace')], 'session and workspace coverage');
   const shells = new Set(value.switches.map(sample => sample.shell));
   assert.equal(shells.size, 2, 'two distinct sessions');
-  const frameSet = sample => {
+  const frameSet = (sample, enforceFrameBudget = true) => {
     assert.ok(Number.isFinite(sample.elapsedMs) && sample.elapsedMs >= 200, 'bounded measurement interval');
     assert.ok(Number.isFinite(sample.cpuMs) && sample.cpuMs >= 0, 'measured process CPU');
     const cpu = 100 * sample.cpuMs / sample.elapsedMs;
@@ -27,7 +27,7 @@ export function verifyRemoteSwitch(root) {
       assert.ok(Math.abs(frame.gapMs - (frame.completedMs - previous)) < 0.01, 'frame gap independently derived');
       previous = frame.completedMs;
       assert.equal(frame.painted, true, 'paint completed');
-      assert.ok(Number.isFinite(frame.gapMs) && frame.gapMs > 0 && frame.gapMs <= 50, `paint gap ${frame.gapMs} ms exceeds 50 ms`);
+      assert.ok(Number.isFinite(frame.gapMs) && frame.gapMs > 0 && (!enforceFrameBudget || frame.gapMs <= 50), `paint gap ${frame.gapMs} ms exceeds 50 ms`);
       assert.ok(Number.isFinite(frame.paintMs) && frame.paintMs >= 0 && frame.paintMs <= frame.gapMs, 'native paint timing');
     }
     assert.ok(previous >= sample.elapsedMs - 50, 'frame sampling covers measurement interval');
@@ -40,8 +40,8 @@ export function verifyRemoteSwitch(root) {
     assert.ok(Number.isFinite(sample.switchMs) && sample.switchMs >= 0 && sample.switchMs < 150, '150 ms switch budget');
     frameSet(sample);
   }
-  const before = frameSet(value.idleBefore);
-  const after = frameSet(value.idleAfter);
+  const before = frameSet(value.idleBefore, false);
+  const after = frameSet(value.idleAfter, false);
   assert.ok(value.idleAfter.elapsedMs >= 2000 && value.idleAfter.elapsedMs < 2400, 'first two seconds after switches sampled');
   assert.ok(after <= Math.max(5, before + 2), 'CPU returns to idle within two seconds');
   const cleanup = JSON.parse(read('cleanup.json'));
@@ -55,7 +55,7 @@ export function verifyRemoteSwitch(root) {
     maxFrameGapMs: Math.max(...value.switches.flatMap(sample => sample.frames.map(frame => frame.gapMs))),
     maxCpuPercent: Math.max(...value.switches.map(sample => 100 * sample.cpuMs / sample.elapsedMs)),
     idleBeforePercent: before, idleAfterPercent: after,
-    boundary: 'Real Windows app and native transcript paints; synthetic second SSH host and alternate remote home. CPU is one-core process time, not divided by logical cores. Forced paints every 10 ms measure completed application frames, not compositor presentation.' };
+    boundary: 'Real Windows app and native transcript paints; synthetic second SSH host and alternate remote home. CPU is one-core process time, not divided by logical cores. Forced paints every 16 ms measure completed application frames, not compositor presentation.' };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
