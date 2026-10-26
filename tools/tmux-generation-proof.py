@@ -30,7 +30,16 @@ with tempfile.TemporaryDirectory(prefix='igsh985-') as scratch:
     marker = Path(scratch) / 'attached'
     def run(command):
         marker.unlink(missing_ok=True)
-        return subprocess.run(['script', '-qec', shlex.join(command), '/dev/null'], input='', env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10)
+        process = subprocess.Popen(['script', '-qec', shlex.join(command), '/dev/null'], stdin=subprocess.PIPE, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            process.wait(timeout=10)
+            return subprocess.CompletedProcess(command, process.returncode, process.stdout.read())
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            process.stdin.close()
+            process.stdout.close()
     try:
         tmux('new-session', '-d', '-s', 'workspace', 'cat')
         before = tmux('list-sessions', '-F', '#{session_name}').splitlines()
