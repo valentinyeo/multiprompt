@@ -2034,6 +2034,16 @@ pub fn detachTabToNewWindow(idx: u32) void {
     }
     cmd_buf[pos] = '"';
     pos += 1;
+    cmd_buf[pos] = ' ';
+    pos += 1;
+    cmd_buf[pos] = '"';
+    pos += 1;
+    for (shell.tmux_identity[0..shell.tmux_identity_len]) |c| {
+        cmd_buf[pos] = c;
+        pos += 1;
+    }
+    cmd_buf[pos] = '"';
+    pos += 1;
     cmd_buf[pos] = 0;
 
     unregisterShellExitWait(idx);
@@ -2136,6 +2146,8 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     const tlen: u32 = @min(shell.tmux_session_len, 63);
     if (tlen > 0) @memcpy(transfer.tmux[0..tlen], shell.tmux_session[0..tlen]);
     transfer.tmux_len = tlen;
+    transfer.tmux_identity = shell.tmux_identity;
+    transfer.tmux_identity_len = shell.tmux_identity_len;
 
     const flen: u32 = @min(shell.favicon_path_len, 511);
     if (flen > 0) @memcpy(transfer.favicon_path[0..flen], shell.favicon_path[0..flen]);

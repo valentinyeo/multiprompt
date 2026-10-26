@@ -212,6 +212,8 @@ pub const TabTransfer = extern struct {
     input: u64 = 0,
     visits: @import("frequent.zig").Visits,
     inbox_excluded: u8,
+    tmux_identity: [64]u8 = @splat(0),
+    tmux_identity_len: u32 = 0,
 };
 
 pub const ShellKind = enum(u3) { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
@@ -1686,6 +1688,8 @@ pub var g_adopt_cwd: [512]u8 = std.mem.zeroes([512]u8);
 pub var g_adopt_cwd_len: u32 = 0;
 pub var g_adopt_tmux: [64]u8 = std.mem.zeroes([64]u8);
 pub var g_adopt_tmux_len: u32 = 0;
+pub var g_adopt_tmux_identity: [64]u8 = @splat(0);
+pub var g_adopt_tmux_identity_len: u32 = 0;
 pub var g_adopt_name_source: NameSource = .default;
 pub var g_adopt_muted: bool = false;
 pub var g_adopt_pinned_top: bool = false;

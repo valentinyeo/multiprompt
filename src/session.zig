@@ -2373,3 +2373,11 @@ test "IGSH-890 recovering ghosts never guesses across hosts or drops local termi
     try std.testing.expectEqual(@as(u32, 0), tabs[1].starred_group_id);
     try std.testing.expectEqual(@as(u8, 1), tabs[1].tmux_host);
 }
+
+test "IGSH-985 saved remote generation survives parsing without inventing legacy identity" {
+    const json = "{\"tabs\":[{\"kind\":\"tmux\",\"name\":\"Known\",\"tmux_session\":\"same-name\",\"tmux_identity\":\"1700:123:$7\"},{\"kind\":\"tmux\",\"name\":\"Legacy\",\"tmux_session\":\"legacy\"}]}";
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 2), parseSessionTabs(json, &tabs));
+    try std.testing.expectEqualStrings("1700:123:$7", tabs[0].tmux_identity[0..tabs[0].tmux_identity_len]);
+    try std.testing.expectEqual(@as(u32, 0), tabs[1].tmux_identity_len);
+}

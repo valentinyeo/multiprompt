@@ -7654,6 +7654,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (cds.dwData == COPYDATA_TAB_TRANSFER and cds.cbData == @sizeOf(TabTransfer)) {
                     if (cds.lpData) |data_ptr| {
                         const transfer: *const TabTransfer = @ptrCast(@alignCast(data_ptr));
+                        if (transfer.tmux_identity_len > 63) return 0;
                         if (transfer.tmux_len > 0 and transfer.tmux_len <= 63) {
                             if (findLocalTmuxTab(transfer.tmux_host, transfer.tmux[0..transfer.tmux_len])) |existing| {
                                 switchToShell(existing);
@@ -7707,6 +7708,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             const tlen = @min(transfer.tmux_len, 63);
                             if (tlen > 0) @memcpy(new_shell.tmux_session[0..tlen], transfer.tmux[0..tlen]);
                             new_shell.tmux_session_len = tlen;
+                            new_shell.tmux_identity = transfer.tmux_identity;
+                            new_shell.tmux_identity_len = transfer.tmux_identity_len;
 
                             const flen = @min(transfer.favicon_path_len, 511);
                             if (flen > 0) @memcpy(new_shell.favicon_path[0..flen], transfer.favicon_path[0..flen]);
@@ -8290,6 +8293,8 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                     new_shell.tmux_session_len = app_state.g_adopt_tmux_len;
                 }
 
+                new_shell.tmux_identity = app_state.g_adopt_tmux_identity;
+                new_shell.tmux_identity_len = app_state.g_adopt_tmux_identity_len;
                 app_state.shells[0] = new_shell;
                 app_state.shell_count = 1;
                 app_state.active_shell = 0;
