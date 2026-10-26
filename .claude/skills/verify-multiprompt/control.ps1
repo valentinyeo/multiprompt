@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -2512,7 +2512,7 @@ function Assert-RelaunchSessions([string]$Stage, $Seed) {
 $usageCollector = $null
 Write-Host 'Launch: validate executable and prepare isolated profile'
 try {
-    if ($Feature -eq 'title-bar') {
+    if ($Feature -in @('title-bar', 'window-controls')) {
         Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot 'title-bar-native.cs')
         [CaptionProof]::SetDpi([int]$env:CAPTION_DPI)
     }
@@ -2754,6 +2754,9 @@ try {
         }
         'title-bar' {
             . (Join-Path $PSScriptRoot 'title-bar.ps1')
+        }
+        'window-controls' {
+            . (Join-Path $PSScriptRoot 'window-controls.ps1')
         }
         'palette-order' {
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
@@ -6205,7 +6208,9 @@ try {
             }
         }
     }
-    Doctor
+    if ($Feature -eq 'window-controls') {
+        if (-not $result.windowControls.closed -or -not $process.HasExited) { throw 'Window control journey did not prove normal close' }
+    } else { Doctor }
     $result.status = 'passed'
 } catch {
     $result.error = $_.Exception.Message
@@ -6279,7 +6284,7 @@ try {
     if ($null -ne $usageCollector) { $usageCollector.Dispose() }
     foreach ($name in $original.Keys) { [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process') }
     if ($null -ne $originalFontSmoothing) { [VerifyNative]::FontSmoothing([bool]$originalFontSmoothing) }
-    if ($Feature -eq 'title-bar' -and ('CaptionProof' -as [type])) {
+    if ($Feature -in @('title-bar', 'window-controls') -and ('CaptionProof' -as [type])) {
         try { [CaptionProof]::RestoreDpi() } catch { $result.status = 'failed'; $result.dpiCleanupError = $_.Exception.Message }
     }
     Save-Json $result 'result.json'

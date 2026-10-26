@@ -1,0 +1,36 @@
+name: Window controls
+
+on:
+  pull_request:
+    paths:
+      - src/window_frame.zig
+      - src/main.zig
+      - src/window_layout.zig
+      - src/chat_float.zig
+      - .claude/skills/verify-multiprompt/window-controls*
+      - .claude/skills/verify-multiprompt/control.ps1
+      - .github/workflows/window-controls.yml
+  push:
+    branches: [master]
+    paths:
+      - src/window_frame.zig
+      - src/main.zig
+      - src/window_layout.zig
+      - src/chat_float.zig
+      - .claude/skills/verify-multiprompt/window-controls*
+      - .claude/skills/verify-multiprompt/control.ps1
+      - .github/workflows/window-controls.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: window-controls-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  controls:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: window-controls

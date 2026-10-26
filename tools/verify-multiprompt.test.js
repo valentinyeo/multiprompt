@@ -2054,7 +2054,7 @@ test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches 
   assert.match(journey, /Restart-SessionRestore "relaunch-\$launch" \$false \$false \$openPorts/);
   assert.match(journey, /Open-NotifyPortListeners/);
   assert.match(journey, /\$after\.selected -cne \$starred\.selected/);
-  const assertion = control.slice(control.indexOf('function Assert-RelaunchSessions('), control.indexOf('try {\n    if ($Feature -eq \'title-bar\')'));
+  const assertion = control.slice(control.indexOf('function Assert-RelaunchSessions('), control.indexOf("Write-Host 'Launch: validate executable and prepare isolated profile'"));
   assert.match(assertion, /sessions listed twice in the sidebar/);
   assert.match(assertion, /@\(\$saved\.tabs\)\.Count -eq \$Seed\.live\.Count/);
   assert.match(assertion, /group headers missing/);
