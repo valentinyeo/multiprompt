@@ -419,6 +419,12 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     }) });
     test_step.dependOn(&b.addRunArtifact(reminders_load_tests).step);
+    const freeze_recorder_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/freeze_recorder.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(freeze_recorder_tests).step);
     const crash_recorder_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/crash_recorder.zig"),
         .target = target,
