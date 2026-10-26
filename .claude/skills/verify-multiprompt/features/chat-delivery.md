@@ -79,3 +79,8 @@ Dispatch `feature=chat-delivery` with `chat_skills_proof=true`. This selects onl
 The owned native composer uses real `mp_complete.py` discovery over isolated `SKILL.md` files, without running a provider. Warm the cache with zebra and yak, then add alpha. Reopen suggestions and select cached yak while the response is delayed. Require alpha within five seconds, keep yak selected after alpha changes its row index, and accept alpha with Tab. Add beta after typing reload-plugins, send it, and require another discovery before reopening suggestions.
 
 The same workflow first builds pinned pre-fix master `d1c9c8b7` and requires exactly the new-skill timeout after successful cache warm, Doctor and cleanup. The fixed app must pass `chat-skills-proof.mjs`, with screenshots, actual inserted composer text, discovery records and zero remaining owned processes. Release proof supplies the published tag, uses its checksum-verified executable, and repeats the identical journey. The deliberate 800 ms transport delay is not a real-network speed measurement.
+
+### Accepted message brightness
+
+Run `verify.yml` with `feature=chat-delivery` and `chat_accepted_proof=true`.
+The owned Windows app sends while busy. The boundary records the exact message enqueue, then removes it with `absorbed_mid_turn` while keeping the agent busy and delaying its user transcript row. Screenshots must show the waiting bubble dimmed, then normal brightness within one second of that receipt, together with working dots. The composer stays empty. `accepted-before.png`, `accepted-after.png`, timestamped frames, transcript, executable doctor and cleanup receipts remain in the artifact. Run unchanged against a pre-fix release tag for the negative control and the published tag for release proof.

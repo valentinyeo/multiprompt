@@ -822,7 +822,7 @@ fn armChatOutboxTimerIfNeeded() void {
     if (app_state.g_chat_outbox.items.len > 0 or app_state.g_chat_tmux_send_job != null or app_state.g_chat_full_settle_job != null) {
         if (!app_state.g_chat_outbox_timer_on) {
             app_state.g_chat_outbox_timer_on = true;
-            _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_OUTBOX, 1500, null);
+            _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_OUTBOX, 250, null);
         }
     } else if (app_state.g_chat_outbox_timer_on) {
         app_state.g_chat_outbox_timer_on = false;
@@ -1259,6 +1259,7 @@ pub fn chatEchoMatchActive() void {
                 app_state.g_chat_outbox.items[i].state = .delivered;
                 changed = true;
             }
+            if (app_state.g_chat_outbox.items[i].delivery_watch.removed_ms != facts.removed_ms) changed = true;
             app_state.g_chat_outbox.items[i].delivery_watch.evidence(facts, now_ms);
         }
         if (e.state == .delivered and !enqueued and (refused or (!busy and (app_state.g_chat_outbox.items[i].delivery_watch.due(now_ms, loaded_ms) or chat_echo.expiredSent(e.state, e.sent_tick_ms, now_ms))))) {
@@ -2393,6 +2394,8 @@ fn chatTmuxSettle() void {
             evidence = if (matched != null) .delivered else if (facts.enqueued) .enqueued else .none;
             if (entry.transcript_queued != facts.enqueued) changed = true;
             entry.transcript_queued = facts.enqueued;
+            if (entry.delivery_watch.removed_ms != facts.removed_ms) changed = true;
+            entry.delivery_watch.evidence(facts, now_ms);
             entry.channel_history_revision = history.history.revision;
             entry.channel_history_generation = history.generation;
         }

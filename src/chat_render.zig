@@ -3162,7 +3162,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     _ = chatFlowText(hdc, e.text, text_rc, false, true, null, offset, null, null, true);
-    if (e.state == .delivered) chatDimQueuedBubble(hdc, bubble);
+    if (e.state == .delivered and e.delivery_watch.removed_ms == 0) chatDimQueuedBubble(hdc, bubble);
     chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
     if (!app_state.clean_chat and actions.send_again) {
         const old = SelectObject(hdc, chatMetadataFont());
