@@ -527,8 +527,7 @@ fn chatFileFailed(entry: *ChatHistoryEntry) void {
 }
 
 fn chatFilePollInterval() u64 {
-    const working = (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].activity == .active) or app_state.g_chat_screen_working;
-    return if (working) 2000 else 8000;
+    return 500;
 }
 
 fn chatHistoryChannelClose(ch: *ChatHistoryChannel) void {
@@ -970,7 +969,7 @@ pub fn chatFileOnReady() void {
             entry.result = null;
             entry.failures = 0;
             entry.missing_message = @splat(0);
-            entry.next = GetTickCount64() + (if (disk or entry.before > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 1000) else chatFilePollInterval());
+            entry.next = GetTickCount64() + (if (disk or entry.before > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 250) else chatFilePollInterval());
             if (belongs_to_active) {
                 active_changed = !entry.unchanged or history.revision != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
@@ -1207,8 +1206,9 @@ pub fn chatReadBoundary() chat_history.ReadBoundary {
     if (!app_state.g_chat_active) return .{};
     if (app_state.active_shell >= app_state.shell_count or !app_state.g_chat_blocks_from_file or
         app_state.g_chat_cache_shell_id != app_state.shells[app_state.active_shell].shell_id) return .{};
+    if (app_state.g_chat_read_visit_state == .all_read) return .{};
     const boundary = chat_history.unreadBoundary(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_read_visit_marker);
-    if (app_state.g_chat_read_open_ready and boundary.index == null) app_state.g_chat_read_visit_marker = 0;
+    if (app_state.g_chat_read_open_ready and app_state.g_chat_read_visit_state == .pending) app_state.g_chat_read_visit_state = if (boundary.index != null) .unread else .all_read;
     return boundary;
 }
 
@@ -1237,7 +1237,6 @@ pub fn chatReadMark(bottom: bool) bool {
     if (!bottom and shell.last_read_message_id != 0 and (previous == null or read <= previous.?)) return false;
     if (shell.last_read_message_id == blocks[read].message_id) return false;
     shell.last_read_message_id = blocks[read].message_id;
-    app_state.g_chat_layout_reuse = 0;
     app_state.g_chat_layout_dirty = true;
     saveSession();
     return true;
@@ -1246,7 +1245,10 @@ pub fn chatReadMark(bottom: bool) bool {
 pub fn chatReadDeactivate() void {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
     _ = chatReadMark(false);
-    if (app_state.g_chat_read_visit_marker == 0) app_state.g_chat_read_visit_marker = app_state.shells[app_state.active_shell].last_read_message_id;
+    if (app_state.g_chat_read_visit_state == .all_read) {
+        app_state.g_chat_read_visit_marker = app_state.shells[app_state.active_shell].last_read_message_id;
+        app_state.g_chat_read_visit_state = .pending;
+    }
     app_state.g_chat_read_open_ready = false;
 }
 
@@ -1295,6 +1297,7 @@ pub fn chatDeferTranscriptLoad() void {
     if (app_state.g_chat_read_visit_shell_id != app_state.g_chat_cache_shell_id) {
         app_state.g_chat_read_visit_shell_id = app_state.g_chat_cache_shell_id;
         app_state.g_chat_read_visit_marker = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].last_read_message_id else 0;
+        app_state.g_chat_read_visit_state = .pending;
     }
     app_state.g_chat_read_open_ready = false;
     app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].last_read_message_id != 0;
@@ -1333,6 +1336,20 @@ pub fn chatSwitchDidPaint() void {
         debugLog(line);
     }
     _ = PostMessageW(app_state.g_main_hwnd, WM_TIMER, TIMER_CHAT_BROWSER_SWAP, 0);
+}
+
+pub fn chatSwitchContentPainted() void {
+    const sid = app_state.g_chat_switch_content_sid;
+    if (sid == 0 or !app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.shells[app_state.active_shell].shell_id != sid) return;
+    if (app_state.g_chat_block_count == 0 or app_state.g_chat_layout_dirty or app_state.g_chat_cache_shell_id != sid) return;
+    app_state.g_chat_switch_content_sid = 0;
+    if (!verboseLoggingEnabled()) return;
+    var client: RECT = std.mem.zeroes(RECT);
+    if (app_state.g_chat_transcript_hwnd != null) _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
+    var buf: [160]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "[switch] chat content shown shell={d} blocks={d} ms={d} layout_w={d} client_w={d}", .{ sid, app_state.g_chat_block_count, GetTickCount64() -| app_state.g_chat_switch_started, app_state.g_chat_layout_width, client.right - client.left }) catch return;
+    debugLog(line);
 }
 
 pub fn chatSwitchBrowserTick() void {
@@ -1556,6 +1573,7 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
         .pending = app_state.g_chat_read_open_pending,
         .visit_shell_id = app_state.g_chat_read_visit_shell_id,
         .visit_marker = app_state.g_chat_read_visit_marker,
+        .visit_state = app_state.g_chat_read_visit_state,
         .ready = app_state.g_chat_read_open_ready,
         .hold = app_state.g_chat_read_hold,
         .file = app_state.g_chat_blocks_from_file,
@@ -1574,6 +1592,7 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
         app_state.g_chat_read_open_pending = saved.pending;
         app_state.g_chat_read_visit_shell_id = saved.visit_shell_id;
         app_state.g_chat_read_visit_marker = saved.visit_marker;
+        app_state.g_chat_read_visit_state = saved.visit_state;
         app_state.g_chat_read_open_ready = saved.ready;
         app_state.g_chat_read_hold = saved.hold;
         app_state.g_chat_blocks_from_file = saved.file;
@@ -1596,6 +1615,7 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
     app_state.g_chat_cache_shell_id = 7;
     app_state.g_chat_read_visit_shell_id = 7;
     app_state.g_chat_read_visit_marker = 11;
+    app_state.g_chat_read_visit_state = .pending;
     app_state.g_chat_blocks[0] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 11 };
     app_state.g_chat_blocks[1] = .{ .start = 1, .len = 1, .role = .prose, .first = true, .message_id = 22 };
     app_state.g_chat_block_count = 2;
@@ -1717,6 +1737,8 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     };
     app_state.g_chat_histories = .empty;
     defer {
+        app_state.g_chat_read_visit_marker = 0;
+        app_state.g_chat_read_boundary = .{};
         for (0..5) |i| chatHistoryForget(@intCast(87400 + i));
         app_state.g_chat_histories.deinit(a);
         app_state.g_chat_histories = saved.histories;
@@ -1800,4 +1822,20 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     app_state.g_chat_layout_reuse = 0;
     chatRelayout(800);
     try std.testing.expectEqual(app_state.g_chat_content_h, incremental_h);
+    var marker: u64 = 0;
+    for (app_state.g_chat_blocks[0..counts[last]]) |block| {
+        if (block.role != .tool and block.message_id != 0) marker = block.message_id;
+    }
+    app_state.g_chat_read_visit_marker = marker;
+    const divider_started = perfNow();
+    chatRelayout(800);
+    const divider_ms = perfMs(divider_started);
+    std.debug.print("IGSH-927 unread divider relayout blocks={d} reuse={d} ms={d}\n", .{ app_state.g_chat_block_count, app_state.g_chat_layout_reuse, divider_ms });
+    try std.testing.expect(app_state.g_chat_read_boundary.index != null);
+    try std.testing.expect(app_state.g_chat_read_boundary.index.? >= counts[last] -| 8);
+    try std.testing.expect(divider_ms < 100);
+    const divider_h = app_state.g_chat_content_h;
+    app_state.g_chat_layout_reuse = 0;
+    chatRelayout(800);
+    try std.testing.expectEqual(divider_h, app_state.g_chat_content_h);
 }

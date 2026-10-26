@@ -1286,6 +1286,7 @@ pub export const mp_version_marker: [("MPVERSION=" ++ APP_VERSION ++ ";").len]u8
 const workspace_snooze = @import("workspace_snooze.zig");
 const reminders_load = @import("reminders_load.zig");
 const crash_recorder = @import("crash_recorder.zig");
+const freeze_recorder = @import("freeze_recorder.zig");
 
 pub const std_options: std.Options = .{ .enable_segfault_handler = false };
 fn crashPanic(msg: []const u8, first_trace_addr: ?usize) noreturn {
@@ -1337,6 +1338,7 @@ fn recordFrontVisit() void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    freeze_recorder.note(msg, app_state.active_shell, if (app_state.g_inbox_active) .inbox else if (app_state.g_all_sessions_active) .sessions else if (app_state.g_search_active) .search else if (app_state.g_shortcuts_active) .shortcuts else if (app_state.g_changelog_active) .changelog else if (app_state.g_browser_focus_mode) .browser else if (app_state.g_chat_active) .chat else .terminal);
     if (msg == update_release.WM_RESPONSIVE) {
         update_release.ready();
         return 0;
@@ -6905,8 +6907,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_ACTIVATEAPP => {
             if (wp == 0) {
-                @import("chat_session.zig").chatReadDeactivate();
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
+                @import("chat_session.zig").chatReadDeactivate();
                 hideBrowserEdgeMasks();
             } else {
                 focusGuardNoteActivation();
@@ -7824,6 +7826,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_DESTROY => {
+            freeze_recorder.closing();
             if (std.Thread.spawn(.{}, exitWatchdog, .{})) |thread| thread.detach() else |_| {}
             chatDraftFlush();
             voiceMicStop();
@@ -8084,6 +8087,8 @@ pub fn main(init: std.process.Init) void {
     app_state.g_main_hwnd = hwnd;
     @import("browser_pane.zig").installBrowserDockHooks();
     defer @import("browser_pane.zig").uninstallBrowserDockHooks();
+    freeze_recorder.start(hwnd, APP_VERSION);
+    defer freeze_recorder.stop();
     defer if (app_state.g_account_instance_mutex != null) {
         _ = ReleaseMutex(app_state.g_account_instance_mutex);
         _ = CloseHandle(app_state.g_account_instance_mutex);
@@ -8374,7 +8379,10 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                 } else |_| {}
             }
 
-            if (crash_recorder.takeRestartNotice()) showHeaderNoticeAscii(crash_recorder.NOTICE_TEXT, 8000, false);
+            if (crash_recorder.takeFreezeNotice()) {
+                showHeaderNoticeAscii(freeze_recorder.NOTICE_TEXT, 8000, false);
+                debugLog(freeze_recorder.NOTICE_TEXT);
+            } else if (crash_recorder.takeRestartNotice()) showHeaderNoticeAscii(crash_recorder.NOTICE_TEXT, 8000, false);
         },
         .done => return true,
     }
