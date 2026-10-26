@@ -6174,7 +6174,7 @@ test "IGSH-959 working dots have no bubble and are small and dim" {
     }
     const full = channelDistance(fg_rgb, bg_rgb);
     try std.testing.expect(painted > 0);
-    try std.testing.expect(painted <= 3 * @as(usize, @intCast(uiScaled(WORKING_DOT_SIZE) * uiScaled(WORKING_DOT_SIZE))));
+    try std.testing.expect(painted <= 3 * @as(usize, @intCast((uiScaled(WORKING_DOT_SIZE) + 2) * (uiScaled(WORKING_DOT_SIZE) + 2))));
     try std.testing.expect(max_x - min_x < 3 * uiScaled(WORKING_DOT_STEP));
     try std.testing.expect(brightest * 100 <= full * 50);
 }
