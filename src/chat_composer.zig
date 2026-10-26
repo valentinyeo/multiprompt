@@ -270,9 +270,9 @@ pub fn chatViewLayout() ChatViewLayout {
     const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
     const mic_btn = RECT{
         .left = composer_card.right - send_margin - send_size,
-        .top = composer_card.top + chatReplyBarH() + send_margin,
+        .top = composer_card.bottom - send_margin - send_size,
         .right = composer_card.right - send_margin,
-        .bottom = composer_card.top + chatReplyBarH() + send_margin + send_size,
+        .bottom = composer_card.bottom - send_margin,
     };
     var action_card = composer_card;
     action_card.right = mic_btn.left - uiScaled(6) + send_margin;
@@ -2372,4 +2372,34 @@ test "IGSH-836 skill keyboard survives stationary hover and real movement or cli
     _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 0);
     n = GetWindowTextW(edit, &text, text.len);
     try std.testing.expectEqualSlices(u16, std.mem.span(L("/one ")), text[0..@intCast(n)]);
+}
+
+test "IGSH-884 every composer button stays on one bottom line for multiline drafts" {
+    const saved_extra = app_state.g_chat_composer_extra_h;
+    const saved_reply = app_state.g_chat_reply_len;
+    const saved_scale = app_state.g_ui_scale;
+    const saved_dpi = app_state.g_main_monitor_dpi;
+    defer app_state.g_chat_composer_extra_h = saved_extra;
+    defer app_state.g_chat_reply_len = saved_reply;
+    defer app_state.g_ui_scale = saved_scale;
+    defer app_state.g_main_monitor_dpi = saved_dpi;
+    for ([_]u32{ 96, 144, 192 }) |dpi| {
+        app_state.g_main_monitor_dpi = dpi;
+        for ([_]u32{ 100, 150 }) |scale| {
+            app_state.g_ui_scale = scale;
+            for ([_]u32{ 0, 5, 20 }) |extra_lines| {
+                app_state.g_chat_composer_extra_h = @as(i32, @intCast(extra_lines)) * chatComposerLineH();
+                for ([_]u32{ 0, 1 }) |reply| {
+                    app_state.g_chat_reply_len = reply;
+                    const layout = chatViewLayout();
+                    for ([_]RECT{ layout.attach_btn, layout.mic_btn, layout.send_btn, layout.stop_btn }) |button| {
+                        try std.testing.expectEqual(layout.send_btn.bottom, button.bottom);
+                        try std.testing.expectEqual(layout.send_btn.top, button.top);
+                        try std.testing.expectEqual(uiScaled(32), button.right - button.left);
+                        try std.testing.expectEqual(uiScaled(32), button.bottom - button.top);
+                    }
+                }
+            }
+        }
+    }
 }
