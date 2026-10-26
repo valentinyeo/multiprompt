@@ -18,6 +18,8 @@ pub const Row = struct {
     unread: bool = false,
     last_active: u64 = 0,
     last_viewed: u64 = 0,
+    browser: bool = false,
+    browser_split: u16 = 350,
 };
 pub const Group = struct { id: u32, name: []const u16, collapsed: bool = false, color: u8 = 0 };
 pub const Snapshot = struct {
@@ -64,7 +66,7 @@ fn valid(s: Snapshot) bool {
     if (s.version != 1 or s.rows.len == 0 or s.rows.len > 256 or s.workspace >= 9 or s.workspaces.len > 9 or s.groups.len > 64 or s.text.len > 32768 or s.blocks.len > 256 or s.font < 10 or s.font > 28 or s.sidebar_width < 100 or s.sidebar_width > 1000) return false;
     var active = false;
     for (s.rows, 0..) |row, i| {
-        if (row.id == 0 or row.name.len > 63 or row.kind > 6 or row.workspace >= 9) return false;
+        if (row.id == 0 or row.name.len > 63 or row.kind > 6 or row.workspace >= 9 or row.browser_split > 1000) return false;
         for (s.rows[0..i]) |previous| if (previous.id == row.id) return false;
         if (row.id == s.active) active = true;
     }
@@ -183,4 +185,24 @@ test "IGSH-814 launch snapshot preserves the saved read anchor per chat" {
     const legacy = (try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[]}]}")).?;
     defer legacy.deinit();
     try std.testing.expectEqual(@as(u64, 0), legacy.value.rows[0].last_read_message_id);
+}
+
+test "IGSH-925 launch snapshot carries the browser pane split and legacy decodes to the default" {
+    const a = std.testing.allocator;
+    const rows = [_]Row{
+        .{ .id = 1, .name = &.{}, .browser = true, .browser_split = 420 },
+        .{ .id = 2, .name = &.{} },
+    };
+    const bytes = try encode(a, .{ .active = 1, .rows = &rows });
+    defer a.free(bytes);
+    const parsed = (try decode(a, bytes)).?;
+    defer parsed.deinit();
+    try std.testing.expect(parsed.value.rows[0].browser);
+    try std.testing.expectEqual(@as(u16, 420), parsed.value.rows[0].browser_split);
+    try std.testing.expect(!parsed.value.rows[1].browser);
+    const legacy = (try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[]}]}")).?;
+    defer legacy.deinit();
+    try std.testing.expect(!legacy.value.rows[0].browser);
+    try std.testing.expectEqual(@as(u16, 350), legacy.value.rows[0].browser_split);
+    try std.testing.expect((try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[],\"browser_split\":1001}]}")) == null);
 }

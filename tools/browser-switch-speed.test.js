@@ -315,7 +315,7 @@ function assertsDispatchOnly(source) {
 }
 
 test('PR journeys are appearance-only while master and manual runs retain the full matrix', () => {
-  const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me'];
+  const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-first-paint'];
   function contract(source) {
     assert.match(source, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), ['appearance']);
@@ -351,7 +351,7 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
   assert.match(workflow, /node --test tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
   assert.match(workflow, /paths:[\s\S]*?- tools\/browser-switch-speed.test.js/);
-  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed'\)\)/);
+  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-first-paint'\)\)/);
   const map = read(base + 'features/browser-switch-speed.md');
   assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']);
   assert.match(map, /on demand only/);

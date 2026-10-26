@@ -21,6 +21,9 @@ pub var selected_starred = false;
 pub var selected_live_shell_id: u32 = 0;
 var cached_ids: [state.MAX_SHELLS]u32 = @splat(0);
 var cached_count: usize = 0;
+var cached_browser: [state.MAX_SHELLS]bool = @splat(false);
+var reserve_active = false;
+var reserve_count: usize = 0;
 var closed_shells: [state.MAX_SHELLS]u32 = @splat(0);
 var closed_count: usize = 0;
 var sidebar_painted = false;
@@ -104,6 +107,8 @@ pub fn restore() void {
         shell.needs_attention = row.unread;
         shell.last_active = row.last_active;
         shell.last_viewed = row.last_viewed;
+        shell.browser_split_permille = row.browser_split;
+        cached_browser[i] = row.browser;
         @memcpy(shell.name[0..row.name.len], row.name);
         shell.name_len = @intCast(row.name.len);
         state.shells[i] = shell;
@@ -114,6 +119,8 @@ pub fn restore() void {
         state.groups[i] = .{ .id = group.id, .name = @splat(0), .name_len = @intCast(group.name.len), .collapsed = group.collapsed, .color = group.color };
         @memcpy(state.groups[i].name[0..group.name.len], group.name);
     }
+    reserve_count = s.rows.len;
+    reserve_active = true;
     chat_id = state.shells[state.active_shell].chat_id;
     state.g_sidebar_w_full = s.sidebar_width;
     state.g_chat_font_pt = s.font;
@@ -147,6 +154,7 @@ pub fn painted(chat: bool) void {
 }
 
 pub fn deferred() void {
+    reserve_active = false;
     var buf: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&buf, "launch deferred-start ms={d}", .{elapsed()}) catch return);
     if (cached) {
@@ -176,6 +184,12 @@ pub fn deferred() void {
         state.active_shell = 0;
         state.group_count = 0;
     }
+}
+
+pub fn reservesBrowser(shell_id: u32) bool {
+    if (!reserve_active) return false;
+    const i = std.mem.indexOfScalar(u32, cached_ids[0..reserve_count], shell_id) orelse return false;
+    return cached_browser[i];
 }
 
 pub fn cachedShell(shell_id: u32) bool {
@@ -252,6 +266,8 @@ pub fn save() void {
         .unread = shell.needs_attention,
         .last_active = shell.last_active,
         .last_viewed = shell.last_viewed,
+        .browser = shell.browser_enabled,
+        .browser_split = @min(shell.browser_split_permille, 1000),
     };
     var groups: [state.MAX_GROUPS]snapshot.Group = undefined;
     for (state.groups[0..state.group_count], 0..) |group, i| groups[i] = .{ .id = group.id, .name = state.groups[i].name[0..group.name_len], .collapsed = group.collapsed, .color = group.color };
@@ -371,4 +387,28 @@ test "ISSUE-569 stale launch snapshot does not become a startup user selection" 
     try std.testing.expectEqual(@as(u32, 42), selected_shell_id);
     try std.testing.expectEqual(@as(u32, 42), selected_live_shell_id);
     try std.testing.expectEqual(@as(u32, 1), state.shell_count);
+}
+
+test "IGSH-925 cached browser pane reserves layout until the real shells replace the snapshot" {
+    const saved_active = reserve_active;
+    const saved_count = reserve_count;
+    const saved_id = cached_ids[0];
+    const saved_flag = cached_browser[0];
+    defer {
+        reserve_active = saved_active;
+        reserve_count = saved_count;
+        cached_ids[0] = saved_id;
+        cached_browser[0] = saved_flag;
+    }
+    cached_ids[0] = 77;
+    cached_browser[0] = true;
+    reserve_count = 1;
+    reserve_active = true;
+    try std.testing.expect(reservesBrowser(77));
+    try std.testing.expect(!reservesBrowser(78));
+    cached_browser[0] = false;
+    try std.testing.expect(!reservesBrowser(77));
+    cached_browser[0] = true;
+    reserve_active = false;
+    try std.testing.expect(!reservesBrowser(77));
 }
