@@ -3733,6 +3733,7 @@ try {
                     $stopBytes -contains [byte]0x1B
                 } 'Esc reached the working stand-in stdin'
                 $composerHandle = [VerifyNative]::GetFocusedWindow($script:window)
+                if ([VerifyNative]::GetAncestor($composerHandle, 2) -ne $script:window -or [VerifyNative]::Class($composerHandle) -cne 'Edit') { throw 'Send click proof lost the owned composer' }
                 $sendFrame = & $readStopFrame
                 if ($null -eq $sendFrame.send -or $null -ne $sendFrame.stop) { throw 'Send is not the only action button before the click' }
                 if ([VerifyNative]::EditText($composerHandle).Length -eq 0) { throw 'Composer draft is empty before the Send click' }
