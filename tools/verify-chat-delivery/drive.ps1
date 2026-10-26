@@ -845,6 +845,12 @@ foreach ($plan in $plans) {
             $dividerProof.allRead = Require-Divider 0 0 'all-read reopen has no divider' $allReadLogStart
             Shot 'unread-divider-all-read'
             if ($env:CHAT_UNREAD_PROOF -eq '1') {
+                $settledLogStart = (Read-Shared "$settings/debug.log").Length
+                [void](Wait-For 'complete foreground history poll before focused arrival' { (Read-Shared "$settings/debug.log").Substring($settledLogStart) -match '\[chat\] transcript load shell=\d+ ok' })
+                $settledLayoutStart = (Read-Shared "$settings/debug.log").Length
+                Press @(0x11, 0x30) 'Ctrl+0: confirm the settled all-read visit' $true
+                [void](Require-Divider 0 0 'settled all-read visit has no New line' $settledLayoutStart)
+                $observation.focusedRevisitReady = $true
                 $focusedLogStart = (Read-Shared "$settings/debug.log").Length
                 $focusedText = 'IGSH871 focused revisit arrival.'
                 Shell-Input 'unread-arrival' $focusedText

@@ -22,6 +22,7 @@ try {
   assert.equal(observation.unreadDivider.passed, true);
   assert.equal(observation.activeDivider.count, 0);
   const active = dividerPixels(readBmp(path.join(root, 'unread-active-session.bmp')), observation.transcript, 0, 0);
+  assert.equal(observation.focusedRevisitReady, true);
   assert.ok(typeof observation.focusedReplyText === 'string' && observation.focusedReplyText.includes('IGSH871 focused revisit arrival.'), 'The actual focused reply must be rendered before no-divider evidence');
   assert.equal(observation.revisitActiveDivider.count, 0);
   dividerPixels(readBmp(path.join(root, 'unread-active-revisit.bmp')), observation.transcript, 0, 0);
