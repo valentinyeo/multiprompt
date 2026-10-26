@@ -105,3 +105,11 @@ Clients send the `hosts` feature token to share up to three server addresses, us
 Hosts are hidden from older clients, whose saves preserve them; host-aware saves replace only the server slots they send.
 
 Clients advertising `host_removal` may send optional `removed_hosts`, a unique array of slot integers 0 through 2 (at most three). These permanent slot tombstones are unioned with stored removals and saved in sorted order; empty arrays are omitted. Every save filters removed slots, including stale uploads from older clients. GET, PUT and conflict replies expose tombstones only to clients advertising `host_removal`; older saves cannot erase them. Removing an account server does not remove local SSH configuration or sessions.
+
+## Service keys and the mp-layout tool
+
+A service key lets a server edit the same account layout the apps sync, without a device sign-in. Keys are `mpk_a_` (admin) or `mpk_w_` (workspace) followed by 43 URL-safe characters. Only the SHA-256 hash is stored, in `service_keys`, and a key works only on `GET` and `PUT /v1/layout`; every other route answers `403 key_scope`. Revoking a key means setting `revoked=1`.
+
+An admin key sees and changes the whole layout, exactly like a device. A workspace key is tied to one workspace. Its reads show only that workspace and its sessions. Its writes may add, reorder, rename and remove sessions inside that workspace. The service merges the write into the stored layout and answers `403 scope_denied`, writing nothing, when the write adds or renames a workspace, or lists a session that belongs to another workspace. A workspace key never changes settings or server slots.
+
+`tools/mp-layout.mjs` is a zero-dependency Node tool that reads `MULTIPROMPT_KEY` (never printed) and optional `MULTIPROMPT_URL`. It runs `list`, `create-section`, `move` and `open`. Each change reads the layout, applies the change and writes once with `base_revision`, so a bulk move is one revision; on `409` it reads the winner and applies the change again. It sends no `X-Layout-Features` header, so favorites, visits and other optional fields are preserved.

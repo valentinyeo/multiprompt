@@ -91,6 +91,35 @@ async function authenticate(request, db) {
   await db.prepare('UPDATE devices SET last_seen=? WHERE id=?').bind(now(), device.id).run();
   return device;
 }
+async function authenticateKey(db, key, pathname) {
+  const keyHash = await hash(key);
+  const row = await db.prepare('SELECT hash,account,kind,workspace FROM service_keys WHERE hash=? AND revoked=0').bind(keyHash).first();
+  if (!row || row.kind !== (key[4] === 'a' ? 'admin' : 'workspace')) fail(401, 'device_required');
+  if (pathname !== '/v1/layout') fail(403, 'key_scope');
+  await db.prepare('UPDATE service_keys SET last_used=? WHERE hash=?').bind(now(), keyHash).run();
+  return { id: null, account: row.account, keyHash, kind: row.kind, workspace: row.workspace };
+}
+function scoped(device, layout) {
+  if (device.kind !== 'workspace') return layout;
+  if (!layout.workspaces.some(w => w.name === device.workspace)) fail(404, 'workspace_not_found');
+  return { schema: 1, revision: layout.revision, workspaces: [{ name: device.workspace }], tabs: layout.tabs.filter(tab => tab.workspace === device.workspace) };
+}
+function confine(device, layout, previous) {
+  if (!previous) fail(503, 'layout_not_seeded');
+  const name = device.workspace;
+  if (!previous.workspaces.some(w => w.name === name)) fail(404, 'workspace_not_found');
+  if (layout.workspaces.length !== 1 || layout.workspaces[0].name !== name || layout.tabs.some(tab => tab.workspace !== name)) fail(403, 'scope_denied');
+  const id = tab => `${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`;
+  const outside = new Set(previous.tabs.filter(tab => tab.workspace !== name).map(id));
+  if (layout.tabs.some(tab => outside.has(id(tab)))) fail(403, 'scope_denied');
+  const tabs = []; let placed = false;
+  for (const tab of previous.tabs) {
+    if (tab.workspace !== name) tabs.push(tab);
+    else if (!placed) { tabs.push(...layout.tabs); placed = true; }
+  }
+  if (!placed) tabs.push(...layout.tabs);
+  return validateLayout({ ...previous, revision: layout.revision, tabs });
+}
 async function sessionAccount(request, env, auth) {
   if (!env.BETTER_AUTH_SECRET || !(request.headers.get('Cookie') || '').includes('session_token')) return null;
   const session = await auth().api.getSession({ headers: request.headers }).catch(() => null);
@@ -215,7 +244,8 @@ export default {
       if (!url.pathname.startsWith('/v1/')) return json({ error: 'not_found' }, 404);
       const keyRoute = url.pathname === '/v1/device-key' || url.pathname === '/v1/device-keys' || /^\/v1\/device-keys\/[^/]+\/(approve|deny)$/.test(url.pathname);
       const sessionEmail = keyRoute || request.headers.get('Authorization') ? null : await sessionAccount(request, env, auth);
-      const device = sessionEmail ? { id: null, account: sessionEmail } : await authenticate(request, db);
+      const serviceKey = request.headers.get('Authorization')?.match(/^Bearer (mpk_[aw]_[A-Za-z0-9_-]{43})$/)?.[1];
+      const device = serviceKey ? await authenticateKey(db, serviceKey, url.pathname) : sessionEmail ? { id: null, account: sessionEmail } : await authenticate(request, db);
       if (sessionEmail && request.method !== 'GET') {
         sameOrigin(request, env);
         if (request.headers.get('X-Multiprompt') !== 'dash' || !(url.pathname.startsWith('/v1/devices/') && request.method === 'DELETE')) fail(403, 'cross_origin');
@@ -284,18 +314,22 @@ export default {
       if (url.pathname === '/v1/layout' && request.method === 'GET') {
         const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
         if (!row) fail(503, 'layout_not_seeded');
-        return reply({ revision: row.revision, layout: JSON.parse(row.layout) });
+        return reply({ revision: row.revision, layout: scoped(device, JSON.parse(row.layout)) });
       }
       if (url.pathname === '/v1/layout' && request.method === 'PUT') {
-        const b = await body(request), layout = validateLayout(b.layout);
+        const b = await body(request);
+        let layout = validateLayout(b.layout);
         if (!Number.isSafeInteger(b.base_revision) || b.base_revision < 0) fail(400, 'invalid_revision');
         const row = await db.prepare('SELECT layout FROM layouts WHERE account=?').bind(device.account).first();
         const previousLayout = row ? JSON.parse(row.layout) : null;
-        if (!layoutFeature(request, 'settings')) {
+        const confined = device.kind === 'workspace';
+        if (confined) layout = confine(device, layout, previousLayout);
+        const req = confined ? { headers: new Headers({ 'X-Layout-Features': (request.headers.get('X-Layout-Features') || '').split(',').map(feature => feature.trim()).filter(feature => !['settings', 'hosts', 'host_removal'].includes(feature)).join(',') }) } : request;
+        if (!layoutFeature(req, 'settings')) {
           if (previousLayout?.settings !== undefined) layout.settings = { ...previousLayout.settings };
           else delete layout.settings;
         }
-        if (!layoutFeature(request, 'hosts')) {
+        if (!layoutFeature(req, 'hosts')) {
           if (previousLayout?.hosts !== undefined) layout.hosts = previousLayout.hosts;
           else delete layout.hosts;
         } else if (previousLayout?.hosts !== undefined || layout.hosts !== undefined) {
@@ -307,30 +341,30 @@ export default {
           }
           layout.hosts = [...hosts.values()].sort((a, b) => a.slot - b.slot);
         }
-        const removed = [...new Set([...(previousLayout?.removed_hosts || []), ...(layoutFeature(request, 'host_removal') ? layout.removed_hosts || [] : [])])].sort((a, b) => a - b);
+        const removed = [...new Set([...(previousLayout?.removed_hosts || []), ...(layoutFeature(req, 'host_removal') ? layout.removed_hosts || [] : [])])].sort((a, b) => a - b);
         if (removed.length) layout.removed_hosts = removed;
         else delete layout.removed_hosts;
         if (layout.hosts) layout.hosts = layout.hosts.filter(host => !removed.includes(host.slot));
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
         for (const tab of layout.tabs) {
           const previous = stored.get(`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`);
-          if (!layoutFeature(request, 'favorite')) {
+          if (!layoutFeature(req, 'favorite')) {
             if (typeof previous?.favorite === 'boolean') tab.favorite = previous.favorite;
             else delete tab.favorite;
           }
-          if (!layoutFeature(request, 'muted')) {
+          if (!layoutFeature(req, 'muted')) {
             if (typeof previous?.muted === 'boolean') tab.muted = previous.muted;
             else delete tab.muted;
           }
-          if (!layoutFeature(request, 'used')) {
+          if (!layoutFeature(req, 'used')) {
             if (previous?.used !== undefined) tab.used = previous.used;
             else delete tab.used;
           } else if (previous?.used !== undefined) tab.used = Math.max(previous.used, tab.used ?? previous.used);
-          if (!layoutFeature(request, 'input')) {
+          if (!layoutFeature(req, 'input')) {
             if (previous?.input !== undefined) tab.input = previous.input;
             else delete tab.input;
           } else if (previous?.input !== undefined) tab.input = Math.max(previous.input, tab.input ?? previous.input);
-          if (!layoutFeature(request, 'visits')) {
+          if (!layoutFeature(req, 'visits')) {
             if (previous?.visits !== undefined) tab.visits = previous.visits;
             else delete tab.visits;
           } else if (previous?.visits !== undefined || tab.visits !== undefined) {
@@ -338,13 +372,14 @@ export default {
           }
         }
         layout.revision = b.base_revision + 1;
-        const result = await db.prepare('UPDATE layouts SET revision=revision+1,layout=? WHERE account=? AND revision=? AND EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0)').bind(JSON.stringify(layout), device.account, b.base_revision, device.id, device.account).run();
+        const alive = device.keyHash ? ['EXISTS (SELECT 1 FROM service_keys WHERE hash=? AND revoked=0)', [device.keyHash]] : ['EXISTS (SELECT 1 FROM devices WHERE id=? AND account=? AND revoked=0)', [device.id, device.account]];
+        const result = await db.prepare('UPDATE layouts SET revision=revision+1,layout=? WHERE account=? AND revision=? AND ' + alive[0]).bind(JSON.stringify(layout), device.account, b.base_revision, ...alive[1]).run();
         if (!result.meta.changes) {
-          if (!await db.prepare('SELECT id FROM devices WHERE id=? AND account=? AND revoked=0').bind(device.id, device.account).first()) fail(401, 'device_required');
+          if (!await db.prepare('SELECT 1 AS ok WHERE ' + alive[0]).bind(...alive[1]).first()) fail(401, 'device_required');
           const row = await db.prepare('SELECT revision,layout FROM layouts WHERE account=?').bind(device.account).first();
-          return row ? reply({ revision: row.revision, layout: JSON.parse(row.layout) }, 409) : reply({ error: 'layout_not_seeded' }, 503);
+          return row ? reply({ revision: row.revision, layout: scoped(device, JSON.parse(row.layout)) }, 409) : reply({ error: 'layout_not_seeded' }, 503);
         }
-        return reply({ revision: layout.revision, layout });
+        return reply({ revision: layout.revision, layout: scoped(device, layout) });
       }
       return reply({ error: 'not_found' }, 404);
     } catch (e) {
