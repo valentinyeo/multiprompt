@@ -2627,8 +2627,11 @@ fn chatStopTmuxThread(key: @import("chat_transcript.zig").Identity, digit: u8) v
 
 pub fn chatShellEditQueued() bool {
     if (!app_state.g_chat_active) return false;
-    @import("chat_composer.zig").chatShellDraftArmPull();
-    return chatShellOp(app_state.active_shell, "edit_queued", null, null);
+    const composer = @import("chat_composer.zig");
+    composer.chatShellDraftArmPull(true);
+    const sent = chatShellOp(app_state.active_shell, "edit_queued", null, null);
+    if (!sent) composer.chatShellDraftArmPull(false);
+    return sent;
 }
 
 pub fn chatShellOp(shell_index: u32, op: []const u8, text: ?[]const u16, in_flight: ?*std.atomic.Value(bool)) bool {

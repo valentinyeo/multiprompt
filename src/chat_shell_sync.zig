@@ -8,7 +8,7 @@ pub const DRAFT_PUSH_CAP: usize = 4000;
 pub const PUSH_QUIET_MS: u64 = 4000;
 pub const FRESH_EDIT_MS: u64 = 3000;
 pub const SEND_QUIET_MS: u64 = 2000;
-pub const PULL_ARM_MS: u64 = 5000;
+pub const PULL_ARM_MS: u64 = 10000;
 
 pub const Row = struct {
     text: [TEXT_CAP]u16 = @splat(0),
@@ -172,6 +172,7 @@ pub const Draft = struct {
     push_ms: u64 = 0,
     quiet_until_ms: u64 = 0,
     pull_until_ms: u64 = 0,
+    foreign: bool = false,
     edit_pending: bool = false,
     push_in_flight: std.atomic.Value(bool) = .init(false),
 
@@ -179,9 +180,15 @@ pub const Draft = struct {
         self.pull_until_ms = now + PULL_ARM_MS;
     }
 
+    pub fn disarmPull(self: *Draft) void {
+        self.pull_until_ms = 0;
+    }
+
     pub fn onShell(self: *Draft, shell_id: u32, shell: []const u16, composer: []const u16, focused: bool, now: u64) Pull {
-        const pull = self.decide(shell_id, shell, composer, focused, now);
-        if (pull == .apply and now >= self.pull_until_ms) return .none;
+        var pull = self.decide(shell_id, shell, composer, focused, now);
+        if (pull == .apply and now >= self.pull_until_ms) pull = .none;
+        const hash = draftHash(shell);
+        self.foreign = pull == .none and !isBlankDraft(shell) and hash != self.synced_hash and hash != draftHash(composer);
         return pull;
     }
 
@@ -240,6 +247,7 @@ pub const Draft = struct {
 
     pub fn pushDue(self: *Draft, composer: []const u16, now: u64) bool {
         if (self.push_in_flight.load(.acquire) or !self.edit_pending) return false;
+        if (self.foreign) return false;
         if (now < self.quiet_until_ms) {
             self.edit_pending = false;
             return false;
@@ -407,6 +415,17 @@ test "IGSH-930 an agent message never replaces an older unfocused composer draft
     _ = draft.onShell(1, w("x"), w("x"), false, 1000);
     draft.onComposerEdit(1100);
     try std.testing.expectEqual(Pull.none, draft.onShell(1, w("[Pasted text #1]"), w("x more"), false, 30000));
+}
+
+test "IGSH-930 an agent message in the shell box is never erased by a push of the human draft" {
+    var draft: Draft = .{};
+    _ = draft.onShell(1, w(""), w(""), true, 1000);
+    draft.onComposerEdit(1500);
+    try std.testing.expectEqual(Pull.none, draft.onShell(1, w("[Pasted text #3 +12 lines]"), w("my draft"), true, 9000));
+    try std.testing.expect(!draft.pushDue(w("my draft"), 9100));
+    try std.testing.expect(draft.edit_pending);
+    try std.testing.expectEqual(Pull.none, draft.onShell(1, w(""), w("my draft"), true, 12000));
+    try std.testing.expect(draft.pushDue(w("my draft"), 12100));
 }
 
 test "IGSH-930 the shell draft is pulled only after Edit Queued Messages arms it and only for a short window" {
