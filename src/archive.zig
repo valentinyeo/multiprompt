@@ -1890,6 +1890,7 @@ pub fn openAllSessions(hwnd: HANDLE) void {
     app_state.g_all_sessions_active = true;
     app_state.g_all_sessions_ctx = false;
     app_state.g_all_sessions_confirm = false;
+    app_state.g_all_sessions_close_running = false;
     app_state.g_all_sessions_mark_count = 0;
     app_state.g_all_sessions_filter_active = false;
     app_state.g_all_sessions_filter_len = 0;
@@ -1907,6 +1908,8 @@ pub fn closeAllSessions(hwnd: HANDLE) void {
     app_state.g_all_sessions_ctx = false;
     app_state.g_all_sessions_confirm = false;
     app_state.g_all_sessions_mark_count = 0;
+    app_state.g_all_sessions_close_running = false;
+    app_state.g_all_sessions_close_count = 0;
     app_state.g_all_sessions_filter_active = false;
     app_state.g_all_sessions_filter_len = 0;
     if (!app_state.g_inbox_active) _ = KillTimer(hwnd, TIMER_INBOX_REFRESH);
@@ -2009,15 +2012,18 @@ fn allSessionsBeginClose(hwnd: HANDLE) void {
     for (0..app_state.g_all_sessions_mark_count) |i| {
         const m = app_state.g_all_sessions_marks[i];
         var still_there = false;
+        var agent_now = false;
         for (0..app_state.g_session_overview_count) |ri| {
             const row = &app_state.g_session_overview_rows.items[ri];
             if (row.kind == .vps_only and row.host == m.host and std.mem.eql(u8, row.session[0..row.session_len], m.session[0..m.session_len])) {
                 still_there = true;
+                agent_now = row.agent != 0;
                 break;
             }
         }
         if (still_there and app_state.g_all_sessions_close_count < app_state.ALL_SESSIONS_CLOSE_MAX) {
             app_state.g_all_sessions_close_queue[app_state.g_all_sessions_close_count] = m;
+            app_state.g_all_sessions_close_queue[app_state.g_all_sessions_close_count].agent = agent_now;
             app_state.g_all_sessions_close_count += 1;
         }
     }

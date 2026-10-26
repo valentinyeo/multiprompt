@@ -112,7 +112,7 @@ try {
     Press-Text 'show all sessions'
     Start-Sleep -Milliseconds 500
     Press 0x0D
-    [void](Wait-For 'tmux list with the five unattached sessions' { (Read-Log).Substring($listOffset) -match 'fetchHostIntoCache\(host=0\) done: total=\d+ bytes, added=6' } 60)
+    [void](Wait-For 'tmux list with all six sessions' { (Read-Log).Substring($listOffset) -match 'fetchHostIntoCache\(host=0\) done: total=\d+ bytes, added=6' } 60)
     Start-Sleep -Seconds 3
     Press 0x55
     Start-Sleep -Seconds 1

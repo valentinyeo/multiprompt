@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
     char cmd[16384] = "", path[MAX_PATH];
     for (int i = 1; i < argc; i++) { strncat(cmd, argv[i], sizeof(cmd) - strlen(cmd) - 2); strcat(cmd, " "); }
     snprintf(path, sizeof(path), "%s\\invocation-%lu.txt", root, GetCurrentProcessId());
-    FILE *log = fopen(path, "wb");
+    FILE *log = fopen(path, "ab");
     if (log) { fprintf(log, "%llu %lu %s\n", GetTickCount64(), GetCurrentProcessId(), cmd); fclose(log); }
     load_sessions();
     if (strstr(cmd, "tmux list-clients")) {
@@ -82,7 +82,9 @@ int main(int argc, char **argv) {
         FILE *f = fopen(path, "wb"); if (!f) return 93; fputs(keep, f); fclose(f);
         char target[MAX_PATH];
         snprintf(target, sizeof(target), "%s\\sessions.txt", root);
-        if (!MoveFileExA(path, target, MOVEFILE_REPLACE_EXISTING)) return 94;
+        int moved = 0;
+        for (int attempt = 0; attempt < 50 && !moved; attempt++) { moved = MoveFileExA(path, target, MOVEFILE_REPLACE_EXISTING); if (!moved) Sleep(40); }
+        if (!moved) return 94;
         return 0;
     }
     if (strstr(cmd, "tmux list-sessions -F")) {
