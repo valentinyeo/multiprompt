@@ -1,0 +1,35 @@
+name: Retention compiler diagnostics
+on:
+  push:
+    branches: [ceo/IGSH-934-diagnose]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install pinned Zig
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          tar -xf $zip -C $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Publish compiler errors as check annotations
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          zig build 2>&1 | Tee-Object -FilePath compile.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            foreach ($line in (Get-Content compile.log | Select-Object -Last 40)) {
+              $escaped = $line.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+              Write-Host "::error::$escaped"
+            }
+          }
+          exit $code
