@@ -70,6 +70,7 @@ const chatRelayoutPreservingScroll = @import("chat_session.zig").chatRelayoutPre
 const layoutChatControls = @import("chat_composer.zig").layoutChatControls;
 const chatAcAgent = @import("chat_composer.zig").chatAcAgent;
 const chatAcClose = @import("chat_composer.zig").chatAcClose;
+const chatAcAfterSend = @import("chat_composer.zig").chatAcAfterSend;
 const CHAT_SEND_VERIFY_DELAYS_MS = @import("app_state.zig").CHAT_SEND_VERIFY_DELAYS_MS;
 const ShellSendResult = @import("app_state.zig").ShellSendResult;
 const CHAT_OUTBOX_MAX_PER_KEY = @import("app_state.zig").CHAT_OUTBOX_MAX_PER_KEY;
@@ -460,7 +461,7 @@ pub fn sendChatPrompt() void {
     _ = @import("chat_session.zig").chatReadMark(true);
     app_state.g_chat_outbox.items[ei].steer_pending = chat_steer_prompt;
     chatOutboxTick();
-    @import("chat_composer.zig").chatAcAfterSend(send_text);
+    chatAcAfterSend(send_text);
     @import("inbox.zig").stampSessionUse(app_state.active_shell, false);
     app_state.g_chat_scroll_bottom_pending = true;
     if (app_state.g_chat_ac_dialog_len > 0 and std.mem.startsWith(u16, send_text, app_state.g_chat_ac_dialog_command[0..app_state.g_chat_ac_dialog_len])) {
