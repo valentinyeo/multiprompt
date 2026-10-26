@@ -75,7 +75,7 @@ function Shot([string]$Name) {
     }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow', 'unread-active-session', 'new-messages-visible')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -600,6 +600,11 @@ foreach ($plan in $plans) {
             if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Composer typing failed' }
             Shell-Input 'todo'
             [void](Wait-For 'todo task in app-written cache' { (Read-Shared $cache.FullName).Contains('TodoWrite') })
+            if ($env:CHAT_UNREAD_PROOF -eq '1') {
+                Bind-Transcript
+                $bounds = $views[0].Current.BoundingRectangle
+                $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
+            } else {
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
             $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
             $todoStatus = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Static')
@@ -695,12 +700,17 @@ foreach ($plan in $plans) {
             Save $observation "$caseDir/observation.json"
             & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence
             if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
+            }
             Shell-Input 'busy'
             $fillLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'messages' '12'
             [void](Wait-For 'new transcript messages at bottom' { (Read-Shared $cache.FullName).Contains('New message 11') })
             [void](Wait-For 'app applied filled transcript at bottom' { $log = Read-Shared "$settings/debug.log"; $log.Length -gt $fillLogStart -and $log.Substring($fillLogStart).Contains('[chat] new messages count=0 visible=0 up=0') })
             [void](Require-NewMessages 0 0 0 'arrival at bottom stays clear' $fillLogStart)
+            if ($env:CHAT_UNREAD_PROOF -eq '1') {
+                $observation.activeDivider = Require-Divider 0 0 'focused session arrivals have no New line' $fillLogStart
+                Shot 'unread-active-session'
+            }
             $layoutLogStart = (Read-Shared "$settings/debug.log").Length
             Press @(0x11, 0x30) 'Ctrl+0: measure filled transcript' $true
             [void](Wait-For 'filled transcript exceeds viewport' {
@@ -951,6 +961,10 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_UNREAD_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-unread-ci-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_REMOTE_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-remote-sync-proof.mjs" $Evidence
     exit $LASTEXITCODE

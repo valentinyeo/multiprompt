@@ -202,6 +202,7 @@ jobs:
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
+      CHAT_UNREAD_PROOF: '1'
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
