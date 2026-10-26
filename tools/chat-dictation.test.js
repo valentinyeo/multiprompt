@@ -22,9 +22,9 @@ function journeyContract(source) {
     "foreach ($stop in @('enter', 'ctrl-d', 'mic-click'))",
     "if ([VerifyNative]::EditText($handle) -cne '') { throw",
     'Press @(0x11, 0x44)', 'fixture-audio-bytes\\t89160$',
-    "Assert-DictationMic $mic $true ($stop + '-listening')", 'Type-Text $typed',
+    "Assert-DictationMic $micLive $true ($stop + '-listening')", 'Type-Text $typed',
     "[VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-812 typing is accepted while listening' -Seconds 1",
-    'GetFocusedWindow($script:window) -ne $handle', "Assert-DictationMic $mic $true ($stop + '-typed-listening')",
+    'GetFocusedWindow($script:window) -ne $handle', "Assert-DictationMic $micLive $true ($stop + '-typed-listening')",
     "Snapshot 'action'", 'Doctor\n                Assert-Foreground',
     '$immediate = [Diagnostics.Stopwatch]::StartNew()',
     "'enter' { [VerifyNative]::Chord(@(0x0D)) }", "'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }",
@@ -62,7 +62,7 @@ test('IGSH-812 real Windows inputs, visible mic pixels and immediate owned nativ
   for (const required of [
     'Press @(0x11, 0x44)', "'enter' { [VerifyNative]::Chord(@(0x0D)) }",
     "'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }", "'mic-click' { [VerifyNative]::ClickClient($script:window,",
-    "Assert-DictationMic $mic $true ($stop + '-listening')", 'Type-Text $typed',
+    "Assert-DictationMic $micLive $true ($stop + '-listening')", 'Type-Text $typed',
     '[VerifyNative]::EditText($handle) -ceq $typed', '[VerifyNative]::EditText($handle) -ceq $expected',
     'if ($elapsed -gt 1000) { throw', '$pixels[0] -gt $pixels[2] / 2',
     'WindowFromPoint(center) != owner', '$transcript.Current.ProcessId -ne $process.Id',
@@ -80,12 +80,12 @@ test('IGSH-846 Windows journey covers Escape discard and restart through real in
   for (const step of [
     "$draft = [VerifyNative]::EditText($handle)",
     "Press @(0x11, 0x44) 'Ctrl+D: start dictation over the existing draft'",
-    "Assert-DictationMic $mic $true 'escape-listening'", "Type-Text ' keep this'",
+    "Assert-DictationMic $micLive $true 'escape-listening'", "Type-Text ' keep this'",
     'Press @(0x1B, 0x1B)', "'\\tcancel\\t0$'", "'\\taudio-bytes\\t89160$'",
     "Assert-DictationMic $mic $false 'escape-cancelled'",
     "if ([VerifyNative]::EditText($handle) -cne $draft) { throw 'IGSH-846 Escape changed the existing draft' }",
     "Press @(0x11, 0x44) 'Ctrl+D: restart dictation after cancellation'",
-    "Assert-DictationMic $mic $true 'escape-restarted'",
+    "Assert-DictationMic $micLive $true 'escape-restarted'",
     "throw 'IGSH-846 cancelled transcript arrived late'",
     "throw \"IGSH-846 cancelled recording reached transcription or delivery: $stage\"",
     "Press @(0x0D) 'Enter: transcribe only the restarted recording'",
@@ -109,7 +109,7 @@ function sendContract(source) {
   for (const step of [
     '$send = Get-DictationSend $mic', "foreach ($way in @('send-click', 'ctrl-enter'))",
     "Press @(0x11, 0x44) 'Ctrl+D: start composer dictation for the send case'",
-    "Assert-DictationMic $mic $true ($way + '-listening')", "$typed = 'typing-' + $way", 'Type-Text $typed',
+    "Assert-DictationMic $micLive $true ($way + '-listening')", "$typed = 'typing-' + $way", 'Type-Text $typed',
     "Snapshot ($way + '-listening')",
     "'send-click' { [VerifyNative]::ClickClient($script:window,", "'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }",
     "[VerifyNative]::EditText($handle) -ceq ''",
@@ -143,7 +143,7 @@ test('IGSH-965 send sits at the far right and the queued send is armed and consu
   const composer = read('src/chat_composer.zig');
   const main = read('src/main.zig');
   assert.match(composer, /const slots = chatSendSlots\(composer_card, send_size, send_margin, [^\n]*chatComposerHasText\(\) or chat_dictation_state != \.idle\);/);
-  assert.match(composer, /\.left = slots\.left - uiScaled\(6\) - send_size,/);
+  assert.match(composer, /\.left = slots\.left - uiScaled\(6\) - chatDictationMicWidth\(chat_dictation_state\),/);
   assert.match(composer, /\.right = mic_btn\.left - uiScaled\(12\),/);
   assert.match(composer, /try std\.testing\.expect\(layout\.send_btn\.left > layout\.mic_btn\.right\);/);
   assert.match(main, /WM_APP_CHAT_SEND => \{\s*if \(wp == 1\) @import\("chat_send\.zig"\)\.chatSteerPrompt\(\) else @import\("chat_composer\.zig"\)\.chatSendOrFinishDictation\(\);/);

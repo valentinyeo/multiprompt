@@ -273,7 +273,7 @@ fn paintChatMicPill(hdc: HANDLE, rc: RECT, ink: DWORD, fill: DWORD) void {
     var digits: [8]u16 = undefined;
     const text = @import("chat_composer.zig").chatDictationElapsedText(&digits, @import("chat_composer.zig").chatDictationElapsedNow());
     const text_h = @max(uiScaled(10), @divTrunc(h * 40, 100));
-    const font = CreateFontW(-text_h, 0, 0, 0, 500, 0, 0, 0, 0, 0, 0, 5, 0, L("Segoe UI"));
+    const font = @import("fonts.zig").chat(-text_h, false, false, false, .{ .body_weight = 500 });
     const old_font = SelectObject(hdc, font);
     _ = SetBkMode(hdc, 1);
     _ = SetTextColor(hdc, ink);
