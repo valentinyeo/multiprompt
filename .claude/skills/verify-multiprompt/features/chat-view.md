@@ -67,4 +67,4 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 - Release-tag runs exercise the desktop toggle and local console stand-ins; the supplemental painter image is generated only for branch builds.
 - Palette entry, theme variants, long-message scrolling and actual browser navigation are outside this selected journey. Link hit coordinates, nested-table scrolling, full-layout find positions, parse reuse and a body longer than a fixed block buffer are covered by regression tests.
 
-Ctrl+Enter delivery (IGSH-911): the suggestion-mode local console case sends through Ctrl+Enter. Its captured stdin must equal the complete typed message plus exactly one Enter, not merely contain it. The typed-mode case still uses plain Enter. The console process is a stand-in; no model provider is called.
+Ctrl+Enter delivery (IGSH-911): the suggestion-mode local console case sends through Ctrl+Enter. Its captured stdin must equal the complete typed message within one bracketed-paste frame plus exactly one Enter, not merely contain it. The typed-mode case still uses plain Enter. The console process is a stand-in; no model provider is called.

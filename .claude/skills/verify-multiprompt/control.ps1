@@ -3527,6 +3527,8 @@ try {
                             Snapshot 'local-route-typed'
                         } else {
                             $suggestionCheck.console = $ready
+                            $wireMessage = ([string][char]27) + '[200~' + $message + ([string][char]27) + '[201~' + "`r"
+                            $suggestionCheck.expected = $wireMessage
                             Wait-Until {
                                 $stdin = [IO.File]::Open($prefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
                                 try {
@@ -3538,7 +3540,7 @@ try {
                                 } finally { $stdin.Dispose() }
                                 $received = [Text.Encoding]::ASCII.GetString($receivedBytes)
                                 $suggestionCheck.received = $received
-                                $received -ceq ($message + "`r")
+                                $received -ceq $wireMessage
                             } 'local suggestion prompt receives the Chat View message and Enter on stdin'
                             $suggestionCheck.passed = $true
                             Snapshot 'local-route-suggestion'
