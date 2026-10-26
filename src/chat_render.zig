@@ -1,5 +1,6 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
+const tokens = @import("design_tokens.zig");
 const link_detect = @import("link_detect.zig");
 const chat_hit = @import("chat_hit.zig");
 const chat_markdown = @import("chat_markdown.zig");
@@ -2772,7 +2773,7 @@ fn chatPaintBlockImages(hdc: HANDLE, index: usize, block_rc: RECT) void {
         if (state == .empty or state == .failed) continue;
         const radius = chat_style.cornerRadius(dest.right - dest.left, dest.bottom - dest.top, uiScaled(CHAT_BUBBLE_RADIUS));
         if (state == .ready and thumb != null and chatImgDrawThumb(hdc, dest, radius, thumb)) continue;
-        fillRoundRectAA(hdc, dest, radius, customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55)));
+        fillRoundRectAA(hdc, dest, radius, customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else if (@import("themes.zig").themeReaderDark()) tokens.ReaderOutline else RGB(41, 45, 55)));
     }
 }
 
@@ -3474,9 +3475,15 @@ pub fn shotFocusTick() void {
 }
 
 pub fn paintChatAttachButton(hdc: HANDLE, rc: RECT) void {
-    const base = app_state.g_chat_input_color;
-    const fill = chat_style.shift(base, if (chat_style.isDark(base)) 22 else -14);
-    @import("smooth.zig").fillEllipse(hdc, rc, fill);
+    if (@import("themes.zig").themeReaderDark()) {
+        const edge = @import("window_layout.zig").chatSurfaceBorderW();
+        @import("smooth.zig").fillEllipse(hdc, rc, @import("window_layout.zig").chatSurfaceBorderColor());
+        @import("smooth.zig").fillEllipse(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, app_state.g_chat_input_color);
+    } else {
+        const base = app_state.g_chat_input_color;
+        const fill = chat_style.shift(base, if (chat_style.isDark(base)) 22 else -14);
+        @import("smooth.zig").fillEllipse(hdc, rc, fill);
+    }
     const cx = rc.left + @divTrunc(rc.right - rc.left, 2);
     const cy = rc.top + @divTrunc(rc.bottom - rc.top, 2);
     const arm = @max(uiScaled(5), @divTrunc(rc.right - rc.left, 5));

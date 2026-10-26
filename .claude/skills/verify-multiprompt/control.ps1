@@ -532,6 +532,7 @@ public static class VerifyNative {
             var bg = pixels.GetPixel(0, pixels.Height / 2);
             int shift = (2126 * bg.R + 7152 * bg.G + 722 * bg.B) / 10000 < 128 ? 53 : -26;
             var fill = System.Drawing.Color.FromArgb(Math.Max(0, Math.Min(255, bg.R + shift)), Math.Max(0, Math.Min(255, bg.G + shift)), Math.Max(0, Math.Min(255, bg.B + shift)));
+            if (bg.R == 0x10 && bg.G == 0x10 && bg.B == 0x10) fill = System.Drawing.Color.FromArgb(0x3A, 0x3A, 0x3A);
             var queuedFill = QueuedColor(bg, fill);
             for (int y = pixels.Height - 2; y > 0; y--) {
                 for (int x = pixels.Width - 2; x > 0; x--) {
@@ -2307,6 +2308,23 @@ function Sidebar-Luminance([string]$Name) {
     } finally { $image.Dispose() }
 }
 
+function Sidebar-Dominant([string]$Name) {
+    $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($Name + '.png')))
+    try {
+        $counts = @{}
+        for ($x = 25; $x -lt 130; $x += 7) {
+            for ($y = 170; $y -lt 550; $y += 7) {
+                $pixel = $image.GetPixel($x, $y)
+                $key = '{0},{1},{2}' -f $pixel.R, $pixel.G, $pixel.B
+                $counts[$key] = 1 + [int]$counts[$key]
+            }
+        }
+        $top = $counts.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 1
+        $channels = $top.Key.Split(',') | ForEach-Object { [int]$_ }
+        return @{ r = $channels[0]; g = $channels[1]; b = $channels[2] }
+    } finally { $image.Dispose() }
+}
+
 function Restart-ChatView([int]$ShellCount) {
     Doctor
     Record 'Close only the owned app normally and restart with the same isolated data directory'
@@ -3016,6 +3034,11 @@ try {
             $dark = Sidebar-Luminance 'before'
             $light = Sidebar-Luminance 'after'
             if ($light -lt $dark + 60) { throw "Visible sidebar did not become light: $dark -> $light" }
+            $reader = Sidebar-Dominant 'before'
+            foreach ($channel in @($reader.r, $reader.g, $reader.b)) {
+                if ([Math]::Abs($channel - 0x10) -gt 4) { throw "IGSH-1016 dark sidebar is not the Android reader background 101010: $($reader.r),$($reader.g),$($reader.b)" }
+            }
+            $result.checks += @{ name = 'IGSH-1016-reader-sidebar'; sidebarRgb = "$($reader.r),$($reader.g),$($reader.b)"; expected = '16,16,16' }
             $result.checks += @{ name = 'dark-to-light'; darkLuminance = $dark; lightLuminance = $light; savedTheme = 'light' }
         }
         'chat-dictation' {
