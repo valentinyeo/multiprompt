@@ -10,8 +10,19 @@ function Save-SkillPill([string]$Name, [string]$Theme, [IntPtr]$Control, [bool]$
 }
 foreach ($theme in @('dark', 'light')) {
     Select-Theme $theme ('skill-theme-' + $theme)
+    $beforeTabs = @((Read-Session).tabs).Count
     Palette 'new cmd'
     Press @(0x0D) 'Enter: new isolated shell for skill colors'
+    Wait-Until {
+        $state = Read-Session
+        @($state.tabs).Count -eq $beforeTabs + 1 -and $state.tabs[$state.active_tab].kind -eq 'cmd'
+    } 'fresh CMD tab saved'
+    $state = Read-Session
+    Wait-WorkspaceSurface $state.active_workspace $state.active_tab $false
+    $ready = Join-Path $scratch ($theme + '-skill-console-ready.txt')
+    Type-Text ('echo ready>"' + $ready + '"')
+    Press @(0x0D) 'Enter: verify the new console accepts real keyboard input'
+    Wait-Until { (Test-Path $ready) -and (Get-Content $ready -Raw).Trim() -eq 'ready' } 'new console executed readiness command'
     Press @(0x12, 0x43) 'Alt+C: open Chat View'
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
     $editCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
