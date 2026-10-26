@@ -214,24 +214,16 @@ pub const DictationState = enum { idle, listening, finishing };
 pub var chat_dictation_state: DictationState = .idle;
 var chat_dictation_engine_toggle: *const fn () void = @import("voice.zig").toggleDictation;
 
-pub const DICTATION_WAVE_BARS = 14;
+pub const DICTATION_WAVE_BARS = 8;
 pub var chat_dictation_started_ms: u64 = 0;
 pub var chat_dictation_wave: [DICTATION_WAVE_BARS]u8 = [_]u8{0} ** DICTATION_WAVE_BARS;
 
 pub fn chatDictationElapsedText(buf: *[8]u16, elapsed_ms: u64) []const u16 {
     const total: u64 = elapsed_ms / 1000;
-    const minutes: u64 = @min(total / 60, 99);
-    const seconds: u64 = total % 60;
-    var at: usize = 0;
-    if (minutes >= 10) {
-        buf[at] = @intCast('0' + minutes / 10);
-        at += 1;
-    }
-    buf[at] = @intCast('0' + minutes % 10);
-    buf[at + 1] = ':';
-    buf[at + 2] = @intCast('0' + seconds / 10);
-    buf[at + 3] = @intCast('0' + seconds % 10);
-    return buf[0 .. at + 4];
+    var tmp: [8]u8 = undefined;
+    const text: []const u8 = std.fmt.bufPrint(&tmp, "{d}:{d:0>2}", .{ total / 60, total % 60 }) catch "0:00";
+    for (text, 0..) |ch, i| buf[i] = ch;
+    return buf[0..text.len];
 }
 
 pub fn chatDictationLevelBar(level: u32) u8 {
@@ -245,9 +237,11 @@ pub fn chatDictationElapsedNow() u64 {
 }
 
 pub fn chatDictationWaveTick() void {
-    if (chat_dictation_state != .listening) return;
-    std.mem.copyForwards(u8, chat_dictation_wave[0 .. DICTATION_WAVE_BARS - 1], chat_dictation_wave[1..DICTATION_WAVE_BARS]);
-    chat_dictation_wave[DICTATION_WAVE_BARS - 1] = chatDictationLevelBar(app_state.g_dictation_level.load(.acquire));
+    if (chat_dictation_state == .idle) return;
+    if (chat_dictation_state == .listening) {
+        std.mem.copyForwards(u8, chat_dictation_wave[0 .. DICTATION_WAVE_BARS - 1], chat_dictation_wave[1..DICTATION_WAVE_BARS]);
+        chat_dictation_wave[DICTATION_WAVE_BARS - 1] = chatDictationLevelBar(app_state.g_dictation_level.load(.acquire));
+    }
     if (app_state.g_main_hwnd != null) {
         const rc = chatViewLayout().mic_btn;
         _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
@@ -256,6 +250,11 @@ pub fn chatDictationWaveTick() void {
 
 pub fn chatDictationMicWidth(state: DictationState) i32 {
     return if (state == .idle) uiScaled(32) else uiScaled(116);
+}
+
+fn chatDictationMicFit(wanted: i32, room: i32) i32 {
+    if (wanted <= chatDictationMicWidth(.idle)) return wanted;
+    return std.math.clamp(room - uiScaled(60), uiScaled(80), wanted);
 }
 
 pub fn chatDictationSync() void {
@@ -347,8 +346,9 @@ pub fn chatViewLayout() ChatViewLayout {
     const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
     const slots = chatSendSlots(composer_card, send_size, send_margin, @import("window_layout.zig").chatStopVisible(), chatComposerHasText() or chat_dictation_state != .idle);
     const send_btn = slots.send;
+    const mic_w = chatDictationMicFit(chatDictationMicWidth(chat_dictation_state), slots.left - uiScaled(6) - (composer_card.left + send_margin + send_size + uiScaled(12)));
     const mic_btn = RECT{
-        .left = slots.left - uiScaled(6) - chatDictationMicWidth(chat_dictation_state),
+        .left = slots.left - uiScaled(6) - mic_w,
         .top = send_btn.top,
         .right = slots.left - uiScaled(6),
         .bottom = send_btn.bottom,
@@ -2792,6 +2792,7 @@ test "IGSH-887 the elapsed timer counts up as minutes and seconds" {
         .{ .ms = 59999, .text = "0:59" },
         .{ .ms = 65000, .text = "1:05" },
         .{ .ms = 605000, .text = "10:05" },
+        .{ .ms = 6000000, .text = "100:00" },
     };
     for (cases) |c| {
         const out = chatDictationElapsedText(&buf, c.ms);

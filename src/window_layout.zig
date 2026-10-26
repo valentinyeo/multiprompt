@@ -251,8 +251,9 @@ fn paintChatMicWave(hdc: HANDLE, rc: RECT, ink: DWORD) void {
     const bars = @import("chat_composer.zig").chat_dictation_wave;
     const count: i32 = @intCast(bars.len);
     const width = rc.right - rc.left;
-    const bar_w = @max(2, @divTrunc(width, count * 2));
     const slot_w = @divTrunc(width, count);
+    if (slot_w < 2) return;
+    const bar_w = @max(1, @divTrunc(slot_w * 2, 3));
     const mid = @divTrunc(rc.top + rc.bottom, 2);
     const max_half = @max(2, @divTrunc(rc.bottom - rc.top, 2));
     const min_half = @max(1, uiScaled(2));
