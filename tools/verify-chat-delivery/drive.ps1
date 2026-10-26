@@ -18,6 +18,7 @@ Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient,
 Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
+if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Fresh skills proof requires chat-delivery' }
 if ($env:CHAT_WIDTH_PROOF -eq '1') {
     if ($Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
     Add-Type -Path "$PSScriptRoot/layout-capture.cs"
@@ -32,6 +33,7 @@ $plans = @(
 )
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='busy'; text='composer stays usable'}) }
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
+if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
 if ($env:CHAT_REMOTE_PROOF -eq '1') { $plans = @(@{name='remote-sync'; mode='idle'; text='remote session follows live process'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
@@ -226,7 +228,7 @@ function Type-Composer([string]$Text) {
     $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='type composer text'; text=$Text})
     foreach ($letter in $Text.ToCharArray()) {
         Doctor $true
-        [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter))
+        [ChatDeliveryDesktop]::Character($letter)
         Start-Sleep -Milliseconds 30
     }
 }
@@ -372,10 +374,18 @@ foreach ($plan in $plans) {
             $observation.steps = $steps
         }
         Save $standIn "$state/state.json"
+        if ($env:CHAT_SKILLS_PROOF -eq '1') {
+            New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-zebra" | Out-Null
+            [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-zebra/SKILL.md", "---`nname: verify-zebra`ndescription: Existing fixture skill`n---`nFixture")
+            New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-yak" | Out-Null
+            [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-yak/SKILL.md", "---`nname: verify-yak`ndescription: Cached selection fixture`n---`nFixture")
+        }
         if ($hasTranscript) { Shell-Run @('init') }
         if ($isHistory) { Shell-Run @('history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
-        Save @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})} "$settings/session.json"
+        $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
+        if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
+        Save $savedSession "$settings/session.json"
         if ($isRemote) {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
             $saved.tabs[0].tmux_host = 2
@@ -395,7 +405,47 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($isRemote) {
+        if ($env:CHAT_SKILLS_PROOF -eq '1') {
+            Type-Composer '/verify-zebra'
+            if ([ChatDeliveryDesktop]::Text($composer) -cne '/verify-zebra') { throw 'Skill fixture did not type the slash and hyphen' }
+            [void](Wait-For 'initial skill fetch applied' { (Read-Shared "$settings/debug.log") -match 'chat-ac: fetched host=0 bytes=[1-9]' } 20)
+            Press @(0x09) 'Tab: accept existing skill' $true
+            [void](Wait-For 'existing skill accepted' { [ChatDeliveryDesktop]::Text($composer) -ceq '/verify-zebra ' } 5)
+            Press @(0x11, 0x41) 'Ctrl+A: select whole skill draft' $true
+            Press @(0x08) 'Backspace: clear whole skill draft' $true
+            New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-alpha" | Out-Null
+            [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-alpha/SKILL.md", "---`nname: verify-alpha`ndescription: Added after warming cache`n---`nFixture")
+            Copy-Item "$profile/home/.claude/skills" "$caseDir/skills" -Recurse
+            $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Type-Composer '/verify-'
+            Press @(0x28) 'Down: select cached yak before background refresh' $true
+            [void](Wait-For 'newly added skill discovered within five seconds' {
+                (Test-Path "$state/completion.jsonl") -and (Read-Shared "$state/completion.jsonl").Contains('verify-alpha')
+            } 4)
+            [void](Wait-For 'refreshed rows applied' { [regex]::Matches((Read-Shared "$settings/debug.log"), 'chat-ac: fetched host=0 bytes=[1-9]').Count -ge 2 } 1)
+            Shot 'fresh-skills-refreshed'
+            Press @(0x09) 'Tab: keep selected cached skill after refresh' $true
+            $selected = [ChatDeliveryDesktop]::Text($composer)
+            if ($selected -cne '/verify-yak ') { throw "Selected row moved during refresh: $selected" }
+            Press @(0x11, 0x41) 'Ctrl+A: select whole skill draft' $true
+            Press @(0x08) 'Backspace: clear whole skill draft' $true
+            Type-Composer '/verify-alpha'
+            Press @(0x09) 'Tab: accept newly discovered skill' $true
+            $accepted = [ChatDeliveryDesktop]::Text($composer)
+            if ($accepted -cne '/verify-alpha ') { throw "New skill unavailable: $accepted" }
+            $elapsed = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
+            if ($elapsed -gt 5000) { throw "New skill took $elapsed ms, longer than five seconds" }
+            Press @(0x11, 0x41) 'Ctrl+A: select whole skill draft' $true
+            Press @(0x08) 'Backspace: clear whole skill draft' $true
+            $beforeReload = [regex]::Matches((Read-Shared "$settings/debug.log"), 'chat-ac: fetched host=0 bytes=[1-9]').Count
+            Type-Composer '/reload-plugins'
+            [void](Wait-For 'reload command opening fetch applied before adding beta' { [regex]::Matches((Read-Shared "$settings/debug.log"), 'chat-ac: fetched host=0 bytes=[1-9]').Count -gt $beforeReload } 5)
+            New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-beta" | Out-Null
+            [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-beta/SKILL.md", "---`nname: verify-beta`ndescription: Reload fixture`n---`nFixture")
+            Press @(0x0D) 'Enter: send reload plugins' $true
+            [void](Wait-For 'reload refresh without reopening list' { (Read-Shared "$state/completion.jsonl").Contains('verify-beta') } 5)
+            $observation.skills = @{newSkillMs=$elapsed; selected=$selected; accepted=$accepted; reload=$true}
+        } elseif ($isRemote) {
             [void](Wait-For 'initial remote transcript read' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
             Bind-Transcript
             foreach ($turn in 1..3) {
@@ -827,7 +877,9 @@ if ($env:CHAT_WIDTH_PROOF -eq '1') {
     if ($LASTEXITCODE -ne 0) { throw 'IGSH-898 message width pixel proof failed' }
     exit 0
 }
-if ($Feature -eq 'chat-full-history') {
+if ($env:CHAT_SKILLS_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-skills-proof.mjs" $Evidence
+} elseif ($Feature -eq 'chat-full-history') {
     & node "$PSScriptRoot/../chat-full-history-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-messages-only') {
     & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --complete

@@ -153,6 +153,7 @@ fn SetWindowTextW(_: anytype, _: anytype) i32 { composer_text = &.{}; return 1; 
 fn L(comptime text: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(text); }
 fn SetTimer(_: anytype, _: u32, _: u32, _: ?*anyopaque) usize { return 0; }
 fn chatAcClose() void {}
+fn chatAcAfterSend(_: []const u16) void {}
 fn chatAcAgent() chat_complete.Agent { return .claude; }
 fn chatDraftFlush() void {}
 fn stampSessionUse(_: u32, _: bool) void {}
