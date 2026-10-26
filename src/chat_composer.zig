@@ -254,7 +254,7 @@ pub fn chatDictationMicWidth(state: DictationState) i32 {
 
 fn chatDictationMicFit(wanted: i32, room: i32) i32 {
     if (wanted <= chatDictationMicWidth(.idle)) return wanted;
-    return std.math.clamp(room - uiScaled(60), uiScaled(80), wanted);
+    return @min(wanted, @max(uiScaled(80), room - uiScaled(60)));
 }
 
 pub fn chatDictationSync() void {

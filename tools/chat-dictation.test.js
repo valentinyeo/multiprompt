@@ -143,7 +143,7 @@ test('IGSH-965 send sits at the far right and the queued send is armed and consu
   const composer = read('src/chat_composer.zig');
   const main = read('src/main.zig');
   assert.match(composer, /const slots = chatSendSlots\(composer_card, send_size, send_margin, [^\n]*chatComposerHasText\(\) or chat_dictation_state != \.idle\);/);
-  assert.match(composer, /\.left = slots\.left - uiScaled\(6\) - chatDictationMicWidth\(chat_dictation_state\),/);
+  assert.match(composer, /const mic_w = chatDictationMicFit\(chatDictationMicWidth\(chat_dictation_state\), [^\n]*\);\s*const mic_btn = RECT\{\s*\.left = slots\.left - uiScaled\(6\) - mic_w,/);
   assert.match(composer, /\.right = mic_btn\.left - uiScaled\(12\),/);
   assert.match(composer, /try std\.testing\.expect\(layout\.send_btn\.left > layout\.mic_btn\.right\);/);
   assert.match(main, /WM_APP_CHAT_SEND => \{\s*if \(wp == 1\) @import\("chat_send\.zig"\)\.chatSteerPrompt\(\) else @import\("chat_composer\.zig"\)\.chatSendOrFinishDictation\(\);/);
