@@ -340,11 +340,9 @@ test "reserved uncertain sends stay unconfirmed across restart" {
     try std.testing.expectEqual(OutboxState.delivered, stateOnLoad(@intFromEnum(OutboxState.delivered), true));
 }
 
-fn messageMatches(block: []const u16, p: Pending) bool {
+fn messageMatches(block: []const u16, p: Pending, norm: []const u16) bool {
     if (p.text.len == 0) return newBlockMatches(block, p.prefix);
     if (sameText(block, p.text)) return true;
-    var full: [16384]u16 = undefined;
-    const norm = normalize(p.text, &full);
     if (pastePlaceholderMatches(block, norm)) return true;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
     const body = normalize(block, &buf);
@@ -396,12 +394,14 @@ fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: 
 
 fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: []const i64, taken: []const ?usize, earlier: []const Pending) ?usize {
     if (p.prefix.len == 0) return null;
+    var full: [16384]u16 = undefined;
+    const norm = normalize(p.text, &full);
     for (blocks, 0..) |b, bi| {
         if (!isNewBlock(p.anchor, b.stamp_ms, bi, window_full) and !p.unanchored_delivery) continue;
         if (p.unanchored_delivery and (p.text.len == 0 or !sameText(b.text, p.text))) continue;
         if (b.stamp_ms > 0 and std.mem.indexOfScalar(i64, claimed, b.stamp_ms) != null) continue;
         if (isTaken(taken, bi, earlier, p)) continue;
-        if (messageMatches(b.text, p)) return bi;
+        if (messageMatches(b.text, p, norm)) return bi;
     }
     return null;
 }
@@ -414,7 +414,10 @@ pub fn assign(pending: []Pending, blocks: []const UserBlock, window_full: bool, 
         const bi = out[i] orelse continue;
         for (pending, 0..) |*other, j| {
             if (j <= i) continue;
-            if (other.text.len > 0 and pending[i].text.len > 0 and !sameText(other.text, pending[i].text) and messageMatches(blocks[bi].text, other.*)) continue;
+            if (other.text.len > 0 and pending[i].text.len > 0 and !sameText(other.text, pending[i].text)) {
+                var full: [16384]u16 = undefined;
+                if (messageMatches(blocks[bi].text, other.*, normalize(other.text, &full))) continue;
+            }
             if (blocks[bi].stamp_ms > 0) {
                 other.anchor.after_ms = @max(other.anchor.after_ms, blocks[bi].stamp_ms);
                 other.unanchored_delivery = false;
