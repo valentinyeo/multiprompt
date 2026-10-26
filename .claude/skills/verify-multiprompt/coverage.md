@@ -148,3 +148,4 @@ A change that alters a mapped feature updates its map and this table in the same
 `chat-full-history` exercises 50 known messages in a tool-heavy synthetic session through the production Windows reader/layout/copy path, then repeats after restart. Red/green GitHub evidence pending; no live Claude session is claimed.
 
 | IGSH-928 | Skill pills | `chat-skill-pill` | Dark/light draft and sent-history pixels, plain and unknown controls; pre-fix release control required. |
+| IGSH-984 | Clickable answer options and question prompts | `chat-options` | Real mouse click on a reply option card and on a question prompt card; the console must receive the lettered answer and the option number; pre-change master control required. |

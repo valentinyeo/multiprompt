@@ -497,6 +497,25 @@ pub fn sendChatPrompt() void {
     _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
 }
 
+pub fn chatSendChoice(text: []const u16) bool {
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or text.len == 0) return false;
+    send_latency.markPressed();
+    const ei = chatEchoEnqueueForShell(app_state.active_shell, text, .queued) orelse {
+        showHeaderNoticeAscii("Could not save the message; try again", 3500, true);
+        return false;
+    };
+    send_latency.markEnqueued(app_state.g_chat_outbox.items[ei].id);
+    app_state.g_chat_read_open_pending = false;
+    app_state.g_chat_read_hold = false;
+    app_state.g_chat_read_open_ready = true;
+    _ = @import("chat_session.zig").chatReadMark(true);
+    @import("inbox.zig").stampSessionUse(app_state.active_shell, false);
+    app_state.g_chat_scroll_bottom_pending = true;
+    chatOutboxTick();
+    _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
+    return true;
+}
+
 fn chatNetworkReportsConnected() bool {
     var flags: DWORD = 0;
     return InternetGetConnectedState(&flags, 0) != 0;
@@ -2611,6 +2630,15 @@ pub fn chatPermissionAnswer(shell_index: u32, action: @import("chat_permission.z
     shell.permission_answered = true;
     @import("window_layout.zig").chatWorkingIndicatorInvalidate();
     return true;
+}
+
+pub fn chatQuestionAnswer(shell_index: u32, digit: u8, question_hash: u64) bool {
+    if (!app_state.g_chat_active or shell_index != app_state.active_shell or shell_index >= app_state.shell_count) return false;
+    var scratch: [2]u16 = undefined;
+    if (@import("chat_capture.zig").captureChatTranscript(shell_index, &scratch, true) == null) return false;
+    const shell = &app_state.shells[shell_index];
+    if (app_state.g_chat_question_sid != shell.shell_id or app_state.g_chat_question.count == 0 or app_state.g_chat_question.hash() != question_hash) return false;
+    return chatAgentKey(shell_index, digit);
 }
 
 fn chatAgentKey(shell_index: u32, digit: u8) bool {

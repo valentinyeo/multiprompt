@@ -1017,6 +1017,21 @@ pub fn chatPermissionCaptureRows(shell_index: u32, width: usize, chars_read: DWO
         if (menu == null) @import("diagnostics.zig").debugLog("[chat] permission cleared");
         @import("window_layout.zig").chatWorkingIndicatorInvalidate();
     }
+    chatQuestionCaptureRows(shell_index, lines[0..count]);
+}
+
+fn chatQuestionCaptureRows(shell_index: u32, lines: []const []const u16) void {
+    const options = @import("chat_options.zig");
+    var question: options.Group = .{};
+    const found = options.parseQuestion(lines, &question);
+    const sid = app_state.shells[shell_index].shell_id;
+    const had = app_state.g_chat_question.count > 0 and app_state.g_chat_question_sid == sid;
+    const changed = had != found or (found and !question.eql(&app_state.g_chat_question));
+    if (found) app_state.g_chat_question = question else app_state.g_chat_question.count = 0;
+    app_state.g_chat_question_sid = sid;
+    if (!changed or !app_state.g_chat_active or app_state.g_main_hwnd == null) return;
+    @import("diagnostics.zig").debugLog(if (found) "[chat] question shown" else "[chat] question cleared");
+    _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_IMAGE_READY, 0, 0);
 }
 
 fn chatConsoleTableRows(raw: []const u16, width: usize, scratch: []u16, table_rows: []bool) void {
