@@ -4386,20 +4386,22 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
         }
         chatPaintWorking(mem_dc, GetTickCount64());
-        const entry = chatHistoryEntry(chatFileIdentity());
-        const missing_note = if (entry) |e| e.missing_message[0] != 0 else false;
-        const failed_load = if (entry) |e| e.failures > 0 else false;
-        const paint_note = app_state.g_chat_block_count == 0 and (g_working_rect == null or missing_note or failed_load);
-        if (paint_note and missing_note and !g_note_logged and verboseLoggingEnabled()) debugLog("[chat] note shown: " ++ chat_history.NOT_AVAILABLE_NOTE);
-        g_note_logged = paint_note and missing_note;
-        if (paint_note) {
-            const extra_top = if (g_working_rect) |working| working.bottom - app_state.g_chat_scroll_y else 0;
-            const message = if (entry) |e|
-                (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else if (e.pending or app_state.g_chat_switch_loading) L("Loading conversation...") else L("No conversation yet"))
-            else
-                L("No conversation yet");
-            chatPaintEmpty(mem_dc, w, message, extra_top);
-        }
+        if (app_state.g_chat_block_count == 0) {
+            const entry = chatHistoryEntry(chatFileIdentity());
+            const missing_note = if (entry) |e| e.missing_message[0] != 0 else false;
+            const failed_load = if (entry) |e| e.failures > 0 else false;
+            const paint_note = g_working_rect == null or missing_note or failed_load;
+            if (paint_note and missing_note and !g_note_logged and verboseLoggingEnabled()) debugLog("[chat] note shown: " ++ chat_history.NOT_AVAILABLE_NOTE);
+            g_note_logged = paint_note and missing_note;
+            if (paint_note) {
+                const extra_top = if (g_working_rect) |working| working.bottom - app_state.g_chat_scroll_y else 0;
+                const message = if (entry) |e|
+                    (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else if (e.pending or app_state.g_chat_switch_loading) L("Loading conversation...") else L("No conversation yet"))
+                else
+                    L("No conversation yet");
+                chatPaintEmpty(mem_dc, w, message, extra_top);
+            }
+        } else g_note_logged = false;
     }
     chatPaintScrollUi(&canvas, mem_dc, w, @max(1, h - app_state.g_chat_bottom_inset));
     @import("chat_find_ui.zig").paint(mem_dc, w);
