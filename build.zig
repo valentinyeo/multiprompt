@@ -16,7 +16,6 @@ pub fn build(b: *std.Build) void {
         if (std.mem.allEqual(u8, &key, 0)) @panic("Release signing public key is still the all-zero placeholder; configure it before publishing");
     }
 
-
     const mod = b.addModule("multiprompt", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -697,19 +696,18 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&idle_front_tests.step);
     vps_test_step.dependOn(&idle_front_tests.step);
     const server_tool_tests = b.addSystemCommand(&.{
-        "node",                                   "--test",                              "--test-concurrency=4",
-        "tools/app-source.test.js",               "tools/browser-fixed-layout.test.js",  "tools/browser-overlay.test.js",
-        "tools/browser-pane-hibernation.test.js", "tools/chat-cache-bound.test.js",      "tools/chat-correctness.test.js",
-        "tools/chat-history-reader.test.js",      "tools/chat-reset.test.js",            "tools/chat-tables.test.js",
-        "tools/chat-transcript-history.test.js",  "tools/chat_injected.test.js",         "tools/crash-report.test.js",
-        "tools/debug-log.test.js",                "tools/favorites.test.js",             "tools/focus-guard.test.js",
-        "tools/idle-cpu.test.js",                 "tools/inbox-eta.test.js",             "tools/inbox-exclude.test.js",
-        "tools/power-saver.test.js",              "tools/sidebar-custom-groups.test.js", "tools/token-ladder-panel.test.js",
-        "tools/unarchive-semantics.test.js",      "tools/update-card.test.js",           "tools/zsb-active-tab.test.js",
-        "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",      "extension/focus-guard.test.js",
-        "tools/chat-queued-notes.test.js",         "tools/chat-unconfirmed-duplicate.test.js",
-        "tools/auto-release-admit.test.js",
-        "tools/chat-unread-visit.test.js",
+        "node",                                   "--test",                                   "--test-concurrency=4",
+        "tools/app-source.test.js",               "tools/browser-fixed-layout.test.js",       "tools/browser-overlay.test.js",
+        "tools/browser-pane-hibernation.test.js", "tools/chat-cache-bound.test.js",           "tools/chat-correctness.test.js",
+        "tools/chat-history-reader.test.js",      "tools/chat-reset.test.js",                 "tools/chat-tables.test.js",
+        "tools/chat-transcript-history.test.js",  "tools/chat_injected.test.js",              "tools/crash-report.test.js",
+        "tools/debug-log.test.js",                "tools/favorites.test.js",                  "tools/focus-guard.test.js",
+        "tools/idle-cpu.test.js",                 "tools/inbox-eta.test.js",                  "tools/inbox-exclude.test.js",
+        "tools/power-saver.test.js",              "tools/sidebar-custom-groups.test.js",      "tools/token-ladder-panel.test.js",
+        "tools/unarchive-semantics.test.js",      "tools/update-card.test.js",                "tools/zsb-active-tab.test.js",
+        "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",           "extension/focus-guard.test.js",
+        "tools/chat-queued-notes.test.js",        "tools/chat-unconfirmed-duplicate.test.js", "tools/auto-release-admit.test.js",
+        "tools/chat-unread-visit.test.js",        "tools/capture-usage-pace.test.js",
     });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);

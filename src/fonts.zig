@@ -232,6 +232,7 @@ const MessageMenuStyle = struct {
     dim: w.DWORD,
     icons: w.HANDLE,
     show_icons: bool,
+    inks: []const ?w.DWORD = &.{},
 };
 var message_menu_style: ?MessageMenuStyle = null;
 threadlocal var menu_window_hook: w.HANDLE = null;
@@ -346,7 +347,7 @@ fn styleMenuWindow(hwnd: w.HANDLE) void {
 }
 
 pub fn trackMessagePopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT) w.BOOL {
-    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, true);
+    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, true, &.{});
 }
 
 fn mixColor(a: w.DWORD, b: w.DWORD) w.DWORD {
@@ -356,7 +357,7 @@ fn mixColor(a: w.DWORD, b: w.DWORD) w.DWORD {
     return r | (g << 8) | (bl << 16);
 }
 
-fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, show_icons: bool) w.BOOL {
+fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, show_icons: bool, inks: []const ?w.DWORD) w.BOOL {
     const chat_style = @import("chat_style.zig");
     const bound = menu_theme;
     const look = chat_style.menuLook(if (bound) |theme| theme.background() else unboundBackground());
@@ -378,7 +379,7 @@ fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved:
         if (menu_window_hook != null) _ = w.UnhookWindowsHookEx(menu_window_hook);
         menu_window_hook = previous_hook;
     }
-    return trackPopupMenuStyled(menu, flags, x, y, reserved, owner, rect, .{ .background = background, .hover = look.hover, .ink = ink, .dim = mixColor(ink, look.fill), .icons = icons, .show_icons = show_icons });
+    return trackPopupMenuStyled(menu, flags, x, y, reserved, owner, rect, .{ .background = background, .hover = look.hover, .ink = ink, .dim = mixColor(ink, look.fill), .icons = icons, .show_icons = show_icons, .inks = inks });
 }
 
 pub fn messageMenuIconFont() w.HANDLE {
@@ -399,6 +400,7 @@ const MenuLabel = struct {
     len: i32 = 0,
     state: u32 = 0,
     id: u32 = 0,
+    ink: ?w.DWORD = null,
 };
 const MeasureItem = extern struct {
     kind: u32,
@@ -422,7 +424,11 @@ const DrawItem = extern struct {
 var menu_labels: []MenuLabel = &.{};
 
 pub fn trackPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT) w.BOOL {
-    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, false);
+    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, false, &.{});
+}
+
+pub fn trackPopupMenuWithInks(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, inks: []const ?w.DWORD) w.BOOL {
+    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, false, inks);
 }
 
 fn trackPopupMenuStyled(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, style: ?MessageMenuStyle) w.BOOL {
@@ -436,6 +442,9 @@ fn trackPopupMenuStyled(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved:
     for (menu_labels, 0..) |*label, i| {
         const pos: u32 = @intCast(i);
         label.state = w.GetMenuState(menu, pos, 0x400);
+        if (style) |theme| {
+            if (i < theme.inks.len) label.ink = theme.inks[i];
+        }
         if (label.state & 0x810 != 0) continue;
         label.id = w.GetMenuItemID(menu, @intCast(pos));
         label.len = w.GetMenuStringW(menu, pos, &label.text, label.text.len, 0x400);
@@ -510,7 +519,7 @@ pub fn menuMessage(msg: w.UINT, lp: w.LPARAM) ?w.LRESULT {
         defer _ = w.SelectObject(item.dc, old);
         const old_mode = w.SetBkMode(item.dc, 1);
         defer _ = w.SetBkMode(item.dc, old_mode);
-        const old_color = w.SetTextColor(item.dc, if (style) |theme| (if (disabled) theme.dim else theme.ink) else w.GetSysColor(if (disabled) 17 else if (selected) 14 else 7));
+        const old_color = w.SetTextColor(item.dc, if (style) |theme| (if (disabled) theme.dim else label.ink orelse theme.ink) else w.GetSysColor(if (disabled) 17 else if (selected) 14 else 7));
         defer _ = w.SetTextColor(item.dc, old_color);
         var text_rect = item.rect;
         text_rect.left += if (style) |theme| (if (theme.show_icons) @as(i32, 36) else 28) else 28;

@@ -27,6 +27,8 @@ Capture `pill-closed.png`, click with SendInput, require the app-owned `#32768` 
 
 Set `usage_pace_proof=true` for pace checks.
 Optional `usage_pace_status` accepts base64 sanitized status JSON.
+Generate live input with `tools/capture-usage-pace.py`.
+It removes account identities, emails, hosts and credentials.
 The job replays sample, above and below snapshots.
 Each uses the normal `ssh-path.txt` boundary.
 The external SSH stand-in only answers status reads.

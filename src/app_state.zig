@@ -1549,6 +1549,18 @@ pub const AiPace = enum(u8) {
     behind,
 };
 
+pub const AiPaceComparison = struct {
+    ratio: f64,
+    verdict: AiPace,
+};
+
+pub const AiUsagePace = struct {
+    per_hour: ?f64 = null,
+    per_day: ?f64 = null,
+    empty_hours: ?f64 = null,
+    comparison: ?AiPaceComparison = null,
+};
+
 pub const AiPaceGoal = struct {
     label: [128]u8 = std.mem.zeroes([128]u8),
     label_len: usize = 0,
@@ -1572,6 +1584,8 @@ pub const AiPaceGoal = struct {
     five_hour_reset_filetime: u64 = 0,
     has_bonus_reset: bool = false,
     bonus_reset_filetime: u64 = 0,
+    weekly_pace: AiUsagePace = .{},
+    five_hour_pace: AiUsagePace = .{},
     pace: AiPace = .on_pace,
     status: AiPaceStatus = .unavailable,
     cluster: [64]u8 = std.mem.zeroes([64]u8),
