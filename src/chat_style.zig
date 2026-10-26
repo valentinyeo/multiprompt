@@ -47,6 +47,9 @@ pub fn isDark(c: u32) bool {
     const lum = (2126 * (c & 0xFF) + 7152 * ((c >> 8) & 0xFF) + 722 * ((c >> 16) & 0xFF)) / 10000;
     return lum < 128;
 }
+pub fn scrollThumbColor(bg: u32) u32 {
+    return shift(bg, if (isDark(bg)) 44 else -60);
+}
 pub const BubbleColors = struct { user: u32, agent: u32, injected: u32 };
 pub fn bubbleColors(bg: u32) BubbleColors {
     if (isDark(bg)) return .{ .user = shift(bg, 53), .agent = shift(bg, 36), .injected = 0x4F2F1E };
@@ -126,6 +129,14 @@ test "user bubbles stay right aligned and cannot exceed the reader width" {
     }
     try std.testing.expectEqual(@as(i32, 74), bubbleWidth(800, 50, 12, 720));
 }
+test "IGSH-897 the scroll thumb is a dark gray a little brighter than a dark chat and darker than a light one" {
+    const dark_bg: u32 = 0x181818;
+    const dark_thumb = scrollThumbColor(dark_bg);
+    try std.testing.expect(isDark(dark_thumb) and dark_thumb > dark_bg);
+    try std.testing.expectEqual(@as(u32, 0x444444), scrollThumbColor(0x181818) & 0xFFFFFF & 0x444444);
+    try std.testing.expect(scrollThumbColor(0xF3F3F3) < 0xF3F3F3);
+}
+
 test "IGSH-849 assistant headers reserve no space" {
     var block = md.Block{ .start = 0, .len = 1, .role = .prose, .first = true };
     try std.testing.expectEqual(@as(i32, 0), headerHeight(block, 28));
