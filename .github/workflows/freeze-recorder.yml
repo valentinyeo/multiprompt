@@ -1,0 +1,78 @@
+name: Freeze recorder
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'build.zig'
+      - 'tools/freeze-recorder*'
+      - '.github/workflows/freeze-recorder.yml'
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional published release to verify instead of a branch build
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: freeze-recorder-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  journey:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Check report privacy controls
+        run: node --test tools/freeze-recorder-proof.test.mjs
+      - name: Install Zig
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          tar -xf $zip -C $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build the app
+        if: inputs.tag == ''
+        run: zig build
+      - name: Download the published app
+        if: inputs.tag != ''
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
+          New-Item -ItemType Directory -Force zig-out/bin | Out-Null
+          Invoke-WebRequest "https://github.com/valentinyeo/multiprompt/releases/download/$env:RELEASE_TAG/multiprompt-x64.exe" -OutFile zig-out/bin/multiprompt.exe
+          Invoke-WebRequest "https://github.com/valentinyeo/multiprompt/releases/download/$env:RELEASE_TAG/zigshell-bridge-x64.exe" -OutFile zig-out/bin/zigshell-bridge.exe
+      - name: Reject the pre-fix release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force old, freeze-evidence | Out-Null
+          Invoke-WebRequest https://github.com/valentinyeo/multiprompt/releases/download/v0.28.922/multiprompt-x64.exe -OutFile old/multiprompt.exe
+          Invoke-WebRequest https://github.com/valentinyeo/multiprompt/releases/download/v0.28.922/zigshell-bridge-x64.exe -OutFile old/zigshell-bridge.exe
+          $red = & pwsh -NoProfile -File ./tools/freeze-recorder-journey.ps1 -Exe ./old/multiprompt.exe -Evidence ./freeze-negative 2>&1
+          $redCode = $LASTEXITCODE
+          $red | Set-Content freeze-evidence/red-log.txt
+          if ($redCode -eq 0 -or ($red -join "`n") -notmatch 'Ten-second stall must write exactly one report; found 0') { throw "Pre-fix control failed for an unexpected reason: $red" }
+          $global:LASTEXITCODE = 0
+          Write-Host 'FREEZE_RED_CONTROL_OK'
+      - name: Force real main-thread stalls
+        shell: pwsh
+        run: ./tools/freeze-recorder-journey.ps1 -Exe ./zig-out/bin/multiprompt.exe -Evidence ./freeze-evidence
+      - name: Validate saved reports
+        run: |
+          node tools/freeze-recorder-proof.mjs freeze-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'Freeze report proof failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: freeze-evidence
+          path: freeze-evidence/
+          if-no-files-found: warn

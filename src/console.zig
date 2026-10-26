@@ -2380,6 +2380,15 @@ pub fn killProcessTree(root_pid: DWORD) void {
     }
 }
 
+var closing_in_background = false;
+
+pub fn closeBackgroundShell(idx: u32) void {
+    if (idx >= app_state.shell_count or idx == app_state.active_shell) return;
+    closing_in_background = true;
+    defer closing_in_background = false;
+    closeShellRemember(idx, true);
+}
+
 pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     if (idx >= app_state.shell_count) return;
     @import("chat_composer.zig").chatDraftCloseForShell(idx);
@@ -2387,7 +2396,8 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     chatOutboxDropForShell(idx);
     _ = parkMainWindowBeforeActiveShellRemoval(idx);
     if (webView2OwnsShell(idx)) closeWebView2();
-    commitRename();
+    const background = closing_in_background;
+    if (!background) commitRename();
 
     stickyRemove(app_state.shells[idx].shell_id);
 
@@ -2466,6 +2476,13 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         app_state.active_shell = 0;
         if (app_state.g_starred_workspace) @import("workspaces.zig").refreshStarredWorkspace();
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        saveSession();
+        return;
+    }
+    if (background) {
+        if (app_state.active_shell > idx) app_state.active_shell -= 1;
+        if (app_state.g_starred_workspace) @import("workspaces.zig").refreshStarredWorkspace();
+        invalidateSidebar();
         saveSession();
         return;
     }
@@ -2592,6 +2609,7 @@ pub fn switchToShell(idx: u32) void {
     if (defer_browser) {
         app_state.g_chat_browser_swap.request(app_state.shells[idx].shell_id, switch_started);
         app_state.g_chat_switch_started = switch_started;
+        app_state.g_chat_switch_content_sid = app_state.shells[idx].shell_id;
         app_state.g_chat_switch_browser_sid = 0;
         cancelBrowserVisibilitySettle();
         cancelPendingNativeBrowserFocus();

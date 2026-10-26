@@ -27,6 +27,7 @@ ${between(history, 'pub const NewMessages =', 'pub const Anchor =')}
 };
 const RECT = struct { bottom: i32 = 600 };
 fn GetClientRect(_: ?usize, _: *RECT) i32 { return 1; }
+fn chatViewClientRect(rc: *RECT) void { _ = GetClientRect(null, rc); }
 fn saveSession() void {}
 const app_state = struct {
   var active_shell: usize = 0;
@@ -45,6 +46,7 @@ const app_state = struct {
   var g_chat_read_divider_y: i32 = 0;
   var g_chat_transcript_hwnd: ?usize = 1;
   var g_chat_scroll_y: i32 = 0;
+  var g_chat_top_pad: i32 = 0;
   var g_chat_layout_reuse: usize = 0;
   var g_chat_layout_dirty = false;
   var g_chat_new_messages: chat_history.NewMessages = .{};
@@ -52,7 +54,7 @@ const app_state = struct {
   var g_chat_block_count: usize = 4;
   var g_chat_layout_rects = [_]RECT{ .{}, .{}, .{}, .{}, .{} };
 };
-${between(session, 'pub fn chatReadBoundary()', 'pub fn chatDeferTranscriptLoad()')}
+${between(session, 'pub fn chatReadBoundary()', 'pub fn chatDeferTranscriptLoad()').replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect')}
 fn openTab() void {
 ${between(session, '    app_state.g_chat_new_messages = .{};', '    if (app_state.g_chat_read_hold)')}
   app_state.g_chat_read_open_pending = false;
@@ -67,7 +69,11 @@ test "divider stays at first unread after reading and clears on all-read revisit
   openTab();
   try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
   app_state.g_chat_read_hold = false;
+  app_state.g_chat_layout_reuse = 2000;
+  app_state.g_chat_layout_dirty = false;
   try std.testing.expect(chatReadMark(true));
+  try std.testing.expectEqual(@as(usize, 2000), app_state.g_chat_layout_reuse);
+  try std.testing.expect(!app_state.g_chat_layout_dirty);
   try std.testing.expectEqual(@as(u64, 33), app_state.shells[0].last_read_message_id);
   try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
   openTab();

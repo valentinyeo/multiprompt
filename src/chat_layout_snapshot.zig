@@ -58,6 +58,7 @@ pub fn save() void {
         .stable_blocks = stable_blocks,
         .width = app_state.g_chat_layout_width,
         .scale = app_state.g_chat_layout_scale,
+        .top_pad = app_state.g_chat_layout_top_pad,
         .font_pt = app_state.g_chat_layout_font_pt,
         .clean = app_state.clean_chat,
         .boundary = app_state.g_chat_read_boundary,
@@ -81,6 +82,7 @@ pub fn restore(entry: ?*Entry) usize {
     @memset(app_state.g_chat_img_count[0..keep], 0);
     app_state.g_chat_layout_width = snapshot.width;
     app_state.g_chat_layout_scale = snapshot.scale;
+    app_state.g_chat_layout_top_pad = snapshot.top_pad;
     app_state.g_chat_layout_font_pt = snapshot.font_pt;
     app_state.g_chat_find_layout_open = false;
     app_state.g_chat_read_boundary = snapshot.boundary;

@@ -162,7 +162,7 @@ test('G1: workflow and harness allow session-open and Windows parses the driver'
   allowsSessionOpen(workflow);
   assert.match(control, /ValidateSet\([^\n)]*'session-open'/);
   assert.match(workflow, /Language\.Parser\]::ParseFile/);
-  assert.match(workflow, /run: node --test tools\/verify-multiprompt\.test\.js/);
+  assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt\.test\.js/);
   assert.match(workflow, /paths:[\s\S]*?- tools\/verify-multiprompt\.test\.js/);
   assert.throws(() => allowsSessionOpen(workflow.replace(", 'session-open'", '')));
 });
@@ -227,7 +227,7 @@ test('G2: offline startup uses the actual ephemeral app-owned loopback listener'
   assert.match(journey, /tunnel-inbound listening port=\(\\d\+\) err=0/);
   assert.match(journey, /Get-NetTCPConnection -State Listen -LocalAddress '127\.0\.0\.1' -LocalPort \$script:zsbPort/);
   assert.match(journey, /\$_.OwningProcess -eq \$process.Id/);
-  assert.match(bridge, /"workspace-list"\) or std\.mem\.eql\(u8, argv\[0\], "session-open"\) or std\.mem\.eql\(u8, argv\[0\], "session-status"\)\) \{\s*sendZsbWorkspaceResponse/);
+  assert.match(bridge, /"workspace-list"\) or std\.mem\.eql\(u8, argv\[0\], "session-open"\) or std\.mem\.eql\(u8, argv\[0\], "session-status"\) or zsbIsTabVerb\(argv\[0\]\)\) \{\s*sendZsbWorkspaceResponse/);
   assert.match(bridge, /zsbSessionOpen\(args, out, @import\("console.zig"\)\.spawnBackgroundTmuxSession, saveSession\)/);
 });
 
@@ -976,14 +976,14 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.match(control, /function Activate-OwnedFrame \{[\s\S]*?SetForegroundWindow\(\$script:window\)[\s\S]*?GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
   assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
   assert.match(palette, /'command palette initialized and owned frame focused' 20/);
-  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-first-paint'))"), control.indexOf("    Record 'Launch complete;"));
+  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners'))"), control.indexOf("    Record 'Launch complete;"));
   assert.match(setup, /ZigShell\/EdgeUserData/);
   assert.match(setup, /\$warmupJob.Start\(\$edge/);
   assert.match(setup, /MainWindowTitle -match '\^Multiprompt verification browser ready'/);
   assert.match(setup, /'isolated browser rendered setup page before the pane adoption deadline starts' 60/);
   assert.doesNotMatch(setup, /Assert-BrowserPane|PaneLayoutProof|Start-Sleep/);
   assert.match(control, /\$warmupStopped = \$warmupJob.Stop\(\)/);
-  assert.match(workflow, /run: node --test tools\/verify-multiprompt.test.js/);
+  assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt.test.js/);
   assert.ok(workflow.includes('- tools/verify-scratch.test.ps1'));
 });
 

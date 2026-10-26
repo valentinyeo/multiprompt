@@ -2,14 +2,15 @@
 
 ## Sub-features
 
-- Ctrl+D starts the existing dictation state; the far-right microphone visibly changes from the idle glyph to an accented glyph on a filled background.
+- Ctrl+D starts the existing dictation state; the microphone, left of the send button, visibly changes from the idle glyph to an accented glyph on a filled background.
 - Enter, a second Ctrl+D, and a real microphone click each stop listening and append the transcript immediately to the native message box, without another keystroke or send.
+- The send button sits at the far right in every state, with the microphone to its left. While dictating, one press on send, or Ctrl+Enter, stops the dictation, keeps every spoken word and sends the whole message; the sent message holds the typed and spoken words exactly once, read from the app outbox after the box empties. Stopping with the microphone still only fills the box.
 - Normal composer typing remains available while listening, and that typed draft survives transcription.
 - In Chat View the header beside the session title never shows dictation status text, and no model or context line sits under the title.
 
 ## How to get to it (user POV)
 
-Open Chat View with Alt+C. Focus the message box and press Ctrl+D. Type while listening, then stop with Enter, Ctrl+D, or the microphone at the far right of the box. The dictated words appear in the unsent draft.
+Open Chat View with Alt+C. Focus the message box and press Ctrl+D. Type while listening, then stop with Enter, Ctrl+D, or the microphone left of the send button. Press send, or Ctrl+Enter, to stop and send in one action. The dictated words appear in the unsent draft.
 
 ## Driving it with control.ps1
 

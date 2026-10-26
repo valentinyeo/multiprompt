@@ -138,6 +138,9 @@ var g_chat_active = true;
 var g_dictation_draft_owner: [192]u8 = undefined;
 var g_dictation_draft_owner_len: usize = 0;
 var g_dictation_cancelled = std.atomic.Value(bool).init(false);
+var g_dictation_send_queued = std.atomic.Value(bool).init(false);
+const send_queued = false;
+fn chatDictationSendFlush(_: bool) void {}
 fn dictationAudit(_: []const u8, _: usize) void {}
 fn insertTextIntoChatComposer(value: []const u16) void { var b: [16400]u16 = @splat(0); @memcpy(b[0..value.len], value); edit(@ptrCast(&b)); }
 fn begin() void {

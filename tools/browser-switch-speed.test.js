@@ -349,9 +349,9 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
   assert.match(workflow, /FEATURE -notin @\([^\n]*'browser-switch-speed'/);
   assert.match(control, /ValidateSet\([^\n]*'browser-switch-speed'/);
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
-  assert.match(workflow, /node --test tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
+  assert.match(workflow, /node --test --test-concurrency=1 tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
   assert.match(workflow, /paths:[\s\S]*?- tools\/browser-switch-speed.test.js/);
-  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-first-paint'\)\)/);
+  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners'\)\)/);
   const map = read(base + 'features/browser-switch-speed.md');
   assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']);
   assert.match(map, /on demand only/);
@@ -422,7 +422,7 @@ function assertsFrozen(source, driver, app, yaml) {
   assert.match(app, /win32WriteAll\(h, "1\\n"\)/);
   assert.match(app, /if \(job.confirmed\) \{\s+setBrowserFrozenMarkerForShell\(idx, job.frozen\)/);
   assert.match(app, /browser_frozen != job.frozen\) return;/);
-  const timeout = yaml.match(/timeout-minutes: \$\{\{ (?:matrix.feature == 'pane-layout' && \d+ \|\| )?matrix.feature == 'browser-switch-speed' && (\d+) \|\| (\d+) \}\}/);
+  const timeout = yaml.match(/timeout-minutes: \$\{\{ (?:matrix.feature == '(?:pane-layout|chat-switch-speed)' && \d+ \|\| )*matrix.feature == 'browser-switch-speed' && (\d+) \|\| (\d+) \}\}/);
   assert.ok(timeout);
   const sets = source.match(/\$modes = @\(([^\n]+)\)/)[1].match(/'[^']+'/g).filter(mode => mode.includes('frozen_')).length;
   const samples = Number(source.match(/Contains\('frozen_'\)\) \{ (\d+) \}/)[1]);
@@ -452,7 +452,7 @@ test('frozen returns require five fresh app-published freezes per view, native c
 });
 
 function assertsSwitchExtension(driver) {
-  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
+  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'",
     "Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse",
@@ -463,7 +463,7 @@ function assertsSwitchExtension(driver) {
     "if (Test-Path $registry) { throw 'Switch timing requires an unregistered disposable native host' }",
     '$switchNativeRegistry = $registry', 'New-Item -Path $registry -Force', 'Set-Item -Path $registry -Value $nativeManifest',
   ]) assert.ok(setup.includes(step), step);
-  assert.match(driver, /if \(\$Feature -ne 'browser-switch-speed' -and \$pane.browser_window_id -ne 0\)/);
+  assert.match(driver, /if \(\$Feature -notin @\('browser-switch-speed', 'chat-switch-speed'\) -and \$pane.browser_window_id -ne 0\)/);
   assert.match(driver, /finally \{\s+if \(\$null -ne \$switchNativeRegistry\) \{\s+Remove-Item -LiteralPath \$switchNativeRegistry -Recurse -Force/);
   const key = Buffer.from(setup.match(/\$publicKey = '([^']+)'/)[1], 'base64');
   const crypto = require('node:crypto');
@@ -491,7 +491,7 @@ test('new measurement code adds no removable code comments', async () => {
 
 function assertsRealBridge(driver, yaml) {
   yaml = yaml.slice(yaml.indexOf('\n  verify:\n'));
-  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
+  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $PSScriptRoot 'browser-switch-chrome.mjs'",
     "Join-Path $config 'chrome-exe.txt'", "Join-Path $config 'browser-engine.txt'",
@@ -623,18 +623,29 @@ function assertsPageFocus(focus, main, pane, driver) {
   assert.match(focus, /pub fn browserPageFocusCommand\(pane_foreground: bool, alt_down: bool\) \?WPARAM/);
   assert.match(focus, /const IDC_FOCUS_WEB_CONTENTS_PANE = 39009;/);
   assert.match(focus, /return if \(pane_foreground and !alt_down\) IDC_FOCUS_WEB_CONTENTS_PANE else null;/);
-  const handoff = focus.slice(focus.indexOf('pub fn focusActiveBrowserPane()'), focus.indexOf('pub fn cancelPendingNativeBrowserFocus()'));
+  const unlock = focus.slice(focus.indexOf('pub fn unlockBrowserForeground()'), focus.indexOf('pub fn focusActiveBrowserPane()'));
+  let unlockCursor = 0;
+  for (const statement of [
+    'if (phys_alt) return;',
+    'keybd_event(VK_MENU, 0, 0, 0);',
+    'keybd_event(0xE8, 0, 0, 0);',
+    'keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);',
+    'keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);',
+    'app_state.g_native_browser_alt_unlocked_at = GetTickCount64();',
+  ]) {
+    const position = unlock.indexOf(statement, unlockCursor);
+    assert.ok(position >= 0, statement);
+    unlockCursor = position + statement.length;
+  }
+  assert.equal((unlock.match(/keybd_event\(/g) ?? []).length, 4);
+  const handoff = focus.slice(focus.indexOf('pub fn focusActiveBrowserPaneUnlocked()'), focus.indexOf('pub fn cancelPendingNativeBrowserFocus()'));
   let cursor = 0;
   for (const statement of [
     'if (!focusGuard(bh)) return;',
     'if (phys_alt) return;',
-    'keybd_event(VK_MENU, 0, 0, 0);',
     '_ = SetForegroundWindow(bh);',
     '_ = SetFocus(bh);',
     'if (attached_target) _ = AttachThreadInput(our_thread, target_thread, 0);',
-    'keybd_event(0xE8, 0, 0, 0);',
-    'keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);',
-    'keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);',
     'browserPageFocusCommand(GetForegroundWindow() == bh, phys_alt)',
     'PostMessageW(bh, @import("win32.zig").WM_COMMAND, command, 0)',
   ]) {
@@ -642,10 +653,12 @@ function assertsPageFocus(focus, main, pane, driver) {
     assert.ok(position >= 0, statement);
     cursor = position + statement.length;
   }
-  assert.equal((handoff.match(/keybd_event\(/g) ?? []).length, 4);
+  assert.equal((handoff.match(/keybd_event\(|SendInput\(/g) ?? []).length, 0);
+  assert.match(read('src/shortcuts.zig'), /kb\.vkCode != 0xFF and kb\.vkCode != 0xE8 and\n\s+foregroundIsOurs\(\)\)/);
   const timer = main.slice(main.indexOf('if (wp == TIMER_NATIVE_BROWSER_FOCUS)'), main.indexOf('if (wp == TIMER_WEBVIEW2_FOCUS)'));
-  const activation = timer.indexOf('focusActiveBrowserPane();');
-  assert.ok(activation >= 0 && activation < timer.indexOf('if (activeBrowserHasForegroundFocus())'));
+  const unlockTick = timer.indexOf('if ((app_state.g_native_browser_alt_unlocked_at == 0 or GetTickCount64() -| app_state.g_native_browser_alt_unlocked_at > 100) and !activeBrowserHasForegroundFocus()) {\n                    unlockBrowserForeground();');
+  const activation = timer.indexOf('focusActiveBrowserPaneUnlocked();');
+  assert.ok(unlockTick >= 0 && unlockTick < activation && activation < timer.indexOf('if (activeBrowserHasForegroundFocus())'));
   assert.match(pane, /if \(idx == app_state.active_shell\) @import\("focus.zig"\)\.requestNativeBrowserFocus\(\);/);
   assert.match(pane, /browserFocusRequestMatches\(app_state.g_focus_browser_shell_id, app_state.shells\[idx\]\.shell_id, foregroundIsOurs\(\)\)/);
   assert.match(focus, /return requested_sid != 0 and requested_sid == active_sid and foreground_owned;/);
@@ -658,6 +671,7 @@ function assertsPageFocus(focus, main, pane, driver) {
   for (const required of [
     'document.title="', 'let keys=0', '++keys', 'foreach ($key in @(0x20, 0x28, 0x4A, 0x4B))',
     'IGSH-724 Alt+Q sent a page key to browser chrome', 'IGSH-724 opening a pane sent Space to browser chrome',
+    'foreach ($round in 1..5)', 'Alt+Q sent a page key to the browser menu',
     "::Chord(@(0x75))", "::Chord(@(0x11, 0x4C))", "Palette 'open browser'",
     'IGSH-724 page-to-input return lost session typing focus', "name = 'IGSH-724 browser-page-focus'",
   ]) assert.ok(driver.includes(required), required);
@@ -667,20 +681,22 @@ test('IGSH-724 native handoff targets Chrome web contents and real keys distingu
   const focus = read('src/focus.zig');
   const main = read('src/main.zig');
   assertsPageFocus(focus, main, browser, journey);
-  const handoff = focus.slice(focus.indexOf('pub fn focusActiveBrowserPane()'), focus.indexOf('pub fn cancelPendingNativeBrowserFocus()'));
-  for (const statement of ['if (phys_alt) return;', 'keybd_event(VK_MENU, 0, 0, 0);', 'keybd_event(0xE8, 0, 0, 0);', 'keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);', 'keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);']) {
-    assert.throws(() => assertsPageFocus(focus.replace(handoff, handoff.replace(statement, '')), main, browser, journey));
+  const unlock = focus.slice(focus.indexOf('pub fn unlockBrowserForeground()'), focus.indexOf('pub fn focusActiveBrowserPane()'));
+  for (const statement of ['if (phys_alt) return;', 'keybd_event(VK_MENU, 0, 0, 0);', 'keybd_event(0xE8, 0, 0, 0);', 'keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);', 'keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);', 'app_state.g_native_browser_alt_unlocked_at = GetTickCount64();']) {
+    assert.throws(() => assertsPageFocus(focus.replace(unlock, unlock.replace(statement, '')), main, browser, journey));
   }
   const neutral = '    keybd_event(0xE8, 0, 0, 0);\n    keybd_event(0xE8, 0, KEYEVENTF_KEYUP, 0);\n';
-  assert.throws(() => assertsPageFocus(focus.replace(handoff, handoff.replace(neutral, '')), main, browser, journey));
-  assert.throws(() => assertsPageFocus(focus.replace(handoff, handoff.replace(neutral, '').replace('    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);\n', '    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);\n' + neutral)), main, browser, journey));
-  assert.throws(() => assertsPageFocus(focus.replace(handoff, handoff.replace('    keybd_event(VK_MENU, 0, 0, 0);\n', '').replace('    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);\n', '')), main, browser, journey));
+  assert.throws(() => assertsPageFocus(focus.replace(unlock, unlock.replace(neutral, '')), main, browser, journey));
+  const handoff = focus.slice(focus.indexOf('pub fn focusActiveBrowserPaneUnlocked()'), focus.indexOf('pub fn cancelPendingNativeBrowserFocus()'));
+  assert.throws(() => assertsPageFocus(focus.replace(handoff, handoff.replace('    _ = SetForegroundWindow(bh);\n', '    keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0);\n    _ = SetForegroundWindow(bh);\n')), main, browser, journey));
+  assert.throws(() => assertsPageFocus(focus.replace(handoff, handoff.replace('    armBrowserEdgeMaskRaise();\n', '    keybd_event(0xE8, 0, 0, 0);\n    armBrowserEdgeMaskRaise();\n')), main, browser, journey));
   for (const before of ['const IDC_FOCUS_WEB_CONTENTS_PANE = 39009;', 'pane_foreground and !alt_down', 'PostMessageW(bh, @import("win32.zig").WM_COMMAND, command, 0)', 'const authorized = pane_authorized or']) {
     assert.throws(() => assertsPageFocus(focus.replace(before, ''), main, browser, journey));
   }
-  assert.throws(() => assertsPageFocus(focus, main.replace('                focusActiveBrowserPane();', ''), browser, journey));
+  assert.throws(() => assertsPageFocus(focus, main.replace('                focusActiveBrowserPaneUnlocked();', ''), browser, journey));
+  assert.throws(() => assertsPageFocus(focus, main.replace('                    unlockBrowserForeground();\n', ''), browser, journey));
   assert.throws(() => assertsPageFocus(focus, main, browser.replace('if (idx == app_state.active_shell) @import("focus.zig").requestNativeBrowserFocus();', ''), journey));
-  for (const before of ['IGSH-724 Alt+Q sent a page key to browser chrome', 'IGSH-724 opening a pane sent Space to browser chrome', '++keys']) {
+  for (const before of ['IGSH-724 Alt+Q sent a page key to browser chrome', 'IGSH-724 opening a pane sent Space to browser chrome', '++keys', 'foreach ($round in 1..5)', 'Alt+Q sent a page key to the browser menu']) {
     assert.throws(() => assertsPageFocus(focus, main, browser, journey.replace(before, '')));
   }
 });

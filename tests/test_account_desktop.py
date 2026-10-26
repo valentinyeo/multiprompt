@@ -101,7 +101,7 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn('TIMER_ACCOUNT_SAVE, 2000', save)
         self.assertIn('account-layout-pending.json', save)
         self.assertIn('writeFileAtomicW(path, pending)', save)
-        self.assertIn('TIMER_ACCOUNT, 20000', function(MAIN, 'accountBootstrap'))
+        self.assertIn('TIMER_ACCOUNT, 5000', function(MAIN, 'accountBootstrap'))
         self.assertIn('account_layout.rebase', function(MAIN, 'accountRequest'))
         self.assertIn('remote.status != 409', function(MAIN, 'accountRequest'))
         self.assertIn('account_layout.rebase', function(MAIN, 'handleLayoutReply'))

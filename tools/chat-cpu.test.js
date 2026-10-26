@@ -184,6 +184,8 @@ const CHAT_FIND_TOP_H: i32 = 52;
 var g_chat_layout_width: i32 = 0;
 var g_chat_layout_scale: i32 = 0;
 var g_chat_layout_font_pt: i32 = 0;
+var g_chat_layout_top_pad: i32 = 0;
+var g_chat_top_pad: i32 = 0;
 var fake_ui_scale: i32 = 100;
 var g_chat_layout_reuse: usize = 0;
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -291,7 +293,7 @@ test('UI completion never parses; polling/paint use revisions, cached tables and
   assert.match(body(source, 'chatFileFetchThread'), /history\.suffix\(a\)/);
   assert.match(body(source, 'chatFileFetchThread'), /CACHE_WRITE_MS/);
   assert.match(body(source, 'chatTableLayout'), /g_chat_tables\.layout/);
-  assert.match(body(source, 'chatTranscriptWndProc'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
+  assert.match(body(source, 'chatPaintTranscriptContent'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
   assert.match(body(source, 'chatFileRequestForDelivery'), /GetLastInputInfo[^]*< 5000\) return/);
   assert.match(body(source, 'chatImgFirstBlock'), /g_chat_blocks_from_file[^]*block\.image_count/);
 });
@@ -608,4 +610,39 @@ test "disabled switch keeps old text and no new timer or per-session tracking" {
   const compileControl = run('const ISSUE_265_WORKING_BAR = true;\n' + prelude + functions.replace('const running = visible and g_main_hwnd != null;', '@compileError("working bar compile control");\n        const running = visible and g_main_hwnd != null;') + checks);
   assert.notEqual(compileControl.status, 0);
   assert.match(compileControl.stderr, /working bar compile control/);
+});
+
+test('IGSH-954 switching read dividers remeasures only the affected suffix, not the loaded history', () => {
+  const prelude = layout.replace('fn chatReadBoundary() ReadBoundary { return .{}; }', 'var current_boundary: ReadBoundary = .{};\nfn chatReadBoundary() ReadBoundary { return current_boundary; }');
+  const checks = `
+test "twenty local and remote cached switches retain their unchanged prefix" {
+    for (&blocks) |*b| b.* = .{ .start = 0, .len = 1, .role = .prose };
+    current_boundary = .{ .index = 995 };
+    chatRelayout(400);
+    const unread_height = g_chat_content_h;
+    for (0..20) |i| {
+        const before = measured;
+        current_boundary = if (i % 2 == 0) .{} else .{ .index = 995 };
+        chatRelayout(400);
+        try std.testing.expect(measured - before <= 5);
+        try std.testing.expectEqual(unread_height - (if (i % 2 == 0) @as(i32, 28) else 0), g_chat_content_h);
+    }
+    current_boundary = .{ .index = 990 };
+    const before = measured;
+    chatRelayout(400);
+    try std.testing.expectEqual(@as(usize, 10), measured - before);
+    current_boundary = .{ .index = 990, .unknown = true };
+    const unchanged = measured;
+    chatRelayout(400);
+    try std.testing.expect(measured - unchanged <= 10);
+    const cached_rects = g_chat_layout_rects[0..1000].*;
+    const cached_height = g_chat_content_h;
+    g_chat_layout_reuse = 0;
+    chatRelayout(400);
+    try std.testing.expectEqual(cached_height, g_chat_content_h);
+    try std.testing.expectEqualDeep(cached_rects, g_chat_layout_rects[0..1000].*);
+}
+`;
+  const result = run(prelude + body(source, 'chatRelayout') + checks);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 });

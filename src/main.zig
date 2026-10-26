@@ -947,7 +947,8 @@ const VK_MENU = @import("app_state.zig").VK_MENU;
 const KEYEVENTF_KEYUP = @import("app_state.zig").KEYEVENTF_KEYUP;
 const focusActiveShell = @import("focus.zig").focusActiveShell;
 const activeShellHasForegroundFocus = @import("focus.zig").activeShellHasForegroundFocus;
-const focusActiveBrowserPane = @import("focus.zig").focusActiveBrowserPane;
+const focusActiveBrowserPaneUnlocked = @import("focus.zig").focusActiveBrowserPaneUnlocked;
+const unlockBrowserForeground = @import("focus.zig").unlockBrowserForeground;
 const cancelPendingNativeBrowserFocus = @import("focus.zig").cancelPendingNativeBrowserFocus;
 const requestNativeBrowserFocus = @import("focus.zig").requestNativeBrowserFocus;
 const requestShellRefocus = @import("focus.zig").requestShellRefocus;
@@ -1559,6 +1560,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const _perf_start = GetTickCount64();
             defer logSlowMs("WM_PAINT", _perf_start);
             var ps: PAINTSTRUCT = std.mem.zeroes(PAINTSTRUCT);
+            @import("chat_float.zig").syncChatRegion();
             const hdc = BeginPaint(hwnd, &ps);
             const paint_rc = ps.rcPaint;
             const pw = paint_rc.right - paint_rc.left;
@@ -1989,7 +1991,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = ScreenToClient(hwnd, &pt);
             if (chatViewOwnsInput()) {
                 const layout = chatViewLayout();
-                if (pointInRect(layout.transcript, pt.x, pt.y)) {
+                var wheel_area = layout.transcript;
+                wheel_area.top = layout.transcript_window.top;
+                if (pointInRect(wheel_area, pt.x, pt.y)) {
                     if (@import("chat_render.zig").chatTableWheel(app_state.g_chat_transcript_hwnd, msg, wp, lp)) return 0;
                     if (msg == WM_MOUSEHWHEEL) return DefWindowProcW(hwnd, msg, wp, lp);
                     @import("chat_render.zig").chatWheelScroll(wp);
@@ -3474,7 +3478,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CHAT_SEND => {
-            if (wp == 1) @import("chat_send.zig").chatSteerPrompt() else sendChatPrompt();
+            if (wp == 1) @import("chat_send.zig").chatSteerPrompt() else @import("chat_composer.zig").chatSendOrFinishDictation();
             return 0;
         },
         WM_APP_VOICE_SPEECH_START => {
@@ -6909,7 +6913,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (wp == 0) {
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
                 @import("chat_session.zig").chatReadDeactivate();
-                hideBrowserEdgeMasks();
+                if (!foregroundIsOurs()) hideBrowserEdgeMasks();
             } else {
                 focusGuardNoteActivation();
                 updateCardPoll();
@@ -6949,7 +6953,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
             } else {
                 updateBrowserVisibility();
-                hideBrowserEdgeMasks();
+                if (!foregroundIsOurs()) hideBrowserEdgeMasks();
                 if (systemAltTabSuppressionActive() or GetTickCount64() >= app_state.g_ws_switch_focus_grace) {
                     cancelShellRefocus(hwnd);
                     _ = SetTimer(hwnd, TIMER_HOOK_UNINSTALL, 150, null);
@@ -7220,7 +7224,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
 
-                focusActiveBrowserPane();
+                if ((app_state.g_native_browser_alt_unlocked_at == 0 or GetTickCount64() -| app_state.g_native_browser_alt_unlocked_at > 100) and !activeBrowserHasForegroundFocus()) {
+                    unlockBrowserForeground();
+                    if (app_state.g_native_browser_alt_unlocked_at != 0) _ = SetTimer(hwnd, TIMER_NATIVE_BROWSER_FOCUS, 10, null);
+                    return 0;
+                }
+                focusActiveBrowserPaneUnlocked();
+                _ = SetTimer(hwnd, TIMER_NATIVE_BROWSER_FOCUS, 30, null);
                 if (activeBrowserHasForegroundFocus()) {
                     cancelPendingNativeBrowserFocus();
                     app_state.g_browser_focus_mode = true;

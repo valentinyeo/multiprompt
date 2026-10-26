@@ -118,6 +118,7 @@ ${fn(layout, 'chatWorkingIndicatorH')}
 fn chatNewMessagesHeight() i32 { return 0; }
 var test_stop_visible = false;
 var test_composer_text = false;
+var chat_dictation_state: enum { idle, listening, finishing } = .idle;
 fn chatStopVisible() bool { return test_stop_visible; }
 fn chatComposerHasText() bool { return test_composer_text; }
 fn consoleCellW() i32 { return uiScaled(10); }
@@ -319,6 +320,8 @@ test "IGSH-549 Chat View content stays inside the pane content inset" {
                     try std.testing.expectEqual(uiScaled(14) + (if (test_permission_visible) uiScaled(36) else @as(i32, 0)), c.composer_card.top - c.transcript.bottom);
                     try std.testing.expectEqual(uiScaled(32), c.mic_btn.right - c.mic_btn.left);
                     try std.testing.expectEqual(uiScaled(32), c.mic_btn.bottom - c.mic_btn.top);
+                    try std.testing.expect(c.send_btn.left > c.mic_btn.right);
+                    try std.testing.expect(c.send_btn.right <= c.composer_card.right);
                     try std.testing.expect(!intersects(c.mic_btn, c.composer));
                     try std.testing.expect(!intersects(c.mic_btn, c.attach_btn));
                     try std.testing.expect(!intersects(c.mic_btn, c.send_btn) or !c.send_shown);
@@ -454,7 +457,8 @@ test('extracted production pane rectangles have equal spacing at 1920x1032', () 
     assert.match(result.stderr, /All \d+ tests passed/);
     for (const [name, mutate] of [
       ['removed working strip', text => text.replace('return if (chatPermissionVisible()) uiScaled(36) else 0;', 'return if (chatPermissionVisible()) uiScaled(36) else uiScaled(18);')],
-      ['microphone overlap', text => text.replace('.right = slots.left - uiScaled(12),', '.right = mic_btn.right,')],
+      ['microphone overlap', text => text.replace('.right = mic_btn.left - uiScaled(12),', '.right = mic_btn.right,')],
+      ['send before microphone', text => text.replace('const send_btn = slots.send;', 'const send_btn = RECT{ .left = composer_card.left, .top = slots.send.top, .right = composer_card.left + send_size, .bottom = slots.send.bottom };')],
       ['native focus inset', text => text.replace('const target_x = target.left;', 'const target_x = target.left + uiScaled(10);')],
       ['caption overlap', text => text.replaceAll('@max(client_origin.y, edge_y -', '@max(client_origin.y - uiScaled(10), edge_y -')],
       ['corner displacement', text => text.replace('moveBrowserEdgeMask(side, rc.left, rc.top,', 'moveBrowserEdgeMask(side, rc.left + 1, rc.top,')],

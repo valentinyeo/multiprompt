@@ -117,7 +117,7 @@ try {
                 Assert ($cardEvent.WaitOne(15000)) 'Card fixture did not report readiness'
                 $deadline = [DateTime]::UtcNow.AddSeconds(30)
                 do {
-                    $cardLog = if (Test-Path $log) { Get-Content $log -Raw } else { '' }
+                    $cardLog = if (Test-Path $log) { -join (Get-Content $log -Raw) } else { '' }
                     if ($cardLog -match '\[update\] card remaining=and 1 more') { break }
                     Assert (-not $cardProcess.HasExited) 'Card fixture exited before painting notes'
                     if ([DateTime]::UtcNow -gt $deadline) { throw 'Update card did not paint release notes' }
@@ -151,7 +151,7 @@ try {
                 Assert ([UpdateProof]::PostMessage($cardProcess.MainWindowHandle, 0x202, [IntPtr]0, $moreClick)) 'More row release failed'
                 $deadline = [DateTime]::UtcNow.AddSeconds(15)
                 do {
-                    $cardLog = Get-Content $log -Raw
+                    $cardLog = -join (Get-Content $log -Raw)
                     if ($cardLog -match '\[update\] card view=expanded n=4 first=Typing feels faster\.') { break }
                     Assert (-not $cardProcess.HasExited) 'Card fixture exited before opening the full list'
                     if ([DateTime]::UtcNow -gt $deadline) { throw 'Update card did not open the full list on click' }
@@ -189,7 +189,7 @@ try {
                 Copy-Item -LiteralPath $NativeUpdate -Destination $cardExe
                 $deadline = [DateTime]::UtcNow.AddSeconds(15)
                 do {
-                    $cardLog = Get-Content $log -Raw
+                    $cardLog = -join (Get-Content $log -Raw)
                     if ($cardLog.Contains('update-card: new version ready ' + $newVersion)) { break }
                     if ([DateTime]::UtcNow -gt $deadline) { throw 'Installed update was not offered on the card' }
                     Start-Sleep -Milliseconds 100

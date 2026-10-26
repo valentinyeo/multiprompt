@@ -596,6 +596,127 @@ pub fn threadTitleNameRectFor(win_w: i32, shell_idx: u32) ?RECT {
     return RECT{ .left = text_left, .top = title_top, .right = title_right, .bottom = title_top + th };
 }
 
+pub const ChatTitleLayout = struct {
+    pill: RECT,
+    icon: RECT,
+    has_icon: bool,
+    text: RECT,
+    meta_pill: RECT,
+    meta_text: RECT,
+    has_meta: bool,
+    meta_warn: bool,
+};
+
+fn measureTitleText(font: HANDLE, text: []const u16) i32 {
+    if (app_state.g_main_hwnd == null or text.len == 0) return 0;
+    const dc = @import("win32.zig").GetDC(app_state.g_main_hwnd);
+    if (dc == null) return 0;
+    defer _ = @import("win32.zig").ReleaseDC(app_state.g_main_hwnd, dc);
+    const old = SelectObject(dc, font);
+    defer _ = SelectObject(dc, old);
+    var size: @import("win32.zig").SIZE = undefined;
+    if (@import("win32.zig").GetTextExtentPoint32W(dc, text.ptr, @intCast(text.len), &size) == 0) return 0;
+    return size.cx;
+}
+
+fn chatTitleMetaText() []const u16 {
+    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > GetTickCount64();
+    if (cap_msg) {
+        if (app_state.g_account_reauth) {
+            return std.mem.span(L("Sign in again: Ctrl+K > Sign in to multiprompt"));
+        }
+        if (app_state.g_cap_msg_len > 0) return app_state.g_cap_msg_text[0..app_state.g_cap_msg_len];
+        return std.mem.span(L("Tab limit reached (256) - close a tab"));
+    }
+    if (app_state.g_chat_active and app_state.g_voice_mode_active) return std.mem.span(@import("voice.zig").voiceStatusLabel());
+    return &.{};
+}
+
+pub fn chatTitleLayout() ?ChatTitleLayout {
+    const th = threadTitleHeight();
+    if (th == 0 or app_state.active_shell >= app_state.shell_count or app_state.g_chat_find_open) return null;
+    const shell = &app_state.shells[app_state.active_shell];
+    const column = chatViewLayout().transcript;
+    const title_top = threadTitleTop();
+    const pill_h = th - uiScaled(10);
+    const pill_top = title_top + @divTrunc(th - pill_h, 2);
+    const pad = uiScaled(16);
+    const margin = uiScaled(12);
+    var layout: ChatTitleLayout = std.mem.zeroes(ChatTitleLayout);
+    var right_limit = column.right - margin;
+    const meta = chatTitleMetaText();
+    if (meta.len > 0) {
+        const meta_w = measureTitleText(uiFontSubtitle(), meta) + pad * 2;
+        const width = @min(meta_w, @divTrunc((column.right - column.left) * 2, 5));
+        const meta_h = pill_h - uiScaled(4);
+        const top = pill_top + @divTrunc(pill_h - meta_h, 2);
+        layout.meta_pill = .{ .left = column.right - margin - width, .top = top, .right = column.right - margin, .bottom = top + meta_h };
+        layout.meta_text = .{ .left = layout.meta_pill.left + pad, .top = layout.meta_pill.top, .right = layout.meta_pill.right - pad, .bottom = layout.meta_pill.bottom };
+        layout.has_meta = true;
+        layout.meta_warn = app_state.g_account_reauth or app_state.g_cap_msg_until > GetTickCount64();
+        right_limit = layout.meta_pill.left - margin;
+    }
+    const center = @divTrunc(column.left + column.right, 2);
+    const icon_w: i32 = if (shell.ai_agent != 0 or shell.needs_attention) uiScaled(30) else 0;
+    const name = shell.name[0..shell.name_len];
+    const text_w = measureTitleText(uiFontThreadTitle(), name);
+    const max_w = @min(column.right - column.left - margin * 2, 2 * (right_limit - center));
+    if (max_w < pad * 2 + uiScaled(40)) return null;
+    const width = std.math.clamp(icon_w + text_w + pad * 2, pad * 2 + uiScaled(40), max_w);
+    layout.pill = .{ .left = center - @divTrunc(width, 2), .top = pill_top, .right = center - @divTrunc(width, 2) + width, .bottom = pill_top + pill_h };
+    layout.has_icon = icon_w > 0;
+    layout.icon = .{ .left = layout.pill.left + pad - uiScaled(2), .top = pill_top, .right = layout.pill.left + pad - uiScaled(2) + uiScaled(24), .bottom = pill_top + pill_h };
+    layout.text = .{ .left = layout.pill.left + pad + icon_w, .top = pill_top, .right = layout.pill.right - pad, .bottom = pill_top + pill_h };
+    return layout;
+}
+
+pub fn chatTitleHoleRect(win_w: i32) ?RECT {
+    if (reconnectButtonRect(win_w) != null) {
+        const column = chatViewLayout().transcript;
+        return .{ .left = column.left, .top = threadTitleTop(), .right = column.right, .bottom = threadTitleTop() + threadTitleHeight() };
+    }
+    return null;
+}
+
+fn paintChatTitlePill(hdc: HANDLE) void {
+    const layout = chatTitleLayout() orelse return;
+    const shell = &app_state.shells[app_state.active_shell];
+    const window_layout = @import("window_layout.zig");
+    const fill = app_state.g_chat_input_color;
+    const border = window_layout.chatSurfaceBorderColor();
+    const edge = window_layout.chatSurfaceBorderW();
+    const fillRoundRectAA = @import("chat_render.zig").fillRoundRectAA;
+    _ = SetBkMode(hdc, TRANSPARENT);
+    fillRoundRectAA(hdc, layout.pill, @divTrunc(layout.pill.bottom - layout.pill.top, 2), border);
+    fillRoundRectAA(hdc, .{ .left = layout.pill.left + edge, .top = layout.pill.top + edge, .right = layout.pill.right - edge, .bottom = layout.pill.bottom - edge }, @divTrunc(layout.pill.bottom - layout.pill.top, 2) - edge, fill);
+    if (layout.has_icon) {
+        var icon = layout.icon;
+        if (shell.needs_attention) {
+            drawAttentionDot(hdc, @divTrunc(icon.left + icon.right, 2), @divTrunc(icon.top + icon.bottom, 2), 4, customColorOr("attention", RGB(80, 140, 255)));
+        } else {
+            drawAgentIcon(hdc, &icon, shell.ai_agent, shell.activity == .active);
+        }
+    }
+    if (shell.name_len > 0) {
+        _ = SelectObject(hdc, uiFontThreadTitle());
+        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(20, 20, 20) else RGB(255, 255, 255));
+        var text = layout.text;
+        _ = DrawTextW(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+    if (layout.has_meta) {
+        const meta_r = layout.meta_pill;
+        fillRoundRectAA(hdc, meta_r, @divTrunc(meta_r.bottom - meta_r.top, 2), border);
+        fillRoundRectAA(hdc, .{ .left = meta_r.left + edge, .top = meta_r.top + edge, .right = meta_r.right - edge, .bottom = meta_r.bottom - edge }, @divTrunc(meta_r.bottom - meta_r.top, 2) - edge, fill);
+        _ = SelectObject(hdc, uiFontSubtitle());
+        const warn_col: DWORD = if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70);
+        const dim_col: DWORD = if (app_state.g_light_theme) RGB(140, 140, 140) else RGB(110, 110, 120);
+        _ = SetTextColor(hdc, if (layout.meta_warn) warn_col else dim_col);
+        const meta = chatTitleMetaText();
+        var text = layout.meta_text;
+        _ = DrawTextW(hdc, meta.ptr, @intCast(meta.len), &text, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+}
+
 pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
     const th = threadTitleHeight();
     if (th == 0) return;
@@ -604,6 +725,10 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
     const title_bottom = title_top + th;
     if (reconnectButtonRect(win_w)) |button| {
         paintDisconnectedNotice(hdc, button, title_top, title_bottom);
+        return;
+    }
+    if (app_state.g_chat_active and @import("chat_composer.zig").chatViewOwnsInput()) {
+        paintChatTitlePill(hdc);
         return;
     }
     const sw = SIDEBAR_W();
@@ -767,7 +892,7 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
         @memset(pixels, 0);
         paintThreadTitle(dc, width);
         _ = gdi.GdiFlush();
-        const title_rect = threadTitleNameRectFor(width, 0) orelse return error.TestUnexpectedResult;
+        const title_rect = (if (chatTitleLayout()) |pill_layout| pill_layout.text else threadTitleNameRectFor(width, 0)) orelse return error.TestUnexpectedResult;
         var ink: usize = 0;
         var y = title_rect.top;
         while (y < title_rect.bottom) : (y += 1) {

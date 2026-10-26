@@ -892,6 +892,7 @@ pub fn chatFileOnReady() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     const key = chatCacheIdentity();
     var active_changed = false;
+    var read_ready: ?bool = null;
     var i: usize = 0;
     while (i < app_state.g_chat_histories.items.len) {
         const entry = app_state.g_chat_histories.items[i];
@@ -935,6 +936,7 @@ pub fn chatFileOnReady() void {
                 (entry.before == 0 and (history.start != entry.history.start or history.inode != entry.history.inode or
                     !std.mem.eql(u8, &history.sid, &entry.history.sid)))) history.start else 0;
             if (entry.unchanged) {
+                entry.history.changed_from = entry.history.blocks.items.len;
                 entry.history.updateCursor(history);
                 entry.history.revision = history.revision;
             } else if (entry.incremental) {
@@ -957,7 +959,7 @@ pub fn chatFileOnReady() void {
                 entry.history = history;
             }
             if (!disk and history.received_ms != 0) entry.history.received_ms = history.received_ms;
-            if (belongs_to_active and app_state.g_chat_active and !disk and !history.more) app_state.g_chat_read_open_ready = foregroundIsOurs();
+            if (belongs_to_active and app_state.g_chat_active and !disk and !history.more) read_ready = foregroundIsOurs();
             if (belongs_to_active and app_state.g_chat_active and added > 0) {
                 const had_messages = app_state.g_chat_new_messages.count() != 0;
                 app_state.g_chat_new_messages.arrive(added, app_state.g_chat_scrolled_up);
@@ -1003,6 +1005,7 @@ pub fn chatFileOnReady() void {
         refreshChatTranscript(false);
         if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
+    if (read_ready) |ready| app_state.g_chat_read_open_ready = ready;
     if (app_state.g_chat_read_open_ready) _ = chatReadBoundary();
 }
 
@@ -1187,7 +1190,7 @@ pub fn chatRefreshAfterFontChange() void {
     app_state.g_chat_layout_reuse = 0;
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null) return;
     var client_rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client_rc);
+    @import("chat_render.zig").chatViewClientRect(&client_rc);
     const viewport_h = client_rc.bottom - client_rc.top;
     chatRelayoutPreservingScroll(client_rc.right - client_rc.left, viewport_h);
     if (app_state.g_chat_block_count == 0) {
@@ -1221,7 +1224,7 @@ pub fn chatReadMark(bottom: bool) bool {
     if (!bottom) {
         if (app_state.g_chat_transcript_hwnd == null) return false;
         var client: RECT = std.mem.zeroes(RECT);
-        _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
+        @import("chat_render.zig").chatViewClientRect(&client);
         edge = app_state.g_chat_scroll_y + client.bottom;
     }
     var candidate: ?usize = null;
@@ -1237,7 +1240,6 @@ pub fn chatReadMark(bottom: bool) bool {
     if (!bottom and shell.last_read_message_id != 0 and (previous == null or read <= previous.?)) return false;
     if (shell.last_read_message_id == blocks[read].message_id) return false;
     shell.last_read_message_id = blocks[read].message_id;
-    app_state.g_chat_layout_dirty = true;
     saveSession();
     return true;
 }
@@ -1303,7 +1305,9 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].last_read_message_id != 0;
     app_state.g_chat_read_open_pending = false;
     if (app_state.g_chat_read_hold) {
-        if (cached) |entry| entry.next = 0;
+        if (cached) |entry| {
+            if (entry.failures == 0) entry.next = 0;
+        }
     }
     app_state.g_chat_echo_layout_count = 0;
     app_state.g_chat_hover_copy = null;
@@ -1409,7 +1413,7 @@ pub fn refreshChatTranscript(force: bool) void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var client_rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client_rc);
+    @import("chat_render.zig").chatViewClientRect(&client_rc);
     const viewport_h = client_rc.bottom - client_rc.top;
     const old_scroll_y = app_state.g_chat_scroll_y;
     const old_content_h = app_state.g_chat_content_h;
@@ -1431,7 +1435,7 @@ pub fn refreshChatTranscript(force: bool) void {
         app_state.g_chat_read_open_pending = false;
         const boundary = chatReadBoundary();
         app_state.g_chat_scroll_y = if (boundary.index != null)
-            std.math.clamp(app_state.g_chat_read_divider_y, @min(0, app_state.g_chat_content_h - viewport_h), @max(0, app_state.g_chat_content_h - viewport_h))
+            std.math.clamp(app_state.g_chat_read_divider_y - app_state.g_chat_top_pad, @min(0, app_state.g_chat_content_h - viewport_h), @max(0, app_state.g_chat_content_h - viewport_h))
         else
             app_state.g_chat_content_h - viewport_h;
     }

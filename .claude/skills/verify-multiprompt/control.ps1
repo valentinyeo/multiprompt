@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'chat-first-paint', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'chat-first-paint', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -238,6 +238,60 @@ public static class VerifyNative {
         if (count > 1) throw new InvalidOperationException("Multiple visible owned browser panes");
         return pane;
     }
+    static Thread probeThread;
+    static volatile bool probeRun;
+    static double probeMax;
+    static readonly object probeLock = new object();
+    public static void StartHangProbe(IntPtr owner) {
+        probeRun = true;
+        probeThread = new Thread(() => {
+            var timer = new System.Diagnostics.Stopwatch();
+            while (probeRun) {
+                UIntPtr result;
+                timer.Restart();
+                SendMessageTimeout(owner, 0, UIntPtr.Zero, IntPtr.Zero, 2, 5000, out result);
+                double elapsed = timer.Elapsed.TotalMilliseconds;
+                lock (probeLock) { if (elapsed > probeMax) probeMax = elapsed; }
+                Thread.Sleep(2);
+            }
+        });
+        probeThread.IsBackground = true;
+        probeThread.Start();
+    }
+    public static void ResetHangProbe() { lock (probeLock) { probeMax = 0; } }
+    public static double HangProbeMax() { lock (probeLock) { return probeMax; } }
+    public static void StopHangProbe() { probeRun = false; if (probeThread != null) probeThread.Join(6000); }
+    public static double[] SwitchToSession(int digit, string log, long offset, string needle, int settleMs) {
+        Input[] inputs = new Input[4];
+        for (int i = 0; i < inputs.Length; i++) inputs[i].type = 1;
+        inputs[0].data.keyboard = new Keyboard { key = 0x11 };
+        inputs[1].data.keyboard = new Keyboard { key = (ushort)(0x31 + digit) };
+        inputs[2].data.keyboard = new Keyboard { key = (ushort)(0x31 + digit), flags = 2 };
+        inputs[3].data.keyboard = new Keyboard { key = 0x11, flags = 2 };
+        ResetHangProbe();
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length) throw new InvalidOperationException("SendInput Ctrl+digit failed");
+        double shown = -1;
+        long position = offset;
+        string carry = "";
+        while (timer.ElapsedMilliseconds < settleMs) {
+            if (shown < 0) {
+                using (var stream = new System.IO.FileStream(log, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete)) {
+                    if (stream.Length > position) {
+                        stream.Seek(position, System.IO.SeekOrigin.Begin);
+                        var bytes = new byte[stream.Length - position];
+                        int read = stream.Read(bytes, 0, bytes.Length);
+                        position += read;
+                        carry += Encoding.UTF8.GetString(bytes, 0, read);
+                        if (carry.Contains(needle)) shown = timer.Elapsed.TotalMilliseconds;
+                        if (carry.Length > 4096) carry = carry.Substring(carry.Length - 4096);
+                    }
+                }
+            }
+            Thread.Sleep(1);
+        }
+        return new double[] { shown, HangProbeMax() };
+    }
     public static IntPtr DockedPaneWindow(IntPtr owner) {
         Rect frame;
         if (!GetWindowRect(owner, out frame)) throw new InvalidOperationException("Missing owned frame rectangle");
@@ -433,6 +487,16 @@ public static class VerifyNative {
             MouseAt(start.X + (target.X - start.X) * step / 12, start.Y + (target.Y - start.Y) * step / 12, 0);
             Thread.Sleep(15);
         }
+    }
+    public static void ClickBrowserContent(IntPtr pane, IntPtr owner) {
+        Rect rect;
+        if (!GetClientRect(pane, out rect)) throw new InvalidOperationException("Browser client rectangle unavailable");
+        Point point = new Point { X = rect.Right / 2, Y = rect.Bottom / 2 };
+        if (!ClientToScreen(pane, ref point)) throw new InvalidOperationException("Browser screen rectangle unavailable");
+        RequireBrowserStrip(pane, owner, point);
+        MouseAt(point.X, point.Y, 0);
+        MouseAt(point.X, point.Y, 2);
+        MouseAt(point.X, point.Y, 4);
     }
     public static void ClickClient(IntPtr hwnd, int x, int y) {
         Point point = new Point { X = x, Y = y };
@@ -1491,7 +1555,7 @@ function Assert-BrowserPane([string]$State, [string]$Step, [long]$PreviousId = 0
              ($State -in @('closed', 'failed') -and $pane.browser_connection_id -eq 0))
     } "browser-pane-stuck ${Step}: $State and connection identity" 25
     $pane = Read-BrowserPane
-    if ($Feature -ne 'browser-switch-speed' -and $pane.browser_window_id -ne 0) { throw 'Unexpected browser extension connection in the no-extension journey' }
+    if ($Feature -notin @('browser-switch-speed', 'chat-switch-speed') -and $pane.browser_window_id -ne 0) { throw 'Unexpected browser extension connection in the no-extension journey' }
     Save-Json $pane ("browser-pane-$Step.json")
     $result.checks += @{ name = "browser-pane-stuck $Step"; state = $pane.browser_state; connectionId = $pane.browser_connection_id }
     Write-Host "browser-pane-stuck $Step PASS"
@@ -2311,10 +2375,29 @@ function Get-DictationMic([IntPtr]$Composer) {
     $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
     $size = [int][Math]::Floor(32 * $scale)
     $margin = [Math]::Max([Math]::Floor(4 * $scale), [Math]::Floor(([Math]::Floor(44 * $scale) - $size) / 2))
-    $left = $thread.Right - $origin.X - $margin - $size
+    $left = $thread.Right - $origin.X - $margin - $size - [Math]::Floor(6 * $scale) - $size
     $top = $edit.Top - $origin.Y - [Math]::Floor(12 * $scale) + $margin
-    if ($left -lt $edit.Right - $origin.X) { throw 'Microphone must be at the far right, outside the native Edit' }
+    if ($left -lt $edit.Right - $origin.X) { throw 'Microphone must sit left of send, outside the native Edit' }
     return ,([int[]]@($left, $top, ($left + $size), ($top + $size)))
+}
+
+function Get-DictationSend([int[]]$Mic) {
+    $state = Read-Session
+    if ($null -eq $state -or ($state.PSObject.Properties['ui_scale'] -and $state.ui_scale -ne 100)) { throw 'Send geometry requires the isolated default UI scale' }
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+    $transcript = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+    if ($null -eq $transcript -or $transcript.Current.ProcessId -ne $process.Id -or $transcript.Current.IsOffscreen) { throw 'Send geometry requires the owned visible transcript' }
+    $thread = New-Object VerifyNative+Rect
+    $origin = New-Object VerifyNative+Point
+    if (-not [VerifyNative]::GetWindowRect([IntPtr]$transcript.Current.NativeWindowHandle, [ref]$thread) -or
+        -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Send geometry unavailable' }
+    $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
+    $size = [int][Math]::Floor(32 * $scale)
+    $margin = [Math]::Max([Math]::Floor(4 * $scale), [Math]::Floor(([Math]::Floor(44 * $scale) - $size) / 2))
+    $left = $thread.Right - $origin.X - $margin - $size
+    if ($left -le $Mic[2] -or $left + $size -gt $thread.Right - $origin.X) { throw 'Send must sit at the far right, right of the microphone' }
+    return ,([int[]]@($left, $Mic[1], ($left + $size), $Mic[3]))
 }
 
 function Assert-DictationMic([int[]]$Rect, [bool]$Active, [string]$Step) {
@@ -2453,7 +2536,7 @@ try {
     foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'MULTIPROMPT_NO_LOGIN', 'ZIGSHELL_DEBUG', 'IGSH_246', 'MULTIPROMPT_DICTATION_FIXTURE')) {
         $original[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
-    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {
+    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {
         $chrome = & node (Join-Path $PSScriptRoot 'browser-switch-chrome.mjs')
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chrome)) { throw 'Pinned Chrome for Testing executable unavailable' }
     }
@@ -2471,7 +2554,7 @@ try {
         New-Item -ItemType Directory -Force $skillRoot | Out-Null
         [IO.File]::WriteAllText((Join-Path $skillRoot 'SKILL.md'), "---`nname: pill-proof`ndescription: isolated skill color proof`n---`nReply with the given text.")
     }
-    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {
+    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {
         $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
         $extensionRoot = [IO.Path]::GetFullPath((Split-Path $extension))
         $extensionRootExisted = Test-Path -LiteralPath $extensionRoot
@@ -2546,6 +2629,31 @@ try {
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
+    if ($Feature -eq 'chat-switch-speed') {
+        $remoteState = Join-Path $scratch 'remote-state'
+        New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        $remoteNames = @(1..5 | ForEach-Object { "verify-agent-$_" })
+        $remotePanes = [ordered]@{}
+        $remoteSids = [ordered]@{}
+        for ($i = 0; $i -lt $remoteNames.Count; $i++) {
+            $remotePanes[$remoteNames[$i]] = 4300 + $i
+            $remoteSids[$remoteNames[$i]] = ('a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $i)
+        }
+        $remoteDocument = [ordered]@{ name = 'chat-switch-speed'; fake = $true; mode = 'idle'; suggestion = 'Try asking about the next step'; sessions = $remoteNames; panes = $remotePanes; sids = $remoteSids; home = (Join-Path $scratch 'profile'); procRoot = ([IO.Path]::GetPathRoot($scratch) + 'proc') }
+        [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
+        $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
+        $env:MP_VERIFY_STATE = $remoteState
+        $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
+        & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 400
+        if ($LASTEXITCODE -ne 0) { throw 'Remote transcript seeding failed' }
+        $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
+        $remoteSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = $remoteTabs } -Depth 6
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
+        Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
+        $result.seedBoundary = 'The harness writes the saved-tab file once before the first launch: five tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.'
+    }
     if ($Feature -eq 'tab-names') {
         $seedFolder = Join-Path $scratch 'GitHub'
         New-Item -ItemType Directory -Force -Path $seedFolder, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -2577,22 +2685,22 @@ try {
         $state = Read-Inbox
         $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -gt 0
     } 'owned main window and initialized CMD session' 60
-    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-first-paint')) {
-        if ($Feature -ne 'browser-switch-speed') {
+    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners')) {
+        if ($Feature -notin @('browser-switch-speed', 'chat-switch-speed')) {
             $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
             $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/EdgeUserData'
         }
         if (-not (Test-Path -LiteralPath $edge)) { throw 'Browser setup requires the configured browser executable' }
         $warmupJob = New-Object VerifyJob
         $arguments = '--user-data-dir="' + $profile + '" --profile-directory=Default --no-first-run --no-default-browser-check --disable-notifications --disable-background-mode --app="data:text/html,<title>Multiprompt verification browser ready</title>"'
-        if ($Feature -eq 'browser-switch-speed') { $arguments += ' --load-extension="' + $extension + '" --disable-extensions-except="' + $extension + '" --silent-debugger-extension-api' }
+        if ($Feature -in @('browser-switch-speed', 'chat-switch-speed')) { $arguments += ' --load-extension="' + $extension + '" --disable-extensions-except="' + $extension + '" --silent-debugger-extension-api' }
         $warmup = $warmupJob.Start($edge, $scratch, (Join-Path $Evidence 'browser-setup.stdout.log'), (Join-Path $Evidence 'browser-setup.stderr.log'), $arguments)
         Wait-Until {
             $warmup.Refresh()
             if ($warmup.HasExited) { throw 'Browser setup process exited before readiness' }
             $warmup.MainWindowHandle -ne [IntPtr]::Zero -and $warmup.MainWindowTitle -match '^Multiprompt verification browser ready'
         } 'isolated browser rendered setup page before the pane adoption deadline starts' 60
-        if ($Feature -eq 'browser-switch-speed') { Wait-SwitchNativeHost }
+        if ($Feature -in @('browser-switch-speed', 'chat-switch-speed')) { Wait-SwitchNativeHost }
         [void][VerifyNative]::ShowWindow($warmup.MainWindowHandle, 0)
         Save-Json @{ pid = $warmup.Id; ready = $true; timeoutSeconds = 60 } 'browser-setup.json'
     }
@@ -2957,6 +3065,48 @@ try {
             }
             Save-Json @{ preservedDraft = $draft; WM_GETTEXT = [VerifyNative]::EditText($handle); audit = $audit } 'escape-restart.text.json'
             $result.checks += @{ name = 'dictation-escape-restart'; passed = $true; WM_GETTEXT = [VerifyNative]::EditText($handle); idleMicPixels = $true }
+            Press @(0x11, 0x41) 'Ctrl+A: select the restarted dictation draft before the send cases'
+            Press @(0x08) 'Backspace: clear the draft before the send cases'
+            Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'IGSH-965 composer empty before the send cases'
+            $send = Get-DictationSend $mic
+            Save-Json @{ mic = $mic; send = $send } 'send-geometry.json'
+            $deliveries = @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\ttarget-chat-composer\t22$' }).Count
+            foreach ($way in @('send-click', 'ctrl-enter')) {
+                $outbox = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
+                [VerifyNative]::BringToForeground($script:window)
+                Record 'Click the owned composer to recover typing focus from the hidden console'
+                [VerifyNative]::ClickClient($handle, 8, 8)
+                Wait-ChatFocus 'Edit' ($way + '-composer')
+                Press @(0x11, 0x44) 'Ctrl+D: start composer dictation for the send case'
+                $iteration++
+                Wait-Until {
+                    @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+                } 'IGSH-965 recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
+                Assert-DictationMic $mic $true ($way + '-listening')
+                $typed = 'typing-' + $way
+                Type-Text $typed
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-965 typing is accepted while listening' -Seconds 1 -PollMilliseconds 10
+                Snapshot ($way + '-listening')
+                Record ('Send once with ' + $way + ' while dictating')
+                $immediate = [Diagnostics.Stopwatch]::StartNew()
+                switch ($way) {
+                    'send-click' { [VerifyNative]::ClickClient($script:window, [int](($send[0] + $send[2]) / 2), [int](($send[1] + $send[3]) / 2)) }
+                    'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }
+                }
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'IGSH-965 one press ended dictation and sent the typed and spoken words' -Seconds 3 -PollMilliseconds 20
+                $elapsed = $immediate.ElapsedMilliseconds
+                Snapshot ($way + '-sent-box')
+                $expected = $typed + ' Go forward ten meters.'
+                Wait-Until {
+                    (Test-Path $outbox) -and @((Get-Content $outbox -Raw | ConvertFrom-Json).queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $expected }).Count -eq 1
+                } 'IGSH-965 the sent message holds the typed and spoken words exactly once' -Seconds 5 -PollMilliseconds 50
+                Assert-DictationMic $mic $false ($way + '-stopped')
+                $audit = @((Read-DictationAudit $auditPath))
+                $deliveries++
+                if (@($audit | Where-Object { $_ -match '\ttarget-chat-composer\t22$' }).Count -ne $deliveries) { throw 'IGSH-965 spoken words did not reach the message box before sending' }
+                Snapshot ($way + '-sent')
+                $result.checks += @{ name = ('dictation-' + $way); passed = $true; delivered = $expected; elapsedMilliseconds = $elapsed; sendRect = $send; micRect = $mic }
+            }
             Snapshot 'after'
         }
         'chat-tables' {
@@ -4369,6 +4519,135 @@ try {
             Snapshot 'after'
             $result.checks += @{ name = 'remind-me-ctrl-h'; entry = 'Ctrl+H'; presetBase = $presetBase; pickerRowIds = $pickerIds; sessionsBefore = @($baseline.tabs).Count; sessionsAfter = @($stateAfter.tabs).Count }
         }
+        'session-tabs' {
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -gt 0 -and $state.active_workspace -ge 0 -and $state.active_tab -ge 0 } 'saved workspace and initial active tab'
+            $initial = Read-Session
+            $initialGroupIds = @()
+            if ($initial.PSObject.Properties['groups']) { $initialGroupIds = @($initial.groups | ForEach-Object { $_.id }) }
+            Palette 'move to group'
+            Press @(0x0D) 'Enter: Move to Group submenu'
+            Type-Text 'new group'
+            Press @(0x0D) 'Enter: first group'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or -not $state.PSObject.Properties['groups']) { return $false }
+                $newGroups = @($state.groups | Where-Object { $_.id -notin $initialGroupIds })
+                $newGroups.Count -eq 1 -and $state.tabs[$initial.active_tab].group_id -eq $newGroups[0].id
+            } 'first user-created group saved'
+            $groupA = @((Read-Session).groups | Where-Object { $_.id -notin $initialGroupIds })[0]
+            $script:zsbPort = 0
+            Wait-Until {
+                if (-not (Test-Path $log)) { return $false }
+                $listener = [regex]::Match(((Get-Content $log -Raw) -join ''), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
+                if (-not $listener.Success) { return $false }
+                $script:zsbPort = [int]$listener.Groups[1].Value
+                @(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $script:zsbPort | Where-Object { $_.OwningProcess -eq $process.Id }).Count -eq 1
+            } 'app-owned loopback tunnel-inbound listener' 30
+            $listed = Invoke-Zsb @('workspace-list') $script:zsbPort 'workspace-list-start'
+            $baseline = Read-Session
+            $workspaceName = $baseline.workspaces[$baseline.active_workspace].name
+            if (-not $workspaceName) { $workspaceName = 'Workspace ' + ($baseline.active_workspace + 1) }
+            if (@($listed.hosts).Count -lt 1 -or -not ($listed.hosts[0] -is [string]) -or -not $listed.hosts[0]) { throw 'workspace-list reported no usable host name' }
+            $hostName = $listed.hosts[0]
+            $tabIds = @{}
+            foreach ($n in 1, 2, 3, 4) {
+                $opened = Invoke-Zsb @('session-open', '--workspace', $workspaceName, '--group', $groupA.name, '--host', $hostName, '--tmux', "verify-$n", '--name', "Verify $n") $script:zsbPort "session-open-$n"
+                if ($opened.created -ne $true -or $opened.tab -le 0) { throw "session-open did not create verify-$n" }
+                $tabIds[$n] = [int]$opened.tab
+            }
+            Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -cmatch '^verify-[1-4]$' }).Count -eq 4 } 'four tmux tabs saved'
+            Palette 'move to group'
+            Press @(0x0D) 'Enter: Move to Group submenu'
+            Type-Text 'new group'
+            Press @(0x0D) 'Enter: second group'
+            $knownGroupIds = @($initialGroupIds) + @($groupA.id)
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state -or -not $state.PSObject.Properties['groups']) { return $false }
+                @($state.groups | Where-Object { $_.id -notin $knownGroupIds }).Count -eq 1
+            } 'second user-created group saved'
+            $groupB = @((Read-Session).groups | Where-Object { $_.id -notin $knownGroupIds })[0]
+            if ($groupB.name -ceq $groupA.name) { throw 'Both groups have the same name' }
+            $before = Read-Session
+            $activeTabBefore = $before.active_tab
+            $activeWorkspaceBefore = $before.active_workspace
+            $activeNameBefore = $before.tabs[$activeTabBefore].name
+            $titleBefore = [VerifyNative]::Title($script:window)
+            $foregroundBefore = [VerifyNative]::GetForegroundWindow()
+            $foregroundTitleBefore = [VerifyNative]::Title($foregroundBefore)
+            $listedBefore = Invoke-Zsb @('workspace-list') $script:zsbPort 'workspace-list-before'
+            Save-Json $before 'session-tabs-before.session.json'
+            Snapshot 'before'
+            $assertQuiet = {
+                param([string]$Step)
+                $state = Read-Session
+                if ($null -eq $state) { throw "session.json is not readable after $Step" }
+                if ($state.active_workspace -ne $activeWorkspaceBefore -or $state.active_tab -ne $activeTabBefore -or $state.tabs[$state.active_tab].name -cne $activeNameBefore) { throw "$Step changed the active workspace or active tab" }
+                if ([VerifyNative]::GetForegroundWindow() -ne $foregroundBefore -or [VerifyNative]::Title($foregroundBefore) -cne $foregroundTitleBefore -or [VerifyNative]::Title($script:window) -cne $titleBefore) { throw "$Step changed foreground window or title" }
+            }
+            $expectRefused = {
+                param([string[]]$ZsbArgs, [string]$Code, [string]$Name)
+                $refused = $false
+                try { [void](Invoke-Zsb $ZsbArgs $script:zsbPort $Name) } catch { $refused = $_.Exception.Message.Contains('"error":"' + $Code + '"') }
+                if (-not $refused) { throw "$Name was not refused with $Code" }
+            }
+            Snapshot 'action'
+            $renamed = Invoke-Zsb @('session-rename', '--tab', [string]$tabIds[1], '--name', 'Renamed One') $script:zsbPort 'session-rename'
+            if ($renamed.renamed -ne $true -or $renamed.tab -ne $tabIds[1]) { throw 'session-rename did not reply renamed for the tab' }
+            Wait-Until { $state = Read-Session; @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-1' -and $_.name -ceq 'Renamed One' }).Count -eq 1 } 'renamed tab saved with its session unchanged'
+            & $assertQuiet 'session-rename'
+            $rebound = Invoke-Zsb @('session-rebind', '--tab', [string]$tabIds[2], '--tmux', 'verify-9') $script:zsbPort 'session-rebind'
+            if ($rebound.rebound -ne $true -or $rebound.tab -ne $tabIds[2] -or $rebound.state -cnotin @('connecting', 'connected', 'disconnected')) { throw 'session-rebind did not reply rebound with a state' }
+            Wait-Until { $state = Read-Session; @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-9' -and $_.name -ceq 'Verify 2' -and $_.group_id -eq $groupA.id }).Count -eq 1 -and @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-2' }).Count -eq 0 } 'rebound tab saved on the new session with its title and group'
+            & $assertQuiet 'session-rebind'
+            $status = Invoke-Zsb @('session-status', '--tab', [string]$tabIds[2]) $script:zsbPort 'session-status-rebound'
+            if ($status.tab -ne $tabIds[2]) { throw 'session-status lost the rebound tab' }
+            & $expectRefused @('session-rebind', '--tab', [string]$tabIds[3], '--tmux', 'verify-9') 'duplicate_session' 'session-rebind-duplicate'
+            $moved = Invoke-Zsb @('session-move', '--tab', [string]$tabIds[3], '--group', $groupB.name) $script:zsbPort 'session-move'
+            if ($moved.moved -ne $true -or $moved.tab -ne $tabIds[3]) { throw 'session-move did not reply moved for the tab' }
+            Wait-Until { $state = Read-Session; @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-3' -and $_.group_id -eq $groupB.id }).Count -eq 1 } 'moved tab saved in the second group'
+            & $assertQuiet 'session-move'
+            $closed = Invoke-Zsb @('session-close', '--tab', [string]$tabIds[4]) $script:zsbPort 'session-close'
+            if ($closed.closed -ne $true -or $closed.tab -ne $tabIds[4]) { throw 'session-close did not reply closed for the tab' }
+            Wait-Until { $state = Read-Session; @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq 'verify-4' }).Count -eq 0 -and @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -cmatch '^verify-' }).Count -eq 3 } 'closed tab removed from the saved layout'
+            & $assertQuiet 'session-close'
+            $activeListed = $null
+            $afterList = Invoke-Zsb @('workspace-list') $script:zsbPort 'workspace-list-after'
+            foreach ($workspace in @($afterList.workspaces)) {
+                foreach ($tab in @($workspace.tabs) + @($workspace.groups | ForEach-Object { @($_.tabs) })) { if ($tab.active -eq $true) { $activeListed = $tab } }
+            }
+            if ($null -eq $activeListed) { throw 'workspace-list reported no active tab' }
+            & $expectRefused @('session-close', '--tab', [string]$activeListed.id) 'active_tab' 'session-close-active'
+            & $expectRefused @('session-move', '--tab', [string]$activeListed.id, '--ungrouped') 'active_tab' 'session-move-active'
+            & $expectRefused @('session-rebind', '--tab', [string]$activeListed.id, '--tmux', 'verify-8') 'active_tab' 'session-rebind-active'
+            & $expectRefused @('session-close', '--tab', '2000000000') 'unknown_tab' 'session-close-unknown'
+            & $assertQuiet 'refused commands'
+            $layout = {
+                param($state)
+                $groupNames = @{}
+                foreach ($g in @($state.groups)) { $groupNames[[int]$g.id] = $g.name }
+                @($state.tabs | ForEach-Object {
+                    $tabGroup = ''
+                    if ($_.PSObject.Properties['group_id'] -and $_.group_id -and $groupNames.ContainsKey([int]$_.group_id)) { $tabGroup = $groupNames[[int]$_.group_id] }
+                    $tabSession = ''
+                    if ($_.PSObject.Properties['tmux_session']) { $tabSession = $_.tmux_session }
+                    $tabWorkspace = 0
+                    if ($_.PSObject.Properties['workspace']) { $tabWorkspace = $_.workspace }
+                    '{0}|{1}|{2}|{3}' -f $_.name, $tabSession, $tabGroup, $tabWorkspace
+                }) -join "`n"
+            }
+            $expectedLayout = & $layout (Read-Session)
+            $expectedActive = (Read-Session).tabs[(Read-Session).active_tab].name
+            Save-Json (Read-Session) 'session-tabs-layout.session.json'
+            Save-Json $afterList 'session-tabs-layout.workspace-list.json'
+            Snapshot 'after'
+            Restart-SessionRestore 'tabs-restart' $false
+            Wait-Until { $state = Read-Session; $null -ne $state -and (& $layout $state) -ceq $expectedLayout } 'saved layout survives the restart exactly' 60
+            Save-Json (Read-Session) 'session-tabs-restarted.session.json'
+            Snapshot 'restarted'
+            $result.checks += @{ name = 'session-tabs-cli-repair'; tabIds = @($tabIds[1], $tabIds[2], $tabIds[3], $tabIds[4]); groupA = $groupA.name; groupB = $groupB.name; layout = $expectedLayout; activeTab = $expectedActive; listedStateBefore = @($listedBefore.workspaces).Count; foregroundBefore = $foregroundBefore.ToInt64(); windowTitle = $titleBefore; restart = $true }
+        }
         'group-rail' {
             Write-Host "group-rail verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
             Select-Theme 'dark' 'group-rail-dark'
@@ -5041,7 +5320,7 @@ try {
                             [VerifyNative]::Chord(@(0x11, 0x4C))
                             if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.ClassName -ne 'OmniboxViewViews') { throw 'Ctrl+L did not focus the browser address bar' }
                             [VerifyNative]::Chord(@(0x12, 0x51))
-                            if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw 'IGSH-724 Alt+Q did not restore the session input' }
+                            Wait-Until { [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab]) } 'IGSH-724 Alt+Q did not restore the session input'
                             [VerifyNative]::Chord(@(0x12, 0x51))
                             $pageKeys = 0
                             foreach ($key in @(0x20, 0x28, 0x4A, 0x4B)) {
@@ -5049,6 +5328,18 @@ try {
                                 [VerifyNative]::Chord(@($key))
                                 $pageKeys++
                                 if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw 'IGSH-724 Alt+Q sent a page key to browser chrome' }
+                            }
+                            Record 'IGSH-972: repeated Alt+Q round trips deliver every page key'
+                            foreach ($round in 1..5) {
+                                [VerifyNative]::Chord(@(0x12, 0x51))
+                                Wait-Until { [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab]) } ('IGSH-972 round ' + $round + ' Alt+Q did not restore the session input')
+                                [VerifyNative]::Chord(@(0x12, 0x51))
+                                foreach ($key in @(0x20, 0x28, 0x4A, 0x4B)) {
+                                    if ([VerifyNative]::GetForegroundWindow() -ne $browser -or [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw ('IGSH-972 round ' + $round + ' refusing page key outside the owned browser') }
+                                    [VerifyNative]::Chord(@($key))
+                                    $pageKeys++
+                                    if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw ('IGSH-972 round ' + $round + ' Alt+Q sent a page key to the browser menu') }
+                                }
                             }
                             Record 'IGSH-724: F6 still reaches browser chrome'
                             [VerifyNative]::Chord(@(0x75))
@@ -5061,7 +5352,7 @@ try {
                             $pageKeys++
                             if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw 'IGSH-724 opening a pane sent Space to browser chrome' }
                             [VerifyNative]::Chord(@(0x12, 0x51))
-                            if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw 'IGSH-724 page-to-input return lost session typing focus' }
+                            Wait-Until { [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab]) } 'IGSH-724 page-to-input return lost session typing focus'
                             $result.checks += @{ name = 'IGSH-724 browser-page-focus'; mode = $mode; tab = $tab; pageKeys = $pageKeys; ctrlL = $true; f6 = $true; inputReturn = $true }
                             $browsers[$tab] = $browser
                             $docks[$tab] = $dock
@@ -5240,6 +5531,9 @@ try {
                 }
                 $traceLines | Set-Content -Encoding UTF8 (Join-Path $Evidence 'switch-timing-debug.log')
             }
+        }
+        'browser-corners' {
+            . "$PSScriptRoot/browser-corners.ps1"
         }
         'browser-pane-locked' {
             Write-Host "browser-pane-locked verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
@@ -5642,6 +5936,158 @@ try {
             Doctor
             Snapshot 'update-idle'
             $result.checks += @{ name = 'update-command-without-ready-keeps-session'; pid = $process.Id; scale = 100; selectedTextPixels = $selectedTextPixels }
+        }
+        'chat-switch-speed' {
+            function Test-TabChat($tab) { return [bool]($tab.PSObject.Properties['cv'] -and $tab.cv) }
+            $sessionCount = 5
+            $switchCount = 20
+            $chatLimitMs = 150
+            $hangLimitMs = 100
+            $settleMs = 1200
+            $modes = @('browser_closed', 'browser_open')
+            $timings = [ordered]@{ session_count = $sessionCount; switches_per_mode = $switchCount; click_to_chat_limit_ms = $chatLimitMs; hang_limit_ms = $hangLimitMs }
+            foreach ($mode in $modes) { $timings[$mode] = @{ samples_ms = @(); app_ms = @(); hang_ms = @(); missing = 0; median_ms = $null; max_ms = $null; max_hang_ms = $null; first_frame_layout_w = @(); first_frame_client_w = @(); first_frame_wrong_width = 0; moved_after_first_frame = 0; moved_lines = @() } }
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $gapCase = @{ name = 'chat-switch-speed'; status = 'failed'; detail = 'Chat switch measurement did not complete'; phase = 'initial-console' }
+            function Read-SharedLog([string]$Path) {
+                $stream = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+                try { $reader = New-Object System.IO.StreamReader($stream); try { return $reader.ReadToEnd() } finally { $reader.Dispose() } } finally { $stream.Dispose() }
+            }
+            function Add-SeedTurn([string]$SessionName, [int]$Round) {
+                $index = [int]($SessionName -replace '^.*-', '') - 1
+                $sid = 'a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $index
+                $folder = ('C:/verify/work{0}' -f $index) -replace '[^A-Za-z0-9]', '-'
+                $path = Join-Path $scratch ("profile/.claude/projects/$folder/$sid.jsonl")
+                $text = "Session $index live answer $Round`n`n" + ('This paragraph stands in for a running agent adding a new answer to the conversation while another session is in front. ' * 3)
+                $row = [ordered]@{ type = 'assistant'; timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'); sessionId = $sid; uuid = [guid]::NewGuid().ToString(); isSidechain = $false; message = [ordered]@{ role = 'assistant'; id = ('msg_live_' + [guid]::NewGuid().ToString('N').Substring(0, 12)); model = 'claude-opus-5-5'; content = @(@{ type = 'text'; text = $text }) } }
+                [IO.File]::AppendAllText($path, (($row | ConvertTo-Json -Depth 6 -Compress) + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+            }
+            $result.checks += $gapCase
+            $shellIds = @()
+            $toggleReady = $null
+            $probeStarted = $false
+            try {
+                Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq $sessionCount -and @($state.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq $sessionCount } 'five seeded remote sessions restored'
+                $gapCase.phase = 'idle-close-fixture'
+                Focus-Palette 'browser auto suspend' 6240
+                Press @(0x0D) 'Enter: disable timed browser closing while measuring'
+                Wait-Until { $state = Read-Session; $state.PSObject.Properties['browser_suspend_min'] -and $state.browser_suspend_min -eq 0 } 'app saved idle browser closing disabled'
+                $gapCase.phase = 'manual-tab-order'
+                Focus-Palette 'tab order' 6217
+                Press @(0x28) 'Down: Tab Order Manual'
+                Press @(0x0D) 'Enter: keep saved order for Ctrl+1 to Ctrl+5'
+                Wait-Until {
+                    $path = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
+                    if (-not (Test-Path $path)) { return $false }
+                    $launch = Get-Content $path -Raw | ConvertFrom-Json
+                    $launch.PSObject.Properties['sort_auto'] -and -not $launch.sort_auto
+                } 'manual tab order saved before creating sessions'
+                for ($tab = 0; $tab -lt $sessionCount; $tab++) {
+                    $gapCase.phase = "session-setup-$tab"
+                    Press @(0x11, (0x31 + $tab)) "Ctrl+$($tab + 1): select remote session $tab"
+                    Wait-Until { $state = Read-Session; $state.active_tab -eq $tab } "remote session $tab selected" 30
+                    if ($null -ne $toggleReady) { Wait-Until { [DateTime]::UtcNow -ge $toggleReady } "Alt+C debounce elapsed before session $tab" }
+                    Press @(0x12, 0x43) "Alt+C: open Chat View for session $tab"
+                    $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+                    Wait-Until { Test-TabChat (Read-Session).tabs[$tab] } "Chat View saved for session $tab" 30
+                    $shownId = (Read-Session).tabs[$tab].shell_id
+                    Wait-Until { ((Get-Content $log -Raw) -join '') -match ('\[switch\] chat content shown shell=' + $shownId + ' blocks=[1-9]') } "seeded transcript shown for session $tab" 60
+                    $shellIds += $shownId
+                }
+                $state = Read-Session
+                if (@($state.tabs).Count -ne $sessionCount -or @($state.tabs | Where-Object { -not (Test-TabChat $_) }).Count -ne 0) { throw 'Not every session is in Chat View' }
+                Save-Json @{ shellIds = $shellIds; tabs = @($state.tabs) } 'chat-switch-sessions.json'
+                if ($null -ne $warmupJob) {
+                    $warmupStopped = $warmupJob.Stop()
+                    Save-Json @{ activeAfterStop = $warmupStopped.ActiveProcesses } 'browser-setup-process-tree.json'
+                    $warmupJob.Dispose()
+                    $warmupJob = $null
+                }
+                Snapshot 'before'
+                [VerifyNative]::StartHangProbe($script:window)
+                $probeStarted = $true
+                foreach ($mode in $modes) {
+                    $open = $mode -eq 'browser_open'
+                    if ($open) {
+                        for ($tab = 0; $tab -lt $sessionCount; $tab++) {
+                            $gapCase.phase = "$mode-setup-$tab"
+                            Press @(0x11, (0x31 + $tab)) "Ctrl+$($tab + 1): select session to open its browser"
+                            Wait-Until { (Read-Session).active_tab -eq $tab } "session $tab selected"
+                            $script:browserShellId = $shellIds[$tab]
+                            $null = Open-BrowserPane ("$mode-$tab")
+                            Wait-SwitchNativeHost
+                            Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_state -eq 'connected' -and $pane.browser_window_id -gt 0 -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero } "session $tab browser connected and docked" 30
+                        }
+                    }
+                    $gapCase.phase = "$mode-start"
+                    Press @(0x11, 0x31) 'Ctrl+1: start timing from the first session'
+                    Wait-Until { (Read-Session).active_tab -eq 0 } 'first session selected'
+                    Start-Sleep -Milliseconds 1500
+                    foreach ($warm in 1..($sessionCount - 1)) {
+                        Press @(0x11, (0x31 + $warm)) "Ctrl+$($warm + 1): first visit warm-up"
+                        Wait-Until { (Read-Session).active_tab -eq $warm } "warm-up session $warm selected"
+                        Start-Sleep -Milliseconds 800
+                    }
+                    Press @(0x11, 0x31) 'Ctrl+1: return to the first session after warm-up'
+                    Wait-Until { (Read-Session).active_tab -eq 0 } 'first session selected after warm-up'
+                    Start-Sleep -Milliseconds 1500
+                    $current = 0
+                    for ($sample = 0; $sample -lt $switchCount; $sample++) {
+                        $gapCase.phase = "$mode-sample-$sample"
+                        $target = ($current + 1) % $sessionCount
+                        Doctor
+                        Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before the switch' 10
+                        Add-SeedTurn (Read-Session).tabs[$target].tmux_session $sample
+                        Start-Sleep -Milliseconds 300
+                        $offset = (Get-Item -LiteralPath $log).Length
+                        $needle = '[switch] chat content shown shell=' + $shellIds[$target] + ' '
+                        Record "Ctrl+$($target + 1): switch to Chat View session $target ($mode sample $sample)"
+                        $measured = [VerifyNative]::SwitchToSession($target, $log, $offset, $needle, $settleMs)
+                        if ((Read-Session).active_tab -ne $target) { throw "Switch $sample did not select session $target" }
+                        $text = Read-SharedLog $log
+                        $range = if ($offset -le $text.Length) { $text.Substring($offset) } else { '' }
+                        $appMs = $null
+                        $found = [regex]::Match($range, [regex]::Escape($needle) + 'blocks=\d+ ms=(\d+)')
+                        if ($found.Success) { $appMs = [int]$found.Groups[1].Value }
+                        if ($open -and -not [VerifyNative]::PaneVisible($script:window)) { throw "Browser pane not visible after switch $sample" }
+                        $widths = [regex]::Match($range, [regex]::Escape($needle) + 'blocks=\d+ ms=\d+ layout_w=(-?\d+) client_w=(-?\d+)')
+                        if ($widths.Success) {
+                            $timings[$mode].first_frame_layout_w += [int]$widths.Groups[1].Value
+                            $timings[$mode].first_frame_client_w += [int]$widths.Groups[2].Value
+                            if ($widths.Groups[1].Value -ne $widths.Groups[2].Value) { $timings[$mode].first_frame_wrong_width++ }
+                            $afterShown = $range.Substring($widths.Index + $widths.Length)
+                            $laterMoves = @($afterShown -split "`n" | Where-Object { $_ -match '\[chat\] frame transcript|\[reposition\] client=' })
+                            if ($laterMoves.Count -gt 0) { $timings[$mode].moved_after_first_frame++; $timings[$mode].moved_lines += $laterMoves[0].Trim() }
+                        }
+                        if ($measured[0] -lt 0) { $timings[$mode].missing++ }
+                        $timings[$mode].samples_ms += $(if ($measured[0] -lt 0) { $settleMs } else { [Math]::Round($measured[0], 1) })
+                        $timings[$mode].app_ms += $appMs
+                        $timings[$mode].hang_ms += [Math]::Round($measured[1], 1)
+                        $range | Set-Content -Encoding UTF8 (Join-Path $Evidence ("{0}-{1}-debug.log" -f $mode, $sample))
+                        $current = $target
+                    }
+                    $timings[$mode].median_ms = Get-SwitchMedian $timings[$mode].samples_ms
+                    $timings[$mode].max_ms = ($timings[$mode].samples_ms | Measure-Object -Maximum).Maximum
+                    $timings[$mode].max_hang_ms = ($timings[$mode].hang_ms | Measure-Object -Maximum).Maximum
+                    if (-not $open) { Snapshot 'action' }
+                }
+                $gapCase.phase = 'verdict'
+                $summary = foreach ($mode in $modes) { "$mode median $($timings[$mode].median_ms) ms (limit $chatLimitMs), worst $($timings[$mode].max_ms) ms, worst window hang $($timings[$mode].max_hang_ms) ms (limit $hangLimitMs), switches without chat shown: $($timings[$mode].missing), first frame at wrong width: $($timings[$mode].first_frame_wrong_width), layout moved after first frame: $($timings[$mode].moved_after_first_frame)" }
+                $gapCase.detail = $summary -join '; '
+                foreach ($mode in $modes) {
+                    if ($timings[$mode].missing -gt 0 -or $timings[$mode].median_ms -gt $chatLimitMs -or $timings[$mode].max_hang_ms -gt $hangLimitMs -or $timings[$mode].first_frame_wrong_width -gt 0 -or $timings[$mode].moved_after_first_frame -gt 0) { throw $gapCase.detail }
+                }
+                Snapshot 'after'
+                $gapCase.status = 'passed'
+            } catch {
+                $gapCase.detail = $gapCase.phase + ': ' + $_.Exception.Message
+                throw
+            } finally {
+                if ($probeStarted) { [VerifyNative]::StopHangProbe() }
+                Save-Json $timings 'switch-timings.json'
+                Save-Json (Read-Session) 'switch-final-session.json'
+                if (Test-Path -LiteralPath $log) { Copy-Item -LiteralPath $log (Join-Path $Evidence 'chat-switch-debug.log') -ErrorAction SilentlyContinue }
+            }
         }
     }
     Doctor

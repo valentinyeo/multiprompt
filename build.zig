@@ -263,7 +263,7 @@ pub fn build(b: *std.Build) void {
     const chat_bench_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.mjs" });
     test_step.dependOn(&chat_bench_tests.step);
     vps_test_step.dependOn(&chat_bench_tests.step);
-    const chat_bench_ab_summary_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench-ab-summary.test.js" });
+    const chat_bench_ab_summary_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench-ab-summary.test.js", "tools/chat-bench-ab-extra.test.js" });
     test_step.dependOn(&chat_bench_ab_summary_tests.step);
     vps_test_step.dependOn(&chat_bench_ab_summary_tests.step);
     const chat_bench_linux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.js", "tools/chat-bench/receipt.test.mjs" });
@@ -419,6 +419,12 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     }) });
     test_step.dependOn(&b.addRunArtifact(reminders_load_tests).step);
+    const freeze_recorder_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/freeze_recorder.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(freeze_recorder_tests).step);
     const crash_recorder_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/crash_recorder.zig"),
         .target = target,
@@ -626,6 +632,9 @@ pub fn build(b: *std.Build) void {
     const zsb_session_open_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-open.test.js" });
     test_step.dependOn(&zsb_session_open_tests.step);
     vps_test_step.dependOn(&zsb_session_open_tests.step);
+    const zsb_session_edit_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-edit.test.js" });
+    test_step.dependOn(&zsb_session_edit_tests.step);
+    vps_test_step.dependOn(&zsb_session_edit_tests.step);
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
     vps_test_step.dependOn(&zsb_deadline_tests.step);

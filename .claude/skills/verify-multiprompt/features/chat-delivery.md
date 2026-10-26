@@ -7,6 +7,7 @@
 - `steer-chord`: Ctrl+X then Ctrl+S submits the composer text, then the channel sends the native `C-x C-s` after the text and Enter.
 - `wrapped-leftover`: the remote prompt box already holds an earlier long single-line message that wraps into three screen rows plus a trailing line break (its Enter became a newline). Sending a new message must submit exactly the typed text once, never the first leftover row glued in front of it (IGSH-608).
 - `queue-draft-sync` (IGSH-682): with a busy fake Claude, one message queued from the shell and one from Chat View must appear in both views in order, survive an edit, and be marked sent in both once Claude takes them; a draft typed in Chat View must appear in the shell input box, while text that lands in the shell input box from another agent (IGSH-930) must never fill the Chat View composer, empty or holding a human draft. This case is expected to fail until the feature exists.
+- `send-stays-gone` (IGSH-960): with a busy fake Claude, the driver types 20 messages into the real Chat View composer, every fourth one long enough to wrap across several rows, waits a different time after the last key (0 to 1.5 seconds) so the composer-to-shell draft push can still be in flight, and presses Enter. After each send it watches the composer and every file in the profile `drafts` folder for 10 seconds (a file with text in it is what shows the sidebar DRAFT badge). The case passes only if the composer stays empty, no draft file holds text, and no sent text is dropped (each one reached Claude's queue or is still pending in the Chat View outbox).
 
 ## How to get to it (user POV)
 
@@ -51,6 +52,12 @@ Ordered steps, all recorded in `observation.json` and re-derived by `check-evide
 
 Expected result on current master: `chat-view-read-transcript`, the shell steps and the clean-up steps pass; `chat-lists-shell-queued`, `chat-lists-both-in-order`, `chat-lists-edited-in-order`, `chat-marks-both-sent`, `composer-ignores-agent-paste` and `shell-box-shows-chat-draft` fail. `node --test tools/verify-chat-delivery.test.js` runs the stand-in as a real Linux process, checks the evidence oracle on a green tree and on a master-like tree, and never starts the app.
 
+For long second-host session and workspace timing, run the [remote switch performance journey](../diagnostics/remote-switch-speed.md). It uses this SSH boundary with an alternate remote home and copies all 2,000 messages before measuring.
+
+### send-stays-gone (IGSH-960)
+
+It reuses the stand-in and transcript set-up of `queue-draft-sync`. Per message the driver types, presses Enter, then runs the gating step `send-stays-gone` (10 seconds of 250 ms samples of the composer text and the draft files). It also records as data, not as a gate, whether the fake Claude queue ended with the sent text (`reached`) and, after every fourth message, whether the fake took the queue (`tookQueue`); the fake then goes busy again so the Chat View queue list never exceeds its 16 rows. At the end the step `outbox-snapshot` saves the Chat View outbox. `check-evidence.js` re-derives the 20 texts and 20 real Enter presses from the raw files and fails if any text is neither an `enqueue` event of the fake Claude nor still pending in the saved outbox, so a build that silently throws text away cannot pass. Delivery speed and order are not judged here (IGSH-969). To prove the case can fail, run it against a build from before IGSH-930, where shell text pulled back into the box on every poll.
+
 ## Gotchas
 
 - Exact capacity/tmux polls and token-ladder reads return empty/unavailable; notification relay probes report legacy and legacy forwards fail explicitly, all in `declined.jsonl` with argv/text and no agent-buffer writes; unknown remote commands retain argv/text in `unsupported.jsonl` and fail the strict evidence check.
@@ -64,10 +71,10 @@ Expected result on current master: `chat-view-read-transcript`, the shell steps 
 ### Remote session changes (IGSH-950)
 
 ```sh
-gh workflow run verify.yml --ref ceo/IGSH-950 -f feature=chat-delivery -f remote_sync_proof=true
+gh workflow run verify.yml --ref ceo/IGSH-950-poll -f feature=chat-delivery -f remote_sync_proof=true
 ```
 
-This opt-in journey uses host index 2 and a separate remote home. Two question/answer turns arrive on one session, then a third arrives after the pane metadata changes to a new session. The old transcript remains readable. Each pair must reach the app cache within two seconds and appear in copied rendered text. The journey saves a terminal screenshot and a Chat View screenshot per turn. `chat-remote-sync-proof.mjs` independently checks the copied text, terminal frames, session change, delivery time and cleanup.
+This opt-in journey uses host index 2 and a separate remote home. Two question/answer turns arrive on one session, then a third arrives after the pane metadata changes to a new session. The old transcript remains readable. Each pair must appear in copied rendered text within two seconds. The timed check uses the real Select All palette command and Ctrl+C, not the deliberately delayed disk cache or composer text. The journey saves a terminal screenshot and a Chat View screenshot per turn. `chat-remote-sync-proof.mjs` independently checks the copied text, terminal frames, session change, delivery time and cleanup.
 
 The SSH host and remote home are synthetic boundaries, not a real server or OS login. The desktop, embedded reader, pane discovery and rendered transcript are real. Reader regressions separately cover noninteractive cross-user discovery and inaccessible or missing live transcripts. The Linux chat sync audit repeats the two-turn/resume case against its real renderer and requires zero drift.
 
@@ -79,3 +86,8 @@ Dispatch `feature=chat-delivery` with `chat_skills_proof=true`. This selects onl
 The owned native composer uses real `mp_complete.py` discovery over isolated `SKILL.md` files, without running a provider. Warm the cache with zebra and yak, then add alpha. Reopen suggestions and select cached yak while the response is delayed. Require alpha within five seconds, keep yak selected after alpha changes its row index, and accept alpha with Tab. Add beta after typing reload-plugins, send it, and require another discovery before reopening suggestions.
 
 The same workflow first builds pinned pre-fix master `d1c9c8b7` and requires exactly the new-skill timeout after successful cache warm, Doctor and cleanup. The fixed app must pass `chat-skills-proof.mjs`, with screenshots, actual inserted composer text, discovery records and zero remaining owned processes. Release proof supplies the published tag, uses its checksum-verified executable, and repeats the identical journey. The deliberate 800 ms transport delay is not a real-network speed measurement.
+
+### Accepted message brightness
+
+Run `verify.yml` with `feature=chat-delivery` and `chat_accepted_proof=true`.
+The owned Windows app sends while busy. The boundary records the exact message enqueue, then removes it with `absorbed_mid_turn` while keeping the agent busy and delaying its user transcript row. Screenshots must show the waiting bubble dimmed, then normal brightness within one second of that receipt, together with working dots. The composer stays empty. `accepted-before.png`, `accepted-after.png`, timestamped frames, transcript, executable doctor and cleanup receipts remain in the artifact. Run unchanged against a pre-fix release tag for the negative control and the published tag for release proof.
