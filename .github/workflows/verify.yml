@@ -47,6 +47,10 @@ on:
         required: false
         default: false
         type: boolean
+      chat_retention_proof:
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - '**'
