@@ -106,7 +106,8 @@ function evaluateSendCase(context) {
   const entered = json('actions.json').filter(action => action.case === name && action.input === 'Enter: send composer');
   assert.equal(entered.length, sendTexts.length, 'one real Enter per message');
   const enqueued = lines(`${name}/transcript.jsonl`).filter(row => row.type === 'queue-operation' && row.operation === 'enqueue').map(row => row.content);
-  const pending = (json(`${name}/outbox-final.json`).queues || []).flatMap(queue => queue.messages || []).map(message => message.t);
+  const outbox = (json(`${name}/outbox-final.json`).queues || []).flatMap(queue => queue.messages || []);
+  const pending = outbox.filter(message => message.s === 0 || message.s === 1 || message.s === 2).map(message => message.t);
   const joined = [...enqueued, ...pending].filter(text => typeof text === 'string' && sendTexts.filter(sent => text.includes(sent)).length > 1);
   assert.deepEqual(joined, [], 'sent text came back into the box and was sent again joined to the next message');
   const lost = sendTexts.filter(text => !enqueued.includes(text) && !pending.includes(text));
@@ -116,7 +117,9 @@ function evaluateSendCase(context) {
   assert.equal(cleanup.scratch_removed, true);
   png(`${name}-final.png`);
   const delivered = sendTexts.filter(text => enqueued.includes(text)).length;
-  return { sends: sendTexts.length, watchedSeconds: 10, longMessages: sendTexts.filter(text => text.length > 100).length, delivered, pending: sendTexts.length - delivered };
+  const outboxStates = {};
+  outbox.filter(message => sendTexts.includes(message.t)).forEach(message => { outboxStates[message.s] = (outboxStates[message.s] || 0) + 1; });
+  return { sends: sendTexts.length, watchedSeconds: 10, longMessages: sendTexts.filter(text => text.length > 100).length, delivered, pending: sendTexts.length - delivered, outboxStates };
 }
 
 function evaluateQueueCase(context) {

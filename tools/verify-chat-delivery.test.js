@@ -853,7 +853,7 @@ test('send-stays-gone evidence fails when a sent message comes back or a send is
   mockFiles(t, files);
   const row = () => evaluateEvidence(base).cases.find(entry => entry.name === sendName);
   assert.equal(row().passed, true, row().detail);
-  assert.deepEqual(row().detail, { sends: 20, watchedSeconds: 10, longMessages: 5, delivered: 20, pending: 0 });
+  assert.deepEqual(row().detail, { sends: 20, watchedSeconds: 10, longMessages: 5, delivered: 20, pending: 0, outboxStates: {} });
   const observationFile = path.join(base, `${sendName}/observation.json`);
   const original = files.get(observationFile);
   const back = JSON.parse(original);
@@ -874,8 +874,10 @@ test('send-stays-gone evidence fails when a sent message comes back or a send is
   files.set(transcriptFile, transcript.split('\n').slice(0, -1).join('\n'));
   assert.match(row().detail, /none was dropped/);
   const outboxFile = path.join(base, `${sendName}/outbox-final.json`);
+  files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: sendTexts[19], s: 2 }] }] }));
+  assert.deepEqual(row().detail, { sends: 20, watchedSeconds: 10, longMessages: 5, delivered: 19, pending: 1, outboxStates: { 2: 1 } });
   files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: sendTexts[19], s: 3 }] }] }));
-  assert.deepEqual(row().detail, { sends: 20, watchedSeconds: 10, longMessages: 5, delivered: 19, pending: 1 });
+  assert.match(row().detail, /none was dropped/);
   files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: 'unrelated text', s: 3 }] }] }));
   assert.match(row().detail, /none was dropped/);
   files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: `${sendTexts[11]}${sendTexts[13]}`, s: 0 }] }] }));
