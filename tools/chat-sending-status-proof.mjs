@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readBmp } from './chat-code-font-proof.mjs';
 
-export function measureStatus(image, rect) {
+export function measureStatus(image, rect, dimmed = false) {
   const { left, top, width, height } = rect;
   assert.ok([left, top, width, height].every(Number.isSafeInteger));
   assert.ok(left >= 0 && top >= 0 && width > 200 && height > 100);
@@ -17,12 +17,12 @@ export function measureStatus(image, rect) {
   }
   const background = [...counts].sort((a, b) => b[1] - a[1])[0][0];
   assert.ok([0, 8, 16].every(shift => ((background >> shift) & 255) < 128), 'dark fixture background');
-  const fill = [0, 8, 16].reduce((color, shift) => color | Math.min(255, ((background >> shift) & 255) + 53) << shift, 0);
+  const fills = (dimmed ? [26, 27] : [53]).map(delta => [0, 8, 16].reduce((color, shift) => color | Math.min(255, ((background >> shift) & 255) + delta) << shift, 0));
   let bottom = -1, right = 0, lo = width, ink = 0;
   for (let y = 0; y < height; y++) {
     let start = -1;
     for (let x = 0; x <= width; x++) {
-      if (x < width && pixel(x, y) === fill) { if (start < 0) start = x; }
+      if (x < width && fills.includes(pixel(x, y))) { if (start < 0) start = x; }
       else if (start >= 0) {
         if (x - start > 40) { bottom = y; right = Math.max(right, x); lo = Math.min(lo, start); ink += x - start; }
         start = -1;
@@ -32,7 +32,7 @@ export function measureStatus(image, rect) {
   assert.ok(ink > 500 && bottom > 20 && bottom + 26 < height, 'outgoing bubble must be visibly painted');
   let bodyInk = 0;
   for (let y = Math.max(0, bottom - 35); y < bottom - 5; y++) for (let x = lo + 12; x < right - 12; x++) {
-    if (pixel(x, y) !== fill && pixel(x, y) !== background) bodyInk++;
+    if (!fills.includes(pixel(x, y)) && pixel(x, y) !== background) bodyInk++;
   }
   assert.ok(bodyInk > 20, 'outgoing bubble contains message text');
   let statusInk = 0;
@@ -60,7 +60,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const cleanup = json('cleanup.json');
     assert.equal(cleanup.remaining_owned_processes, 0);
     assert.equal(cleanup.scratch_removed, true);
-    const frames = ['sending-immediate', 'sending-delivered'].map(name => ({ name, ...measureStatus(readBmp(path.join(root, name + '.bmp')), observation.transcript) }));
+    const frames = ['sending-immediate', 'sending-delivered'].map(name => ({ name, ...measureStatus(readBmp(path.join(root, name + '.bmp')), observation.transcript, name === 'sending-delivered') }));
     fs.writeFileSync(path.join(root, 'result.json'), JSON.stringify({ feature: 'chat-sending-status', status: 'passed', frames }, null, 2));
     console.log('IGSH-931 Windows send frames have no status row');
   } catch (error) {

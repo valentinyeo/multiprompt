@@ -22,3 +22,13 @@ test('bubble without text cannot prove a message', () => {
   for (let y = 30; y < 90; y++) for (let x = 180; x < 376; x++) image.pixels.writeUIntLE(0x4d4d4d, (y * 400 + x) * 4, 3);
   assert.throws(() => measureStatus(image, rect), /message text/);
 });
+
+test('delivered queued bubble is measured at its existing half opacity', () => {
+  const image = frame();
+  for (let y = 30; y < 90; y++) for (let x = 180; x < 376; x++) {
+    const offset = (y * 400 + x) * 4;
+    if (image.pixels.readUIntLE(offset, 3) === 0x4d4d4d) image.pixels.writeUIntLE(0x323232, offset, 3);
+  }
+  assert.equal(measureStatus(image, rect, true).statusInk, 0);
+  assert.throws(() => measureStatus(image, rect), /outgoing bubble/);
+});
