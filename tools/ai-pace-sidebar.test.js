@@ -72,7 +72,7 @@ test("daily goals remain uncapped and persist through the sanitized snapshot", (
   assert.match(telemetry, /canonicalDeadline/);
 });
 
-test("one-line sticky carousel owns combined, VPS, and AI cards with full numbers on hover", () => {
+test("one-line carousel retains overview/VPS hover while AI opens the existing data menu", () => {
   assert.match(source, /const SIDEBAR_STICKY_CARD_H: i32 = 26;/);
   assert.match(source, /const SIDEBAR_STATUS_DETAIL_H: i32 = 222;/);
   assert.match(source, /const SIDEBAR_STICKY_CARD_COLLAPSED_H: i32 = 58;/);
@@ -87,13 +87,14 @@ test("one-line sticky carousel owns combined, VPS, and AI cards with full number
   assert.match(popup, /if \(!g_status_card_hover/);
   assert.match(popup, /paintSidebarCombinedDetail/);
   assert.match(popup, /paintSidebarVpsDetail/);
-  assert.match(popup, /paintSidebarAiPaceDetail/);
+  assert.match(popup, /g_sidebar_status_card == 2/);
+  assert.doesNotMatch(popup, /paintSidebarAiPaceDetail/);
   assert.match(functionBody(source, "sidebarStatusPopupRect", "paintSidebarStatusCardPopup"), /uiScaled\(SIDEBAR_STATUS_DETAIL_H\)/);
   const move = source.slice(source.indexOf("WM_MOUSEMOVE => {"), source.indexOf("const upd_hit = updateCardHit(GET_X(lp), GET_Y(lp));"));
   assert.match(move, /sidebarStickyCardHoverTest\(GET_X\(lp\), GET_Y\(lp\)\)/);
   assert.match(move, /TrackMouseEvent\(&tracking\)/);
   assert.match(source, /0x02A3 => \{\s+if \(g_status_card_hover\) \{\s+g_status_card_hover = false;/);
-  const line = functionBody(source, "paintSidebarAiPaceCard", "paintSidebarAiPaceDetail");
+  const line = functionBody(source, "paintSidebarAiPaceCard", "createAiUsageMenu");
   assert.match(line, /paintAiPaceWeekRuns/);
   assert.doesNotMatch(line, /formatResetHours|aiPaceNextWeeklyReset/);
   assert.doesNotMatch(line, /"CX"|"CL"/);
@@ -102,7 +103,7 @@ test("one-line sticky carousel owns combined, VPS, and AI cards with full number
 
 test("the usage display draws no burn label and no hours to reset", () => {
   assert.doesNotMatch(source, /fn aiPaceNextWeeklyReset|formatResetHours|earliestReset/);
-  const detail = functionBody(source, "paintSidebarAiPaceDetail", "paintSidebarCombinedDetail");
+  const detail = functionBody(source, "createAiUsageMenu", "showSidebarAiUsageMenu");
   assert.doesNotMatch(detail, /"BURN"|ladder_mode|CODEX" else "CLAUDE/);
   assert.doesNotMatch(source, /"Burn \{s\}: /);
 });
@@ -141,16 +142,15 @@ test("configured rows pair weekly usage with its reset and retain secondary quot
   assert.match(parse, /goal\.weekly_reset_filetime = reset_filetime/);
   assert.match(parse, /quota\.get\("windowMinutes"\)/);
   assert.match(parse, /goal\.five_hour_reset_filetime = reset_filetime/);
-  const bar = functionBody(source, "paintAiPaceBar", "paintSidebarAiPaceCard");
-  assert.match(bar, /@min\(goal\.progress_tenths, 1000\)/);
-  const card = functionBody(source, "paintSidebarAiPaceCard", "paintSidebarCombinedCard");
-  assert.match(card, /const goal_count = @min\(g_ai_pace\.goal_count, g_ai_pace\.goals\.len\)/);
-  assert.match(card, /while \(slot < goal_count\)/);
-  assert.match(card, /aiPaceProviderLabel\(&goal\)/);
-  assert.match(card, /formatAiPaceResetDetail\(&weekly_detail_buf, local, weekly_reset\)/);
-  assert.match(card, /"WEEK USED \| \{s\}", \.\{aiPaceWord\(goal\.pace\)\}/);
-  assert.match(card, /formatAiPaceBonusReset\(&bonus_buf, local\)/);
-  assert.match(card, /"5H \{s\} \| R \{s\}/);
-  assert.match(card, /FABLE \{s\}/);
-  assert.match(card, /progress_text: \[\]const u8 = if \(goal\.retrying\)[\s\S]*"RETRY"/);
+  const menu = functionBody(source, "createAiUsageMenu", "showSidebarAiUsageMenu");
+  assert.match(menu, /snapshot\.goals\[0\.\.count\]/);
+  assert.match(menu, /aiPaceProviderLabel\(&goal\)/);
+  assert.match(menu, /formatAiPaceResetDetail/);
+  assert.match(menu, /aiPaceWord\(goal\.pace\)/);
+  assert.match(menu, /formatAiPaceBonusReset/);
+  assert.match(menu, /5H \{s\}.*Fable \{s\}/);
+  assert.match(menu, /goal\.retrying/);
+  assert.match(menu, /AppendMenuW/);
+  assert.match(source, /IGSH-908 native usage menu retains distinct pools/);
+
 });

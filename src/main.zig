@@ -1921,7 +1921,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (sidebarStickyCardHitTest(my)) {
                     app_state.g_shell_focused = false;
-                    cycleSidebarStatusCard(1);
+                    if (!app_state.g_sidebar_collapsed and app_state.g_sidebar_status_card == 2) {
+                        @import("telemetry_panel.zig").showSidebarAiUsageMenu();
+                    } else cycleSidebarStatusCard(1);
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }

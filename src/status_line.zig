@@ -7,6 +7,20 @@ pub fn providerShortLabel(provider: []const u8) []const u8 {
     return "AI";
 }
 
+pub fn poolShortLabel(buf: []u8, provider: []const u8, ordinal: usize, count: usize) []const u8 {
+    const short = providerShortLabel(provider);
+    if (count <= 1) return short;
+    return std.fmt.bufPrint(buf, "{s}{d}", .{ short, ordinal }) catch short;
+}
+
+test "IGSH-908 same-provider pools have distinct short labels" {
+    var buf: [16]u8 = undefined;
+    try std.testing.expectEqualStrings("CL1", poolShortLabel(&buf, "claude", 1, 2));
+    try std.testing.expectEqualStrings("CL2", poolShortLabel(&buf, "claude", 2, 2));
+    try std.testing.expectEqualStrings("CX", poolShortLabel(&buf, "codex", 1, 1));
+    try std.testing.expectEqualStrings("KM", poolShortLabel(&buf, "kimi", 1, 1));
+}
+
 pub fn wholePercent(tenths: u32) u32 {
     return (tenths + 5) / 10;
 }
