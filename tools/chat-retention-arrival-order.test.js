@@ -12,7 +12,7 @@ test('IGSH-981 each burst paints before the text-size measurement runs', () => {
   const at = pattern => lines.findIndex(line => pattern.test(line));
   const mark = at(/^\$burstStart = \(Read-Shared "\$settings\/debug\.log"\)\.Length$/);
   const send = at(/^Shell-Run @\('retention-burst', '20'\)$/);
-  const painted = at(/^\[void\]\(Wait-For .*Substring\(\$burstStart\) -match 'PERF\\\[chat\\\]: receive to paint ms=\\d\+ size=\\d\+'/);
+  const painted = at(/^\[void\]\(Wait-For .*Substring\(\$burstStart\) -match \('PERF\\\[chat\\\]: receive to paint ms=\\d\+ size=' \+ \(2000 \+ \$burst \* 20\) \+ '\(\?!\\d\)'\)/);
   const measure = at(/^Retention-Copy "burst-\$burst"/);
   assert.ok(mark >= 0 && send >= 0 && painted >= 0 && measure >= 0, 'burst loop lost a step');
   assert.ok(mark < send && send < painted && painted < measure, 'text-size measurement must follow the arrival paint line');

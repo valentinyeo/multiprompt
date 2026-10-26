@@ -391,7 +391,7 @@ function Assert-Retention {
         }
         $burstStart = (Read-Shared "$settings/debug.log").Length
         Shell-Run @('retention-burst', '20')
-        [void](Wait-For "IGSH-981 burst $burst painted before text size is measured" { (Read-Shared "$settings/debug.log").Substring($burstStart) -match 'PERF\[chat\]: receive to paint ms=\d+ size=\d+' })
+        [void](Wait-For "IGSH-981 burst $burst painted before text size is measured" { (Read-Shared "$settings/debug.log").Substring($burstStart) -match ('PERF\[chat\]: receive to paint ms=\d+ size=' + (2000 + $burst * 20) + '(?!\d)') })
         Retention-Copy "burst-$burst" (2000 + $burst * 20)
         $anchors += $retentionPosition
         Shot "retention-burst-$burst"
