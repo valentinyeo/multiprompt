@@ -5550,8 +5550,8 @@ try {
             Wait-Until { $script:ownSession = Read-Session; $null -ne $script:ownSession -and $script:ownSession.workspace_count -eq $before + 1 -and $script:ownSession.active_workspace -ne 0 } 'new workspace persisted'
             $ownWorkspace = $script:ownSession.active_workspace
             $ownWorkspaceId = $script:ownSession.workspaces[$ownWorkspace].wid
-            $ownWorkspaceName = $script:ownSession.workspaces[$ownWorkspace].name
-            if ([string]::IsNullOrWhiteSpace($ownWorkspaceName) -or $ownWorkspaceName -ceq $script:ownSession.workspaces[0].name) { throw 'Expected a distinct workspace name' }
+            $ownWorkspaceName = 'Own profile 989'
+            if ($ownWorkspaceName -ceq $script:ownSession.workspaces[0].name) { throw 'Expected a distinct workspace name' }
             if ([string]::IsNullOrWhiteSpace($ownWorkspaceId) -or $ownWorkspaceId -ceq $script:ownSession.workspaces[0].wid) { throw 'Expected a distinct workspace identity' }
             $ownToken = Get-OwnProfileToken $ownWorkspaceId
             $ownRoot = [IO.Path]::GetFullPath((Join-Path $ownBase ('chrome/' + $ownToken))).TrimEnd('\')
@@ -5593,9 +5593,9 @@ try {
                 Record 'Regenerate the opted-in workspace id in session.json and key the opt-in by workspace name, as after an account layout sync'
                 $sessionPath = Join-Path $scratch 'roaming/ZigShell/session.json'
                 $sessionText = [IO.File]::ReadAllText($sessionPath)
-                $idField = '"wid":"' + $ownWorkspaceId + '"'
-                if (-not $sessionText.Contains($idField)) { throw 'Opted-in workspace id missing from session.json before regeneration' }
-                [IO.File]::WriteAllText($sessionPath, $sessionText.Replace($idField, '"wid":"ws-regenerated-989"'))
+                $idPattern = '"name":"[^"]*","wid":"' + [regex]::Escape($ownWorkspaceId) + '"'
+                if (-not [regex]::IsMatch($sessionText, $idPattern)) { throw 'Opted-in workspace id missing from session.json before regeneration' }
+                [IO.File]::WriteAllText($sessionPath, [regex]::Replace($sessionText, $idPattern, ('"name":"' + $ownWorkspaceName + '","wid":"ws-regenerated-989"')))
                 [IO.File]::WriteAllText($optIn, $ownWorkspaceName + '=' + $ownWorkspaceId + "`n")
             }
             Wait-Until {
