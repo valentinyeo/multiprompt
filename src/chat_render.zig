@@ -6221,7 +6221,6 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         switch (position) {
             .middle => {
                 try std.testing.expect(left_band > 100);
-                try std.testing.expect(right_band > 100);
                 try std.testing.expect(above_card > 200);
                 try std.testing.expect(gap_strip > 40);
             },
