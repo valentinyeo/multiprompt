@@ -113,3 +113,9 @@ test('IGSH-718 journey requires real owned mouse input, exact new log, popup dis
   assert.equal(neutral([54, 118, 232], [243, 243, 243]), false);
   assert.equal(neutral([24, 24, 24], [24, 24, 24]), false);
 });
+
+test('IGSH-966 the Stop button shows no hover label and still highlights on hover', () => {
+  assert.doesNotMatch(layout, /Stop \(Esc\)|paintChatStopTooltip/);
+  assert.match(layout, /const hover = glyph == .stop and app_state.g_chat_stop_hover/);
+  assert.match(control, /hoverLabelDiffPixels/);
+});

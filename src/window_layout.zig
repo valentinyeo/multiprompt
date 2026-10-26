@@ -447,11 +447,7 @@ pub fn paintChatView(hdc: HANDLE) void {
         close.left = label.right;
         _ = DrawTextW(hdc, L("×"), -1, &close, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
-    if (chatPermissionVisible()) {
-        paintChatPermission(hdc, card_border);
-        return;
-    }
-    paintChatStopTooltip(hdc, layout);
+    if (chatPermissionVisible()) paintChatPermission(hdc, card_border);
 }
 
 var chat_buttons_logged: [13]i32 = @splat(std.math.minInt(i32));
@@ -472,23 +468,6 @@ fn logChatButtons(layout: @import("app_state.zig").ChatViewLayout) void {
     }
     if (layout.send_shown) debugLog(std.fmt.bufPrint(&log, "[chat] send rect {d},{d},{d},{d}", .{ send.left, send.top, send.right, send.bottom }) catch "");
     if (layout.stop_shown) debugLog(std.fmt.bufPrint(&log, "[chat] stop rect {d},{d},{d},{d}", .{ stop.left, stop.top, stop.right, stop.bottom }) catch "");
-}
-
-fn paintChatStopTooltip(hdc: HANDLE, layout: @import("app_state.zig").ChatViewLayout) void {
-    if (!app_state.g_chat_stop_hover or !layout.stop_shown) return;
-    const text = L("Stop (Esc)");
-    const old_font = SelectObject(hdc, @import("drawing.zig").uiFontSubtitle());
-    defer _ = SelectObject(hdc, old_font);
-    var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
-    _ = DrawTextW(hdc, text, -1, &calc, @import("win32.zig").DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
-    const width = calc.right - calc.left + uiScaled(12);
-    const left = @max(layout.composer_card.left, layout.stop_btn.right - width);
-    var tip = RECT{ .left = left, .top = layout.composer_card.top - uiScaled(28), .right = left + width, .bottom = layout.composer_card.top - uiScaled(4) };
-    const brush = CreateSolidBrush(@import("themes.zig").themeSidebarBg());
-    _ = @import("win32.zig").FillRect(hdc, &tip, brush);
-    _ = DeleteObject(brush);
-    _ = SetTextColor(hdc, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(65, 65, 75) else RGB(215, 215, 225)));
-    _ = DrawTextW(hdc, text, -1, &tip, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
 pub fn invalidateSpinnerRects() void {
