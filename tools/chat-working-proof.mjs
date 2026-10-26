@@ -12,16 +12,18 @@ export function dots(image, area) {
   const bg = rgb(area.left, area.top);
   const seen = new Set();
   const blobs = [];
-  const ink = (x, y) => Math.max(...rgb(x, y).map((v, i) => Math.abs(v - bg[i]))) > 30;
+  const strength = (x, y) => Math.max(...rgb(x, y).map((v, i) => Math.abs(v - bg[i])));
+  const ink = (x, y) => strength(x, y) > 30;
   for (let y = area.top; y < area.bottom; y++) for (let x = area.left; x < Math.min(area.right, area.left + 180); x++) {
     const key = y * image.width + x;
     if (seen.has(key) || !ink(x, y)) continue;
     const queue = [[x, y]];
     seen.add(key);
-    const blob = { left: x, right: x + 1, top: y, bottom: y + 1, pixels: 0 };
+    const blob = { left: x, right: x + 1, top: y, bottom: y + 1, pixels: 0, peak: 0 };
     for (let i = 0; i < queue.length; i++) {
       const [px, py] = queue[i];
       blob.pixels++;
+      blob.peak = Math.max(blob.peak, strength(px, py));
       blob.left = Math.min(blob.left, px); blob.right = Math.max(blob.right, px + 1);
       blob.top = Math.min(blob.top, py); blob.bottom = Math.max(blob.bottom, py + 1);
       for (const [nx, ny] of [[px - 1, py], [px + 1, py], [px, py - 1], [px, py + 1]]) {
@@ -31,7 +33,7 @@ export function dots(image, area) {
       }
     }
     const w = blob.right - blob.left, h = blob.bottom - blob.top;
-    if (w >= 4 && w <= 12 && h >= 4 && h <= 12 && Math.abs(w - h) <= 1 && blob.pixels / (w * h) >= 0.55) blobs.push(blob);
+    if (w >= 4 && w <= 12 && h >= 4 && h <= 12 && Math.abs(w - h) <= 1 && blob.pixels / (w * h) >= 0.55 && blob.peak <= 120) blobs.push(blob);
   }
   blobs.sort((a, b) => a.left - b.left);
   for (const a of blobs) for (const b of blobs) for (const c of blobs) {

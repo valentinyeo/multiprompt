@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { dots } from './chat-working-proof.mjs';
 
-function frame(centers = [], fill = 200, radius = 3) {
+function frame(centers = [], fill = 100, radius = 3) {
   const image = { width: 200, height: 100, pixels: Buffer.alloc(200 * 100 * 4, 24) };
   for (const [cx, cy] of centers) for (let y = 0; y < 100; y++) for (let x = 0; x < 200; x++) {
     if ((x - cx) ** 2 + (y - cy) ** 2 > radius * radius) continue;
@@ -23,6 +23,10 @@ test('visible three-dot frames are distinguished from idle, one dot and separate
   assert.equal(first.length, 3);
   assert.notDeepEqual(first, second);
   assert.throws(() => dots(frame(), { ...area, right: 201 }), /Invalid transcript/);
+});
+
+test('full strength glyph-sized blobs are not dots', () => {
+  assert.equal(dots(frame([[20, 48], [30, 50], [40, 50]], 200, 3), area), null);
 });
 
 test('small dim dots are still found', () => {
