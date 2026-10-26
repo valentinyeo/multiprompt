@@ -79,7 +79,7 @@ execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/t
         TAG: tag, BUILT_SHA: sha, REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } }),
     admit: (env = {}) => spawnSync('bash', ['tools/auto-release-admit.sh'], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_REPOSITORY: 'example/multiprompt',
-        GH_LOG: log, TESTED_SHA: git('rev-parse', 'HEAD'), ...env } }),
+        GH_LOG: log, TEST_REMOTE: remote, TESTED_SHA: git('rev-parse', 'HEAD'), ...env } }),
     calls: () => fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)),
   };
 }
