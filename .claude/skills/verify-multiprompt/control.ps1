@@ -5734,6 +5734,19 @@ try {
             foreach ($mode in $modes) { $timings[$mode] = @{ samples_ms = @(); app_ms = @(); hang_ms = @(); missing = 0; median_ms = $null; max_ms = $null; max_hang_ms = $null } }
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $gapCase = @{ name = 'chat-switch-speed'; status = 'failed'; detail = 'Chat switch measurement did not complete'; phase = 'initial-console' }
+            function Read-SharedLog([string]$Path) {
+                $stream = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+                try { $reader = New-Object System.IO.StreamReader($stream); try { return $reader.ReadToEnd() } finally { $reader.Dispose() } } finally { $stream.Dispose() }
+            }
+            function Add-SeedTurn([string]$SessionName, [int]$Round) {
+                $index = [int]($SessionName -replace '^.*-', '') - 1
+                $sid = 'a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $index
+                $folder = ('C:/verify/work{0}' -f $index) -replace '[^A-Za-z0-9]', '-'
+                $path = Join-Path $scratch ("profile/.claude/projects/$folder/$sid.jsonl")
+                $text = "Session $index live answer $Round`n`n" + ('This paragraph stands in for a running agent adding a new answer to the conversation while another session is in front. ' * 3)
+                $row = [ordered]@{ type = 'assistant'; timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'); sessionId = $sid; uuid = [guid]::NewGuid().ToString(); isSidechain = $false; message = [ordered]@{ role = 'assistant'; id = ('msg_live_' + [guid]::NewGuid().ToString('N').Substring(0, 12)); model = 'claude-opus-5-5'; content = @(@{ type = 'text'; text = $text }) } }
+                [IO.File]::AppendAllText($path, (($row | ConvertTo-Json -Depth 6 -Compress) + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+            }
             $result.checks += $gapCase
             $shellIds = @()
             $toggleReady = $null
@@ -5809,12 +5822,14 @@ try {
                         $target = ($current + 1) % $sessionCount
                         Doctor
                         Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before the switch' 10
+                        Add-SeedTurn (Read-Session).tabs[$target].tmux_session $sample
+                        Start-Sleep -Milliseconds 300
                         $offset = (Get-Item -LiteralPath $log).Length
                         $needle = '[switch] chat content shown shell=' + $shellIds[$target] + ' '
                         Record "Ctrl+$($target + 1): switch to Chat View session $target ($mode sample $sample)"
                         $measured = [VerifyNative]::SwitchToSession($target, $log, $offset, $needle, $settleMs)
                         if ((Read-Session).active_tab -ne $target) { throw "Switch $sample did not select session $target" }
-                        $text = [IO.File]::ReadAllText($log)
+                        $text = Read-SharedLog $log
                         $range = if ($offset -le $text.Length) { $text.Substring($offset) } else { '' }
                         $appMs = $null
                         $found = [regex]::Match($range, [regex]::Escape($needle) + 'blocks=\d+ ms=(\d+)')
