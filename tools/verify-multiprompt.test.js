@@ -227,7 +227,7 @@ test('G2: offline startup uses the actual ephemeral app-owned loopback listener'
   assert.match(journey, /tunnel-inbound listening port=\(\\d\+\) err=0/);
   assert.match(journey, /Get-NetTCPConnection -State Listen -LocalAddress '127\.0\.0\.1' -LocalPort \$script:zsbPort/);
   assert.match(journey, /\$_.OwningProcess -eq \$process.Id/);
-  assert.match(bridge, /"workspace-list"\) or std\.mem\.eql\(u8, argv\[0\], "session-open"\) or std\.mem\.eql\(u8, argv\[0\], "session-status"\)\) \{\s*sendZsbWorkspaceResponse/);
+  assert.match(bridge, /"workspace-list"\) or std\.mem\.eql\(u8, argv\[0\], "session-open"\) or std\.mem\.eql\(u8, argv\[0\], "session-status"\) or zsbIsTabVerb\(argv\[0\]\)\) \{\s*sendZsbWorkspaceResponse/);
   assert.match(bridge, /zsbSessionOpen\(args, out, @import\("console.zig"\)\.spawnBackgroundTmuxSession, saveSession\)/);
 });
 
