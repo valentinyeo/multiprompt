@@ -314,14 +314,13 @@ function assertsDispatchOnly(source) {
   assert.match(source, /FEATURE -notin @\([^\n]*'browser-switch-speed'/);
 }
 
-test('PR journeys are appearance-only while master pushes and release tags retain the full matrix', () => {
+test('PR journeys are appearance-only while master and manual runs retain the full matrix', () => {
   const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me'];
   function contract(source) {
-    assert.match(source, /^  push:\n    branches: \[master\]\n    tags: \['v\*'\]/m);
+    assert.match(source, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'push'), full);
-    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/tags/v0.28.837'), full);
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837'), full);
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
   }
