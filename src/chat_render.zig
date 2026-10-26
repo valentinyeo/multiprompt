@@ -1804,6 +1804,7 @@ var g_choice_card_w: i32 = 0;
 var g_choice_pick_key: u64 = 0;
 var g_choice_pick_index: usize = 0;
 var g_choice_pick_set = false;
+var g_choice_pick_prompt = false;
 var g_choice_pick_sid: u32 = 0;
 
 fn chatChoiceCardCount() usize {
@@ -1909,6 +1910,10 @@ fn chatChoicesRefresh(buf: []const u16) void {
         if (chatChoicePickFor(chatChoiceKey(&next.group, true, 0))) next.chosen = g_choice_pick_index;
         next.live = next.chosen == null;
     } else _ = chatChoicesFind(buf, &next);
+    if (g_choice_pick_prompt and !(next.present and next.prompt)) {
+        g_choice_pick_set = false;
+        g_choice_pick_prompt = false;
+    }
     g_choice = next;
 }
 
@@ -1972,7 +1977,10 @@ fn chatChoiceClick(index: usize) void {
     g_choice_pick_index = index;
     g_choice_pick_set = true;
     g_choice_pick_sid = app_state.shells[app_state.active_shell].shell_id;
-    chatImageReady();
+    g_choice_pick_prompt = g_choice.prompt;
+    g_choice.chosen = index;
+    g_choice.live = false;
+    if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
 
 fn chatPaintChoiceTitle(hdc: HANDLE, text_color: DWORD, sub_color: DWORD) void {
@@ -2007,7 +2015,7 @@ fn chatChoicesLog() void {
     for (g_choice_rects[0..g_choice_rect_count]) |rc| hash = (hash *% 31 +% @as(u64, @bitCast(@as(i64, rc.top - app_state.g_chat_scroll_y)))) *% 31 +% @as(u64, @bitCast(@as(i64, rc.left)));
     if (hash == g_choice_logged) return;
     g_choice_logged = hash;
-    var log: [512]u8 = undefined;
+    var log: [1024]u8 = undefined;
     var len = (std.fmt.bufPrint(&log, "CHAT_CHOICES prompt={d} live={d} chosen={d} n={d}", .{ @intFromBool(g_choice.prompt), @intFromBool(g_choice.live), if (g_choice.chosen) |c| @as(i64, @intCast(c)) else -1, g_choice_rect_count }) catch return).len;
     for (g_choice_rects[0..g_choice_rect_count], 0..) |rc, i| {
         const part = std.fmt.bufPrint(log[len..], " c{d}={d},{d},{d},{d}", .{ i, rc.left, rc.top - app_state.g_chat_scroll_y, rc.right, rc.bottom - app_state.g_chat_scroll_y }) catch break;
