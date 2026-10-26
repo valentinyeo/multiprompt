@@ -6,7 +6,8 @@
 int main(int argc, char **argv) {
     if (argc != 3) return 1;
     BOOL suggestion = strcmp(argv[1], "suggestion") == 0;
-    BOOL working = strcmp(argv[1], "working") == 0;
+    BOOL inline_working = strcmp(argv[1], "inline") == 0;
+    BOOL working = inline_working || strcmp(argv[1], "working") == 0;
     if (!suggestion && !working && strcmp(argv[1], "typed") != 0) return 1;
     char path[MAX_PATH];
     if (snprintf(path, sizeof(path), "%s-stdin.bin", argv[2]) >= (int)sizeof(path)) return 2;
@@ -24,6 +25,11 @@ int main(int argc, char **argv) {
     CONSOLE_SCREEN_BUFFER_INFO info;
     if (!GetConsoleScreenBufferInfo(output, &info)) return 4;
     COORD origin = {0, info.srWindow.Bottom};
+    if (inline_working) {
+        COORD user = {0, (SHORT)(info.srWindow.Bottom - 4)};
+        const WCHAR *question = L"\x276f Please respond.";
+        if (!SetConsoleCursorPosition(output, user) || !WriteConsoleW(output, question, (DWORD)wcslen(question), &written, NULL)) return 4;
+    }
     if (working) {
         COORD status = {0, (SHORT)(info.srWindow.Bottom - 2)};
         const WCHAR *thinking = L"\x273b Thinking\x2026 (esc to interrupt)";
@@ -52,6 +58,18 @@ int main(int argc, char **argv) {
     fputs("]}", ready);
     fclose(ready);
     for (;;) {
+        if (inline_working) {
+            if (snprintf(path, sizeof(path), "%s-reply", argv[2]) >= (int)sizeof(path)) return 2;
+            if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
+                COORD user = {0, (SHORT)(info.srWindow.Bottom - 4)};
+                const WCHAR *reply = L"\x1b[0m\x1b[2J";
+                if (!WriteConsoleW(output, reply, (DWORD)wcslen(reply), &written, NULL) || !SetConsoleCursorPosition(output, user)) return 4;
+                reply = L"\x276f Please respond.\r\n\r\n\x25cf Ready.\r\n\x276f ";
+                if (!WriteConsoleW(output, reply, (DWORD)wcslen(reply), &written, NULL)) return 4;
+                inline_working = FALSE;
+            }
+            if (WaitForSingleObject(input, 50) == WAIT_TIMEOUT) continue;
+        }
         INPUT_RECORD record;
         DWORD read;
         if (!ReadConsoleInputW(input, &record, 1, &read) || read != 1) return 6;
