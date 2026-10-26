@@ -2545,7 +2545,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (mx < SIDEBAR_W() and my >= 0) {
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
-                if (sidebarStickyCardHitTest(my)) return 0;
+                if (sidebarStickyCardHitTest(my)) {
+                    if (!app_state.g_sidebar_collapsed and app_state.g_sidebar_status_card == 2) {
+                        @import("telemetry_panel.zig").showSidebarAiUsageMenu();
+                    }
+                    return 0;
+                }
                 const logical_my = my + app_state.g_sidebar_scroll;
                 const ht = hitTestSidebar(logical_my);
                 switch (ht) {
