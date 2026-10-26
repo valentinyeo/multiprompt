@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const FIRST_PORT: u16 = 19548;
-pub const PORT_COUNT: usize = 24;
+pub const PORT_COUNT: usize = 12;
 
 pub const NOTIFY_PORTS = blk: {
     var ports: [PORT_COUNT]u16 = undefined;
