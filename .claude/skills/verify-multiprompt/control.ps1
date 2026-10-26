@@ -1764,7 +1764,8 @@ function WindowShot([string]$Name) {
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try {
         $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
-        $bitmap.Save((Join-Path $Evidence ($Name + '.png')), [Drawing.Imaging.ImageFormat]::Png)
+        $shotPath = Join-Path $Evidence "$Name.png"
+        $bitmap.Save($shotPath, [Drawing.Imaging.ImageFormat]::Png)
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 
