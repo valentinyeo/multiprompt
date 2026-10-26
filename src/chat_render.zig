@@ -1900,12 +1900,7 @@ pub fn chatScrollStateChanged(viewport_h: i32) void {
     const had_messages = app_state.g_chat_new_messages.count() != 0;
     app_state.g_chat_scrolled_up = app_state.g_chat_scroll_y < app_state.g_chat_content_h - viewport_h - uiScaled(4);
     app_state.g_chat_new_messages.atBottom(app_state.g_chat_scrolled_up);
-    if (!app_state.g_chat_scrolled_up and @import("chat_session.zig").chatReadMark(true)) {
-        var client: RECT = std.mem.zeroes(RECT);
-        _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
-        chatRelayout(client.right);
-        app_state.g_chat_scroll_y = app_state.g_chat_content_h - viewport_h;
-    }
+    if (!app_state.g_chat_scrolled_up) _ = @import("chat_session.zig").chatReadMark(true);
     chatNewMessagesChanged(had_messages);
 }
 

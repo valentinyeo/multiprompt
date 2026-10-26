@@ -24,6 +24,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Diagnostic verification
 
+- [Remote switch speed](../diagnostics/remote-switch-speed.md): dedicated Windows baseline/candidate workflow, 20 session switches and 20 workspace switches, 2,000 rendered messages, native paint gaps, one-core CPU, and two-second recovery.
+
 - [Account servers](../diagnostics/account-hosts.md): deterministic Test-workflow Worker and production desktop-sync regression; the offline desktop harness has no account-service stub.
 
 - [Chat sync audit](../diagnostics/chat-sync-audit.md): a dedicated `feature=chat-sync-audit` job runs the real audit renderer and synthetic diagnostic fixtures on GitHub Linux. This is not a desktop journey and makes no UI or live-session claim.

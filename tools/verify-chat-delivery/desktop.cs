@@ -112,11 +112,7 @@ public static class ChatDeliveryDesktop {
         if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
             Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||
             !IsWindowVisible(transcript) || !GetWindowRect(transcript, out rect)) throw new InvalidOperationException("Transcript wheel ownership mismatch");
-        if (!SetCursorPos((rect.Left + rect.Right) / 2, (rect.Top + rect.Bottom) / 2)) throw new InvalidOperationException("Transcript pointer move failed");
-        var input = new Input { Type = 0 };
-        input.Data.Mouse.Flags = 0x0800;
-        input.Data.Mouse.Data = unchecked((uint)delta);
-        if (SendInput(1, new[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Transcript wheel input failed");
+        WheelTranscript(main, pid, transcript, (rect.Left + rect.Right) / 2, (rect.Top + rect.Bottom) / 2, delta);
     }
     public static void PressOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
         if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||

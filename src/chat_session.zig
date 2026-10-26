@@ -935,6 +935,7 @@ pub fn chatFileOnReady() void {
                 (entry.before == 0 and (history.start != entry.history.start or history.inode != entry.history.inode or
                     !std.mem.eql(u8, &history.sid, &entry.history.sid)))) history.start else 0;
             if (entry.unchanged) {
+                entry.history.changed_from = entry.history.blocks.items.len;
                 entry.history.updateCursor(history);
                 entry.history.revision = history.revision;
             } else if (entry.incremental) {
@@ -1233,7 +1234,6 @@ pub fn chatReadMark(bottom: bool) bool {
     if (!bottom and shell.last_read_message_id != 0 and (previous == null or read <= previous.?)) return false;
     if (shell.last_read_message_id == blocks[read].message_id) return false;
     shell.last_read_message_id = blocks[read].message_id;
-    app_state.g_chat_layout_dirty = true;
     saveSession();
     return true;
 }
@@ -1288,7 +1288,9 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].last_read_message_id != 0;
     app_state.g_chat_read_open_pending = false;
     if (app_state.g_chat_read_hold) {
-        if (cached) |entry| entry.next = 0;
+        if (cached) |entry| {
+            if (entry.failures == 0) entry.next = 0;
+        }
     }
     app_state.g_chat_echo_layout_count = 0;
     app_state.g_chat_hover_copy = null;

@@ -36,6 +36,7 @@ if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='
 if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') { $plans = @(@{name='accepted-message'; mode='busy'; text='accepted message stays readable'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
+if ($env:CHAT_SWITCH_PROOF -eq '1') { $plans = @(@{name='remote-switch'; mode='idle'; text='long remote conversation switching'}) }
 if ($env:CHAT_REMOTE_PROOF -eq '1') { $plans = @(@{name='remote-sync'; mode='idle'; text='remote session follows live process'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
@@ -416,7 +417,8 @@ foreach ($plan in $plans) {
     $main = [IntPtr]::Zero
     $composer = [IntPtr]::Zero
     $isAccepted = $plan.name -eq 'accepted-message'
-    $isRemote = $plan.name -eq 'remote-sync'
+    $isSwitch = $plan.name -eq 'remote-switch'
+    $isRemote = $plan.name -eq 'remote-sync' -or $isSwitch
     $isQueue = $plan.name -eq 'queue-draft-sync'
     $isActivity = $plan.name -eq 'messages-only'
     $isHistory = $plan.name -eq 'full-history'
@@ -472,6 +474,7 @@ foreach ($plan in $plans) {
         }
         if ($hasTranscript) { Shell-Run @('init') }
         if ($isHistory) { Shell-Run @($(if ($env:CHAT_RETENTION_PROOF -eq '1') { 'retention-init' } else { 'history' })) }
+        if ($isSwitch) { Shell-Run @('switch-history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
@@ -479,6 +482,7 @@ foreach ($plan in $plans) {
         if ($isRemote) {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
             $saved.tabs[0].tmux_host = 2
+            if ($isSwitch) { $saved.single_window = $true }
             Save $saved "$settings/session.json"
         }
         Copy-Item "$settings/session.json" "$caseDir/seed-session.json"
@@ -535,6 +539,8 @@ foreach ($plan in $plans) {
             Press @(0x0D) 'Enter: send reload plugins' $true
             [void](Wait-For 'reload refresh without reopening list' { (Read-Shared "$state/completion.jsonl").Contains('verify-beta') } 5)
             $observation.skills = @{newSkillMs=$elapsed; selected=$selected; accepted=$accepted; reload=$true}
+        } elseif ($isSwitch) {
+            . "$PSScriptRoot/remote-switch.ps1"
         } elseif ($isRemote) {
             [void](Wait-For 'initial remote transcript read' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
             Bind-Transcript
@@ -985,6 +991,10 @@ Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_pro
 Stop-Transcript
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-accepted-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
+if ($env:CHAT_SWITCH_PROOF -eq '1') {
+    & node "$PSScriptRoot/../remote-switch-proof.mjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_REMOTE_PROOF -eq '1') {
