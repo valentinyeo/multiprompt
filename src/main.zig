@@ -153,6 +153,8 @@ const WM_APP_ALL_SESSIONS_OPEN = @import("win32.zig").WM_APP_ALL_SESSIONS_OPEN;
 const WM_APP_ALL_SESSIONS_KEY = @import("win32.zig").WM_APP_ALL_SESSIONS_KEY;
 const WM_APP_REMIND_PRESETS_OPEN = @import("win32.zig").WM_APP_REMIND_PRESETS_OPEN;
 const WM_APP_ARCHIVE_ARM = @import("win32.zig").WM_APP_ARCHIVE_ARM;
+const WM_APP_MORE_MENU_ACTION = @import("win32.zig").WM_APP_MORE_MENU_ACTION;
+const more_menu = @import("more_menu.zig");
 const WM_APP_SHOT_PASTE = @import("win32.zig").WM_APP_SHOT_PASTE;
 const WM_APP_BROWSER_SHOTURL = @import("win32.zig").WM_APP_BROWSER_SHOTURL;
 const WM_APP_CHAT_TAB_URL = @import("win32.zig").WM_APP_CHAT_TAB_URL;
@@ -676,6 +678,7 @@ const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFS
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
+const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -1115,6 +1118,7 @@ const startLadderMode = @import("telemetry_panel.zig").startLadderMode;
 const cycleSidebarStatusCard = @import("telemetry_panel.zig").cycleSidebarStatusCard;
 const changelogDefaultTicket = @import("changelog.zig").changelogDefaultTicket;
 const openChangelogTicket = @import("changelog.zig").openChangelogTicket;
+const chatTitleLayout = @import("drawing.zig").chatTitleLayout;
 const resetPaintBackbuffer = @import("drawing.zig").resetPaintBackbuffer;
 const ensurePaintBackbuffer = @import("drawing.zig").ensurePaintBackbuffer;
 const resetFontCache = @import("drawing.zig").resetFontCache;
@@ -1541,6 +1545,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SIZE => {
+            more_menu.close();
             const SIZE_MINIMIZED: WPARAM = 1;
             if (wp == SIZE_MINIMIZED) {
                 resetPaintBackbuffer();
@@ -1892,6 +1897,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     closeUrlPicker();
                 }
                 return 0;
+            }
+            if (chatViewOwnsInput()) {
+                if (chatTitleLayout()) |title| {
+                    const more = title.more;
+                    if (mx >= more.left and mx < more.right and my >= more.top and my < more.bottom) {
+                        more_menu.open();
+                        return 0;
+                    }
+                }
             }
             {
                 const tth_click = threadTitleHeight();
@@ -3453,6 +3467,35 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             return 0;
         },
+        WM_APP_MORE_MENU_ACTION => {
+            if (app_state.active_shell >= app_state.shell_count) return 0;
+            const shell = app_state.active_shell;
+            const tmux = app_state.shells[shell].tmux_session_len > 0;
+            switch (wp) {
+                @intFromEnum(more_menu.Item.approve) => _ = @import("chat_send.zig").chatPermissionAnswer(shell, .allow),
+                @intFromEnum(more_menu.Item.stop) => {
+                    if (app_state.ISSUE_265_WORKING_BAR) _ = @import("chat_send.zig").chatStopAgent(shell) else _ = PostMessageW(hwnd, WM_APP_CHAT_INTERRUPT, 0, 0);
+                },
+                @intFromEnum(more_menu.Item.terminal) => _ = PostMessageW(hwnd, WM_APP_CHAT_TOGGLE, 0, 0),
+                @intFromEnum(more_menu.Item.rename) => _ = beginPaletteRenameInput(shell),
+                @intFromEnum(more_menu.Item.history) => {
+                    app_state.g_search_spawn_ws = 0xFF;
+                    app_state.g_all_sessions_unattached_only = false;
+                    app_state.g_all_sessions_tab = AS_TAB_ARCHIVED;
+                    openAllSessions(hwnd);
+                },
+                @intFromEnum(more_menu.Item.waiting) => hideActiveTabUntilAttention(),
+                @intFromEnum(more_menu.Item.remind) => if (tmux) {
+                    _ = PostMessageW(hwnd, WM_APP_REMIND_PRESETS_OPEN, 0, 0);
+                },
+                @intFromEnum(more_menu.Item.archive) => archiveActiveTab(),
+                @intFromEnum(more_menu.Item.end_session) => if (tmux) endActiveTmuxSession(),
+                @intFromEnum(more_menu.Item.remove) => closeNonTmuxTabAt(shell),
+                else => {},
+            }
+            _ = InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
         WM_APP_CHAT_TOGGLE => {
             toggleChatView();
             return 0;
@@ -4611,6 +4654,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     showActiveShellAfterOverlay();
                     chatCopySelection();
                     _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_CHAT_MORE_MENU_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = @import("win32.zig").UpdateWindow(hwnd);
+                    if (app_state.g_chat_active) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
+                    more_menu.open();
                     return 0;
                 }
                 if (target == SEARCH_CHAT_FOCUS_MESSAGES_OFFSET) {

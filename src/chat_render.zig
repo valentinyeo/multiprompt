@@ -6873,6 +6873,95 @@ test "IGSH-1001 the scroll-down button sits on a clear gap, not on chat text" {
     try std.testing.expectEqual(ink, scrollProofColor(beside));
 }
 
+fn moreMenuProofNear(pixel: u32, r: u32, g: u32, b: u32, slack: u32) bool {
+    const near = struct {
+        fn within(a: u32, e: u32, d: u32) bool {
+            return (if (a > e) a - e else e - a) <= d;
+        }
+    }.within;
+    return near(pixel & 0xFF, r, slack) and near((pixel >> 8) & 0xFF, g, slack) and near((pixel >> 16) & 0xFF, b, slack);
+}
+
+fn moreMenuProof(frame_dc: HANDLE, frame_pixels: []const u32, frame_w: usize, pane: RECT, more: RECT, bg: u32) !void {
+    const w = @import("win32.zig");
+    const more_menu = @import("more_menu.zig");
+    const pane_w = pane.right - pane.left;
+    const pane_h = pane.bottom - pane.top;
+    var backdrop = more_menu.captureBackdrop(frame_dc, pane.left, pane.top, pane_w, pane_h, 0x00CC0020) orelse return error.TestUnexpectedResult;
+    defer backdrop.release();
+    const menu_dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(menu_dc);
+    const menu_info: w.BITMAPINFO = .{ .header = .{ .width = pane_w, .height = -pane_h } };
+    var menu_bits: ?*anyopaque = null;
+    const menu_bitmap = w.CreateDIBSection(menu_dc, &menu_info, 0, &menu_bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(menu_bitmap);
+    const old_menu = SelectObject(menu_dc, menu_bitmap);
+    defer _ = SelectObject(menu_dc, old_menu);
+    _ = w.BitBlt(menu_dc, 0, 0, pane_w, pane_h, backdrop.dc, 0, 0, 0x00CC0020);
+
+    const bounds = RECT{ .left = 0, .top = 0, .right = pane_w, .bottom = pane_h };
+    const anchor = RECT{ .left = more.left - pane.left, .top = more.top - pane.top, .right = more.right - pane.left, .bottom = more.bottom - pane.top };
+    var state: more_menu.State = .{};
+    state.enabled[@intFromEnum(more_menu.Item.model)] = false;
+    const model = std.unicode.utf8ToUtf16LeStringLiteral("Opus \u{b7} Medium");
+    @memcpy(state.model[0..model.len], model);
+    state.model_len = model.len;
+    more_menu.paint(menu_dc, bounds, anchor, &state);
+    _ = w.GdiFlush();
+
+    const pixels = @as([*]const u32, @ptrCast(@alignCast(menu_bits.?)))[0 .. @as(usize, @intCast(pane_w)) * @as(usize, @intCast(pane_h))];
+    const at = struct {
+        fn get(px: []const u32, width: i32, x: i32, y: i32) u32 {
+            return scrollProofColor(px[@as(usize, @intCast(y)) * @as(usize, @intCast(width)) + @as(usize, @intCast(x))]);
+        }
+    }.get;
+    const geo = more_menu.geometry(bounds, anchor);
+    try std.testing.expect(geo.panel.top >= anchor.bottom);
+    try std.testing.expect(geo.panel.right <= bounds.right);
+    try std.testing.expectEqual(anchor.right, geo.panel.right);
+
+    const dim_x = pane.left + 3;
+    const dim_y = pane.top + 3;
+    const source = scrollProofColor(frame_pixels[@as(usize, @intCast(dim_y)) * frame_w + @as(usize, @intCast(dim_x))]);
+    const shown = at(pixels, pane_w, 3, 3);
+    try std.testing.expect(moreMenuProofNear(shown, (source & 0xFF) * 5 / 12, ((source >> 8) & 0xFF) * 5 / 12, ((source >> 16) & 0xFF) * 5 / 12, 2));
+    _ = bg;
+
+    const panel_probe = at(pixels, pane_w, geo.panel.left + 4, geo.panel.top + @divTrunc(geo.panel.bottom - geo.panel.top, 2));
+    try std.testing.expectEqual(RGB(0x18, 0x18, 0x18), panel_probe);
+    const remove_cell = geo.cells[@intFromEnum(more_menu.Item.remove)];
+    const card_probe = at(pixels, pane_w, remove_cell.left + 4, remove_cell.top + @divTrunc(remove_cell.bottom - remove_cell.top, 2));
+    try std.testing.expectEqual(RGB(0x1F, 0x1F, 0x1F), card_probe);
+
+    var red_rows: usize = 0;
+    var y = remove_cell.top;
+    while (y < remove_cell.bottom) : (y += 1) {
+        var x = remove_cell.left;
+        while (x < remove_cell.right) : (x += 1) {
+            if (moreMenuProofNear(at(pixels, pane_w, x, y), 0xF2, 0x8B, 0x82, 24)) red_rows += 1;
+        }
+    }
+    std.debug.print("IGSH-1020 more menu: red pixels in Remove row={d}\n", .{red_rows});
+    try std.testing.expect(red_rows > 20);
+
+    var plain_red: usize = 0;
+    const approve_cell = geo.cells[@intFromEnum(more_menu.Item.approve)];
+    y = approve_cell.top;
+    while (y < approve_cell.bottom) : (y += 1) {
+        var x = approve_cell.left;
+        while (x < approve_cell.right) : (x += 1) {
+            if (moreMenuProofNear(at(pixels, pane_w, x, y), 0xF2, 0x8B, 0x82, 24)) plain_red += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), plain_red);
+
+    var enabled: [8]u8 = undefined;
+    if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
+        const bytes = @as([*]const u8, @ptrCast(menu_bits.?))[0 .. @as(usize, @intCast(pane_w)) * @as(usize, @intCast(pane_h)) * 4];
+        try scrollProofSave(L("chat-more-menu.bmp"), bytes, menu_info.header);
+    }
+}
+
 test "IGSH-933 messages scroll behind the floating title pill and into the message box" {
     try std.testing.expect(@import("fonts.zig").register());
     defer @import("fonts.zig").unregister();
@@ -7113,4 +7202,14 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         }
     }
     try std.testing.expect(sweep_outside > 200);
+
+    app_state.g_chat_scroll_y = middle_scroll;
+    var menu_rc = RECT{ .left = 0, .top = 0, .right = frame_w, .bottom = frame_h };
+    const menu_brush = CreateSolidBrush(bg);
+    _ = FillRect(frame_dc, &menu_rc, menu_brush);
+    _ = DeleteObject(menu_brush);
+    @import("window_layout.zig").paintChatView(frame_dc);
+    drawing.paintThreadTitle(frame_dc, frame_w);
+    _ = GdiFlush();
+    try moreMenuProof(frame_dc, frame_pixels, frame_w, layout.pane, title_layout.more, bg);
 }

@@ -388,6 +388,9 @@ jobs:
             $image = [Drawing.Bitmap]::FromFile("$pwd/$source")
             try { $image.Save("$pwd/evidence/chat-scroll-behind-$name.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
           }
+          if (-not (Test-Path 'chat-more-menu.bmp')) { throw 'Missing more-menu proof: chat-more-menu.bmp' }
+          $image = [Drawing.Bitmap]::FromFile("$pwd/chat-more-menu.bmp")
+          try { $image.Save("$pwd/evidence/chat-more-menu.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
           node tools/chat-render-reference.mjs evidence
           if ($LASTEXITCODE -ne 0) { throw 'Chrome reference or repaint evidence failed' }
           foreach ($file in @('chat-markdown-render.png', 'chat-markdown-render-gdi.png', 'chrome-reference.png', 'repaint-ms.json')) {
