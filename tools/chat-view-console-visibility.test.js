@@ -284,6 +284,7 @@ var g_chat_browser_swap = struct {
 }{};
 var g_chat_switch_started: u64 = 0;
 var g_chat_switch_browser_sid: u32 = 0;
+var g_chat_switch_content_sid: u32 = 0;
 var g_chat_switch_preparing = false;
 var g_browser_focus_mode = false;
 var g_shell_focused = true;
