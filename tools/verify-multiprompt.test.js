@@ -976,7 +976,7 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.match(control, /function Activate-OwnedFrame \{[\s\S]*?SetForegroundWindow\(\$script:window\)[\s\S]*?GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
   assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
   assert.match(palette, /'command palette initialized and owned frame focused' 20/);
-  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed'))"), control.indexOf("    Record 'Launch complete;"));
+  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-first-paint'))"), control.indexOf("    Record 'Launch complete;"));
   assert.match(setup, /ZigShell\/EdgeUserData/);
   assert.match(setup, /\$warmupJob.Start\(\$edge/);
   assert.match(setup, /MainWindowTitle -match '\^Multiprompt verification browser ready'/);
@@ -1942,7 +1942,7 @@ test('IGSH-678 chat code font journey measures real console code and names every
 test('IGSH-702 remind-me journey presses Ctrl+H and proves the picker by the app palette rows log', () => {
   assert.match(control, /ValidateSet\([^\n)]*'remind-me'/);
   assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'remind-me'/);
-  assert.match(workflow, /fromJSON\('\[[^\n]*"remind-me"\]'\)/);
+  assert.match(workflow, /fromJSON\('\[[^\n]*"remind-me"(?:, "[a-z-]+")*\]'\)/);
   const journey = control.slice(control.indexOf("        'remind-me' {"), control.indexOf("        'group-rail' {"));
   assert.match(journey, /Press @\(0x11, 0x48\)/);
   assert.match(journey, /SEARCH_REMIND_PRESET_OFFSET/);
@@ -2082,7 +2082,7 @@ test('IGSH-925 chat-first-paint journey relaunches a saved chat with a docked br
   for (const required of ['first-paint-layout', 'docked-browser-pane', 'fast-reopen', 'IGSH-568', 'chat layout moved after first paint']) assert.ok(map.includes(required), required);
   assert.match(read(skill + 'features/README.md'), /\[Chat first paint\]\(chat-first-paint.md\)/);
   assert.match(read(skill + 'SKILL.md'), /`chat-first-paint`/);
-  assert.throws(() => assert.match(control.replace("'chat-first-paint')][string]$Feature", "')][string]$Feature"), /ValidateSet\([^\n)]*'chat-first-paint'/));
+  assert.throws(() => assert.match(control.replace("'chat-first-paint', ", ''), /ValidateSet\([^\n)]*'chat-first-paint'/));
 });
 
 test('IGSH-905 six-line composer proof holds Shift until the native composer shows the newline and always releases it', () => {

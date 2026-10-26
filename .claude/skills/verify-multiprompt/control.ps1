@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'relaunch-saved-sessions', 'chat-first-paint')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'chat-first-paint', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -4671,9 +4671,10 @@ try {
                 if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$rect)) { throw 'Window rectangle unavailable' }
                 $bitmap = New-Object Drawing.Bitmap(($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top))
                 $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                $file = Join-Path $Evidence "$Name.png"
                 try {
                     $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
-                    $bitmap.Save((Join-Path $Evidence ($Name + '.png')), [Drawing.Imaging.ImageFormat]::Png)
+                    $bitmap.Save($file, [Drawing.Imaging.ImageFormat]::Png)
                 } finally { $graphics.Dispose(); $bitmap.Dispose() }
             }
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -eq 'cmd' } 'one real CMD session'
@@ -4734,7 +4735,7 @@ try {
             Capture-Window 'settled'
             $all = Read-LaunchLog
             $trace = if ($all.Length -ge $logOffset) { $all.Substring($logOffset) } else { $all }
-            Set-Content -LiteralPath (Join-Path $Evidence 'launch-2.debug.log') -Value $trace -Encoding UTF8
+            $trace | Out-File -LiteralPath (Join-Path $Evidence 'launch-2.debug.log') -Encoding utf8
             $client = ''
             $events = @()
             foreach ($line in ($trace -split "`n")) {
