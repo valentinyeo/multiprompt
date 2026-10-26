@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+TOOL_CALL = re.compile(r'^● [A-Za-z_]+(?: [A-Z][A-Za-z_]*)*\(')
 SETTLE_SECONDS = 5
 SETTLE_LIMIT_SECONDS = 45
 
@@ -46,11 +47,11 @@ def pane_candidates(capture):
             pending = True
         elif re.match(r'^[❯›>] ', line):
             prompt, pending = line_no, False
-        elif re.match(r'^● [A-Za-z_]+\(', line) and line_no < len(lines) and ANSI.sub('', lines[line_no]).lstrip().startswith('⎿'):
+        elif TOOL_CALL.match(line) and line_no < len(lines) and ANSI.sub('', lines[line_no]).lstrip().startswith('⎿'):
             pending = False
         if line_no > len(lines) - 8:
             continue
-        if line.startswith('● ') and not re.match(r'^● [A-Za-z_]+\(', line):
+        if line.startswith('● ') and not TOOL_CALL.match(line):
             if ANSI.sub('', lines[line_no]).lstrip().startswith('⎿'):
                 continue
             text = line[2:].strip()
