@@ -261,3 +261,117 @@ test('executed production Zig decision, show, picker-close and input paths pass;
     assert.match(baseline.stderr, /URL picker close[^]*FAIL/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+function chatHandoffHarness(text) {
+  const open = fn(text, 'openChatView')
+    .replaceAll('@import("focus.zig").parkMainWindowBeforeActiveShellRemoval', 'parkMainWindowBeforeActiveShellRemoval')
+    .replaceAll('@import("win32.zig").TIMER_CHAT_BROWSER_SWAP', 'TIMER_CHAT_BROWSER_SWAP')
+    .replaceAll('@import("chat_switch.zig").paint_deadline_ms', '30');
+  return `const std = @import("std");
+const HANDLE = ?usize;
+const SW_HIDE = 0;
+const SW_SHOW = 5;
+const TIMER_CHAT_BROWSER_SWAP = 1;
+const g_main_hwnd: HANDLE = 100;
+const g_chat_transcript_hwnd: HANDLE = 101;
+const g_chat_composer_hwnd: HANDLE = 102;
+var shell_count: u32 = 1;
+var active_shell: u32 = 0;
+var shells = [_]struct { hwnd: HANDLE = 10, shell_id: u32 = 1, chat_view_on: bool = false }{.{}};
+var g_chat_browser_swap = struct {
+    shell_id: u32 = 1,
+    fn request(self: *@This(), id: u32, _: u64) void { self.shell_id = id; }
+}{};
+var g_chat_switch_started: u64 = 0;
+var g_chat_switch_browser_sid: u32 = 0;
+var g_chat_switch_preparing = false;
+var g_browser_focus_mode = false;
+var g_shell_focused = true;
+var g_chat_active = false;
+var g_voice_deferred_text: [0]struct { shell_id: u32, len: usize, text: [1]u16 } = .{};
+var foreground: HANDLE = 10;
+var focused: HANDLE = 10;
+var attached = false;
+var hidden_while_foreground = false;
+var hide_requested = false;
+var controls_ready = true;
+fn GetTickCount64() u64 { return 1000; }
+fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?usize) usize { return 1; }
+fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) i32 { return 1; }
+fn closeWebView2() void {}
+fn cancelShellRefocus(_: HANDLE) void {}
+fn ensureChatControls() bool { return controls_ready; }
+fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
+fn chatDraftBindToActive() void {}
+fn chatDeferTranscriptLoad() void {}
+fn layoutChatControls() void {}
+fn insertTextIntoChatComposer(_: []const u16) void {}
+fn verboseLoggingEnabled() bool { return false; }
+fn debugLog(_: []const u8) void {}
+fn GetForegroundWindow() HANDLE { return foreground; }
+fn foregroundHwndIsOurs(hwnd: HANDLE) bool { return hwnd == g_main_hwnd or hwnd == shells[0].hwnd or hwnd == 20; }
+fn focusGuard(_: HANDLE) bool { return foregroundHwndIsOurs(foreground); }
+fn GetCurrentThreadId() u32 { return 1; }
+fn GetWindowThreadProcessId(_: HANDLE, _: ?usize) u32 { return 2; }
+fn AttachThreadInput(_: u32, _: u32, attach: i32) i32 { attached = attach != 0; return 1; }
+fn SetForegroundWindow(hwnd: HANDLE) i32 {
+    if (!focusGuard(hwnd)) return 0;
+    if (foreground != g_main_hwnd and !attached) return 0;
+    foreground = hwnd;
+    return 1;
+}
+fn SetFocus(hwnd: HANDLE) HANDLE { if (foreground == g_main_hwnd) focused = hwnd; return null; }
+fn ShowWindow(_: HANDLE, _: i32) i32 { return 1; }
+fn ShowWindowAsync(hwnd: HANDLE, _: i32) i32 {
+    hide_requested = true;
+    hidden_while_foreground = foreground == hwnd;
+    return 1;
+}
+${fn(text, 'parkMainWindowBeforeActiveShellRemoval')}
+${open}
+test "IGSH-955 chat takes foreground before asynchronously hiding the console" {
+    for ([_]HANDLE{ 10, 20, 100 }) |initial| {
+        foreground = initial;
+        focused = initial;
+        hide_requested = false;
+        hidden_while_foreground = false;
+        openChatView();
+        try std.testing.expect(hide_requested);
+        try std.testing.expect(!hidden_while_foreground);
+        try std.testing.expectEqual(g_main_hwnd, foreground);
+        try std.testing.expectEqual(g_chat_composer_hwnd, focused);
+        try std.testing.expect(!attached);
+    }
+}
+test "IGSH-955 background chat restore never takes another app's foreground" {
+    foreground = 999;
+    focused = 999;
+    openChatView();
+    try std.testing.expectEqual(@as(HANDLE, 999), foreground);
+    try std.testing.expectEqual(@as(HANDLE, 999), focused);
+    try std.testing.expect(!attached);
+}
+test "IGSH-955 failed chat control creation leaves console focus intact" {
+    foreground = 10;
+    focused = 10;
+    hide_requested = false;
+    controls_ready = false;
+    openChatView();
+    try std.testing.expect(!hide_requested);
+    try std.testing.expectEqual(@as(HANDLE, 10), foreground);
+    try std.testing.expectEqual(@as(HANDLE, 10), focused);
+}
+`;
+}
+
+test('IGSH-955 production chat handoff transfers cross-thread foreground before hiding; preserves background focus', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-handoff-zig-'));
+  try {
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, chatHandoffHarness(source));
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /All 3 tests passed/);
+    console.log(result.stderr.trim());
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
