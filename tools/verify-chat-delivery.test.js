@@ -878,4 +878,6 @@ test('send-stays-gone evidence fails when a sent message comes back or a send is
   assert.deepEqual(row().detail, { sends: 20, watchedSeconds: 10, longMessages: 5, delivered: 19, pending: 1 });
   files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: 'unrelated text', s: 3 }] }] }));
   assert.match(row().detail, /none was dropped/);
+  files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: `${sendTexts[11]}${sendTexts[13]}`, s: 0 }] }] }));
+  assert.match(row().detail, /came back into the box and was sent again joined to the next message/);
 });

@@ -107,6 +107,8 @@ function evaluateSendCase(context) {
   assert.equal(entered.length, sendTexts.length, 'one real Enter per message');
   const enqueued = lines(`${name}/transcript.jsonl`).filter(row => row.type === 'queue-operation' && row.operation === 'enqueue').map(row => row.content);
   const pending = (json(`${name}/outbox-final.json`).queues || []).flatMap(queue => queue.messages || []).map(message => message.t);
+  const joined = [...enqueued, ...pending].filter(text => typeof text === 'string' && sendTexts.filter(sent => text.includes(sent)).length > 1);
+  assert.deepEqual(joined, [], 'sent text came back into the box and was sent again joined to the next message');
   const lost = sendTexts.filter(text => !enqueued.includes(text) && !pending.includes(text));
   assert.deepEqual(lost, [], 'every sent message was either queued by Claude or is still pending in the Chat View outbox, none was dropped');
   const cleanup = json(`${name}/cleanup.json`);
