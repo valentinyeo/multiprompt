@@ -1790,6 +1790,8 @@ const ChoiceState = struct {
     present: bool = false,
     prompt: bool = false,
     anchor: usize = 0,
+    ordinal: usize = 0,
+    answered_below: bool = false,
     live: bool = false,
     chosen: ?usize = null,
 };
@@ -1824,13 +1826,19 @@ fn chatChoiceStripH() i32 {
     return uiScaled(CHOICE_GAP) + title + cards * uiScaled(CHOICE_CARD_H) + (cards - 1) * uiScaled(CHOICE_GAP);
 }
 
-fn chatChoiceKey(group: *const chat_options.Group, prompt: bool, anchor: usize) u64 {
-    return if (prompt) group.hash() else group.hash() *% 31 +% anchor;
+fn chatChoiceKey(group: *const chat_options.Group, prompt: bool, ordinal: usize) u64 {
+    return if (prompt) group.hash() else group.hash() *% 31 +% ordinal;
 }
 
 fn chatChoiceUserText(buf: []const u16, block: ChatBlock) []const u16 {
     const disp = chatBlockDisplayRange(buf, block);
     return buf[disp.start .. disp.start + disp.len];
+}
+
+fn chatChoicePickFor(key: u64) bool {
+    if (!g_choice_pick_set or g_choice_pick_key != key) return false;
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    return g_choice_pick_sid == app_state.shells[app_state.active_shell].shell_id;
 }
 
 fn chatChoicesFind(buf: []const u16, found: *ChoiceState) bool {
@@ -1858,6 +1866,10 @@ fn chatChoicesFind(buf: []const u16, found: *ChoiceState) bool {
         }
         if (role != .tool) anchor = j;
     }
+    var ordinal: usize = 0;
+    for (blocks[0 .. lp + 1]) |block| {
+        if (block.role == .prose) ordinal += 1;
+    }
     var chunks: [64]chat_options.Chunk = undefined;
     var n: usize = 0;
     for (blocks[start .. lp + 1]) |block| {
@@ -1873,8 +1885,10 @@ fn chatChoicesFind(buf: []const u16, found: *ChoiceState) bool {
     found.present = true;
     found.prompt = false;
     found.anchor = anchor;
-    const key = chatChoiceKey(&found.group, false, anchor);
-    if (g_choice_pick_set and g_choice_pick_key == key) found.chosen = g_choice_pick_index;
+    found.ordinal = ordinal;
+    found.answered_below = user_after != null;
+    const key = chatChoiceKey(&found.group, false, ordinal);
+    if (chatChoicePickFor(key)) found.chosen = g_choice_pick_index;
     if (found.chosen == null) {
         if (user_after) |ui| {
             const reply = chatChoiceUserText(buf, blocks[ui]);
@@ -1898,11 +1912,9 @@ fn chatChoicesRefresh(buf: []const u16) void {
         next.group = app_state.g_chat_question;
         next.present = true;
         next.prompt = true;
-        if (g_choice_pick_set and g_choice_pick_key == chatChoiceKey(&next.group, true, 0)) next.chosen = g_choice_pick_index;
+        if (chatChoicePickFor(chatChoiceKey(&next.group, true, 0))) next.chosen = g_choice_pick_index;
         next.live = next.chosen == null;
     } else _ = chatChoicesFind(buf, &next);
-    const active_sid: u32 = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
-    if (!next.present and g_choice_pick_sid == active_sid) g_choice_pick_set = false;
     g_choice = next;
 }
 
@@ -1951,7 +1963,7 @@ fn chatChoiceAt(x: i32, y: i32) ?usize {
 fn chatChoiceClick(index: usize) void {
     const chat_send = @import("chat_send.zig");
     const group = &g_choice.group;
-    const key = chatChoiceKey(group, g_choice.prompt, g_choice.anchor);
+    const key = chatChoiceKey(group, g_choice.prompt, g_choice.ordinal);
     if (g_choice.prompt) {
         const digit = if (index < group.count) group.options[index].digit else group.other;
         if (!chat_send.chatQuestionAnswer(app_state.active_shell, digit, group.hash())) return;
@@ -2008,6 +2020,9 @@ fn chatChoicesLog() void {
         len += part.len;
     }
     debugLog(log[0..len]);
+    var diag: [160]u8 = undefined;
+    const text = std.fmt.bufPrint(&diag, "CHAT_CHOICES_DIAG anchor={d} ordinal={d} answered_below={d} echo={d} pick_set={d}", .{ g_choice.anchor, g_choice.ordinal, @intFromBool(g_choice.answered_below), app_state.g_chat_echo_layout_count, @intFromBool(g_choice_pick_set) }) catch return;
+    debugLog(text);
 }
 
 fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
