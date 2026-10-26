@@ -1026,7 +1026,7 @@ fn chatQuestionCaptureRows(shell_index: u32, lines: []const []const u16) void {
     const found = options.parseQuestion(lines, &question);
     const sid = app_state.shells[shell_index].shell_id;
     const had = app_state.g_chat_question.count > 0 and app_state.g_chat_question_sid == sid;
-    const changed = had != found or (found and !question.eql(&app_state.g_chat_question)) or app_state.g_chat_question_sid != sid;
+    const changed = had != found or (found and !question.eql(&app_state.g_chat_question));
     if (found) app_state.g_chat_question = question else app_state.g_chat_question.count = 0;
     app_state.g_chat_question_sid = sid;
     if (!changed or !app_state.g_chat_active or app_state.g_main_hwnd == null) return;

@@ -1791,7 +1791,6 @@ const ChoiceState = struct {
     prompt: bool = false,
     anchor: usize = 0,
     origin: usize = 0,
-    answered_below: bool = false,
     live: bool = false,
     chosen: ?usize = null,
 };
@@ -1882,7 +1881,6 @@ fn chatChoicesFind(buf: []const u16, found: *ChoiceState) bool {
     found.prompt = false;
     found.anchor = anchor;
     found.origin = start;
-    found.answered_below = user_after != null;
     const key = chatChoiceKey(&found.group, false, start);
     if (chatChoicePickFor(key)) found.chosen = g_choice_pick_index;
     if (found.chosen == null) {
@@ -2006,7 +2004,7 @@ var g_choice_logged: u64 = 0;
 fn chatChoicesLog() void {
     var hash: u64 = @as(u64, @intFromBool(g_choice.live)) + 2 * @as(u64, @intFromBool(g_choice.prompt));
     hash = hash *% 31 +% (if (g_choice.chosen) |c| @as(u64, c) + 1 else 0);
-    for (g_choice_rects[0..g_choice_rect_count]) |rc| hash = (hash *% 31 +% @as(u64, @bitCast(@as(i64, rc.top)))) *% 31 +% @as(u64, @bitCast(@as(i64, rc.left)));
+    for (g_choice_rects[0..g_choice_rect_count]) |rc| hash = (hash *% 31 +% @as(u64, @bitCast(@as(i64, rc.top - app_state.g_chat_scroll_y)))) *% 31 +% @as(u64, @bitCast(@as(i64, rc.left)));
     if (hash == g_choice_logged) return;
     g_choice_logged = hash;
     var log: [512]u8 = undefined;
@@ -2016,9 +2014,6 @@ fn chatChoicesLog() void {
         len += part.len;
     }
     debugLog(log[0..len]);
-    var diag: [160]u8 = undefined;
-    const text = std.fmt.bufPrint(&diag, "CHAT_CHOICES_DIAG anchor={d} origin={d} answered_below={d} echo={d} pick_set={d}", .{ g_choice.anchor, g_choice.origin, @intFromBool(g_choice.answered_below), app_state.g_chat_echo_layout_count, @intFromBool(g_choice_pick_set) }) catch return;
-    debugLog(text);
 }
 
 fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
