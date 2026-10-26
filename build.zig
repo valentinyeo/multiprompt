@@ -471,6 +471,10 @@ pub fn build(b: *std.Build) void {
     chat_message_menu_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_message_menu_tests.step);
     vps_test_step.dependOn(&chat_message_menu_tests.step);
+    const chat_keynav_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-keynav.test.js" });
+    chat_keynav_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&chat_keynav_tests.step);
+    vps_test_step.dependOn(&chat_keynav_tests.step);
     const chat_skill_tab_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-skill-tab.test.js" });
     chat_skill_tab_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_skill_tab_tests.step);

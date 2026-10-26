@@ -1713,7 +1713,6 @@ pub fn closeChatView() void {
     app_state.g_chat_working_applied_len = 0;
     app_state.g_chat_screen_status_len = 0;
     chatSelectionClear();
-    @import("chat_render.zig").chatNavClear();
     app_state.g_chat_sel_transcript_focus = false;
     if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].chat_view_on = false;
     if (app_state.g_voice_mode_active) {

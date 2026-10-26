@@ -36,7 +36,7 @@ test('IGSH-992 the composer routes Up Down Enter Esc to message focus without co
 
 test('IGSH-992 Enter opens the same menu as right-click through one shared function', () => {
   const render = read('src/chat_render.zig');
-  assert.match(render, /WM_RBUTTONDOWN => return chatMessageMenu\(hwnd, msg, wp, lp, null\)/);
+  assert.match(render, /WM_RBUTTONDOWN => \{\s*if \(app_state\.g_chat_find_open[^]*?return chatMessageMenu\(hwnd, msg, wp, lp, null\);/);
   const menu = fn(render, 'chatMessageMenu');
   assert.match(menu, /TrackPopupMenu\(/);
   assert.match(menu, /chatContextMenuItems\(/);
@@ -54,7 +54,8 @@ test('IGSH-992 focus skips tool rows, scrolls into view and draws a ring with no
   const ring = fn(render, 'chatPaintNavRing');
   assert.match(ring, /customColorOr\("accent"/);
   assert.doesNotMatch(ring, /DrawText|chatDrawText/);
-  assert.match(render, /g_chat_nav_active and app_state\.g_chat_nav_index == i\) chatPaintNavRing\(/);
+  assert.match(render, /nav_index != null and nav_index\.\? == i\) chatPaintNavRing\(/);
+  assert.match(fn(render, 'chatNavIndex'), /g_chat_nav_shell_id/, 'focus is dropped lazily when the conversation changes');
 });
 
 test('IGSH-992 shortcut, Ctrl+K entry and doc row ship together', () => {

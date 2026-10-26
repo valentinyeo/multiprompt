@@ -1189,6 +1189,7 @@ pub var g_chat_nav_index: usize = 0;
 pub var g_chat_nav_source: u64 = 0;
 pub var g_chat_nav_segment: u64 = 0;
 pub var g_chat_nav_stamp: i64 = 0;
+pub var g_chat_nav_shell_id: u32 = 0;
 pub var g_chat_sel_click_count: u32 = 0;
 pub var g_chat_sel_last_click: u64 = 0;
 pub var g_chat_sel_last_x: i32 = 0;

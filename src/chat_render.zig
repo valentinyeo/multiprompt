@@ -4795,6 +4795,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
     if (app_state.active_shell < app_state.shell_count) {
         const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
         const first = if (chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], app_state.g_chat_scroll_y)) |anchor| anchor.index else app_state.g_chat_block_count;
+        const nav_index = chatNavIndex();
         for (first..app_state.g_chat_block_count) |i| {
             if (app_state.g_chat_blocks[i].role == .tool or g_reaction_view.hides(i)) continue;
             var rc = app_state.g_chat_layout_rects[i];
@@ -4811,7 +4812,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             g_bubble_span = null;
             chatPaintBlockImages(mem_dc, i, body_rc);
             chatPaintReactions(mem_dc, g_reaction_view.mask(i), rc);
-            if (app_state.g_chat_nav_active and app_state.g_chat_nav_index == i) chatPaintNavRing(mem_dc, body_rc);
+            if (nav_index != null and nav_index.? == i) chatPaintNavRing(mem_dc, body_rc);
             @import("chat_find_ui.zig").paintMatch(mem_dc, app_state.g_chat_blocks[i], rc);
             if (app_state.g_voice_state == .speaking and app_state.g_voice_highlight != null and
                 i >= app_state.g_voice_highlight.?.start and i < app_state.g_voice_highlight.?.end)
@@ -4866,7 +4867,6 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
 }
 
 fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_block: ?usize) LRESULT {
-    if (keyboard_block == null and app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
     const menu = CreatePopupMenu();
     if (menu == null) return 0;
     defer _ = DestroyMenu(menu);
@@ -4972,6 +4972,10 @@ pub fn chatNavClear() void {
 
 fn chatNavIndex() ?usize {
     if (!app_state.g_chat_nav_active) return null;
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != app_state.g_chat_nav_shell_id) {
+        app_state.g_chat_nav_active = false;
+        return null;
+    }
     const count = app_state.g_chat_block_count;
     const allocator = std.heap.page_allocator;
     const sources = allocator.alloc(u64, count) catch return null;
@@ -4993,7 +4997,9 @@ fn chatNavIndex() ?usize {
 
 fn chatNavFocus(index: usize) void {
     const block = app_state.g_chat_blocks[index];
+    if (app_state.active_shell >= app_state.shell_count) return;
     app_state.g_chat_nav_active = true;
+    app_state.g_chat_nav_shell_id = app_state.shells[app_state.active_shell].shell_id;
     app_state.g_chat_nav_index = index;
     app_state.g_chat_nav_source = block.source_offset;
     app_state.g_chat_nav_segment = block.segment;
@@ -5017,11 +5023,6 @@ fn chatNavReveal(index: usize) void {
         const delta = view_bottom - bottom;
         if (top + delta < view_top) chatScrollBy(view_top - top) else chatScrollBy(delta);
     }
-}
-
-pub fn chatNavResync() void {
-    if (!app_state.g_chat_nav_active) return;
-    if (chatNavIndex() == null) chatNavClear();
 }
 
 pub fn chatNavStart() void {
@@ -5189,8 +5190,8 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_LBUTTONDOWN => {
-            chatNavClear();
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
+            chatNavClear();
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatToolAt(GET_X(lp), GET_Y(lp))) |index| {
                 app_state.g_chat_blocks[index].tool_open = !app_state.g_chat_blocks[index].tool_open;
@@ -5303,7 +5304,10 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             chatTranscriptMouseDown(hwnd, GET_X(lp), GET_Y(lp));
             return 0;
         },
-        WM_RBUTTONDOWN => return chatMessageMenu(hwnd, msg, wp, lp, null),
+        WM_RBUTTONDOWN => {
+            if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
+            return chatMessageMenu(hwnd, msg, wp, lp, null);
+        },
         WM_MOUSEWHEEL, WM_MOUSEHWHEEL => {
             if (chatTableWheel(hwnd, msg, wp, lp)) return 0;
             if (msg == WM_MOUSEHWHEEL) return DefWindowProcW(hwnd, msg, wp, lp);

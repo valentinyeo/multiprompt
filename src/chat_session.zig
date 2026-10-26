@@ -1137,7 +1137,6 @@ fn refreshChatBlockCache(force: bool) bool {
         chatApplyDisplayGlyphs(app_state.g_chat_capture[0..len], screen_blocks[0..screen_count]);
     }
     app_state.g_chat_received.retain(std.heap.page_allocator, app_state.g_chat_blocks[0..app_state.g_chat_block_count]);
-    @import("chat_render.zig").chatNavResync();
     if (app_state.g_voice_cursor_shell_id == app_state.shells[app_state.active_shell].shell_id and app_state.g_voice_cursor_latest_hash != 0) {
         var latest: [8192]u16 = undefined;
         const n = chatLatestAgentReply(&latest);
@@ -1308,7 +1307,6 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_hover_link = null;
     app_state.g_chat_sel_transcript_focus = false;
     chatSelectionClear();
-    @import("chat_render.zig").chatNavClear();
     _ = chat_layout_snapshot.restore(cached);
     app_state.g_chat_layout_dirty = true;
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
