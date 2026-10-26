@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -2629,6 +2629,21 @@ try {
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
+    if ($Feature -eq 'tmux-binding') {
+        $bindingState = Join-Path $scratch 'binding-state'
+        New-Item -ItemType Directory -Force $bindingState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        $bindingDocument = @{ name = 'tmux-binding'; binding = $true; bindingStatus = $true; mode = 'busy'; suggestion = ''; sessions = @('verify-binding') }
+        [IO.File]::WriteAllText((Join-Path $bindingState 'state.json'), ($bindingDocument | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+        $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
+        $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
+        $env:MP_VERIFY_STATE = $bindingState
+        $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
+        $bindingSeed = @{ active_tab = 0; single_window = $true; tabs = @(@{ kind = 'vps2'; name = 'Saved remote conversation'; manual = $true; pid = 0 }) }
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), ($bindingSeed | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+        Save-Json $bindingSeed 'seed-session.json'
+        $result.seedBoundary = 'One saved bare SSH tab. Only SSH is replaced by an owned console showing an existing named terminal session. The real app detects, adopts, saves and restores its binding; command receipts prove five exact reattachments and no session creation. No live server, credentials or real Claude are used.'
+    }
     if ($Feature -eq 'chat-switch-speed') {
         $remoteState = Join-Path $scratch 'remote-state'
         New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -3800,6 +3815,7 @@ try {
                 foreach ($listener in $listeners) { $listener.Stop() }
             }
         }
+        'tmux-binding' { . (Join-Path $PSScriptRoot 'tmux-binding.ps1') }
         'relaunch-saved-sessions' {
             $script:relaunchListeners = $null
             $openPorts = {

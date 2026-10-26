@@ -98,3 +98,5 @@ These maps use `.github/workflows/verify-reconnect.yml` and `tools/verify-reconn
 - Inbox publication: `publishInboxStateNow` at `src/inbox.zig:240`; visibility: `openInbox` at `src/inbox.zig:1374`, `closeInbox` at `src/inbox.zig:1409`; unread toggle: `inboxToggleReadRow` at `src/inbox.zig:1687`, keyboard dispatch: `handleInboxKey` at `src/inbox.zig:1717`.
 
 Keep these implementation anchors here, not in the user-facing recipes. Refresh them when the source moves.
+
+- [Saved terminal binding](tmux-binding.md): adopted remote identities survive missing status text and five reopens.

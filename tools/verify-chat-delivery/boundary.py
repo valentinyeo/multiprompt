@@ -73,6 +73,9 @@ def ctrl_k(buffer, cursor):
 
 
 def screen(value, buffer=None):
+    if value.get("binding"):
+        status = "[verify-binding] 0:bash*" if value.get("bindingStatus") else "Status temporarily hidden"
+        return "Named terminal: verify-binding\nExisting conversation sentinel\n\n" + status + "\n"
     head = "Claude Code\n\n" + ("Working... (esc to interrupt)\n" if value["mode"] == "busy" else "Ready\n") + "\n"
     if stateful(value):
         if buffer is None:
@@ -688,6 +691,10 @@ def ssh():
         record("declined.jsonl", operation="remote command", kind=kind, argv=ARGS, command=command, exitCode=exit_code)
         sys.stdout.write(output)
         return exit_code
+    if state().get("binding") and "exec ${SHELL:-bash} -l" in command:
+        record("invocations.jsonl", kind="login", session="verify-binding")
+        attach("verify-binding")
+        return 0
     python = re.search(r"\bpython3\s", command)
     if python:
         remote = shlex.split(command[python.start():])
