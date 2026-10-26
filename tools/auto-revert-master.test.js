@@ -58,7 +58,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null) {
       if (command === 'gh') {
         if (args[0] === 'pr' && args[1] === 'create') return `https://github.com/${repository}/pull/351\n`;
         if (args[0] === 'pr' && args[1] === 'merge') return '';
-        if (args[0] === 'pr' && args[1] === 'list') return input.existingPull ? input.existingPull + '\n' : '\n';
+        if (args[0] === 'pr' && args[1] === 'list') return JSON.stringify(input.existingPull ? [{ url: input.existingPull, state: input.existingState || 'OPEN' }] : []);
         if (args[0] === 'workflow' && args[1] === 'run') return '';
         assert.equal(args[0], 'api');
         if (args.includes('POST')) return JSON.stringify({ number: 1 });
@@ -449,12 +449,48 @@ test('a re-run after the revert merged still reopens the board ticket once more 
   assert.equal(result.process.exitCode, 0);
 });
 
-test('a re-run while the revert pull request is still open reaches the board without pushing again', () => {
+test('a re-run while the revert pull request is open redoes the check dispatches and auto-merge, then reaches the board without pushing again', () => {
   const input = fixture();
   input.existingPull = `https://github.com/${repository}/pull/351`;
   const result = runtime(input, 'workflow_run');
-  assert.ok(result.calls.every(call => !call.includes('push') && !(call[0] === 'git' && call[1] === 'revert') && !(call[1] === 'pr' && (call[2] === 'create' || call[2] === 'merge'))));
-  assert.deepEqual(result.calls.find(call => call[0] === 'node'), ['node', 'tools/auto-revert-board.js', 'IGSH-812', input.run.html_url, 'session-restore, chat-focus']);
+  assert.ok(result.calls.every(call => !call.includes('push') && !(call[0] === 'git' && call[1] === 'revert') && !(call[1] === 'pr' && call[2] === 'create')));
+  const dispatched = result.calls.filter(call => call[1] === 'workflow' && call[2] === 'run').map(call => call[3]);
+  assert.deepEqual(dispatched, ['gitleaks.yml', 'no-comments.yml', 'test.yml', 'verify.yml']);
+  const merge = result.calls.findIndex(call => call[1] === 'pr' && call[2] === 'merge');
+  const board = result.calls.findIndex(call => call[0] === 'node');
+  assert.deepEqual(result.calls[merge], ['gh', 'pr', 'merge', input.existingPull, '--repo', repository, '--auto', '--squash']);
+  assert.deepEqual(result.calls[board], ['node', 'tools/auto-revert-board.js', 'IGSH-812', input.run.html_url, 'session-restore, chat-focus']);
+  assert.ok(merge >= 0 && merge < board);
+  assert.equal(result.process.exitCode, 0);
+});
+
+test('a re-run whose auto-merge enabling fails opens an issue and leaves the ticket alone', () => {
+  const input = fixture();
+  input.existingPull = `https://github.com/${repository}/pull/351`;
+  const result = runtime(input, 'workflow_run', 'merge');
+  assert.ok(result.calls.every(call => call[0] !== 'node'));
+  assert.ok(result.calls.some(call => call.includes('POST')));
+  assert.equal(result.process.exitCode, 1);
+});
+
+test('a revert pull request closed without merging neither reopens the ticket nor pushes again', () => {
+  const input = fixture();
+  input.existingPull = `https://github.com/${repository}/pull/351`;
+  input.existingState = 'CLOSED';
+  const result = runtime(input, 'workflow_run');
+  assert.ok(result.calls.every(call => call[0] !== 'node' && !call.includes('push') && !(call[1] === 'pr' && (call[2] === 'create' || call[2] === 'merge'))));
+  const issue = result.calls.find(call => call.includes('POST'));
+  assert.ok(issue.some(arg => arg.includes('closed without merging')));
+  assert.equal(result.process.exitCode, 1);
+});
+
+test('a merged revert pull request that a re-run still sees reaches the board without touching the pull request', () => {
+  const input = fixture();
+  input.existingPull = `https://github.com/${repository}/pull/351`;
+  input.existingState = 'MERGED';
+  const result = runtime(input, 'workflow_run');
+  assert.ok(result.calls.every(call => !call.includes('push') && !(call[1] === 'pr' && (call[2] === 'create' || call[2] === 'merge')) && !(call[1] === 'workflow')));
+  assert.ok(result.calls.some(call => call[0] === 'node'));
   assert.equal(result.process.exitCode, 0);
 });
 
