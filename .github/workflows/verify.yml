@@ -50,6 +50,11 @@ on:
         required: false
         default: false
         type: boolean
+      missing_note_proof:
+        description: Open a tab with no transcript and require the plain not-available note, never terminal text
+        required: false
+        default: false
+        type: boolean
       chat_width_proof:
         description: Capture wide and narrow message geometry with the chat-messages-only journey
         required: false
@@ -216,6 +221,7 @@ jobs:
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       CHAT_SWITCH_PROOF: ${{ inputs.remote_switch_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
+      CHAT_MISSING_PROOF: ${{ inputs.missing_note_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
       FEATURE: ${{ matrix.feature }}
@@ -230,7 +236,7 @@ jobs:
       - name: Check verification contracts
         run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs
       - name: Check remote sync proof oracle
-        run: node --test tools/chat-remote-sync-proof.test.mjs tools/remote-switch-proof.test.mjs
+        run: node --test tools/chat-remote-sync-proof.test.mjs tools/remote-switch-proof.test.mjs tools/chat-missing-note-proof.test.mjs
       - name: Check accepted message pixel oracle
         run: node --test tools/chat-accepted-proof.test.mjs
       - name: Check inline working pixel oracle

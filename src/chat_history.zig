@@ -655,6 +655,7 @@ pub fn scrollAfterLayout(content_h: i32, viewport_h: i32, old_y: i32, follow_bot
 }
 
 pub const MISSING_RETRY_MS: u64 = 60_000;
+pub const NOT_AVAILABLE_NOTE = "Chat not available for this session, use the shell view";
 
 pub fn missingReason(wire: []const u8, id: u32) ?[]const u8 {
     var lines = std.mem.splitScalar(u8, wire, '\n');
@@ -689,99 +690,13 @@ pub fn retryDue(pending: bool, now: u64, next: u64) bool {
     return !pending and now >= next;
 }
 
-pub fn showScreen(keyed: bool, file_blocks: usize, missing: bool, failures: u8) bool {
-    return !keyed or (file_blocks == 0 and (missing or failures > 0));
+pub fn showScreen(keyed: bool) bool {
+    return !keyed;
 }
 
-pub fn screenText(raw: []const u16, width: usize, rows: usize, out: []u16) usize {
-    if (width == 0) return 0;
-    const available_rows = @min(rows, raw.len / width + @intFromBool(raw.len % width != 0));
-    var written: usize = 0;
-    var end: usize = 0;
-    for (0..available_rows) |row_index| {
-        const start = row_index * width;
-        const line = std.mem.trimEnd(u16, raw[start .. start + @min(width, raw.len - start)], &.{ ' ', '\t', 0 });
-        if (written == 0 and line.len == 0) continue;
-        const separator: usize = if (written == 0) 0 else 2;
-        if (separator > out.len - written or line.len > out.len - written - separator) break;
-        if (separator != 0) {
-            out[written] = '\r';
-            out[written + 1] = '\n';
-            written += 2;
-        }
-        @memcpy(out[written .. written + line.len], line);
-        written += line.len;
-        if (line.len != 0) end = written;
-    }
-    return end;
-}
-
-test "terminal fallback keeps every row of a real btop screen" {
-    const a = std.testing.allocator;
-    const fixtures = [_][]const u8{
-        @embedFile("testdata/btop-screen.txt"),
-        "owner@vps:~$ echo hi\nhi\nvalentin@vps:~$\n\n\n",
-    };
-    for (fixtures, 0..) |fixture, fixture_index| {
-        const text = try std.unicode.utf8ToUtf16LeAlloc(a, fixture);
-        defer a.free(text);
-        var lines: std.ArrayList([]const u16) = .empty;
-        defer lines.deinit(a);
-        var split = std.mem.splitScalar(u16, text, '\n');
-        var width: usize = 0;
-        while (split.next()) |line| {
-            width = @max(width, line.len);
-            try lines.append(a, line);
-        }
-        const raw = try a.alloc(u16, width * lines.items.len);
-        defer a.free(raw);
-        @memset(raw, ' ');
-        for (lines.items, 0..) |line, i| @memcpy(raw[i * width .. i * width + line.len], line);
-        const out = try a.alloc(u16, raw.len + 2 * lines.items.len);
-        defer a.free(out);
-        const len = screenText(raw, width, lines.items.len, out);
-        var first_row: usize = 0;
-        var last = lines.items.len;
-        while (first_row < last and std.mem.trimEnd(u16, lines.items[first_row], &.{ ' ', '\t', 0 }).len == 0) : (first_row += 1) {}
-        while (last > first_row and std.mem.trimEnd(u16, lines.items[last - 1], &.{ ' ', '\t', 0 }).len == 0) : (last -= 1) {}
-        var actual = std.mem.splitSequence(u16, out[0..len], &.{ '\r', '\n' });
-        var count: usize = 0;
-        while (actual.next()) |line| {
-            try std.testing.expect(first_row + count < last);
-            try std.testing.expectEqualSlices(u16, std.mem.trimEnd(u16, lines.items[first_row + count], &.{ ' ', '\t', 0 }), line);
-            count += 1;
-        }
-        try std.testing.expectEqual(last - first_row, count);
-        if (fixture_index == 0) {
-            try std.testing.expectEqual(@as(u16, 0x256D), out[0]);
-        } else {
-            try std.testing.expectEqual(@as(usize, 3), count);
-        }
-    }
-}
-
-test "terminal screen text trims empty edges and stops at whole rows" {
-    const raw = std.unicode.utf8ToUtf16LeStringLiteral("    " ++ " a\t\x00" ++ "    " ++ "bc  " ++ "    ");
-    var out: [32]u16 = @splat(0xFFFF);
-    const expected = std.unicode.utf8ToUtf16LeStringLiteral(" a\r\n\r\nbc");
-    const len = screenText(raw, 4, 5, &out);
-    try std.testing.expectEqualSlices(u16, expected, out[0..len]);
-    try std.testing.expectEqual(@as(usize, 2), screenText(raw, 4, 5, out[0..7]));
-    try std.testing.expectEqual(@as(usize, 0), screenText(raw, 4, 5, out[0..1]));
-    try std.testing.expectEqual(@as(usize, 0), screenText(raw, 0, 5, &out));
-    try std.testing.expectEqual(@as(usize, 0), screenText(raw, 4, 0, &out));
-    try std.testing.expectEqual(@as(usize, 0), screenText(&.{}, 4, 5, &out));
-    try std.testing.expectEqual(@as(usize, 0), screenText(raw[0..4], 4, 5, &out));
-    const short_len = screenText(raw[0..14], 4, 9, &out);
-    try std.testing.expectEqualSlices(u16, expected, out[0..short_len]);
-}
-
-test "a keyed tab whose transcript is missing or failing shows the terminal instead of an empty chat" {
-    try std.testing.expect(showScreen(false, 0, false, 0));
-    try std.testing.expect(!showScreen(true, 0, false, 0));
-    try std.testing.expect(showScreen(true, 0, true, 0));
-    try std.testing.expect(showScreen(true, 0, false, 2));
-    try std.testing.expect(!showScreen(true, 12, true, 1));
+test "IGSH-973 a keyed tab never shows terminal rows as chat, whatever its transcript state" {
+    try std.testing.expect(showScreen(false));
+    try std.testing.expect(!showScreen(true));
 }
 
 pub const Rect = struct { left: i32, top: i32, right: i32, bottom: i32 };

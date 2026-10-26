@@ -52,6 +52,10 @@ Ordered steps, all recorded in `observation.json` and re-derived by `check-evide
 
 Expected result on current master: `chat-view-read-transcript`, the shell steps and the clean-up steps pass; `chat-lists-shell-queued`, `chat-lists-both-in-order`, `chat-lists-edited-in-order`, `chat-marks-both-sent`, `composer-ignores-agent-paste` and `shell-box-shows-chat-draft` fail. `node --test tools/verify-chat-delivery.test.js` runs the stand-in as a real Linux process, checks the evidence oracle on a green tree and on a master-like tree, and never starts the app.
 
+### missing-transcript (IGSH-973)
+
+Dispatch with `-f feature=chat-delivery -f missing_note_proof=true`. The saved tmux tab shows the idle Claude-like screen but no transcript file exists, so the reader answers `missing`. The case passes only when the app logs `[chat] note shown: Chat not available for this session, use the shell view` and the text Chat View copies after select-all holds none of the stand-in's terminal text (`Claude Code`, `Ready`, the grey suggestion, the `❯` glyph). `tools/chat-missing-note-proof.mjs` re-derives both from `observation.json`, `debug.log` and the stand-in's `console.jsonl`. Dispatching it with `-f tag=<release before the fix>` is the red run: that release paints the screen as a chat block. The three delivery cases and this one use host 0; second-host transcript following is the `remote_sync_proof` run (IGSH-950).
+
 For long second-host session and workspace timing, run the [remote switch performance journey](../diagnostics/remote-switch-speed.md). It uses this SSH boundary with an alternate remote home and copies all 2,000 messages before measuring.
 
 ### send-stays-gone (IGSH-960)

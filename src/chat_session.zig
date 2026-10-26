@@ -106,7 +106,6 @@ const chatApplyDisplayGlyphs = @import("chat_capture.zig").chatApplyDisplayGlyph
 const chatClassifyBlocks = @import("chat_capture.zig").chatClassifyBlocks;
 const chatBlockDisplayRange = @import("chat_capture.zig").chatBlockDisplayRange;
 const captureChatTranscript = @import("chat_capture.zig").captureChatTranscript;
-const captureScreenText = @import("chat_capture.zig").captureScreenText;
 const ChatHistoryEntry = @import("app_state.zig").ChatHistoryEntry;
 const ChatHistoryChannel = @import("app_state.zig").ChatHistoryChannel;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
@@ -774,9 +773,9 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
     entry.result_missing = @splat(0);
     if (ok) {
         if (chat_history.missingReason(wire.items, id)) |reason| {
-            var message: [256]u8 = undefined;
-            const text = std.fmt.bufPrint(&message, "Transcript not reachable: {s}", .{reason}) catch "Transcript not reachable: session transcript not found";
-            const len = std.unicode.utf8ToUtf16Le(entry.result_missing[0..255], text) catch 0;
+            var log: [320]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&log, "[chat] transcript not reachable: {s}", .{reason}) catch "[chat] transcript not reachable");
+            const len = std.unicode.utf8ToUtf16Le(entry.result_missing[0..255], chat_history.NOT_AVAILABLE_NOTE) catch 0;
             entry.result_missing[len] = 0;
             ok = false;
         }
@@ -1069,12 +1068,9 @@ fn refreshChatBlockCache(force: bool) bool {
     if (app_state.g_chat_active) chatActivateTables(entry orelse chatHistoryEntry(chatCacheIdentity()));
     const from_file = if (entry) |e| e.history.blocks.items.len > 0 else false;
     app_state.g_chat_file_valid = from_file;
-    const file_missing = if (entry) |e| e.missing_message[0] != 0 else false;
-    const file_failures = if (entry) |e| e.failures else 0;
-    const file_blocks = if (entry) |e| e.history.blocks.items.len else 0;
     const keyed = key.shell_id != 0 and app_state.g_chat_active;
-    const show_screen = chat_history.showScreen(keyed, file_blocks, file_missing, file_failures);
-    const screen_len = if (show_screen) (if (keyed) captureScreenText(app_state.active_shell, &app_state.g_chat_screen) else captureChatTranscript(app_state.active_shell, &app_state.g_chat_screen, false)) else blk: {
+    const show_screen = chat_history.showScreen(keyed);
+    const screen_len = if (show_screen) captureChatTranscript(app_state.active_shell, &app_state.g_chat_screen, false) else blk: {
         if (!force) _ = captureChatTranscript(app_state.active_shell, &app_state.g_chat_screen, true);
         break :blk null;
     };
@@ -1101,8 +1097,8 @@ fn refreshChatBlockCache(force: bool) bool {
         app_state.g_chat_received.clear(std.heap.page_allocator);
     }
     var screen_blocks: [CHAT_MAX_BLOCKS]ChatBlock = undefined;
-    const screen_count = if (!from_file and !(keyed and show_screen)) chatClassifyBlocks(source, &screen_blocks) else 0;
-    if (!from_file and !(keyed and show_screen)) {
+    const screen_count = if (!from_file) chatClassifyBlocks(source, &screen_blocks) else 0;
+    if (!from_file) {
         chat_style.markScreenMessages(screen_blocks[0..screen_count]);
         chatTableRefresh(screen_blocks[0..screen_count], source);
     }
@@ -1133,9 +1129,6 @@ fn refreshChatBlockCache(force: bool) bool {
         }
         app_state.g_chat_switch_loading = false;
         app_state.g_chat_window_full = false;
-    } else if (keyed and show_screen) {
-        app_state.g_chat_block_count = if (len > 0) 1 else 0;
-        if (len > 0) app_state.g_chat_blocks[0] = .{ .start = 0, .len = len, .role = .code };
     } else {
         app_state.g_chat_block_count = screen_count;
         @memcpy(app_state.g_chat_blocks[0..screen_count], screen_blocks[0..screen_count]);

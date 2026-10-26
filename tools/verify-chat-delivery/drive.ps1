@@ -39,6 +39,7 @@ if ($env:CHAT_ACCEPTED_PROOF -eq '1') { $plans = @(@{name='accepted-message'; mo
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
 if ($env:CHAT_SWITCH_PROOF -eq '1') { $plans = @(@{name='remote-switch'; mode='idle'; text='long remote conversation switching'}) }
 if ($env:CHAT_REMOTE_PROOF -eq '1') { $plans = @(@{name='remote-sync'; mode='idle'; text='remote session follows live process'}) }
+if ($env:CHAT_MISSING_PROOF -eq '1') { $plans = @(@{name='missing-transcript'; mode='idle'; text='no transcript behind this tab'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
@@ -422,6 +423,7 @@ foreach ($plan in $plans) {
     $isRemote = $plan.name -eq 'remote-sync' -or $isSwitch
     $isQueue = $plan.name -eq 'queue-draft-sync'
     $isSendStays = $plan.name -eq 'send-stays-gone'
+    $isMissing = $plan.name -eq 'missing-transcript'
     $isActivity = $plan.name -eq 'messages-only'
     $isHistory = $plan.name -eq 'full-history'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
@@ -579,6 +581,29 @@ foreach ($plan in $plans) {
                 Press @(0x12, 0x43) 'Alt+C: return to remote Chat View'
                 Bind-Transcript
             }
+        } elseif ($isMissing) {
+            $noteLine = '[chat] note shown: Chat not available for this session, use the shell view'
+            $observation.noteShown = $false
+            try {
+                [void](Wait-For 'plain not-available note painted' { (Read-Shared "$settings/debug.log").Contains($noteLine) } 20)
+                $observation.noteShown = $true
+            } catch { $observation.noteWait = $_.ToString() }
+            Start-Sleep -Seconds 2
+            Shot 'missing-transcript-note'
+            [Windows.Forms.Clipboard]::SetText('IGSH-973 clipboard sentinel')
+            $paletteStart = (Read-Shared "$settings/debug.log").Length
+            Press @(0x11, 0x4B) 'Ctrl+K: select the whole Chat View'
+            [void](Wait-For 'palette ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+            $query = 'chat view select all'
+            foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+            [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+            Press @(0x0D) 'Enter: select the whole Chat View'
+            Press @(0x11, 0x43) 'Ctrl+C: copy what Chat View shows'
+            Start-Sleep -Milliseconds 500
+            $observation.copied = [Windows.Forms.Clipboard]::GetText()
+            [IO.File]::WriteAllText("$caseDir/copied.txt", $observation.copied)
+            Press @(0x1B) 'Esc: clear selection'
+            $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isHistory -and $env:CHAT_RETENTION_PROOF -eq '1') {
             Assert-Retention
         } elseif ($isHistory) {
@@ -1052,6 +1077,10 @@ if ($env:CHAT_SWITCH_PROOF -eq '1') {
 }
 if ($env:CHAT_REMOTE_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-remote-sync-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
+if ($env:CHAT_MISSING_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-missing-note-proof.mjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_SENDING_PROOF -eq '1') {

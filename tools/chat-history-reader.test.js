@@ -21,7 +21,8 @@ test('missing transcript reason crosses the worker handoff and selects the minut
   const history = fs.readFileSync('src/chat_history.zig', 'utf8');
   assert.match(history, /MISSING_RETRY_MS: u64 = 60_000/);
   assert.match(main, /missingReason\(wire.items, id\)/);
-  assert.match(main, /Transcript not reachable: \{s\}/);
+  assert.match(main, /utf8ToUtf16Le\(entry\.result_missing\[0\.\.255\], chat_history\.NOT_AVAILABLE_NOTE\)/);
+  assert.match(history, /NOT_AVAILABLE_NOTE = "Chat not available for this session, use the shell view"/);
   assert.match(main, /entry\.missing_message = entry\.result_missing;\s*chatFileFailed\(entry\)/);
   assert.match(main, /if \(entry\.missing_message\[0\] != 0\) chat_history\.MISSING_RETRY_MS else chat_history\.retryDelay/);
   assert.match(main, /if \(e\.missing_message\[0\] != 0\).*?&e\.missing_message/);

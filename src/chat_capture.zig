@@ -1019,33 +1019,6 @@ pub fn chatPermissionCaptureRows(shell_index: u32, width: usize, chars_read: DWO
     }
 }
 
-pub fn captureScreenText(shell_index: u32, out: []u16) ?usize {
-    if (shell_index >= app_state.shell_count) return null;
-    const pid = app_state.shells[shell_index].pid;
-    if (pid == 0) return null;
-
-    _ = FreeConsole();
-    if (AttachConsole(pid) == 0) return null;
-    defer _ = FreeConsole();
-    const handle = openAttachedConsoleOutput() orelse return null;
-    defer _ = CloseHandle(handle);
-
-    var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
-    if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
-    if (info.dwSize.x <= 0 or info.dwSize.y <= 0) return null;
-    const width: usize = @intCast(info.dwSize.x);
-    if (width > app_state.g_chat_raw.len) return null;
-    const top = @max(0, info.srWindow.top);
-    const bottom = @min(info.dwSize.y - 1, info.srWindow.bottom);
-    if (bottom < top) return null;
-    const rows = @min(@as(usize, @intCast(bottom - top + 1)), app_state.g_chat_raw.len / width);
-    const cells: DWORD = @intCast(rows * width);
-    var chars_read: DWORD = 0;
-    if (ReadConsoleOutputCharacterW(handle, &app_state.g_chat_raw, cells, .{ .x = 0, .y = top }, &chars_read) == 0) return null;
-    chatPermissionCaptureRows(shell_index, width, chars_read, rows);
-    return chat_history.screenText(app_state.g_chat_raw[0..chars_read], width, rows, out);
-}
-
 fn chatConsoleTableRows(raw: []const u16, width: usize, scratch: []u16, table_rows: []bool) void {
     @memset(table_rows, false);
     var starts: [1200]usize = undefined;

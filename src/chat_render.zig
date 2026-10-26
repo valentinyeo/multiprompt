@@ -1738,6 +1738,7 @@ fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
 }
 
 var g_working_rect: ?RECT = null;
+var g_note_logged = false;
 
 pub fn chatWorkingSync() void {
     if (app_state.g_chat_transcript_hwnd == null) return;
@@ -4285,12 +4286,12 @@ pub fn chatTableWheel(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) bool {
     return true;
 }
 
-fn chatPaintEmpty(hdc: HANDLE, width: i32, message: LPCWSTR) void {
+fn chatPaintEmpty(hdc: HANDLE, width: i32, message: LPCWSTR, extra_top: i32) void {
     if (app_state.clean_chat) return;
     _ = SetBkMode(hdc, TRANSPARENT);
     const old_font = SelectObject(hdc, chatMetadataFont());
     _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
-    var load_rc = RECT{ .left = uiScaled(16), .top = uiScaled(12) + app_state.g_chat_top_pad, .right = width - uiScaled(16), .bottom = uiScaled(44) + app_state.g_chat_top_pad };
+    var load_rc = RECT{ .left = uiScaled(16), .top = uiScaled(12) + app_state.g_chat_top_pad + extra_top, .right = width - uiScaled(16), .bottom = uiScaled(44) + app_state.g_chat_top_pad + extra_top };
     if (app_state.g_chat_find_open) {
         load_rc.top += uiScaled(app_state.CHAT_FIND_TOP_H);
         load_rc.bottom += uiScaled(app_state.CHAT_FIND_TOP_H);
@@ -4385,13 +4386,19 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
         }
         chatPaintWorking(mem_dc, GetTickCount64());
-        if (app_state.g_chat_block_count == 0 and g_working_rect == null) {
-            const entry = chatHistoryEntry(chatFileIdentity());
+        const entry = chatHistoryEntry(chatFileIdentity());
+        const missing_note = if (entry) |e| e.missing_message[0] != 0 else false;
+        const failed_load = if (entry) |e| e.failures > 0 else false;
+        const paint_note = app_state.g_chat_block_count == 0 and (g_working_rect == null or missing_note or failed_load);
+        if (paint_note and missing_note and !g_note_logged and verboseLoggingEnabled()) debugLog("[chat] note shown: " ++ chat_history.NOT_AVAILABLE_NOTE);
+        g_note_logged = paint_note and missing_note;
+        if (paint_note) {
+            const extra_top = if (g_working_rect) |working| working.bottom - app_state.g_chat_scroll_y else 0;
             const message = if (entry) |e|
                 (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else if (e.pending or app_state.g_chat_switch_loading) L("Loading conversation...") else L("No conversation yet"))
             else
                 L("No conversation yet");
-            chatPaintEmpty(mem_dc, w, message);
+            chatPaintEmpty(mem_dc, w, message, extra_top);
         }
     }
     chatPaintScrollUi(&canvas, mem_dc, w, @max(1, h - app_state.g_chat_bottom_inset));
@@ -5483,7 +5490,7 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             .loading => L("Loading conversation..."),
             .failed => L("Could not load the conversation, retrying"),
             else => L("No conversation yet"),
-        }),
+        }, 0),
         .tool, .tool_detail, .tool_diff => {
             block.role = .tool;
             block.tool_open = true;
