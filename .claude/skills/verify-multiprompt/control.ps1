@@ -2550,6 +2550,11 @@ try {
     $env:LOCALAPPDATA = Join-Path $scratch 'local'
     if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch 'profile' }
     $env:HOME = Join-Path $scratch 'profile'
+    if ($Feature -eq 'status-card') {
+        $usageRoot = Join-Path $env:APPDATA 'ZigShell'
+        New-Item -ItemType Directory -Force $usageRoot | Out-Null
+        Copy-Item (Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-908/usage-telemetry.json') (Join-Path $usageRoot 'usage-telemetry.json')
+    }
     if ($Feature -eq 'chat-skill-pill') {
         $skillRoot = Join-Path $env:USERPROFILE '.claude/skills/pill-proof'
         New-Item -ItemType Directory -Force $skillRoot | Out-Null
@@ -5956,12 +5961,6 @@ try {
                 }
                 $shot = 'status-card-' + ($page + 1)
                 Snapshot $shot
-                if ($page -eq 2) {
-                    $plain = Measure-PlainStatusCard $shot
-                    $plain.page = 3
-                    $pages += $plain
-                    continue
-                }
                 $measure = Measure-StatusCard $shot
                 $measure.page = $page + 1
                 $pages += $measure
@@ -5969,22 +5968,35 @@ try {
             }
             $result.statusCard = [ordered]@{ heights = $heights; minimum = 20; maximum = 30; pages = $pages }
             Save-Json $result.statusCard 'status-card.json'
-            Snapshot 'action'
-            Doctor
-            Assert-Foreground
-            Record 'Mouse: hover the sidebar status card'
-            [VerifyNative]::MoveMouseClient($script:window, [int][Math]::Round(60 * $scale), $client.Bottom - [int][Math]::Round(14 * $scale), $true)
-            Start-Sleep -Milliseconds 600
-            Snapshot 'hover'
-            Record 'Mouse: leave the sidebar status card'
-            [VerifyNative]::MoveMouseClient($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2), $false)
-            Start-Sleep -Milliseconds 300
-            Snapshot 'after'
             foreach ($height in $heights) {
                 if ($height -gt 30 -or $height -lt 20) { throw ('status-card: card height ' + $height + ' outside 20..30; heights ' + ($heights -join ', ')) }
             }
-            if ($null -ne $plain.edge) { throw ('status-card: AI page draws a frame or fill at y=' + $plain.edge + ' in status-card-3.png') }
-            $result.checks += @{ name = 'status-card'; heights = $heights; aiPagePlain = $true; entry = 'Ctrl+Shift+G'; hover = 'hover.png' }
+            if (($pages[2].clientBottom - $pages[2].bottom) / $scale -gt 35) { throw 'IGSH-908: usage pill has no frame at the sidebar bottom' }
+            Snapshot 'pill-closed'
+            $pillX = [int][Math]::Round(60 * $scale)
+            $pillY = $client.Bottom - [int][Math]::Round(14 * $scale)
+            Record 'Real click: expand AI usage pill'
+            [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
+            Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'AI usage data panel visible'
+            $menu = @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible })[0]
+            $look = [VerifyNative]::MenuLook([IntPtr]::new([int64]$menu.handle))
+            if ($look.cornerShown -or $look.leftEdge -ne $look.fill -or $look.rightEdge -ne $look.fill) { throw 'IGSH-908: expanded usage panel differs from the existing rounded menu style' }
+            Snapshot 'pill-open'
+            Record 'Real second click: close AI usage pill'
+            [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
+            Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'usage panel closes on second click'
+            [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
+            Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'usage panel reopens'
+            Press @(0x1B) 'Escape: dismiss AI usage panel'
+            Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'usage panel closes on Escape'
+            [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
+            Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'usage panel reopens before outside click'
+            [VerifyNative]::ClickClient($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
+            Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'usage panel closes on outside click'
+            Snapshot 'pill-dismissed'
+            $result.statusCard = [ordered]@{ heights = $heights; minimum = 20; maximum = 30; pages = $pages; usagePanel = @{ secondClick = $true; escape = $true; outside = $true; look = $look } }
+            Save-Json $result.statusCard 'status-card.json'
+            $result.checks += @{ name = 'status-card'; heights = $heights; usagePill = $true; menuStyle = $true; secondClick = $true; escape = $true; outside = $true; entry = 'Ctrl+Shift+G' }
         }
         'command-palette' {
             Palette 'interface'
