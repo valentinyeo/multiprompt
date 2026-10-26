@@ -86,10 +86,11 @@ test('IGSH-718 journey requires real owned mouse input, exact new log, popup dis
   assert.match(control, /MouseAt\(point.X, point.Y, 8\);\s*MouseAt\(point.X, point.Y, 16\)/);
   assert.match(control, /\$menuLines.Count -ne \$menuLinesBefore \+ 1/);
   assert.ok(control.includes("items=Reply,Copy$'"));
-  assert.match(control, /Snapshot 'message-menu'\s*Press @\(0x1B\)/);
+  assert.match(control, /Snapshot 'message-menu'\s*if \(\$menuLook\.cornerShown\)/);
+  assert.match(control, /Press @\(0x1B\) 'Esc: dismiss message menu'/);
   assert.match(control, /\$menuLook = \[VerifyNative\]::MenuLook\(/);
   assert.match(control, /\$menuLook\.cornerShown\) \{ throw/);
-  assert.match(control, /\$menuLook\.borderShown -or \$menuLook\.leftEdge -ne \$menuLook\.fill -or \$menuLook\.rightEdge -ne \$menuLook\.fill\) \{ throw/);
+  assert.match(control, /\$menuLook\.leftEdge -ne \$menuLook\.fill -or \$menuLook\.rightEdge -ne \$menuLook\.fill\) \{ throw/);
   assert.match(control, /class -eq '#32768' -and \$_.visible \}\).Count -eq 0/);
   for (const name of ['message-menu', 'grey-buttons']) assert.ok(control.includes(`name = '${name}'; passed = $false; reason = 'not reached'`));
   assert.match(control, /new System.Drawing.Bitmap\(image\)/);

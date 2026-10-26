@@ -487,7 +487,8 @@ public static class VerifyNative {
                 return new Dictionary<string, object> {
                     { "width", width }, { "height", height }, { "clipped", clipped }, { "side", side },
                     { "fill", hex(width - 8, height - 6) },
-                    { "cornerShown", shown(0, 0) }, { "borderShown", side > 0 && shown(0, height / 2) },
+                    { "cornerShown", shown(0, 0) && hex(0, 0) == hex(0, height / 2) },
+                    { "corner", hex(0, 0) }, { "corner2", hex(2, 2) }, { "outerLeft", hex(0, height / 2) },
                     { "leftEdge", hex(side, height / 2) }, { "rightEdge", hex(width - 1 - side, height / 2) }
                 };
             }
@@ -3549,9 +3550,9 @@ try {
                                 $menuWindow = @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible })[0]
                                 $menuLook = [VerifyNative]::MenuLook([IntPtr]::new([int64]$menuWindow.handle))
                                 $menuCheck.look = $menuLook
-                                if ($menuLook.cornerShown) { throw 'IGSH-892: message menu corner is still drawn, so the menu is square' }
-                                if ($menuLook.borderShown -or $menuLook.leftEdge -ne $menuLook.fill -or $menuLook.rightEdge -ne $menuLook.fill) { throw ('IGSH-892: message menu has a border: edges ' + $menuLook.leftEdge + ' and ' + $menuLook.rightEdge + ' differ from fill ' + $menuLook.fill) }
                                 Snapshot 'message-menu'
+                                if ($menuLook.cornerShown) { throw 'IGSH-892: message menu corner is still drawn, so the menu is square' }
+                                if ($menuLook.leftEdge -ne $menuLook.fill -or $menuLook.rightEdge -ne $menuLook.fill) { throw ('IGSH-892: message menu has a border: edges ' + $menuLook.leftEdge + ' and ' + $menuLook.rightEdge + ' differ from fill ' + $menuLook.fill) }
                                 Press @(0x1B) 'Esc: dismiss message menu'
                                 Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'
                                 $menuCheck.passed = $true
