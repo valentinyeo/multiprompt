@@ -104,6 +104,8 @@ pub fn restore() void {
         shell.needs_attention = row.unread;
         shell.last_active = row.last_active;
         shell.last_viewed = row.last_viewed;
+        shell.browser_enabled = row.browser;
+        shell.browser_split_permille = row.browser_split;
         @memcpy(shell.name[0..row.name.len], row.name);
         shell.name_len = @intCast(row.name.len);
         state.shells[i] = shell;
@@ -252,6 +254,8 @@ pub fn save() void {
         .unread = shell.needs_attention,
         .last_active = shell.last_active,
         .last_viewed = shell.last_viewed,
+        .browser = shell.browser_enabled,
+        .browser_split = @min(shell.browser_split_permille, 1000),
     };
     var groups: [state.MAX_GROUPS]snapshot.Group = undefined;
     for (state.groups[0..state.group_count], 0..) |group, i| groups[i] = .{ .id = group.id, .name = state.groups[i].name[0..group.name_len], .collapsed = group.collapsed, .color = group.color };
