@@ -2812,7 +2812,10 @@ test "IGSH-887 the mic is a round button when idle and a wide pill while dictati
     try std.testing.expectEqual(idle.mic_btn.bottom - idle.mic_btn.top, idle.mic_btn.right - idle.mic_btn.left);
     chat_dictation_state = .listening;
     const live = chatViewLayout();
-    try std.testing.expectEqual(chatDictationMicWidth(.listening), live.mic_btn.right - live.mic_btn.left);
+    try std.testing.expect(live.mic_btn.right - live.mic_btn.left >= uiScaled(80));
+    try std.testing.expectEqual(chatDictationMicWidth(.listening), chatDictationMicFit(chatDictationMicWidth(.listening), uiScaled(1000)));
+    try std.testing.expectEqual(uiScaled(80), chatDictationMicFit(chatDictationMicWidth(.listening), uiScaled(100)));
+    try std.testing.expectEqual(chatDictationMicWidth(.idle), chatDictationMicFit(chatDictationMicWidth(.idle), uiScaled(10)));
     try std.testing.expectEqual(idle.mic_btn.right, live.mic_btn.right);
     try std.testing.expect(live.composer.right < idle.composer.right);
     try std.testing.expect(live.mic_btn.left > live.composer.right);
