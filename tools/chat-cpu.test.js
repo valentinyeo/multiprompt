@@ -16,12 +16,13 @@ function body(text, name) {
     .replaceAll('offset, height, null)', 'offset, height, null, false)')
     .replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary')
     .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
-    .replaceAll('@import("window_layout.zig").chatStopVisible', 'chatStopVisible');
+    .replaceAll('@import("window_layout.zig").chatStopVisible', 'chatStopVisible')
+    .replaceAll('@import("chat_composer.zig").chatAcAgent', 'chatAcAgent');
 }
 function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
   try {
-    copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
+    copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig', 'chat_reaction.zig', 'chat_transcript.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn known(_: []const u16) bool { return false; }\npub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
@@ -164,6 +165,16 @@ test('singleton startup oracle rejects the actual 706 check-then-spawn race', ()
 
 const layout = `
 const std = @import("std");
+const CHAT_OUTBOX_MAX_PER_KEY = 20;
+const chat_transcript = @import("chat_transcript.zig");
+const chat_reaction = @import("chat_reaction.zig");
+var g_reaction_view: chat_reaction.View = .{};
+const HistoryEntry = struct { history: struct { status: chat_transcript.Status = .{} } = .{} };
+fn chatHistoryEntry(_: u32) ?*HistoryEntry { return null; }
+fn chatFileIdentity() u32 { return 0; }
+fn chatAcAgent() enum { claude, codex, other } { return .claude; }
+fn chatShellReactionId(text: []const u16) u64 { return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(text)) | (@as(u64, 1) << 63); }
+
 const chat_echo = @import("chat_echo.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_style = @import("chat_style.zig");

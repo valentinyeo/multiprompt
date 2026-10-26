@@ -3434,7 +3434,7 @@ pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
 fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
     if (mask == 0) return;
     if (app_state.g_chat_rich_fonts[11] == null) {
-        app_state.g_chat_rich_fonts[11] = @import("fonts.zig").create(-uiScaled(17), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, L("Segoe UI Emoji"));
+        app_state.g_chat_rich_fonts[11] = @import("fonts.zig").emoji(-uiScaled(17));
     }
     const old = SelectObject(hdc, app_state.g_chat_rich_fonts[11]);
     defer _ = SelectObject(hdc, old);

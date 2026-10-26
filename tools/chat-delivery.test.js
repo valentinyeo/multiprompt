@@ -24,6 +24,8 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 const chat_echo = @import("chat_echo.zig");
+const chat_reaction = @import("chat_reaction.zig");
+var g_reaction_view: chat_reaction.View = .{};
 const json_reader = @import("json_reader.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_history = @import("chat_history.zig");
