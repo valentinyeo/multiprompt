@@ -2143,6 +2143,12 @@ function Restart-ChatView([int]$ShellCount) {
     Doctor
 }
 
+function Read-DictationAudit([string]$Path) {
+    $file = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $reader = New-Object IO.StreamReader($file)
+    try { return $reader.ReadToEnd().Split([char]10, [StringSplitOptions]::RemoveEmptyEntries) } finally { $reader.Dispose() }
+}
+
 function Get-DictationMic([IntPtr]$Composer) {
     $state = Read-Session
     if ($null -eq $state -or ($state.PSObject.Properties['ui_scale'] -and $state.ui_scale -ne 100)) { throw 'Dictation geometry requires the isolated default UI scale' }
@@ -2708,7 +2714,7 @@ try {
                     Wait-Until { $false } 'deliberately stalled recorded PCM capture precondition' -Seconds 1 -PollMilliseconds 20
                 }
                 Wait-Until {
-                    (Test-Path $auditPath) -and @([IO.File]::ReadAllLines($auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+                    (Test-Path $auditPath) -and @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
                 } 'recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
                 Assert-DictationMic $mic $true ($stop + '-listening')
                 $typed = 'typing-' + $stop
@@ -2733,7 +2739,7 @@ try {
                 if ($elapsed -gt 1000) { throw "IGSH-812 transcript was not immediate: $elapsed ms" }
                 Save-Json @{ WM_GETTEXT = [VerifyNative]::EditText($handle); expected = $expected; elapsedMilliseconds = $elapsed; handle = $handle.ToInt64(); pid = $process.Id } ($stop + '.text.json')
                 Assert-DictationMic $mic $false ($stop + '-stopped')
-                $audit = @([IO.File]::ReadAllLines($auditPath))
+                $audit = @((Read-DictationAudit $auditPath))
                 foreach ($stage in @('audio-bytes\t89160', 'fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
                     if (@($audit | Where-Object { $_ -match ('\t' + $stage + '$') }).Count -ne $iteration) { throw "IGSH-812 missing production transcription stage $stage" }
                 }
@@ -2750,7 +2756,7 @@ try {
             Press @(0x11, 0x44) 'Ctrl+D: start dictation over the existing draft'
             $iteration++
             Wait-Until {
-                @([IO.File]::ReadAllLines($auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+                @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
             } 'IGSH-846 cancellation recording reached the real capture worker' -Seconds 2 -PollMilliseconds 20
             Assert-DictationMic $mic $true 'escape-listening'
             Type-Text ' keep this'
@@ -2758,7 +2764,7 @@ try {
             Wait-Until { [VerifyNative]::EditText($handle) -ceq $draft } 'IGSH-846 draft includes typing during recording'
             Press @(0x1B, 0x1B) 'Escape with a repeated keydown: discard the recording once'
             Wait-Until {
-                $audit = @([IO.File]::ReadAllLines($auditPath))
+                $audit = @((Read-DictationAudit $auditPath))
                 @($audit | Where-Object { $_ -match '\tcancel\t0$' }).Count -eq 1 -and
                     @($audit | Where-Object { $_ -match '\taudio-bytes\t89160$' }).Count -eq $iteration
             } 'IGSH-846 cancellation stopped the capture worker' -Seconds 2 -PollMilliseconds 20
@@ -2770,11 +2776,11 @@ try {
             Press @(0x11, 0x44) 'Ctrl+D: restart dictation after cancellation'
             $iteration++
             Wait-Until {
-                @([IO.File]::ReadAllLines($auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+                @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
             } 'IGSH-846 a new recording starts after cancellation' -Seconds 2 -PollMilliseconds 20
             Assert-DictationMic $mic $true 'escape-restarted'
             if ([VerifyNative]::EditText($handle) -cne $draft) { throw 'IGSH-846 cancelled transcript arrived late' }
-            $audit = @([IO.File]::ReadAllLines($auditPath))
+            $audit = @((Read-DictationAudit $auditPath))
             foreach ($stage in @('fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
                 if (@($audit | Where-Object { $_ -match ('\t' + $stage + '$') }).Count -ne $delivered) { throw "IGSH-846 cancelled recording reached transcription or delivery: $stage" }
             }
@@ -2782,7 +2788,7 @@ try {
             $expected = $draft + ' Go forward ten meters.'
             Wait-Until { [VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-846 restarted recording delivers exactly once' -Seconds 1 -PollMilliseconds 10
             Assert-DictationMic $mic $false 'escape-restart-stopped'
-            $audit = @([IO.File]::ReadAllLines($auditPath))
+            $audit = @((Read-DictationAudit $auditPath))
             foreach ($stage in @('fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
                 if (@($audit | Where-Object { $_ -match ('\t' + $stage + '$') }).Count -ne ($delivered + 1)) { throw "IGSH-846 restarted recording did not deliver exactly once: $stage" }
             }

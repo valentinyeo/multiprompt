@@ -174,7 +174,8 @@ test('IGSH-893 audit evidence serializes plain lines within five seconds on Wind
     fs.writeFileSync(auditPath, lines.join('\n'));
     const auditRead = driver.match(/^\s*\$audit = (.+)$/m);
     assert.ok(auditRead, 'production audit read exists');
-    const script = `$ErrorActionPreference = 'Stop'; $auditPath = $env:AUDIT_PATH; $audit = ${auditRead[1]}; if ((ConvertTo-Json -InputObject @{} -Compress) -cne '{}') { throw 'JSON serializer precondition failed' }; Write-Host ('AUDIT_READ_READY type=' + $audit[0].GetType().FullName + ' properties=' + ($audit[0].PSObject.Properties.Name -join ',')); $clock = [Diagnostics.Stopwatch]::StartNew(); $json = ConvertTo-Json -InputObject @{ audit = $audit } -Depth 12 -Compress; Write-Host ('SERIALIZATION_MS=' + $clock.ElapsedMilliseconds); Write-Output $json`;
+    const helper = driver.slice(driver.indexOf('function Read-DictationAudit('), driver.indexOf('function Get-DictationMic('));
+    const script = `$ErrorActionPreference = 'Stop'; ${helper}; $auditPath = $env:AUDIT_PATH; $held = [IO.File]::Open($auditPath, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite); try { $audit = ${auditRead[1]} } finally { $held.Dispose() }; if ((ConvertTo-Json -InputObject @{} -Compress) -cne '{}') { throw 'JSON serializer precondition failed' }; Write-Host ('AUDIT_READ_READY type=' + $audit[0].GetType().FullName + ' properties=' + ($audit[0].PSObject.Properties.Name -join ',')); $clock = [Diagnostics.Stopwatch]::StartNew(); $json = ConvertTo-Json -InputObject @{ audit = $audit } -Depth 12 -Compress; Write-Host ('SERIALIZATION_MS=' + $clock.ElapsedMilliseconds); Write-Output $json`;
     const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
       encoding: 'utf8', timeout: 30000, env: { ...process.env, AUDIT_PATH: auditPath },
     });
