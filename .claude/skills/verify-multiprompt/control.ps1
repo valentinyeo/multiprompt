@@ -425,9 +425,9 @@ public static class VerifyNative {
     public static double ProbeFirstMs;
     public static double ProbeSecondMs;
     public static void ResetPollStats() { PollCount = 0; PollMaxMs = 0; PollLastMs = 0; ProbeFirstMs = -1; ProbeSecondMs = -1; }
-    static double TimedCapture(int x, int y, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
+    static double TimedCapture(int px, int py, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
-        graphics.CopyFromScreen(x, y, 0, 0, pixels.Size);
+        graphics.CopyFromScreen(px, py, 0, 0, pixels.Size);
         return (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
     }
     static void ProbeCaptures(IntPtr console, IntPtr browser, Rect dock, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
