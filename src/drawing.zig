@@ -74,7 +74,6 @@ const paletteAnchoredBesideBrowser = @import("browser_pane.zig").paletteAnchored
 const chatViewLayout = @import("chat_composer.zig").chatViewLayout;
 const chatRelayout = @import("chat_render.zig").chatRelayout;
 const voiceStatusLabel = @import("voice.zig").voiceStatusLabel;
-const asciiToU16 = @import("inbox.zig").asciiToU16;
 const inboxPublishesShell = @import("inbox.zig").inboxPublishesShell;
 const inboxRelTime = @import("inbox.zig").inboxRelTime;
 
@@ -706,6 +705,7 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
         .chat = app_state.g_chat_active,
         .title = app_state.g_thread_title,
         .numbers = app_state.g_eta_numbers_on,
+        .light = app_state.g_light_theme,
         .reauth = app_state.g_account_reauth,
         .cap_until = app_state.g_cap_msg_until,
         .voice = app_state.g_voice_mode_active,
@@ -720,6 +720,7 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
         app_state.g_chat_active = saved.chat;
         app_state.g_thread_title = saved.title;
         app_state.g_eta_numbers_on = saved.numbers;
+        app_state.g_light_theme = saved.light;
         app_state.g_account_reauth = saved.reauth;
         app_state.g_cap_msg_until = saved.cap_until;
         app_state.g_voice_mode_active = saved.voice;
@@ -734,13 +735,14 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
     app_state.g_main_hwnd = window;
     app_state.shell_count = 1;
     app_state.active_shell = 0;
-    app_state.shells[0] = std.mem.zeroes(app_state.Shell);
+    app_state.shells[0] = app_state.empty_shell;
     const title = std.unicode.utf8ToUtf16LeStringLiteral("My working session");
     @memcpy(app_state.shells[0].name[0..title.len], title);
     app_state.shells[0].name_len = title.len;
     app_state.g_chat_active = true;
     app_state.g_thread_title = true;
     app_state.g_eta_numbers_on = true;
+    app_state.g_light_theme = false;
     app_state.g_account_reauth = false;
     app_state.g_cap_msg_until = 0;
     app_state.g_voice_mode_active = false;
