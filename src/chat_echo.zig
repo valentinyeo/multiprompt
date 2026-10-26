@@ -343,9 +343,9 @@ test "reserved uncertain sends stay unconfirmed across restart" {
 fn messageMatches(block: []const u16, p: Pending, norm: []const u16) bool {
     if (p.text.len == 0) return newBlockMatches(block, p.prefix);
     if (sameText(block, p.text)) return true;
-    if (pastePlaceholderMatches(block, norm)) return true;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
     const body = normalize(block, &buf);
+    if (pastePlaceholderMatches(body, norm)) return true;
     const cut = stripTrailingEllipsis(body);
     if (cut.len < body.len and cut.len >= MIN_PARTIAL and cut.len < norm.len and std.mem.startsWith(u16, norm, cut)) return true;
     if (norm.len == 0 or body.len <= norm.len) return false;
@@ -366,9 +366,7 @@ pub fn isNewBlock(anchor: Anchor, stamp_ms: i64, ordinal: usize, window_full: bo
 
 const PASTE_PLACEHOLDER = [_]u16{ '[', 'P', 'a', 's', 't', 'e', 'd', ' ', 't', 'e', 'x', 't' };
 
-fn pastePlaceholderMatches(block_text: []const u16, prefix: []const u16) bool {
-    var buf: [BLOCK_NORM_CAP]u16 = undefined;
-    const norm = normalize(block_text, &buf);
+fn pastePlaceholderMatches(norm: []const u16, prefix: []const u16) bool {
     const at = std.mem.indexOf(u16, norm, &PASTE_PLACEHOLDER) orelse return false;
     var end = at;
     while (end > 0 and norm[end - 1] == ' ') end -= 1;
@@ -380,7 +378,9 @@ fn pastePlaceholderMatches(block_text: []const u16, prefix: []const u16) bool {
 
 pub fn newBlockMatches(block_text: []const u16, prefix: []const u16) bool {
     if (prefix.len == 0) return false;
-    return blockMatches(block_text, prefix) or pastePlaceholderMatches(block_text, prefix);
+    if (blockMatches(block_text, prefix)) return true;
+    var buf: [BLOCK_NORM_CAP]u16 = undefined;
+    return pastePlaceholderMatches(normalize(block_text, &buf), prefix);
 }
 
 fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: Pending) bool {
