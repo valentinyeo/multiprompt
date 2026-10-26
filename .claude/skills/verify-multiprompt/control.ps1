@@ -33,6 +33,7 @@ switch ($Feature) {
         }
 }
 
+Write-Host 'Launch: loading native verification helpers'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Drawing
 Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -TypeDefinition @'
 using System;
@@ -1234,6 +1235,7 @@ function Save-Json($Value, [string]$Name) {
 }
 
 function Record([string]$Action) {
+    Write-Host $Action
     [void]$script:actions.Add(@{ time = [DateTime]::UtcNow.ToString('o'); action = $Action; title = [VerifyNative]::Title($script:window) })
     Save-Json @($script:actions.ToArray()) 'actions.json'
 }
@@ -1294,6 +1296,7 @@ function Remove-ScratchPath([string]$Path, [int]$Seconds = 20) {
 }
 
 function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds = 20, [int]$PollMilliseconds = 200, [switch]$Tight) {
+    Write-Host "Wait: $Description (timeout $Seconds s)"
     $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
     $lastError = ''
     do {
@@ -1301,7 +1304,7 @@ function Wait-Until([scriptblock]$Condition, [string]$Description, [int]$Seconds
         try { if (& $Condition) { return } } catch { $lastError = $_.Exception.Message }
         if ($Tight) { [Threading.Thread]::Sleep(1) } else { Start-Sleep -Milliseconds $PollMilliseconds }
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw "Missing precondition or resulting state: $Description. $lastError"
+    throw "Waited $Seconds s for $Description. $lastError"
 }
 
 function Read-Session {
@@ -1558,6 +1561,7 @@ function Get-SwitchMedian($Values) {
 }
 
 function Doctor {
+    Write-Host 'Doctor: checking owned executable and UI Automation window'
     $process.Refresh()
     if ($process.HasExited -or $script:window -eq [IntPtr]::Zero) { throw 'Doctor: owned app window missing' }
     [uint32]$owner = 0
@@ -1574,6 +1578,7 @@ function Doctor {
 }
 
 function Snapshot([string]$Name) {
+    Write-Host "Evidence: snapshot $Name, focused UI Automation element"
     $foreground = [VerifyNative]::GetForegroundWindow()
     $focus = @{ foreground = $foreground.ToInt64(); capturedAt = [DateTime]::UtcNow.ToString('o') }
     try {
@@ -1592,6 +1597,7 @@ function Snapshot([string]$Name) {
     } catch { $focus.processError = $_.Exception.Message }
     Save-Json $focus ($Name + '.focus.json')
     $element = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+    Write-Host "Evidence: snapshot $Name, UI Automation subtree"
     $nodes = $element.FindAll([System.Windows.Automation.TreeScope]::Subtree, [System.Windows.Automation.Condition]::TrueCondition)
     $tree = foreach ($node in $nodes) {
         @{ name = $node.Current.Name; class = $node.Current.ClassName; type = $node.Current.ControlType.ProgrammaticName; pid = $node.Current.ProcessId; handle = $node.Current.NativeWindowHandle }
@@ -2281,6 +2287,7 @@ function Assert-RelaunchSessions([string]$Stage, $Seed) {
 }
 
 try {
+    Write-Host 'Launch: validate executable and prepare isolated profile'
     if ($Feature -eq 'title-bar') {
         Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot 'title-bar-native.cs')
         [CaptionProof]::SetDpi([int]$env:CAPTION_DPI)
@@ -2450,6 +2457,7 @@ try {
     Doctor
     Record 'Launch complete; read-only Doctor passed'
     Snapshot 'before'
+    Write-Host "Drive: $Feature"
     $driveFeature = $Feature
     switch ($Feature) {
         'composer-buttons' { $driveFeature = 'chat-view' }
