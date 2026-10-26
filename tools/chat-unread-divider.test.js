@@ -51,7 +51,7 @@ test('IGSH-814 marker rides saved tabs, launch rows, reconnect and account cache
 test('IGSH-814 leave, bottom and send lifecycle preserve anchors until live history is ready', () => {
   const model = read('src/chat_session.zig');
   assert.match(read('src/main.zig'), /WM_ACTIVATEAPP => \{\s+if \(wp == 0\) \{[^]*?@import\("chat_session.zig"\).chatReadDeactivate\(\)/);
-  assert.match(model, /!disk and !history.more\) app_state.g_chat_read_open_ready = foregroundIsOurs\(\)/);
+  assert.match(model, /!disk and !history.more\) read_ready = foregroundIsOurs\(\)/);
   assert.match(model, /const restore_read = app_state.g_chat_read_open_pending and app_state.g_chat_read_open_ready/);
   assert.match(model, /!app_state.g_chat_active or app_state.g_chat_read_open_pending or \(bottom and app_state.g_chat_read_hold\)/);
   assert.match(model, /app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count and app_state.shells\[app_state.active_shell\].last_read_message_id != 0;\s+app_state.g_chat_read_open_pending = false;/);
