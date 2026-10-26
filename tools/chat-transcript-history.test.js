@@ -639,6 +639,14 @@ test "cache-first switch-back IGSH-815 restart and continuation progress" {
     shells[0].tmux_session_len = 6;
     try one.history.apply(a, "@mp\\t1\\thistory\\tok\\tsid\\t100\\t200\\t9\\t0\\tclaude\\tterm-1\\t1\\t\\ttail\\t100\\n{\\"role\\":\\"user\\",\\"text\\":\\"last\\"}\\n@@MP_END@@\\n", 1, one.key);
     one.disk_loaded = true;
+    shells[0].last_read_message_id = 42;
+    one.failures = 1;
+    one.next = 99999;
+    chatDeferTranscriptLoad();
+    try std.testing.expectEqual(@as(u64, 99999), one.next);
+    one.failures = 0;
+    chatDeferTranscriptLoad();
+    try std.testing.expectEqual(@as(u64, 0), one.next);
     one.before = 100;
     remote_pages = &.{ "@mp\\t2\\thistory\\tok\\tsid\\t100\\t100\\t9\\t0\\tclaude\\tterm-1\\t1\\t\\tolder\\t100\\n{\\"role\\":\\"user\\",\\"text\\":\\"duplicate\\"}\\n@@MP_END@@\\n" };
     remote_calls = 0;
