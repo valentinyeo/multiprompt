@@ -42,7 +42,10 @@ Wait-Until {
     ($first.dots | ConvertTo-Json -Compress) -cne ($next.dots | ConvertTo-Json -Compress)
 } 'IGSH-924 dots animate' -Seconds 20
 $check.frames += (Get-Content (Join-Path $Evidence 'working-1.json') -Raw | ConvertFrom-Json)
-[IO.File]::WriteAllText(($prefix + '-reply'), 'reply now')
+$ready = Get-Content ($prefix + '-ready.json') -Raw | ConvertFrom-Json
+$replyEvent = [Threading.EventWaitHandle]::OpenExisting(('Local\MultipromptInlineReply-' + $ready.pid))
+try { [void]$replyEvent.Set() } finally { $replyEvent.Dispose() }
+Wait-Until { Test-Path ($prefix + '-replied') } 'stand-in wrote the real reply to its console'
 Wait-Until { & $probe 'after' 'idle' } 'IGSH-924 dots gone after reply' -Seconds 45
 $check.passed = $true
 Save-Json $check 'working-proof.json'

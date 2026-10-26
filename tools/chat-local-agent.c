@@ -10,6 +10,12 @@ int main(int argc, char **argv) {
     BOOL working = inline_working || strcmp(argv[1], "working") == 0;
     if (!suggestion && !working && strcmp(argv[1], "typed") != 0) return 1;
     char path[MAX_PATH];
+    HANDLE reply_event = NULL;
+    if (inline_working) {
+        if (snprintf(path, sizeof(path), "Local\\MultipromptInlineReply-%lu", GetCurrentProcessId()) >= (int)sizeof(path)) return 2;
+        reply_event = CreateEventA(NULL, TRUE, FALSE, path);
+        if (!reply_event) return 2;
+    }
     if (snprintf(path, sizeof(path), "%s-stdin.bin", argv[2]) >= (int)sizeof(path)) return 2;
     FILE *received = fopen(path, "wb");
     if (!received) return 2;
@@ -57,19 +63,21 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 32; i++) fprintf(ready, "%s%u", i ? "," : "", attributes[i]);
     fputs("]}", ready);
     fclose(ready);
+    if (inline_working) {
+        if (WaitForSingleObject(reply_event, INFINITE) != WAIT_OBJECT_0) return 2;
+        CloseHandle(reply_event);
+        COORD user = {0, (SHORT)(info.srWindow.Bottom - 4)};
+        const WCHAR *reply = L"\x1b[0m\x1b[2J";
+        if (!WriteConsoleW(output, reply, (DWORD)wcslen(reply), &written, NULL) || !SetConsoleCursorPosition(output, user)) return 4;
+        reply = L"\x276f Please respond.\r\n\r\n\x25cf Ready.\r\n\x276f ";
+        if (!WriteConsoleW(output, reply, (DWORD)wcslen(reply), &written, NULL)) return 4;
+        if (snprintf(path, sizeof(path), "%s-replied", argv[2]) >= (int)sizeof(path)) return 2;
+        FILE *replied = fopen(path, "w");
+        if (!replied) return 2;
+        fputs("Ready.", replied);
+        fclose(replied);
+    }
     for (;;) {
-        if (inline_working) {
-            if (snprintf(path, sizeof(path), "%s-reply", argv[2]) >= (int)sizeof(path)) return 2;
-            if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
-                COORD user = {0, (SHORT)(info.srWindow.Bottom - 4)};
-                const WCHAR *reply = L"\x1b[0m\x1b[2J";
-                if (!WriteConsoleW(output, reply, (DWORD)wcslen(reply), &written, NULL) || !SetConsoleCursorPosition(output, user)) return 4;
-                reply = L"\x276f Please respond.\r\n\r\n\x25cf Ready.\r\n\x276f ";
-                if (!WriteConsoleW(output, reply, (DWORD)wcslen(reply), &written, NULL)) return 4;
-                inline_working = FALSE;
-            }
-            if (WaitForSingleObject(input, 50) == WAIT_TIMEOUT) continue;
-        }
         INPUT_RECORD record;
         DWORD read;
         if (!ReadConsoleInputW(input, &record, 1, &read) || read != 1) return 6;
