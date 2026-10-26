@@ -34,14 +34,12 @@ function harness() {
   const shared = layout.includes('pub fn paneRects(');
   const functions = [
     fn(read('drawing'), 'uiScaled'),
-    fn(read('window_frame'), 'frameScaled'),
-    fn(read('window_frame'), 'controlsRect').replaceAll('w.RECT', 'RECT'),
     ...['SIDEBAR_W', 'tabRowH', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'browserAppTitlebarH', 'browserDockTarget', 'calcBrowserLayout'].map(n => fn(browser, n)),
     fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(chat, 'chatDictationMicWidth'), fn(chat, 'chatDictationMicFit'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks').replace('    refreshBrowserControlMaskColor(layout);\n', ''), fn(chat, 'chatViewLayout'), fn(chat, 'chatSendSlots'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'),
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
   ];
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));
-  const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('@import("chat_composer.zig").', '').replaceAll('@import("window_frame.zig").', '').replaceAll('@import("console.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
+  const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('@import("chat_composer.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
   return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -427,8 +425,7 @@ test "all production pane consumers share outer margins and gaps" {
                                 }
                                 right_margin = test_client.right - b.browser_x - b.browser_w;
                                 browser_gap = b.browser_x - primary.right;
-                                try equalGap(controlsRect(test_client.right).bottom + margin, b.urlbar_y);
-                                browser_top = b.urlbar_y - controlsRect(test_client.right).bottom;
+                                browser_top = b.urlbar_y;
                                 browser_bottom = test_client.bottom - b.browser_y - b.browser_h;
                             }
                             std.debug.print("scale={d} chat={} browser={} full={} hidden={} title={} sidebar-gap={d} browser-gap={d} burn-bottom={d} pane-bottom={d} browser-bottom={d} outer={d} right={d} top={d}\\n", .{scale, chat_on, browser_on, full, hidden, title, sidebar_gap, browser_gap, test_client.bottom - burn.bottom, test_client.bottom - primary.bottom, browser_bottom, margin, right_margin, primary.top});

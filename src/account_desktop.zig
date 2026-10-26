@@ -1377,7 +1377,6 @@ pub fn paintAccountLock(hwnd: HANDLE) void {
     var ps: PAINTSTRUCT = std.mem.zeroes(PAINTSTRUCT);
     const hdc = BeginPaint(hwnd, &ps);
     defer _ = EndPaint(hwnd, &ps);
-    defer @import("window_frame.zig").paint(hwnd, hdc);
     var rc: RECT = undefined;
     _ = GetClientRect(hwnd, &rc);
     const bg = CreateSolidBrush(themeSidebarBg());

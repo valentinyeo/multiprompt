@@ -976,7 +976,7 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.match(control, /function Activate-OwnedFrame \{[\s\S]*?SetForegroundWindow\(\$script:window\)[\s\S]*?GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
   assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
   assert.match(palette, /'command palette initialized and owned frame focused' 20/);
-  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls'))"), control.indexOf("    Record 'Launch complete;"));
+  const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners'))"), control.indexOf("    Record 'Launch complete;"));
   assert.match(setup, /ZigShell\/EdgeUserData/);
   assert.match(setup, /\$warmupJob.Start\(\$edge/);
   assert.match(setup, /MainWindowTitle -match '\^Multiprompt verification browser ready'/);
@@ -2054,7 +2054,7 @@ test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches 
   assert.match(journey, /Restart-SessionRestore "relaunch-\$launch" \$false \$false \$openPorts/);
   assert.match(journey, /Open-NotifyPortListeners/);
   assert.match(journey, /\$after\.selected -cne \$starred\.selected/);
-  const assertion = control.slice(control.indexOf('function Assert-RelaunchSessions('), control.indexOf("Write-Host 'Launch: validate executable and prepare isolated profile'"));
+  const assertion = control.slice(control.indexOf('function Assert-RelaunchSessions('), control.indexOf('try {\n    if ($Feature -eq \'title-bar\')'));
   assert.match(assertion, /sessions listed twice in the sidebar/);
   assert.match(assertion, /@\(\$saved\.tabs\)\.Count -eq \$Seed\.live\.Count/);
   assert.match(assertion, /group headers missing/);

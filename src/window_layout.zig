@@ -121,20 +121,15 @@ pub fn paneRects(client: RECT, sidebar_w: i32, browser: bool, split_permille: u3
 }
 
 pub fn activePaneRects(client: RECT) PaneRects {
-    var panes = paneRects(client, SIDEBAR_W(), browserSlotReserved(), @import("browser_pane.zig").browserSplitPermilleForActiveShell(), uiScaled(if (app_state.g_sidebar_collapsed) app_state.SIDEBAR_STICKY_CARD_COLLAPSED_H else app_state.SIDEBAR_STICKY_CARD_H));
-    panes.browser.top = @import("window_frame.zig").controlsRect(client.right).bottom + paneOuterMargin();
-    panes.splitter.top = panes.browser.top;
-    return panes;
+    return paneRects(client, SIDEBAR_W(), browserSlotReserved(), @import("browser_pane.zig").browserSplitPermilleForActiveShell(), uiScaled(if (app_state.g_sidebar_collapsed) app_state.SIDEBAR_STICKY_CARD_COLLAPSED_H else app_state.SIDEBAR_STICKY_CARD_H));
 }
 
 pub fn activePaneContentRect(client: RECT) RECT {
     const pane = activePaneRects(client).primary;
     const inset = paneFocusInset();
-    const controls = @import("window_frame.zig").controlsRect(client.right);
-    const top = if (!app_state.g_chat_active and pane.right > controls.left) @max(pane.top + inset, controls.bottom - threadTitleHeight()) else pane.top + inset;
     return .{
         .left = pane.left + inset,
-        .top = top,
+        .top = pane.top + inset,
         .right = pane.right - inset,
         .bottom = pane.bottom - inset,
     };
