@@ -5720,6 +5720,16 @@ try {
                 Focus-Palette 'browser auto suspend' 6240
                 Press @(0x0D) 'Enter: disable timed browser closing while measuring'
                 Wait-Until { $state = Read-Session; $state.PSObject.Properties['browser_suspend_min'] -and $state.browser_suspend_min -eq 0 } 'app saved idle browser closing disabled'
+                $gapCase.phase = 'manual-tab-order'
+                Focus-Palette 'tab order' 6217
+                Press @(0x28) 'Down: Tab Order Manual'
+                Press @(0x0D) 'Enter: keep creation order for Ctrl+1 to Ctrl+5'
+                Wait-Until {
+                    $path = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
+                    if (-not (Test-Path $path)) { return $false }
+                    $launch = Get-Content $path -Raw | ConvertFrom-Json
+                    $launch.PSObject.Properties['sort_auto'] -and -not $launch.sort_auto
+                } 'manual tab order saved before creating sessions'
                 for ($tab = 0; $tab -lt $sessionCount; $tab++) {
                     $gapCase.phase = "session-setup-$tab"
                     if ($tab -gt 0) {
