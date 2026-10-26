@@ -11,6 +11,11 @@ on:
         required: true
         default: appearance
         type: string
+      dictation_stall:
+        description: Deliberately stall the dictation capture precondition to prove failure evidence
+        required: false
+        default: false
+        type: boolean
       tag:
         description: Optional release tag instead of building this branch
         required: false
@@ -172,6 +177,7 @@ jobs:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
+      VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
@@ -424,6 +430,7 @@ jobs:
           if ($proofList.Count -ne 28 -or $withoutRing -ne 0) { throw "Pre-fix rings were not observed in every theme/view/cycle (proofs=$($proofList.Count) withoutRing=$withoutRing)" }
           $global:LASTEXITCODE = 0
       - name: Launch Doctor Drive Evidence Cleanup
+        timeout-minutes: ${{ env.FEATURE == 'chat-dictation' && 5 || 30 }}
         if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'browser-own-profile' && env.FEATURE != 'title-bar'
         shell: powershell
         run: |
