@@ -221,6 +221,10 @@ const MessageMenuStyle = struct {
 };
 var message_menu_style: ?MessageMenuStyle = null;
 threadlocal var menu_window_hook: w.HANDLE = null;
+threadlocal var menu_clip_hwnd: w.HANDLE = null;
+threadlocal var menu_clip_width: i32 = 0;
+threadlocal var menu_clip_height: i32 = 0;
+const menu_window_radius: i32 = 12;
 
 const DWMWA_WINDOW_CORNER_PREFERENCE: w.DWORD = 33;
 const DWMWA_BORDER_COLOR: w.DWORD = 34;
@@ -249,17 +253,49 @@ fn unboundForeground() w.DWORD {
     return 0xFFFFFF;
 }
 
+fn cornerInset(radius: i32, from_edge: i32) i32 {
+    if (from_edge >= radius) return 0;
+    const dy = radius - from_edge - 1;
+    return radius - @as(i32, @intFromFloat(@sqrt(@as(f32, @floatFromInt(radius * radius - dy * dy)))));
+}
+
 fn fillMenuRow(dc: w.HANDLE, row: w.RECT, radius: i32, color: w.DWORD) void {
     if (smooth_fill_round_rect) |fill| return fill(dc, row, radius, color);
     const brush = w.CreateSolidBrush(color);
     defer _ = w.DeleteObject(brush);
     var y = row.top;
     while (y < row.bottom) : (y += 1) {
-        const from_edge = @min(y - row.top, row.bottom - 1 - y);
-        const inset = if (from_edge >= radius) 0 else radius - @as(i32, @intFromFloat(@sqrt(@as(f32, @floatFromInt(radius * radius - (radius - from_edge - 1) * (radius - from_edge - 1))))));
+        const inset = cornerInset(radius, @min(y - row.top, row.bottom - 1 - y));
         const span = w.RECT{ .left = row.left + inset, .top = y, .right = row.right - inset, .bottom = y + 1 };
         _ = w.FillRect(dc, &span, brush);
     }
+}
+
+fn clipMenuWindow(hwnd: w.HANDLE) void {
+    var outer: w.RECT = undefined;
+    var inner: w.RECT = undefined;
+    if (w.GetWindowRect(hwnd, &outer) == 0 or w.GetClientRect(hwnd, &inner) == 0) return;
+    const width = outer.right - outer.left;
+    const height = outer.bottom - outer.top;
+    if (menu_clip_hwnd == hwnd and menu_clip_width == width and menu_clip_height == height) return;
+    menu_clip_hwnd = hwnd;
+    menu_clip_width = width;
+    menu_clip_height = height;
+    const side = @max(0, @divTrunc(width - (inner.right - inner.left), 2));
+    const edge = @max(0, @divTrunc(height - (inner.bottom - inner.top), 2));
+    const radius = @min(menu_window_radius, @divTrunc(height - 2 * edge, 2));
+    const region = w.CreateRectRgn(side, edge + radius, width - side, height - edge - radius);
+    var row: i32 = 0;
+    while (row < radius) : (row += 1) {
+        const inset = cornerInset(radius, row);
+        const top = w.CreateRectRgn(side + inset, edge + row, width - side - inset, edge + row + 1);
+        const bottom = w.CreateRectRgn(side + inset, height - edge - row - 1, width - side - inset, height - edge - row);
+        _ = w.CombineRgn(region, region, top, 2);
+        _ = w.CombineRgn(region, region, bottom, 2);
+        _ = w.DeleteObject(top);
+        _ = w.DeleteObject(bottom);
+    }
+    _ = w.SetWindowRgn(hwnd, region, 1);
 }
 
 fn roundMenuWindow(hwnd: w.HANDLE) bool {
@@ -270,12 +306,25 @@ fn roundMenuWindow(hwnd: w.HANDLE) bool {
     return rounded and borderless;
 }
 
+const WindowReturn = extern struct {
+    result: w.LRESULT,
+    lparam: w.LPARAM,
+    wparam: w.WPARAM,
+    message: u32,
+    hwnd: w.HANDLE,
+};
+
 fn menuWindowHook(code: i32, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
-    if (code == 3) {
-        const hwnd: w.HANDLE = @ptrFromInt(wp);
-        var class: [8]u16 = @splat(0);
-        const len = w.GetClassNameW(hwnd, &class, class.len);
-        if (len > 0 and std.mem.eql(u16, class[0..@intCast(len)], L("#32768"))) _ = roundMenuWindow(hwnd);
+    if (code >= 0 and lp != 0) {
+        const info: *const WindowReturn = @ptrFromInt(@as(usize, @bitCast(lp)));
+        if (info.message == 0x47) {
+            var class: [8]u16 = @splat(0);
+            const len = w.GetClassNameW(info.hwnd, &class, class.len);
+            if (len > 0 and std.mem.eql(u16, class[0..@intCast(len)], L("#32768"))) {
+                _ = roundMenuWindow(info.hwnd);
+                clipMenuWindow(info.hwnd);
+            }
+        }
     }
     return w.CallNextHookEx(menu_window_hook, code, wp, lp);
 }
@@ -306,8 +355,9 @@ fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved:
     defer _ = SetMenuInfo(menu, &MenuInfo{ .background = null });
     const ink = if (bound) |theme| theme.foreground() else unboundForeground();
     smooth_fill_round_rect = if (bound) |theme| theme.fill_round_rect else null;
+    menu_clip_hwnd = null;
     const previous_hook = menu_window_hook;
-    menu_window_hook = w.SetWindowsHookExW(5, &menuWindowHook, null, w.GetCurrentThreadId());
+    menu_window_hook = w.SetWindowsHookExW(12, &menuWindowHook, null, w.GetCurrentThreadId());
     defer {
         if (menu_window_hook != null) _ = w.UnhookWindowsHookEx(menu_window_hook);
         menu_window_hook = previous_hook;

@@ -652,6 +652,7 @@ pub extern "gdi32" fn Ellipse(HANDLE, i32, i32, i32, i32) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn RoundRect(HANDLE, i32, i32, i32, i32, i32, i32) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn CreateRoundRectRgn(i32, i32, i32, i32, i32, i32) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn CreateRectRgn(i32, i32, i32, i32) callconv(WINAPI) HANDLE;
+pub extern "gdi32" fn CombineRgn(HANDLE, HANDLE, HANDLE, i32) callconv(WINAPI) i32;
 pub extern "user32" fn SetWindowRgn(HANDLE, HANDLE, BOOL) callconv(WINAPI) i32;
 pub extern "gdi32" fn CreatePen(i32, i32, DWORD) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn MoveToEx(HANDLE, i32, i32, ?*POINT) callconv(WINAPI) BOOL;

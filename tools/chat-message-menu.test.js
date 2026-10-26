@@ -50,6 +50,8 @@ test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons
   assert.match(fonts, /chat_style.menuLook\(if \(bound\) \|theme\| theme.background\(\) else unboundBackground\(\)\)/);
   assert.match(read('src/main.zig'), /bindMenuTheme\(\.\{\s*\.background = &@import\("themes.zig"\).themeConsoleBg,\s*\.foreground = &@import\("themes.zig"\).themeConsoleFg,\s*\.fill_round_rect = &@import\("smooth.zig"\).fillRoundRect/);
   assert.match(fonts, /DWMWCP_ROUND/);
+  assert.match(fonts, /SetWindowsHookExW\(12, &menuWindowHook[^]*?\.message == 0x47|info.message == 0x47[^]*?clipMenuWindow\(info.hwnd\)/);
+  assert.match(fonts, /SetWindowRgn\(hwnd, region, 1\)/);
   assert.match(fonts, /mask: u32 = 2/);
   assert.match(fonts, /SetMenuInfo\(menu, &info\)[^]*?defer _ = SetMenuInfo\(menu, &MenuInfo\{ \.background = null \}\)/);
   assert.match(fonts, /theme.foreground\(\)/);
@@ -86,8 +88,8 @@ test('IGSH-718 journey requires real owned mouse input, exact new log, popup dis
   assert.ok(control.includes("items=Reply,Copy$'"));
   assert.match(control, /Snapshot 'message-menu'\s*Press @\(0x1B\)/);
   assert.match(control, /\$menuLook = \[VerifyNative\]::MenuLook\(/);
-  assert.match(control, /\$menuLook\.corner -eq \$menuLook\.fill\) \{ throw/);
-  assert.match(control, /\$menuLook\.leftEdge -ne \$menuLook\.fill -or \$menuLook\.rightEdge -ne \$menuLook\.fill\) \{ throw/);
+  assert.match(control, /\$menuLook\.cornerShown\) \{ throw/);
+  assert.match(control, /\$menuLook\.borderShown -or \$menuLook\.leftEdge -ne \$menuLook\.fill -or \$menuLook\.rightEdge -ne \$menuLook\.fill\) \{ throw/);
   assert.match(control, /class -eq '#32768' -and \$_.visible \}\).Count -eq 0/);
   for (const name of ['message-menu', 'grey-buttons']) assert.ok(control.includes(`name = '${name}'; passed = $false; reason = 'not reached'`));
   assert.match(control, /new System.Drawing.Bitmap\(image\)/);
