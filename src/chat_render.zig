@@ -6177,6 +6177,8 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     const bg = themeConsoleBg();
     @import("chat_composer.zig").refreshChatBrushes();
     const fill = app_state.g_chat_input_color;
+    const title_layout = @import("drawing.zig").chatTitleLayout() orelse return error.TestUnexpectedResult;
+    const beside_right = (if (title_layout.has_meta) title_layout.meta_pill.right else pill.right) + uiScaled(8);
     const Position = enum { middle, top, bottom };
     const straddle = app_state.g_chat_layout_rects[block_count / 2];
     const middle_scroll = std.math.clamp(straddle.top + @divTrunc(straddle.bottom - straddle.top, 2) - (layout.composer_card.top - window.top), 0, max_scroll);
@@ -6211,7 +6213,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         try std.testing.expect(outline != bg and outline != fill);
 
         const left_band = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.top, pill.left - uiScaled(8), pill.bottom);
-        const right_band = floatProofInk(frame_pixels, frame_w, bg, pill.right + uiScaled(8), pill.top, layout.transcript.right - uiScaled(16), pill.bottom);
+        const right_band = floatProofInk(frame_pixels, frame_w, bg, beside_right, pill.top, layout.transcript.right - uiScaled(16), pill.bottom);
         const above_card = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(40), layout.transcript.right, card.top);
         const gap_strip = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(12), layout.transcript.right, card.top - uiScaled(1));
         const below_pill = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.bottom + uiScaled(2), layout.transcript.right, pill.bottom + uiScaled(40));
