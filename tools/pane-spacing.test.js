@@ -34,13 +34,14 @@ function harness() {
   const shared = layout.includes('pub fn paneRects(');
   const functions = [
     fn(read('drawing'), 'uiScaled'),
+    fn(read('window_frame'), 'frameScaled'),
     fn(read('window_frame'), 'controlsRect').replaceAll('w.RECT', 'RECT'),
     ...['SIDEBAR_W', 'tabRowH', 'threadTitleHeight', 'threadTitleTop', 'consoleEdgePad', 'centeredConsoleColumn', 'contentHeaderLeft', 'browserDockConsoleX', 'paneFocusRingPad', 'paneFocusContentGap', 'paneFocusInset', 'browserUrlBarH', 'browserAppTitlebarH', 'browserDockTarget', 'calcBrowserLayout'].map(n => fn(browser, n)),
     fn(read('drawing'), 'threadTitleBandRightFor'), fn(chat, 'chatReplyBarH'), fn(chat, 'chatDictationMicWidth'), fn(chat, 'chatDictationMicFit'), fn(browser, 'setBrowserSplitFromMouse'), fn(browser, 'positionBrowserEdgeMasks').replace('    refreshBrowserControlMaskColor(layout);\n', ''), fn(chat, 'chatViewLayout'), fn(chat, 'chatSendSlots'), fn(capacity, 'sidebarStickyCardRect'), fn(layout, 'repositionActive'), fn(browser, 'paintBrowserSplitter'),
     fn(read('console'), 'positionReconnectedConsole').replace('const pane = @import("browser_pane.zig");', 'const pane = app_state;').replaceAll('@import("drawing.zig").', ''),
   ];
   if (shared) functions.push(...['paneOuterMargin', 'paneGap', 'clampPaneSplitWidth', 'paneRects', 'activePaneRects', 'activePaneContentRect'].map(n => fn(layout, n)));
-  const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('@import("chat_composer.zig").', '').replaceAll('@import("window_frame.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
+  const production = functions.join('\n').replaceAll('@import("window_layout.zig").', '').replaceAll('@import("browser_pane.zig").', '').replaceAll('@import("chat_composer.zig").', '').replaceAll('@import("window_frame.zig").', '').replaceAll('@import("console.zig").', '').replaceAll('const style = @import("window_layout.zig");', 'const style = pane_style;');
   return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};

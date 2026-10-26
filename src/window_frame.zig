@@ -1,20 +1,23 @@
 const std = @import("std");
 const w = @import("win32.zig");
-const uiScaled = @import("drawing.zig").uiScaled;
 const RGB = @import("startup.zig").RGB;
 
 pub const Button = enum { minimize, maximize, close };
 var hovered: ?Button = null;
 var pressed: ?Button = null;
 
+fn frameScaled(px: i32) i32 {
+    return @intCast(@divTrunc(@as(i64, px) * @as(i64, @intCast(@import("console.zig").mainWindowDpi())), 96));
+}
+
 pub fn controlsRect(width: i32) w.RECT {
-    return .{ .left = width - uiScaled(44) * 3, .top = 0, .right = width, .bottom = uiScaled(32) };
+    return .{ .left = width - frameScaled(44) * 3, .top = 0, .right = width, .bottom = frameScaled(32) };
 }
 
 pub fn buttonRect(width: i32, button: Button) w.RECT {
     const band = controlsRect(width);
-    const left = band.left + @as(i32, @intCast(@intFromEnum(button))) * uiScaled(44);
-    return .{ .left = left, .top = band.top, .right = left + uiScaled(44), .bottom = band.bottom };
+    const left = band.left + @as(i32, @intCast(@intFromEnum(button))) * frameScaled(44);
+    return .{ .left = left, .top = band.top, .right = left + frameScaled(44), .bottom = band.bottom };
 }
 
 fn buttonAt(width: i32, point: w.POINT) ?Button {
@@ -54,7 +57,7 @@ pub fn hitTest(client: w.RECT, point: w.POINT, maximized: bool, border: i32) w.L
         if (bottom) return 15;
     }
     if (buttonAt(client.right, point)) |button| return hitCode(button);
-    if (point.y < uiScaled(8)) return 2;
+    if (point.y < frameScaled(8)) return 2;
     return 1;
 }
 
@@ -151,7 +154,7 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE) void {
     _ = w.FillRect(dc, &band, background);
     _ = w.DeleteObject(background);
     const ink = @import("themes.zig").customColorOr("subtitle", if (@import("app_state.zig").g_light_theme) RGB(100, 100, 100) else RGB(160, 160, 160));
-    const pen = w.CreatePen(0, @max(1, uiScaled(1)), ink);
+    const pen = w.CreatePen(0, @max(1, frameScaled(1)), ink);
     const old = w.SelectObject(dc, pen);
     defer {
         _ = w.SelectObject(dc, old);
@@ -166,14 +169,14 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE) void {
         }
         const x = @divTrunc(rc.left + rc.right, 2);
         const y = @divTrunc(rc.top + rc.bottom, 2);
-        const half = uiScaled(5);
+        const half = frameScaled(5);
         switch (button) {
             .minimize => {
                 _ = w.MoveToEx(dc, x - half, y, null);
                 _ = w.LineTo(dc, x + half, y);
             },
             .maximize => {
-                const offset = if (w.IsZoomed(hwnd) != 0) uiScaled(2) else 0;
+                const offset = if (w.IsZoomed(hwnd) != 0) frameScaled(2) else 0;
                 _ = w.MoveToEx(dc, x - half + offset, y - half, null);
                 _ = w.LineTo(dc, x + half, y - half);
                 _ = w.LineTo(dc, x + half, y + half - offset);
@@ -210,4 +213,16 @@ test "custom frame retains resize corners, native window-button hits and a thin 
         try std.testing.expectEqual(hitCode(button), hitTest(rc, point, true, 4));
     }
     try std.testing.expectEqual(@as(w.LRESULT, 1), hitTest(rc, .{ .x = 500, .y = 300 }, false, 4));
+}
+
+test "window control hit areas do not shrink with the app content scale" {
+    const state = @import("app_state.zig");
+    const saved = state.g_ui_scale;
+    defer state.g_ui_scale = saved;
+    state.g_ui_scale = 100;
+    const expected = controlsRect(1000);
+    for ([_]u32{ 50, 75, 150, 200 }) |scale| {
+        state.g_ui_scale = scale;
+        try std.testing.expect(std.meta.eql(expected, controlsRect(1000)));
+    }
 }

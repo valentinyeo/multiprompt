@@ -41,3 +41,11 @@ test('IGSH-1000 maximized client content excludes the native invisible resize bo
   assert.match(journey, /Abs\(\$pixels.captionInset\) -gt 1 -or -not \$pixels.clientInsideWorkArea/);
   assert.match(native, /origin.Y, client.Right, client.Bottom[\s\S]*monitor.Work.Left, monitor.Work.Top/);
 });
+
+test('IGSH-1000 window hit areas follow monitor DPI, not smaller chat content settings', () => {
+  const frame = read('src/window_frame.zig');
+  const geometry = frame.slice(frame.indexOf('fn frameScaled('), frame.indexOf('fn buttonAt('));
+  assert.match(geometry, /mainWindowDpi\(\)/);
+  assert.doesNotMatch(geometry, /g_ui_scale|drawing.zig/);
+  assert.match(frame, /window control hit areas do not shrink with the app content scale/);
+});
