@@ -1,6 +1,7 @@
 $bindingName = 'verify-binding'
 $bindingCheck = @{ name = 'tmux-binding-five-reopens'; passed = $false; beforeCount = 1; afterCount = 0; launches = @() }
 $result.checks += $bindingCheck
+& $Exe --notify ('SESSION:' + $bindingName + ':a1b2c3d4-0985-4000-8000-000000000985:C:/verify')
 Wait-Until {
     $state = Read-Session
     $tabs = @($state.tabs)

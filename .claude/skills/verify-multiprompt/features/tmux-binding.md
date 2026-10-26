@@ -14,7 +14,7 @@ Open an SSH tab, attach an existing terminal session, then close and reopen Mult
 ## Driving it with control.ps1
 
 Dispatch `verify.yml` with `feature=tmux-binding` on the exact candidate revision.
-The fixture seeds one bare SSH tab before launch. Its isolated SSH boundary displays an existing session named `verify-binding` with a stock status row. The real app must detect and save its name and second-host identity.
+The fixture seeds one bare SSH tab before launch. Its isolated SSH boundary displays an existing session named `verify-binding` with a stock status row. The driver delivers the normal public `SESSION` hook for that name. The real app must adopt and save its name and second-host identity. The hook is the same notification an agent sends; no app setter or saved binding is injected.
 The boundary then removes only the status row. Observe four real name-poll events while requiring the saved identity to remain intact. No app setting or timer is injected.
 Normally close and reopen the owned app five times, reusing only its private profile. Each cycle must retain the exact name and host, emit exactly one additional attach command and no additional bare login, and keep the boundary's one-session registry unchanged. Save screenshots and session JSON for every cycle.
 `binding-proof.json` records all five cycles and before/after counts. `binding-commands.jsonl` retains exact attach receipts. The normal Doctor, foreground, hash, process-tree and cleanup rules remain required.

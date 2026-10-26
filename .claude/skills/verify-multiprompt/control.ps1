@@ -2639,10 +2639,10 @@ try {
         $env:MP_VERIFY_STATE = $bindingState
         $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
-        $bindingSeed = @{ active_tab = 0; single_window = $true; tabs = @(@{ kind = 'vps2'; name = 'Saved remote conversation'; manual = $true; pid = 0 }) }
+        $bindingSeed = @{ active_tab = 0; single_window = $true; tabs = @(@{ kind = 'vps2'; name = 'verify-binding'; manual = $true; pid = 0 }) }
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), ($bindingSeed | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
         Save-Json $bindingSeed 'seed-session.json'
-        $result.seedBoundary = 'One saved bare SSH tab. Only SSH is replaced by an owned console showing an existing named terminal session. The real app detects, adopts, saves and restores its binding; command receipts prove five exact reattachments and no session creation. No live server, credentials or real Claude are used.'
+        $result.seedBoundary = 'One saved bare SSH tab. Only SSH is replaced by an owned console showing an existing named terminal session. The real app accepts a normal SESSION hook, adopts, saves and restores its binding; command receipts prove five exact reattachments and no session creation. No live server, credentials or real Claude are used.'
     }
     if ($Feature -eq 'chat-switch-speed') {
         $remoteState = Join-Path $scratch 'remote-state'
