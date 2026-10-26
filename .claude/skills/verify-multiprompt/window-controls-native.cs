@@ -7,6 +7,10 @@ using System.Threading;
 public static class WindowControlsProof {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] struct MonitorInfo { public int Size; public Rect Monitor, Work; public uint Flags; }
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")] static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
@@ -25,7 +29,9 @@ public static class WindowControlsProof {
         uint dpi = GetDpiForWindow(hwnd);
         Rect native = new Rect { Right = client.Right, Bottom = client.Bottom };
         if (!AdjustWindowRectExForDpi(ref native, 0x00CF0000, false, 0, dpi)) throw new InvalidOperationException("Native caption comparison unavailable");
-        return new int[] { frame.Left, frame.Top, frame.Right, frame.Bottom, origin.X, origin.Y, client.Right, client.Bottom, (int)dpi, -native.Top };
+        MonitorInfo monitor = new MonitorInfo { Size = Marshal.SizeOf(typeof(MonitorInfo)) };
+        if (!GetMonitorInfoW(MonitorFromWindow(hwnd, 2), ref monitor)) throw new InvalidOperationException("Monitor work area unavailable");
+        return new int[] { frame.Left, frame.Top, frame.Right, frame.Bottom, origin.X, origin.Y, client.Right, client.Bottom, (int)dpi, -native.Top, monitor.Work.Left, monitor.Work.Top, monitor.Work.Right, monitor.Work.Bottom, IsZoomed(hwnd) ? 1 : 0 };
     }
     public static int Hit(IntPtr hwnd, int x, int y) {
         Point point = new Point { X = x, Y = y };
@@ -64,8 +70,9 @@ public static class WindowControlsProof {
         int differences = 0;
         using (Bitmap before = new Bitmap(reference))
         using (Bitmap after = new Bitmap(actual)) {
-            for (int y = 0; y < buttonHeight; y++) {
-                for (int x = geometry[6] - buttonWidth * 3; x < geometry[6]; x++) {
+            int left = geometry[4] - geometry[0], top = geometry[5] - geometry[1];
+            for (int y = top; y < top + buttonHeight; y++) {
+                for (int x = left + geometry[6] - buttonWidth * 3; x < left + geometry[6]; x++) {
                     Color a = before.GetPixel(x, y), b = after.GetPixel(x, y);
                     if (Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B))) > 8) differences++;
                 }
@@ -75,9 +82,10 @@ public static class WindowControlsProof {
     }
     public static void NegativeControl(string source, string target, int[] geometry, int buttonWidth) {
         using (Bitmap image = new Bitmap(source)) {
-            int x = geometry[6] - buttonWidth * 3 + 8;
-            Color prior = image.GetPixel(x, 8);
-            image.SetPixel(x, 8, prior.R < 128 ? Color.White : Color.Black);
+            int x = geometry[4] - geometry[0] + geometry[6] - buttonWidth * 3 + 8;
+            int y = geometry[5] - geometry[1] + 8;
+            Color prior = image.GetPixel(x, y);
+            image.SetPixel(x, y, prior.R < 128 ? Color.White : Color.Black);
             image.Save(target);
         }
     }
@@ -105,6 +113,8 @@ public static class WindowControlsProof {
             }
         }
         output["topInset"] = topGap;
+        output["captionInset"] = geometry[5] - (geometry[14] == 1 ? geometry[11] : geometry[1]);
+        output["clientInsideWorkArea"] = geometry[14] != 1 || (geometry[4] == geometry[10] && geometry[5] == geometry[11] && geometry[4] + geometry[6] == geometry[12] && geometry[5] + geometry[7] == geometry[13]);
         output["nativeTopInset"] = geometry[9];
         output["recoveredTopPixels"] = geometry[9] - topGap;
         output["glyphPixels"] = ink;

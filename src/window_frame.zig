@@ -69,7 +69,24 @@ fn hover(hwnd: w.HANDLE, button: ?Button) void {
 
 pub fn handle(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) ?w.LRESULT {
     switch (msg) {
-        0x0083 => return 0,
+        0x0083 => {
+            if (lp == 0) return 0;
+            const client: *w.RECT = @ptrFromInt(@as(usize, @bitCast(lp)));
+            const top = client.top;
+            _ = w.DefWindowProcW(hwnd, msg, wp, lp);
+            client.top = top;
+            if (w.IsZoomed(hwnd) != 0) {
+                var monitor = std.mem.zeroes(w.MONITORINFO);
+                monitor.cbSize = @sizeOf(w.MONITORINFO);
+                if (w.GetMonitorInfoW(w.MonitorFromWindow(hwnd, w.MONITOR_DEFAULTTONEAREST), &monitor) != 0) {
+                    client.left = @max(client.left, monitor.rcWork.left);
+                    client.top = @max(client.top, monitor.rcWork.top);
+                    client.right = @min(client.right, monitor.rcWork.right);
+                    client.bottom = @min(client.bottom, monitor.rcWork.bottom);
+                }
+            }
+            return 0;
+        },
         w.WM_NCHITTEST => {
             var point = pointFromMessage(lp);
             _ = w.ScreenToClient(hwnd, &point);
