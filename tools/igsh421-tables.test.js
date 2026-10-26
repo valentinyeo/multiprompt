@@ -345,7 +345,7 @@ test('ISSUE-421 production hit-test oracle rejects missing horizontal source tra
 
 test('ISSUE-421 wheel routing works while the composer owns keyboard focus', () => {
   const main = fs.readFileSync('src/main.zig', 'utf8');
-  assert.match(main, /WM_MOUSEWHEEL, WM_MOUSEHWHEEL => \{[^]*?pointInRect\(layout\.transcript, pt\.x, pt\.y\)[^]*?chatTableWheel\(app_state\.g_chat_transcript_hwnd, msg, wp, lp\)/);
+  assert.match(main, /WM_MOUSEWHEEL, WM_MOUSEHWHEEL => \{[^]*?pointInRect\(layout\.transcript_window, pt\.x, pt\.y\)[^]*?chatTableWheel\(app_state\.g_chat_transcript_hwnd, msg, wp, lp\)/);
 });
 
 

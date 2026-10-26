@@ -177,6 +177,9 @@ var g_chat_last_len: usize = 1;
 var g_chat_layout_dirty = true;
 var g_chat_find_layout_open = false;
 const CHAT_FIND_TOP_H: i32 = 52;
+const CHAT_PILL_TOP: i32 = 8;
+const CHAT_PILL_H: i32 = 30;
+const CHAT_PILL_GAP: i32 = 10;
 var g_chat_layout_width: i32 = 0;
 var g_chat_layout_scale: i32 = 0;
 var g_chat_layout_font_pt: i32 = 0;
@@ -236,7 +239,7 @@ test "prefix rectangles survive repeated layout and suffix updates; resize and f
     g_chat_layout_reuse = 999; g_chat_block_count = 1001;
     chatRelayout(400);
     try std.testing.expectEqual(@as(usize, 1002), measured);
-    try std.testing.expectEqual(@as(i32, 20020), g_chat_content_h);
+    try std.testing.expectEqual(@as(i32, 20020) + chatTopPad(), g_chat_content_h);
     chatRelayout(401);
     try std.testing.expectEqual(@as(usize, 2003), measured);
     g_chat_font_pt += 1;
@@ -250,7 +253,7 @@ test "prefix rectangles survive repeated layout and suffix updates; resize and f
 }
 `;
 test('production layout measures only changed suffixes and caches unchanged geometry', () => {
-  const result = run(layout + body(source, 'chatRelayout') + layoutChecks);
+  const result = run(layout + body(source, 'chatTopPad') + body(source, 'chatRelayout') + layoutChecks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 test('ISSUE-268 oldest match has room below the find bar and closing removes that room', () => {
@@ -259,21 +262,21 @@ test('ISSUE-268 oldest match has room below the find bar and closing removes tha
       for (&blocks) |*b| b.* = .{ .start = 0, .len = 1, .role = .prose };
       g_chat_block_count = 1;
       chatRelayout(400);
-      try std.testing.expectEqual(@as(i32, 0), g_chat_layout_rects[0].top);
+      try std.testing.expectEqual(chatTopPad(), g_chat_layout_rects[0].top);
       g_chat_find_open = true;
       chatRelayout(400);
-      try std.testing.expect(g_chat_layout_rects[0].top >= uiScaled(52));
+      try std.testing.expect(g_chat_layout_rects[0].top >= chatTopPad() + uiScaled(52));
       g_chat_find_open = false;
       chatRelayout(400);
-      try std.testing.expectEqual(@as(i32, 0), g_chat_layout_rects[0].top);
+      try std.testing.expectEqual(chatTopPad(), g_chat_layout_rects[0].top);
   }`;
-  const result = run(layout + body(source, 'chatRelayout') + check);
+  const result = run(layout + body(source, 'chatTopPad') + body(source, 'chatRelayout') + check);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 test('layout oracle rejects actual 706 full-history remeasurement', () => {
   const old = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-5880899.zig', 'utf8') });
   assert.equal(old.status, 0);
-  const result = run(layout + body(old.stdout, 'chatRelayout') + layoutChecks);
+  const result = run(layout + body(source, 'chatTopPad') + body(old.stdout, 'chatRelayout') + layoutChecks);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /expected 1000, found 2000/);
 });
@@ -284,7 +287,7 @@ test('UI completion never parses; polling/paint use revisions, cached tables and
   assert.match(body(source, 'chatFileFetchThread'), /history\.suffix\(a\)/);
   assert.match(body(source, 'chatFileFetchThread'), /CACHE_WRITE_MS/);
   assert.match(body(source, 'chatTableLayout'), /g_chat_tables\.layout/);
-  assert.match(body(source, 'chatTranscriptWndProc'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
+  assert.match(body(source, 'chatPaintTranscript'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
   assert.match(body(source, 'chatFileRequestForDelivery'), /GetLastInputInfo[^]*< 5000\) return/);
   assert.match(body(source, 'chatImgFirstBlock'), /g_chat_blocks_from_file[^]*block\.image_count/);
 });

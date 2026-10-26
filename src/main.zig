@@ -1080,7 +1080,6 @@ const voiceHandleUtterance = @import("voice.zig").voiceHandleUtterance;
 const repositionActive = @import("window_layout.zig").repositionActive;
 const invalidateSidebar = @import("window_layout.zig").invalidateSidebar;
 const chatWorkingIndicatorSync = @import("window_layout.zig").chatWorkingIndicatorSync;
-const paintChatView = @import("window_layout.zig").paintChatView;
 const invalidateSpinnerRects = @import("window_layout.zig").invalidateSpinnerRects;
 const startWindowRename = @import("rename.zig").startWindowRename;
 const startRename = @import("rename.zig").startRename;
@@ -1572,7 +1571,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (mem_dc == null) {
                 var canvas = @import("smooth.zig").Canvas.init(hdc);
                 paintSidebar(hdc);
-                paintChatView(hdc);
                 @import("drawing.zig").paintDisconnectedShell(hdc);
                 paintBrowserPlaceholder(hdc);
                 paintBrowserSplitter(hdc);
@@ -1587,7 +1585,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             const canvas = @import("drawing.zig").beginPaintCanvas();
             paintSidebar(mem_dc);
-            paintChatView(mem_dc);
             @import("drawing.zig").paintDisconnectedShell(mem_dc);
             paintBrowserPlaceholder(mem_dc);
             paintBrowserSplitter(mem_dc);
@@ -1986,7 +1983,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = ScreenToClient(hwnd, &pt);
             if (chatViewOwnsInput()) {
                 const layout = chatViewLayout();
-                if (pointInRect(layout.transcript, pt.x, pt.y)) {
+                if (pointInRect(layout.transcript_window, pt.x, pt.y)) {
                     if (@import("chat_render.zig").chatTableWheel(app_state.g_chat_transcript_hwnd, msg, wp, lp)) return 0;
                     if (msg == WM_MOUSEHWHEEL) return DefWindowProcW(hwnd, msg, wp, lp);
                     @import("chat_render.zig").chatWheelScroll(wp);

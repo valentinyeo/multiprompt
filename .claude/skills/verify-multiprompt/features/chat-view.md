@@ -20,6 +20,7 @@ Keep the real desktop entry journey separate from the deterministic received-mes
 - `pending-message-selection-copy`: native tests check that messages still waiting to send can be selected, selected together with sent messages, and copied, and that the selection survives streamed transcript updates.
 - `copy-link`: native tests check that right-clicking a link offers Copy link and copies only that URL, without trailing punctuation.
 - `steer-send`: native tests check that Ctrl+X then Ctrl+S in Chat View sends the typed message and then presses Claude's own Ctrl+X Ctrl+S once it is typed, on both the tmux channel and direct input, that an empty composer presses it at once, that a failed paste presses nothing, and that only an adjacent plain Ctrl+X, Ctrl+S chord fires.
+- `scroll-behind`: native Windows tests build a long synthetic transcript and run the real transcript paint path at the middle, top and bottom scroll positions, saving `chat-scroll-behind-middle.png`, `chat-scroll-behind-top.png` and `chat-scroll-behind-bottom.png`. They require message pixels beside and under the floating title pill and in the strip above the message box, the first message fully below the pill at the top, the last message ending above the box at the bottom, fill and outline colours on the pill and box, and no message pixels below the box.
 
 ## How to get to it (user POV)
 

@@ -276,7 +276,7 @@ pub fn chatSurfaceBorderColor() DWORD {
     return customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55));
 }
 
-fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, radius: i32) void {
+pub fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, radius: i32) void {
     const edge = chatSurfaceBorderW();
     fillRoundRectAA(hdc, rc, radius, border_color);
     fillRoundRectAA(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, @max(0, radius - edge), color);
@@ -383,7 +383,7 @@ fn paintChatPermission(hdc: HANDLE, border: DWORD) void {
     const old_font = SelectObject(hdc, ensureChatFont());
     defer _ = SelectObject(hdc, old_font);
     for (std.meta.tags(@import("chat_permission.zig").Action), 0..) |action, i| {
-        const rc = chatPermissionRect(action) orelse continue;
+        const rc = @import("chat_composer.zig").chatPaintShift(chatPermissionRect(action) orelse continue);
         const text = app_state.g_chat_permission.optionText(action) orelse continue;
         paintChatSurface(hdc, rc, app_state.g_chat_input_color, border, uiScaled(6));
         _ = SetTextColor(hdc, if (app_state.shells[app_state.active_shell].permission_answered) customColorOr("hint", RGB(135, 139, 147)) else customColorOr("text", if (app_state.g_light_theme) RGB(40, 44, 52) else RGB(220, 224, 232)));
@@ -402,7 +402,7 @@ pub fn paintChatView(hdc: HANDLE) void {
     var canvas = @import("smooth.zig").Canvas.init(hdc);
     defer canvas.deinit();
     if (!chatViewOwnsInput()) return;
-    const layout = chatViewLayout();
+    const layout = @import("chat_composer.zig").chatViewLayoutForPaint();
     refreshChatBrushes();
     _ = SetBkMode(hdc, TRANSPARENT);
     const card_border = chatSurfaceBorderColor();
@@ -417,7 +417,7 @@ pub fn paintChatView(hdc: HANDLE) void {
         preview.bottom = layout.composer_card.top + @import("chat_composer.zig").chatReplyBarH();
         _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
         _ = DrawTextW(hdc, &app_state.g_chat_reply_preview, @intCast(app_state.g_chat_reply_preview_len), &preview, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        var cancel = @import("chat_composer.zig").chatReplyCancelRect();
+        var cancel = @import("chat_composer.zig").chatPaintShift(@import("chat_composer.zig").chatReplyCancelRect());
         _ = DrawTextW(hdc, L("×"), -1, &cancel, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
     const has_text = app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0;
@@ -425,8 +425,9 @@ pub fn paintChatView(hdc: HANDLE) void {
     if (layout.stop_shown) paintChatButton(hdc, layout.stop_btn, true, .stop);
     paintChatAttachButton(hdc, layout.attach_btn);
     paintChatMicButton(hdc, layout.mic_btn);
-    logChatButtons(layout);
-    if (@import("chat_composer.zig").chatNewMessagesRect()) |pill| {
+    logChatButtons(chatViewLayout());
+    if (@import("chat_composer.zig").chatNewMessagesRect()) |unshifted_pill| {
+        const pill = @import("chat_composer.zig").chatPaintShift(unshifted_pill);
         paintChatSurface(hdc, pill, app_state.g_chat_input_color, card_border, uiScaled(13));
         const old_font = SelectObject(hdc, ensureChatFont());
         defer _ = SelectObject(hdc, old_font);
@@ -511,13 +512,16 @@ pub fn invalidateSpinnerRects() void {
         _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
     }
     if (threadTitleHeight() > 0 and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].activity == .active) {
-        const title_left = if (app_state.g_chat_active) chatViewLayout().transcript.left else SIDEBAR_W();
-        var title_rc = RECT{
-            .left = title_left,
-            .top = threadTitleTop(),
-            .right = title_left + 56,
-            .bottom = threadTitleTop() + threadTitleHeight(),
-        };
+        const title_left = SIDEBAR_W();
+        var title_rc = if (app_state.g_chat_active)
+            (if (@import("drawing.zig").chatTitleLayout()) |title| title.pill else RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 })
+        else
+            RECT{
+                .left = title_left,
+                .top = threadTitleTop(),
+                .right = title_left + 56,
+                .bottom = threadTitleTop() + threadTitleHeight(),
+            };
         _ = InvalidateRect(app_state.g_main_hwnd, &title_rc, 0);
     }
 }

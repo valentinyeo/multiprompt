@@ -111,6 +111,7 @@ const ChatHistoryEntry = @import("app_state.zig").ChatHistoryEntry;
 const ChatHistoryChannel = @import("app_state.zig").ChatHistoryChannel;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
 const chatRelayout = @import("chat_render.zig").chatRelayout;
+const chatViewportH = @import("chat_render.zig").chatViewportH;
 const chat_image = @import("chat_image.zig");
 const ChatImgItem = @import("app_state.zig").ChatImgItem;
 const chatEchoMatchActive = @import("chat_send.zig").chatEchoMatchActive;
@@ -1185,7 +1186,7 @@ pub fn chatRefreshAfterFontChange() void {
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null) return;
     var client_rc: RECT = std.mem.zeroes(RECT);
     _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client_rc);
-    const viewport_h = client_rc.bottom - client_rc.top;
+    const viewport_h = chatViewportH(client_rc.bottom - client_rc.top);
     chatRelayoutPreservingScroll(client_rc.right - client_rc.left, viewport_h);
     if (app_state.g_chat_block_count == 0) {
         chatDeferTranscriptLoad();
@@ -1370,7 +1371,7 @@ pub fn refreshChatTranscript(force: bool) void {
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var client_rc: RECT = std.mem.zeroes(RECT);
     _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client_rc);
-    const viewport_h = client_rc.bottom - client_rc.top;
+    const viewport_h = chatViewportH(client_rc.bottom - client_rc.top);
     const old_scroll_y = app_state.g_chat_scroll_y;
     const old_content_h = app_state.g_chat_content_h;
     const restore_read = app_state.g_chat_read_open_pending and app_state.g_chat_read_open_ready;

@@ -835,7 +835,7 @@ pub fn chatOutboxChanged() void {
     if (app_state.g_chat_active and app_state.g_chat_transcript_hwnd != null) {
         var rc: RECT = std.mem.zeroes(RECT);
         _ = GetClientRect(app_state.g_chat_transcript_hwnd, &rc);
-        chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
+        chatRelayoutPreservingScroll(rc.right - rc.left, @import("chat_render.zig").chatViewportH(rc.bottom - rc.top));
         _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);

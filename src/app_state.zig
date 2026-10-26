@@ -600,6 +600,9 @@ pub var g_cursor_sizewe: HANDLE = null;
 pub var g_cursor_arrow: HANDLE = null;
 pub const SHELL_PAD: i32 = if (LOOK_UNIFIED) 0 else 6;
 pub const THREAD_TITLE_H: i32 = 44;
+pub const CHAT_PILL_TOP: i32 = 8;
+pub const CHAT_PILL_H: i32 = 30;
+pub const CHAT_PILL_GAP: i32 = 10;
 pub const DEV_LETTER_SPACING: i32 = 0;
 pub const DEV_SHELL_COLS: i32 = 100;
 pub const DEV_TOP_PAD: i32 = 10;
@@ -1148,6 +1151,8 @@ pub var g_chat_bubble_pos: []chat_style.BubblePos = &g_chat_bubble_storage;
 pub var g_chat_layout_width: i32 = 0;
 pub var g_chat_layout_reuse: usize = 0;
 pub var g_chat_layout_scale: i32 = 0;
+pub var g_chat_bottom_inset: i32 = 0;
+pub var g_chat_layout_shift: struct { x: i32 = 0, y: i32 = 0 } = .{};
 pub var g_chat_layout_font_pt: i32 = 0;
 pub var g_chat_layout_dirty = false;
 pub var g_chat_content_h: i32 = 0;
@@ -2459,6 +2464,7 @@ pub var g_webview2_focus_retries: u8 = 0;
 pub const ChatViewLayout = struct {
     pane: RECT,
     transcript: RECT,
+    transcript_window: RECT,
     composer_card: RECT,
     composer: RECT,
     send_btn: RECT,

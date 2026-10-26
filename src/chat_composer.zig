@@ -249,6 +249,20 @@ pub fn chatDictationClick(x: i32, y: i32) bool {
     return true;
 }
 
+pub fn chatPaintShift(rc: RECT) RECT {
+    const dx = app_state.g_chat_layout_shift.x;
+    const dy = app_state.g_chat_layout_shift.y;
+    return .{ .left = rc.left + dx, .top = rc.top + dy, .right = rc.right + dx, .bottom = rc.bottom + dy };
+}
+
+pub fn chatViewLayoutForPaint() ChatViewLayout {
+    var layout = chatViewLayout();
+    inline for (.{ "pane", "transcript", "transcript_window", "composer_card", "composer", "send_btn", "attach_btn", "mic_btn", "stop_btn" }) |field| {
+        @field(layout, field) = chatPaintShift(@field(layout, field));
+    }
+    return layout;
+}
+
 pub fn chatViewLayout() ChatViewLayout {
     var rc: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &rc);
@@ -292,6 +306,12 @@ pub fn chatViewLayout() ChatViewLayout {
             .top = content_top,
             .right = right,
             .bottom = transcript_bottom,
+        },
+        .transcript_window = .{
+            .left = left,
+            .top = slot.top,
+            .right = right,
+            .bottom = composer_card.bottom,
         },
         .composer_card = composer_card,
         .composer = .{
@@ -636,21 +656,26 @@ pub fn layoutChatControls() void {
         _ = ShowWindow(app_state.g_chat_status_hwnd, if (status_h > 0 and !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active) SW_SHOW else SW_HIDE);
         _ = InvalidateRect(app_state.g_chat_status_hwnd, null, 0);
     }
-    layout.transcript.top += status_h;
+    const window = layout.transcript_window;
+    const inset = window.bottom - layout.transcript.bottom;
+    const inset_changed = inset != app_state.g_chat_bottom_inset;
+    app_state.g_chat_bottom_inset = inset;
     var batch = BeginDeferWindowPos(2);
     if (batch != null and app_state.g_chat_transcript_hwnd != null)
-        batch = DeferWindowPos(batch, app_state.g_chat_transcript_hwnd, null, layout.transcript.left, layout.transcript.top, layout.transcript.right - layout.transcript.left, layout.transcript.bottom - layout.transcript.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        batch = DeferWindowPos(batch, app_state.g_chat_transcript_hwnd, null, window.left, window.top, window.right - window.left, window.bottom - window.top, SWP_NOZORDER | SWP_NOACTIVATE);
     if (batch != null)
         batch = DeferWindowPos(batch, app_state.g_chat_composer_hwnd, null, layout.composer.left, layout.composer.top, layout.composer.right - layout.composer.left, layout.composer.bottom - layout.composer.top, SWP_NOZORDER | SWP_NOACTIVATE);
     if (batch == null or EndDeferWindowPos(batch) == 0) {
         if (app_state.g_chat_transcript_hwnd != null)
-            _ = MoveWindow(app_state.g_chat_transcript_hwnd, layout.transcript.left, layout.transcript.top, layout.transcript.right - layout.transcript.left, layout.transcript.bottom - layout.transcript.top, 0);
+            _ = MoveWindow(app_state.g_chat_transcript_hwnd, window.left, window.top, window.right - window.left, window.bottom - window.top, 0);
         _ = MoveWindow(app_state.g_chat_composer_hwnd, layout.composer.left, layout.composer.top, layout.composer.right - layout.composer.left, layout.composer.bottom - layout.composer.top, 0);
     }
-    if (app_state.g_chat_layout_dirty and app_state.g_chat_transcript_hwnd != null) {
+    _ = SetWindowPos(app_state.g_chat_composer_hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    if (app_state.g_chat_transcript_hwnd != null) {
         var rc: RECT = std.mem.zeroes(RECT);
         _ = GetClientRect(app_state.g_chat_transcript_hwnd, &rc);
-        chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
+        if (app_state.g_chat_layout_dirty or inset_changed) chatRelayoutPreservingScroll(rc.right - rc.left, @import("chat_render.zig").chatViewportH(rc.bottom - rc.top));
+        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
     chatComposerSetScrollBar(content_h > chatComposerMaxEditH());
     _ = SendMessageW(app_state.g_chat_composer_hwnd, EM_SCROLLCARET, 0, 0);

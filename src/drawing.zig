@@ -23,6 +23,8 @@ const DeleteObject = @import("win32.zig").DeleteObject;
 const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
+const GetDC = @import("win32.zig").GetDC;
+const ReleaseDC = @import("win32.zig").ReleaseDC;
 const GetStockObject = @import("win32.zig").GetStockObject;
 const CreateFontW = @import("fonts.zig").create;
 const CreatePen = @import("win32.zig").CreatePen;
@@ -577,6 +579,12 @@ fn threadTitleBandRightFor(win_w: i32) i32 {
 pub fn threadTitleNameRectFor(win_w: i32, shell_idx: u32) ?RECT {
     const th = threadTitleHeight();
     if (th == 0 or shell_idx >= app_state.shell_count) return null;
+    if (app_state.g_chat_active) {
+        const title = chatTitleLayout() orelse return null;
+        var name = title.name;
+        name.right = @max(name.right, @min(name.left + uiScaled(220), title.pill.right));
+        return name;
+    }
     const title_top = threadTitleTop();
     const sw = SIDEBAR_W();
     const band_right = threadTitleBandRightFor(win_w);
@@ -596,14 +604,148 @@ pub fn threadTitleNameRectFor(win_w: i32, shell_idx: u32) ?RECT {
     return RECT{ .left = text_left, .top = title_top, .right = title_right, .bottom = title_top + th };
 }
 
+const ChatTitleStatus = struct { text: [*]const u16, len: i32, color: DWORD, right_aligned: bool };
+
+const ChatTitleLayout = struct {
+    pill: RECT,
+    icon: RECT,
+    name: RECT,
+    status: RECT,
+    has_icon: bool,
+    has_name: bool,
+    has_status: bool,
+    status_text: ChatTitleStatus,
+};
+
+fn chatTitleStatus() ?ChatTitleStatus {
+    const now = GetTickCount64();
+    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
+    if (cap_msg) {
+        const color: DWORD = if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70);
+        if (app_state.g_account_reauth) return .{ .text = L("Sign in again: Ctrl+K > Sign in to multiprompt"), .len = -1, .color = color, .right_aligned = false };
+        if (app_state.g_cap_msg_len > 0) return .{ .text = @ptrCast(&app_state.g_cap_msg_text), .len = @intCast(app_state.g_cap_msg_len), .color = color, .right_aligned = false };
+        return .{ .text = L("Tab limit reached (256) - close a tab"), .len = -1, .color = color, .right_aligned = false };
+    }
+    if (app_state.g_chat_active and app_state.g_voice_mode_active) {
+        return .{ .text = voiceStatusLabel(), .len = -1, .color = if (app_state.g_light_theme) RGB(140, 140, 140) else RGB(110, 110, 120), .right_aligned = true };
+    }
+    return null;
+}
+
+fn chatTitleTextWidth(font: HANDLE, text: [*]const u16, len: i32) i32 {
+    const dc = GetDC(null);
+    if (dc == null) return 0;
+    defer _ = ReleaseDC(null, dc);
+    const old = SelectObject(dc, font);
+    defer _ = SelectObject(dc, old);
+    var calc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+    _ = DrawTextW(dc, text, len, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+    return calc.right - calc.left;
+}
+
+pub fn chatTitleLayout() ?ChatTitleLayout {
+    if (threadTitleHeight() == 0 or app_state.active_shell >= app_state.shell_count) return null;
+    const shell = &app_state.shells[app_state.active_shell];
+    const layout = chatViewLayout();
+    const column_w = layout.transcript.right - layout.transcript.left;
+    const side = uiScaled(16);
+    const max_w = column_w - 2 * side;
+    if (max_w <= uiScaled(48)) return null;
+    const top = layout.pane.top + uiScaled(app_state.CHAT_PILL_TOP);
+    const height = uiScaled(app_state.CHAT_PILL_H);
+    const pad = uiScaled(14);
+    const icon_w: i32 = if (shell.needs_attention or shell.ai_agent != 0) uiScaled(24) + uiScaled(6) else 0;
+    const status = chatTitleStatus();
+    const status_gap = uiScaled(16);
+    var status_w: i32 = 0;
+    if (status) |item| status_w = status_gap + chatTitleTextWidth(uiFontSubtitle(), item.text, item.len);
+    var name_w: i32 = 0;
+    name_w = if (shell.name_len > 0) chatTitleTextWidth(uiFontThreadTitle(), @ptrCast(&shell.name), @intCast(shell.name_len)) else uiScaled(60);
+    const chrome = 2 * pad + icon_w;
+    const room = max_w - chrome;
+    if (status_w > @divTrunc(room, 2)) status_w = @max(0, @divTrunc(room, 2));
+    name_w = @min(name_w, @max(0, room - status_w));
+    const width = @min(max_w, chrome + name_w + status_w);
+    const left = layout.transcript.left + @divTrunc(column_w - width, 2);
+    var cursor = left + pad;
+    var out: ChatTitleLayout = undefined;
+    out.pill = .{ .left = left, .top = top, .right = left + width, .bottom = top + height };
+    out.has_icon = icon_w > 0;
+    out.icon = .{ .left = cursor, .top = top, .right = cursor + uiScaled(24), .bottom = top + height };
+    cursor += icon_w;
+    out.has_name = shell.name_len > 0 and name_w > 0;
+    out.name = .{ .left = cursor, .top = top, .right = cursor + name_w, .bottom = top + height };
+    cursor += name_w;
+    out.has_status = status != null and status_w > status_gap;
+    out.status = .{ .left = cursor + status_gap, .top = top, .right = left + width - pad, .bottom = top + height };
+    out.status_text = status orelse .{ .text = L(""), .len = 0, .color = 0, .right_aligned = false };
+    return out;
+}
+
+const shiftedByLayout = @import("chat_composer.zig").chatPaintShift;
+
+fn disconnectedPill(button: RECT) RECT {
+    const column = chatViewLayout().transcript;
+    return .{ .left = @max(button.left - uiScaled(420), column.left), .top = button.top - uiScaled(2), .right = button.right + uiScaled(10), .bottom = button.bottom + uiScaled(2) };
+}
+
+pub fn chatTitleHit(x: i32, y: i32) bool {
+    if (!app_state.g_chat_active) return false;
+    if (reconnectButtonRect(0)) |button| {
+        const pill = disconnectedPill(button);
+        return x >= pill.left and x < pill.right and y >= pill.top and y < pill.bottom;
+    }
+    const title = chatTitleLayout() orelse return false;
+    return x >= title.pill.left and x < title.pill.right and y >= title.pill.top and y < title.pill.bottom;
+}
+
+pub fn paintChatTitlePill(hdc: HANDLE) void {
+    if (!app_state.g_chat_active or app_state.g_chat_find_open) return;
+    if (threadTitleHeight() == 0 or app_state.active_shell >= app_state.shell_count) return;
+    const window_layout = @import("window_layout.zig");
+    @import("chat_composer.zig").refreshChatBrushes();
+    const border = window_layout.chatSurfaceBorderColor();
+    _ = SetBkMode(hdc, TRANSPARENT);
+    const shell = &app_state.shells[app_state.active_shell];
+    if (reconnectButtonRect(0)) |button| {
+        const pill = shiftedByLayout(disconnectedPill(button));
+        window_layout.paintChatSurface(hdc, pill, app_state.g_chat_input_color, border, @divTrunc(pill.bottom - pill.top, 2));
+        paintDisconnectedNotice(hdc, shiftedByLayout(button), pill.top, pill.bottom, pill.left + uiScaled(14));
+        return;
+    }
+    var title = chatTitleLayout() orelse return;
+    inline for (.{ "pill", "icon", "name", "status" }) |field| @field(title, field) = shiftedByLayout(@field(title, field));
+    window_layout.paintChatSurface(hdc, title.pill, app_state.g_chat_input_color, border, @divTrunc(title.pill.bottom - title.pill.top, 2));
+    if (title.has_icon) {
+        var icon = title.icon;
+        if (shell.needs_attention) {
+            drawAttentionDot(hdc, @divTrunc(icon.left + icon.right, 2), @divTrunc(icon.top + icon.bottom, 2), 4, customColorOr("attention", RGB(80, 140, 255)));
+        } else {
+            drawAgentIcon(hdc, &icon, shell.ai_agent, shell.activity == .active);
+        }
+    }
+    if (title.has_name) {
+        _ = SelectObject(hdc, uiFontThreadTitle());
+        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(20, 20, 20) else RGB(255, 255, 255));
+        var name = title.name;
+        _ = DrawTextW(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+    if (title.has_status) {
+        _ = SelectObject(hdc, uiFontSubtitle());
+        _ = SetTextColor(hdc, title.status_text.color);
+        var status = title.status;
+        _ = DrawTextW(hdc, title.status_text.text, title.status_text.len, &status, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | (if (title.status_text.right_aligned) DT_RIGHT else 0));
+    }
+}
+
 pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
     const th = threadTitleHeight();
-    if (th == 0) return;
+    if (th == 0 or app_state.g_chat_active) return;
     if (app_state.active_shell >= app_state.shell_count) return;
     const title_top = threadTitleTop();
     const title_bottom = title_top + th;
     if (reconnectButtonRect(win_w)) |button| {
-        paintDisconnectedNotice(hdc, button, title_top, title_bottom);
+        paintDisconnectedNotice(hdc, button, title_top, title_bottom, SIDEBAR_W() + uiScaled(16));
         return;
     }
     const sw = SIDEBAR_W();
@@ -765,7 +907,7 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
         app_state.shells[0].eta_total_ms = if (eta_active) 120_000 else 0;
         app_state.shells[0].eta_deadline_tick = GetTickCount64() + 120_000;
         @memset(pixels, 0);
-        paintThreadTitle(dc, width);
+        paintChatTitlePill(dc);
         _ = gdi.GdiFlush();
         const title_rect = threadTitleNameRectFor(width, 0) orelse return error.TestUnexpectedResult;
         var ink: usize = 0;
@@ -1169,7 +1311,7 @@ pub fn reconnectButtonRect(win_w: i32) ?RECT {
     return .{ .left = @max(SIDEBAR_W(), right - uiScaled(if (shell.ssh_reconnect.phase == .ended) 152 else 96)), .top = threadTitleTop() + uiScaled(3), .right = right, .bottom = threadTitleTop() + threadTitleHeight() - uiScaled(3) };
 }
 
-fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32) void {
+fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32, left: i32) void {
     const shell = app_state.shells[app_state.active_shell];
     _ = SetBkMode(hdc, TRANSPARENT);
     const old_font = SelectObject(hdc, uiFontSubtitle());
@@ -1186,7 +1328,7 @@ fn paintDisconnectedNotice(hdc: HANDLE, button: RECT, top: i32, bottom: i32) voi
         "Reconnecting..."
     else
         std.fmt.bufPrint(&buf, "Reconnecting in {d}s", .{seconds}) catch "Reconnecting...";
-    var notice = RECT{ .left = SIDEBAR_W() + uiScaled(16), .top = top, .right = button.left - uiScaled(8), .bottom = bottom };
+    var notice = RECT{ .left = left, .top = top, .right = button.left - uiScaled(8), .bottom = bottom };
     drawAscii(hdc, text, &notice, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     const brush = CreateSolidBrush(customColorOr("button_bg", if (app_state.g_light_theme) RGB(220, 225, 232) else RGB(60, 65, 75)));
     var rc = button;

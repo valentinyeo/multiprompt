@@ -1022,8 +1022,9 @@ pub fn voiceReadReply(step: voice_filter.ReplyStep) void {
         _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
         const top = app_state.g_chat_layout_rects[range.start].top;
         const bottom = app_state.g_chat_layout_rects[range.end - 1].bottom;
-        if (top < app_state.g_chat_scroll_y or bottom > app_state.g_chat_scroll_y + client.bottom - client.top) {
-            app_state.g_chat_scroll_y = std.math.clamp(if (bottom - top <= client.bottom - client.top) bottom - (client.bottom - client.top) else top, chatMinScroll(), chatMaxScroll());
+        const viewport_h = @import("chat_render.zig").chatViewportH(client.bottom - client.top);
+        if (top < app_state.g_chat_scroll_y or bottom > app_state.g_chat_scroll_y + viewport_h) {
+            app_state.g_chat_scroll_y = std.math.clamp(if (bottom - top <= viewport_h) bottom - viewport_h else top, chatMinScroll(), chatMaxScroll());
         }
         _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }

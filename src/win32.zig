@@ -1,4 +1,5 @@
 const std = @import("std");
+const app_state = @import("app_state.zig");
 pub const OPENFILENAMEW = @import("app_state.zig").OPENFILENAMEW;
 pub const CREDUI_INFOW = @import("app_state.zig").CREDUI_INFOW;
 
@@ -568,7 +569,35 @@ pub extern "user32" fn LoadIconW(HANDLE, ?*anyopaque) callconv(WINAPI) HANDLE;
 pub extern "user32" fn LoadImageW(HANDLE, ?*anyopaque, UINT, i32, i32, UINT) callconv(WINAPI) HANDLE;
 pub const IMAGE_ICON: UINT = 1;
 pub const LR_DEFAULTCOLOR: UINT = 0;
-pub extern "user32" fn InvalidateRect(HANDLE, ?*const RECT, BOOL) callconv(WINAPI) BOOL;
+const invalidate_api = struct {
+    extern "user32" fn InvalidateRect(HANDLE, ?*const RECT, BOOL) callconv(WINAPI) BOOL;
+};
+
+pub fn InvalidateRect(hwnd: HANDLE, rc: ?*const RECT, erase: BOOL) callconv(WINAPI) BOOL {
+    const result = invalidate_api.InvalidateRect(hwnd, rc, erase);
+    if (hwnd != null and hwnd == app_state.g_main_hwnd and app_state.g_chat_active) invalidateTranscriptLayer(rc);
+    return result;
+}
+
+fn invalidateTranscriptLayer(rc: ?*const RECT) void {
+    const transcript = app_state.g_chat_transcript_hwnd orelse return;
+    if (IsWindowVisible(transcript) == 0) return;
+    const area = rc orelse {
+        _ = invalidate_api.InvalidateRect(transcript, null, 0);
+        return;
+    };
+    var window: RECT = std.mem.zeroes(RECT);
+    if (GetWindowRect(transcript, &window) == 0) return;
+    var origin = POINT{ .x = 0, .y = 0 };
+    if (ClientToScreen(app_state.g_main_hwnd, &origin) == 0) return;
+    const shifted = RECT{
+        .left = area.left - (window.left - origin.x),
+        .top = area.top - (window.top - origin.y),
+        .right = area.right - (window.left - origin.x),
+        .bottom = area.bottom - (window.top - origin.y),
+    };
+    _ = invalidate_api.InvalidateRect(transcript, &shifted, 0);
+}
 pub extern "user32" fn BeginPaint(HANDLE, *PAINTSTRUCT) callconv(WINAPI) HANDLE;
 pub extern "user32" fn EndPaint(HANDLE, *const PAINTSTRUCT) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetDC(HANDLE) callconv(WINAPI) HANDLE;

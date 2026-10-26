@@ -93,6 +93,7 @@ var g_chat_screen_status_len: usize = 0;
 var g_chat_load_tries: u8 = 0; // old-defer positive control only
 var g_chat_content_h: i32 = 0;
 var g_chat_scroll_y: i32 = 0;
+var g_chat_bottom_inset: i32 = 0;
 var g_chat_scrolled_up = false;
 var g_chat_new_messages: chat_history.NewMessages = .{};
 var g_chat_scroll_bottom_pending = false;
@@ -177,7 +178,7 @@ fn chatRelayout(_: i32) void {
 }
 `;
 const entry = src.slice(src.indexOf('const ChatHistoryEntry = struct {'), src.indexOf('\n};', src.indexOf('const ChatHistoryEntry = struct {')) + 3);
-const functions = ['chatTableRefresh', 'chatReceivedBlocks', 'chatFileFetchThread', 'chatFileIdentity', 'chatFileIdentityForShell', 'chatCacheIdentity', 'chatStoreTabCache', 'chatActivateTables', 'chatHistoryForget', 'chatGrowSlice', 'chatEnsureTranscriptCapacity', 'refreshChatBlockCache', 'chatFileFailed', 'chatFileOnReady', 'refreshChatTranscript', 'chatRelayoutPreservingScroll', 'chatMinScroll', 'chatMaxScroll', 'chatScrollBy', 'chatScrollStateChanged'];
+const functions = ['chatTableRefresh', 'chatReceivedBlocks', 'chatFileFetchThread', 'chatFileIdentity', 'chatFileIdentityForShell', 'chatCacheIdentity', 'chatStoreTabCache', 'chatActivateTables', 'chatHistoryForget', 'chatGrowSlice', 'chatEnsureTranscriptCapacity', 'refreshChatBlockCache', 'chatFileFailed', 'chatFileOnReady', 'refreshChatTranscript', 'chatRelayoutPreservingScroll', 'chatViewportH', 'chatMinScroll', 'chatMaxScroll', 'chatScrollBy', 'chatScrollStateChanged'];
 const acceptance = `
 test "cache-first switch-back, stale completion and failure preserve complete messages" {
     const a = std.heap.page_allocator;
@@ -521,7 +522,7 @@ test('background retries, local cache, complete dynamic layout and diagnostics a
   assert.match(fn('chatHistoryPersistent'), /60_000/);
   assert.match(fn('chatHistoryFetchOnce'), /60_000/);
   assert.doesNotMatch(fn('chatHistoryFetch'), /fetchAcPersistent|mp_complete/);
-  assert.match(fn('chatTranscriptWndProc'), /Could not load the conversation, retrying/);
+  assert.match(fn('chatPaintTranscript'), /Could not load the conversation, retrying/);
   assert.match(fn('chatImageReady'), /chatRelayoutPreservingScroll/);
   assert.match(fn('chatViewLayout'), /activePaneContentRect\(rc\)/);
   assert.match(fn('activePaneRects'), /browserSlotReserved/);
