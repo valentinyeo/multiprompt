@@ -1888,6 +1888,7 @@ test "dictation verification ignores TUI framing and requires new console text" 
 
 pub fn cancelDictation() void {
     if (!app_state.g_dictation_running.load(.acquire) or !app_state.g_dictation_cancelled.load(.acquire)) return;
+    app_state.g_dictation_send_queued.store(false, .release);
     app_state.g_dictation_recording.store(false, .release);
     app_state.g_dictation_draft_owner_len = 0;
     @import("chat_composer.zig").chatDictationSync();
@@ -1899,6 +1900,7 @@ pub fn handleDictationReady() void {
     @import("chat_composer.zig").chatDictationSync();
     defer @import("chat_composer.zig").chatDictationSync();
     app_state.g_dictation_running.store(false, .release);
+    const send_queued = app_state.g_dictation_send_queued.swap(false, .acq_rel);
     var text_copy: [8192]u16 = undefined;
     var text_len: usize = 0;
     var err_copy: [160]u16 = undefined;
@@ -1935,6 +1937,7 @@ pub fn handleDictationReady() void {
     if (was_voice_listening) app_state.g_voice_last_activity_tick = GetTickCount64();
     const transcript = trimDictationText(text_copy[0..text_len]);
     if (transcript.len == 0) {
+        @import("chat_composer.zig").chatDictationSendFlush(send_queued);
         if (was_voice_listening) {
             app_state.g_voice_state = .idle;
             invalidateChatHeader();
@@ -1975,6 +1978,7 @@ pub fn handleDictationReady() void {
     if (app_state.g_dictation_draft_owner_len > 0) {
         @import("chat_composer.zig").chatDraftAppend(app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len], transcript);
         dictationAudit("target-chat-composer", transcript.len);
+        @import("chat_composer.zig").chatDictationSendFlush(send_queued);
         return;
     }
 
@@ -2071,6 +2075,7 @@ pub fn toggleDictation() void {
         app_state.g_dictation_draft_owner_len = id.len;
     }
     app_state.g_dictation_cancelled.store(false, .release);
+    app_state.g_dictation_send_queued.store(false, .release);
     app_state.g_dictation_recording.store(true, .release);
     app_state.g_dictation_running.store(true, .release);
     dictationAudit("start", if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0);

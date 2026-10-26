@@ -228,7 +228,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Drag in Chat View | Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll |
 | Ctrl+C in Chat View | Copy the selection (right-click offers Reply and Copy) |
 | Ctrl+A in Chat View | Select all transcript text (transcript focus; composer keeps its own Ctrl+A) |
-| Enter / Ctrl+Enter in Chat View | Send your message; Shift+Enter adds a new line; Enter inserts an open command suggestion |
+| Enter / Ctrl+Enter in Chat View | Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion |
 | / in Chat View | Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes |
 | $ in Chat View (Codex) | Suggest Codex skills |
 | Ctrl+/ in Chat View | Browse commands and skills for this session |
