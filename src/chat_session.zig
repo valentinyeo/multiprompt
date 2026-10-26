@@ -1207,8 +1207,9 @@ pub fn chatReadBoundary() chat_history.ReadBoundary {
     if (!app_state.g_chat_active) return .{};
     if (app_state.active_shell >= app_state.shell_count or !app_state.g_chat_blocks_from_file or
         app_state.g_chat_cache_shell_id != app_state.shells[app_state.active_shell].shell_id) return .{};
+    if (app_state.g_chat_read_visit_state == .all_read) return .{};
     const boundary = chat_history.unreadBoundary(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_read_visit_marker);
-    if (app_state.g_chat_read_open_ready and boundary.index == null) app_state.g_chat_read_visit_marker = 0;
+    if (app_state.g_chat_read_open_ready and app_state.g_chat_read_visit_state == .pending) app_state.g_chat_read_visit_state = if (boundary.index != null) .unread else .all_read;
     return boundary;
 }
 
@@ -1244,7 +1245,10 @@ pub fn chatReadMark(bottom: bool) bool {
 pub fn chatReadDeactivate() void {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
     _ = chatReadMark(false);
-    if (app_state.g_chat_read_visit_marker == 0) app_state.g_chat_read_visit_marker = app_state.shells[app_state.active_shell].last_read_message_id;
+    if (app_state.g_chat_read_visit_state == .all_read) {
+        app_state.g_chat_read_visit_marker = app_state.shells[app_state.active_shell].last_read_message_id;
+        app_state.g_chat_read_visit_state = .pending;
+    }
     app_state.g_chat_read_open_ready = false;
 }
 
@@ -1293,6 +1297,7 @@ pub fn chatDeferTranscriptLoad() void {
     if (app_state.g_chat_read_visit_shell_id != app_state.g_chat_cache_shell_id) {
         app_state.g_chat_read_visit_shell_id = app_state.g_chat_cache_shell_id;
         app_state.g_chat_read_visit_marker = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].last_read_message_id else 0;
+        app_state.g_chat_read_visit_state = .pending;
     }
     app_state.g_chat_read_open_ready = false;
     app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].last_read_message_id != 0;
@@ -1570,6 +1575,7 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
         .pending = app_state.g_chat_read_open_pending,
         .visit_shell_id = app_state.g_chat_read_visit_shell_id,
         .visit_marker = app_state.g_chat_read_visit_marker,
+        .visit_state = app_state.g_chat_read_visit_state,
         .ready = app_state.g_chat_read_open_ready,
         .hold = app_state.g_chat_read_hold,
         .file = app_state.g_chat_blocks_from_file,
@@ -1588,6 +1594,7 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
         app_state.g_chat_read_open_pending = saved.pending;
         app_state.g_chat_read_visit_shell_id = saved.visit_shell_id;
         app_state.g_chat_read_visit_marker = saved.visit_marker;
+        app_state.g_chat_read_visit_state = saved.visit_state;
         app_state.g_chat_read_open_ready = saved.ready;
         app_state.g_chat_read_hold = saved.hold;
         app_state.g_chat_blocks_from_file = saved.file;
@@ -1610,6 +1617,7 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
     app_state.g_chat_cache_shell_id = 7;
     app_state.g_chat_read_visit_shell_id = 7;
     app_state.g_chat_read_visit_marker = 11;
+    app_state.g_chat_read_visit_state = .pending;
     app_state.g_chat_blocks[0] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 11 };
     app_state.g_chat_blocks[1] = .{ .start = 1, .len = 1, .role = .prose, .first = true, .message_id = 22 };
     app_state.g_chat_block_count = 2;
