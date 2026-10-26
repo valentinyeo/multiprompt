@@ -752,7 +752,7 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
     app_state.shell_count = 1;
     app_state.active_shell = 0;
     app_state.shells[0] = std.mem.zeroes(app_state.Shell);
-    const title = L("My working session");
+    const title = std.unicode.utf8ToUtf16LeStringLiteral("My working session");
     @memcpy(app_state.shells[0].name[0..title.len], title);
     app_state.shells[0].name_len = title.len;
     app_state.g_chat_active = true;
