@@ -1,0 +1,141 @@
+name: Chat perf bisect
+run-name: chat perf ${{ inputs.refs || 'v0.28.900 v0.28.917' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      refs:
+        description: Space separated release tags or full 40 character commit SHAs, such as v0.28.900 v0.28.917
+        required: true
+        default: v0.28.900 v0.28.917
+        type: string
+      repeats:
+        description: Measured runs per ref (1 to 5)
+        required: true
+        default: '3'
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/chat-perf-bisect.yml
+      - tools/chat-perf-table.mjs
+      - tools/chat-perf-table.test.js
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      refs: ${{ steps.matrix.outputs.refs }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Test table calculations
+        run: node --test tools/chat-perf-table.test.js
+      - name: Validate refs and create matrix
+        id: matrix
+        env:
+          REFS: ${{ github.event_name == 'pull_request' && 'v0.28.900 v0.28.917' || inputs.refs }}
+          REPEATS: ${{ github.event_name == 'pull_request' && '3' || inputs.repeats }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const { REFS, REPEATS, GITHUB_OUTPUT } = process.env;
+          const refs = REFS.trim().split(/\s+/);
+          if (refs.length < 1 || refs.length > 40 || refs.some(ref => !/^(v\d+\.\d+\.\d+|[0-9a-f]{40})$/.test(ref))) throw new Error('refs must be 1 to 40 release tags or full commit SHAs');
+          if (!/^[1-5]$/.test(REPEATS)) throw new Error('repeats must be 1 to 5');
+          fs.appendFileSync(GITHUB_OUTPUT, `refs=${JSON.stringify(refs)}\n`);
+          NODE
+
+  measure:
+    name: measure ${{ matrix.ref }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJSON(needs.plan.outputs.refs) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.ref }}
+          fetch-depth: 1
+          path: subject
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: tooling
+          persist-credentials: false
+      - name: Install Zig 0.16.0
+        run: |
+          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Run the native 50 MB history benchmark
+        env:
+          REPEATS: ${{ github.event_name == 'pull_request' && '3' || inputs.repeats }}
+          REF: ${{ matrix.ref }}
+        run: |
+          mkdir -p out
+          cd subject
+          sha="$(git rev-parse HEAD)"
+          subject="$(git log -1 --format=%s)"
+          printf '%s\n%s\n' "$sha" "$subject" > ../out/identity.txt
+          if ! grep -q 'test-chat-perf' build.zig; then echo "no test-chat-perf step at $sha" > ../out/unsupported.txt; fi
+          for index in $(seq 1 "$REPEATS"); do
+            set +e
+            zig build test-chat-perf --summary all > "../out/run-$index.log" 2>&1
+            printf '%s\n' "$?" > "../out/run-$index.exit"
+            set -e
+          done
+          grep -h 'CPU707 benchmark' ../out/run-*.log || true
+      - name: Write the row for this ref
+        if: always()
+        env:
+          REF: ${{ matrix.ref }}
+        run: node tooling/tools/chat-perf-table.mjs row out "$REF" > "out/row.json"
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-perf-${{ matrix.ref }}
+          path: out/
+          if-no-files-found: error
+
+  table:
+    needs: measure
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: chat-perf-*
+          path: rows
+      - name: Build the table
+        run: |
+          node tools/chat-perf-table.mjs table rows > table.md
+          cat table.md >> "$GITHUB_STEP_SUMMARY"
+          cat table.md
+          echo "::notice title=chat-perf-table::$(sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g' table.md)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-perf-table
+          path: |
+            table.md
+            rows/
+          if-no-files-found: error

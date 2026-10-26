@@ -48,7 +48,7 @@ jobs:
         with:
           node-version: 22
       - name: Test summary calculations
-        run: node --test candidate/tools/chat-bench-ab-summary.test.js
+        run: node --test candidate/tools/chat-bench-ab-summary.test.js candidate/tools/chat-bench-ab-extra.test.js
       - name: Download and verify release executables
         env:
           GH_TOKEN: ${{ github.token }}
@@ -151,6 +151,9 @@ jobs:
       - name: Write A/B summary
         if: always()
         run: node candidate/tools/chat-bench/ab-summary.mjs results/manifest.json results
+      - name: Write CPU, memory and paint metrics per tag
+        if: always()
+        run: node candidate/tools/chat-bench/ab-extra.mjs results/manifest.json results
       - name: Upload all benchmark evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

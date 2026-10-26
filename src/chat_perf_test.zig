@@ -144,3 +144,33 @@ test "ISSUE-421 layout cache invalidates same-length text font and scale and kee
     try std.testing.expectEqual(@as(i32, 0), last.scroll);
     try std.testing.expectEqual(@as(usize, 5), cache.builds);
 }
+
+test "IGSH-961 reconcile cost grows with blocks, block length and pending message length" {
+    const a = std.heap.page_allocator;
+    const block_counts = [_]usize{ 1200, 2800, 12200 };
+    const block_chars = [_]usize{ 60, 600 };
+    const pending_chars = [_]usize{ 40, 2000, 12000 };
+    for (block_counts) |count| for (block_chars) |chars| {
+        const storage = try a.alloc(u16, count * chars);
+        defer a.free(storage);
+        const users = try a.alloc(echo.UserBlock, count);
+        defer a.free(users);
+        for (0..count) |i| {
+            const slice = storage[i * chars ..][0..chars];
+            for (slice, 0..) |*c, k| c.* = if (k % 7 == 6) ' ' else @intCast('a' + (i + k) % 26);
+            users[i] = .{ .text = slice };
+        }
+        for (pending_chars) |pending_len| {
+            const text = try a.alloc(u16, pending_len);
+            defer a.free(text);
+            for (text, 0..) |*c, k| c.* = if (k % 9 == 8) ' ' else @intCast('A' + k % 26);
+            var pending: [1]echo.Pending = .{.{ .prefix = text[0..@min(text.len, 40)], .text = text, .anchor = .{ .counted = true } }};
+            var picked: [1]?usize = undefined;
+            const start = now();
+            echo.assign(&pending, users, false, &.{}, &picked);
+            const elapsed = ms(start);
+            std.mem.doNotOptimizeAway(picked[0]);
+            std.debug.print("CPU961 reconcile blocks={d} block_chars={d} pending_chars={d} ms={d}\n", .{ count, chars, pending_len, elapsed });
+        }
+    };
+}
