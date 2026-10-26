@@ -8084,10 +8084,10 @@ pub fn main(init: std.process.Init) void {
     }
 
     app_state.g_main_hwnd = hwnd;
-    freeze_recorder.start(hwnd, APP_VERSION);
-    defer freeze_recorder.stop();
     @import("browser_pane.zig").installBrowserDockHooks();
     defer @import("browser_pane.zig").uninstallBrowserDockHooks();
+    freeze_recorder.start(hwnd, APP_VERSION);
+    defer freeze_recorder.stop();
     defer if (app_state.g_account_instance_mutex != null) {
         _ = ReleaseMutex(app_state.g_account_instance_mutex);
         _ = CloseHandle(app_state.g_account_instance_mutex);
