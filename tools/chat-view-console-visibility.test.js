@@ -38,7 +38,12 @@ function audit(text) {
     if (call[1] === 'hw') assert.ok(fn(text, 'moveBrowserEdgeMask').includes(call[0]), 'hw must be a browser mask');
     if (['target', 'hwnd', 'owner_hwnd'].includes(call[1])) assert.equal(call[2] === 'SW_SHOW' || call[2] === 'SW_SHOWNOACTIVATE', false, 'generic handles cannot reveal consoles');
   }
-  const flags = [...text.matchAll(/SetWindowPos\([^;]+SWP_SHOWWINDOW[^;]+;/g)];
+  const maskRaise = fn(text, 'raiseBrowserEdgeMasksZOrderOnly');
+  assert.match(maskRaise, /const hw = g_browser_edge_mask_hwnds\[i\];/);
+  const maskFlags = [...maskRaise.matchAll(/SetWindowPos\([^;]+SWP_SHOWWINDOW[^;]+;/g)];
+  assert.equal(maskFlags.length, 1);
+  assert.match(maskFlags[0][0], /^SetWindowPos\(hw, null, 0, 0, 0, 0, SWP_NOMOVE \| SWP_NOSIZE \| SWP_NOACTIVATE \| SWP_NOREDRAW \| SWP_SHOWWINDOW\);$/);
+  const flags = [...text.replace(maskRaise, '').matchAll(/SetWindowPos\([^;]+SWP_SHOWWINDOW[^;]+;/g)];
   assert.equal(flags.length, 1);
   assert.match(flags[0][0], /^SetWindowPos\(g_chat_ac_hwnd,/);
   const layout = fn(text, 'repositionActive');
@@ -69,6 +74,8 @@ function audit(text) {
 
 test('every console reveal is guarded; a new HWND alias bypass are rejected', () => {
   audit(source);
+  const maskRaise = fn(source, 'raiseBrowserEdgeMasksZOrderOnly');
+  assert.throws(() => audit(source.replace(maskRaise, maskRaise.replace('const hw = g_browser_edge_mask_hwnds[i];', 'const hw = shells[0].hwnd;'))));
   assert.throws(() => audit(source + '\nfn leakedRepair() void { verifyShellWindowSize(hwnd, 0, 0, 1, 1); }'));
   assert.throws(() => audit(source + '\nfn leakedConsole() void { _ = ShowWindow(console_alias, SW_SHOW); }'));
   assert.throws(() => audit(source + '\nfn leakedConsole(hwnd: HANDLE) void { _ = ShowWindow(hwnd, SW_SHOW); }'));
