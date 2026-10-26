@@ -8,7 +8,7 @@
 - No reopen emits a bare login or creates another remote session.
 - Reusing the same name with another server generation is refused before attachment.
 
-## How to get to it
+## How to get to it (user POV)
 
 Open an SSH tab, attach an existing terminal session, then close and reopen Multiprompt.
 

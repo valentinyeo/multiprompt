@@ -158,5 +158,6 @@ test "IGSH-985 guarded attach checks generation and addresses immutable session 
 test "IGSH-985 first attach is exact and shell metacharacters remain quoted" {
     var buf: [2048]u8 = undefined;
     try std.testing.expectEqualStrings("tmux attach -t '=remote'", try attachCommand(&buf, "remote", "", false));
+    try std.testing.expectEqualStrings("tmux new-session -A -s 'remote'", try attachCommand(&buf, "remote", "", true));
     try std.testing.expectEqualStrings("tmux attach -t '=a'\\''b'", try attachCommand(&buf, "a'b", "", false));
 }

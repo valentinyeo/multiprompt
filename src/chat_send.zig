@@ -1800,6 +1800,7 @@ pub fn sshReconnectNow(idx: u32) void {
     if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return;
     if (shell.console_inflight or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .reconnecting) return;
     const was_ended = shell.ssh_reconnect.phase == .ended;
+    if (was_ended) shell.tmux_identity_len = 0;
     shell.ssh_reconnect.manual(GetTickCount64());
     shell.disconnected = true;
     if (was_ended) @import("drawing.zig").invalidateReconnectContent(idx);
