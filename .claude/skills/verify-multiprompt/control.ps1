@@ -2311,10 +2311,29 @@ function Get-DictationMic([IntPtr]$Composer) {
     $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
     $size = [int][Math]::Floor(32 * $scale)
     $margin = [Math]::Max([Math]::Floor(4 * $scale), [Math]::Floor(([Math]::Floor(44 * $scale) - $size) / 2))
-    $left = $thread.Right - $origin.X - $margin - $size
+    $left = $thread.Right - $origin.X - $margin - $size - [Math]::Floor(6 * $scale) - $size
     $top = $edit.Top - $origin.Y - [Math]::Floor(12 * $scale) + $margin
-    if ($left -lt $edit.Right - $origin.X) { throw 'Microphone must be at the far right, outside the native Edit' }
+    if ($left -lt $edit.Right - $origin.X) { throw 'Microphone must sit left of send, outside the native Edit' }
     return ,([int[]]@($left, $top, ($left + $size), ($top + $size)))
+}
+
+function Get-DictationSend([int[]]$Mic) {
+    $state = Read-Session
+    if ($null -eq $state -or ($state.PSObject.Properties['ui_scale'] -and $state.ui_scale -ne 100)) { throw 'Send geometry requires the isolated default UI scale' }
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+    $transcript = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+    if ($null -eq $transcript -or $transcript.Current.ProcessId -ne $process.Id -or $transcript.Current.IsOffscreen) { throw 'Send geometry requires the owned visible transcript' }
+    $thread = New-Object VerifyNative+Rect
+    $origin = New-Object VerifyNative+Point
+    if (-not [VerifyNative]::GetWindowRect([IntPtr]$transcript.Current.NativeWindowHandle, [ref]$thread) -or
+        -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Send geometry unavailable' }
+    $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
+    $size = [int][Math]::Floor(32 * $scale)
+    $margin = [Math]::Max([Math]::Floor(4 * $scale), [Math]::Floor(([Math]::Floor(44 * $scale) - $size) / 2))
+    $left = $thread.Right - $origin.X - $margin - $size
+    if ($left -le $Mic[2] -or $left + $size -gt $thread.Right - $origin.X) { throw 'Send must sit at the far right, right of the microphone' }
+    return ,([int[]]@($left, $Mic[1], ($left + $size), $Mic[3]))
 }
 
 function Assert-DictationMic([int[]]$Rect, [bool]$Active, [string]$Step) {
@@ -2957,6 +2976,42 @@ try {
             }
             Save-Json @{ preservedDraft = $draft; WM_GETTEXT = [VerifyNative]::EditText($handle); audit = $audit } 'escape-restart.text.json'
             $result.checks += @{ name = 'dictation-escape-restart'; passed = $true; WM_GETTEXT = [VerifyNative]::EditText($handle); idleMicPixels = $true }
+            Press @(0x11, 0x41) 'Ctrl+A: select the restarted dictation draft before the send cases'
+            Press @(0x08) 'Backspace: clear the draft before the send cases'
+            Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'IGSH-965 composer empty before the send cases'
+            $send = Get-DictationSend $mic
+            Save-Json @{ mic = $mic; send = $send } 'send-geometry.json'
+            $deliveries = @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\ttarget-chat-composer\t22$' }).Count
+            foreach ($way in @('send-click', 'ctrl-enter')) {
+                $marker = Join-Path $scratch ($way + '.txt')
+                Press @(0x11, 0x44) 'Ctrl+D: start composer dictation for the send case'
+                $iteration++
+                Wait-Until {
+                    @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
+                } 'IGSH-965 recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
+                Assert-DictationMic $mic $true ($way + '-listening')
+                $typed = '>"' + $marker + '" echo ' + $way
+                Type-Text $typed
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-965 typing is accepted while listening' -Seconds 1 -PollMilliseconds 10
+                Snapshot ($way + '-listening')
+                Record ('Send once with ' + $way + ' while dictating')
+                $immediate = [Diagnostics.Stopwatch]::StartNew()
+                switch ($way) {
+                    'send-click' { [VerifyNative]::ClickClient($script:window, [int](($send[0] + $send[2]) / 2), [int](($send[1] + $send[3]) / 2)) }
+                    'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }
+                }
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq '' -and (Test-Path $marker) } 'IGSH-965 one press ended dictation and sent the typed and spoken words' -Seconds 5 -PollMilliseconds 20
+                $elapsed = $immediate.ElapsedMilliseconds
+                $delivered = (Get-Content $marker -Raw).Trim()
+                $expected = $way + ' Go forward ten meters.'
+                if ($delivered -cne $expected) { throw "IGSH-965 session received '$delivered' instead of '$expected'" }
+                Assert-DictationMic $mic $false ($way + '-stopped')
+                $audit = @((Read-DictationAudit $auditPath))
+                $deliveries++
+                if (@($audit | Where-Object { $_ -match '\ttarget-chat-composer\t22$' }).Count -ne $deliveries) { throw 'IGSH-965 spoken words did not reach the message box before sending' }
+                Snapshot ($way + '-sent')
+                $result.checks += @{ name = ('dictation-' + $way); passed = $true; delivered = $delivered; elapsedMilliseconds = $elapsed; sendRect = $send; micRect = $mic }
+            }
             Snapshot 'after'
         }
         'chat-tables' {

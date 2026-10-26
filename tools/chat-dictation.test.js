@@ -101,6 +101,61 @@ test('IGSH-846 Windows journey covers Escape discard and restart through real in
   assert.doesNotMatch(recipe, /Set-Content|WriteAll|PostMessage|SetEnvironmentVariable|\.SetFocus\(|\.SetValue\(|Start-Sleep/);
 });
 
+function sendContract(source) {
+  const begin = source.indexOf("            Press @(0x11, 0x41) 'Ctrl+A: select the restarted dictation draft before the send cases'");
+  assert.ok(begin >= 0);
+  const recipe = source.slice(begin, source.indexOf("        'chat-tables' {", begin));
+  let offset = 0;
+  for (const step of [
+    '$send = Get-DictationSend $mic', "foreach ($way in @('send-click', 'ctrl-enter'))",
+    "Press @(0x11, 0x44) 'Ctrl+D: start composer dictation for the send case'",
+    "Assert-DictationMic $mic $true ($way + '-listening')", "$typed = '>\"' + $marker + '\" echo ' + $way", 'Type-Text $typed',
+    "Snapshot ($way + '-listening')",
+    "'send-click' { [VerifyNative]::ClickClient($script:window,", "'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }",
+    "[VerifyNative]::EditText($handle) -ceq '' -and (Test-Path $marker)",
+    "$expected = $way + ' Go forward ten meters.'", 'if ($delivered -cne $expected) { throw',
+    "Assert-DictationMic $mic $false ($way + '-stopped')", '$deliveries++', "Snapshot ($way + '-sent')",
+    "name = ('dictation-' + $way)",
+  ]) {
+    const at = recipe.indexOf(step, offset);
+    assert.ok(at >= offset, `missing or misordered ${step}`);
+    offset = at + step.length;
+  }
+  const press = recipe.slice(recipe.indexOf('$immediate ='), recipe.indexOf('$elapsed ='));
+  assert.doesNotMatch(press, /Type-Text|Press |Snapshot|Start-Sleep|SetFocus|PostMessage/);
+  assert.doesNotMatch(recipe, /Set-Content|WriteAll|PostMessage|SetEnvironmentVariable|\.SetFocus\(|\.SetValue\(|Start-Sleep/);
+  const geometry = source.slice(source.indexOf('function Get-DictationSend('), source.indexOf('function Assert-DictationMic('));
+  for (const required of ['$transcript.Current.ProcessId -ne $process.Id', '$left -le $Mic[2]', 'GetDpiForWindow($script:window) / 96.0']) assert.ok(geometry.includes(required), required);
+  const mic = source.slice(source.indexOf('function Get-DictationMic('), source.indexOf('function Get-DictationSend('));
+  assert.ok(mic.includes('- [Math]::Floor(6 * $scale) - $size'));
+}
+
+test('IGSH-965 one press on send or Ctrl+Enter while dictating stops, appends the spoken words and sends them to the session', () => {
+  sendContract(driver);
+  for (const required of ["'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }", 'if ($delivered -cne $expected) { throw', '$send = Get-DictationSend $mic', "[VerifyNative]::EditText($handle) -ceq '' -and (Test-Path $marker)", '- [Math]::Floor(6 * $scale) - $size']) {
+    const broken = driver.replaceAll(required, 'REMOVED');
+    assert.notEqual(broken, driver, required);
+    assert.throws(() => sendContract(broken), assert.AssertionError, required);
+  }
+});
+
+test('IGSH-965 send sits at the far right and the queued send is armed and consumed on the real paths', () => {
+  const composer = read('src/chat_composer.zig');
+  const main = read('src/main.zig');
+  assert.match(composer, /const slots = chatSendSlots\(composer_card, send_size, send_margin, [^\n]*chatComposerHasText\(\) or chat_dictation_state != \.idle\);/);
+  assert.match(composer, /\.left = slots\.left - uiScaled\(6\) - send_size,/);
+  assert.match(composer, /\.right = mic_btn\.left - uiScaled\(12\),/);
+  assert.match(composer, /try std\.testing\.expect\(layout\.send_btn\.left > layout\.mic_btn\.right\);/);
+  assert.match(main, /WM_APP_CHAT_SEND => \{\s*if \(wp == 1\) @import\("chat_send\.zig"\)\.chatSteerPrompt\(\) else @import\("chat_composer\.zig"\)\.chatSendOrFinishDictation\(\);/);
+  const readyStart = voice.indexOf('pub fn handleDictationReady(');
+  const ready = voice.slice(readyStart, readyStart + 6000);
+  assert.match(ready, /const send_queued = app_state\.g_dictation_send_queued\.swap\(false, \.acq_rel\);/);
+  assert.equal((ready.match(/chatDictationSendFlush\(send_queued\)/g) || []).length, 2);
+  assert.match(voice, /pub fn cancelDictation\(\) void \{[^}]*g_dictation_send_queued\.store\(false, \.release\);/);
+  const keys = composer.slice(composer.indexOf('fn chatDictationKey('), composer.indexOf('pub fn chatDictationClick('));
+  assert.doesNotMatch(keys, /g_dictation_send_queued/);
+});
+
 function seamContract(source) {
   const fixture = source.slice(source.indexOf('fn dictationFixtureEnabled('), source.indexOf('fn captureDictationPcm('));
   for (const required of ['"GITHUB_ACTIONS", "true"', '"RUNNER_OS", "Windows"', '"MULTIPROMPT_NO_LOGIN", "1"', '"MULTIPROMPT_DICTATION_FIXTURE"', 'win32OpenRead(file)', 'win32ReadAll(handle, out)']) assert.ok(fixture.includes(required), required);
