@@ -1123,6 +1123,8 @@ test "ISSUE-611 session views survive session write parse and restore" {
     for (0..3) |i| {
         app_state.shells[i] = empty_shell;
         app_state.shells[i].kind = .tmux;
+        app_state.shells[i].tmux_session[0] = @intCast('a' + i);
+        app_state.shells[i].tmux_session_len = 1;
         app_state.shells[i].pinned_top = i != 1;
         restoreBrowserStateFromSavedTab(@intCast(i), &tabs[i]);
     }
