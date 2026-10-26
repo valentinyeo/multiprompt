@@ -237,6 +237,39 @@ class ChatSyncAuditTest(unittest.TestCase):
                 self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
                 self.assertEqual(findings[0]['transcript_lines'][-1]['record'], 'conversation')
 
+    def test_igsh912_queued_prompt_without_recorded_text_is_not_missing_chat_until_dequeued(self):
+        reader = audit.load_reader()
+        prompt = '[broadcast from neutral lead] rules updated: tag every ticket. Run the rules skill.'
+        events = [dict(type='queue-operation', operation='enqueue', content='<task-notification>neutral</task-notification>',
+                       timestamp='2026-01-01T00:00:00Z'),
+                  dict(type='queue-operation', operation='dequeue', timestamp='2026-01-01T00:00:01Z'),
+                  dict(type='queue-operation', operation='enqueue', timestamp='2026-01-01T00:00:02Z')]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+            wire = self.wire([]).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+            capture = {'prompt': '❯ ' + prompt, 'output': '● ' + prompt}
+            shown = ['prompt']
+            def command(argv, **kwargs):
+                return capture[shown[0]] + '\n' * 9 if argv[0] == 'tmux' else '{"probe":0,"present":false}\n'
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', path)), \
+                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
+                 patch.object(reader, 'read_process_cwd', return_value=''), \
+                 patch.object(reader, 'response', return_value=wire), patch.object(audit, 'run', side_effect=command):
+                self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep=lambda seconds: None), [])
+                shown[0] = 'output'
+                findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep=lambda seconds: None)
+                self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
+                shown[0] = 'prompt'
+                events.append(dict(type='queue-operation', operation='dequeue', timestamp='2026-01-01T00:00:03Z'))
+                events.append(dict(type='user', message=dict(role='user', content=prompt), timestamp='2026-01-01T00:00:03Z'))
+                path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+                wire = self.wire([]).replace('\t0\t100\t', f'\t0\t{path.stat().st_size}\t')
+                reader.response.return_value = wire
+                findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep=lambda seconds: None)
+                self.assertEqual([item['kind'] for item in findings], ['pane_missing'])
+                self.assertEqual(findings[0]['transcript_lines'][-1]['record'], 'conversation')
+
     def test_igsh739_cleared_session_without_transcript_is_not_drift(self):
         reader = audit.load_reader()
         with patch.object(reader, 'resolve_tmux_agent', return_value=None), \
