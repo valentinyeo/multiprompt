@@ -31,7 +31,7 @@ $plans = @(
     @{name='wrapped-leftover'; mode='busy'; text='wrapped delivery delta'; leftover='earlier long message about the weekly plan that keeps wrapping across rows'}
     @{name='queue-draft-sync'; mode='busy'; text='chat queued beta'}
 )
-if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='busy'; text='composer stays usable'}) }
+if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='idle'; text='composer stays usable'}) }
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
@@ -695,6 +695,7 @@ foreach ($plan in $plans) {
             Save $observation "$caseDir/observation.json"
             & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence
             if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
+            Shell-Input 'busy'
             $fillLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'messages' '12'
             [void](Wait-For 'new transcript messages at bottom' { (Read-Shared $cache.FullName).Contains('New message 11') })
