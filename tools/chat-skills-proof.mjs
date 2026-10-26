@@ -14,7 +14,7 @@ export function verify(dir) {
   assert.equal(cleanup.scratch_removed, true);
   assert.equal(cleanup.evidence_preserved, true);
   assert.ok(observed.skills.newSkillMs > 0 && observed.skills.newSkillMs <= 5000);
-  assert.equal(observed.skills.selected, '/verify-zebra ');
+  assert.equal(observed.skills.selected, '/verify-yak ');
   assert.equal(observed.skills.accepted, '/verify-alpha ');
   assert.equal(observed.skills.reload, true);
   const requests = fs.readFileSync(path.join(dir, 'fresh-skills/stand-in/completion.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);

@@ -376,6 +376,8 @@ foreach ($plan in $plans) {
         if ($Feature -eq 'chat-skills') {
             New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-zebra" | Out-Null
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-zebra/SKILL.md", "---`nname: verify-zebra`ndescription: Existing fixture skill`n---`nFixture")
+            New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-yak" | Out-Null
+            [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-yak/SKILL.md", "---`nname: verify-yak`ndescription: Cached selection fixture`n---`nFixture")
         }
         if ($hasTranscript) { Shell-Run @('init') }
         if ($isHistory) { Shell-Run @('history') }
@@ -403,8 +405,8 @@ foreach ($plan in $plans) {
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
         if ($Feature -eq 'chat-skills') {
-            Type-Composer '/verify-'
-            if ([ChatDeliveryDesktop]::Text($composer) -cne '/verify-') { throw 'Skill fixture did not type the slash and hyphen' }
+            Type-Composer '/verify-zebra'
+            if ([ChatDeliveryDesktop]::Text($composer) -cne '/verify-zebra') { throw 'Skill fixture did not type the slash and hyphen' }
             [void](Wait-For 'initial skill fetch applied' { (Read-Shared "$settings/debug.log") -match 'chat-ac: fetched host=0 bytes=[1-9]' } 20)
             Press @(0x09) 'Tab: accept existing skill' $true
             [void](Wait-For 'existing skill accepted' { [ChatDeliveryDesktop]::Text($composer) -ceq '/verify-zebra ' } 5)
@@ -415,6 +417,7 @@ foreach ($plan in $plans) {
             Copy-Item "$profile/home/.claude/skills" "$caseDir/skills" -Recurse
             $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Type-Composer '/verify-'
+            Press @(0x28) 'Down: select cached yak before background refresh' $true
             [void](Wait-For 'newly added skill discovered within five seconds' {
                 (Test-Path "$state/completion.jsonl") -and (Read-Shared "$state/completion.jsonl").Contains('verify-alpha')
             } 4)
@@ -422,7 +425,7 @@ foreach ($plan in $plans) {
             Shot 'fresh-skills-refreshed'
             Press @(0x09) 'Tab: keep selected cached skill after refresh' $true
             $selected = [ChatDeliveryDesktop]::Text($composer)
-            if ($selected -cne '/verify-zebra ') { throw "Selected row moved during refresh: $selected" }
+            if ($selected -cne '/verify-yak ') { throw "Selected row moved during refresh: $selected" }
             Press @(0x11, 0x41) 'Ctrl+A: select whole skill draft' $true
             Press @(0x08) 'Backspace: clear whole skill draft' $true
             Type-Composer '/verify-alpha'

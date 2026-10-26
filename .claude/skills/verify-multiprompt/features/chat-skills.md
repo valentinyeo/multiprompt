@@ -12,7 +12,7 @@ Open Chat View in a remote Claude session. Type a slash and a skill prefix. Tab 
 
 Dispatch verify.yml with feature=chat-skills and this branch, or a published release tag. The existing isolated desktop driver owns its app, profile and fake SSH transport. The transport calls the real mp_complete.py discovery over real SKILL.md files; no provider runs. A prepared built-in cache avoids provider initialization, without replacing skill discovery.
 
-Warm suggestions with verify-zebra. Clear the composer, add verify-alpha on the test host, reopen suggestions and require a refreshed response within five seconds. Tab must still insert verify-zebra after alphabetical reordering. Filter and accept verify-alpha within the same five-second budget. Add verify-beta, send reload-plugins, and require a new discovery response before reopening suggestions.
+Warm suggestions with verify-zebra and verify-yak; accept zebra once. Clear the composer, add verify-alpha on the test host, reopen suggestions and require a refreshed response within five seconds. Move Down to cached yak before the delayed refresh. Zebra stays first from recent use; alpha inserts before yak. Tab must still insert verify-yak after its row index changes. Filter and accept verify-alpha within the same five-second budget. Add verify-beta, send reload-plugins, and require a new discovery response before reopening suggestions.
 
 Require CHAT_SKILLS_PROOF_OK, result.json passed, executable Doctor identity, screenshots, completion request records and zero remaining owned processes. The old app must fail the same journey at newly-added skill discovery, not setup.
 
