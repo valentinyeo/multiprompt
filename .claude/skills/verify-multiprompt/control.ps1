@@ -1717,7 +1717,18 @@ function Press-ShiftEnter([string]$Label) {
     Record 'Shift released after Shift+Enter'
 }
 
+function Wait-FrameForeground {
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        [void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        if ([VerifyNative]::GetForegroundWindow() -eq $script:window) { return }
+        Start-Sleep -Milliseconds 100
+    }
+    throw 'Owned app frame never became foreground before the command palette'
+}
+
 function Focus-Palette([string]$Query, [int]$Target) {
+    if ([VerifyNative]::GetForegroundWindow() -ne $script:window) { Wait-FrameForeground }
     $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
     $start = ((Get-Content $log -Raw) -join '').Length
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'

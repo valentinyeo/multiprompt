@@ -289,7 +289,10 @@ def shell():
         descriptions = ["Check app-smoke state", "Inspect app-smoke run details", "Read commit statuses on PR head"]
         for i in range(12):
             identity = "activity-" + str(i)
-            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo verified", description=descriptions[i % len(descriptions)]))]))
+            call = dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo verified", description=descriptions[i % len(descriptions)]))
+            if i == 0:
+                call = dict(type="tool_use", id=identity, name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))
+            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[call]))
             fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="verified", is_error=False)]))
         return 0
     if op == "show":

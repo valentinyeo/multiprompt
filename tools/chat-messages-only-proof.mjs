@@ -162,7 +162,8 @@ export function evaluate(root, complete, toolsOnly = false) {
   const completed = tools.filter(row => row.status === 'ok' && row.detail.includes('verified'));
   assert.equal(tools.length, 12, 'production reader retained all tool calls');
   assert.equal(completed.length, 12, 'production reader retained all paired successful results');
-  assert.deepEqual([...new Set(tools.map(row => row.text))].sort(), ['Ran Check app-smoke state', 'Ran Inspect app-smoke run details', 'Ran Read commit statuses on PR head'].sort());
+  assert.deepEqual([...new Set(tools.map(row => row.text))].sort(), ['Ran Check app-smoke state', 'Ran Inspect app-smoke run details', 'Ran Read commit statuses on PR head', 'TodoWrite'].sort());
+  assert.equal(tools.filter(row => row.text === 'TodoWrite').length, 1, 'the scripted agent writes one todo so the app paints its status row');
   assert.equal(new Set(tools.map(row => row.id)).size, 12);
   const measured = compareTranscript(readBmp(path.join(root, 'messages-only-before-tools.bmp')), readBmp(path.join(root, 'messages-only-after-tools.bmp')), observation.transcript);
   const cleanChat = toolsOnly ? null : compareCleanChat(
