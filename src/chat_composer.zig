@@ -1759,7 +1759,7 @@ pub fn chatDraftFlush() void {
     }
     if (app_state.g_main_hwnd != null) {
         _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
-        if (app_state.g_chat_draft_dirty) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
+        if (app_state.g_chat_draft_dirty or (shell_draft.edit_pending and shell_draft.foreign)) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
     }
 }
 
