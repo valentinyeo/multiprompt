@@ -1712,6 +1712,33 @@ function Wait-ConsoleText([string]$Command) {
     } "console visibly contains staged command: $Command"
 }
 
+function Send-ProfileScreenshot([string]$Step, [string]$Profile, [int]$ExpectedUpload) {
+    $pane = Read-BrowserPane
+    $windowId = [int64]$pane.browser_window_id
+    if ($windowId -le 0) { throw "screenshot ${Step}: pane has no bound browser window" }
+    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $logStart = ([IO.File]::ReadAllText($log)).Length
+    $bridge = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
+    $arguments = ''
+    if ($Profile -ne '') { $arguments += "--profile $Profile " }
+    $arguments += "--window $windowId shoturl --user-initiated"
+    $stdout = Join-Path $Evidence "screenshot-$Step.stdout.txt"
+    $stderr = Join-Path $Evidence "screenshot-$Step.stderr.txt"
+    $shot = Start-Process -FilePath $bridge -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
+    if (-not $shot.WaitForExit(60000)) { $shot.Kill(); throw "screenshot ${Step}: shoturl did not finish in 60 seconds" }
+    $exitCode = $shot.ExitCode
+    $output = (([string](Get-Content -LiteralPath $stdout -Raw)) + ([string](Get-Content -LiteralPath $stderr -Raw))).Trim()
+    if ($exitCode -ne 0) { throw "screenshot ${Step}: shoturl failed with exit ${exitCode}: $output" }
+    $expectedUrl = "https://example.invalid/shot-$ExpectedUpload.png"
+    Wait-Until {
+        $trace = ([IO.File]::ReadAllText($log)).Substring($logStart)
+        $trace.Contains("notify: payload=SHOTUSER:${windowId}:$expectedUrl") -and $trace -match '\[paste-focus\] queued shell=\d+ user=true' -and $trace -match '\[paste-focus\] (console|composer) paste applied'
+    } "screenshot ${Step}: the app received and pasted the link from window $windowId" 60
+    $uploads = @(Get-Content -LiteralPath (Join-Path $script:uploadReceiverDir 'uploads.jsonl'))
+    if ($uploads.Count -ne $ExpectedUpload) { throw "screenshot ${Step}: expected $ExpectedUpload uploads but the receiver saw $($uploads.Count)" }
+    $result.checks += @{ name = "browser-own-profile screenshot $Step"; windowId = $windowId; url = $expectedUrl; profile = $(if ($Profile -eq '') { 'shared' } else { $Profile }) }
+}
+
 function Palette([string]$Query) {
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
     Type-Text $Query
@@ -1962,33 +1989,6 @@ function Open-WorkspaceBrowser([string]$Step) {
     Palette 'open browser'
     Press @(0x0D) ('Enter: Open Browser Pane for ' + $Step)
     return Assert-WorkspaceBrowser $Step
-}
-
-function Send-ProfileScreenshot([string]$Step, [string]$Profile, [int]$ExpectedUpload) {
-    $pane = Read-BrowserPane
-    $windowId = [int64]$pane.browser_window_id
-    if ($windowId -le 0) { throw "screenshot ${Step}: pane has no bound browser window" }
-    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-    $logStart = ([IO.File]::ReadAllText($log)).Length
-    $bridge = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
-    $arguments = ''
-    if ($Profile -ne '') { $arguments += "--profile $Profile " }
-    $arguments += "--window $windowId shoturl --user-initiated"
-    $stdout = Join-Path $Evidence "screenshot-$Step.stdout.txt"
-    $stderr = Join-Path $Evidence "screenshot-$Step.stderr.txt"
-    $shot = Start-Process -FilePath $bridge -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
-    if (-not $shot.WaitForExit(60000)) { $shot.Kill(); throw "screenshot ${Step}: shoturl did not finish in 60 seconds" }
-    $exitCode = $shot.ExitCode
-    $output = (([string](Get-Content -LiteralPath $stdout -Raw)) + ([string](Get-Content -LiteralPath $stderr -Raw))).Trim()
-    if ($exitCode -ne 0) { throw "screenshot ${Step}: shoturl failed with exit ${exitCode}: $output" }
-    $expectedUrl = "https://example.invalid/shot-$ExpectedUpload.png"
-    Wait-Until {
-        $trace = ([IO.File]::ReadAllText($log)).Substring($logStart)
-        $trace.Contains("notify: payload=SHOTUSER:${windowId}:$expectedUrl") -and $trace -match '\[paste-focus\] queued shell=\d+ user=true' -and $trace -match '\[paste-focus\] (console|composer) paste applied'
-    } "screenshot ${Step}: the app received and pasted the link from window $windowId" 60
-    $uploads = @(Get-Content -LiteralPath (Join-Path $script:uploadReceiverDir 'uploads.jsonl'))
-    if ($uploads.Count -ne $ExpectedUpload) { throw "screenshot ${Step}: expected $ExpectedUpload uploads but the receiver saw $($uploads.Count)" }
-    $result.checks += @{ name = "browser-own-profile screenshot $Step"; windowId = $windowId; url = $expectedUrl; profile = $(if ($Profile -eq '') { 'shared' } else { $Profile }) }
 }
 
 function Select-Theme([string]$Theme, [string]$ActionShot, [string]$SavedTheme = $Theme) {
@@ -5085,9 +5085,6 @@ try {
                     Save-Json @{ activeAfterStop = $warmupStopped.ActiveProcesses } 'browser-setup-process-tree.json'
                 }
             } finally {
-                foreach ($pinned in $script:pinnedNotifyListeners) { $pinned.Stop() }
-                $script:pinnedNotifyListeners = @()
-                if ($null -ne $script:uploadReceiver -and -not $script:uploadReceiver.HasExited) { $script:uploadReceiver.Kill() }
                 if ($null -ne $switchNativeRegistry) {
                     Remove-Item -LiteralPath $switchNativeRegistry -Recurse -Force
                     $switchNativeRegistry = $null
@@ -5096,6 +5093,9 @@ try {
                     Remove-Item -LiteralPath $switchExtensionRoot -Recurse -Force
                     $switchExtensionRoot = $null
                 }
+                foreach ($pinned in $script:pinnedNotifyListeners) { $pinned.Stop() }
+                $script:pinnedNotifyListeners = @()
+                if ($null -ne $script:uploadReceiver -and -not $script:uploadReceiver.HasExited) { $script:uploadReceiver.Kill() }
                 if (Test-Path $scratch) {
                     Prepare-ScratchEvidence $scratch
                     $data = Join-Path $Evidence 'data'
