@@ -55,6 +55,26 @@ fn signature(window: RECT, holes: *const HoleList) u64 {
     return hasher.final() | 1;
 }
 
+pub fn buildRegion(window: RECT, holes: *const HoleList) w32.HANDLE {
+    const width = window.right - window.left;
+    const height = window.bottom - window.top;
+    const base = w32.CreateRectRgn(0, 0, width, height);
+    if (base == null) return null;
+    for (holes.items[0..holes.len]) |hole| {
+        const r = hole.rect;
+        const left = r.left - window.left - 1;
+        const top = r.top - window.top - 1;
+        const right = r.right - window.left + 1;
+        const bottom = r.bottom - window.top + 1;
+        const diameter = if (hole.radius > 0) (hole.radius + 1) * 2 else 0;
+        const piece = if (diameter > 0) w32.CreateRoundRectRgn(left, top, right + 1, bottom + 1, diameter, diameter) else w32.CreateRectRgn(left, top, right, bottom);
+        if (piece == null) continue;
+        _ = w32.CombineRgn(base, base, piece, RGN_DIFF);
+        _ = w32.DeleteObject(piece);
+    }
+    return base;
+}
+
 pub fn syncChatRegion() void {
     const hwnd = app_state.g_chat_transcript_hwnd;
     if (hwnd == null) return;
@@ -70,22 +90,7 @@ pub fn syncChatRegion() void {
     collectHoles(&holes);
     const sig = signature(window, &holes);
     if (sig == app_state.g_chat_hole_signature) return;
-    const width = window.right - window.left;
-    const height = window.bottom - window.top;
-    const base = w32.CreateRectRgn(0, 0, width, height);
-    if (base == null) return;
-    for (holes.items[0..holes.len]) |hole| {
-        const r = hole.rect;
-        const left = r.left - window.left - 1;
-        const top = r.top - window.top - 1;
-        const right = r.right - window.left + 1;
-        const bottom = r.bottom - window.top + 1;
-        const diameter = if (hole.radius > 0) (hole.radius + 1) * 2 else 0;
-        const piece = if (diameter > 0) w32.CreateRoundRectRgn(left, top, right + 1, bottom + 1, diameter, diameter) else w32.CreateRectRgn(left, top, right, bottom);
-        if (piece == null) continue;
-        _ = w32.CombineRgn(base, base, piece, RGN_DIFF);
-        _ = w32.DeleteObject(piece);
-    }
+    const base = buildRegion(window, &holes) orelse return;
     if (w32.SetWindowRgn(hwnd, base, 1) == 0) {
         _ = w32.DeleteObject(base);
         return;
