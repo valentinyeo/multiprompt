@@ -59,6 +59,9 @@ pub const CHANGELOG = blk: {
 };
 
 const SOURCE_CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.881", .items = &.{
+        .{ .text = "Pasted text keeps its line breaks when sent.", .ticket = "IGSH-895" },
+    } },
     .{ .ver = "0.28.880", .items = &.{
         .{ .text = "Screenshots sent from the standard browser profile and from a workspace's own browser profile now have an automatic end-to-end check.", .ticket = "IGSH-894" },
         .{ .text = "Updates now wait until Multiprompt has been closed and reopened three times on saved sessions without listing any session twice.", .ticket = "IGSH-900" },
