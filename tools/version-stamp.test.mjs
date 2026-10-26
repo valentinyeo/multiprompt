@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { stampTree, buildChangelog, classifyTrees, fixHint } from './version-stamp.mjs';
+import { stampTree, buildChangelog, previousReleaseTag, classifyTrees, fixHint } from './version-stamp.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const tool = path.join(root, 'tools/version-stamp.mjs');
@@ -402,4 +402,44 @@ test('build changelog uses the tag and fragments without changing source default
   const again = spawnSync(process.execPath, [tool, 'build', 'v0.28.900'], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(again.status, 0, again.stderr);
   assert.equal(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), generated);
+});
+
+test('IGSH-889 picks the newest older release tag by number', () => {
+  const tags = ['v0.28.9', 'v0.28.10', 'v0.28.11', 'v0.28.12', 'v1.0.0', 'nightly', 'v0.28.10-rc1'];
+  assert.equal(previousReleaseTag(tags, 'v0.28.11'), 'v0.28.10');
+  assert.equal(previousReleaseTag(tags, 'v0.28.10'), 'v0.28.9');
+  assert.equal(previousReleaseTag(tags, 'v0.28.9'), null);
+  assert.equal(previousReleaseTag(tags, 'v2.0.0'), 'v1.0.0');
+});
+
+test('IGSH-889 a release lists only fragments added since the previous release', t => {
+  const old = { 'changelog.d/DEMO-1-old.md': 'An old improvement.\n' };
+  const fresh = { ...base(), ...old, 'changelog.d/DEMO-2-new.md': 'A new improvement.\n' };
+  const generated = buildChangelog(fresh, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
+  assert.match(generated, /A new improvement/);
+  assert.doesNotMatch(generated, /An old improvement/);
+  const quiet = buildChangelog({ ...base(), ...old }, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
+  assert.match(quiet, /Updates include the latest improvements/);
+  assert.doesNotMatch(quiet, /An old improvement/);
+
+  const r = repo(t, { ...base(), ...old });
+  r.git('tag', 'v0.28.735');
+  r.write({ 'changelog.d/DEMO-2-new.md': 'Second release change.\n' });
+  r.commit();
+  r.git('tag', 'v0.28.736');
+  r.write({ 'changelog.d/DEMO-3-skipped.md': 'Third release change.\n' });
+  r.commit();
+  r.git('tag', 'v0.28.737');
+  r.write({ 'changelog.d/DEMO-4-latest.md': 'Latest release change.\n' });
+  r.commit();
+  r.git('tag', 'v0.28.738');
+  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738'], { cwd: r.dir, encoding: 'utf8' });
+  assert.equal(built.status, 0, built.stderr);
+  const written = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
+  assert.doesNotMatch(written, /An old improvement/);
+  const order = ['0.28.738', '0.28.737', '0.28.736', '0.28.735'].map(v => written.indexOf(`.ver = "${v}"`));
+  assert.ok(order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1])), 'one entry per release, newest first');
+  assert.match(written.slice(order[0], order[1]), /Latest release change/);
+  assert.match(written.slice(order[1], order[2]), /Third release change/);
+  assert.match(written.slice(order[2], order[3]), /Second release change/);
 });

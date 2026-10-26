@@ -260,7 +260,7 @@ function assertsOwnedInput(source) {
     'GetForegroundWindow', 'GetAncestor', 'GetAncestor', 'GetWindowThreadProcessId',
   ]);
   assert.doesNotMatch(guard, /SetForegroundWindow|SetFocus|BringToForeground|::Chord\(|::Text\(|Wait-(?:Until|Foreground)|\b(?:while|do|until)\b/);
-  assert.match(wait, /^function Wait-Foreground \{\s+for \(\$attempt = 0; \$attempt -lt 50; \$attempt\+\+\) \{\s+\[void\]\[VerifyNative\]::AllowSetForegroundWindow\(\[uint32\]\$process.Id\)\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+try \{ Assert-Foreground; return \} catch \{\}\s+if \(\$attempt -lt 49\) \{ Start-Sleep -Milliseconds 100 \}\s+\}\s+Assert-Foreground\s+\}\s*$/);
+  assert.match(wait, /^function Wait-Foreground \{\s+try \{ Assert-Foreground; return \} catch \{\}\s+for \(\$attempt = 0; \$attempt -lt 50; \$attempt\+\+\) \{\s+\[void\]\[VerifyNative\]::AllowSetForegroundWindow\(\[uint32\]\$process.Id\)\s+\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)\s+try \{ Assert-Foreground; return \} catch \{\}\s+if \(\$attempt -lt 49\) \{ Start-Sleep -Milliseconds 100 \}\s+\}\s+Assert-Foreground\s+\}\s*$/);
   assert.doesNotMatch(wait, /Wait-Until|while\s*\(/);
   assert.match(press, /^function Press\(\[int\[\]\]\$Keys, \[string\]\$Label\) \{\s+Doctor\s+Wait-Foreground\s+Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)\s+\}\s*$/);
   assert.match(press, /Record \$Label\s+Assert-Foreground\s+\[VerifyNative\]::Chord\(\$Keys\)/);
@@ -276,6 +276,7 @@ function assertsOwnedInput(source) {
 test('IGSH-807: foreground ownership is bounded, refuses foreign input and is rechecked at injection', () => {
   assertsOwnedInput(control);
   for (const [before, after] of [
+    ['function Wait-Foreground {\n    try { Assert-Foreground; return } catch {}', 'function Wait-Foreground {'],
     ['$foreground = [VerifyNative]::GetForegroundWindow()', '[void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)\n        $foreground = [VerifyNative]::GetForegroundWindow()'],
     ['$foreground = [VerifyNative]::GetForegroundWindow()', '[void][VerifyNative]::SetForegroundWindow($script:window)\n        $foreground = [VerifyNative]::GetForegroundWindow()'],
     ['        [void][VerifyNative]::SetForegroundWindow($script:window)\n        try { Assert-Foreground; return } catch {}', '        try { Assert-Foreground; return } catch {}\n        [void][VerifyNative]::SetForegroundWindow($script:window)'],
@@ -369,7 +370,12 @@ function Refuses([scriptblock]$Action) {
 }
 Reset
 Press @(0x12, 0x43) 'owned main'
-Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 1 -and [VerifyNative]::Allows -eq 1) 'Owned main input failed'
+Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 0 -and [VerifyNative]::Allows -eq 0) 'Owned main input failed'
+Reset
+[VerifyNative]::Foreground = [IntPtr]20; [VerifyNative]::Root = $script:window; [VerifyNative]::Owner = 99
+[VerifyNative]::LoseOnActivation = $true
+Press @(0x0D) 'owned child console Enter'
+Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 0 -and [VerifyNative]::Foreground -eq [IntPtr]20) 'IGSH-884 Enter moved focus away from the owned console'
 Reset
 [VerifyNative]::Owner = 99
 Assert-Foreground
@@ -385,15 +391,15 @@ Require ([VerifyNative]::Reads -eq 2 -and $script:sleeps -eq 1) 'Transient foreg
 Reset
 [VerifyNative]::Foreign()
 Refuses { Press @(0x41) 'foreign' }
-Require ([VerifyNative]::Reads -eq 255 -and $script:sleeps -eq 253 -and [VerifyNative]::Activations -eq 50 -and [VerifyNative]::Allows -eq 50) 'Foreign refusal did not respect retry or activation boundary'
+Require ([VerifyNative]::Reads -eq 260 -and $script:sleeps -eq 257 -and [VerifyNative]::Activations -eq 50 -and [VerifyNative]::Allows -eq 50) 'Foreign refusal did not respect retry or activation boundary'
 Reset
 [VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 2
 Press @(0x41) 'recovered on second activation'
-Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 2 -and [VerifyNative]::Allows -eq 2 -and $script:sleeps -eq 5) 'Press did not retry foreground activation'
+Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 2 -and [VerifyNative]::Allows -eq 2 -and $script:sleeps -eq 9) 'Press did not retry foreground activation'
 Reset
 [VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 50
 Press @(0x41) 'recovered on last activation'
-Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 50 -and [VerifyNative]::Allows -eq 50 -and $script:sleeps -eq 245) 'Press did not allow the last bounded activation'
+Require ([VerifyNative]::Chords -eq 1 -and [VerifyNative]::Activations -eq 50 -and [VerifyNative]::Allows -eq 50 -and $script:sleeps -eq 249) 'Press did not allow the last bounded activation'
 foreach ($field in @('Foreground', 'Root', 'RootOwner')) {
     Reset
     if ($field -eq 'Foreground') { [VerifyNative]::Foreground = [IntPtr]::Zero }
@@ -403,6 +409,7 @@ foreach ($field in @('Foreground', 'Root', 'RootOwner')) {
     Require ([VerifyNative]::Reads -eq 5) 'Null HWND bypassed bounded ownership checks'
 }
 Reset
+[VerifyNative]::Foreign()
 [VerifyNative]::LoseOnActivation = $true
 Refuses { Press @(0x41) 'lost on activation' }
 Reset

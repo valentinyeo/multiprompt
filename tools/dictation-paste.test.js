@@ -57,7 +57,7 @@ test("dictation reports success only after console output verification", () => {
   const ready = functionBody("handleDictationReady", "toggleDictation");
   assert.match(ready, /pasteDictationToShellVerified\(active_shell, transcript\)/);
   const verified = ready.indexOf('dictationAudit("shell-output-verified"');
-  const success = ready.indexOf('showHeaderNoticeAscii("Dictation pasted"', verified);
+  const success = ready.indexOf('showDictationStatus("Dictation pasted"', verified);
   assert.ok(verified >= 0 && success > verified,
     "the shell branch must verify output before announcing a successful paste");
   assert.match(ready, /Dictation copied: console rejected input/);
@@ -116,7 +116,7 @@ test("IGSH-846 recording Escape discards audio and never delivers a transcript",
   const cancel = functionBody("cancelDictation", "handleDictationReady");
   assert.match(cancel, /g_dictation_recording\.store\(false, \.release\)/);
   const worker = functionBody("dictationWorkerThread", "synthesizeCtrlVIntoForeground");
-  assert.match(worker, /captureDictationPcm\(audio\)[\s\S]*?if \(g_dictation_cancelled\.load\(\.acquire\)\) \{\s*if \(g_main_hwnd != null\) _ = PostMessageW\(g_main_hwnd, WM_APP_DICTATION_READY, 0, 0\);\s*return;\s*\}[\s\S]*?deepgramTranscribePcm\(/,
+  assert.match(worker, /captureDictationPcm\(&audio\)[\s\S]*?if \(g_dictation_cancelled\.load\(\.acquire\)\) \{\s*if \(g_main_hwnd != null\) _ = PostMessageW\(g_main_hwnd, WM_APP_DICTATION_READY, 0, 0\);\s*return;\s*\}[\s\S]*?deepgramTranscribePcm\(/,
     "cancelled audio must be freed without provider transcription");
   const ready = functionBody("handleDictationReady", "toggleDictation");
   const discard = ready.indexOf('if (g_dictation_cancelled.load(.acquire))');

@@ -108,7 +108,7 @@ pub var g_power_background_since_tick: u64 = 0;
 
 pub const PowerTimerMode = enum { normal, saving, deep_idle };
 
-pub const NOTIFY_PORTS = [_]u16{ 19548, 19549, 19550, 19551, 19552, 19553, 19554, 19555, 19556, 19557, 19558, 19559 };
+pub const NOTIFY_PORTS = @import("notify_ports.zig").NOTIFY_PORTS;
 
 pub var g_tunnel_inbound_port: u16 = 0;
 pub var g_notify_bound_port: u16 = 0;
@@ -1152,6 +1152,8 @@ pub var g_chat_layout_dirty = false;
 pub var g_chat_content_h: i32 = 0;
 pub var g_chat_scroll_y: i32 = 0;
 pub var g_chat_scrolled_up = false;
+pub var g_chat_read_visit_shell_id: u32 = 0;
+pub var g_chat_read_visit_marker: u64 = 0;
 pub var g_chat_read_open_pending = false;
 pub var g_chat_read_open_ready = false;
 pub var g_chat_read_hold = false;
@@ -2516,8 +2518,23 @@ pub var g_chat_bench_first_paint: bool = false;
 pub var g_chat_bench_content_paint: bool = false;
 pub const TIMER_CHAT_BENCH: usize = 0xB311;
 
+pub const ChatLayoutSnapshot = struct {
+    content_hash: u64,
+    stable_text: usize,
+    stable_blocks: usize,
+    width: i32,
+    scale: i32,
+    font_pt: i32,
+    clean: bool,
+    boundary: chat_history.ReadBoundary,
+    img_first_block: usize,
+    first_image: usize,
+    read_divider_y: i32,
+    rects: []RECT,
+};
 pub const ChatHistoryEntry = struct {
     key: chat_transcript.Identity,
+    layout: ?ChatLayoutSnapshot = null,
     generation: u64 = 0,
     history: chat_history.History = .{},
     backfill: chat_history.Backfill = .{},
@@ -2543,6 +2560,12 @@ pub const ChatHistoryEntry = struct {
     next: u64 = 0,
     ready: std.atomic.Value(bool) = .init(false),
     result: ?chat_history.History = null,
+
+    pub fn clearLayout(self: *ChatHistoryEntry) void {
+        const snapshot = self.layout orelse return;
+        std.heap.page_allocator.free(snapshot.rects);
+        self.layout = null;
+    }
 };
 pub var g_chat_received: chat_markdown.BlockCache = .{};
 pub var g_chat_tables: chat_markdown.TableCache = .{};
@@ -3268,8 +3291,6 @@ pub const LAST_PASTE_FALLBACK_MS: u64 = 60_000;
 pub const DICTATION_SAMPLE_RATE: DWORD = 16000;
 pub const DICTATION_CHUNK_BYTES: usize = 3200;
 pub const DICTATION_BUFFER_COUNT: usize = 4;
-const DICTATION_MAX_SECONDS: usize = 45;
-pub const DICTATION_MAX_BYTES: usize = DICTATION_SAMPLE_RATE * 2 * DICTATION_MAX_SECONDS;
 
 pub const pcmFrameRms = duplex.pcmFrameRms;
 const VadState = duplex.VadState;

@@ -22,7 +22,7 @@ function decide({ run, repository, commits, jobs, history = [] }) {
   if (!failed.length && run.conclusion === 'cancelled') return { action: 'ignore', reason: 'Cancelled run has no failed journey' };
   const marker = `Auto-Revert-Run: ${run.id}`;
   const duplicate = commits.find(commit => commit.commit.message.split('\n').includes(marker));
-  if (duplicate) return { action: 'skip', reason: `Run already reverted by ${duplicate.sha}` };
+  if (duplicate) return { action: 'skip', reason: `Run already reverted by ${duplicate.sha}`, duplicate: duplicate.commit.message };
   const target = commits.find(commit => commit.sha === run.head_sha);
   if (!target) return refuse('Run head is not on the first-parent history of master');
   const subject = target.commit.message.split('\n')[0];
@@ -92,14 +92,24 @@ function main() {
   const ticket = decision.ticket || commits.find(commit => commit.sha === run.head_sha)?.commit.message.split('\n')[0].match(/\bIGSH-\d+\b/)?.[0] || 'Unknown ticket';
   const notify = detail => {
     const title = `${ticket}: master verify failure (run ${runId})`;
-    const body = `${marker}\n\n${detail}\n\nFailed journeys/jobs: ${failing}\n\nRun: ${run.html_url}\nHead: ${run.head_sha}\n\nHypertask notification unavailable: this workflow uses only GITHUB_TOKEN, which cannot authenticate to the board. Manually reopen ${ticket} and post the failing journeys above. No board write was attempted.`;
+    const body = `${marker}\n\n${detail}\n\nFailed journeys/jobs: ${failing}\n\nRun: ${run.html_url}\nHead: ${run.head_sha}\n\nThe board ticket was not reopened by this run. Manually reopen ${ticket} and post the failing journeys above.`;
     const existing = api(`repos/${repository}/issues?state=all&per_page=100`, '--paginate', '--slurp').flat().find(issue => !issue.pull_request && issue.body?.split('\n').includes(marker));
     if (!existing) api(`repos/${repository}/issues`, '-X', 'POST', '-f', `title=${title}`, '-f', `body=${body}`);
-    console.error('::error::Hypertask notification unavailable; GitHub issue records the cause and required manual ticket reopening.');
+    console.error('::error::Board ticket not reopened; the GitHub issue records the cause and the required manual reopening.');
     process.exitCode = 1;
   };
+  const reopenBoard = (key, journeys, context) => {
+    try {
+      execFileSync('node', ['tools/auto-revert-board.js', key, run.html_url, journeys], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000 });
+    } catch (error) {
+      notify(`${context}, but the board ticket was not reopened: ${error.stderr?.toString().trim() || error.message}`);
+    }
+  };
   if (decision.action === 'skip') {
-    notify(decision.reason);
+    const key = decision.duplicate?.match(/\bIGSH-\d+\b/)?.[0];
+    const journeys = decision.duplicate?.match(/^Failed journeys: (.+)$/m)?.[1];
+    if (key && journeys) reopenBoard(key, journeys, decision.reason);
+    else notify(decision.reason);
     return;
   }
   if (decision.action === 'refuse') {
@@ -108,6 +118,31 @@ function main() {
   }
   const branch = `auto-revert/${runId}`;
   const subject = commits.find(commit => commit.sha === decision.sha).commit.message.split('\n')[0];
+  const journeyText = decision.journeys.join(', ');
+  const enableMerge = pull => {
+    for (const workflow of ['gitleaks.yml', 'no-comments.yml', 'test.yml']) {
+      execFileSync('gh', ['workflow', 'run', workflow, '--repo', repository, '--ref', branch], { encoding: 'utf8' });
+    }
+    execFileSync('gh', ['workflow', 'run', 'verify.yml', '--repo', repository, '--ref', branch, '-f', 'feature=appearance'], { encoding: 'utf8' });
+    execFileSync('gh', ['pr', 'merge', pull, '--repo', repository, '--auto', '--squash'], { encoding: 'utf8' });
+  };
+  const earlier = git('ls-remote', '--heads', 'origin', branch)
+    ? JSON.parse(execFileSync('gh', ['pr', 'list', '--repo', repository, '--head', branch, '--state', 'all', '--json', 'url,state'], { encoding: 'utf8' }) || '[]')[0]
+    : null;
+  if (earlier) {
+    if (earlier.state === 'CLOSED') {
+      notify(`Revert pull request ${earlier.url} was closed without merging, so nothing was rolled back and the ticket was left alone.`);
+      return;
+    }
+    try {
+      if (earlier.state === 'OPEN') enableMerge(earlier.url);
+    } catch (error) {
+      notify(`Auto-revert could not enable squash auto-merge on ${earlier.url}: ${error.message}\n\nstdout:\n${error.stdout?.toString() || ''}\n\nstderr:\n${error.stderr?.toString() || ''}`);
+      throw error;
+    }
+    reopenBoard(ticket, journeyText, `Revert pull request ${earlier.url} already exists`);
+    return;
+  }
   let pullRequest;
   try {
     if (git('rev-parse', 'HEAD') !== tip || git('status', '--porcelain')) throw new Error('Checkout is not a clean current master; refusing to revert');
@@ -119,16 +154,12 @@ function main() {
     git('commit', '-m', `Revert "${subject}"`, '-m', `This reverts commit ${decision.sha}.\n\n${decision.marker}\nFailed journeys: ${decision.journeys.join(', ')}\nVerify run: ${run.html_url}`);
     git('-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential', 'push', 'origin', `HEAD:refs/heads/${branch}`);
     pullRequest = execFileSync('gh', ['pr', 'create', '--repo', repository, '--base', 'master', '--head', branch, '--title', `Revert ${subject}`, '--body', `This reverts commit ${decision.sha}.\n\n${decision.marker}\nFailed journeys: ${decision.journeys.join(', ')}\nVerify run: ${run.html_url}`], { encoding: 'utf8' }).trimEnd();
-    for (const workflow of ['gitleaks.yml', 'no-comments.yml', 'test.yml']) {
-      execFileSync('gh', ['workflow', 'run', workflow, '--repo', repository, '--ref', branch], { encoding: 'utf8' });
-    }
-    execFileSync('gh', ['workflow', 'run', 'verify.yml', '--repo', repository, '--ref', branch, '-f', 'feature=appearance'], { encoding: 'utf8' });
-    execFileSync('gh', ['pr', 'merge', pullRequest, '--repo', repository, '--auto', '--squash'], { encoding: 'utf8' });
+    enableMerge(pullRequest);
   } catch (error) {
     notify(`Auto-revert could not prepare or enable squash auto-merge for ${decision.sha}: ${error.message}\n\nstdout:\n${error.stdout?.toString() || ''}\n\nstderr:\n${error.stderr?.toString() || ''}`);
     throw error;
   }
-  notify(`Opened ${pullRequest} to revert only ${decision.sha} with squash auto-merge enabled. Failed journeys: ${decision.journeys.join(', ')}.`);
+  reopenBoard(ticket, journeyText, `Opened ${pullRequest} to revert only ${decision.sha} with squash auto-merge enabled`);
 }
 
 module.exports = { decide };

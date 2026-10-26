@@ -1,5 +1,6 @@
 const chatTableRefresh = @import("chat_render.zig").chatTableRefresh;
 const chat_switch = @import("chat_switch.zig");
+const chat_layout_snapshot = @import("chat_layout_snapshot.zig");
 const ShowWindow = @import("focus.zig").ShowWindow;
 const SW_SHOWNOACTIVATE = @import("win32.zig").SW_SHOWNOACTIVATE;
 const chatViewOwnsInput = @import("chat_composer.zig").chatViewOwnsInput;
@@ -475,6 +476,7 @@ pub fn chatHistoryForget(shell_id: u32) void {
             i += 1;
             continue;
         }
+        entry.clearLayout();
         entry.tables.deinit(std.heap.page_allocator);
         entry.history.deinit(std.heap.page_allocator);
         entry.backfill.deinit(std.heap.page_allocator);
@@ -899,6 +901,7 @@ pub fn chatFileOnReady() void {
         if (!entry.loading_disk) chatFetchRelease();
         if (entry.retired) {
             if (entry.result) |*history| history.deinit(std.heap.page_allocator);
+            entry.clearLayout();
             entry.tables.deinit(std.heap.page_allocator);
             entry.history.deinit(std.heap.page_allocator);
             entry.backfill.deinit(std.heap.page_allocator);
@@ -1200,7 +1203,7 @@ pub fn chatReadBoundary() chat_history.ReadBoundary {
     if (!app_state.g_chat_active) return .{};
     if (app_state.active_shell >= app_state.shell_count or !app_state.g_chat_blocks_from_file or
         app_state.g_chat_cache_shell_id != app_state.shells[app_state.active_shell].shell_id) return .{};
-    return chat_history.unreadBoundary(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.shells[app_state.active_shell].last_read_message_id);
+    return chat_history.unreadBoundary(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_read_visit_marker);
 }
 
 pub fn chatReadMark(bottom: bool) bool {
@@ -1238,6 +1241,7 @@ pub fn chatDeferTranscriptLoad() void {
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null) return;
     if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 750, null);
     if (@import("launch_cache.zig").pending and @import("launch_cache.zig").queue.next <= 2) return;
+    chat_layout_snapshot.save();
     @import("chat_find_ui.zig").close(false);
     app_state.g_chat_prepend_pending = false;
     app_state.g_chat_layout_reuse = 0;
@@ -1275,6 +1279,10 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_scrolled_up = false;
     app_state.g_chat_new_messages = .{};
     app_state.g_chat_read_boundary = .{};
+    if (app_state.g_chat_read_visit_shell_id != app_state.g_chat_cache_shell_id) {
+        app_state.g_chat_read_visit_shell_id = app_state.g_chat_cache_shell_id;
+        app_state.g_chat_read_visit_marker = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].last_read_message_id else 0;
+    }
     app_state.g_chat_read_open_ready = false;
     app_state.g_chat_read_hold = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].last_read_message_id != 0;
     app_state.g_chat_read_open_pending = false;
@@ -1286,6 +1294,7 @@ pub fn chatDeferTranscriptLoad() void {
     app_state.g_chat_hover_link = null;
     app_state.g_chat_sel_transcript_focus = false;
     chatSelectionClear();
+    _ = chat_layout_snapshot.restore(cached);
     app_state.g_chat_layout_dirty = true;
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     if (app_state.g_chat_block_count == 0) chatFileRequest(chatFileIdentity());
@@ -1522,7 +1531,10 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
         .chat = app_state.g_chat_active,
         .restoring = app_state.g_restoring,
         .pending = app_state.g_chat_read_open_pending,
+        .visit_shell_id = app_state.g_chat_read_visit_shell_id,
+        .visit_marker = app_state.g_chat_read_visit_marker,
         .ready = app_state.g_chat_read_open_ready,
+        .hold = app_state.g_chat_read_hold,
         .file = app_state.g_chat_blocks_from_file,
         .cache = app_state.g_chat_cache_shell_id,
         .blocks = app_state.g_chat_blocks[0..2].*,
@@ -1537,7 +1549,10 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
         app_state.g_chat_active = saved.chat;
         app_state.g_restoring = saved.restoring;
         app_state.g_chat_read_open_pending = saved.pending;
+        app_state.g_chat_read_visit_shell_id = saved.visit_shell_id;
+        app_state.g_chat_read_visit_marker = saved.visit_marker;
         app_state.g_chat_read_open_ready = saved.ready;
+        app_state.g_chat_read_hold = saved.hold;
         app_state.g_chat_blocks_from_file = saved.file;
         app_state.g_chat_cache_shell_id = saved.cache;
         app_state.g_chat_blocks[0..2].* = saved.blocks;
@@ -1556,6 +1571,8 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
     app_state.g_restoring = true;
     app_state.g_chat_blocks_from_file = true;
     app_state.g_chat_cache_shell_id = 7;
+    app_state.g_chat_read_visit_shell_id = 7;
+    app_state.g_chat_read_visit_marker = 11;
     app_state.g_chat_blocks[0] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 11 };
     app_state.g_chat_blocks[1] = .{ .start = 1, .len = 1, .role = .prose, .first = true, .message_id = 22 };
     app_state.g_chat_block_count = 2;
@@ -1566,10 +1583,11 @@ test "IGSH-814 cached reopen cannot mark offline arrivals read and bottom clears
     app_state.g_chat_read_open_pending = false;
     try std.testing.expect(!chatReadMark(true));
     app_state.g_chat_read_open_ready = true;
+    app_state.g_chat_read_hold = false;
     try std.testing.expect(chatReadMark(true));
     try std.testing.expectEqual(@as(u64, 22), app_state.shells[0].last_read_message_id);
     try std.testing.expectEqual(@as(u64, 77), app_state.shells[1].last_read_message_id);
-    try std.testing.expectEqualDeep(chat_history.ReadBoundary{}, chatReadBoundary());
+    try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
     try std.testing.expect(!chatReadMark(true));
 }
 
@@ -1623,4 +1641,140 @@ test "IGSH-868 reopen holds the unread line at the bottom until the reader scrol
     app_state.g_chat_read_hold = false;
     try std.testing.expect(chatReadMark(true));
     try std.testing.expectEqual(@as(u64, 22), app_state.shells[0].last_read_message_id);
+}
+
+fn perfNow() std.Io.Timestamp {
+    return std.Io.Clock.awake.now(std.testing.io);
+}
+
+fn perfMs(start: std.Io.Timestamp) i64 {
+    return @intCast(start.durationTo(perfNow()).toMilliseconds());
+}
+
+fn perfWire(a: std.mem.Allocator, tmux: []const u8, bytes: usize, revision: u32, base: usize) !std.ArrayList(u8) {
+    var wire: std.ArrayList(u8) = .empty;
+    errdefer wire.deinit(a);
+    var header: [160]u8 = undefined;
+    try wire.appendSlice(a, try std.fmt.bufPrint(&header, "@mp\t{d}\thistory\tok\tsid\t{d}\t{d}\t9\t0\tclaude\t{s}\n", .{ revision, base, base + bytes, tmux }));
+    const user = "{\"role\":\"user\",\"timestamp\":\"2026-10-03T12:34:00Z\",\"text\":\"Please look at the failing build and tell me what changed in the layout code, then fix it and run the tests again before you reply.\"}\n";
+    const reply_head = "{\"role\":\"assistant\",\"id\":\"a";
+    const reply_body = "\",\"text\":\"Here is what I found in the layout code. The cache keeps one measured rectangle for every message in the conversation, and it was thrown away each time the tab changed, so the whole history was measured again on every switch. I kept the rectangles with the tab instead and the switch only has to measure what is new.\\n\\n- the first point is about the width of the bubbles\\n- the second point is about the font size and the scale\\n- the third point is about the unread divider\\n\\n```zig\\nconst reused = restore(entry);\\n```\"}\n";
+    var written: usize = 0;
+    var n: usize = 0;
+    while (written < bytes) : (n += 1) {
+        const before = wire.items.len;
+        if (n % 2 == 0) {
+            try wire.appendSlice(a, user);
+        } else {
+            var id: [32]u8 = undefined;
+            try wire.appendSlice(a, reply_head);
+            try wire.appendSlice(a, try std.fmt.bufPrint(&id, "{d}x{d}", .{ revision, n }));
+            try wire.appendSlice(a, reply_body);
+        }
+        written += wire.items.len - before;
+    }
+    try wire.appendSlice(a, "@@MP_END@@\n");
+    return wire;
+}
+
+test "IGSH-874 revisiting a tab with a large history reuses its saved layout and stays inside the switch budget" {
+    const a = std.heap.page_allocator;
+    const w = @import("win32.zig");
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("messages only"), 0, 0, 0, 800, 600, null, null, w.GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const saved = .{
+        .hwnd = app_state.g_chat_transcript_hwnd,
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .chat = app_state.g_chat_active,
+        .shells = app_state.shells[0..5].*,
+        .histories = app_state.g_chat_histories,
+        .from_file = app_state.g_chat_blocks_from_file,
+        .cache = app_state.g_chat_cache_shell_id,
+    };
+    app_state.g_chat_histories = .empty;
+    defer {
+        for (0..5) |i| chatHistoryForget(@intCast(87400 + i));
+        app_state.g_chat_histories.deinit(a);
+        app_state.g_chat_histories = saved.histories;
+        app_state.g_chat_transcript_hwnd = saved.hwnd;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.shells[0..5].* = saved.shells;
+        app_state.g_chat_blocks_from_file = saved.from_file;
+        app_state.g_chat_cache_shell_id = saved.cache;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_layout_reuse = 0;
+    }
+    app_state.g_chat_transcript_hwnd = hwnd;
+    app_state.g_chat_active = true;
+    app_state.shell_count = 5;
+    app_state.active_shell = 0;
+    const sizes = [5]usize{ 256 * 1024, 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024 };
+    var entries: [5]*ChatHistoryEntry = undefined;
+    var counts: [5]usize = undefined;
+    for (0..5) |i| {
+        var tmux_buf: [16]u8 = undefined;
+        const tmux = try std.fmt.bufPrint(&tmux_buf, "term-{d}", .{i});
+        const id: u32 = @intCast(87400 + i);
+        app_state.shells[i] = empty_shell;
+        app_state.shells[i].kind = .tmux;
+        app_state.shells[i].shell_id = id;
+        @memcpy(app_state.shells[i].tmux_session[0..tmux.len], tmux);
+        app_state.shells[i].tmux_session_len = @intCast(tmux.len);
+        const key = chat_transcript.Identity.initTmux(id, 0, false, tmux, "");
+        entries[i] = chatHistoryEntry(key) orelse return error.TestUnexpectedResult;
+        var wire = try perfWire(a, tmux, sizes[i], 1, 0);
+        defer wire.deinit(a);
+        try entries[i].history.apply(a, wire.items, 1, key);
+        counts[i] = entries[i].history.blocks.items.len;
+        try std.testing.expect(counts[i] > 100);
+    }
+    var content_h: [5]i32 = undefined;
+    for (0..5) |i| {
+        app_state.active_shell = @intCast(i);
+        const start = perfNow();
+        chatDeferTranscriptLoad();
+        chatRelayout(800);
+        std.debug.print("IGSH-874 first visit tab={d} blocks={d} ms={d}\n", .{ i, counts[i], perfMs(start) });
+        try std.testing.expectEqual(counts[i], app_state.g_chat_block_count);
+        content_h[i] = app_state.g_chat_content_h;
+        try std.testing.expect(content_h[i] > 0);
+    }
+    for (0..2) |round| {
+        for (0..5) |i| {
+            app_state.active_shell = @intCast(i);
+            const start = perfNow();
+            chatDeferTranscriptLoad();
+            try std.testing.expect(app_state.g_chat_layout_reuse > 0 and app_state.g_chat_layout_reuse + 8 >= counts[i]);
+            chatRelayout(800);
+            const elapsed = perfMs(start);
+            std.debug.print("IGSH-874 revisit round={d} tab={d} blocks={d} reuse={d} ms={d}\n", .{ round, i, counts[i], app_state.g_chat_layout_reuse, elapsed });
+            try std.testing.expectEqual(counts[i], app_state.g_chat_layout_reuse);
+            try std.testing.expectEqual(content_h[i], app_state.g_chat_content_h);
+            try std.testing.expect(elapsed < 100);
+        }
+    }
+    const last = 4;
+    var more = try perfWire(a, "term-4", 8 * 1024, 2, entries[last].history.offset);
+    defer more.deinit(a);
+    app_state.active_shell = 0;
+    chatDeferTranscriptLoad();
+    chatRelayout(800);
+    try entries[last].history.apply(a, more.items, 2, chat_transcript.Identity.initTmux(87404, 0, false, "term-4", ""));
+    try std.testing.expect(entries[last].history.blocks.items.len > counts[last]);
+    app_state.active_shell = last;
+    const start = perfNow();
+    chatDeferTranscriptLoad();
+    try std.testing.expect(app_state.g_chat_layout_reuse + 8 >= counts[last]);
+    chatRelayout(800);
+    const appended_ms = perfMs(start);
+    std.debug.print("IGSH-874 revisit after append blocks={d} reuse_before={d} ms={d}\n", .{ app_state.g_chat_block_count, counts[last], appended_ms });
+    const incremental_h = app_state.g_chat_content_h;
+    try std.testing.expect(appended_ms < 100);
+    app_state.g_chat_layout_reuse = 0;
+    chatRelayout(800);
+    try std.testing.expectEqual(app_state.g_chat_content_h, incremental_h);
 }

@@ -8,6 +8,7 @@ Group the same session independently in its home workspace and Favorites (Alt+1)
 - Favorites grouping creates a separate membership without replacing the home group.
 - Returning home preserves both saved memberships.
 - A muted starred session stays in Favorites, in its Favorites group (IGSH-719).
+- Cached sidebar previews never become duplicate sessions when notification ports are occupied (IGSH-890).
 
 ## How to get to it (user POV)
 
@@ -25,6 +26,8 @@ Preconditions: baseline Doctor passes on a fresh single-window instance with its
 - Capture `starred-grouped.png` and `session-starred-grouped.json`, then press Alt+2. Require the initial tab and home workspace active, `favorite: true`, `group_id: H` and `starred_group_id: F` unchanged.
 - Ctrl+K `new cmd`, Enter, so the Inbox keeps one unmuted session for Doctor. Alt+1 selects the starred tab; Ctrl+K `mute tab`, Enter; require `muted: true` saved. Press Alt+2, then Alt+1; require `starred_view: true` with the starred tab selected, `starred_group_id: F` and `muted: true`. Capture `starred-muted.png` and `session-starred-muted.json`. A release that hides muted sessions from Favorites leaves nothing selected and fails this wait.
 - Inspect `before.png`, `action.png`, `starred-grouped.png`, `starred-muted.png`, `after.png`, `actions.json`, both saved-state snapshots and `result.json`. The result records both exact persisted field names and IDs.
+
+- IGSH-890 continues after the muted-starred check: normally close the owned app, stop its owned descendants, and occupy every production notification port with fixture TCP listeners. Restart the same executable/profile, require both the `no free notify port` diagnostic and completed `launch step=browser`, then switch Home/Favorites four times with a fresh Inbox refresh each time. The saved tab count must stay unchanged, every CMD tab must have a real PID, and the selected favorite must keep its Favorites group. Restart again while the fixture still owns the ports; retain `favorites-no-duplicates.png`, four refresh snapshots and `favorites-no-duplicates.json`. Fixture sockets close in `finally`. This is isolated GitHub Windows only, not a user's desktop.
 
 ## Gotchas
 

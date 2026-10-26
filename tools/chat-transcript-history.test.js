@@ -24,6 +24,8 @@ const ChatBlock = chat_markdown.Block;
 const HANDLE = ?*anyopaque;
 const RECT = chat_history.Rect;
 const ChatImgItem = struct { dummy: u8 = 0 };
+const ChatLayoutSnapshot = struct { rects: []RECT };
+const chat_layout_snapshot = struct { fn save() void {} fn restore(_: anytype) usize { return 0; } };
 const CHAT_MAX_BLOCKS = 256;
 const TIMER_CHAT_REFRESH = 27;
 const Shell = struct {
@@ -94,6 +96,8 @@ var g_chat_scroll_y: i32 = 0;
 var g_chat_scrolled_up = false;
 var g_chat_new_messages: chat_history.NewMessages = .{};
 var g_chat_scroll_bottom_pending = false;
+var g_chat_read_visit_shell_id: u32 = 0;
+var g_chat_read_visit_marker: u64 = 0;
 var g_chat_read_open_pending = false;
 var g_chat_read_hold = false;
 var g_chat_read_open_ready = false;

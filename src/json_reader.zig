@@ -119,6 +119,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.kind = if (std.mem.eql(u8, kind, "pwsh")) .pwsh else if (std.mem.eql(u8, kind, "vps")) .vps else if (std.mem.eql(u8, kind, "tmux")) .tmux else if (std.mem.eql(u8, kind, "vps2")) .vps2 else if (std.mem.eql(u8, kind, "bash")) .bash else if (std.mem.eql(u8, kind, "gitbash")) .gitbash else .cmd;
         tab.name_len = copyWide(obj, "name", &tab.name);
         tab.tmux_session_len = copyString(obj, "tmux_session", &tab.tmux_session);
+        if (tab.kind == .tmux and tab.tmux_session_len == 0) continue;
         tab.cwd_len = copyString(obj, "cwd", &tab.cwd);
         tab.favicon_path_len = copyString(obj, "favicon_path", &tab.favicon_path);
         tab.claude_sid_len = copyString(obj, "csid", &tab.claude_sid);
@@ -159,7 +160,43 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.bsplit_permille = @intCast(@min(split, 1000));
         count += 1;
     }
+    for (array(field(root, "tabs"))) |saved| {
+        const target = string(field(saved, "tmux_session")) orelse "";
+        if (!std.mem.eql(u8, string(field(saved, "kind")) orelse "", "tmux") or target.len != 0) continue;
+        const index = restoredSessionTab(root, tabs[0..count], uint(saved, "shell_id")) orelse continue;
+        const tab = &tabs[index];
+        if (tab.group_id == 0) tab.group_id = @truncate(uint(saved, "group_id"));
+        if (tab.starred_group_id == 0) tab.starred_group_id = @truncate(uint(saved, "starred_group_id"));
+        tab.cv = tab.cv or boolTrue(saved, "cv");
+        tab.pinned_top = tab.pinned_top or boolTrue(saved, "pinned_top");
+    }
     return count;
+}
+
+pub fn restoredSessionTab(root: std.json.Value, tabs: anytype, id: u64) ?usize {
+    if (id == 0) return null;
+    const identity = @import("tmux_identity.zig");
+    for (tabs, 0..) |tab, i| {
+        if (tab.shell_id == id) return identity.restoreWinner(tabs, i);
+    }
+    for (array(field(root, "tabs"))) |saved| {
+        if (uint(saved, "shell_id") != id) continue;
+        const target = string(field(saved, "tmux_session")) orelse "";
+        if (!std.mem.eql(u8, string(field(saved, "kind")) orelse "", "tmux") or target.len != 0) continue;
+        var name: [64]u16 = undefined;
+        const len = copyWide(saved, "name", &name);
+        if (len == 0) continue;
+        const workspace = uint(saved, "workspace");
+        var recovered: ?usize = null;
+        for (tabs, 0..) |tab, i| {
+            if (tab.kind != .tmux or tab.workspace != workspace or !std.mem.eql(u16, tab.name[0..tab.name_len], name[0..len])) continue;
+            const candidate = identity.restoreWinner(tabs, i);
+            if (recovered != null and recovered.? != candidate) return null;
+            recovered = candidate;
+        }
+        return recovered;
+    }
+    return null;
 }
 
 test "JSON fields are scoped and decode escapes, Unicode, nested extras and reordered keys" {

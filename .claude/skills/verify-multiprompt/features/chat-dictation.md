@@ -5,6 +5,7 @@
 - Ctrl+D starts the existing dictation state; the far-right microphone visibly changes from the idle glyph to an accented glyph on a filled background.
 - Enter, a second Ctrl+D, and a real microphone click each stop listening and append the transcript immediately to the native message box, without another keystroke or send.
 - Normal composer typing remains available while listening, and that typed draft survives transcription.
+- In Chat View the header beside the session title never shows dictation status text, and no model or context line sits under the title.
 
 ## How to get to it (user POV)
 
