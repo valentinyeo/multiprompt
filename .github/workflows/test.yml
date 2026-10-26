@@ -113,7 +113,7 @@ jobs:
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
       - name: Save native header capacity proof
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
-        uses: actions/upload-artifact@4ccc17d76dd944333b636d3a07c97446fd8e7a11
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: header-capacity-proof
           path: '*header-capacity.bmp'
