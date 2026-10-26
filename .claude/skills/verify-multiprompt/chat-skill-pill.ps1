@@ -49,13 +49,14 @@ foreach ($theme in @('dark', 'light')) {
     $captures += Save-SkillPill ($theme + '-plain-sent') $theme $thread $false
     Assert-ChatTyping '/pill-proof arguments stay normal' ($theme + '-skill')
     $captures += Save-SkillPill ($theme + '-skill-draft') $theme $edit $true
+    if ($theme -eq 'dark') { Snapshot 'action' }
     Press @(0x11, 0x0D) 'Ctrl+Enter: send known skill message'
     Wait-Until { [VerifyNative]::EditText($edit) -ceq '' } 'known skill message left composer'
     $captures += Save-SkillPill ($theme + '-skill-sent') $theme $thread $true
 }
+Snapshot 'after'
 Save-Json @{ captures = $captures; boundary = 'A real discovered skill file in the isolated home, native keyboard input and local CMD delivery; no external AI provider or remote skill execution.' } 'skill-pill.json'
 & node (Join-Path $PSScriptRoot '../../../tools/chat-skill-pill-proof.mjs') $Evidence
 $summary = Get-Content (Join-Path $Evidence 'skill-pill-summary.json') -Raw | ConvertFrom-Json
 $result.checks += @{ name = 'IGSH-928 skill pill pixels'; passed = $summary.passed; captures = $summary.checks }
 if ($LASTEXITCODE -ne 0 -or -not $summary.passed) { throw 'IGSH-928 skill pill pixels failed' }
-Snapshot 'after'
