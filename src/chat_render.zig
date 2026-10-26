@@ -6427,6 +6427,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     const beside_right = (if (title_layout.has_meta) title_layout.meta_pill.right else pill.right) + uiScaled(8);
     const Position = enum { middle, top, bottom, sweep };
     const sweep_steps = 24;
+    const gap = @import("chat_float.zig").moat();
     var sweep_outside: usize = 0;
     const straddle = app_state.g_chat_layout_rects[block_count / 2];
     const middle_scroll = std.math.clamp(straddle.top + @divTrunc(straddle.bottom - straddle.top, 2) - (layout.composer_card.top - window.top), 0, max_scroll);
