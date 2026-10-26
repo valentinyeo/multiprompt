@@ -1498,6 +1498,7 @@ test "IGSH-678 Chat View code is Nordwand Mono two points smaller and overflowin
 }
 
 test "IGSH-898 long messages fill narrow columns and stay bounded in wide columns" {
+    @setEvalBranchQuota(10000);
     const dc = GetDC(null) orelse return error.TestUnexpectedResult;
     defer _ = ReleaseDC(null, dc);
     const text = std.unicode.utf8ToUtf16LeStringLiteral("A long message with enough detail to reach the width limit in either layout. " ** 20);
@@ -1938,7 +1939,8 @@ fn chatScrollUiMouseDown(hwnd: HANDLE, x: i32, y: i32) bool {
     const h = client.bottom - client.top;
     const badge = chatScrollJumpBadgeBox(w, h);
     if (app_state.g_chat_scrolled_up and (scroll_ui.contains(chatScrollJumpBox(w, h), x, y) or
-        (if (badge) |box| scroll_ui.contains(box, x, y) else false))) {
+        (if (badge) |box| scroll_ui.contains(box, x, y) else false)))
+    {
         chatJumpToNewest();
         return true;
     }
