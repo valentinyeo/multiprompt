@@ -11,6 +11,7 @@ const queueTexts = {
   a2: 'shell queued alpha edited',
   shellDraft: 'shell draft gamma',
   chatDraft: 'chat draft delta',
+  agentPaste: 'agent report line one\nagent report line two',
   suggestion: 'Try asking about the next step',
 };
 const queueSteps = [
@@ -24,9 +25,9 @@ const queueSteps = [
   'chat-marks-both-sent',
   'shell-took-both',
   'suggestion-not-draft',
-  'composer-shows-shell-draft',
-  'composer-clears-with-shell',
+  'composer-ignores-agent-paste',
   'shell-box-shows-chat-draft',
+  'draft-survives-agent-paste',
 ];
 const agentBoundary = 'stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server';
 
@@ -119,8 +120,10 @@ function evaluateQueueCase(context) {
   const shellDraft = frameIndex(idle, frame => frame.origin === 'shell' && frame.box === t.shellDraft && frame.suggestionShown === false);
   const last = frames.at(-1);
   assert.ok(frameIndex(shellDraft, frame => frame.origin === 'app' && frame.box === t.chatDraft) > shellDraft);
-  assert.equal(last.box, t.chatDraft, 'fake shell input box holds the Chat View draft at the end');
-  assert.equal(last.origin, 'app', 'the draft reached the shell box through the app, not the shell');
+  const draftIndex = frameIndex(shellDraft, frame => frame.origin === 'app' && frame.box === t.chatDraft);
+  assert.equal(last.box, t.chatDraft + t.agentPaste, 'fake shell input box holds the Chat View draft followed by the agent message at the end');
+  assert.equal(last.origin, 'shell', 'the agent message reached the shell box through the shell');
+  assert.ok(frames.length - 1 > draftIndex, 'the draft reached the shell box through the app before the agent message');
   const keys = lines(`${stand}/agent-buffer.jsonl`);
   assert.ok(keys.length > 0 && keys.every(row => row.case === name));
   assert.ok(keys.some(row => row.argv.includes('-l') && row.argv.at(-1) === t.b), 'Chat View sent its queued message through the tmux channel');

@@ -34,7 +34,7 @@ if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
 if ($env:CHAT_REMOTE_PROOF -eq '1') { $plans = @(@{name='remote-sync'; mode='idle'; text='remote session follows live process'}) }
-$queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; suggestion='Try asking about the next step'}
+$queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
 $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
@@ -720,12 +720,17 @@ foreach ($plan in $plans) {
             Start-Sleep -Seconds 6
             [void](Step 'suggestion-not-draft' { ([ChatDeliveryDesktop]::Text($composer)) -ceq '' } 5)
             Shell-Input 'text' $t.shellDraft
-            [void](Step 'composer-shows-shell-draft' { ([ChatDeliveryDesktop]::Text($composer)) -ceq $t.shellDraft })
+            Start-Sleep -Seconds 8
+            Shot "$($plan.name)-agent-paste-empty"
+            [void](Step 'composer-ignores-agent-paste' { ([ChatDeliveryDesktop]::Text($composer)) -ceq '' } 5)
             Shell-Input 'key' 'C-u'
-            [void](Step 'composer-clears-with-shell' { ([ChatDeliveryDesktop]::Text($composer)) -ceq '' } 10)
             Clear-Composer
             Type-Composer $t.chatDraft
             [void](Step 'shell-box-shows-chat-draft' { (Fake-State).box -ceq $t.chatDraft })
+            Shell-Input 'text' $t.agentPaste
+            Start-Sleep -Seconds 8
+            Shot "$($plan.name)-draft-kept"
+            [void](Step 'draft-survives-agent-paste' { ([ChatDeliveryDesktop]::Text($composer)) -ceq $t.chatDraft } 5)
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } else {
             $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='type composer text'; text=$plan.text})

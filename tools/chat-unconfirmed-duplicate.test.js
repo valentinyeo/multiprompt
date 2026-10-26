@@ -39,16 +39,17 @@ function draftModel() {
     assert.ok(value, name);
     return [name, Number(value[1])];
   }));
-  const pull = logic(body(sync, 'onShell'))
+  const pull = logic(body(sync, 'decide'))
     .replaceAll('&.{}', '""')
     .replace('if (composer_blank) draftHash("") else composer_hash', 'composer_blank ? draftHash("") : composer_hash')
     .replace('return if (composer_blank && !isBlankDraft(shell)) "apply" else "none";', 'return composer_blank && !isBlankDraft(shell) ? "apply" : "none";');
-  const draft = { shell_id: 0, known: false, shell_hash: 0, synced_hash: 0, edit_ms: 0, push_ms: 0, quiet_until_ms: 0, edit_pending: false };
+  const draft = { shell_id: 0, known: false, shell_hash: 0, synced_hash: 0, edit_ms: 0, push_ms: 0, quiet_until_ms: 0, pull_until_ms: Infinity, foreign: false, edit_pending: false };
   const hash = text => text.trim().replaceAll('\r', '');
   const blank = text => !text.trim();
   const names = Object.keys(constants);
   const values = Object.values(constants);
-  draft.onShell = new Function('draftHash', 'isBlankDraft', ...names, `return function(shell_id, shell, composer, focused, now) {${pull}}`)(hash, blank, ...values);
+  draft.decide = new Function('draftHash', 'isBlankDraft', ...names, `return function(shell_id, shell, composer, focused, now) {${pull}}`)(hash, blank, ...values);
+  draft.onShell = new Function('draftHash', 'isBlankDraft', `return function(shell_id, shell, composer, focused, now) {${logic(body(sync, 'onShell'))}}`)(hash, blank);
   draft.onSend = new Function(...names, `return function(now) {${logic(body(sync, 'onSend'))}}`)(...values);
   draft.applied = new Function('draftHash', `return function(text) {${logic(body(sync, 'applied'))}}`)(hash);
   return draft;

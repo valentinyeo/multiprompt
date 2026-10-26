@@ -36,7 +36,7 @@ var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const CHAT_OUTBOX_KEY_CAP = 192;
-const ShellDraft = struct { fn onComposerEdit(_: ShellDraft, _: u64) void {} };
+const ShellDraft = struct { edit_pending: bool = false, foreign: bool = false, fn onComposerEdit(_: ShellDraft, _: u64) void {} };
 var shell_draft: ShellDraft = .{};
 fn GetTickCount64() u64 { return 0; }
 const TIMER_CHAT_DRAFT = 1;
