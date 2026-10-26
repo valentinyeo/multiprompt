@@ -26,7 +26,10 @@ try {
     assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.ok(bytes.length > 10000);
   }
-  const log = read('full-history/debug.log');
+  const anchors = json('full-history/retention-anchors.json');
+  assert.equal(anchors.length, 10);
+  assert.ok(anchors.every(row => row.unknown === 0 && row.scroll === anchors[0].scroll && row.marker !== '0'));
+  const log = read('full-history/retention-arrival.log');
   const arrival = [...log.matchAll(/PERF\[chat\]: receive to paint ms=(\d+) size=(\d+)/g)].map(m => +m[1]);
   assert.ok(arrival.length >= 10, 'arrival timings missing');
   assert.ok(Math.max(...arrival) < 100, `arrival exceeded 100ms: ${arrival}`);
