@@ -4,7 +4,8 @@ const path = require('node:path');
 
 const names = ['busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover'];
 const queueName = 'queue-draft-sync';
-const allNames = [...names, queueName];
+const sendName = 'send-stays-gone';
+const allNames = [...names, queueName, sendName];
 const queueTexts = {
   a: 'shell queued alpha',
   b: 'chat queued beta',
@@ -28,6 +29,14 @@ const queueSteps = [
   'composer-ignores-agent-paste',
   'shell-box-shows-chat-draft',
   'draft-survives-agent-paste',
+];
+const sendTexts = Array.from({ length: 20 }, (_, i) => (i + 1) % 4 === 0
+  ? `send ${i + 1} long message about the weekly plan that keeps wrapping across several rows of the composer box until the whole text needs more than one line`
+  : `send ${i + 1} short note`);
+const sendSteps = [
+  'chat-view-read-transcript',
+  'drafts-blank-before-sends',
+  ...sendTexts.flatMap((_, i) => ['send-reaches-shell', 'send-stays-gone', ...((i + 1) % 4 === 0 ? ['shell-took-queue'] : [])]),
 ];
 const agentBoundary = 'stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server';
 
@@ -76,6 +85,33 @@ function firstView(views, from, expected) {
   const index = views.findIndex((view, position) => position >= from && JSON.stringify(view.map(item => ({ text: item.text, state: item.state }))) === wanted);
   assert.ok(index >= 0, `Chat View never listed ${JSON.stringify(expected)}`);
   return index;
+}
+
+function evaluateSendCase(context) {
+  const { json, lines, png } = context;
+  const name = sendName;
+  const observation = json(`${name}/observation.json`);
+  assert.equal(observation.name, name);
+  assert.equal(observation.error, null, observation.error || 'driver error');
+  assert.deepEqual(observation.steps.map(step => step.name), sendSteps, 'every journey step ran in order');
+  const failed = observation.steps.filter(step => step.ok !== true).map(step => step.name);
+  assert.ok(failed.length === 0, `journey steps failed: ${failed.join(', ')}`);
+  assert.equal(observation.sends.length, sendTexts.length);
+  observation.sends.forEach((send, i) => {
+    assert.equal(send.n, i + 1);
+    assert.equal(send.text, sendTexts[i]);
+    assert.equal(send.reached, true, `send ${i + 1} reached the shell queue`);
+    assert.equal(send.reappeared, null, `send ${i + 1} came back into the box: ${JSON.stringify(send.reappeared)}`);
+  });
+  const entered = json('actions.json').filter(action => action.case === name && action.input === 'Enter: send composer');
+  assert.equal(entered.length, sendTexts.length, 'one real Enter per message');
+  const enqueued = lines(`${name}/transcript.jsonl`).filter(row => row.type === 'queue-operation' && row.operation === 'enqueue').map(row => row.content);
+  assert.deepEqual(enqueued, sendTexts, 'Claude queued every sent message once, in order');
+  const cleanup = json(`${name}/cleanup.json`);
+  assert.equal(cleanup.remaining_owned_processes, 0);
+  assert.equal(cleanup.scratch_removed, true);
+  png(`${name}-final.png`);
+  return { sends: sendTexts.length, watchedSeconds: 10, longMessages: sendTexts.filter(text => text.length > 100).length };
 }
 
 function evaluateQueueCase(context) {
@@ -253,6 +289,11 @@ function evaluateEvidence(root) {
   } catch (error) {
     cases.push({ name: queueName, passed: false, detail: error.message });
   }
+  try {
+    cases.push({ name: sendName, passed: true, detail: evaluateSendCase({ root, json, lines, png }) });
+  } catch (error) {
+    cases.push({ name: sendName, passed: false, detail: error.message });
+  }
   return { feature: 'chat-delivery', status: cases.every(row => row.passed) ? 'passed' : 'failed', agentBoundary, cases };
 }
 
@@ -265,4 +306,4 @@ if (require.main === module) {
   process.exitCode = result.status === 'passed' ? 0 : 1;
 }
 
-module.exports = { names, queueName, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence };
+module.exports = { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence };
