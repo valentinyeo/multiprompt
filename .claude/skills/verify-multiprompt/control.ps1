@@ -3893,15 +3893,22 @@ try {
                 if ($empty.size -le 0 -or $stopW -ne $empty.size -or $stopH -ne $empty.size) { throw ('Stop rect is ' + $stopW + 'x' + $stopH + ', expected the ' + $empty.size + ' px send size') }
                 if (-not (& $insideCard $empty.stop $empty.card)) { throw ('Stop rect ' + ($empty.stop -join ',') + ' is outside composer card ' + ($empty.card -join ',')) }
                 if ($null -ne $empty.send) { throw ('Send rect ' + ($empty.send -join ',') + ' is drawn while the composer is empty and the agent is working') }
-                Snapshot 'stop-in-box'
-                Snapshot 'composer-working-empty'
-                foreach ($shot in @('stop-in-box', 'composer-working-empty')) {
+                $stopClock = [Diagnostics.Stopwatch]::StartNew()
+                $stopCheck.paintAttempts = 0
+                while ($true) {
+                    $stopCheck.paintAttempts++
+                    Snapshot 'stop-in-box'
                     try {
-                        $stopCheck[$shot] = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence ($shot + '.png')), $script:window, $empty.card, $empty.stop, $null)
+                        $stopCheck.stopPixels = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'stop-in-box.png'), $script:window, $empty.card, $empty.stop, $null)
+                        break
                     } catch {
-                        throw ($shot + ' screenshot does not paint the grey Stop disc in the logged Stop slot: ' + $_.Exception.Message)
+                        if ($stopClock.Elapsed.TotalSeconds -gt 8) { throw ('stop-in-box screenshot never paints the grey Stop disc in the logged Stop slot: ' + $_.Exception.Message) }
+                        Start-Sleep -Milliseconds 300
                     }
                 }
+                $stopCheck.paintedAfterMs = [int]$stopClock.ElapsedMilliseconds
+                Snapshot 'composer-working-empty'
+                $stopCheck.workingEmptyPixels = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'composer-working-empty.png'), $script:window, $empty.card, $empty.stop, $null)
                 Type-Text 'x'
                 Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -eq $typed.stop } 'Send replaces Stop after typing while working'
                 $typed = & $readStopFrame
