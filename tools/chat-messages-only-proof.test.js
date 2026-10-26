@@ -159,3 +159,17 @@ test('IGSH-816 feature map names every CLEAN artifact, exact palette steps and t
   const { readChangelogEntry } = require('./changelog-entry.js');
   assert.match(readChangelogEntry('IGSH-816'), /Choose CLEAN chat[\s\S]*keeping messages and the working indicator/);
 });
+
+test('IGSH-857 the stand-in agent writes the todo before the baseline so the status row never appears mid-proof', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+  const driver = read('tools/verify-chat-delivery/drive.ps1');
+  const boundary = read('tools/verify-chat-delivery/boundary.py');
+  const todo = driver.indexOf("Shell-Input 'todo'");
+  assert.ok(todo > 0 && todo < driver.indexOf("Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript'"));
+  assert.ok(todo < driver.indexOf('$observation.transcript = @{'));
+  assert.match(driver.slice(todo, driver.indexOf('$observation.transcript = @{')), /Wait-For 'owned status row above the transcript once the todo is read'/);
+  assert.match(boundary, /if op == "todo":[\s\S]*?name="TodoWrite"/);
+  assert.match(boundary, /if op == "activity":[\s\S]*?for i in range\(11\):/);
+});

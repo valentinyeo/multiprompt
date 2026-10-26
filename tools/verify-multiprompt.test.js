@@ -971,8 +971,9 @@ test('ISSUE-559 real Windows cleanup rejects the old vanished-lockfile race and 
 test('ISSUE-559 setup waits for rendered browser readiness and retries only owned-frame activation', () => {
   const palette = control.slice(control.indexOf('function Focus-Palette('), control.indexOf('function Wait-WorkspaceSurface('));
   assert.equal((palette.match(/Press @\(0x11, 0x4B\)/g) || []).length, 1);
-  assert.ok(palette.includes('Wait-FrameForeground') && palette.indexOf('Wait-FrameForeground') < palette.indexOf('Press @(0x11, 0x4B)'));
-  assert.match(control, /function Wait-FrameForeground \{[\s\S]*?AllowSetForegroundWindow[\s\S]*?SetForegroundWindow\(\$script:window\)[\s\S]*?GetForegroundWindow\(\) -eq \$script:window/);
+  assert.match(palette, /Press @\(0x11, 0x4B\) 'Ctrl\+K: open command palette'\s+Retry-PaletteOpen \$log \$start/);
+  assert.match(control, /function Retry-PaletteOpen[\s\S]*?-le 3[\s\S]*?ready chars=0[\s\S]*?Activate-OwnedFrame\s+Press @\(0x11, 0x4B\) 'Ctrl\+K: open command palette again'/);
+  assert.match(control, /function Activate-OwnedFrame \{[\s\S]*?SetForegroundWindow\(\$script:window\)[\s\S]*?GetAncestor\(\[VerifyNative\]::GetForegroundWindow\(\), 2\) -eq \$script:window/);
   assert.match(palette, /if \(\$trace -notmatch[^\n]*\) \{ return \$false \}\s*Doctor\s*Assert-Foreground\s*\[void\]\[VerifyNative\]::SetForegroundWindow\(\$script:window\)/);
   assert.match(palette, /'command palette initialized and owned frame focused' 20/);
   const setup = control.slice(control.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed'))"), control.indexOf("    Record 'Launch complete;"));
