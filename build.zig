@@ -263,7 +263,7 @@ pub fn build(b: *std.Build) void {
     const chat_bench_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.mjs" });
     test_step.dependOn(&chat_bench_tests.step);
     vps_test_step.dependOn(&chat_bench_tests.step);
-    const chat_bench_ab_summary_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench-ab-summary.test.js" });
+    const chat_bench_ab_summary_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench-ab-summary.test.js", "tools/chat-bench-ab-extra.test.js" });
     test_step.dependOn(&chat_bench_ab_summary_tests.step);
     vps_test_step.dependOn(&chat_bench_ab_summary_tests.step);
     const chat_bench_linux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-bench.test.js", "tools/chat-bench/receipt.test.mjs" });
