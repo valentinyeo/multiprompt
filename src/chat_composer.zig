@@ -1556,6 +1556,7 @@ pub fn openChatView() void {
         return;
     }
     app_state.shells[app_state.active_shell].chat_view_on = true;
+    _ = @import("focus.zig").parkMainWindowBeforeActiveShellRemoval(app_state.active_shell);
     _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
     chatDraftBindToActive();
     chatDeferTranscriptLoad();
