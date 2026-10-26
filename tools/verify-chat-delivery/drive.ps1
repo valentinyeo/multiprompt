@@ -851,9 +851,10 @@ foreach ($plan in $plans) {
                 [void](Wait-For 'exact focused reply entered the app-written cache' { (Read-Shared $cache.FullName).Contains($focusedText) })
                 $copyLogStart = (Read-Shared "$settings/debug.log").Length
                 Press @(0x11, 0x4B) 'Ctrl+K: select all transcript text for focused proof' $true
+                [void](Wait-For 'focused proof palette ready' { (Read-Shared "$settings/debug.log").Substring($copyLogStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
                 $query = 'chat view select all'
                 foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-                [void](Wait-For 'focused proof select-all command selected' { (Read-Shared "$settings/debug.log").Substring($copyLogStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+                [void](Wait-For 'focused proof select-all command selected' { (Read-Shared "$settings/debug.log").Substring($copyLogStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=\d+ target=6364') })
                 Press @(0x0D) 'Enter: select the actual rendered focused reply'
                 Press @(0x11, 0x43) 'Ctrl+C: copy the actual rendered focused reply'
                 $observation.focusedReplyText = [Windows.Forms.Clipboard]::GetText()
