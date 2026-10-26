@@ -4764,6 +4764,7 @@ try {
             Save-Json @{ snapshotCarriesBrowserPane = $snapshotBrowser; moved = $moved; eventCount = $events.Count } 'chat-first-paint-verdict.json'
             if ($moved.Count -gt 0) { throw "chat-first-paint: chat layout moved after first paint: $($moved -join '; ')" }
             $result.checks += @{ name = 'chat-first-paint'; events = $events.Count; moved = 0; snapshotCarriesBrowserPane = $snapshotBrowser }
+            Snapshot 'action'
             Snapshot 'after'
         }
         'browser-switch-speed' {
