@@ -174,13 +174,13 @@ test('IGSH-893 audit evidence serializes plain lines within five seconds on Wind
     fs.writeFileSync(auditPath, lines.join('\n'));
     const auditRead = driver.match(/^\s*\$audit = (.+)$/m);
     assert.ok(auditRead, 'production audit read exists');
-    const script = `$ErrorActionPreference = 'Stop'; $auditPath = $env:AUDIT_PATH; $audit = ${auditRead[1]}; ConvertTo-Json -InputObject @{ audit = $audit } -Depth 12 -Compress`;
+    const script = `$ErrorActionPreference = 'Stop'; $auditPath = $env:AUDIT_PATH; $audit = ${auditRead[1]}; Write-Host 'AUDIT_READ_READY'; $clock = [Diagnostics.Stopwatch]::StartNew(); ConvertTo-Json -InputObject @{ audit = $audit } -Depth 12 -Compress`;
     const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
       encoding: 'utf8', timeout: 5000, env: { ...process.env, AUDIT_PATH: auditPath },
     });
-    assert.ifError(result.error);
+    assert.equal(result.error, undefined, JSON.stringify({ error: result.error?.message, stdout: result.stdout, stderr: result.stderr, expression: auditRead[1] }));
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout).audit, lines);
+    assert.deepEqual(JSON.parse(result.stdout.split('AUDIT_READ_READY')[1]).audit, lines);
     console.log('DICTATION_AUDIT_SERIALIZATION_OK');
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

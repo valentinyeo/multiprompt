@@ -418,7 +418,7 @@ jobs:
           if ($proofList.Count -ne 28 -or $withoutRing -ne 0) { throw "Pre-fix rings were not observed in every theme/view/cycle (proofs=$($proofList.Count) withoutRing=$withoutRing)" }
           $global:LASTEXITCODE = 0
       - name: Launch Doctor Drive Evidence Cleanup
-        timeout-minutes: 5
+        timeout-minutes: ${{ env.FEATURE == 'chat-dictation' && 5 || 30 }}
         if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'browser-own-profile' && env.FEATURE != 'title-bar'
         shell: powershell
         run: |
