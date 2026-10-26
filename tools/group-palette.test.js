@@ -75,12 +75,14 @@ ${block(state, 'const SavedTab = struct')};
 const Shell = struct {
     selected: bool = false, chat_id: u64 = 0, group_id: u32 = 1, starred_group_id: u32 = 0, favorite: bool = false, workspace: u8 = 0, kind: ShellKind = .cmd, tmux_host: u8 = 0,
     name: [64]u16 = @splat(0), name_len: u32 = 0, name_source: enum { manual, semantic, auto } = .manual,
+    tmux_identity: [64]u8 = @splat(0), tmux_identity_len: u32 = 0,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, cached_cwd: [512]u8 = @splat(0), cached_cwd_len: u32 = 0,
 };
 var shells = [_]Shell{.{}, .{}, .{}, .{}};
 var g_closed_count: u32 = 0;
 var g_closed_history: [10]ClosedShell = undefined;
 var g_pending_tmux_host: u8 = 0;
+var g_pending_tmux_identity: ?[]const u8 = null;
 var g_pending_chat_id: u64 = 0;
 fn GetTickCount64() u64 { return 1; }
 fn spawnShellWithSession(_: ShellKind, _: ?[]const u8, _: ?[]const u8, _: ?usize) bool {
