@@ -398,6 +398,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \u{2192} Browser: Insert Agent Instructions", .b = "Paste the multiprompt-browser guide into the active shell", .header = false },
     .{ .a = "URL bar (click strip above pane)", .b = "Type a URL and press Enter to navigate the docked pane", .header = false },
     .{ .a = "Ctrl+Click URL in shell", .b = "Open link in the docked browser pane (was: default browser)", .header = false },
+    .{ .a = "Ctrl+, / Ctrl+K -> Settings", .b = "Open Settings; Escape closes the panel", .header = false },
     .{ .a = "Ctrl+K -> Changelog", .b = "what changed in each version", .header = false },
     .{ .a = "(agent-reported) Session ETA countdown", .b = "Sidebar row shows time left + a progress line; toggle either from Ctrl+K \u{2192} ETA Countdown Numbers / ETA Progress Line", .header = false },
     .{ .a = "Ctrl+K \u{2192} Estimate Accuracy", .b = "See how each agent's time estimates compare to how long tasks actually took", .header = false },
@@ -648,6 +649,17 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_focus_authorized_until = 0;
             app_state.g_focus_browser_shell_id = 0;
             app_state.g_focus_user_action_tick = GetTickCount64();
+        }
+
+        if (@import("settings_panel.zig").ownsForeground()) {
+            if (kb.vkCode == 0x5B or kb.vkCode == 0x5C) app_state.g_win_held = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
+            return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+        }
+        if (kb.vkCode == 0xBC and wp == WM_KEYDOWN and isCtrlDown() and !isAltDown(kb.flags) and !app_state.g_win_held and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and foregroundIsOurs())
+        {
+            _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_SETTINGS_OPEN, 0, 0);
+            return 1;
         }
 
         if (kb.vkCode == 0x0D and wp == WM_KEYDOWN and isCtrlDown() and

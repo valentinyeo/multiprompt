@@ -741,6 +741,7 @@ pub fn browserPaneOwnsForegroundHwnd(fg: HANDLE, bh: HANDLE) bool {
 pub fn foregroundHwndIsOurs(fg: HANDLE) bool {
     if (fg == null or app_state.g_main_hwnd == null) return false;
     if (fg == app_state.g_main_hwnd) return true;
+    if (@import("settings_panel.zig").ownsWindow(fg)) return true;
     if (app_state.g_urlbar_hwnd) |ub| {
         if (fg == ub and IsWindow(ub) != 0) {
             const owner: LONG_PTR = @bitCast(@intFromPtr(app_state.g_main_hwnd));

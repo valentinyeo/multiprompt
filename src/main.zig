@@ -1,3 +1,4 @@
+const SEARCH_SETTINGS_OFFSET = @import("app_state.zig").SEARCH_SETTINGS_OFFSET;
 const list_input = @import("list_input.zig");
 const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
@@ -1247,6 +1248,7 @@ comptime {
         _ = @import("chat_send.zig");
         _ = @import("window_layout.zig");
         _ = @import("window_frame.zig");
+        _ = @import("settings_panel.zig");
         _ = @import("rename.zig");
         _ = @import("changelog.zig");
         _ = @import("drawing.zig");
@@ -1524,6 +1526,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOVE => {
+            @import("settings_panel.zig").reposition();
             noteMainWindowMonitor(hwnd);
             if (app_state.g_monitor_transition.active) {
                 armMonitorTransitionTimer(hwnd);
@@ -1546,6 +1549,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_SIZE => {
             more_menu.close();
+            @import("settings_panel.zig").reposition();
             const SIZE_MINIMIZED: WPARAM = 1;
             if (wp == SIZE_MINIMIZED) {
                 resetPaintBackbuffer();
@@ -3311,12 +3315,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_FONT_BIGGER => {
             if (chatViewOwnsInput()) {
-                app_state.g_chat_font_pt = @min(28, app_state.g_chat_font_pt + 1);
-                resetFontCache();
-                layoutChatControls();
-                chatRefreshAfterFontChange();
-                _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-                saveSession();
+                setChatFontPoint(app_state.g_chat_font_pt + 1);
                 var cfb: [64]u8 = undefined;
                 const cfs = std.fmt.bufPrint(&cfb, "Chat text size: {d}", .{app_state.g_chat_font_pt}) catch "Chat text size";
                 showHeaderNoticeAscii(cfs, 1500, false);
@@ -3335,12 +3334,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_FONT_SMALLER => {
             if (chatViewOwnsInput()) {
-                app_state.g_chat_font_pt = @max(10, app_state.g_chat_font_pt - 1);
-                resetFontCache();
-                layoutChatControls();
-                chatRefreshAfterFontChange();
-                _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-                saveSession();
+                setChatFontPoint(app_state.g_chat_font_pt - 1);
                 var cfb: [64]u8 = undefined;
                 const cfs = std.fmt.bufPrint(&cfb, "Chat text size: {d}", .{app_state.g_chat_font_pt}) catch "Chat text size";
                 showHeaderNoticeAscii(cfs, 1500, false);
@@ -3359,12 +3353,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_FONT_RESET => {
             if (chatViewOwnsInput()) {
-                app_state.g_chat_font_pt = CHAT_FONT_DEFAULT_PT;
-                resetFontCache();
-                layoutChatControls();
-                chatRefreshAfterFontChange();
-                _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-                saveSession();
+                setChatFontPoint(CHAT_FONT_DEFAULT_PT);
                 showHeaderNoticeAscii("Chat text size: default", 1500, false);
                 return 0;
             }
@@ -4053,6 +4042,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_LAYOUT_READY => {
             handleLayoutReply(lp);
+            return 0;
+        },
+        @import("win32.zig").WM_APP_SETTINGS_OPEN => {
+            if (app_state.g_search_active) _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+            if (app_state.g_shortcuts_active) _ = SendMessageW(hwnd, WM_APP_SHORTCUTS_CLOSE, 0, 0);
+            if (app_state.g_changelog_active) _ = SendMessageW(hwnd, WM_APP_CHANGELOG_CLOSE, 0, 0);
+            _ = @import("win32.zig").UpdateWindow(hwnd);
+            if (app_state.g_chat_transcript_hwnd != null) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
+            @import("settings_panel.zig").open(hwnd);
             return 0;
         },
         WM_APP_SHORTCUTS_OPEN => {
@@ -4967,6 +4965,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_scroll = 0;
                     updateSearchResults();
                     _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_SETTINGS_OFFSET) {
+                    _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+                    _ = PostMessageW(hwnd, @import("win32.zig").WM_APP_SETTINGS_OPEN, 0, 0);
                     return 0;
                 }
                 if (target == SEARCH_QUIT_OFFSET) {
@@ -6609,43 +6612,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_THEME_SYSTEM_OFFSET or target == SEARCH_THEME_DARK_OFFSET or target == SEARCH_THEME_MID_OFFSET or target == SEARCH_THEME_LIGHT_OFFSET or target == SEARCH_THEME_AMOLED_OFFSET or target == SEARCH_THEME_EDGE_GRAY_OFFSET) {
-                    app_state.g_system_theme = target == SEARCH_THEME_SYSTEM_OFFSET;
-                    app_state.g_dev_theme_active = false;
-                    app_state.g_multiprompt_theme = false;
-                    if (app_state.g_system_theme) {
-                        resolveSystemThemeFlags();
-                    } else {
-                        app_state.g_light_theme = target == SEARCH_THEME_LIGHT_OFFSET;
-                        app_state.g_mid_theme = target == SEARCH_THEME_MID_OFFSET;
-                        app_state.g_edge_gray_theme = target == SEARCH_THEME_EDGE_GRAY_OFFSET;
-                        app_state.g_amoled_theme = target == SEARCH_THEME_AMOLED_OFFSET;
-                    }
-                    resetFontCache();
-                    applyTitleBarTheme();
-                    applyConsoleThemeToAllShells();
-                    repositionActive();
-                    refreshBrowserEdgeMasks();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    saveGlobalTheme();
-                    return 0;
-                }
-                if (target == SEARCH_THEME_MULTIPROMPT_OFFSET) {
-                    app_state.g_system_theme = false;
-                    app_state.g_multiprompt_theme = true;
-                    app_state.g_dev_theme_active = false;
-                    app_state.g_light_theme = false;
-                    app_state.g_mid_theme = false;
-                    app_state.g_edge_gray_theme = false;
-                    app_state.g_amoled_theme = false;
-                    resetFontCache();
-                    applyTitleBarTheme();
-                    applyConsoleThemeToAllShells();
-                    repositionActive();
-                    refreshBrowserEdgeMasks();
-                    startSpinnerTimerIfNeeded();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    saveGlobalTheme();
+                const theme_choice: ?@import("themes.zig").Choice = switch (target) {
+                    SEARCH_THEME_SYSTEM_OFFSET => .system,
+                    SEARCH_THEME_DARK_OFFSET => .dark,
+                    SEARCH_THEME_MID_OFFSET => .mid,
+                    SEARCH_THEME_LIGHT_OFFSET => .light,
+                    SEARCH_THEME_AMOLED_OFFSET => .amoled,
+                    SEARCH_THEME_EDGE_GRAY_OFFSET => .edge_gray,
+                    SEARCH_THEME_MULTIPROMPT_OFFSET => .multiprompt,
+                    else => null,
+                };
+                if (theme_choice) |choice| {
+                    @import("themes.zig").choose(choice);
                     return 0;
                 }
                 if (target == SEARCH_THEME_DEV_BLUE_OFFSET and IS_DEV) {
@@ -8213,10 +8191,20 @@ pub fn main(init: std.process.Init) void {
     update_release.beginCheck();
     var msg: MSG = std.mem.zeroes(MSG);
     while (GetMessageW(&msg, null, 0, 0) > 0) {
+        if (@import("settings_panel.zig").dialogMessage(&msg)) continue;
         _ = TranslateMessage(&msg);
         _ = DispatchMessageW(&msg);
         launch_cache.acceptedInput(msg.message);
     }
+}
+
+pub fn setChatFontPoint(point: i32) void {
+    app_state.g_chat_font_pt = std.math.clamp(point, 10, 28);
+    resetFontCache();
+    layoutChatControls();
+    chatRefreshAfterFontChange();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    saveSession();
 }
 
 var startup_phase: @import("launch_plan.zig").Deferred = .account;

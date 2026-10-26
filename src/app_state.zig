@@ -3656,3 +3656,5 @@ pub var g_chat_find_layout_open = false;
 pub const ShellDoubleClick = struct { time: u32, point: POINT, shell_id: u32 };
 pub var g_shell_double_click_first: ?ShellDoubleClick = null;
 pub var g_shell_double_click_pending: ?ShellDoubleClick = null;
+
+pub const SEARCH_SETTINGS_OFFSET: usize = 4002;
