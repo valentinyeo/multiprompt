@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { dividerPixels, verifyUnreadDivider } from './chat-messages-only-proof.mjs';
+import { dividerPixels } from './chat-messages-only-proof.mjs';
 import { readBmp } from './chat-code-font-proof.mjs';
 
 const root = path.resolve(process.argv[2]);
@@ -24,7 +24,26 @@ try {
   const active = dividerPixels(readBmp(path.join(root, 'unread-active-session.bmp')), observation.transcript, 0, 0);
   assert.equal(observation.revisitActiveDivider.count, 0);
   dividerPixels(readBmp(path.join(root, 'unread-active-revisit.bmp')), observation.transcript, 0, 0);
-  const divider = verifyUnreadDivider(root);
+  const boundary = json('messages-only/unread-divider.json');
+  const rows = fs.readFileSync(path.join(root, 'messages-only/app-cache-reopened.jsonl'), 'utf8').trim().split(/\r?\n/).slice(1).map(line => JSON.parse(line));
+  const read = rows.findIndex(row => row.id === boundary.readId);
+  assert.ok(read >= 0);
+  const firstUnread = rows.slice(read + 1).find(row => row.role === 'user' || row.role === 'assistant');
+  assert.equal(firstUnread.id, boundary.firstUnreadId);
+  assert.equal(firstUnread.offset, boundary.unreadOffset);
+  assert.equal(boundary.reopened.offset, firstUnread.offset);
+  assert.ok(boundary.reopened.y < boundary.reopened.messageY);
+  for (const phase of ['reopened', 'bottom', 'sent']) {
+    assert.equal(boundary[phase].count, 1);
+    assert.equal(boundary[phase].unknown, 0);
+  }
+  assert.equal(boundary.bottom.marker, boundary.marker);
+  assert.equal(boundary.sent.marker, boundary.beforeSend.marker);
+  assert.equal(boundary.sent.offset, boundary.beforeSend.offset);
+  assert.equal(boundary.allRead.count, 0);
+  assert.equal(json('messages-only/restart-process-tree.json').ActiveProcesses, 0);
+  const divider = dividerPixels(readBmp(path.join(root, 'unread-divider-reopened.bmp')), boundary.transcript, boundary.transcript.top + boundary.reopened.lineY - boundary.reopened.scroll, 1);
+  dividerPixels(readBmp(path.join(root, 'unread-divider-all-read.bmp')), boundary.transcript, 0, 0);
   const actions = json('actions.json');
   assert.ok(actions.some(action => action.input === 'two new arrivals while reading' && action.state.count === 2 && action.state.visible === 1 && action.state.up === 1));
   assert.ok(actions.some(action => action.input === 'Ctrl+Tab: return to the unread tab'));

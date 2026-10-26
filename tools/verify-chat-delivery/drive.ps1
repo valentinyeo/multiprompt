@@ -797,6 +797,7 @@ foreach ($plan in $plans) {
                 $null
             }
             Shot 'unread-divider-reopened'
+            if ($env:CHAT_UNREAD_PROOF -ne '1') {
             $gapLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'forget-message' $readId
             $dividerProof.gap = Require-Divider 1 0 'known anchor survives source removal' $gapLogStart
@@ -804,6 +805,7 @@ foreach ($plan in $plans) {
             [void](Wait-For 'resynced cache retains the saved source message' { $bytes = Read-Shared $cache.FullName; $bytes.Contains($firstUnreadId) -and $bytes.Contains($readId) })
             Copy-Item $cache.FullName "$caseDir/app-cache-gap.jsonl"
             Shot 'unread-divider-gap'
+            }
             $bottomLogStart = (Read-Shared "$settings/debug.log").Length
             [void](Wait-For 'scroll the full history gap to bottom' {
                 $frame = New-MessageState $bottomLogStart
