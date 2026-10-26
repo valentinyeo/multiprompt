@@ -3580,6 +3580,10 @@ try {
                                 $quoteLinesBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' }).Count
                                 $stdinBytesBeforeReply = (Get-Item ($prefix + '-stdin.bin')).Length
                                 Doctor
+                                Snapshot 'selection-after-menu'
+                                Wait-Until {
+                                    try { [void][VerifyNative]::MessageBubblePoint($transcript); return $true } catch { return $false }
+                                } 'owned user bubble repainted after closing the menu'
                                 Record 'IGSH-717: genuine SendInput drag over only part of the owned user bubble text'
                                 $selectionCheck.points = @([VerifyNative]::SelectTranscriptText($transcript, $process.Id, $script:window))
                                 Snapshot 'selection-enter-reply-selected'
