@@ -17,7 +17,7 @@ test('IGSH-923 isolated remote fixture uses the actual persisted agent identity 
 test('IGSH-923 reopening refreshes both triggers, errors back off, and failed responses preserve selectable cached skills', () => {
   const source = fs.readFileSync('src/chat_composer.zig', 'utf8');
   const state = fs.readFileSync('src/app_state.zig', 'utf8');
-  const done = source.slice(source.indexOf('pub fn chatAcOnFetchDone('), source.indexOf('\nfn chatAcOnComposerChanged('));
+  const done = source.slice(source.indexOf('pub fn chatAcOnFetchDone('), source.indexOf('\nfn chatAcCatalog('));
   const afterSend = source.slice(source.indexOf('pub fn chatAcAfterSend('), source.indexOf('\npub fn chatAcOpenBrowse('));
   const policy = source.slice(source.indexOf('    if (opening and slot.pending', source.indexOf('fn chatAcOnComposerChanged(')), source.indexOf('\n}', source.indexOf('    if (opening and slot.pending', source.indexOf('fn chatAcOnComposerChanged('))));
   const slot = state.slice(state.indexOf('const ChatAcSlot = struct'), state.indexOf('\nconst ChatAc = struct'));
@@ -43,6 +43,7 @@ const app_state = struct {
     var g_chat_ac_mutex = Mutex{};
     var g_chat_ac = struct { open: bool = false, slot: usize = 0, token: chat_complete.Token = .{ .mode = .slash, .start = 0, .end = 1 } }{};
     const g_chat_composer_hwnd: usize = 0;
+    const g_chat_transcript_hwnd: usize = 0;
     const g_main_hwnd: usize = 0;
 };
 var agent: chat_complete.Agent = .claude;
@@ -53,6 +54,7 @@ var requests: usize = 0;
 var ranked: usize = 0;
 const TIMER_CHAT_AC_DEBOUNCE = 1;
 fn Sleep(_: u32) void {}
+fn InvalidateRect(_: usize, _: ?usize, _: i32) i32 { return 1; }
 fn GetTickCount64() u64 { return clock; }
 fn GetWindowTextW(_: usize, _: []u16, _: usize) i32 { return 0; }
 fn SetTimer(_: usize, _: usize, _: u32, _: ?usize) usize { return 1; }

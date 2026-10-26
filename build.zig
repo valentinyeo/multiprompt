@@ -509,7 +509,7 @@ pub fn build(b: *std.Build) void {
     const chat_table_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tables.test.js", "tools/igsh421-tables.test.js", "tools/chat-table-bench/bench.test.js" });
     test_step.dependOn(&chat_table_tests.step);
     vps_test_step.dependOn(&chat_table_tests.step);
-    const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js" });
+    const chat_rich_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-rich.test.js", "tools/chat-skill-pill-proof.test.mjs" });
     test_step.dependOn(&chat_rich_tests.step);
     test_step.dependOn(&chat_view_gaps_tests.step);
     const chat_autocomplete_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-autocomplete.test.js", "tools/chat-skills-refresh.test.js" });

@@ -605,7 +605,7 @@ fn debugLog(_: []const u8) void {}
 fn chatFlowTable(_: HANDLE, text: []const u16, area: RECT, paint: bool, _: ?ChatHit, offset: usize, height: ?*i32) ?link_detect.Range {
     record(text, .table, 0, area, paint, offset, height); return null;
 }
-fn chatFlowText(_: HANDLE, text: []const u16, area: RECT, code: bool, paint: bool, _: ?ChatHit, offset: usize, height: ?*i32, _: ?[]const usize) ?link_detect.Range {
+fn chatFlowText(_: HANDLE, text: []const u16, area: RECT, code: bool, paint: bool, _: ?ChatHit, offset: usize, height: ?*i32, _: ?[]const usize, comptime _: bool) ?link_detect.Range {
     record(text, if (code) .code else .plain, 0, area, paint, offset, height); return null;
 }
 fn chatRichText(_: HANDLE, text: []const u16, area: RECT, level: u3, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32, _: bool) ?link_detect.Range {

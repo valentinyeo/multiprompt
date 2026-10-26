@@ -145,3 +145,5 @@ The helper creates a private Windows Job object with kill-on-close and no breaka
 ## Maintain
 
 Use `/maintain-verification-skill` when menus, keyboard routing, persistence or startup change. Update the relevant map, [coverage table](coverage.md) and harness together, then repeat the GitHub journey and screenshot review. Never relabel an unverified path as covered.
+
+- [Skill pills](features/chat-skill-pill.md): native draft and sent-history colors on dark and light themes.

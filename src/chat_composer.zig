@@ -701,6 +701,7 @@ fn ensureChatControls() bool {
         _ = SetWindowLongPtrW(app_state.g_chat_status_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&@import("chat_render.zig").chatStatusWndProc)));
     }
     if (app_state.g_chat_composer_hwnd == null) {
+        _ = loadPaletteSkills();
         app_state.g_chat_composer_scroll_shown = false;
         app_state.g_chat_composer_hwnd = CreateWindowExW(
             0,
@@ -731,6 +732,13 @@ fn ensureChatControls() bool {
         ensureChatAcClass();
         app_state.g_chat_ac_hwnd = CreateWindowExW(0, L("ZigShellChatSuggest"), L(""), WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 100, 100, app_state.g_main_hwnd, null, null, null);
         if (app_state.g_chat_ac_hwnd == null) return false;
+    }
+    for ([_]chat_complete.Mode{ .slash, .dollar }) |mode| {
+        if (mode == .dollar and chatAcAgent() != .codex) continue;
+        const index = chatAcCatalog(mode) orelse continue;
+        const slot = &app_state.g_chat_ac_slots[index];
+        const elapsed = GetTickCount64() -| slot.fetched;
+        if (slot.pending == 0 and (slot.fetched == 0 or elapsed > (if (slot.status == .@"error") @as(u64, 60_000) else if (slot.status == .loading) @as(u64, 4_000) else 600_000))) chatAcRequest(index);
     }
     refreshChatBrushes();
     return true;
@@ -1016,6 +1024,8 @@ pub fn chatAcOnFetchDone(id: u32, slot_index: usize) void {
     } else {
         slot.status = .@"error";
     }
+    _ = InvalidateRect(app_state.g_chat_composer_hwnd, null, 0);
+    _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     if (app_state.g_chat_ac.open and app_state.g_chat_ac.slot == slot_index) {
         var text: [16384]u16 = undefined;
         const n = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
@@ -1026,6 +1036,44 @@ pub fn chatAcOnFetchDone(id: u32, slot_index: usize) void {
         if (slot.status != .@"error") chatAcRequest(slot_index);
     } else if (app_state.g_chat_ac.open and app_state.g_chat_ac.slot == slot_index and !slot.retry_used and (slot.status == .stale or slot.status == .loading))
         _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_AC_DEBOUNCE, 4000, null);
+}
+
+fn chatAcCatalog(mode: chat_complete.Mode) ?usize {
+    const agent = chatAcAgent();
+    if (agent == .other or app_state.active_shell >= app_state.shell_count) return null;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (!isRemoteShellKind(shell.kind)) {
+        return null;
+    }
+    const host: u8 = if (shell.kind == .tmux) shell.tmux_host else if (shell.kind == .vps2) 1 else 0;
+    const session = if (shell.kind == .tmux) shell.tmux_session[0..shell.tmux_session_len] else "";
+    const cwd = shell.claude_cwd[0..shell.claude_cwd_len];
+    var index: usize = 0;
+    var found = false;
+    for (&app_state.g_chat_ac_slots, 0..) |*slot, i| {
+        if (slot.agent == agent and slot.mode == mode and slot.host == host and std.mem.eql(u8, std.mem.sliceTo(&slot.session, 0), session) and
+            std.mem.eql(u8, std.mem.sliceTo(&slot.cwd, 0), cwd))
+        {
+            index = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        var oldest: u64 = std.math.maxInt(u64);
+        for (&app_state.g_chat_ac_slots, 0..) |*slot, i| {
+            if (slot.pending == 0 and slot.fetched < oldest) {
+                index = i;
+                oldest = slot.fetched;
+            }
+        }
+        const slot = &app_state.g_chat_ac_slots[index];
+        if (slot.pending != 0) return null;
+        slot.* = .{ .host = host, .agent = agent, .mode = mode };
+        @memcpy(slot.session[0..session.len], session);
+        @memcpy(slot.cwd[0..cwd.len], cwd);
+    }
+    return index;
 }
 
 fn chatAcOnComposerChanged() void {
@@ -1060,34 +1108,8 @@ fn chatAcOnComposerChanged() void {
     if (app_state.g_chat_ac.dismissed and app_state.g_chat_ac.dismissed_start == token.start and fragment.len == app_state.g_chat_ac.dismissed_len and
         std.mem.eql(u16, fragment, app_state.g_chat_ac.dismissed_text[0..app_state.g_chat_ac.dismissed_len])) return;
     app_state.g_chat_ac.dismissed = false;
-    const host: u8 = if (shell.kind == .tmux) shell.tmux_host else if (shell.kind == .vps2) 1 else 0;
-    const session = if (shell.kind == .tmux) shell.tmux_session[0..shell.tmux_session_len] else "";
-    const cwd = shell.claude_cwd[0..shell.claude_cwd_len];
-    var index: usize = 0;
-    var found = false;
-    for (&app_state.g_chat_ac_slots, 0..) |*slot, i| {
-        if (slot.agent == agent and slot.mode == token.mode and slot.host == host and std.mem.eql(u8, std.mem.sliceTo(&slot.session, 0), session) and
-            std.mem.eql(u8, std.mem.sliceTo(&slot.cwd, 0), cwd))
-        {
-            index = i;
-            found = true;
-            break;
-        }
-    }
-    if (!found) {
-        var oldest: u64 = std.math.maxInt(u64);
-        for (&app_state.g_chat_ac_slots, 0..) |*slot, i| {
-            if (slot.pending == 0 and slot.fetched < oldest) {
-                index = i;
-                oldest = slot.fetched;
-            }
-        }
-        const slot = &app_state.g_chat_ac_slots[index];
-        if (slot.pending != 0) return;
-        slot.* = .{ .host = host, .agent = agent, .mode = token.mode };
-        @memcpy(slot.session[0..session.len], session);
-        @memcpy(slot.cwd[0..cwd.len], cwd);
-    }
+    const index = chatAcCatalog(token.mode) orelse return;
+    const slot = &app_state.g_chat_ac_slots[index];
     const opening = !app_state.g_chat_ac.open or app_state.g_chat_ac.slot != index or app_state.g_chat_ac.token.start != token.start or app_state.g_chat_ac.token.mode != token.mode;
     if (opening) {
         app_state.g_chat_ac.query_len = 0;
@@ -1097,7 +1119,6 @@ fn chatAcOnComposerChanged() void {
     app_state.g_chat_ac.open = true;
     app_state.g_chat_ac.slot = index;
     app_state.g_chat_ac.token = token;
-    const slot = &app_state.g_chat_ac_slots[index];
     chatAcRank(text[0..@intCast(n)], token);
     if (opening and slot.pending != 0) slot.refresh_pending = true;
     const elapsed = GetTickCount64() -| slot.fetched;

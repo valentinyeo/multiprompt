@@ -144,3 +144,5 @@ A change that alters a mapped feature updates its map and this table in the same
 ## IGSH-815 full-session history
 
 `chat-full-history` exercises 50 known messages in a tool-heavy synthetic session through the production Windows reader/layout/copy path, then repeats after restart. Red/green GitHub evidence pending; no live Claude session is claimed.
+
+| IGSH-928 | Skill pills | `chat-skill-pill` | Dark/light draft and sent-history pixels, plain and unknown controls; pre-fix release control required. |

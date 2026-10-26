@@ -12,6 +12,8 @@ function body(text, name) {
   const start = text.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
   return text.slice(start, text.indexOf('\n}', start) + 2)
+    .replace('source_map: ?[]const usize) ?link_detect.Range', 'source_map: ?[]const usize, comptime _: bool) ?link_detect.Range')
+    .replaceAll('offset, height, null)', 'offset, height, null, false)')
     .replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary')
     .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
     .replaceAll('@import("window_layout.zig").chatStopVisible', 'chatStopVisible');
@@ -20,6 +22,7 @@ function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn known(_: []const u16) bool { return false; }\npub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, ('const chat_hit = @import("chat_hit.zig");\nvar g_chat_find_open = false;\n' + lineHeightPolicy + '\n' + code).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
@@ -332,6 +335,7 @@ fn customColorOr(_: []const u8, value: u32) u32 { return value; }
 fn RGB(_: u8, _: u8, _: u8) u32 { return 0; }
 fn chatLinkFont(_: bool) HANDLE { return 1; }
 fn chatCodeTokenColor(_: chat_code.Kind) u32 { return 0; }
+fn chatUserBubbleColor() u32 { return 0; }
 fn chatPaintSelectionRun(_: HANDLE, _: []const u16, _: usize, _: i32, _: i32, _: i32) void { selection_runs += 1; }
 `;
 const flowChecks = `
@@ -339,14 +343,14 @@ test "table paint without selection makes no per-character GDI calls; real selec
     const text: [1000]u16 = @splat('x');
     var map: [1000]usize = undefined;
     for (&map, 0..) |*value, i| value.* = i;
-    _ = chatFlowText(0, &text, .{ .right = 10000 }, true, true, null, 0, null, &map);
+    _ = chatFlowText(0, &text, .{ .right = 10000 }, true, true, null, 0, null, &map, false);
     try std.testing.expectEqual(@as(usize, 0), character_widths);
     try std.testing.expectEqual(@as(usize, 0), selection_runs);
     g_chat_sel_active = true;
     for ([_]bool{ true, false }) |focused| {
         g_chat_sel_transcript_focus = focused;
         character_widths = 0; selection_runs = 0;
-        _ = chatFlowText(0, &text, .{ .right = 10000 }, true, true, null, 0, null, &map);
+        _ = chatFlowText(0, &text, .{ .right = 10000 }, true, true, null, 0, null, &map, false);
         try std.testing.expectEqual(@as(usize, 1000), character_widths);
         try std.testing.expectEqual(@as(usize, 1000), selection_runs);
     }
@@ -413,14 +417,14 @@ test "ISSUE-438 dragging on line one measures no glyph prefixes on other lines" 
             var at: usize = 0;
             caret_widths = 0;
             const hit = ChatHit{ .x = 331, .y = 35, .char = &at };
-            if (mode == 2) _ = chatRichText(0, text, area, 0, false, hit, 17, null, false) else _ = chatFlowText(0, text, area, mode == 0, false, hit, 17, null, null);
+            if (mode == 2) _ = chatRichText(0, text, area, 0, false, hit, 17, null, false) else _ = chatFlowText(0, text, area, mode == 0, false, hit, 17, null, null, false);
             try std.testing.expectEqual(@as(usize, 57), at);
             try std.testing.expect(caret_widths > 1);
             if (lines == 1) first_widths = caret_widths else try std.testing.expectEqual(first_widths, caret_widths);
             if (lines == 128) for ([_]i32{ area.top - 1, area.top + @as(i32, @intCast(lines + 1)) * 20 }) |y| {
                 caret_widths = 0;
                 const outside = ChatHit{ .x = 331, .y = y, .char = &at };
-                if (mode == 2) _ = chatRichText(0, text, area, 0, false, outside, 17, null, false) else _ = chatFlowText(0, text, area, mode == 0, false, outside, 17, null, null);
+                if (mode == 2) _ = chatRichText(0, text, area, 0, false, outside, 17, null, false) else _ = chatFlowText(0, text, area, mode == 0, false, outside, 17, null, null, false);
                 try std.testing.expectEqual(@as(usize, 0), caret_widths);
                 try std.testing.expectEqual(if (y < area.top) @as(usize, 17) else 17 + text.len, at);
             };

@@ -371,7 +371,7 @@ fn chatLineIndentPx(hdc: HANDLE, text: []const u16, pos: usize) i32 {
     return chatTextWidth(hdc, text[pos .. pos + marker]);
 }
 
-fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32, source_map: ?[]const usize) ?link_detect.Range {
+fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32, source_map: ?[]const usize, comptime skill_pills: bool) ?link_detect.Range {
     const base = if (code) ensureChatCodeFont() else ensureChatFont();
     const old_font = SelectObject(hdc, base);
     defer _ = SelectObject(hdc, old_font);
@@ -405,6 +405,7 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
             y += line_h;
             continue;
         }
+        const word_start = pos;
         var word_end = pos;
         const space = text[pos] == ' ' or text[pos] == '\t';
         while (word_end < text.len and (text[word_end] == ' ' or text[word_end] == '\t') == space and text[word_end] != '\r' and text[word_end] != '\n') : (word_end += 1) {}
@@ -453,6 +454,9 @@ fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: b
                 _ = SetTextColor(hdc, chatCodeTokenColor(if (token) |t| t.kind else .normal));
             }
             if (paint) {
+                if (skill_pills and @import("chat_skill.zig").known(text[word_start..word_end])) {
+                    _ = SetTextColor(hdc, @import("chat_skill.zig").paint(hdc, rect, chatUserBubbleColor()));
+                }
                 if (app_state.g_chat_find_open) {
                     if (source_map) |map| {
                         var left = rect.left;
@@ -509,7 +513,7 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
     const line_h = chatLineHeight(DrawTextW(hdc, L("Ag"), 2, &calc, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX));
     const max_w = @max(1, area.right - area.left);
     var span_buf: [512]chat_markdown.Span = undefined;
-    const spans = if (text.len <= span_buf.len) span_buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return chatFlowText(hdc, text, area, false, paint, hit, offset, height, null);
+    const spans = if (text.len <= span_buf.len) span_buf[0..] else std.heap.page_allocator.alloc(chat_markdown.Span, text.len) catch return chatFlowText(hdc, text, area, false, paint, hit, offset, height, null, false);
     defer if (text.len > span_buf.len) std.heap.page_allocator.free(spans);
     const n = chat_markdown.inlineSpans(text, spans);
     var nearest = chat_hit.Nearest{ .char = offset };
@@ -805,7 +809,7 @@ fn chatReceivedBlocks(text: []const u16, offset: usize) ![]const ChatBlock {
 
 fn chatFlowBlock(hdc: HANDLE, text: []const u16, block: ChatBlock, area: RECT, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32) ?link_detect.Range {
     if (block.markdown and block.role == .injected) {
-        const parts = chatReceivedBlocks(text, offset) catch return chatFlowText(hdc, text, area, false, paint, hit, offset, height, null);
+        const parts = chatReceivedBlocks(text, offset) catch return chatFlowText(hdc, text, area, false, paint, hit, offset, height, null, false);
         var total: i32 = 0;
         for (parts, 0..) |part, i| {
             if (i > 0) total += uiScaled(6);
@@ -827,7 +831,8 @@ fn chatFlowBlock(hdc: HANDLE, text: []const u16, block: ChatBlock, area: RECT, p
         return null;
     }
     if (block.kind == .table) return chatFlowTable(hdc, text, area, paint, hit, offset, height);
-    if (!block.markdown or block.role == .code or block.role == .user) return chatFlowText(hdc, text, area, block.role == .code, paint, hit, offset, height, null);
+    if (block.role == .user) return chatFlowText(hdc, text, area, false, paint, hit, offset, height, null, true);
+    if (!block.markdown or block.role == .code) return chatFlowText(hdc, text, area, block.role == .code, paint, hit, offset, height, null, false);
     if (block.kind == .list) {
         var body = area;
         const indent = @as(i32, block.level) * uiScaled(22);
@@ -934,7 +939,7 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
             const diff_rows = chat_diff.rowCount(buf[block.diff_start..][0..block.diff_len], block.tool_open);
             const diff_h = @as(i32, @intCast(diff_rows)) * uiScaled(chat_diff.row_height);
             if (block.tool_open and block.detail_len > 0) {
-                _ = chatFlowText(hdc, buf[block.detail_start..][0..block.detail_len], .{ .left = 0, .top = 0, .right = @max(1, width - 2 * uiScaled(CHAT_CODE_PAD)), .bottom = 0 }, true, false, null, block.detail_start, &flow_h, null);
+                _ = chatFlowText(hdc, buf[block.detail_start..][0..block.detail_len], .{ .left = 0, .top = 0, .right = @max(1, width - 2 * uiScaled(CHAT_CODE_PAD)), .bottom = 0 }, true, false, null, block.detail_start, &flow_h, null, false);
                 flow_h += 2 * uiScaled(CHAT_CODE_PAD);
             }
             return .{ .left = 0, .top = y, .right = width, .bottom = y + line_h + diff_h + flow_h };
@@ -957,7 +962,7 @@ fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32, statu
     _ = SelectObject(hdc, old_font);
     const bubble_w = chat_style.bubbleWidth(width, calc.right, pad, uiScaled(720));
     var flow_h: i32 = 0;
-    _ = chatFlowText(hdc, text, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, false, null, 0, &flow_h, null);
+    _ = chatFlowText(hdc, text, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, false, null, 0, &flow_h, null, false);
     const bubble_h = flow_h + 2 * pad + (if (app_state.clean_chat or !status) @as(i32, 0) else uiScaled(CHAT_STATUS_H));
     return .{ .left = width - bubble_w, .top = y, .right = width, .bottom = y + bubble_h };
 }
@@ -1097,7 +1102,7 @@ test "IGSH-376 received fenced code find uses its full layout" {
     var heading_h: i32 = 0;
     _ = chatRichText(dc, w("Ready"), .{ .left = 0, .top = 0, .right = 700, .bottom = 0 }, 1, false, null, 2, &heading_h, false);
     var line_h: i32 = 0;
-    _ = chatFlowText(dc, w("alpha"), .{ .left = 0, .top = 0, .right = 700, .bottom = 0 }, true, false, null, 0, &line_h, null);
+    _ = chatFlowText(dc, w("alpha"), .{ .left = 0, .top = 0, .right = 700, .bottom = 0 }, true, false, null, 0, &line_h, null, false);
     const at = std.mem.indexOf(u16, text, w("needle")).?;
     try std.testing.expectEqual(37 + uiScaled(CHAT_BUBBLE_PAD) + heading_h + uiScaled(6) + line_h, chatFindY(0, at));
 }
@@ -1642,7 +1647,7 @@ pub fn chatFindY(index: usize, position: ?usize) i32 {
     }
     const text = app_state.g_chat_capture[start..at];
     if (detail) {
-        _ = chatFlowText(dc, text, area, true, false, null, start, &height, null);
+        _ = chatFlowText(dc, text, area, true, false, null, start, &height, null, false);
     } else {
         _ = chatFlowBlock(dc, text, block, area, false, null, start, &height);
     }
@@ -1708,7 +1713,7 @@ fn chatPaintShellRow(hdc: HANDLE, row: *const chat_shell_sync.Row, rc: RECT) voi
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
-    _ = chatFlowText(hdc, text, text_rc, false, true, null, SHELL_ROW_SELECTION_OFFSET, null, null);
+    _ = chatFlowText(hdc, text, text_rc, false, true, null, SHELL_ROW_SELECTION_OFFSET, null, null, true);
     chatDimQueuedBubble(hdc, bubble);
 }
 
@@ -3132,7 +3137,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
                 const detail_rc = RECT{ .left = panel.left + uiScaled(CHAT_CODE_PAD), .top = panel.top + uiScaled(CHAT_CODE_PAD), .right = panel.right - uiScaled(CHAT_CODE_PAD), .bottom = panel.bottom - uiScaled(CHAT_CODE_PAD) };
                 _ = SelectObject(hdc, ensureChatCodeFont());
                 _ = SetTextColor(hdc, text_color);
-                _ = chatFlowText(hdc, buf[block.detail_start..][0..block.detail_len], detail_rc, true, true, null, block.detail_start, null, null);
+                _ = chatFlowText(hdc, buf[block.detail_start..][0..block.detail_len], detail_rc, true, true, null, block.detail_start, null, null, false);
             }
         },
         .code => {
@@ -3156,7 +3161,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
-    _ = chatFlowText(hdc, e.text, text_rc, false, true, null, offset, null, null);
+    _ = chatFlowText(hdc, e.text, text_rc, false, true, null, offset, null, null, true);
     if (e.state == .delivered) chatDimQueuedBubble(hdc, bubble);
     chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
     if (!app_state.clean_chat and actions.send_again) {
@@ -3247,7 +3252,7 @@ test "Chat View code paints token colors and copy hit testing respects scroll wi
     const text = std.unicode.utf8ToUtf16LeStringLiteral("const");
     for ([_]bool{ true, false }) |light| {
         app_state.g_light_theme = light;
-        _ = chatFlowText(dc, text, .{ .left = 0, .top = 0, .right = 320, .bottom = 160 }, true, true, null, 0, null, null);
+        _ = chatFlowText(dc, text, .{ .left = 0, .top = 0, .right = 320, .bottom = 160 }, true, true, null, 0, null, null, false);
         try std.testing.expectEqual(chatCodeTokenColor(.keyword), GetTextColor(dc));
         try std.testing.expect(chatCodeTokenColor(.keyword) != chatCodeTokenColor(.normal));
     }
@@ -4848,7 +4853,7 @@ test "ISSUE-438 nearest caret covers spaces line tails and below the last line" 
             var char: usize = 0;
             const area = RECT{ .left = 0, .top = 0, .right = 400, .bottom = 250 };
             const hit = ChatHit{ .x = point.x, .y = point.y, .char = &char };
-            if (rich) _ = chatRichText(dc, text, area, 0, false, hit, 0, null, false) else _ = chatFlowText(dc, text, area, false, false, hit, 0, null, null);
+            if (rich) _ = chatRichText(dc, text, area, 0, false, hit, 0, null, false) else _ = chatFlowText(dc, text, area, false, false, hit, 0, null, null, false);
             try std.testing.expectEqual(point.expected, char);
         }
     }
