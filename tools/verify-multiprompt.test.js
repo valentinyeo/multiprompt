@@ -1514,7 +1514,7 @@ test('IGSH-612 palette-order journey seeds only the usage fixture and fails rele
   assert.match(read(skill + 'SKILL.md'), /`palette-order`/);
 });
 
-test('IGSH-673 status-card journey measures all three pages by pixels and fails outside 20..30', () => {
+test('IGSH-908 status-card journey keeps compact pages and proves the existing-style usage popup', () => {
   assert.match(control, /ValidateSet\([^\n)]*'status-card'/);
   assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'status-card'/);
   assert.match(workflow, /fromJSON\('\[[^\n]*"status-card", "palette-order"[^\]]*\]'\)/);
@@ -1525,10 +1525,16 @@ test('IGSH-673 status-card journey measures all three pages by pixels and fails 
   assert.match(journey, /roaming\/ZigShell\/sidebar-status-card\.txt/);
   assert.match(journey, /Measure-StatusCard \$shot/);
   assert.match(journey, /\$result\.statusCard = \[ordered\]@\{ heights = \$heights/);
-  assert.match(journey, /MoveMouseClient\(\$script:window, [^\n]*, \$true\)\s+Start-Sleep -Milliseconds 600\s+Snapshot 'hover'/);
   assert.match(journey, /if \(\$height -gt 30 -or \$height -lt 20\) \{ throw/);
-  assert.ok(journey.indexOf('$result.statusCard =') < journey.indexOf("Snapshot 'hover'"));
-  assert.ok(journey.indexOf("Snapshot 'hover'") < journey.indexOf('if ($height -gt 30'));
+  assert.match(journey, /IGSH-908: usage pill has no frame at the sidebar bottom/);
+  for (const check of ['usage panel closes on second click', 'usage panel closes on Escape', 'usage panel closes on outside click']) assert.ok(journey.includes(check));
+  assert.match(journey, /MenuLook/);
+  assert.match(journey, /\$look\.cornerShown/);
+  assert.match(journey, /usagePill = \$true/);
+  assert.match(journey, /Snapshot 'pill-closed'/);
+  assert.match(journey, /Snapshot 'pill-open'/);
+  assert.match(control, /MultipromptUsageTelemetryLaunch/);
+  assert.match(control, /IGSH-908\/usage-telemetry\.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage|Copy-Item/);
   const measure = control.slice(control.indexOf('function Measure-StatusCard('), control.indexOf('function Sidebar-Luminance('));
   assert.match(measure, /GetDpiForWindow\(\$script:window\)/);

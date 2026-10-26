@@ -2275,34 +2275,6 @@ function Measure-StatusCard([string]$Name) {
     }
 }
 
-function Measure-PlainStatusCard([string]$Name) {
-    $frame = New-Object VerifyNative+Rect
-    $client = New-Object VerifyNative+Rect
-    $origin = New-Object VerifyNative+Point
-    if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or
-        -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'status-card native geometry unavailable' }
-    $dpi = [VerifyNative]::GetDpiForWindow($script:window)
-    $scale = $dpi / 96.0
-    $offsetX = $origin.X - $frame.Left
-    $offsetY = $origin.Y - $frame.Top
-    $x = $offsetX + [int][Math]::Round(14 * $scale)
-    $bottom = $offsetY + $client.Bottom - 1
-    $top = $bottom - [int][Math]::Round(40 * $scale)
-    $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($Name + '.png')))
-    try {
-        $background = $image.GetPixel($x, $bottom)
-        $edge = $null
-        for ($y = $bottom; $y -ge $top; $y--) {
-            $pixel = $image.GetPixel($x, $y)
-            if ([Math]::Max([Math]::Abs($pixel.R - $background.R), [Math]::Max([Math]::Abs($pixel.G - $background.G), [Math]::Abs($pixel.B - $background.B))) -gt 8) { $edge = $y; break }
-        }
-    } finally { $image.Dispose() }
-    return [ordered]@{
-        screenshot = $Name + '.png'; x = $x; top = $top; bottom = $bottom; background = @($background.R, $background.G, $background.B)
-        edge = $edge; dpi = $dpi
-    }
-}
-
 function Sidebar-Luminance([string]$Name) {
     $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($Name + '.png')))
     try {
@@ -2521,6 +2493,7 @@ function Assert-RelaunchSessions([string]$Stage, $Seed) {
     return @{ stage = $Stage; published = $published.Count; saved = @($saved.tabs).Count; groups = $savedGroups.Count; selected = $selected[0].name; starred_view = [bool]$state.starred_view }
 }
 
+$usageCollector = $null
 Write-Host 'Launch: validate executable and prepare isolated profile'
 try {
     if ($Feature -eq 'title-bar') {
@@ -2551,6 +2524,7 @@ try {
     if ($Feature -ne 'browser-own-profile') { $env:USERPROFILE = Join-Path $scratch 'profile' }
     $env:HOME = Join-Path $scratch 'profile'
     if ($Feature -eq 'status-card') {
+        $usageCollector = [Threading.Mutex]::new($false, 'Local\MultipromptUsageTelemetryLaunch')
         $usageRoot = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $usageRoot | Out-Null
         Copy-Item (Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-908/usage-telemetry.json') (Join-Path $usageRoot 'usage-telemetry.json')
@@ -5982,6 +5956,7 @@ try {
             $look = [VerifyNative]::MenuLook([IntPtr]::new([int64]$menu.handle))
             if ($look.cornerShown -or $look.leftEdge -ne $look.fill -or $look.rightEdge -ne $look.fill) { throw 'IGSH-908: expanded usage panel differs from the existing rounded menu style' }
             Snapshot 'pill-open'
+            Snapshot 'action'
             Record 'Real second click: close AI usage pill'
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
             Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'usage panel closes on second click'
@@ -5994,6 +5969,8 @@ try {
             [VerifyNative]::ClickClient($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
             Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'usage panel closes on outside click'
             Snapshot 'pill-dismissed'
+            if ([IO.File]::ReadAllText($statusFile).Trim() -ne '2') { throw 'AI data panel changed the selected status page' }
+            Snapshot 'after'
             $result.statusCard = [ordered]@{ heights = $heights; minimum = 20; maximum = 30; pages = $pages; usagePanel = @{ secondClick = $true; escape = $true; outside = $true; look = $look } }
             Save-Json $result.statusCard 'status-card.json'
             $result.checks += @{ name = 'status-card'; heights = $heights; usagePill = $true; menuStyle = $true; secondClick = $true; escape = $true; outside = $true; entry = 'Ctrl+Shift+G' }
@@ -6262,6 +6239,7 @@ try {
     if ($null -ne $warmupJob) { $warmupJob.Dispose() }
     if ($null -ne $job) { $job.Dispose() }
     if ($null -ne $process) { $process.Dispose() }
+    if ($null -ne $usageCollector) { $usageCollector.Dispose() }
     foreach ($name in $original.Keys) { [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process') }
     if ($null -ne $originalFontSmoothing) { [VerifyNative]::FontSmoothing([bool]$originalFontSmoothing) }
     if ($Feature -eq 'title-bar' -and ('CaptionProof' -as [type])) {
