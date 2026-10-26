@@ -10,7 +10,6 @@ const WM_APP_SHOW_SIDEBAR = @import("win32.zig").WM_APP_SHOW_SIDEBAR;
 const TIMER_ETA_REPAINT = @import("win32.zig").TIMER_ETA_REPAINT;
 const NOTIFY_PORTS = @import("app_state.zig").NOTIFY_PORTS;
 const RECT = @import("win32.zig").RECT;
-const SYSTEMTIME = @import("win32.zig").SYSTEMTIME;
 const IsIconic = @import("win32.zig").IsIconic;
 const GetWindowRect = @import("win32.zig").GetWindowRect;
 const IsWindowVisible = @import("win32.zig").IsWindowVisible;
@@ -21,7 +20,6 @@ const GetCommandLineA = @import("win32.zig").GetCommandLineA;
 const SetFilePointerEx = @import("win32.zig").SetFilePointerEx;
 const FILE_END = @import("win32.zig").FILE_END;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
-const GetLocalTime = @import("win32.zig").GetLocalTime;
 const playNotificationSound = @import("startup.zig").playNotificationSound;
 const RGB = @import("startup.zig").RGB;
 const empty_shell = @import("app_state.zig").empty_shell;
@@ -1064,39 +1062,6 @@ test "etaFillFraction clamps to 0..1" {
     try std.testing.expectEqual(@as(f32, 1), etaFillFraction(1000, 1000));
     try std.testing.expectEqual(@as(f32, 1), etaFillFraction(5000, 1000));
     try std.testing.expectEqual(@as(f32, 0), etaFillFraction(500, 0));
-}
-
-fn etaClockString(now_min_of_day: i64, delta_ms: i64, out: []u8) []const u8 {
-    var total_min = now_min_of_day + @divTrunc(delta_ms, 60_000);
-    total_min = @mod(total_min, 1440);
-    if (total_min < 0) total_min += 1440;
-    const hh: u32 = @intCast(@divTrunc(total_min, 60));
-    const mm: u32 = @intCast(@mod(total_min, 60));
-    return std.fmt.bufPrint(out, "{d:0>2}:{d:0>2}", .{ hh, mm }) catch out[0..0];
-}
-
-test "etaClockString wraps past midnight" {
-    var buf: [8]u8 = undefined;
-    try std.testing.expectEqualStrings("14:27", etaClockString(14 * 60 + 15, 12 * 60_000, &buf));
-    try std.testing.expectEqualStrings("00:05", etaClockString(23 * 60 + 55, 10 * 60_000, &buf));
-}
-
-fn etaDeadlineLocalTime(deadline_tick: u64, out: []u8) []const u8 {
-    const delta_ms: i64 = etaRemainingMs(deadline_tick, GetTickCount64());
-    var st: SYSTEMTIME = undefined;
-    GetLocalTime(&st);
-    const now_min_of_day: i64 = @as(i64, st.hour) * 60 + @as(i64, st.minute);
-    return etaClockString(now_min_of_day, delta_ms, out);
-}
-
-pub fn etaHeaderLabel(shell_idx: u32, out: []u8) []const u8 {
-    if (shell_idx >= app_state.shell_count or app_state.shells[shell_idx].eta_total_ms == 0) return out[0..0];
-    var rem_buf: [16]u8 = undefined;
-    const remaining_ms: i64 = etaRemainingMs(app_state.shells[shell_idx].eta_deadline_tick, GetTickCount64());
-    const rem_txt = formatEtaRemaining(remaining_ms, &rem_buf);
-    var clock_buf: [8]u8 = undefined;
-    const clock_txt = etaDeadlineLocalTime(app_state.shells[shell_idx].eta_deadline_tick, &clock_buf);
-    return std.fmt.bufPrint(out, "ETA {s}, done about {s}", .{ rem_txt, clock_txt }) catch out[0..0];
 }
 
 fn etaAgentSlug(ai_agent: u8) []const u8 {

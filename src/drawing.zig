@@ -74,7 +74,6 @@ const paletteAnchoredBesideBrowser = @import("browser_pane.zig").paletteAnchored
 const chatViewLayout = @import("chat_composer.zig").chatViewLayout;
 const chatRelayout = @import("chat_render.zig").chatRelayout;
 const voiceStatusLabel = @import("voice.zig").voiceStatusLabel;
-const etaHeaderLabel = @import("notifications.zig").etaHeaderLabel;
 const asciiToU16 = @import("inbox.zig").asciiToU16;
 const inboxPublishesShell = @import("inbox.zig").inboxPublishesShell;
 const inboxRelTime = @import("inbox.zig").inboxRelTime;
@@ -591,10 +590,7 @@ pub fn threadTitleNameRectFor(win_w: i32, shell_idx: u32) ?RECT {
     const now = GetTickCount64();
     const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
     const voice_status = !cap_msg and app_state.g_chat_active and app_state.g_voice_mode_active;
-    const base_right_margin: i32 = if (cap_msg) 360 else if (voice_status) 200 else if (browserSlotReserved()) 16 else 120;
-    const eta_header_shown = !cap_msg and app_state.g_chat_active and app_state.g_eta_numbers_on and app_state.shells[shell_idx].eta_total_ms > 0;
-    const eta_reserve: i32 = if (eta_header_shown) uiScaled(160) else 0;
-    const right_margin: i32 = base_right_margin + eta_reserve;
+    const right_margin: i32 = if (cap_msg) 360 else if (voice_status) 200 else if (browserSlotReserved()) 16 else 120;
     const title_right = band_right - right_margin - 8;
     if (title_right <= text_left + 20) return null;
 
@@ -638,19 +634,6 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
     const right_margin: i32 = if (cap_msg) 360 else if (voice_status) 200 else if (show_meta) 120 else 16;
     const right_x: i32 = band_right - right_margin;
     const dim_col: DWORD = if (app_state.g_light_theme) RGB(140, 140, 140) else RGB(110, 110, 120);
-    const eta_header_shown = !cap_msg and app_state.g_chat_active and app_state.g_eta_numbers_on and app_state.shells[app_state.active_shell].eta_total_ms > 0;
-    if (eta_header_shown) {
-        var eta_buf: [64]u8 = undefined;
-        const eta_txt = etaHeaderLabel(app_state.active_shell, &eta_buf);
-        if (eta_txt.len > 0) {
-            _ = SelectObject(hdc, uiFontSubtitle());
-            _ = SetTextColor(hdc, dim_col);
-            var eta_wbuf: [64]u16 = undefined;
-            const eta_wlen = asciiToU16(eta_txt, &eta_wbuf);
-            var eta_hdr_rc = RECT{ .left = right_x - uiScaled(160), .top = title_top, .right = right_x - 8, .bottom = title_bottom };
-            _ = DrawTextW(hdc, @ptrCast(&eta_wbuf), @intCast(eta_wlen), &eta_hdr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
-        }
-    }
     if (cap_msg) {
         _ = SelectObject(hdc, uiFontSubtitle());
         const warn_col: DWORD = if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70);
