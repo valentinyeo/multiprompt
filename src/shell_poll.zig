@@ -1285,7 +1285,7 @@ fn cwdMatchesCachedU16(live: []const u16, cached: []const u8) bool {
     while (b > 0 and (cached[b - 1] == '\\' or cached[b - 1] == '/')) b -= 1;
     if (a != b) return false;
     for (live[0..a], cached[0..b]) |w, c| {
-        const wn: u16 = if (w == '/') '\\' else w;
+        const wn: u16 = if (w == '/') '\\' else (w & 0xFF);
         const cn: u16 = if (c == '/') '\\' else c;
         if (u16AsciiLower(wn) != u16AsciiLower(cn)) return false;
     }
@@ -2093,8 +2093,12 @@ pub fn pollShellNames() void {
             if (readVpsPromptCwd(det_pid, &vps_cwd_buf)) |vps_full| {
                 const seg = u16LastPathSegment(vps_full);
                 const name_slice = if (seg.len == 0) vps_full else seg;
-                if (setSmartShellNameFromU16(&app_state.shells[i], name_slice, agent)) {
-                    changed = true;
+                const vps_cached_len: usize = @intCast(app_state.shells[i].cached_cwd_len);
+                if (!restoredNameStaysForCwd(app_state.shells[i].restored_name_hold, vps_full, app_state.shells[i].cached_cwd[0..vps_cached_len])) {
+                    app_state.shells[i].restored_name_hold = false;
+                    if (setSmartShellNameFromU16(&app_state.shells[i], name_slice, agent)) {
+                        changed = true;
+                    }
                 }
                 const cwd_copy = @min(vps_full.len, @as(usize, 511));
                 for (0..cwd_copy) |ci| {

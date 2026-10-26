@@ -4287,6 +4287,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.shells[idx].name[tabs[t].name_len] = 0;
             app_state.shells[idx].name_len = tabs[t].name_len;
             app_state.shells[idx].name_source = if (tabs[t].manual) .manual else if (tabs[t].sem) .semantic else .default;
+            app_state.shells[idx].restored_name_hold = app_state.shells[idx].name_source == .default and tabs[t].name_len > 0;
             if (tabs[t].tmux_session_len > 0) {
                 @memcpy(app_state.shells[idx].tmux_session[0..tabs[t].tmux_session_len], tabs[t].tmux_session[0..tabs[t].tmux_session_len]);
                 app_state.shells[idx].tmux_session_len = tabs[t].tmux_session_len;
