@@ -295,6 +295,8 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \u{2192} Start new session", .b = "Restart an ended server session with the same name (also in tab actions)", .header = false },
     .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },
+    .{ .a = "Space in All Sessions", .b = "Mark or unmark the selected unattached session", .header = false },
+    .{ .a = "x in All Sessions", .b = "Close the marked unattached sessions, or the selected one, after a confirmation", .header = false },
     .{ .a = "Alt+E", .b = "Move active tab to Waiting until it gets a blue dot", .header = false },
     .{ .a = "Alt+Z", .b = "Undo the most recent move to Waiting", .header = false },
     .{ .a = "Ctrl+K -> Restore Waiting", .b = "Restore waiting live sessions in this workspace", .header = false },
@@ -1389,6 +1391,18 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     return 1;
                 }
+                if (app_state.g_all_sessions_close_running) return 1;
+                if (app_state.g_all_sessions_confirm) {
+                    if (kb.vkCode == 0x1B or (!ctrl and kb.vkCode == 0x4E)) {
+                        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 43, 0);
+                        return 1;
+                    }
+                    if (kb.vkCode == 0x0D or (!ctrl and kb.vkCode == 0x59)) {
+                        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 42, 0);
+                        return 1;
+                    }
+                    return 1;
+                }
                 if (app_state.g_all_sessions_ctx) {
                     if (kb.vkCode == 0x1B or (!ctrl and kb.vkCode == 0x51)) {
                         _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 31, 0);
@@ -1446,6 +1460,14 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (!ctrl and kb.vkCode == 0x47) {
                     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, if (shift) 21 else 20, 0);
+                    return 1;
+                }
+                if (!ctrl and kb.vkCode == 0x58) {
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 41, 0);
+                    return 1;
+                }
+                if (!ctrl and kb.vkCode == 0x20) {
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 40, 0);
                     return 1;
                 }
                 if (!ctrl and kb.vkCode == 0x55) {

@@ -22,6 +22,8 @@ const PROCESS_INFORMATION = @import("win32.zig").PROCESS_INFORMATION;
 const WIN32_FIND_DATAW = @import("win32.zig").WIN32_FIND_DATAW;
 const GetClientRect = @import("win32.zig").GetClientRect;
 const InvalidateRect = @import("win32.zig").InvalidateRect;
+const PostMessageW = @import("focus.zig").PostMessageW;
+const WM_APP_ALL_SESSIONS_KEY = @import("win32.zig").WM_APP_ALL_SESSIONS_KEY;
 const FillRect = @import("win32.zig").FillRect;
 const DrawTextW = @import("win32.zig").DrawTextW;
 const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
@@ -1590,6 +1592,66 @@ pub fn drawFavoriteDot(hdc: HANDLE, cx: i32, cy: i32) void {
     drawAttentionDot(hdc, cx, cy, @divTrunc(FAVORITE_DOT_D, 2), RGB(240, 196, 75));
 }
 
+fn drawAllSessionsCloseConfirm(hdc: HANDLE, w: i32, h: i32, font_title: HANDLE, font_subtitle: HANDLE, fg_bright: DWORD, fg_dim: DWORD) void {
+    const count = app_state.g_all_sessions_close_count;
+    if (count == 0) return;
+    const agent = allSessionsCloseAnyAgent();
+    const box_w: i32 = @min(w - 48, 820);
+    const box_h: i32 = if (agent) 196 else 160;
+    const left: i32 = @divTrunc(w - box_w, 2);
+    const top: i32 = @max(@as(i32, 90), @divTrunc(h - box_h, 3));
+    var box = RECT{ .left = left, .top = top, .right = left + box_w, .bottom = top + box_h };
+    const box_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(250, 246, 238) else RGB(38, 32, 26));
+    _ = FillRect(hdc, &box, box_br);
+    _ = DeleteObject(box_br);
+    var edge = RECT{ .left = left, .top = top, .right = left + 5, .bottom = top + box_h };
+    const edge_br = CreateSolidBrush(if (agent) RGB(230, 80, 70) else RGB(240, 180, 90));
+    _ = FillRect(hdc, &edge, edge_br);
+    _ = DeleteObject(edge_br);
+
+    var head_buf: [160]u8 = undefined;
+    const first = app_state.g_all_sessions_close_queue[0];
+    const head = if (count == 1)
+        (std.fmt.bufPrint(&head_buf, "Close {s} on {s}?", .{ first.session[0..first.session_len], sessionOverviewHostLabel(first.host) }) catch "Close this session?")
+    else
+        (std.fmt.bufPrint(&head_buf, "Close {d} sessions?", .{count}) catch "Close these sessions?");
+    _ = SelectObject(hdc, font_title);
+    _ = SetTextColor(hdc, fg_bright);
+    var head_rc = RECT{ .left = left + 22, .top = top + 12, .right = left + box_w - 16, .bottom = top + 42 };
+    drawAscii(hdc, head, &head_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+    _ = SelectObject(hdc, font_subtitle);
+    _ = SetTextColor(hdc, fg_dim);
+    var list_buf: [256]u8 = undefined;
+    var lp: usize = 0;
+    const shown: u32 = @min(count, 3);
+    for (0..shown) |i| {
+        const t = app_state.g_all_sessions_close_queue[i];
+        const part = std.fmt.bufPrint(list_buf[lp..], "{s}{s} ({s})", .{ if (i == 0) "" else ", ", t.session[0..t.session_len], sessionOverviewHostLabel(t.host) }) catch break;
+        lp += part.len;
+    }
+    if (count > shown) {
+        const more = std.fmt.bufPrint(list_buf[lp..], " and {d} more", .{count - shown}) catch "";
+        lp += more.len;
+    }
+    var list_rc = RECT{ .left = left + 22, .top = top + 46, .right = left + box_w - 16, .bottom = top + 72 };
+    drawAscii(hdc, list_buf[0..lp], &list_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+    var end_rc = RECT{ .left = left + 22, .top = top + 76, .right = left + box_w - 16, .bottom = top + 102 };
+    drawAscii(hdc, "This ends the tmux session on the server and everything running in it.", &end_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+    var row_y: i32 = top + 106;
+    if (agent) {
+        _ = SetTextColor(hdc, RGB(230, 80, 70));
+        var warn_rc = RECT{ .left = left + 22, .top = row_y, .right = left + box_w - 16, .bottom = row_y + 28 };
+        drawAscii(hdc, if (count == 1) "WARNING: an AI agent is running in this session. Closing it loses its work in progress." else "WARNING: an AI agent is running in at least one of these sessions. Closing loses its work in progress.", &warn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        row_y += 34;
+    }
+    _ = SetTextColor(hdc, RGB(240, 180, 90));
+    var key_rc = RECT{ .left = left + 22, .top = row_y, .right = left + box_w - 16, .bottom = row_y + 28 };
+    drawAscii(hdc, "Enter / y  Close        Esc / n  Cancel", &key_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+}
+
 pub fn paintAllSessions(hdc: HANDLE) void {
     buildSessionOverviewRows();
     var rc: RECT = std.mem.zeroes(RECT);
@@ -1723,6 +1785,13 @@ pub fn paintAllSessions(hdc: HANDLE) void {
             _ = DeleteObject(bar_br);
         }
 
+        const marked = allSessionsRowMarked(row);
+        if (marked) {
+            var mark_rc = RECT{ .left = 12, .top = y, .right = 19, .bottom = y + row_h };
+            const mark_br = CreateSolidBrush(RGB(240, 130, 70));
+            _ = FillRect(hdc, &mark_rc, mark_br);
+            _ = DeleteObject(mark_br);
+        }
         const cy = y + @divTrunc(row_h, 2);
         drawAttentionDot(hdc, 28, cy, 4, if (row.attention) blue else kind_color);
 
@@ -1733,9 +1802,9 @@ pub fn paintAllSessions(hdc: HANDLE) void {
         drawAscii(hdc, label, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 
         _ = SelectObject(hdc, font_subtitle);
-        _ = SetTextColor(hdc, if (row.stale_candidate) RGB(230, 150, 55) else kind_color);
+        _ = SetTextColor(hdc, if (marked) RGB(240, 130, 70) else if (row.stale_candidate) RGB(230, 150, 55) else kind_color);
         var kind_rc = RECT{ .left = kind_left, .top = y, .right = kind_right, .bottom = y + row_h };
-        drawAscii(hdc, if (row.stale_candidate) "stale?" else sessionOverviewKindLabel(row.kind), &kind_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        drawAscii(hdc, if (marked) "marked" else if (row.stale_candidate) "stale?" else sessionOverviewKindLabel(row.kind), &kind_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 
         _ = SetTextColor(hdc, fg_dim);
         var ctx_rc = RECT{ .left = ctx_left, .top = y, .right = ctx_right, .bottom = y + row_h };
@@ -1771,9 +1840,19 @@ pub fn paintAllSessions(hdc: HANDLE) void {
         drawn += 1;
     }
 
+    if (app_state.g_all_sessions_confirm) drawAllSessionsCloseConfirm(hdc, w, h, font_title, font_subtitle, fg_bright, fg_dim);
+
     _ = SelectObject(hdc, font_subtitle);
     var ft_rc = RECT{ .left = 22, .top = h - footer_h, .right = w - 16, .bottom = h - 6 };
-    if (app_state.g_all_sessions_ctx) {
+    if (app_state.g_all_sessions_close_running) {
+        _ = SetTextColor(hdc, RGB(240, 180, 90));
+        var cl_buf: [64]u8 = undefined;
+        const cl_msg = std.fmt.bufPrint(&cl_buf, "Closing sessions {d} of {d}...", .{ @min(app_state.g_all_sessions_close_next, app_state.g_all_sessions_close_count), app_state.g_all_sessions_close_count }) catch "Closing sessions...";
+        drawAscii(hdc, cl_msg, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    } else if (app_state.g_all_sessions_confirm) {
+        _ = SetTextColor(hdc, RGB(240, 180, 90));
+        _ = DrawTextW(hdc, L("Close sessions:     Enter / y  Close        Esc / n  Cancel"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    } else if (app_state.g_all_sessions_ctx) {
         _ = SetTextColor(hdc, RGB(240, 180, 90));
         _ = DrawTextW(hdc, L("Session actions:     Enter / a  Attach        k  KILL remote tmux session        q / Esc  Cancel"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     } else if (app_state.g_all_sessions_filter_active) {
@@ -1781,7 +1860,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
         _ = DrawTextW(hdc, L("Type to reduce   Backspace edit   Up/Down move   Enter open   Esc clear search"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     } else {
         _ = SetTextColor(hdc, fg_dim);
-        _ = DrawTextW(hdc, L("Ctrl+F search   Ctrl+K actions   h/l tabs   j/k move   w waiting   a archived   u unattached   Enter open   q/Esc close"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        _ = DrawTextW(hdc, L("Ctrl+F search   Ctrl+K actions   h/l tabs   j/k move   Space mark   x close unattached   w waiting   a archived   u unattached   Enter open   q/Esc close"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
         if (app_state.g_all_sessions_unattached_only) {
             _ = SetTextColor(hdc, blue);
             var uo_rc = RECT{ .left = w - 230, .top = h - footer_h, .right = w - 16, .bottom = h - 6 };
@@ -1810,6 +1889,9 @@ pub fn openAllSessions(hwnd: HANDLE) void {
     buildSessionOverviewRows();
     app_state.g_all_sessions_active = true;
     app_state.g_all_sessions_ctx = false;
+    app_state.g_all_sessions_confirm = false;
+    app_state.g_all_sessions_close_running = false;
+    app_state.g_all_sessions_mark_count = 0;
     app_state.g_all_sessions_filter_active = false;
     app_state.g_all_sessions_filter_len = 0;
     app_state.g_all_sessions_sel = 0;
@@ -1824,6 +1906,10 @@ pub fn closeAllSessions(hwnd: HANDLE) void {
     if (!app_state.g_all_sessions_active) return;
     app_state.g_all_sessions_active = false;
     app_state.g_all_sessions_ctx = false;
+    app_state.g_all_sessions_confirm = false;
+    app_state.g_all_sessions_mark_count = 0;
+    app_state.g_all_sessions_close_running = false;
+    app_state.g_all_sessions_close_count = 0;
     app_state.g_all_sessions_filter_active = false;
     app_state.g_all_sessions_filter_len = 0;
     if (!app_state.g_inbox_active) _ = KillTimer(hwnd, TIMER_INBOX_REFRESH);
@@ -1838,6 +1924,7 @@ pub fn closeAllSessions(hwnd: HANDLE) void {
 pub fn openAllSessionsFilter(hwnd: HANDLE) void {
     if (!app_state.g_all_sessions_active) return;
     app_state.g_all_sessions_ctx = false;
+    app_state.g_all_sessions_confirm = false;
     app_state.g_all_sessions_filter_active = true;
     app_state.g_all_sessions_filter_len = 0;
     app_state.g_all_sessions_sel = 0;
@@ -1860,6 +1947,172 @@ pub fn allSessionsJump(hwnd: HANDLE) void {
         return;
     };
     _ = activateSessionOverviewRow(ri, hwnd);
+}
+
+fn removeTmuxCacheEntry(host: u8, session: []const u8) void {
+    var ci: u32 = 0;
+    while (ci < app_state.g_tmux_cache_count) {
+        const e = &app_state.g_tmux_cache[ci];
+        if (e.host == host and std.ascii.eqlIgnoreCase(e.name[0..e.name_len], session)) {
+            var j = ci;
+            while (j + 1 < app_state.g_tmux_cache_count) : (j += 1) app_state.g_tmux_cache[j] = app_state.g_tmux_cache[j + 1];
+            app_state.g_tmux_cache_count -= 1;
+        } else ci += 1;
+    }
+}
+
+fn allSessionsCloseLog(comptime fmt: []const u8, args: anytype) void {
+    var buf: [384]u8 = undefined;
+    const msg = std.fmt.bufPrint(&buf, fmt, args) catch return;
+    debugLog(msg);
+}
+
+fn allSessionsMarkIndex(host: u8, session: []const u8) ?usize {
+    for (0..app_state.g_all_sessions_mark_count) |i| {
+        const m = &app_state.g_all_sessions_marks[i];
+        if (m.host == host and std.mem.eql(u8, m.session[0..m.session_len], session)) return i;
+    }
+    return null;
+}
+
+pub fn allSessionsRowMarked(row: *const SessionOverviewRow) bool {
+    return allSessionsMarkIndex(row.host, row.session[0..row.session_len]) != null;
+}
+
+fn allSessionsToggleMark(hwnd: HANDLE) void {
+    const ri = allSessionsNthVisible(app_state.g_all_sessions_sel) orelse return;
+    const row = &app_state.g_session_overview_rows.items[ri];
+    if (row.kind != .vps_only or row.session_len == 0) {
+        showHeaderNoticeAscii("Only unattached sessions can be marked", 2500, true);
+        return;
+    }
+    const sess = row.session[0..row.session_len];
+    if (allSessionsMarkIndex(row.host, sess)) |mi| {
+        var j = mi;
+        while (j + 1 < app_state.g_all_sessions_mark_count) : (j += 1) app_state.g_all_sessions_marks[j] = app_state.g_all_sessions_marks[j + 1];
+        app_state.g_all_sessions_mark_count -= 1;
+    } else if (app_state.g_all_sessions_mark_count < app_state.ALL_SESSIONS_CLOSE_MAX) {
+        const m = &app_state.g_all_sessions_marks[app_state.g_all_sessions_mark_count];
+        m.host = row.host;
+        m.session_len = row.session_len;
+        m.agent = row.agent != 0;
+        @memcpy(m.session[0..row.session_len], sess);
+        app_state.g_all_sessions_mark_count += 1;
+    } else {
+        showHeaderNoticeAscii("Mark limit reached", 2500, true);
+        return;
+    }
+    allSessionsCloseLog("all-sessions mark session={s} marked={d} total={d}", .{ sess, @intFromBool(allSessionsMarkIndex(row.host, sess) != null), app_state.g_all_sessions_mark_count });
+    if (app_state.g_all_sessions_sel + 1 < allSessionsVisibleCount()) app_state.g_all_sessions_sel += 1;
+    _ = InvalidateRect(hwnd, null, 0);
+}
+
+fn allSessionsBeginClose(hwnd: HANDLE) void {
+    app_state.g_all_sessions_close_count = 0;
+    for (0..app_state.g_all_sessions_mark_count) |i| {
+        const m = app_state.g_all_sessions_marks[i];
+        var still_there = false;
+        var agent_now = false;
+        for (0..app_state.g_session_overview_count) |ri| {
+            const row = &app_state.g_session_overview_rows.items[ri];
+            if (row.kind == .vps_only and row.host == m.host and std.mem.eql(u8, row.session[0..row.session_len], m.session[0..m.session_len])) {
+                still_there = true;
+                agent_now = row.agent != 0;
+                break;
+            }
+        }
+        if (still_there and app_state.g_all_sessions_close_count < app_state.ALL_SESSIONS_CLOSE_MAX) {
+            app_state.g_all_sessions_close_queue[app_state.g_all_sessions_close_count] = m;
+            app_state.g_all_sessions_close_queue[app_state.g_all_sessions_close_count].agent = agent_now;
+            app_state.g_all_sessions_close_count += 1;
+        }
+    }
+    if (app_state.g_all_sessions_close_count == 0) {
+        const ri = allSessionsNthVisible(app_state.g_all_sessions_sel) orelse return;
+        const row = &app_state.g_session_overview_rows.items[ri];
+        if (row.kind != .vps_only or row.session_len == 0) {
+            showHeaderNoticeAscii("Only unattached sessions can be closed here", 2500, true);
+            return;
+        }
+        const t = &app_state.g_all_sessions_close_queue[0];
+        t.host = row.host;
+        t.session_len = row.session_len;
+        t.agent = row.agent != 0;
+        @memcpy(t.session[0..row.session_len], row.session[0..row.session_len]);
+        app_state.g_all_sessions_close_count = 1;
+    }
+    app_state.g_all_sessions_ctx = false;
+    app_state.g_all_sessions_confirm = true;
+    var names: [256]u8 = undefined;
+    var np: usize = 0;
+    for (0..app_state.g_all_sessions_close_count) |i| {
+        const t = &app_state.g_all_sessions_close_queue[i];
+        const part = std.fmt.bufPrint(names[np..], "{s}{s}", .{ if (i == 0) "" else ",", t.session[0..t.session_len] }) catch break;
+        np += part.len;
+    }
+    allSessionsCloseLog("all-sessions close-confirm count={d} strong={d} targets={s}", .{ app_state.g_all_sessions_close_count, @intFromBool(allSessionsCloseAnyAgent()), names[0..np] });
+    _ = InvalidateRect(hwnd, null, 0);
+}
+
+fn allSessionsCloseAnyAgent() bool {
+    for (0..app_state.g_all_sessions_close_count) |i| {
+        if (app_state.g_all_sessions_close_queue[i].agent) return true;
+    }
+    return false;
+}
+
+fn allSessionsFinishClose(hwnd: HANDLE) void {
+    app_state.g_all_sessions_close_running = false;
+    app_state.g_all_sessions_mark_count = 0;
+    buildSessionOverviewRows();
+    app_state.g_tmux_fetch_tick = 0;
+    var buf: [64]u8 = undefined;
+    const done = app_state.g_all_sessions_close_done;
+    const failed = app_state.g_all_sessions_close_failed;
+    const msg = if (failed == 0)
+        (std.fmt.bufPrint(&buf, "Closed {d} session{s}", .{ done, if (done == 1) "" else "s" }) catch "Sessions closed")
+    else
+        (std.fmt.bufPrint(&buf, "Closed {d}, {d} failed (session busy?)", .{ done, failed }) catch "Some sessions failed");
+    allSessionsCloseLog("all-sessions close-finished done={d} failed={d}", .{ done, failed });
+    showHeaderNoticeAscii(msg, 3500, failed != 0);
+    _ = InvalidateRect(hwnd, null, 0);
+}
+
+fn allSessionsCloseNext(hwnd: HANDLE) void {
+    if (!app_state.g_all_sessions_close_running) return;
+    if (app_state.g_all_sessions_close_next >= app_state.g_all_sessions_close_count) {
+        allSessionsFinishClose(hwnd);
+        return;
+    }
+    const t = app_state.g_all_sessions_close_queue[app_state.g_all_sessions_close_next];
+    app_state.g_all_sessions_close_next += 1;
+    const sess = t.session[0..t.session_len];
+    const killed = killRemoteTmuxSession(sess, t.host);
+    allSessionsCloseLog("all-sessions close-result session={s} ok={d}", .{ sess, @intFromBool(killed) });
+    if (killed) {
+        removeTmuxCacheEntry(t.host, sess);
+        if (allSessionsMarkIndex(t.host, sess)) |mi| {
+            var j = mi;
+            while (j + 1 < app_state.g_all_sessions_mark_count) : (j += 1) app_state.g_all_sessions_marks[j] = app_state.g_all_sessions_marks[j + 1];
+            app_state.g_all_sessions_mark_count -= 1;
+        }
+        app_state.g_all_sessions_close_done += 1;
+    } else {
+        app_state.g_all_sessions_close_failed += 1;
+    }
+    buildSessionOverviewRows();
+    _ = InvalidateRect(hwnd, null, 0);
+    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_ALL_SESSIONS_KEY, 44, 0);
+}
+
+fn allSessionsConfirmClose(hwnd: HANDLE) void {
+    if (!app_state.g_all_sessions_confirm) return;
+    app_state.g_all_sessions_confirm = false;
+    app_state.g_all_sessions_close_next = 0;
+    app_state.g_all_sessions_close_done = 0;
+    app_state.g_all_sessions_close_failed = 0;
+    app_state.g_all_sessions_close_running = true;
+    allSessionsCloseNext(hwnd);
 }
 
 pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
@@ -1949,6 +2202,14 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
             app_state.g_all_sessions_tab = AS_TAB_ARCHIVED;
             app_state.g_all_sessions_sel = 0;
         },
+        40 => allSessionsToggleMark(hwnd),
+        41 => allSessionsBeginClose(hwnd),
+        42 => allSessionsConfirmClose(hwnd),
+        43 => {
+            app_state.g_all_sessions_confirm = false;
+            debugLog("all-sessions close-cancelled");
+        },
+        44 => allSessionsCloseNext(hwnd),
         30 => {
             const ri = allSessionsNthVisible(app_state.g_all_sessions_sel) orelse return;
             if (app_state.g_session_overview_rows.items[ri].session_len == 0) {
@@ -1986,15 +2247,7 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
                     buildSessionOverviewRows();
                     showHeaderNoticeAscii("Archived session deleted", 2500, false);
                 } else if (row.shell_id != 0 and findShellById(row.shell_id) != null and rejectPinnedSessionClose(@intCast(findShellById(row.shell_id).?))) {} else if (killRemoteTmuxSession(sbuf[0..slen], rhost)) {
-                    var ci: u32 = 0;
-                    while (ci < app_state.g_tmux_cache_count) {
-                        const e = &app_state.g_tmux_cache[ci];
-                        if (e.host == rhost and std.ascii.eqlIgnoreCase(e.name[0..e.name_len], sbuf[0..slen])) {
-                            var j = ci;
-                            while (j + 1 < app_state.g_tmux_cache_count) : (j += 1) app_state.g_tmux_cache[j] = app_state.g_tmux_cache[j + 1];
-                            app_state.g_tmux_cache_count -= 1;
-                        } else ci += 1;
-                    }
+                    removeTmuxCacheEntry(rhost, sbuf[0..slen]);
                     buildSessionOverviewRows();
                     app_state.g_tmux_fetch_tick = 0;
                     showHeaderNoticeAscii("Session killed", 2500, false);
