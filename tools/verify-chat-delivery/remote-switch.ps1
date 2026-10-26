@@ -46,27 +46,28 @@ Bind-Transcript
 $observation.messages = $messages.Count
 $observation.switches = [Collections.Generic.List[object]]::new()
 function Measure-CPU([scriptblock]$Action, [int]$MinimumMs) {
-    Doctor
     $app.Refresh()
-    $cpuStart = $app.TotalProcessorTime.TotalMilliseconds
     $timer = [Diagnostics.Stopwatch]::StartNew()
+    $cpuStart = $app.TotalProcessorTime.TotalMilliseconds
     & $Action
     [void](Wait-For 'measurement interval completed' { $timer.ElapsedMilliseconds -ge $MinimumMs } 10)
-    $elapsed = $timer.Elapsed.TotalMilliseconds
     $app.Refresh()
     $cpuMs = $app.TotalProcessorTime.TotalMilliseconds - $cpuStart
+    $elapsed = $timer.Elapsed.TotalMilliseconds
     @{elapsedMs=$elapsed; cpuMs=$cpuMs; cpuPercent=100 * $cpuMs / $elapsed}
 }
 function Measure-Frames([scriptblock]$Action, [int]$MinimumMs) {
     $view = [IntPtr]$views[0].Current.NativeWindowHandle
     $sampler = [RemoteSwitchFrames]::new($view, $app.Id)
     try { $sample = Measure-CPU $Action $MinimumMs }
-    finally { $frames = @($sampler.Finish()); $sampler.Dispose() }
+    finally { $frames = @($sampler.Finish()); $frameElapsed = $sampler.ElapsedMs; $sampler.Dispose() }
     if ($frames.Count -eq 0) { throw 'Actual transcript paint samples missing' }
     $sample.frames = $frames
+    $sample.frameElapsedMs = $frameElapsed
     $sample
 }
 function Switch-Sample([int[]]$Keys, [bool]$Workspace, [bool]$Probe) {
+    Doctor
     $offset = (Read-Shared "$settings/debug.log").Length
     $workspaceBefore = (Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).active_workspace
     $action = {
@@ -87,6 +88,7 @@ function Switch-Sample([int[]]$Keys, [bool]$Workspace, [bool]$Probe) {
     }
     $sample
 }
+Doctor
 $observation.idleBefore = Measure-CPU {} 2000
 for ($i = 0; $i -lt 20; $i++) {
     $sample = Switch-Sample @(0x11, 0x09) $false $false
@@ -105,7 +107,8 @@ $expectedShells = 2
 [void](Wait-For 'two distinct saved workspaces' {
     $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
     $slots = @($saved.tabs | ForEach-Object { if ($_.PSObject.Properties['workspace']) { [int]$_.workspace } else { 0 } } | Select-Object -Unique)
-    $saved.workspace_count -eq 2 -and @($saved.tabs).Count -eq 2 -and $slots.Count -eq 2
+    $published = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
+    $saved.workspace_count -eq 2 -and @($saved.tabs).Count -eq 2 -and $slots.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 0 }).Count -eq 1
 })
 Switch-Palette 'chat view on everywhere'
 Bind-Transcript
@@ -120,7 +123,9 @@ for ($i = 0; $i -lt 20; $i++) {
     $observation.switches.Add($sample)
     Save $observation "$caseDir/observation.json"
 }
+Doctor
 $observation.idleAfter = Measure-CPU {} 2000
+Press @(0x12, 0x25) 'Alt+Left: capture the proved remote conversation'
 Bind-Transcript
 Shot 'remote-switch-complete'
 Save $observation "$caseDir/observation.json"

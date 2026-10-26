@@ -34,9 +34,11 @@ public sealed class RemoteSwitchFrames : IDisposable {
             Thread.Sleep(16);
         }
     }
+    public double ElapsedMs { get { return clock.Elapsed.TotalMilliseconds; } }
     public Frame[] Finish() {
         stopped = true;
         if (!thread.Join(1500)) throw new InvalidOperationException("Frame sampler did not stop");
+        clock.Stop();
         lock (frames) return frames.ToArray();
     }
     public void Dispose() { Finish(); }

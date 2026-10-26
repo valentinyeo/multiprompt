@@ -13,8 +13,16 @@ export function verifyRemoteSwitch(root) {
   assert.deepEqual([...new Set(messages)], Array.from({ length: 2000 }, (_, i) => i), 'complete rendered long conversation');
   assert.equal(value.switches.length, 40, 'twenty measured switches per surface');
   assert.deepEqual(value.switches.map(sample => sample.mode), [...Array(20).fill('session'), ...Array(20).fill('workspace')], 'session and workspace coverage');
-  const shells = new Set(value.switches.map(sample => sample.shell));
-  assert.equal(shells.size, 2, 'two distinct sessions');
+  const finalTabs = JSON.parse(read('remote-switch/session-chat.json')).tabs;
+  const remote = finalTabs.find(tab => tab.kind === 'tmux' && tab.tmux_host === 2);
+  const local = finalTabs.find(tab => tab.kind === 'cmd');
+  assert.ok(remote && local, 'published second-host and local sessions');
+  for (const mode of ['session', 'workspace']) {
+    const shells = new Set(value.switches.filter(sample => sample.mode === mode).map(sample => sample.shell));
+    assert.equal(shells.size, 2, 'two distinct sessions per surface');
+    assert.ok(shells.has(remote.shell_id), 'same remote conversation across both surfaces');
+    if (mode === 'workspace') assert.ok(shells.has(local.shell_id), 'new local workspace session');
+  }
   const cpuSample = sample => {
     assert.ok(Number.isFinite(sample.elapsedMs) && sample.elapsedMs >= 200, 'bounded measurement interval');
     assert.ok(Number.isFinite(sample.cpuMs) && sample.cpuMs >= 0, 'measured process CPU');
@@ -24,6 +32,7 @@ export function verifyRemoteSwitch(root) {
   };
   const frameSet = sample => {
     assert.ok(Number.isFinite(sample.elapsedMs) && sample.elapsedMs >= 200, 'bounded probe interval');
+    assert.ok(Number.isFinite(sample.frameElapsedMs) && sample.frameElapsedMs >= sample.elapsedMs, 'probe clock covers the switch interval');
     assert.ok(sample.frames.length >= 5, 'native frame samples');
     let previous = 0;
     for (const frame of sample.frames) {
@@ -34,7 +43,7 @@ export function verifyRemoteSwitch(root) {
       assert.ok(Number.isFinite(frame.gapMs) && frame.gapMs > 0 && frame.gapMs <= 50, `paint gap ${frame.gapMs} ms exceeds 50 ms`);
       assert.ok(Number.isFinite(frame.paintMs) && frame.paintMs >= 0 && frame.paintMs <= frame.gapMs, 'native paint timing');
     }
-    assert.ok(previous >= sample.elapsedMs - 50, 'frame sampling covers measurement interval');
+    assert.ok(previous >= sample.frameElapsedMs - 50, 'frame sampling covers measurement interval');
   };
   for (const [i, sample] of value.switches.entries()) {
     assert.equal(sample.index, i % 20);
@@ -46,6 +55,7 @@ export function verifyRemoteSwitch(root) {
     assert.ok(Number.isFinite(sample.return.switchMs) && sample.return.switchMs >= 0 && sample.return.switchMs < 150, '150 ms return switch budget');
     assert.ok(Number.isFinite(sample.probe.switchMs) && sample.probe.switchMs >= 0 && sample.probe.switchMs < 150, '150 ms probe switch budget');
     if (sample.mode === 'workspace') {
+      assert.equal(sample.workspaceAfter, finalTabs.find(tab => tab.shell_id === sample.shell).workspace || 0, 'published workspace identity');
       assert.equal(sample.return.workspaceAfter, sample.workspaceBefore);
       assert.equal(sample.probe.workspaceAfter, sample.workspaceAfter);
     }
