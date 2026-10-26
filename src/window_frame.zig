@@ -72,9 +72,6 @@ pub fn handle(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) ?w.LRESUL
         0x0083 => {
             if (lp == 0) return 0;
             const client: *w.RECT = @ptrFromInt(@as(usize, @bitCast(lp)));
-            const top = client.top;
-            _ = w.DefWindowProcW(hwnd, msg, wp, lp);
-            client.top = top;
             if (w.IsZoomed(hwnd) != 0) {
                 var monitor = std.mem.zeroes(w.MONITORINFO);
                 monitor.cbSize = @sizeOf(w.MONITORINFO);
