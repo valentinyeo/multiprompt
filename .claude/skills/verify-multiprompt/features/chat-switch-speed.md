@@ -5,7 +5,8 @@
 - Real Ctrl+1 to Ctrl+5 session switches between five remote Claude sessions in Chat View that each hold a 400-round conversation (over 1,200 transcript blocks with code blocks, tables and tool calls), with the browser pane closed and then open on every session.
 - Click-to-chat-shown time: from the native SendInput call until the app log holds `[switch] chat content shown shell=<id>` for the target session. That line is written on the first paint after the switch where the transcript has blocks, the layout is not dirty and the transcript cache belongs to the target session. An empty "Loading conversation..." area never counts as shown.
 - Window hang probe: a native thread sends WM_NULL to the main window every 2 ms and records the longest round trip in each sample window (from the switch input until 1.2 s later, so the delayed second layout and save are included).
-- The named `chat-switch-speed` case fails if any median is above 150 ms, any single window hang is above 100 ms, or any switch never shows its chat.
+- First frame already final: the `chat content shown` line also carries `layout_w` (the width the transcript was laid out for) and `client_w` (the width of the transcript window at that paint). They must be equal, and no `[chat] frame` or `[reposition]` line may follow the shown line inside the sample window, so nothing moves after the first frame with content.
+- The named `chat-switch-speed` case fails if any median is above 150 ms, any single window hang is above 100 ms, any switch never shows its chat, any first frame has the wrong width, or any layout moves after the first frame.
 
 ## How to get to it (user POV)
 
@@ -20,7 +21,7 @@ Run on demand with `workflow_dispatch` using feature `chat-switch-speed` on a br
 2. Before launch the harness writes `session.json` once with five tmux tabs, an `ssh-path.txt` pointing at the compiled stand-in `ssh.exe`, and five seeded transcripts (`boundary.py shell seed-many 400`). This is the same documented exception as Chat delivery; nothing else is seeded. After restore, select each tab with Ctrl+1 to Ctrl+5, press Alt+C and wait for its `chat content shown` line, then save `chat-switch-sessions.json` with the shell IDs.
 3. Start the hang probe. For each of `browser_closed` and `browser_open` (panes opened and docked on all five sessions first): visit every session once as a warm-up, return to session one, then do 20 switches in a round robin (1 to 2, 2 to 3, and so on).
 4. Before each switch the harness appends one new assistant answer to the target session's transcript, like a running agent that kept working while another session was in front, so the switch also has to take in new history. Each switch is one native call that starts the Stopwatch, sends the key chord, and polls the app log from the pre-switch byte offset for the content line. It returns the click-to-shown time and the longest probe round trip. The app's own `ms=` value for the same line is kept as `app_ms`.
-5. Save `switch-timings.json` from finally: per mode `samples_ms`, `app_ms`, `hang_ms`, `missing`, `median_ms`, `max_ms`, `max_hang_ms`. A switch that never shows its chat is recorded as 1200 ms and counted in `missing`. Each sample's raw log range is kept as `<mode>-<sample>-debug.log`.
+5. Save `switch-timings.json` from finally: per mode `samples_ms`, `app_ms`, `hang_ms`, `missing`, `median_ms`, `max_ms`, `max_hang_ms`, `first_frame_layout_w`, `first_frame_client_w`, `first_frame_wrong_width`, `moved_after_first_frame`, `moved_lines`. A switch that never shows its chat is recorded as 1200 ms and counted in `missing`. Each sample's raw log range is kept as `<mode>-<sample>-debug.log`.
 
 ## Gotchas
 

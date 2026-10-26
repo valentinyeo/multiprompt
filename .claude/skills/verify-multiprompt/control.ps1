@@ -5731,7 +5731,7 @@ try {
             $settleMs = 1200
             $modes = @('browser_closed', 'browser_open')
             $timings = [ordered]@{ session_count = $sessionCount; switches_per_mode = $switchCount; click_to_chat_limit_ms = $chatLimitMs; hang_limit_ms = $hangLimitMs }
-            foreach ($mode in $modes) { $timings[$mode] = @{ samples_ms = @(); app_ms = @(); hang_ms = @(); missing = 0; median_ms = $null; max_ms = $null; max_hang_ms = $null } }
+            foreach ($mode in $modes) { $timings[$mode] = @{ samples_ms = @(); app_ms = @(); hang_ms = @(); missing = 0; median_ms = $null; max_ms = $null; max_hang_ms = $null; first_frame_layout_w = @(); first_frame_client_w = @(); first_frame_wrong_width = 0; moved_after_first_frame = 0; moved_lines = @() } }
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $gapCase = @{ name = 'chat-switch-speed'; status = 'failed'; detail = 'Chat switch measurement did not complete'; phase = 'initial-console' }
             function Read-SharedLog([string]$Path) {
@@ -5835,6 +5835,15 @@ try {
                         $found = [regex]::Match($range, [regex]::Escape($needle) + 'blocks=\d+ ms=(\d+)')
                         if ($found.Success) { $appMs = [int]$found.Groups[1].Value }
                         if ($open -and -not [VerifyNative]::PaneVisible($script:window)) { throw "Browser pane not visible after switch $sample" }
+                        $widths = [regex]::Match($range, [regex]::Escape($needle) + 'blocks=\d+ ms=\d+ layout_w=(-?\d+) client_w=(-?\d+)')
+                        if ($widths.Success) {
+                            $timings[$mode].first_frame_layout_w += [int]$widths.Groups[1].Value
+                            $timings[$mode].first_frame_client_w += [int]$widths.Groups[2].Value
+                            if ($widths.Groups[1].Value -ne $widths.Groups[2].Value) { $timings[$mode].first_frame_wrong_width++ }
+                            $afterShown = $range.Substring($widths.Index + $widths.Length)
+                            $laterMoves = @($afterShown -split "`n" | Where-Object { $_ -match '\[chat\] frame transcript|\[reposition\] client=' })
+                            if ($laterMoves.Count -gt 0) { $timings[$mode].moved_after_first_frame++; $timings[$mode].moved_lines += $laterMoves[0].Trim() }
+                        }
                         if ($measured[0] -lt 0) { $timings[$mode].missing++ }
                         $timings[$mode].samples_ms += $(if ($measured[0] -lt 0) { $settleMs } else { [Math]::Round($measured[0], 1) })
                         $timings[$mode].app_ms += $appMs
@@ -5848,10 +5857,10 @@ try {
                     if (-not $open) { Snapshot 'action' }
                 }
                 $gapCase.phase = 'verdict'
-                $summary = foreach ($mode in $modes) { "$mode median $($timings[$mode].median_ms) ms (limit $chatLimitMs), worst $($timings[$mode].max_ms) ms, worst window hang $($timings[$mode].max_hang_ms) ms (limit $hangLimitMs), switches without chat shown: $($timings[$mode].missing)" }
+                $summary = foreach ($mode in $modes) { "$mode median $($timings[$mode].median_ms) ms (limit $chatLimitMs), worst $($timings[$mode].max_ms) ms, worst window hang $($timings[$mode].max_hang_ms) ms (limit $hangLimitMs), switches without chat shown: $($timings[$mode].missing), first frame at wrong width: $($timings[$mode].first_frame_wrong_width), layout moved after first frame: $($timings[$mode].moved_after_first_frame)" }
                 $gapCase.detail = $summary -join '; '
                 foreach ($mode in $modes) {
-                    if ($timings[$mode].missing -gt 0 -or $timings[$mode].median_ms -gt $chatLimitMs -or $timings[$mode].max_hang_ms -gt $hangLimitMs) { throw $gapCase.detail }
+                    if ($timings[$mode].missing -gt 0 -or $timings[$mode].median_ms -gt $chatLimitMs -or $timings[$mode].max_hang_ms -gt $hangLimitMs -or $timings[$mode].first_frame_wrong_width -gt 0 -or $timings[$mode].moved_after_first_frame -gt 0) { throw $gapCase.detail }
                 }
                 Snapshot 'after'
                 $gapCase.status = 'passed'
