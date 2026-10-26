@@ -5,6 +5,7 @@ $bounds = $views[0].Current.BoundingRectangle
 Save @{left=[int]$bounds.Left; top=[int]$bounds.Top; right=[int]$bounds.Right; bottom=[int]$bounds.Bottom} "$caseDir/area.json"
 $point = Wait-For 'two painted same-prefix replies' {
     Shot 'reactions-before'
+    $ErrorActionPreference = 'Continue'
     $located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --locate 2> "$caseDir/oracle-locate-stderr.log"
     if ($LASTEXITCODE -eq 0) { ($located -join "`n") | ConvertFrom-Json }
 }
@@ -32,12 +33,14 @@ $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
 if ($observation.composerText -cne $plan.text) { throw 'Reaction cleared the composer draft' }
 [void](Wait-For 'pending badge without another bubble' {
     Shot 'reactions-pending'
+    $ErrorActionPreference = 'Continue'
     & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --frame pending 2> "$caseDir/oracle-pending-stderr.log"
     $LASTEXITCODE -eq 0
 })
 Shell-Run @('idle')
 [void](Wait-For 'delivered badge without another bubble' {
     Shot 'reactions-delivered'
+    $ErrorActionPreference = 'Continue'
     & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --frame delivered 2> "$caseDir/oracle-delivered-stderr.log"
     $LASTEXITCODE -eq 0
 })
@@ -56,12 +59,14 @@ $observation.restartComposerText = [ChatDeliveryDesktop]::Text($composer)
 if ($observation.restartComposerText -cne $plan.text) { throw 'Restart lost the untouched composer draft' }
 [void](Wait-For 'restart badge on the same first reply' {
     Shot 'reactions-restart'
+    $ErrorActionPreference = 'Continue'
     & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --frame restart 2> "$caseDir/oracle-restart-stderr.log"
     $LASTEXITCODE -eq 0
 })
 Shell-Run @('reaction-fallback')
 [void](Wait-For 'unmatched reaction stays an ordinary bubble' {
     Shot 'reactions-fallback'
+    $ErrorActionPreference = 'Continue'
     & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --frame fallback 2> "$caseDir/oracle-fallback-stderr.log"
     $LASTEXITCODE -eq 0
 })
