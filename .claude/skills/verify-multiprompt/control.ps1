@@ -469,17 +469,6 @@ public static class VerifyNative {
             int shift = (2126 * bg.R + 7152 * bg.G + 722 * bg.B) / 10000 < 128 ? 53 : -26;
             var fill = System.Drawing.Color.FromArgb(Math.Max(0, Math.Min(255, bg.R + shift)), Math.Max(0, Math.Min(255, bg.G + shift)), Math.Max(0, Math.Min(255, bg.B + shift)));
             var queuedFill = QueuedColor(bg, fill);
-            var fills = new Dictionary<int, int>();
-            for (int x = pixels.Width / 2 - 16; x <= pixels.Width / 2 + 16; x++) {
-                var color = pixels.GetPixel(x, pixels.Height - 20);
-                int delta = Math.Max(Math.Abs(color.R - bg.R), Math.Max(Math.Abs(color.G - bg.G), Math.Abs(color.B - bg.B)));
-                if (delta < 16 || delta > 100 || Math.Abs(color.R - color.G) > 2 || Math.Abs(color.G - color.B) > 2) continue;
-                int key = color.ToArgb(), count;
-                fills.TryGetValue(key, out count);
-                fills[key] = count + 1;
-            }
-            int largest = 0;
-            foreach (var item in fills) if (item.Value > largest) { largest = item.Value; fill = System.Drawing.Color.FromArgb(item.Key); }
             for (int y = pixels.Height - 2; y > 0; y--) {
                 for (int x = pixels.Width - 2; x > 0; x--) {
                     int color = pixels.GetPixel(x, y).ToArgb();
