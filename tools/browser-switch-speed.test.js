@@ -677,6 +677,29 @@ function assertsPageFocus(focus, main, pane, driver) {
   ]) assert.ok(driver.includes(required), required);
 }
 
+function assertsOpenPaneHopSync(driver) {
+  const palette = driver.indexOf("Palette 'open browser'");
+  const offset = driver.indexOf("$hopStart = (Read-SharedText $hopLog).Length", palette);
+  const press = driver.indexOf("Press @(0x0D) 'IGSH-724: opening an existing pane focuses its page'", palette);
+  const wait = driver.indexOf("-match 'pane_hop result bh_fg=true' } 'IGSH-998 app finished the open-pane hop to its browser'", palette);
+  const foreground = driver.indexOf("throw 'Opening the pane did not focus its browser'", palette);
+  const space = driver.indexOf("throw 'IGSH-724 opening a pane sent Space to browser chrome'", palette);
+  assert.ok(palette >= 0 && palette < offset && offset < press && press < wait && wait < foreground && foreground < space);
+}
+
+test('IGSH-998 open-pane foreground check waits for the app pane_hop result and stays strict', () => {
+  assertsOpenPaneHopSync(journey);
+  for (const before of [
+    "$hopStart = (Read-SharedText $hopLog).Length\n",
+    "-match 'pane_hop result bh_fg=true'",
+  ]) assert.throws(() => assertsOpenPaneHopSync(journey.replace(before, '')), before);
+  const wait = /^ *Wait-Until \{ \(Read-SharedText \$hopLog\)[^\n]*\n/m;
+  assert.match(journey, wait);
+  assert.throws(() => assertsOpenPaneHopSync(journey.replace(wait, '')));
+  assert.ok(journey.includes("if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Opening the pane did not focus its browser' }"));
+  assert.ok(!/Start-Sleep|Thread\]::Sleep/.test(journey.slice(journey.indexOf("$hopStart"), journey.indexOf("throw 'Opening the pane did not focus its browser'"))));
+});
+
 test('IGSH-724 native handoff targets Chrome web contents and real keys distinguish page focus from toolbar activation', () => {
   const focus = read('src/focus.zig');
   const main = read('src/main.zig');
