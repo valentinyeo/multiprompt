@@ -4882,7 +4882,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     const echo_index = if (echo_id) |id| chatOutboxIndexById(id) else null;
     const unsent_actions = if (echo_index) |ei| chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).send_again else false;
     const block_at = keyboard_block orelse chatTranscriptBlockAtPoint(GET_Y(lp));
-    const selection_text = if (keyboard_block != null) (std.heap.page_allocator.alloc(u16, 0) catch return 0) else chatCopyTextAlloc(std.heap.page_allocator, null) catch {
+    const selection_text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
         showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
         return 0;
     };
@@ -5191,13 +5191,13 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_LBUTTONDOWN => {
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
-            chatNavClear();
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatToolAt(GET_X(lp), GET_Y(lp))) |index| {
                 app_state.g_chat_blocks[index].tool_open = !app_state.g_chat_blocks[index].tool_open;
                 chatImageReady();
                 return 0;
             }
+            chatNavClear();
             if (chatTableMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatEchoRetryAt(GET_X(lp), GET_Y(lp))) return 0;
             if (chatChoiceAt(GET_X(lp), GET_Y(lp))) |index| {
