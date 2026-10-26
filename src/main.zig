@@ -1707,6 +1707,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
             if (app_state.g_all_sessions_active) {
                 app_state.g_all_sessions_ctx = false;
+                if (!app_state.g_all_sessions_close_running) app_state.g_all_sessions_confirm = false;
                 const list_top = allSessionsListTop();
                 const tab_strip_bot: i32 = 54;
                 if (my >= 0 and my < tab_strip_bot) {

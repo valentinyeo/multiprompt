@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static char root[MAX_PATH];
 static char sessions[4096];
@@ -68,6 +69,28 @@ int main(int argc, char **argv) {
             }
         }
         puts("@@MP_LIVE@@"); return 0;
+    }
+    char *victim = strstr(cmd, "tmux kill-session -t ");
+    if (victim) {
+        victim += strlen("tmux kill-session -t ");
+        while (*victim == '\'' || *victim == '"') victim++;
+        victim[strcspn(victim, " '\";\r\n")] = 0;
+        if (!exists(victim)) { fprintf(stderr, "can't find session: %s\n", victim); return 1; }
+        char keep[4096] = "";
+        for (char *p = strtok(sessions, "\r\n"); p; p = strtok(NULL, "\r\n")) if (strcmp(p, victim)) { strcat(keep, p); strcat(keep, "\n"); }
+        snprintf(path, sizeof(path), "%s\\sessions.next", root);
+        FILE *f = fopen(path, "wb"); if (!f) return 93; fputs(keep, f); fclose(f);
+        char target[MAX_PATH];
+        snprintf(target, sizeof(target), "%s\\sessions.txt", root);
+        if (!MoveFileExA(path, target, MOVEFILE_REPLACE_EXISTING)) return 94;
+        return 0;
+    }
+    if (strstr(cmd, "tmux list-sessions -F")) {
+        if (strstr(cmd, " vps ")) {
+            for (char *p = strtok(sessions, "\r\n"); p; p = strtok(NULL, "\r\n"))
+                printf("%s|%lld|0|/home/runner/work/%s|%s|\n", p, (long long)time(NULL) - 120, p, strncmp(p, "agent-", 6) ? "bash" : "claude");
+        }
+        return 0;
     }
     if (strstr(cmd, "tmux list-sessions")) {
         for (char *p = strtok(sessions, "\r\n"); p; p = strtok(NULL, "\r\n")) printf("%s\t1\t0\n", p);

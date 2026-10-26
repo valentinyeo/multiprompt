@@ -169,6 +169,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K → Start new session | Restart an ended server session with the same name (also in tab actions) |
 | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) |
 | Ctrl+F in All Sessions | Reduce the list to matching sessions |
+| Space in All Sessions | Mark or unmark the selected unattached session |
+| x in All Sessions | Close the marked unattached sessions, or the selected one, after a confirmation |
 | Alt+E | Move active tab to Waiting until it gets a blue dot |
 | Alt+Z | Undo the most recent move to Waiting |
 | Ctrl+K -&gt; Restore Waiting | Restore waiting live sessions in this workspace |
