@@ -98,6 +98,7 @@ var g_chat_new_messages: chat_history.NewMessages = .{};
 var g_chat_scroll_bottom_pending = false;
 var g_chat_read_visit_shell_id: u32 = 0;
 var g_chat_read_visit_marker: u64 = 0;
+var g_chat_read_visit_state: enum { pending, all_read, unread } = .pending;
 var g_chat_read_open_pending = false;
 var g_chat_read_hold = false;
 var g_chat_read_open_ready = false;
@@ -105,6 +106,7 @@ var g_chat_read_boundary: chat_history.ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
 fn chatReadMark(_: bool) bool { return false; }
 fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }
+fn foregroundIsOurs() bool { return true; }
 var g_chat_echo_layout_count: usize = 0;
 var request_count: usize = 0;
 var capture_count: usize = 0;
@@ -539,7 +541,6 @@ var g_chat_file_request_id: u32 = 0;
 const LASTINPUTINFO = struct { cbSize: u32, dwTime: u32 };
 fn IsIconic(_: HANDLE) i32 { return 0; }
 fn IsWindowVisible(_: HANDLE) i32 { return 1; }
-fn foregroundIsOurs() bool { return true; }
 fn GetLastInputInfo(_: *LASTINPUTINFO) i32 { return 1; }
 fn chatFetchAcquire() bool { return true; }
 const TestThread = struct {

@@ -1157,6 +1157,7 @@ pub var g_chat_scroll_y: i32 = 0;
 pub var g_chat_scrolled_up = false;
 pub var g_chat_read_visit_shell_id: u32 = 0;
 pub var g_chat_read_visit_marker: u64 = 0;
+pub var g_chat_read_visit_state: enum { pending, all_read, unread } = .pending;
 pub var g_chat_read_open_pending = false;
 pub var g_chat_read_open_ready = false;
 pub var g_chat_read_hold = false;

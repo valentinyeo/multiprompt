@@ -6908,6 +6908,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_ACTIVATEAPP => {
             if (wp == 0) {
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
+                @import("chat_session.zig").chatReadDeactivate();
                 hideBrowserEdgeMasks();
             } else {
                 focusGuardNoteActivation();
