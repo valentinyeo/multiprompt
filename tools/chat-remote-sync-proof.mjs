@@ -15,7 +15,7 @@ export function verifyRemoteSync(root) {
   assert.notEqual(value.turns[1].session, value.turns[2].session, 'resume changes session identity');
   const frames = read('remote-sync/stand-in/frames.jsonl').trim().split('\n').map(JSON.parse);
   for (const turn of value.turns) {
-    assert.ok(turn.loadedMs >= 0 && turn.loadedMs <= 2000, 'two-second delivery budget');
+    assert.ok(turn.renderedMs >= 0 && turn.renderedMs <= 2000, 'two-second delivery budget');
     const copied = read(`remote-sync/turn-${turn.turn}-copied.txt`);
     assert.ok(copied.includes(turn.question) && copied.includes(turn.answer), 'rendered question and answer');
     if (turn.turn === 3) assert.ok(!copied.includes('Remote answer 2'), 'no stale conversation');
