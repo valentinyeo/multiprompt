@@ -42,9 +42,10 @@ const fixture = () => ({
   ],
 });
 
-function runtime(input, event = 'workflow_dispatch', failure = null) {
+function runtime(input, event = 'workflow_dispatch', failure = null, rateLimits = []) {
   const calls = [];
   const output = [];
+  const waits = [];
   const process = { env: { AUTO_REVERT_RUN_ID: String(input.run.id), GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: repository }, exitCode: 0 };
   const module = { exports: {} };
   const require = name => {
@@ -56,6 +57,10 @@ function runtime(input, event = 'workflow_dispatch', failure = null) {
         stderr: Buffer.from(`GH013: ${failure} rejected\nexact command output\n`),
       });
       if (command === 'gh') {
+        if (args[0] === 'api' && args[1] === 'rate_limit') return JSON.stringify({ resources: { core: { reset: Math.floor(Date.now() / 1000) + 120 } } });
+        if (args[0] === 'api' && args[1].endsWith(`/actions/runs/${input.run.id}`) && rateLimits.length) {
+          throw Object.assign(new Error('Command failed'), { stderr: Buffer.from(rateLimits.shift()) });
+        }
         if (args[0] === 'pr' && args[1] === 'create') return `https://github.com/${repository}/pull/351\n`;
         if (args[0] === 'pr' && args[1] === 'merge') return '';
         if (args[0] === 'pr' && args[1] === 'list') return JSON.stringify(input.existingPull ? [{ url: input.existingPull, state: input.existingState || 'OPEN' }] : []);
@@ -84,8 +89,8 @@ function runtime(input, event = 'workflow_dispatch', failure = null) {
     } };
   };
   require.main = module;
-  vm.runInNewContext(fs.readFileSync(`${__dirname}/auto-revert-master.js`, 'utf8'), { require, module, process, console: { log: value => output.push(value), error: value => output.push(value) } });
-  return { calls, output: output.join('\n'), process };
+  vm.runInNewContext(fs.readFileSync(`${__dirname}/auto-revert-master.js`, 'utf8'), { require, module, process, Atomics: { wait: (...args) => waits.push(args[3]) }, console: { log: value => output.push(value), error: value => output.push(value) } });
+  return { calls, output: output.join('\n'), process, waits };
 }
 
 test('real master run-name verify full master is accepted', () => {
@@ -161,7 +166,7 @@ test('baseline skips history entries where the journey job was cancelled', () =>
   assert.equal(listCalls(result).length, 1);
 });
 
-test('journeys already red at their baseline skip the revert and open an issue', () => {
+test('journeys already red at their baseline skip green without opening an incident', () => {
   const input = fixture();
   input.history[0].run.conclusion = 'failure';
   input.history[0].jobs = input.jobs;
@@ -172,8 +177,8 @@ test('journeys already red at their baseline skip the revert and open an issue',
   const result = runtime(input, 'workflow_run');
   assert.match(result.output, /already red/);
   assert.ok(result.calls.every(call => !call.includes('revert') && !call.includes('push')));
-  assert.ok(result.calls.some(call => call.includes('POST') && call.some(arg => arg.includes('Journeys already red'))));
-  assert.equal(result.process.exitCode, 1);
+  assert.ok(result.calls.every(call => !call.includes('POST')));
+  assert.equal(result.process.exitCode, 0);
 });
 
 test('only newly failing journeys are blamed when master was already red', () => {
@@ -203,8 +208,8 @@ test('a journey that last passed on an older commit than the parent is not blame
   });
   const result = runtime(input, 'workflow_run');
   assert.ok(result.calls.every(call => !call.includes('revert') && !call.includes('push')));
-  assert.ok(result.calls.some(call => call.includes('POST') && call.some(arg => arg.includes('Cannot isolate'))));
-  assert.equal(result.process.exitCode, 1);
+  assert.ok(result.calls.every(call => !call.includes('POST')));
+  assert.equal(result.process.exitCode, 0);
 });
 
 test('matrix job names in history count as their plain journey', () => {
@@ -436,7 +441,8 @@ test('duplicate red workflow path never pushes a second revert', () => {
   assert.ok(result.calls.every(call => !call.includes('revert') && !call.includes('push')));
   assert.match(result.output, /already reverted/);
   assert.ok(result.calls.every(call => call[0] !== 'node'));
-  assert.ok(result.calls.some(call => call.includes('POST')));
+  assert.ok(result.calls.every(call => !call.includes('POST')));
+  assert.equal(result.process.exitCode, 0);
 });
 
 test('a re-run after the revert merged still reopens the board ticket once more through the idempotent step', () => {
@@ -594,4 +600,25 @@ test('one-shot proof rejects its subject only, never an innocent commit mentioni
     });
     assert.equal(result.status, expected, `${message}\n${result.stdout}\n${result.stderr}`);
   }
+});
+
+for (const [name, errors] of [
+  ['primary rate limit', ['gh: API rate limit exceeded (HTTP 403)']],
+  ['secondary rate limit', ['gh: You have exceeded a secondary rate limit (HTTP 403)']],
+  ['repeated rate limits', ['gh: API rate limit exceeded (HTTP 403)', 'gh: API rate limit exceeded (HTTP 403)']],
+]) test(`${name} waits then retries without changing the revert decision`, () => {
+  const count = errors.length;
+  const result = runtime(fixture(), 'workflow_dispatch', null, [...errors]);
+  assert.equal(result.process.exitCode, 0, result.output);
+  assert.equal(JSON.parse(result.output).action, 'revert');
+  assert.equal(result.waits.length, count);
+  assert.ok(result.waits.every(ms => ms >= 60000 && ms <= 121000));
+  assert.equal(result.calls.filter(call => call[0] === 'gh' && call[2] === `repos/${repository}/actions/runs/40195971037`).length, count + 1);
+});
+
+test('permission errors fail immediately without retrying or touching master', () => {
+  const result = runtime(fixture(), 'workflow_run', null, ['gh: Resource not accessible by integration (HTTP 403)']);
+  assert.equal(result.process.exitCode, 1);
+  assert.equal(result.waits.length, 0);
+  assert.ok(result.calls.every(call => !call.includes('push') && !call.includes('POST')));
 });
