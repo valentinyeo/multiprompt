@@ -138,6 +138,20 @@ pub const View = struct {
         return target.last;
     }
 
+    fn hideReplies(self: *View, blocks: []const md.Block, from: usize) void {
+        var end = from;
+        var count: usize = 0;
+        while (end < blocks.len and blocks[end].role != .user) : (end += 1) {
+            const block = blocks[end];
+            if (block.role != .prose and block.role != .code) continue;
+            if (block.first or count == 0) count += 1;
+        }
+        if (count != 1) return;
+        for (blocks[from..end], from..) |block, index| {
+            if (block.role == .prose or block.role == .code) self.hidden.items[index] = true;
+        }
+    }
+
     pub fn build(self: *View, a: std.mem.Allocator, blocks: []const md.Block, text: []const u16, pending: []const Pending) !bool {
         try self.hidden.resize(a, blocks.len);
         try self.badges.resize(a, blocks.len);
@@ -160,6 +174,7 @@ pub const View = struct {
             const target = try resolve(a, reaction, &targets, blocks, text, i) orelse continue;
             self.hidden.items[i] = true;
             self.badges.items[target] |= reaction.emoji.bit();
+            self.hideReplies(blocks, i + 1);
         }
         for (pending) |item| {
             const reaction = parse(item.text) orelse continue;
@@ -279,4 +294,45 @@ test "IGSH-975 ordinary history changes do not invalidate an unchanged reaction 
     _ = try view.build(a, blocks[0..1], &.{'x'}, &.{});
     view.context = 999;
     try std.testing.expect(!try view.build(a, &blocks, &.{'x'}, &.{}));
+}
+
+test "IGSH-1012 a lone session reply to a reaction is hidden and other replies stay" {
+    const a = std.testing.allocator;
+    const words = std.unicode.utf8ToUtf16LeStringLiteral("Everything is done");
+    var line: [256]u16 = undefined;
+    const reaction = format(.like, reference("msg_target"), words, &line).?;
+    const ack = std.unicode.utf8ToUtf16LeStringLiteral("Noted, thanks.");
+    const more = std.unicode.utf8ToUtf16LeStringLiteral("Finished the follow-up");
+    const capture = try a.alloc(u16, words.len + reaction.len + ack.len + more.len);
+    defer a.free(capture);
+    @memcpy(capture[0..words.len], words);
+    @memcpy(capture[words.len..][0..reaction.len], reaction);
+    @memcpy(capture[words.len + reaction.len ..][0..ack.len], ack);
+    @memcpy(capture[words.len + reaction.len + ack.len ..], more);
+    const reply_start = words.len + reaction.len;
+    const target: md.Block = .{ .start = 0, .len = words.len, .role = .prose, .first = true, .message_id = 1, .reaction_reference = reference("msg_target") };
+    const react: md.Block = .{ .start = words.len, .len = reaction.len, .role = .user, .first = true };
+    const ack_block: md.Block = .{ .start = reply_start, .len = ack.len, .role = .prose, .first = true, .message_id = 2 };
+    const more_block: md.Block = .{ .start = reply_start + ack.len, .len = more.len, .role = .prose, .first = true, .message_id = 3 };
+    var view: View = .{};
+    defer view.deinit(a);
+    _ = try view.build(a, &[_]md.Block{ target, react, ack_block }, capture, &.{});
+    try std.testing.expect(!view.hides(0));
+    try std.testing.expect(view.hides(1));
+    try std.testing.expect(view.hides(2));
+    try std.testing.expectEqual(Emoji.like.bit(), view.mask(0));
+    _ = try view.build(a, &[_]md.Block{ target, react, ack_block, more_block }, capture, &.{});
+    try std.testing.expect(view.hides(1));
+    try std.testing.expect(!view.hides(2));
+    try std.testing.expect(!view.hides(3));
+    const ordinary: md.Block = .{ .start = words.len, .len = 1, .role = .user, .first = true };
+    _ = try view.build(a, &[_]md.Block{ target, ordinary, ack_block }, capture, &.{});
+    try std.testing.expect(!view.hides(1));
+    try std.testing.expect(!view.hides(2));
+    const next: md.Block = .{ .start = reply_start + ack.len, .len = more.len, .role = .user, .first = true };
+    const answer: md.Block = .{ .start = reply_start + ack.len, .len = more.len, .role = .prose, .first = true, .message_id = 4 };
+    _ = try view.build(a, &[_]md.Block{ target, react, ack_block, next, answer }, capture, &.{});
+    try std.testing.expect(view.hides(2));
+    try std.testing.expect(!view.hides(3));
+    try std.testing.expect(!view.hides(4));
 }
