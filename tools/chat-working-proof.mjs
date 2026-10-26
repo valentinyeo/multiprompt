@@ -45,7 +45,7 @@ export function dots(image, area) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [file, areaFile, output, state, previousFile] = process.argv.slice(2);
   const image = readBmp(file);
-  const area = JSON.parse(fs.readFileSync(areaFile, 'utf8'));
+  const area = JSON.parse(fs.readFileSync(areaFile, 'utf8').replace(/^\uFEFF/, ''));
   const found = dots(image, area);
   let replyPixels = 0;
   if (state === 'idle') {
