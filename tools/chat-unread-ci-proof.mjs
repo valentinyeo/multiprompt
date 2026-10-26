@@ -22,6 +22,8 @@ try {
   assert.equal(observation.unreadDivider.passed, true);
   assert.equal(observation.activeDivider.count, 0);
   const active = dividerPixels(readBmp(path.join(root, 'unread-active-session.bmp')), observation.transcript, 0, 0);
+  assert.equal(observation.revisitActiveDivider.count, 0);
+  dividerPixels(readBmp(path.join(root, 'unread-active-revisit.bmp')), observation.transcript, 0, 0);
   const divider = verifyUnreadDivider(root);
   const actions = json('actions.json');
   assert.ok(actions.some(action => action.input === 'two new arrivals while reading' && action.state.count === 2 && action.state.visible === 1 && action.state.up === 1));
