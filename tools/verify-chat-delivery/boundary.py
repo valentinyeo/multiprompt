@@ -18,7 +18,10 @@ ARGS = sys.argv[2:]
 
 
 def state():
-    return json.loads((ROOT / "state.json").read_text(encoding="utf-8-sig"))
+    value = json.loads((ROOT / "state.json").read_text(encoding="utf-8-sig"))
+    if value.get("binding"):
+        value["bindingStatus"] = not (ROOT / "binding-status-hidden").exists()
+    return value
 
 
 def record(file, **values):

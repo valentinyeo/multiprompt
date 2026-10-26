@@ -7,8 +7,7 @@ Wait-Until {
     $tabs.Count -eq 1 -and $tabs[0].kind -eq 'tmux' -and $tabs[0].tmux_session -ceq $bindingName -and $tabs[0].tmux_host -eq 1
 } 'confirmed remote identity adopted and saved' 180
 Snapshot 'before'
-$bindingDocument.bindingStatus = $false
-[IO.File]::WriteAllText((Join-Path $bindingState 'state.json'), ($bindingDocument | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+New-Item -ItemType File (Join-Path $bindingState 'binding-status-hidden') | Out-Null
 Wait-Until {
     $ready = Join-Path $bindingState 'ready.json'
     (Test-Path $ready) -and (Get-Content $ready -Raw | ConvertFrom-Json).screen.Contains('Status temporarily hidden')
@@ -28,7 +27,7 @@ foreach ($cycle in 1..5) {
         $saved = Read-Session
         $tabs = @($saved.tabs)
         $tabs.Count -eq 1 -and $tabs[0].kind -eq 'tmux' -and $tabs[0].tmux_session -ceq $bindingName -and $tabs[0].tmux_host -eq 1 -and
-            (Read-SharedText (Join-Path $bindingState 'invocations.jsonl')).Contains('"kind": "attach"')
+            ([regex]::Matches((Read-SharedText (Join-Path $bindingState 'invocations.jsonl')), '"kind": "attach"')).Count -eq $cycle
     } "reopen $cycle restored the exact remote identity" 60
     $saved = Read-Session
     $tabs = @($saved.tabs)
