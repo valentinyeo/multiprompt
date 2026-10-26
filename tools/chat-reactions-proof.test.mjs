@@ -30,3 +30,22 @@ for (const [name, mutate] of [
   const f = fixture(); mutate(f);
   assert.throws(() => assertBadge(inspect(f.image, area)));
 });
+
+
+test('gradient fills remain one bubble; shared pill shade does not split user rows', () => {
+  const f = fixture();
+  for (const [top, bottom, base] of [[10, 45, 53], [60, 116, 36], [165, 230, 36]]) {
+    for (let step = 0; step < 8; step++) {
+      const shade = 32 + base + 8 - Math.trunc(8 * step / 7);
+      f.fill(20, top + Math.trunc((bottom - top) * step / 8), 250, top + Math.trunc((bottom - top) * (step + 1) / 8), shade * 0x010101);
+    }
+  }
+  assertBadge(inspect(f.image, area));
+});
+
+test('rounded-edge shades cannot substitute for a painted badge glyph', () => {
+  const f = fixture();
+  f.fill(42, 126, 53, 136, 0x585858);
+  f.fill(28, 120, 31, 142, 0x484848);
+  assert.throws(() => assertBadge(inspect(f.image, area)));
+});

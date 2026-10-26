@@ -11,30 +11,35 @@ export function inspect(image, area) {
   const width = area.right - area.left, height = area.bottom - area.top;
   const seen = new Uint8Array(width * height), queue = new Int32Array(width * height);
   const groups = { agent: [], user: [], dim: [], pill: [] };
-  const colors = new Map([[shifted(36), 'agent'], [shifted(53), 'user'], [shifted(26), 'dim'], [shifted(27), 'dim'], [shifted(56), 'pill']]);
+  const colors = new Map();
+  for (const [kind, low, high] of [['agent', 36, 48], ['user', 53, 65], ['dim', 26, 33]]) {
+    for (let delta = low; delta <= high; delta++) colors.set(shifted(delta), kind);
+  }
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const start = y * width + x;
     if (seen[start]) continue;
     const color = pixel(x + area.left, y + area.top), kind = colors.get(color);
     if (!kind) continue;
-    let head = 0, tail = 1, left = x, right = x, top = y, bottom = y;
+    let head = 0, tail = 1, left = x, right = x, top = y, bottom = y, solidPill = 0;
     queue[0] = start; seen[start] = 1;
     while (head < tail) {
       const pos = queue[head++], px = pos % width, py = Math.floor(pos / width);
+      if (pixel(px + area.left, py + area.top) === shifted(56)) solidPill++;
       left = Math.min(left, px); right = Math.max(right, px); top = Math.min(top, py); bottom = Math.max(bottom, py);
       for (const next of [px > 0 ? pos - 1 : -1, px + 1 < width ? pos + 1 : -1, py > 0 ? pos - width : -1, py + 1 < height ? pos + width : -1]) {
         if (next < 0 || seen[next]) continue;
-        if (pixel(next % width + area.left, Math.floor(next / width) + area.top) !== color) continue;
+        if (colors.get(pixel(next % width + area.left, Math.floor(next / width) + area.top)) !== kind) continue;
         seen[next] = 1; queue[tail++] = next;
       }
     }
     if (tail < 100 || right - left < 20 || bottom - top < 8) continue;
+    const group = kind === 'user' && right - left < 100 && bottom - top < 40 && solidPill > tail * 0.6 ? 'pill' : kind;
     let ink = 0;
     for (let iy = top + 3; iy < bottom - 3; iy++) for (let ix = left + 5; ix < right - 5; ix++) {
       const value = pixel(ix + area.left, iy + area.top);
-      if (value !== color && value !== shifted(36) && value !== bg) ink++;
+      if ([0, 8, 16].every(shift => ((value >> shift) & 255) > ((shifted(56) >> shift) & 255) + 20)) ink++;
     }
-    groups[kind].push({ left: left + area.left, right: right + area.left + 1, top: top + area.top, bottom: bottom + area.top + 1, ink });
+    groups[group].push({ left: left + area.left, right: right + area.left + 1, top: top + area.top, bottom: bottom + area.top + 1, ink });
   }
   for (const list of Object.values(groups)) list.sort((a, b) => a.top - b.top);
   return groups;
