@@ -23,7 +23,7 @@ pub fn known(token: []const u16) bool {
             !std.mem.eql(u8, std.mem.sliceTo(&slot.cwd, 0), shell.claude_cwd[0..shell.claude_cwd_len])) continue;
         for (slot.entries[0..slot.count]) |entry| {
             const prefix: u16 = if (slot.mode == .dollar or entry.kind == 'K') '$' else '/';
-            if ((entry.kind == 'C' or entry.kind == 'S' or entry.kind == 'K' or entry.kind == 'D') and complete.commandMatches(token, entry.name, prefix)) return true;
+            if (complete.commandMatches(token, entry.name, prefix)) return true;
         }
     }
     return false;
@@ -77,4 +77,46 @@ test "IGSH-928 composer and history share exact whole skill ranges without chang
     try std.testing.expectEqual(text.len, last.end);
     try std.testing.expect(next(text, last.end) == null);
     try std.testing.expect(!known(L("/pill")) and !known(L("/pill-proof/path")) and !known(L("plain")));
+}
+
+test "IGSH-928 built-in slash commands use only the active session catalog" {
+    const L = std.unicode.utf8ToUtf16LeStringLiteral;
+    const active = app.active_shell;
+    const count = app.shell_count;
+    const shell = &app.shells[0];
+    const kind = shell.kind;
+    const agent = shell.ai_agent;
+    const host = shell.tmux_host;
+    const cwd_len = shell.claude_cwd_len;
+    const session_len = shell.tmux_session_len;
+    const slot = &app.g_chat_ac_slots[0];
+    const saved_slot = slot.*;
+    defer {
+        app.active_shell = active;
+        app.shell_count = count;
+        shell.kind = kind;
+        shell.ai_agent = agent;
+        shell.tmux_host = host;
+        shell.claude_cwd_len = cwd_len;
+        shell.tmux_session_len = session_len;
+        slot.* = saved_slot;
+    }
+    app.active_shell = 0;
+    app.shell_count = 1;
+    shell.kind = .tmux;
+    shell.ai_agent = 1;
+    shell.tmux_host = 1;
+    shell.claude_cwd_len = 0;
+    shell.tmux_session_len = 0;
+    slot.* = .{ .agent = .claude, .host = 1, .count = 1 };
+    slot.entries[0] = .{ .kind = 'B', .name = "pill-test-command", .hint = "", .desc = "" };
+    try std.testing.expect(known(L("/pill-test-command")));
+    slot.mode = .file;
+    try std.testing.expect(!known(L("/pill-test-command")));
+    slot.mode = .slash;
+    slot.host = 0;
+    try std.testing.expect(!known(L("/pill-test-command")));
+    slot.host = 1;
+    slot.session[0] = 'x';
+    try std.testing.expect(!known(L("/pill-test-command")));
 }
