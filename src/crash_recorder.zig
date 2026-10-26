@@ -710,6 +710,23 @@ pub fn takeRestartNotice() bool {
     return noticeIsFresh(secs, unixNow());
 }
 
+pub fn writeFreezeReport(name: []const u8, bytes: []const u8) void {
+    if (g_dir_len == 0) return;
+    var path: [400]u16 = undefined;
+    const report = joinWide(&path, name) orelse return;
+    if (!writeWholeFile(report, bytes)) return;
+    if (joinWide(&path, "freeze.marker")) |marker| _ = writeWholeFile(marker, "saved\n");
+}
+
+pub fn takeFreezeNotice() bool {
+    if (g_dir_len == 0) return false;
+    var path: [340]u16 = undefined;
+    const marker = joinWide(&path, "freeze.marker") orelse return false;
+    var text: [8]u8 = undefined;
+    if (readFileTail(marker, &text) == 0) return false;
+    return win.DeleteFileW(marker.ptr) != 0;
+}
+
 pub fn openFolder() void {
     if (g_dir_len == 0) return;
     _ = win.ShellExecuteW(null, std.unicode.utf8ToUtf16LeStringLiteral("open"), @ptrCast(&g_dir), null, null, 1);
