@@ -51,6 +51,8 @@ Ordered steps, all recorded in `observation.json` and re-derived by `check-evide
 
 Expected result on current master: `chat-view-read-transcript`, the shell steps and the clean-up steps pass; `chat-lists-shell-queued`, `chat-lists-both-in-order`, `chat-lists-edited-in-order`, `chat-marks-both-sent`, `composer-ignores-agent-paste` and `shell-box-shows-chat-draft` fail. `node --test tools/verify-chat-delivery.test.js` runs the stand-in as a real Linux process, checks the evidence oracle on a green tree and on a master-like tree, and never starts the app.
 
+For long second-host session and workspace timing, run the [remote switch performance journey](../diagnostics/remote-switch-speed.md). It uses this SSH boundary with an alternate remote home and copies all 2,000 messages before measuring.
+
 ## Gotchas
 
 - Exact capacity/tmux polls and token-ladder reads return empty/unavailable; notification relay probes report legacy and legacy forwards fail explicitly, all in `declined.jsonl` with argv/text and no agent-buffer writes; unknown remote commands retain argv/text in `unsupported.jsonl` and fail the strict evidence check.

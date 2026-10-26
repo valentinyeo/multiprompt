@@ -13,7 +13,7 @@
 
 Use Ctrl+Tab for sessions and Alt+Left or Alt+Right for workspaces. No new app actions or timing limits are added.
 
-## Driving it with control.ps1
+## Driving it with the Windows performance harness
 
 Dispatch the delivery driver through the existing workflow:
 
@@ -27,7 +27,7 @@ The PR runs both sides automatically. Download `remote-switch-baseline` and `rem
 
 `tools/remote-switch-proof.mjs` checks every sample, session/workspace alternation, complete rendered history, screenshot signature, and owned-process cleanup. Require `REMOTE_SWITCH_OK`, `result.json` status `passed`, and successful cleanup. Inspect `remote-switch-complete.png`, `remote-switch-unread-visit.png`, copied text, action log, build identity, and raw frame records.
 
-The baseline builds pre-fix master `fe7ffa681d728d222479bfc93b63a932ce09c9f1`. The candidate builds the PR head. Both use the identical current journey. The red must finish its setup and fail a performance budget. A build, launch, incomplete-history, or ownership failure is not a performance red control. Retain both run URLs.
+The baseline builds pre-fix master `fe7ffa681d728d222479bfc93b63a932ce09c9f1`. The candidate builds the PR head. Both use the identical current journey. The red must finish its setup and fail a performance budget. A build, launch, incomplete-history, or ownership failure is not a performance red control. Timed-out native paints stay in the frame record and fail the candidate oracle; the driver does not discard those measurements as missing setup. Retain both run URLs.
 
 ## Gotchas
 
