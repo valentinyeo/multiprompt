@@ -1794,7 +1794,7 @@ function Send-ProfileScreenshot([string]$Step, [string]$Profile, [int]$ExpectedU
     $windowId = [int64]$pane.browser_window_id
     if ($windowId -le 0) { throw "screenshot ${Step}: pane has no bound browser window" }
     $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-    $logStart = ([IO.File]::ReadAllText($log)).Length
+    $logStart = (Read-SharedText $log).Length
     $bridge = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
     $arguments = ''
     if ($Profile -ne '') { $arguments += "--profile $Profile " }
@@ -1809,7 +1809,7 @@ function Send-ProfileScreenshot([string]$Step, [string]$Profile, [int]$ExpectedU
     if ($exitCode -ne 0) { throw "screenshot ${Step}: shoturl failed with exit ${exitCode}: $output" }
     $expectedUrl = "https://example.invalid/shot-$ExpectedUpload.png"
     Wait-Until {
-        $trace = ([IO.File]::ReadAllText($log)).Substring($logStart)
+        $trace = (Read-SharedText $log).Substring($logStart)
         $trace.Contains("notify: payload=SHOTUSER:${windowId}:$expectedUrl") -and $trace -match '\[paste-focus\] queued shell=\d+ user=true' -and $trace -match '\[paste-focus\] (console|composer) paste applied'
     } "screenshot ${Step}: the app received and pasted the link from window $windowId" 60
     $uploads = @(Get-Content -LiteralPath (Join-Path $script:uploadReceiverDir 'uploads.jsonl'))
@@ -2193,6 +2193,12 @@ function Restart-ChatView([int]$ShellCount) {
         [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window
     } 'restarted app foreground'
     Doctor
+}
+
+function Read-SharedText([string]$Path) {
+    $file = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $reader = New-Object IO.StreamReader($file)
+    try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
 
 function Read-DictationAudit([string]$Path) {
@@ -3432,7 +3438,7 @@ try {
             $expectedTabs = @((Read-Session).tabs).Count
             $listeners = @()
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            $logStart = ([IO.File]::ReadAllText($log)).Length
+            $logStart = (Read-SharedText $log).Length
             Doctor
             Record 'Close only the owned app before occupying notification ports'
             if (-not $process.CloseMainWindow() -or -not $process.WaitForExit(10000)) { throw 'Favorites app refused normal close' }
@@ -3459,7 +3465,7 @@ try {
                     $process.Refresh()
                     $script:window = $process.MainWindowHandle
                     $state = Read-Inbox
-                    $trace = ([IO.File]::ReadAllText($log)).Substring($logStart)
+                    $trace = (Read-SharedText $log).Substring($logStart)
                     $script:window -ne [IntPtr]::Zero -and $null -ne $state -and
                         $state.hwnd -eq $script:window.ToInt64().ToString() -and
                         $trace -match 'no free notify port' -and $trace -match 'launch step=browser'
@@ -3505,7 +3511,7 @@ try {
                 $launches = @()
                 $launchLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
                 Wait-Until {
-                    $trace = [IO.File]::ReadAllText($launchLog)
+                    $trace = Read-SharedText $launchLog
                     $trace -match 'launch step=browser' -and $trace -match 'installHook: KEYBOARD_LL installed'
                 } 'launch-1 restore finished and keyboard hook installed' 60
                 $first = Assert-RelaunchSessions 'launch-1' $relaunchSeed

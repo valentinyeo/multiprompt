@@ -2106,3 +2106,12 @@ test('IGSH-911 native bubble and selection scans recognize exact delivered alpha
   assert.notDeepEqual(samples.background.map((value, i) => Math.floor((value * 128 + samples.selection[i] * 127) / 255)), samples.deliveredSelection);
   assert.ok(read('src/chat_render.zig').includes('.source_constant_alpha = 128'));
 });
+
+test('IGSH-857: debug.log is read with shared access so a live app write cannot fail the journey', () => {
+  assert.ok(!control.includes('[IO.File]::ReadAllText($log)'));
+  assert.ok(!control.includes('[IO.File]::ReadAllText($launchLog)'));
+  const helper = control.slice(control.indexOf('function Read-SharedText('), control.indexOf('function Read-DictationAudit('));
+  assert.match(helper, /\[IO\.FileShare\]::ReadWrite/);
+  assert.equal(control.split('(Read-SharedText $log)').length - 1, 4);
+  assert.equal(control.split('Read-SharedText $launchLog').length - 1, 1);
+});
