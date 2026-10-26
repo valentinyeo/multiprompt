@@ -5417,7 +5417,10 @@ try {
                             if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.ClassName -ne 'OmniboxViewViews') { throw 'F6 did not reach the browser address bar' }
                             [VerifyNative]::Chord(@(0x12, 0x51))
                             Palette 'open browser'
+                            $hopLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+                            $hopStart = (Read-SharedText $hopLog).Length
                             Press @(0x0D) 'IGSH-724: opening an existing pane focuses its page'
+                            Wait-Until { (Read-SharedText $hopLog).Substring($hopStart) -match 'pane_hop result bh_fg=true' } 'IGSH-998 app finished the open-pane hop to its browser'
                             if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Opening the pane did not focus its browser' }
                             [VerifyNative]::Chord(@(0x20))
                             $pageKeys++
