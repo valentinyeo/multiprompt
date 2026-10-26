@@ -1201,6 +1201,9 @@ $warmupJob = $null
 $warmup = $null
 $switchNativeRegistry = $null
 $switchExtensionRoot = $null
+$script:pinnedNotifyListeners = @()
+$script:uploadReceiver = $null
+$script:uploadReceiverDir = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
 $script:scratchLinks = @()
@@ -1707,6 +1710,34 @@ function Wait-ConsoleText([string]$Command) {
         $text = $pattern.DocumentRange.GetText(-1) -replace '[\r\n]', ''
         $text.TrimEnd().EndsWith($Command, [StringComparison]::Ordinal)
     } "console visibly contains staged command: $Command"
+}
+
+function Send-ProfileScreenshot([string]$Step, [string]$Profile, [int]$ExpectedUpload) {
+    $pane = Read-BrowserPane
+    $windowId = [int64]$pane.browser_window_id
+    if ($windowId -le 0) { throw "screenshot ${Step}: pane has no bound browser window" }
+    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $logStart = ([IO.File]::ReadAllText($log)).Length
+    $bridge = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
+    $arguments = ''
+    if ($Profile -ne '') { $arguments += "--profile $Profile " }
+    $arguments += "--window $windowId shoturl --user-initiated"
+    $stdout = Join-Path $Evidence "screenshot-$Step.stdout.txt"
+    $stderr = Join-Path $Evidence "screenshot-$Step.stderr.txt"
+    $shot = Start-Process -FilePath $bridge -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
+    [void]$shot.Handle
+    if (-not $shot.WaitForExit(60000)) { $shot.Kill(); throw "screenshot ${Step}: shoturl did not finish in 60 seconds" }
+    $exitCode = $shot.ExitCode
+    $output = (([string](Get-Content -LiteralPath $stdout -Raw)) + ([string](Get-Content -LiteralPath $stderr -Raw))).Trim()
+    if ($exitCode -ne 0) { throw "screenshot ${Step}: shoturl failed with exit ${exitCode}: $output" }
+    $expectedUrl = "https://example.invalid/shot-$ExpectedUpload.png"
+    Wait-Until {
+        $trace = ([IO.File]::ReadAllText($log)).Substring($logStart)
+        $trace.Contains("notify: payload=SHOTUSER:${windowId}:$expectedUrl") -and $trace -match '\[paste-focus\] queued shell=\d+ user=true' -and $trace -match '\[paste-focus\] (console|composer) paste applied'
+    } "screenshot ${Step}: the app received and pasted the link from window $windowId" 60
+    $uploads = @(Get-Content -LiteralPath (Join-Path $script:uploadReceiverDir 'uploads.jsonl'))
+    if ($uploads.Count -ne $ExpectedUpload) { throw "screenshot ${Step}: expected $ExpectedUpload uploads but the receiver saw $($uploads.Count)" }
+    $result.checks += @{ name = "browser-own-profile screenshot $Step"; windowId = $windowId; url = $expectedUrl; profile = $(if ($Profile -eq '') { 'shared' } else { $Profile }) }
 }
 
 function Palette([string]$Query) {
@@ -2227,6 +2258,22 @@ try {
         if ($audioHash -cne 'f15c60ec54059d8b66e410d0064945a0b0a04ea56e1ddca1958e493c0cf70e71') { throw 'Recorded dictation PCM checksum mismatch' }
         $env:MULTIPROMPT_DICTATION_FIXTURE = $fixture
         $result.dictationBoundary = @{ audio = 'recorded CMUSphinx goforward.pcm'; sha256 = $audioHash; provider = 'offline provider-format response replay, not live Deepgram recognition'; microphoneHardware = $false }
+    }
+    if ($Feature -eq 'browser-own-profile') {
+        for ($port = 19548; $port -le 19559; $port++) {
+            $pinned = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $port)
+            $pinned.Start()
+            $script:pinnedNotifyListeners += $pinned
+        }
+        $script:uploadReceiverDir = Join-Path $Evidence 'upload-receiver'
+        New-Item -ItemType Directory -Force $script:uploadReceiverDir | Out-Null
+        $receiverPortFile = Join-Path $script:uploadReceiverDir 'port.txt'
+        $script:uploadReceiver = Start-Process -FilePath node -ArgumentList @((Join-Path $PSScriptRoot '../../../tools/screenshot-upload-receiver.mjs'), $receiverPortFile, $script:uploadReceiverDir, 'verify-only-upload-secret') -PassThru -WindowStyle Hidden
+        Wait-Until { Test-Path -LiteralPath $receiverPortFile -PathType Leaf } 'local upload receiver listening' 30
+        $uploadConfigDir = Join-Path $env:LOCALAPPDATA 'screencast2-go'
+        New-Item -ItemType Directory -Force $uploadConfigDir | Out-Null
+        [IO.File]::WriteAllText((Join-Path $uploadConfigDir 'config.toml'), "api_base_url = `"http://127.0.0.1:$((Get-Content -LiteralPath $receiverPortFile -Raw).Trim())`"`nupload_secret = `"verify-only-upload-secret`"`n")
+        New-Item -ItemType File -Force (Join-Path $script:uploadReceiverDir 'uploads.jsonl') | Out-Null
     }
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
@@ -4818,10 +4865,12 @@ try {
             $null = Assert-WorkspaceBrowser 'shared-return' $sharedRoot 0
             Press @(0x12, 0x51) 'Alt+Q: focus the shared-profile browser'
             $null = Assert-WorkspaceBrowser 'shared-altq' $sharedRoot 0
+            Send-ProfileScreenshot 'shared' '' 1
             Press @(0x12, (0x32 + $ownWorkspace)) ("Alt+" + (2 + $ownWorkspace) + ": switch to stored workspace " + $ownWorkspace)
             $null = Assert-WorkspaceBrowser 'own-return' $ownRoot $ownWorkspace
             Press @(0x12, 0x51) 'Alt+Q: focus the own-profile browser'
             $null = Assert-WorkspaceBrowser 'own-altq' $ownRoot $ownWorkspace
+            Send-ProfileScreenshot 'own' $ownToken 2
             Restart-SessionRestore 'own-profile-restart' $false
             Wait-Until {
                 $state = Read-Inbox
@@ -5055,6 +5104,9 @@ try {
                     Remove-Item -LiteralPath $switchExtensionRoot -Recurse -Force
                     $switchExtensionRoot = $null
                 }
+                foreach ($pinned in $script:pinnedNotifyListeners) { $pinned.Stop() }
+                $script:pinnedNotifyListeners = @()
+                if ($null -ne $script:uploadReceiver -and -not $script:uploadReceiver.HasExited) { $script:uploadReceiver.Kill() }
                 if (Test-Path $scratch) {
                     Prepare-ScratchEvidence $scratch
                     $data = Join-Path $Evidence 'data'

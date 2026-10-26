@@ -94,3 +94,13 @@ test('IGSH-672 never clones, migrates, claims or names private data and adds no 
   }
   assert.doesNotMatch(own + pane, /ws-\d{6,}-\d/);
 });
+
+test('IGSH-894 the journey pins the twelve old notify ports and sends a real screenshot from each profile', () => {
+  const journey = control.slice(control.indexOf("'browser-own-profile' {\n            if ((Get-OwnProfileToken"));
+  assert.match(control, /for \(\$port = 19548; \$port -le 19559; \$port\+\+\)/);
+  assert.match(control, /Send-ProfileScreenshot[\s\S]*notify: payload=SHOTUSER:\$\{windowId\}:\$expectedUrl/);
+  assert.match(journey, /Send-ProfileScreenshot 'shared' '' 1/);
+  assert.match(journey, /Send-ProfileScreenshot 'own' \$ownToken 2/);
+  assert.match(control, /--profile \$Profile /);
+  assert.match(control, /expected \$ExpectedUpload uploads but the receiver saw/);
+});
