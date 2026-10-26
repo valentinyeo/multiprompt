@@ -98,3 +98,13 @@ test('production corner geometry and alpha rasterizer execute at both scales', (
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('IGSH-953 native deactivation retains masks for owned browser focus', () => {
+  const main = source('main.zig');
+  const start = main.indexOf('        WM_ACTIVATEAPP => {');
+  const end = main.indexOf('        WM_SETFOCUS => {', start);
+  const handoff = main.slice(start, end);
+  assert.equal((handoff.match(/if \(!foregroundIsOurs\(\)\) hideBrowserEdgeMasks\(\);/g) || []).length, 2);
+  assert.doesNotMatch(handoff.replaceAll('if (!foregroundIsOurs()) hideBrowserEdgeMasks();', ''), /hideBrowserEdgeMasks\(/);
+});
