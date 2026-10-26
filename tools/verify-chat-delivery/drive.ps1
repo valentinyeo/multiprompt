@@ -600,11 +600,7 @@ foreach ($plan in $plans) {
             if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Composer typing failed' }
             Shell-Input 'todo'
             [void](Wait-For 'todo task in app-written cache' { (Read-Shared $cache.FullName).Contains('TodoWrite') })
-            if ($env:CHAT_UNREAD_PROOF -eq '1') {
-                Bind-Transcript
-                $bounds = $views[0].Current.BoundingRectangle
-                $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
-            } else {
+            if ($env:CHAT_UNREAD_PROOF -ne '1') {
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
             $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
             $todoStatus = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Static')
@@ -700,6 +696,10 @@ foreach ($plan in $plans) {
             Save $observation "$caseDir/observation.json"
             & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence
             if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
+            } else {
+                Bind-Transcript
+                $bounds = $views[0].Current.BoundingRectangle
+                $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
             }
             Shell-Input 'busy'
             $fillLogStart = (Read-Shared "$settings/debug.log").Length

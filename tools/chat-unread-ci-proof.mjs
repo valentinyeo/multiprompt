@@ -10,7 +10,7 @@ try {
   const observation = json('messages-only/observation.json');
   const cleanup = json('cleanup.json');
   const build = json('build.json');
-  const doctors = json('doctor.json');
+  const doctors = [json('doctor.json')].flat();
   assert.equal(observation.error, null);
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.scratch_removed, true);
