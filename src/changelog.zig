@@ -59,6 +59,9 @@ pub const CHANGELOG = blk: {
 };
 
 const SOURCE_CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.878", .items = &.{
+        .{ .text = "The chat box shows at most two round buttons, and Send replaces Stop while you type.", .ticket = "IGSH-909" },
+    } },
     .{ .ver = "0.28.877", .items = &.{
         .{ .text = "Broken updates reopen their task automatically, with the failed check listed.", .ticket = "IGSH-837" },
         .{ .text = "New versions publish within half an hour even when several changes land close together.", .ticket = "IGSH-853" },
