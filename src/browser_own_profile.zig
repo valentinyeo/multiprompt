@@ -38,14 +38,23 @@ pub fn isToken(value: []const u8) bool {
     return true;
 }
 
-pub fn listed(contents: []const u8, workspace_id: []const u8) bool {
-    if (workspace_id.len == 0) return false;
+pub fn seed(contents: []const u8, workspace_id: []const u8, workspace_name: []const u8) ?[]const u8 {
+    if (workspace_id.len == 0 and workspace_name.len == 0) return null;
     const body = if (std.mem.startsWith(u8, contents, "\xEF\xBB\xBF")) contents[3..] else contents;
+    var named: ?[]const u8 = null;
     var lines = std.mem.splitScalar(u8, body, '\n');
-    while (lines.next()) |line| {
-        if (std.mem.eql(u8, std.mem.trim(u8, line, " \t\r"), workspace_id)) return true;
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len == 0) continue;
+        const split = std.mem.lastIndexOfScalar(u8, line, '=');
+        const key = std.mem.trim(u8, if (split) |at| line[0..at] else line, " \t");
+        const pinned = if (split) |at| std.mem.trim(u8, line[at + 1 ..], " \t") else "";
+        const chosen = if (pinned.len > 0) pinned else key;
+        if (chosen.len == 0) continue;
+        if (workspace_id.len > 0 and std.mem.eql(u8, key, workspace_id)) return chosen;
+        if (named == null and workspace_name.len > 0 and std.mem.eql(u8, key, workspace_name)) named = chosen;
     }
-    return false;
+    return named;
 }
 
 pub fn path(buf: []u8, local: []const u8, engine: []const u8, value: []const u8) ![]const u8 {
@@ -151,11 +160,31 @@ test "IGSH-672 own profile tokens are stable, distinct and pipe safe" {
 }
 
 test "IGSH-672 opt-in file lists exact workspace ids one per line" {
-    try std.testing.expect(listed("ws-own-test\n", "ws-own-test"));
-    try std.testing.expect(listed("\xEF\xBB\xBFws-a\r\n  ws-own-test  \r\n", "ws-own-test"));
-    try std.testing.expect(!listed("ws-own-test-2\n", "ws-own-test"));
-    try std.testing.expect(!listed("", "ws-own-test"));
-    try std.testing.expect(!listed("ws-own-test\n", ""));
+    try std.testing.expectEqualStrings("ws-own-test", seed("ws-own-test\n", "ws-own-test", "").?);
+    try std.testing.expectEqualStrings("ws-own-test", seed("\xEF\xBB\xBFws-a\r\n  ws-own-test  \r\n", "ws-own-test", "").?);
+    try std.testing.expect(seed("ws-own-test-2\n", "ws-own-test", "") == null);
+    try std.testing.expect(seed("", "ws-own-test", "") == null);
+    try std.testing.expect(seed("ws-own-test\n", "", "") == null);
+}
+
+test "IGSH-989 opt-in by workspace name survives a regenerated workspace id" {
+    const listing = "inne=ws-before-sync\n";
+    try std.testing.expectEqualStrings("ws-before-sync", seed(listing, "ws-after-sync", "inne").?);
+    try std.testing.expectEqualStrings("ws-before-sync", seed(listing, "ws-before-sync", "inne").?);
+    try std.testing.expect(seed(listing, "ws-after-sync-two", "Yeo UX") == null);
+    try std.testing.expect(seed(listing, "ws-after-sync", "inne chat") == null);
+    try std.testing.expect(seed(listing, "", "") == null);
+    try std.testing.expectEqualStrings("inne", seed("inne\n", "ws-new", "inne").?);
+    var first: [TOKEN_LEN]u8 = undefined;
+    var second: [TOKEN_LEN]u8 = undefined;
+    _ = try token(&first, seed(listing, "ws-after-sync", "inne").?);
+    _ = try token(&second, "ws-before-sync");
+    try std.testing.expectEqualStrings(&second, &first);
+}
+
+test "IGSH-989 an id line beats a name line for the same workspace" {
+    const listing = "inne=ws-name-seed\nws-current=ws-id-seed\n";
+    try std.testing.expectEqualStrings("ws-id-seed", seed(listing, "ws-current", "inne").?);
 }
 
 test "IGSH-672 own profile folders never name the shared profile or old hash folders" {
