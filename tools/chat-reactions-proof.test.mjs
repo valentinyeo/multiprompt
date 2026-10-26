@@ -49,3 +49,10 @@ test('rounded-edge shades cannot substitute for a painted badge glyph', () => {
   f.fill(28, 120, 31, 142, 0x484848);
   assert.throws(() => assertBadge(inspect(f.image, area)));
 });
+
+
+test('small composer buttons overlapping the transcript are not queued reaction bubbles', () => {
+  const f = fixture();
+  f.fill(260, 245, 291, 276, 0x414141);
+  assertBadge(inspect(f.image, area));
+});

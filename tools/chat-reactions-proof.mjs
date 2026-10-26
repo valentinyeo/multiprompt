@@ -32,7 +32,7 @@ export function inspect(image, area) {
         seen[next] = 1; queue[tail++] = next;
       }
     }
-    if (tail < 100 || right - left < 20 || bottom - top < 8) continue;
+    if (tail < 100 || right - left < 20 || bottom - top < 8 || (kind === 'dim' && right - left <= 80)) continue;
     const group = kind === 'user' && right - left < 100 && bottom - top < 40 && solidPill > tail * 0.6 ? 'pill' : kind;
     let ink = 0;
     for (let iy = top + 3; iy < bottom - 3; iy++) for (let ix = left + 5; ix < right - 5; ix++) {
