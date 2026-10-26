@@ -61,7 +61,7 @@ $transcriptHandle = [IntPtr]::new([int64]$script:workingTranscript[0].Current.Na
 if ($script:workingTranscript[0].Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($transcriptHandle, 2) -ne $script:window) { throw 'Reply copy requires the owned transcript' }
 Wait-Until {
     [System.Windows.Forms.Clipboard]::Clear()
-    [VerifyNative]::ClickClient($transcriptHandle, 20, 20)
+    [void][VerifyNative]::SelectTranscriptText($transcriptHandle, $process.Id, $script:window)
     Press @(0x11, 0x41) 'Ctrl+A: select the visible conversation'
     Press @(0x11, 0x43) 'Ctrl+C: read the actual conversation'
     $copied = [System.Windows.Forms.Clipboard]::GetText()
