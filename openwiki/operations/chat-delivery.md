@@ -58,8 +58,9 @@ conversation is missing or cannot be read and no messages are loaded, Chat View
 paints the plain note `Chat not available for this session, use the shell view`
 below the working dots and retries once a minute. The reader's reason goes to the
 debug log as `[chat] transcript not reachable: <reason>`. Keyless tabs retain the
-agent-screen capture path. This replaces the terminal-block fallback of ISSUE-301
-(v0.28.734).
+agent-screen capture path. The launch snapshot no longer restores chat blocks for tmux
+tabs, so an older terminal block cannot return after an update. This replaces the
+terminal-block fallback of ISSUE-301 (v0.28.734).
 
 ## Model, context and todo header
 
