@@ -2041,6 +2041,7 @@ pub fn toggleDictation() void {
         return;
     }
     app_state.g_dictation_enter_stop_queued.store(false, .release);
+    app_state.g_dictation_send_queued.store(false, .release);
     if (app_state.g_dictation_recording.load(.acquire)) {
         app_state.g_dictation_recording.store(false, .release);
         dictationAudit("stop", 0);
@@ -2075,7 +2076,6 @@ pub fn toggleDictation() void {
         app_state.g_dictation_draft_owner_len = id.len;
     }
     app_state.g_dictation_cancelled.store(false, .release);
-    app_state.g_dictation_send_queued.store(false, .release);
     app_state.g_dictation_recording.store(true, .release);
     app_state.g_dictation_running.store(true, .release);
     dictationAudit("start", if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0);
