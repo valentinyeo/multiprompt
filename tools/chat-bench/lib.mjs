@@ -161,7 +161,8 @@ export function geometryInside(geometry) {
   if (!geometry) return false;
   const inside = rect => !!rect && rect.left >= geometry.pane_left && rect.right <= geometry.pane_right && rect.right > rect.left;
   const aligned = (a, b) => ['left', 'right', 'top', 'bottom'].every(k => Math.abs(a[k] - b[k]) <= 1);
-  return [geometry.title, geometry.layout.transcript, geometry.layout.composer_card, geometry.layout.attach_btn, geometry.layout.send_btn, geometry.layout.stop_btn, geometry.layout.mic_btn, geometry.transcript, geometry.composer].every(inside) && aligned(geometry.transcript, geometry.layout.transcript) && aligned(geometry.composer, geometry.layout.composer);
+  const transcriptWindow = geometry.layout.transcript_window ?? geometry.layout.transcript;
+  return [geometry.title, geometry.layout.transcript, transcriptWindow, geometry.layout.composer_card, geometry.layout.attach_btn, geometry.layout.send_btn, geometry.layout.stop_btn, geometry.layout.mic_btn, geometry.transcript, geometry.composer].every(inside) && aligned(geometry.transcript, transcriptWindow) && aligned(geometry.composer, geometry.layout.composer);
 }
 
 export function evaluate(run, config) {

@@ -266,6 +266,16 @@ test('browser regression oracle rejects clipped header, split composer, blank lo
   const rect = { left: 250, right: 790, top: 70, bottom: 900 };
   const good = { pane_left: 240, pane_right: 800, title: rect, transcript: rect, composer: rect, layout: { transcript: rect, composer: rect, composer_card: rect, attach_btn: rect, send_btn: rect, stop_btn: rect, mic_btn: rect } };
   assert.equal(geometryInside(good), true);
+  const floating = structuredClone(good);
+  floating.layout.transcript_window = { ...rect, top: 18, bottom: 1014 };
+  floating.transcript = { ...floating.layout.transcript_window };
+  assert.equal(geometryInside(floating), true);
+  const clipped = structuredClone(floating);
+  clipped.transcript = { ...rect };
+  assert.equal(geometryInside(clipped), false);
+  const outside = structuredClone(floating);
+  outside.layout.transcript_window.right = 1000;
+  assert.equal(geometryInside(outside), false);
   for (const mutate of [g => { g.layout.mic_btn = { ...rect, right: 1000 }; }, g => { delete g.layout.mic_btn; }, g => { g.layout.stop_btn = { ...rect, left: 200 }; }, g => { g.title = { ...rect, left: 700, right: 1000 }; }, g => { g.layout.composer_card = { ...rect, right: 1100 }; }, g => { g.composer = { ...rect, left: 260 }; }]) {
     const g = structuredClone(good); mutate(g); assert.equal(geometryInside(g), false);
   }
