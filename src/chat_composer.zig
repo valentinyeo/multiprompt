@@ -2298,6 +2298,77 @@ test "IGSH-885 a reply arriving while dictating leaves the draft and the recordi
     try testChatDictation(.reply);
 }
 
+test "IGSH-922 slash filtering coalesces layout into one completed popup paint" {
+    const w = @import("win32.zig");
+    const Spy = struct {
+        var paints: usize = 0;
+        fn proc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+            if (msg == WM_PAINT) paints += 1;
+            return chatAcWndProc(hwnd, msg, wp, lp);
+        }
+    };
+    const saved = .{
+        .main = app_state.g_main_hwnd,
+        .popup = app_state.g_chat_ac_hwnd,
+        .chat = app_state.g_chat_active,
+        .ac = app_state.g_chat_ac,
+        .count = app_state.shell_count,
+        .entries = app_state.g_chat_ac_slots[0].entries[0..4].*,
+        .slot_count = app_state.g_chat_ac_slots[0].count,
+        .status = app_state.g_chat_ac_slots[0].status,
+    };
+    defer {
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_ac_hwnd = saved.popup;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_chat_ac = saved.ac;
+        app_state.shell_count = saved.count;
+        app_state.g_chat_ac_slots[0].entries[0..4].* = saved.entries;
+        app_state.g_chat_ac_slots[0].count = saved.slot_count;
+        app_state.g_chat_ac_slots[0].status = saved.status;
+    }
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000 | WS_VISIBLE, 0, 0, 1000, 800, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    ensureChatAcClass();
+    const popup = CreateWindowExW(0, L("ZigShellChatSuggest"), L(""), WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 100, 100, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(popup);
+    _ = SetWindowLongPtrW(popup, -4, @bitCast(@intFromPtr(&Spy.proc)));
+    app_state.g_main_hwnd = parent;
+    app_state.g_chat_ac_hwnd = popup;
+    app_state.g_chat_active = true;
+    app_state.shell_count = 0;
+    app_state.g_chat_ac = .{ .open = true };
+    for ([_][]const u8{ "skill-one", "skill-two", "search", "other" }, 0..) |name, i| {
+        app_state.g_chat_ac_slots[0].entries[i] = .{ .kind = 'S', .name = name, .hint = "", .desc = "" };
+    }
+    app_state.g_chat_ac_slots[0].count = 4;
+    app_state.g_chat_ac_slots[0].status = .ok;
+    _ = w.UpdateWindow(parent);
+    var inline_paints: usize = 0;
+    var queued_paints: usize = 0;
+    for ([_][]const u16{ std.mem.span(L("/")), std.mem.span(L("/s")), std.mem.span(L("/sk")), std.mem.span(L("/ski")), std.mem.span(L("/skiz")), std.mem.span(L("/ski")) }, [_]usize{ 4, 3, 2, 2, 0, 2 }) |text, expected_count| {
+        Spy.paints = 0;
+        const token = chat_complete.tokenAtCaret(text, text.len, .claude) orelse return error.TestUnexpectedResult;
+        chatAcRank(text, token);
+        chatAcRank(text, token);
+        inline_paints += Spy.paints;
+        const inline_count = Spy.paints;
+        _ = w.UpdateWindow(popup);
+        queued_paints += Spy.paints - inline_count;
+        std.debug.print("IGSH-922 chars={d} matches={d} inline_paints={d} queued_paints={d}\n", .{ text.len, app_state.g_chat_ac.count, inline_count, Spy.paints - inline_count });
+        try std.testing.expectEqual(expected_count, app_state.g_chat_ac.count);
+        try std.testing.expect(IsWindowVisible(popup) != 0);
+        if (expected_count > 0) {
+            const dc = GetDC(popup) orelse return error.TestUnexpectedResult;
+            defer _ = ReleaseDC(popup, dc);
+            try std.testing.expectEqual(customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)), w.GetPixel(dc, 2, 2));
+        }
+    }
+    std.debug.print("IGSH-922 searches=6 inline_paints={d} queued_paints={d}\n", .{ inline_paints, queued_paints });
+    try std.testing.expectEqual(@as(usize, 0), inline_paints);
+    try std.testing.expectEqual(@as(usize, 6), queued_paints);
+}
+
 test "IGSH-836 skill keyboard survives stationary hover and real movement or click takes over" {
     const w = @import("win32.zig");
     const Cursor = struct {
