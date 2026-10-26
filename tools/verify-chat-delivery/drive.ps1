@@ -33,6 +33,7 @@ $plans = @(
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='busy'; text='composer stays usable'}) }
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
+if ($env:CHAT_REMOTE_PROOF -eq '1') { $plans = @(@{name='remote-sync'; mode='idle'; text='remote session follows live process'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
@@ -323,11 +324,12 @@ foreach ($plan in $plans) {
     $job = $null
     $main = [IntPtr]::Zero
     $composer = [IntPtr]::Zero
+    $isRemote = $plan.name -eq 'remote-sync'
     $isQueue = $plan.name -eq 'queue-draft-sync'
     $isActivity = $plan.name -eq 'messages-only'
     $isHistory = $plan.name -eq 'full-history'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
-    $hasTranscript = $isQueue -or $isActivity -or $isHistory -or $isSending
+    $hasTranscript = $isQueue -or $isActivity -or $isHistory -or $isSending -or $isRemote
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -356,6 +358,15 @@ foreach ($plan in $plans) {
             $standIn.panePid = 4242
             $standIn.transcript = $transcript
             $standIn.meta = "$profile/home/.claude/sessions/4242.json"
+            if ($isRemote) {
+                $standIn.remoteHome = "$profile/secondary/home"
+                $standIn.transcript = $transcript.Replace("$profile/home", $standIn.remoteHome)
+                $standIn.meta = "$($standIn.remoteHome)/.claude/sessions/4242.json"
+                $transcript = $standIn.transcript
+                $observation.remoteHome = $standIn.remoteHome
+                $observation.clientHome = "$profile/home"
+                $observation.turns = [Collections.Generic.List[object]]::new()
+            }
             $standIn.procDir = $procDir
             $observation.texts = $queueTexts
             $observation.steps = $steps
@@ -365,6 +376,11 @@ foreach ($plan in $plans) {
         if ($isHistory) { Shell-Run @('history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         Save @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})} "$settings/session.json"
+        if ($isRemote) {
+            $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+            $saved.tabs[0].tmux_host = 2
+            Save $saved "$settings/session.json"
+        }
         Copy-Item "$settings/session.json" "$caseDir/seed-session.json"
         if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable embedded version mismatch' }
         $job = [VerifyJob]::new()
@@ -379,7 +395,45 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($isHistory) {
+        if ($isRemote) {
+            [void](Wait-For 'initial remote transcript read' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
+            Bind-Transcript
+            foreach ($turn in 1..3) {
+                if ($turn -eq 3) { Shell-Run @('resume', 'live-resumed-session') }
+                $timer = [Diagnostics.Stopwatch]::StartNew()
+                Shell-Run @('turn', [string]$turn)
+                $question = "Remote question $turn"
+                $answer = "Remote answer $turn"
+                [void](Wait-For 'newest remote question and answer loaded within two seconds' {
+                    @(Get-ChildItem "$settings/chatcache/*.jsonl" -ErrorAction SilentlyContinue | Where-Object {
+                        $text = Read-Shared $_.FullName
+                        $text.Contains($question) -and $text.Contains($answer)
+                    }).Count -gt 0
+                } 2)
+                $loadedMs = [int]$timer.ElapsedMilliseconds
+                if ($loadedMs -gt 2000) { throw "Remote turn $turn exceeded two seconds: $loadedMs" }
+                $paletteStart = (Read-Shared "$settings/debug.log").Length
+                Press @(0x11, 0x4B) 'Ctrl+K: select remote conversation'
+                [void](Wait-For 'remote palette ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+                $query = 'chat view select all'
+                foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+                [void](Wait-For 'remote select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+                Press @(0x0D) 'Enter: select remote conversation'
+                Press @(0x11, 0x43) 'Ctrl+C: copy rendered remote conversation'
+                $copied = [Windows.Forms.Clipboard]::GetText()
+                [IO.File]::WriteAllText("$caseDir/turn-$turn-copied.txt", $copied)
+                if (-not $copied.Contains($question) -or -not $copied.Contains($answer)) { throw "Remote turn $turn missing from rendered conversation" }
+                if ($turn -eq 3 -and $copied.Contains('Remote answer 2')) { throw 'Resumed conversation still contains stale session rows' }
+                Press @(0x1B) 'Esc: clear remote selection'
+                $observation.turns.Add(@{turn=$turn; loadedMs=$loadedMs; question=$question; answer=$answer; session=(Get-Content "$state/state.json" -Raw | ConvertFrom-Json).sid})
+                Shot "remote-turn-$turn-chat"
+                Press @(0x12, 0x43) 'Alt+C: show remote terminal'
+                [void](Wait-For 'remote terminal frame painted' { (Read-Shared "$state/frames.jsonl").Contains($answer) })
+                Shot "remote-turn-$turn-terminal"
+                Press @(0x12, 0x43) 'Alt+C: return to remote Chat View'
+                Bind-Transcript
+            }
+        } elseif ($isHistory) {
             Assert-FullHistory 'open'
             Copy-Item "$settings/chatcache" "$caseDir/cache-before-restart" -Recurse -Force
             $actions.Add(@{case=$plan.name; input='close and restart the owned app with the same profile'})
@@ -751,6 +805,10 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_REMOTE_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-remote-sync-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_SENDING_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-sending-status-proof.mjs" $Evidence
     if ($LASTEXITCODE -ne 0) { exit 1 }

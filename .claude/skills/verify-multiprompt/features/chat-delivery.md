@@ -60,3 +60,13 @@ Expected result on current master: `chat-view-read-transcript`, the shell steps 
 - The app's screen read for 811's outbox gate is the attached console, not a reader `screen` opcode. The stand-in mirrors fake capture-pane characters into that console so the old busy and nonblank-input checks remain exercised. The production reader separately calls capture-pane while sending.
 - The known local direct-input gap is not covered: the local console route still rejects a prompt row holding a suggestion, even on master/821. This journey deliberately exercises remote tmux channel delivery, the route relevant to the reported remote Claude sessions.
 - Multiline paste-buffer, slash commands, real transcript confirmation, local console paste, permission prompts and other entry points remain outside these four cases. Branch/release runs have not passed merely because source contracts pass locally.
+
+### Remote session changes (IGSH-950)
+
+```sh
+gh workflow run verify.yml --ref ceo/IGSH-950 -f feature=chat-delivery -f remote_sync_proof=true
+```
+
+This opt-in journey uses host index 2 and a separate remote home. Two question/answer turns arrive on one session, then a third arrives after the pane metadata changes to a new session. The old transcript remains readable. Each pair must reach the app cache within two seconds and appear in copied rendered text. The journey saves a terminal screenshot and a Chat View screenshot per turn. `chat-remote-sync-proof.mjs` independently checks the copied text, terminal frames, session change, delivery time and cleanup.
+
+The SSH host and remote home are synthetic boundaries, not a real server or OS login. The desktop, embedded reader, pane discovery and rendered transcript are real. Reader regressions separately cover noninteractive cross-user discovery and inaccessible or missing live transcripts. The Linux chat sync audit repeats the two-turn/resume case against its real renderer and requires zero drift.

@@ -1129,6 +1129,44 @@ class HistoryReaderTest(unittest.TestCase):
             self.query['sid'] = 'sid'
             self.read()
 
+    def test_live_session_replaces_readable_saved_sid(self):
+        self.write(self.event('saved old reply'))
+        live = self.path.with_name('live.jsonl')
+        live.write_text(json.dumps(self.event('current reply')) + '\n')
+        self.query.update(follow=True, cached_sid='sid', inode=self.path.stat().st_ino,
+                          offset=self.path.stat().st_size)
+        with patch.object(reader, 'resolve_tmux_agent', return_value=('live', live)):
+            fields, rows = self.read()
+        self.assertEqual(fields[4], 'live')
+        self.assertEqual(fields[5], '0')
+        self.assertEqual([r['text'] for r in rows], ['current reply'])
+
+    def test_live_session_missing_retries_without_reading_saved_sid(self):
+        self.write(self.event('saved old reply'))
+        self.query['follow'] = True
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            for _ in range(2):
+                wire = reader.response(self.query)
+                self.assertIn('history\tmissing', wire)
+                self.assertNotIn('saved old reply', wire)
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)):
+                self.assertIn('saved old reply', reader.response(self.query))
+
+    def test_live_cross_user_discovery_ignores_saved_sid(self):
+        self.write(self.event('saved old reply'))
+        self.query['follow'] = True
+        owner = ('secondary', Path('/home/secondary'))
+        expected = '@mp\t7\thistory\tok\tlive\t0\n{"text":"live owner rows"}\n@@MP_END@@\n'
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None), \
+                patch.object(reader, 'tmux_owner_process', return_value=(99, owner)), \
+                patch.object(reader, 'owner_response', return_value=expected) as read_owner:
+            self.assertEqual(reader.response(self.query, reader.READER_SOURCE), expected)
+        read_owner.assert_called_once_with(dict(self.query, sid='', discovery_pid=99), owner, reader.READER_SOURCE)
+        with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)) as resolve:
+            self.assertIn('saved old reply', reader.response(dict(self.query, sid='', discovery_pid=99),
+                                                           reader.READER_SOURCE, as_owner=True))
+        resolve.assert_called_once_with('claude', 'term-1', 99)
+
     def test_claude_pid_map_resolves_its_exact_jsonl(self):
         self.write(self.event())
         metadata = self.home / '.claude/sessions/99.json'

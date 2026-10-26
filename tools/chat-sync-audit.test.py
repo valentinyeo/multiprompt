@@ -26,6 +26,46 @@ class ChatSyncAuditTest(unittest.TestCase):
     def fact(self, operation, stamp, content='please check the build'):
         return dict(role='assistant', text='', timestamp=stamp, settlement=dict(operation=operation, content=content))
 
+    def test_second_host_alternate_home_two_turns_and_resumed_session_have_zero_drift(self):
+        reader = audit.load_reader()
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / 'secondary/home'
+            folder = home / '.claude/projects/-work-demo'
+            folder.mkdir(parents=True)
+            metadata = home / '.claude/sessions/99.json'
+            metadata.parent.mkdir(parents=True)
+            saved = folder / 'saved.jsonl'
+            saved.write_text(json.dumps(dict(type='assistant', message=dict(role='assistant', content='saved old reply'))) + '\n')
+            query = dict(id=1, codex=False, sid='saved', tmux='remote-tab', cwd='/work/demo',
+                         follow=True, cached_sid='', inode=0, offset=0)
+            original_run = subprocess.run
+            capture = ''
+            def run(argv, **kwargs):
+                if argv[:2] == ['tmux', 'capture-pane']:
+                    return capture
+                return original_run(argv, capture_output=True, text=True, timeout=60, check=True, **kwargs).stdout
+            with patch.object(reader, 'HOME', home), \
+                    patch.object(reader, 'open_claude_transcript', return_value=None), \
+                    patch.object(reader, 'read_process_cwd', return_value='/work/demo'), \
+                    patch.object(reader, 'process_table', return_value={99: (1, ['claude'])}), \
+                    patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '99\n', '')), \
+                    patch.object(audit, 'run', side_effect=run):
+                for turn in range(1, 4):
+                    sid = 'first' if turn < 3 else 'resumed'
+                    metadata.write_text(json.dumps(dict(sessionId=sid, cwd='/work/demo')))
+                    question, answer = f'Remote neutral question number {turn}', f'Remote neutral answer number {turn}'
+                    transcript = folder / (sid + '.jsonl')
+                    with transcript.open('a') as output:
+                        for role, text in [('user', question), ('assistant', answer)]:
+                            output.write(json.dumps(dict(type=role, message=dict(role=role, content=text))) + '\n')
+                    capture = f'❯ {question}\n● {answer}\n' + '\n' * 8
+                    wire = reader.response(query, reader.READER_SOURCE)
+                    self.assertIn(question, wire)
+                    self.assertIn(answer, wire)
+                    self.assertNotIn('saved old reply', wire)
+                    self.assertEqual(audit.audit_pane(reader, '%1', 'remote-tab', 'claude', 99,
+                                                     ROOT / 'zig-out/bin/chat-audit', sleep=lambda _: None), [])
+
     def test_crafted_wire_reports_each_drift_kind(self):
         rows = [
             dict(role='user', text='<command-name>neutral</command-name>', timestamp='2026-10-17T15:06:44Z'),

@@ -1125,13 +1125,14 @@ def resolve_response_path(q, source=None, as_owner=False):
             tmux and not TMUX_NAME.fullmatch(tmux) or not sid and not tmux or
             cwd and not Path(cwd).is_absolute()):
         raise ValueError("invalid identity")
+    follow = bool(q.get("follow") and tmux)
     denied = False
     delegated = None
     try:
-        path = conversation_path(agent, sid, cwd) if sid else None
+        path = conversation_path(agent, sid, cwd) if sid and not follow else None
     except PermissionError:
         path, denied = None, True
-    owner = conversation_owner(cwd) if agent == "claude" and sid else None
+    owner = conversation_owner(cwd) if agent == "claude" and sid and not follow else None
     if path is None and owner and owner[1] != HOME:
         try:
             path = conversation_path(agent, sid, cwd, owner[1])

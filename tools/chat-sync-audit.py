@@ -257,7 +257,7 @@ def audit_pane(reader, pane, session, agent, agent_pid, binary, sleep=time.sleep
     if truth_sid and truth_sid != sid:
         return [dict(context, kind='transcript_mismatch', text='Resolved transcript differs from live agent metadata')]
     query = dict(id=1, codex=agent == 'codex', sid=sid, tmux=session,
-                 cwd=reader.read_process_cwd(agent_pid) or '', settlement=True, cached_sid='',
+                 cwd=reader.read_process_cwd(agent_pid) or '', settlement=True, follow=True, cached_sid='',
                  inode=0, offset=0, start=0, before=0, mtime=0, probe='')
     capture = run(['tmux', 'capture-pane', '-p', '-J', '-t', pane, '-S', '-120'])
     wire = reader.response(query, reader.READER_SOURCE)
