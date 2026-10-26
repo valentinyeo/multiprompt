@@ -132,7 +132,7 @@ test "injected production paint metadata geometry and user-send matching" {
         try std.testing.expectEqual(injected_rc.right, user_rc.right);
         try std.testing.expectEqual(injected_rc.bottom - CHAT_STATUS_H, user_rc.bottom);
         try std.testing.expectEqual(width, injected_rc.right);
-        try std.testing.expect(injected_rc.right - injected_rc.left <= chat_style.bubbleMaxWidth(width));
+        try std.testing.expect(injected_rc.right - injected_rc.left <= chat_style.bubbleMaxWidth(width, uiScaled(720)));
         chatPaintBlock(0, text[0..message.len], injected, .single, injected_rc);
         try std.testing.expectEqual(@as(u32, 0xFF1E2F4F), chat_style.argb(fill));
         try std.testing.expectEqual(@as(i32, 20), radius);

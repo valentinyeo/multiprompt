@@ -18,6 +18,11 @@ Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient,
 Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
+if ($env:CHAT_WIDTH_PROOF -eq '1') {
+    if ($Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
+    Add-Type -Path "$PSScriptRoot/layout-capture.cs"
+    [LayoutCapture]::Display()
+}
 $plans = @(
     @{name='busy-send'; mode='busy'; text='busy delivery alpha'},
     @{name='idle-suggestion'; mode='idle'; text='idle delivery beta'},
@@ -66,7 +71,7 @@ function Shot([string]$Name) {
     }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -405,6 +410,33 @@ foreach ($plan in $plans) {
             Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript' $true
             Copy-Item $cache.FullName "$caseDir/app-cache-before.jsonl"
             Shot 'messages-only-before-tools'
+            if ($env:CHAT_WIDTH_PROOF -eq '1') {
+                $frames = @()
+                foreach ($size in @(@{name='wide'; width=1920}, @{name='narrow'; width=818})) {
+                    Doctor $true
+                    [void][LayoutCapture]::ShowWindow($main, 9)
+                    if (-not [LayoutCapture]::MoveWindow($main, 0, 0, $size.width, 1000, $true)) { throw 'Owned resize failed' }
+                    Press @(0x11, 0x30) 'Ctrl+0: render resized transcript' $true
+                    [void](Wait-For 'owned window reached requested width' {
+                        $r = [System.Windows.Automation.AutomationElement]::FromHandle($main).Current.BoundingRectangle
+                        [int]$r.Width -eq $size.width
+                    })
+                    Start-Sleep -Milliseconds 750
+                    Doctor $true
+                    $frame = @{name=$size.name; dpi=[LayoutCapture]::GetDpiForWindow($main); version=$ExpectedVersion; sha256=$ExpectedHash}
+                    foreach ($pair in @(@{key='window'; handle=$main}, @{key='composer'; handle=$composer})) {
+                        $r = [System.Windows.Automation.AutomationElement]::FromHandle($pair.handle).Current.BoundingRectangle
+                        $frame[$pair.key] = @{left=[int]$r.Left; top=[int]$r.Top; width=[int]$r.Width; height=[int]$r.Height}
+                    }
+                    $r = $views[0].Current.BoundingRectangle
+                    $frame.transcript = @{left=[int]$r.Left; top=[int]$r.Top; width=[int]$r.Width; height=[int]$r.Height}
+                    Shot "layout-$($size.name)"
+                    $frames += $frame
+                }
+                Save $frames "$Evidence/layout-frames.json"
+                $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+                continue
+            }
             $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Shell-Input 'activity'
             [void](Wait-For 'all twelve completed tool calls in app-written cache' {
@@ -688,6 +720,14 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_WIDTH_PROOF -eq '1') {
+    $observed = Get-Content "$Evidence/messages-only/observation.json" -Raw | ConvertFrom-Json
+    $clean = Get-Content "$Evidence/cleanup.json" -Raw | ConvertFrom-Json
+    if ($observed.error -or $clean.remaining_owned_processes -ne 0 -or -not $clean.scratch_removed -or -not (Test-Path "$Evidence/layout-frames.json")) { throw "Layout capture failed: $($observed.error)" }
+    & node "$PSScriptRoot/../chat-width-proof.mjs" $Evidence
+    if ($LASTEXITCODE -ne 0) { throw 'IGSH-898 message width pixel proof failed' }
+    exit 0
+}
 if ($Feature -eq 'chat-full-history') {
     & node "$PSScriptRoot/../chat-full-history-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-messages-only') {
