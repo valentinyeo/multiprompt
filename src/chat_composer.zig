@@ -158,6 +158,7 @@ const closeWebView2 = @import("browser_pane.zig").closeWebView2;
 const ChatViewLayout = @import("app_state.zig").ChatViewLayout;
 const chatDeferTranscriptLoad = @import("chat_session.zig").chatDeferTranscriptLoad;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
+const chat_keynav = @import("chat_keynav.zig");
 const chatRelayoutPreservingScroll = @import("chat_session.zig").chatRelayoutPreservingScroll;
 const DragAcceptFiles = @import("win32.zig").DragAcceptFiles;
 const ChangeWindowMessageFilterEx = @import("win32.zig").ChangeWindowMessageFilterEx;
@@ -1365,6 +1366,24 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
         return 0;
     }
     if (msg == 0x0102 and app_state.g_chat_sel_transcript_focus and @import("chat_render.zig").chatSelectionReply(msg, wp, lp)) return 0;
+    if (msg == 0x0201 or msg == 0x0102 or msg == 0x0302 or msg == 0x0300) @import("chat_render.zig").chatNavClear();
+    if (msg == WM_KEYDOWN) {
+        const key_down = @as(i16, @bitCast(@as(u16, 0x8000)));
+        const nav_action = chat_keynav.action(
+            app_state.g_chat_nav_active,
+            wp,
+            GetWindowTextLengthW(hwnd) == 0,
+            app_state.g_chat_ac.open,
+            isCtrlDown(),
+            (GetAsyncKeyState(0x10) & key_down) != 0,
+            (GetAsyncKeyState(@as(i32, VK_MENU)) & key_down) != 0,
+        );
+        if (nav_action == .open) {
+            var pending: @import("win32.zig").MSG = undefined;
+            while (@import("win32.zig").PeekMessageW(&pending, hwnd, 0x0102, 0x0102, 1) != 0) {}
+        }
+        if (@import("chat_render.zig").chatNavKey(nav_action)) return 0;
+    }
     if (msg == 0x0201 or msg == 0x0102) app_state.g_chat_sel_transcript_focus = false;
     if ((msg == 0x0201 or msg == 0x0102) and app_state.g_chat_sel_active) {
         chatSelectionClear();
@@ -1686,6 +1705,7 @@ pub fn closeChatView() void {
     app_state.g_chat_working_applied_len = 0;
     app_state.g_chat_screen_status_len = 0;
     chatSelectionClear();
+    @import("chat_render.zig").chatNavClear();
     app_state.g_chat_sel_transcript_focus = false;
     if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].chat_view_on = false;
     if (app_state.g_voice_mode_active) {
