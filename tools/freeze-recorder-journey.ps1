@@ -90,7 +90,7 @@ try {
     $bitmap.Save((Join-Path $Evidence 'next-start.png'))
     $graphics.Dispose()
     $bitmap.Dispose()
-    $log = [IO.File]::ReadAllText((Join-Path $env:APPDATA 'ZigShell/debug.log'))
+    $log = -join (Get-Content -LiteralPath (Join-Path $env:APPDATA 'ZigShell/debug.log') -Raw)
     if (-not $log.Contains('Multiprompt froze last time, a report was saved')) { throw 'Next-start freeze notice missing' }
     if (Test-Path (Join-Path $crashes 'freeze.marker')) { throw 'Next-start notice was not consumed' }
     if (@(Reports).Count -ne 2) { throw 'Restart created an extra freeze report' }
