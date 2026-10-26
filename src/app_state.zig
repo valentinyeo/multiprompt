@@ -228,6 +228,7 @@ pub const Shell = struct {
     name: [64]u16,
     name_len: u32,
     name_source: NameSource,
+    restored_name_hold: bool = false,
     notified: bool,
     activity: ShellActivity,
     working_since_ms: u64 = 0,

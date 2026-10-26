@@ -276,7 +276,7 @@ pub fn chatViewLayout() ChatViewLayout {
     };
     var action_card = composer_card;
     action_card.right = mic_btn.left - uiScaled(6) + send_margin;
-    const slots = chatSendSlots(action_card, send_size, send_margin, uiScaled(6), @import("window_layout.zig").chatStopVisible(), chatComposerHasText());
+    const slots = chatSendSlots(action_card, send_size, send_margin, @import("window_layout.zig").chatStopVisible(), chatComposerHasText());
     const send_btn = slots.send;
     const attach_btn = RECT{
         .left = composer_card.left + send_margin,
@@ -348,34 +348,36 @@ pub fn chatNewMessagesDismiss() void {
     chatNewMessagesChanged(had_messages);
 }
 
-pub fn chatSendSlots(card: RECT, size: i32, margin: i32, gap: i32, working: bool, has_text: bool) struct { send: RECT, stop: RECT, send_shown: bool, stop_shown: bool, left: i32 } {
+pub fn chatSendSlots(card: RECT, size: i32, margin: i32, working: bool, has_text: bool) struct { send: RECT, stop: RECT, send_shown: bool, stop_shown: bool, left: i32 } {
     const slot = RECT{ .left = card.right - margin - size, .top = card.bottom - margin - size, .right = card.right - margin, .bottom = card.bottom - margin };
-    if (!working) return .{ .send = slot, .stop = slot, .send_shown = true, .stop_shown = false, .left = slot.left };
-    if (!has_text) return .{ .send = slot, .stop = slot, .send_shown = false, .stop_shown = true, .left = slot.left };
-    const send = RECT{ .left = slot.left - gap - size, .top = slot.top, .right = slot.left - gap, .bottom = slot.bottom };
-    return .{ .send = send, .stop = slot, .send_shown = true, .stop_shown = true, .left = send.left };
+    const stop_only = working and !has_text;
+    return .{ .send = slot, .stop = slot, .send_shown = !stop_only, .stop_shown = stop_only, .left = slot.left };
 }
 
-test "ISSUE-675 Stop takes the send slot while working and Send moves left of it once text is typed" {
+test "IGSH-909 send and stop share one slot so the composer never shows more than two buttons" {
     const card = RECT{ .left = 100, .top = 500, .right = 900, .bottom = 560 };
-    const idle = chatSendSlots(card, 32, 14, 6, false, true);
+    const idle = chatSendSlots(card, 32, 14, false, true);
     try std.testing.expect(idle.send_shown and !idle.stop_shown);
     try std.testing.expectEqual(RECT{ .left = 854, .top = 514, .right = 886, .bottom = 546 }, idle.send);
     try std.testing.expectEqual(idle.send.left, idle.left);
-    try std.testing.expectEqual(idle.send, chatSendSlots(card, 32, 14, 6, false, false).send);
-    const empty = chatSendSlots(card, 32, 14, 6, true, false);
+    try std.testing.expectEqual(idle.send, chatSendSlots(card, 32, 14, false, false).send);
+    const empty = chatSendSlots(card, 32, 14, true, false);
     try std.testing.expect(!empty.send_shown and empty.stop_shown);
     try std.testing.expectEqual(idle.send, empty.stop);
     try std.testing.expectEqual(@as(i32, 32), empty.stop.right - empty.stop.left);
     try std.testing.expectEqual(@as(i32, 32), empty.stop.bottom - empty.stop.top);
     try std.testing.expectEqual(empty.stop.left, empty.left);
-    const typed = chatSendSlots(card, 32, 14, 6, true, true);
-    try std.testing.expect(typed.send_shown and typed.stop_shown);
-    try std.testing.expectEqual(idle.send, typed.stop);
-    try std.testing.expectEqual(RECT{ .left = 816, .top = 514, .right = 848, .bottom = 546 }, typed.send);
-    try std.testing.expect(typed.send.right <= typed.stop.left);
+    const typed = chatSendSlots(card, 32, 14, true, true);
+    try std.testing.expect(typed.send_shown and !typed.stop_shown);
+    try std.testing.expectEqual(idle.send, typed.send);
     try std.testing.expectEqual(typed.send.left, typed.left);
-    for ([_]RECT{ idle.send, empty.stop, typed.send, typed.stop }) |rc| {
+    for ([_]bool{ false, true }) |working| {
+        for ([_]bool{ false, true }) |has_text| {
+            const s = chatSendSlots(card, 32, 14, working, has_text);
+            try std.testing.expectEqual(@as(u8, 1), @as(u8, @intFromBool(s.send_shown)) + @as(u8, @intFromBool(s.stop_shown)));
+        }
+    }
+    for ([_]RECT{ idle.send, empty.stop, typed.send }) |rc| {
         try std.testing.expect(rc.left >= card.left and rc.top >= card.top and rc.right <= card.right and rc.bottom <= card.bottom);
     }
 }

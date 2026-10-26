@@ -99,7 +99,8 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
   assert.ok(concurrency, 'workflow concurrency block exists');
   const group = concurrency[1].match(/^  group: (.+?)\r?$/m);
   assert.ok(group, 'workflow concurrency group exists');
-  assert.match(concurrency[1], /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \|\| \(github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\) \}\}\r?$/m);
+  assert.match(concurrency[1], /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}\r?$/m, 'a running master verify finishes; only the pending run is replaced');
+  assert.doesNotMatch(concurrency[1], /refs\/heads\/master/, 'a master push never cancels the master verify already running');
   assert.match(workflow, /^    strategy:\n      fail-fast: false\n      max-parallel: 6\n      matrix:\n/m, 'full journey matrix leaves Windows slots for release and PR checks');
   const context = (event, feature, tag = '', attempt = '1') => ({
     github: { workflow: 'Verify desktop', ref: 'refs/heads/master', event_name: event, run_attempt: attempt, sha: 'abc123' },
@@ -2019,4 +2020,26 @@ test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches 
   assert.match(read(skill + 'features/README.md'), /\[Relaunch saved sessions\]\(relaunch-saved-sessions.md\)/);
   assert.match(read(skill + 'SKILL.md'), /`relaunch-saved-sessions`/);
   assert.throws(() => assert.match(control.replace("'relaunch-saved-sessions')][string]$Feature", "')][string]$Feature"), /ValidateSet\([^\n)]*'relaunch-saved-sessions'/));
+});
+
+test('IGSH-905 six-line composer proof holds Shift until the native composer shows the newline and always releases it', () => {
+  const start = control.indexOf('function Press-ShiftEnter(');
+  assert.notEqual(start, -1, 'control.ps1 has no Press-ShiftEnter');
+  const helper = control.slice(start, control.indexOf('\nfunction ', start + 1));
+  const order = /\[VerifyNative\]::GetAncestor\(\$composer, 2\) -ne \$script:window -or \[VerifyNative\]::Class\(\$composer\) -cne 'Edit'[\s\S]+?\[VerifyNative\]::KeyDown\(0x10\)\s+try \{[\s\S]+?\[VerifyNative\]::KeyDown\(0x0D\)[\s\S]+?\[VerifyNative\]::KeyUp\(0x0D\)\s+Wait-Until \{ @\(\[VerifyNative\]::EditText\(\$composer\) -split "`r\?`n"\)\.Count -eq \(\$before \+ 1\) \}[^\n]*\s+\} finally \{\s+\[VerifyNative\]::KeyUp\(0x10\)\s+\}\s+Wait-Until \{ -not \[VerifyNative\]::IsDown\(0x10\) \}/;
+  assert.match(helper, order);
+  assert.doesNotMatch(helper, /Chord|\[VerifyNative\]::Text|Press @/);
+  assert.equal(helper.split('[VerifyNative]::KeyUp(0x10)').length - 1, 1);
+  const buttons = control.slice(control.indexOf("$buttonsCheck = @{ name = 'round-bottom-composer-buttons'"), control.indexOf('$buttonsCheck.passed = $true'));
+  assert.match(buttons, /Press-ShiftEnter 'Shift\+Enter: grow the owned draft without sending'\s+Type-Text \('Draft line ' \+ \$line\)/);
+  assert.doesNotMatch(buttons, /Press @\(0x10, 0x0D\)/);
+  assert.match(buttons, /@\(\$draft -split "`r\?`n"\)\.Count -ne \$lines/);
+  for (const broken of [
+    helper.replace(/\} finally \{\s+\[VerifyNative\]::KeyUp\(0x10\)\s+\}/, '}\n    [VerifyNative]::KeyUp(0x10)'),
+    helper.replace('[VerifyNative]::KeyDown(0x10)\n    try {', 'try {\n        [VerifyNative]::KeyDown(0x10)\n        [VerifyNative]::KeyUp(0x10)'),
+  ]) {
+    assert.doesNotMatch(broken, order);
+  }
+  const earlyRelease = helper.replace('[VerifyNative]::KeyDown(0x0D)', '[VerifyNative]::KeyUp(0x10)\n        [VerifyNative]::KeyDown(0x0D)');
+  assert.notEqual(earlyRelease.split('[VerifyNative]::KeyUp(0x10)').length - 1, 1);
 });

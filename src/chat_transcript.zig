@@ -63,25 +63,14 @@ pub const Status = struct {
     todos_known: bool = false,
 
     pub fn known(self: *const Status) bool {
-        return self.model_len > 0 or self.percent_left != null or self.todos_known;
+        return self.todos_known;
     }
 
     pub fn label(self: *const Status, out: []u16) usize {
-        var n: usize = 0;
-        if (self.model_len > 0) {
-            n = @min(out.len, self.model_len);
-            @memcpy(out[0..n], self.model[0..n]);
-        }
+        if (!self.todos_known) return 0;
         var bytes: [80]u8 = undefined;
-        if (self.percent_left) |left| {
-            const part = std.fmt.bufPrint(&bytes, "{s}{d}% context left", .{ if (n > 0) " · " else "", left }) catch unreachable;
-            n += std.unicode.utf8ToUtf16Le(out[n..], part) catch 0;
-        }
-        if (self.todos_known) {
-            const part = std.fmt.bufPrint(&bytes, "{s}{d} of {d} done", .{ if (n > 0) " · " else "", self.done, self.total }) catch unreachable;
-            n += std.unicode.utf8ToUtf16Le(out[n..], part) catch 0;
-        }
-        return n;
+        const part = std.fmt.bufPrint(&bytes, "{d} of {d} done", .{ self.done, self.total }) catch unreachable;
+        return std.unicode.utf8ToUtf16Le(out, part) catch 0;
     }
 };
 
@@ -618,7 +607,7 @@ test "status row parses model context and bounded todos without treating free te
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("one line next"), result.todos[0].text[0..result.todos[0].len]);
     var label: [256]u16 = undefined;
     const len = result.label(&label);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Opus 5.5 · 62% context left · 3 of 7 done"), label[0..len]);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("3 of 7 done"), label[0..len]);
 }
 
 test "status row label omits missing parts and old responses parse identically" {
@@ -629,10 +618,10 @@ test "status row label omits missing parts and old responses parse identically" 
     try std.testing.expect(!old.status.known());
     try std.testing.expectEqual(@as(usize, 1), old.count);
     try std.testing.expectEqualSlices(u16, &.{ 'H', 'i' }, text[0..old.len]);
-    const partial = (parseStatus("{\"role\":\"status\",\"percent_left\":0}").?).status;
+    const partial = (parseStatus("{\"role\":\"status\",\"model\":\"Opus 5.5\",\"percent_left\":0}").?).status;
     var label: [256]u16 = undefined;
-    const len = partial.label(&label);
-    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("0% context left"), label[0..len]);
+    try std.testing.expect(!partial.known());
+    try std.testing.expectEqual(@as(usize, 0), partial.label(&label));
     const empty = (parseStatus("{\"role\":\"status\",\"todos\":[]}").?).status;
     try std.testing.expect(empty.known());
     try std.testing.expectEqual(@as(usize, 0), empty.total);

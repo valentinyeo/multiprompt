@@ -1886,7 +1886,7 @@ pub fn cancelDictation() void {
     app_state.g_dictation_draft_owner_len = 0;
     @import("chat_composer.zig").chatDictationSync();
     dictationAudit("cancel", 0);
-    showHeaderNoticeAscii("Dictation cancelled", 2200, false);
+    showDictationStatus("Dictation cancelled", 2200);
 }
 
 pub fn handleDictationReady() void {
@@ -1982,7 +1982,7 @@ pub fn handleDictationReady() void {
         focusActiveBrowserPane();
         Sleep(50);
         synthesizeCtrlVIntoForeground();
-        showHeaderNoticeAscii("Dictation pasted", 2200, false);
+        showDictationStatus("Dictation pasted", 2200);
     } else if (app_state.active_shell < app_state.shell_count) {
         dictationAudit("target-shell", transcript.len);
         debugLog("dictation: paste target shell");
@@ -1996,7 +1996,7 @@ pub fn handleDictationReady() void {
         switch (paste_result) {
             .verified => {
                 dictationAudit("shell-output-verified", transcript.len);
-                showHeaderNoticeAscii("Dictation pasted", 2200, false);
+                showDictationStatus("Dictation pasted", 2200);
             },
             .delivery_failed => {
                 dictationAudit("shell-vk-packet-failed", transcript.len);
@@ -2015,8 +2015,13 @@ pub fn handleDictationReady() void {
         }
         debugLog("dictation: paste target foreground fallback");
         synthesizeCtrlVIntoForeground();
-        showHeaderNoticeAscii("Dictation pasted", 2200, false);
+        showDictationStatus("Dictation pasted", 2200);
     }
+}
+
+fn showDictationStatus(msg: []const u8, ms: u64) void {
+    if (app_state.g_chat_active) return;
+    showHeaderNoticeAscii(msg, ms, false);
 }
 
 pub fn toggleDictation() void {
@@ -2029,11 +2034,11 @@ pub fn toggleDictation() void {
     if (app_state.g_dictation_recording.load(.acquire)) {
         app_state.g_dictation_recording.store(false, .release);
         dictationAudit("stop", 0);
-        showHeaderNoticeAscii("Dictation transcribing...", 60000, false);
+        showDictationStatus("Dictation transcribing...", 60000);
         return;
     }
     if (app_state.g_dictation_running.load(.acquire)) {
-        showHeaderNoticeAscii("Dictation already transcribing...", 3000, false);
+        showDictationStatus("Dictation already transcribing...", 3000);
         return;
     }
     var key_buf: [256]u8 = undefined;
@@ -2070,5 +2075,24 @@ pub fn toggleDictation() void {
         return;
     };
     t.detach();
-    showHeaderNoticeAscii("Dictation recording - Ctrl+Shift+Space to stop", 60000, false);
+    showDictationStatus("Dictation recording - Ctrl+Shift+Space to stop", 60000);
+}
+
+test "IGSH-888 Chat View header shows no dictation status text" {
+    const old_active = app_state.g_chat_active;
+    const old_len = app_state.g_cap_msg_len;
+    const old_hwnd = app_state.g_main_hwnd;
+    defer {
+        app_state.g_chat_active = old_active;
+        app_state.g_cap_msg_len = old_len;
+        app_state.g_main_hwnd = old_hwnd;
+    }
+    app_state.g_main_hwnd = null;
+    app_state.g_chat_active = true;
+    app_state.g_cap_msg_len = 0;
+    showDictationStatus("Dictation transcribing...", 60000);
+    try std.testing.expectEqual(@as(usize, 0), app_state.g_cap_msg_len);
+    app_state.g_chat_active = false;
+    showDictationStatus("Dictation transcribing...", 60000);
+    try std.testing.expect(app_state.g_cap_msg_len > 0);
 }

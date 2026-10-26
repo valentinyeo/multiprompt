@@ -48,6 +48,7 @@ const WM_MOUSEWHEEL = @import("win32.zig").WM_MOUSEWHEEL;
 const WM_MOUSEHWHEEL = @import("win32.zig").WM_MOUSEHWHEEL;
 const TIMER_REFOCUS = @import("win32.zig").TIMER_REFOCUS;
 const TIMER_CHAT_SEL_SCROLL = @import("win32.zig").TIMER_CHAT_SEL_SCROLL;
+const TIMER_CHAT_SCROLLBAR = @import("win32.zig").TIMER_CHAT_SCROLLBAR;
 const TIMER_SHOT_FOCUS = @import("win32.zig").TIMER_SHOT_FOCUS;
 const TIMER_CHAT_FOREGROUND_RETRY = @import("win32.zig").TIMER_CHAT_FOREGROUND_RETRY;
 const WNDCLASSEXW = @import("win32.zig").WNDCLASSEXW;
@@ -1882,6 +1883,7 @@ pub fn chatScrollBy(delta_px: i32) void {
     if (new_y == app_state.g_chat_scroll_y) return;
     app_state.g_chat_read_hold = false;
     app_state.g_chat_scroll_y = new_y;
+    chatScrollActivity();
     var client: RECT = std.mem.zeroes(RECT);
     _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
     chatScrollStateChanged(client.bottom - client.top);
@@ -1893,6 +1895,22 @@ pub fn chatScrollBy(delta_px: i32) void {
 const scroll_ui = @import("chat_scrollbar.zig");
 
 var chat_scroll_drag: ?struct { grab: i32 } = null;
+var chat_scroll_last_ms: ?u64 = null;
+
+fn chatScrollOpacity() u8 {
+    return scroll_ui.opacity(GetTickCount64(), chat_scroll_last_ms, chat_scroll_drag != null);
+}
+
+fn chatScrollActivity() void {
+    chat_scroll_last_ms = GetTickCount64();
+    const hwnd = app_state.g_chat_transcript_hwnd orelse return;
+    _ = SetTimer(hwnd, TIMER_CHAT_SCROLLBAR, 50, null);
+}
+
+fn chatScrollbarTimer(hwnd: HANDLE) void {
+    _ = InvalidateRect(hwnd, null, 0);
+    if (chatScrollOpacity() == 0) _ = KillTimer(hwnd, TIMER_CHAT_SCROLLBAR);
+}
 
 pub fn chatWheelScroll(wp: WPARAM) void {
     const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
@@ -1920,7 +1938,7 @@ fn chatScrollJumpBadgeBox(w: i32, h: i32) ?scroll_ui.Box {
 }
 
 fn chatScrollThumb(h: i32) ?scroll_ui.Span {
-    return scroll_ui.thumb(app_state.g_chat_content_h, h, app_state.g_chat_scroll_y, h, uiScaled(28));
+    return scroll_ui.fixedThumb(app_state.g_chat_content_h, h, app_state.g_chat_scroll_y, h, uiScaled(scroll_ui.THUMB_HEIGHT_PX));
 }
 
 fn chatScrollHitBox(w: i32, h: i32) scroll_ui.Box {
@@ -1952,6 +1970,7 @@ fn chatScrollUiMouseDown(hwnd: HANDLE, x: i32, y: i32) bool {
         chatScrollToThumbTop(h, span.height, y - grab);
     }
     chat_scroll_drag = .{ .grab = grab };
+    chatScrollActivity();
     _ = SetCapture(hwnd);
     _ = InvalidateRect(hwnd, null, 0);
     return true;
@@ -1970,6 +1989,7 @@ fn chatScrollUiMouseMove(hwnd: HANDLE, y: i32) bool {
 fn chatScrollUiMouseUp(hwnd: HANDLE) bool {
     if (chat_scroll_drag == null) return false;
     chat_scroll_drag = null;
+    chat_scroll_last_ms = GetTickCount64();
     _ = ReleaseCapture();
     _ = InvalidateRect(hwnd, null, 0);
     return true;
@@ -1989,13 +2009,14 @@ fn chatLogScrollUi(h: i32, box: scroll_ui.Box) void {
 }
 
 fn chatPaintScrollUi(canvas: *@import("smooth.zig").Canvas, hdc: HANDLE, w: i32, h: i32) void {
-    if (chatScrollThumb(h)) |span| {
-        const x = w - uiScaled(3) - uiScaled(6);
-        const track = RECT{ .left = x, .top = 0, .right = x + uiScaled(6), .bottom = h };
-        fillRoundRectAA(hdc, track, uiScaled(3), customColorOr("scrollbar_track", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55)));
-        const thumb = RECT{ .left = x, .top = span.top, .right = x + uiScaled(6), .bottom = span.top + span.height };
-        fillRoundRectAA(hdc, thumb, uiScaled(3), customColorOr("scrollbar_thumb", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
-    }
+    const alpha = chatScrollOpacity();
+    if (alpha != 0) if (chatScrollThumb(h)) |span| {
+        const width = uiScaled(scroll_ui.THUMB_WIDTH_PX);
+        const x = w - uiScaled(scroll_ui.THUMB_MARGIN_PX) - width;
+        const thumb = RECT{ .left = x, .top = span.top, .right = x + width, .bottom = span.top + span.height };
+        const bg = themeConsoleBg();
+        fillRoundRectAA(hdc, thumb, @divTrunc(width, 2), scroll_ui.blend(bg, chat_style.scrollThumbColor(bg), alpha));
+    };
     const box = chatScrollJumpBox(w, h);
     chatLogScrollUi(h, box);
     if (!app_state.g_chat_scrolled_up) return;
@@ -4627,6 +4648,10 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_SETFOCUS => return 0,
         WM_TIMER => {
+            if (wp == TIMER_CHAT_SCROLLBAR) {
+                chatScrollbarTimer(hwnd);
+                return 0;
+            }
             if (wp == TIMER_CHAT_SEL_SCROLL) {
                 if (!app_state.g_chat_sel_dragging) {
                     _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
@@ -4907,6 +4932,7 @@ test "ISSUE-438 double click selects a word and triple click selects a padded bl
     defer {
         _ = ReleaseCapture();
         _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
+        _ = KillTimer(hwnd, TIMER_CHAT_SCROLLBAR);
         app_state.g_chat_last_len = 0;
         app_state.g_chat_block_count = 0;
         app_state.g_chat_sel_click_count = 0;
@@ -5239,8 +5265,6 @@ const CleanChatScene = enum {
     remove,
     shell_queue,
     injected_queue,
-    model,
-    context,
     todo_summary,
     todo_done,
     todo_working,
@@ -5364,27 +5388,18 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             chatPaintShellRow(dc, &row, rc);
             crop.top = natural_bottom + (if (row.injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
         },
-        .model, .context, .todo_summary, .todo_done, .todo_working, .todo_pending, .todo_chevron => {
+        .todo_summary, .todo_done, .todo_working, .todo_pending, .todo_chevron => {
             var status: chat_transcript.Status = .{};
-            switch (scene) {
-                .model => {
-                    status.model_len = 6;
-                    @memcpy(status.model[0..6], std.unicode.utf8ToUtf16LeStringLiteral("Claude"));
-                },
-                .context => status.percent_left = 42,
-                else => {
-                    status.todos_known = true;
-                    status.total = 1;
-                    status.done = 1;
-                    status.todos[0].len = 9;
-                    @memcpy(status.todos[0].text[0..9], std.unicode.utf8ToUtf16LeStringLiteral("Task text"));
-                    status.todos[0].status = switch (scene) {
-                        .todo_done => .completed,
-                        .todo_working => .in_progress,
-                        else => .pending,
-                    };
-                },
-            }
+            status.todos_known = true;
+            status.total = 1;
+            status.done = 1;
+            status.todos[0].len = 9;
+            @memcpy(status.todos[0].text[0..9], std.unicode.utf8ToUtf16LeStringLiteral("Task text"));
+            status.todos[0].status = switch (scene) {
+                .todo_done => .completed,
+                .todo_working => .in_progress,
+                else => .pending,
+            };
             chatPaintStatus(dc, &status, area, brush);
             if (scene == .todo_done or scene == .todo_working or scene == .todo_pending) crop.top = uiScaled(28);
             if (scene == .todo_chevron) crop.left = width - uiScaled(24);
@@ -5533,14 +5548,6 @@ test "IGSH-816 CLEAN hides Send again row pixels" {
 
 test "IGSH-816 CLEAN hides Remove row pixels" {
     try expectCleanChatRowHidden(.remove);
-}
-
-test "IGSH-816 CLEAN hides model footer pixels" {
-    try expectCleanChatRowHidden(.model);
-}
-
-test "IGSH-816 CLEAN hides context-left footer pixels" {
-    try expectCleanChatRowHidden(.context);
 }
 
 test "IGSH-816 CLEAN hides todo summary footer pixels" {
@@ -5726,4 +5733,123 @@ test "IGSH-871 new reply badge counts arrivals and remains attached to the jump 
     try std.testing.expectEqual(wider.right, badge.right);
     app_state.g_chat_new_messages.atBottom(false);
     try std.testing.expect(chatScrollJumpBadgeBox(800, 600) == null);
+}
+
+fn scrollProofColor(pixel: u32) u32 {
+    return ((pixel & 0xFF) << 16) | (pixel & 0xFF00) | ((pixel >> 16) & 0xFF);
+}
+
+fn scrollProofSave(name: LPCWSTR, pixels: []const u8, header: anytype) !void {
+    const w = @import("win32.zig");
+    const bmp = try std.testing.allocator.alloc(u8, 54 + pixels.len);
+    defer std.testing.allocator.free(bmp);
+    @memset(bmp[0..54], 0);
+    @memcpy(bmp[0..2], "BM");
+    std.mem.writeInt(u32, bmp[2..6], @intCast(bmp.len), .little);
+    std.mem.writeInt(u32, bmp[10..14], 54, .little);
+    @memcpy(bmp[14..54], std.mem.asBytes(&header));
+    @memcpy(bmp[54..], pixels);
+    const file = w.CreateFileW(name, 0x40000000, 0, null, 2, 0x80, null);
+    try std.testing.expect(file != null and file != @as(HANDLE, @ptrFromInt(std.math.maxInt(usize))));
+    defer _ = w.CloseHandle(file);
+    var written: u32 = 0;
+    try std.testing.expect(w.WriteFile(file, bmp.ptr, @intCast(bmp.len), &written, null) != 0 and written == bmp.len);
+}
+
+test "IGSH-897 scrollbar draws no track, only a narrow fixed thumb while scrolling, then fades away" {
+    const w = @import("win32.zig");
+    const GdiFlush = struct {
+        extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
+    }.GdiFlush;
+    const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(dc);
+    const width = 400;
+    const height = 600;
+    const info: w.BITMAPINFO = .{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    const pixels = @as([*]const u32, @ptrCast(@alignCast(bits.?)))[0 .. width * height];
+    const bytes = @as([*]const u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    const old_content = app_state.g_chat_content_h;
+    const old_scroll = app_state.g_chat_scroll_y;
+    const old_up = app_state.g_chat_scrolled_up;
+    const old_last = chat_scroll_last_ms;
+    const old_drag = chat_scroll_drag;
+    defer {
+        app_state.g_chat_content_h = old_content;
+        app_state.g_chat_scroll_y = old_scroll;
+        app_state.g_chat_scrolled_up = old_up;
+        chat_scroll_last_ms = old_last;
+        chat_scroll_drag = old_drag;
+    }
+    app_state.g_chat_content_h = 3000;
+    app_state.g_chat_scroll_y = 1200;
+    app_state.g_chat_scrolled_up = false;
+    chat_scroll_drag = null;
+    var canvas = @import("smooth.zig").Canvas.init(dc);
+    defer canvas.deinit();
+    const bg = themeConsoleBg();
+    const thumb_color = chat_style.scrollThumbColor(bg);
+    const span = chatScrollThumb(height).?;
+    try std.testing.expectEqual(uiScaled(scroll_ui.THUMB_HEIGHT_PX), span.height);
+    const thumb_w = uiScaled(scroll_ui.THUMB_WIDTH_PX);
+    const left = width - uiScaled(scroll_ui.THUMB_MARGIN_PX) - thumb_w;
+    const middle = span.top + @divTrunc(span.height, 2);
+    const strip_left: usize = @intCast(width - uiScaled(16));
+    const States = enum { rest, scrolling, fading, faded };
+    for ([_]States{ .rest, .scrolling, .fading, .faded }) |state| {
+        var background = RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+        const brush = CreateSolidBrush(bg);
+        _ = FillRect(dc, &background, brush);
+        _ = DeleteObject(brush);
+        const now = GetTickCount64();
+        chat_scroll_last_ms = switch (state) {
+            .rest => null,
+            .scrolling => now,
+            .fading => now -| (scroll_ui.HOLD_MS + scroll_ui.FADE_MS / 2),
+            .faded => now -| (scroll_ui.HOLD_MS + scroll_ui.FADE_MS + 1000),
+        };
+        chatPaintScrollUi(&canvas, dc, width, height);
+        _ = GdiFlush();
+        var changed_rows: usize = 0;
+        var changed_outside_thumb: usize = 0;
+        var changed_left_of_thumb: usize = 0;
+        var y: usize = 0;
+        while (y < height) : (y += 1) {
+            var x: usize = strip_left;
+            while (x < width) : (x += 1) {
+                if (scrollProofColor(pixels[y * width + x]) == bg) continue;
+                const inside = @as(i32, @intCast(y)) >= span.top and @as(i32, @intCast(y)) < span.top + span.height;
+                if (!inside) changed_outside_thumb += 1;
+                if (@as(i32, @intCast(x)) < left) changed_left_of_thumb += 1;
+                if (x == @as(usize, @intCast(left + @divTrunc(thumb_w, 2)))) changed_rows += 1;
+            }
+        }
+        const center = scrollProofColor(pixels[@as(usize, @intCast(middle)) * width + @as(usize, @intCast(left + @divTrunc(thumb_w, 2)))]);
+        try std.testing.expectEqual(@as(usize, 0), changed_outside_thumb);
+        try std.testing.expectEqual(@as(usize, 0), changed_left_of_thumb);
+        switch (state) {
+            .rest, .faded => {
+                try std.testing.expectEqual(@as(usize, 0), changed_rows);
+                try std.testing.expectEqual(bg, center);
+            },
+            .scrolling => {
+                try std.testing.expect(changed_rows >= @as(usize, @intCast(span.height - thumb_w)) and changed_rows <= @as(usize, @intCast(span.height)));
+                try std.testing.expectEqual(thumb_color, center);
+                try std.testing.expect(thumb_w <= uiScaled(6));
+            },
+            .fading => {
+                try std.testing.expect(center != bg and center != thumb_color);
+            },
+        }
+        var enabled: [8]u8 = undefined;
+        if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
+            if (state == .rest) try scrollProofSave(L("scrollbar-rest.bmp"), bytes, info.header);
+            if (state == .scrolling) try scrollProofSave(L("scrollbar-scrolling.bmp"), bytes, info.header);
+            if (state == .faded) try scrollProofSave(L("scrollbar-faded.bmp"), bytes, info.header);
+        }
+    }
 }

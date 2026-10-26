@@ -179,6 +179,12 @@ pub fn hasStaged() bool {
 
 pub fn restart(pids: []const u32) bool {
     if (!enabled()) return false;
+    if (checker) |process| {
+        if (checking() and win.TerminateProcess(process, 0) == 0) return false;
+        if (win.WaitForSingleObject(process, 0xFFFFFFFF) != 0) return false;
+        _ = win.CloseHandle(process);
+        checker = null;
+    }
     var buf: [100]u8 = undefined;
     const name = std.fmt.bufPrint(&buf, "Local\\MultipromptApply-{d}-{d}", .{ win.GetCurrentProcessId(), win.GetTickCount64() }) catch return false;
     const wide = std.unicode.utf8ToUtf16LeAllocZ(std.heap.page_allocator, name) catch return false;

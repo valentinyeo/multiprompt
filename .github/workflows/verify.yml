@@ -66,7 +66,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   reopen-board-contract:
@@ -289,6 +289,12 @@ jobs:
             Copy-Item chat-markdown-proof.json $metadataPath
           }
           Remove-Item Env:IGSH_610
+          foreach ($name in @('rest', 'scrolling', 'faded')) {
+            $source = "scrollbar-$name.bmp"
+            if (-not (Test-Path $source)) { throw "Missing scrollbar proof: $source" }
+            $image = [Drawing.Bitmap]::FromFile("$pwd/$source")
+            try { $image.Save("$pwd/evidence/chat-scrollbar-$name.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
+          }
           node tools/chat-render-reference.mjs evidence
           if ($LASTEXITCODE -ne 0) { throw 'Chrome reference or repaint evidence failed' }
           foreach ($file in @('chat-markdown-render.png', 'chat-markdown-render-gdi.png', 'chrome-reference.png', 'repaint-ms.json')) {

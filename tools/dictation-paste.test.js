@@ -57,7 +57,7 @@ test("dictation reports success only after console output verification", () => {
   const ready = functionBody("handleDictationReady", "toggleDictation");
   assert.match(ready, /pasteDictationToShellVerified\(active_shell, transcript\)/);
   const verified = ready.indexOf('dictationAudit("shell-output-verified"');
-  const success = ready.indexOf('showHeaderNoticeAscii("Dictation pasted"', verified);
+  const success = ready.indexOf('showDictationStatus("Dictation pasted"', verified);
   assert.ok(verified >= 0 && success > verified,
     "the shell branch must verify output before announcing a successful paste");
   assert.match(ready, /Dictation copied: console rejected input/);

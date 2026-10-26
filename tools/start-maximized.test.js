@@ -58,7 +58,9 @@ test('IGSH-587 Relaunch card and crash reopen helpers pass maximized on both pro
     }
     assert.throws(() => assertRelaunch(source.replaceAll('si.dwFlags = 0x1;', 'si.dwFlags = 0;')));
   }
-  assert.match(read('src/update_card.zig'), /update_release\.restart\(pids\[0\.\.np\]\) else update_check\.spawnRelaunchHelper/);
+  const card = read('src/update_card.zig');
+  assert.match(card, /update_release\.restart\(pids\[0\.\.np\]\)/);
+  assert.match(card, /update_check\.spawnRelaunchHelper\(app_state\.g_update_path/);
 });
 
 function assertUpdateLaunches(source) {

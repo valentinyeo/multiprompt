@@ -45,7 +45,7 @@ test('Windows behavioral update tests are required by CI', () => {
   ]) assert.equal(source.split('\n').filter(line => line.trim() === command).length, 1, command);
   for (const command of [
     'powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"',
-    'powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }}',
+    'powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multiprompt.exe"',
   ]) assert.equal(update.split('\n').filter(line => line.trim() === command).length, 1, command);
   assert.match(source, /node --test tools\/update-release-review\.test\.js > "\$env:RUNNER_TEMP\/update-review-before\.log"/);
   assert.match(source, /foreach \(\$finding in 1\.\.9\)/);

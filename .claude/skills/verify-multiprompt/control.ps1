@@ -128,12 +128,16 @@ public static class VerifyNative {
     [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, UIntPtr count, IntPtr text, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScan(char character);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
     [DllImport("dwmapi.dll")] public static extern int DwmFlush();
     static void Key(ushort key, ushort scan, uint flags) {
         Input input = new Input(); input.type = 1;
         input.data.keyboard = new Keyboard { key = key, scan = scan, flags = flags };
         if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("SendInput failed");
     }
+    public static void KeyDown(int key) { Key((ushort)key, 0, 0); }
+    public static void KeyUp(int key) { Key((ushort)key, 0, 2); }
+    public static bool IsDown(int key) { return (GetAsyncKeyState(key) & 0x8000) != 0; }
     public static void Chord(int[] keys) {
         Input[] inputs = new Input[keys.Length * 2];
         for (int i = 0; i < keys.Length; i++) {
@@ -1634,6 +1638,28 @@ function Click-WorkspacePill([int]$Workspace) {
     Record ("Click workspace pill for stored workspace $Workspace")
     [void][VerifyNative]::DwmFlush()
     [VerifyNative]::ClickClient($script:window, (8 + ($Workspace + 1) * 29 + 12), 17)
+}
+
+function Press-ShiftEnter([string]$Label) {
+    Doctor
+    Wait-Foreground
+    Record $Label
+    Assert-Foreground
+    $composer = [VerifyNative]::GetFocusedWindow($script:window)
+    if ([VerifyNative]::GetAncestor($composer, 2) -ne $script:window -or [VerifyNative]::Class($composer) -cne 'Edit') { throw 'Shift+Enter needs the owned focused composer' }
+    $before = @([VerifyNative]::EditText($composer) -split "`r?`n").Count
+    [VerifyNative]::KeyDown(0x10)
+    try {
+        Start-Sleep -Milliseconds 35
+        [VerifyNative]::KeyDown(0x0D)
+        Start-Sleep -Milliseconds 35
+        [VerifyNative]::KeyUp(0x0D)
+        Wait-Until { @([VerifyNative]::EditText($composer) -split "`r?`n").Count -eq ($before + 1) } 'native composer shows the Shift+Enter newline while Shift is held' -Tight
+    } finally {
+        [VerifyNative]::KeyUp(0x10)
+    }
+    Wait-Until { -not [VerifyNative]::IsDown(0x10) } 'Shift is released after Shift+Enter'
+    Record 'Shift released after Shift+Enter'
 }
 
 function Focus-Palette([string]$Query, [int]$Target) {
@@ -3190,11 +3216,13 @@ try {
             if ($stopped.ActiveProcesses -ne 0) { throw 'Favorites restart left owned descendants' }
             $job.Dispose()
             try {
-                $portSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../src/app_state.zig'))
-                $portList = [regex]::Match($portSource, 'pub const NOTIFY_PORTS = \[_\]u16\{([^}]+)\}')
-                if (-not $portList.Success) { throw 'Notification port list missing' }
-                foreach ($port in $portList.Groups[1].Value.Split(',')) {
-                    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, [int]$port.Trim())
+                $portSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../src/notify_ports.zig'))
+                $firstPort = [regex]::Match($portSource, 'pub const FIRST_PORT: u16 = (\d+);')
+                $portCount = [regex]::Match($portSource, 'pub const PORT_COUNT: usize = (\d+);')
+                if (-not $firstPort.Success -or -not $portCount.Success) { throw 'Notification port range missing' }
+                for ($offset = 0; $offset -lt [int]$portCount.Groups[1].Value; $offset++) {
+                    $port = [int]$firstPort.Groups[1].Value + $offset
+                    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $port)
                     $listener.Start()
                     $listeners += $listener
                 }
@@ -3781,31 +3809,33 @@ try {
                 if ($empty.size -le 0 -or $stopW -ne $empty.size -or $stopH -ne $empty.size) { throw ('Stop rect is ' + $stopW + 'x' + $stopH + ', expected the ' + $empty.size + ' px send size') }
                 if (-not (& $insideCard $empty.stop $empty.card)) { throw ('Stop rect ' + ($empty.stop -join ',') + ' is outside composer card ' + ($empty.card -join ',')) }
                 if ($null -ne $empty.send) { throw ('Send rect ' + ($empty.send -join ',') + ' is drawn while the composer is empty and the agent is working') }
+                Snapshot 'stop-in-box'
+                Snapshot 'composer-working-empty'
                 Type-Text 'x'
-                Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -ne $typed.stop } 'Send and Stop both drawn after typing while working'
+                Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -eq $typed.stop } 'Send replaces Stop after typing while working'
                 $typed = & $readStopFrame
                 $stopCheck.typed = $typed
-                if (($typed.stop[2] - $typed.stop[0]) -ne $typed.size -or ($typed.stop[3] - $typed.stop[1]) -ne $typed.size) { throw 'Stop changed size after typing' }
-                if ($typed.send[2] -gt $typed.stop[0]) { throw ('Send rect ' + ($typed.send -join ',') + ' is not left of Stop rect ' + ($typed.stop -join ',')) }
-                if (-not (& $insideCard $typed.send $typed.card) -or -not (& $insideCard $typed.stop $typed.card)) { throw 'Send or Stop is outside the composer card after typing' }
-                Snapshot 'stop-in-box'
+                if (($typed.send[2] - $typed.send[0]) -ne $typed.size -or ($typed.send[3] - $typed.send[1]) -ne $typed.size) { throw 'Send changed size after typing' }
+                if (-not (& $insideCard $typed.send $typed.card)) { throw 'Send is outside the composer card after typing' }
+                if (($typed.send -join ',') -ne ($empty.stop -join ',')) { throw ('Send rect ' + ($typed.send -join ',') + ' is not in the slot Stop used: ' + ($empty.stop -join ',')) }
+                Snapshot 'composer-working-text'
                 Snapshot 'grey-buttons'
                 $buttonsCheck = @{ name = 'round-bottom-composer-buttons'; passed = $false; frames = @() }
                 $result.checks += $buttonsCheck
                 foreach ($lines in @(1, 6)) {
                     if ($lines -eq 6) {
                         for ($line = 2; $line -le 6; $line++) {
-                            Press @(0x10, 0x0D) 'Shift+Enter: grow the owned draft without sending'
+                            Press-ShiftEnter 'Shift+Enter: grow the owned draft without sending'
                             Type-Text ('Draft line ' + $line)
                         }
                     }
                     Wait-Until {
                         $frame = & $readStopFrame
-                        $null -ne $frame.mic -and $null -ne $frame.attach -and $null -ne $frame.send -and $null -ne $frame.stop -and
+                        $null -ne $frame.mic -and $null -ne $frame.attach -and $null -ne $frame.send -and $null -eq $frame.stop -and
                         ($lines -eq 1 -or $frame.card[1] -lt $typed.card[1] - 2 * $frame.size)
-                    } 'all four composer buttons painted at the requested draft height'
+                    } 'all three composer buttons painted at the requested draft height'
                     $frame = & $readStopFrame
-                    foreach ($name in @('attach', 'mic', 'send', 'stop')) {
+                    foreach ($name in @('attach', 'mic', 'send')) {
                         $rect = $frame[$name]
                         if ($rect[3] -ne $frame.send[3] -or $rect[1] -ne $frame.send[1] -or
                             ($rect[2] - $rect[0]) -ne $frame.size -or ($rect[3] - $rect[1]) -ne $frame.size) {
@@ -3836,6 +3866,14 @@ try {
                     $stopCheck.receivedBytes = $stopBytes.Length
                     $stopBytes -contains [byte]0x1B
                 } 'Esc reached the working stand-in stdin'
+                $composerHandle = [VerifyNative]::GetFocusedWindow($script:window)
+                if ([VerifyNative]::GetAncestor($composerHandle, 2) -ne $script:window -or [VerifyNative]::Class($composerHandle) -cne 'Edit') { throw 'Send click proof lost the owned composer' }
+                $sendFrame = & $readStopFrame
+                if ($null -eq $sendFrame.send -or $null -ne $sendFrame.stop) { throw 'Send is not the only action button before the click' }
+                if ([VerifyNative]::EditText($composerHandle).Length -eq 0) { throw 'Composer draft is empty before the Send click' }
+                [VerifyNative]::ClickClient($script:window, [int](($sendFrame.send[0] + $sendFrame.send[2]) / 2), [int](($sendFrame.send[1] + $sendFrame.send[3]) / 2))
+                Wait-Until { [VerifyNative]::EditText($composerHandle).Length -eq 0 } 'clicking Send took the draft out of the composer'
+                $stopCheck.sendClicked = $true
                 $stopCheck.passed = $true
                 $stopCheck.reason = ''
             } catch {
