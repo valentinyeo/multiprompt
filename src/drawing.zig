@@ -565,13 +565,13 @@ pub fn drawAgentIcon(hdc: HANDLE, rc: *RECT, agent: u8, active: bool) void {
 }
 
 fn threadTitleBandRightFor(win_w: i32) i32 {
-    if (app_state.g_chat_active) return chatViewLayout().transcript.right;
+    if (app_state.g_chat_active) return @min(chatViewLayout().transcript.right, @import("window_frame.zig").controlsRect(win_w).left);
     if (browserSlotReserved()) {
         if (calcBrowserLayout()) |layout| {
             return @min(win_w, layout.splitter_left);
         }
     }
-    return win_w;
+    return @import("window_frame.zig").controlsRect(win_w).left;
 }
 
 pub fn threadTitleNameRectFor(win_w: i32, shell_idx: u32) ?RECT {
@@ -636,7 +636,10 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     const th = threadTitleHeight();
     if (th == 0 or app_state.active_shell >= app_state.shell_count or app_state.g_chat_find_open) return null;
     const shell = &app_state.shells[app_state.active_shell];
-    const column = chatViewLayout().transcript;
+    var column = chatViewLayout().transcript;
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client);
+    column.right = @min(column.right, @import("window_frame.zig").controlsRect(client.right).left - uiScaled(8));
     const title_top = threadTitleTop();
     const pill_h = th - uiScaled(10);
     const pill_top = title_top + @divTrunc(th - pill_h, 2);
@@ -682,6 +685,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
     const layout = chatTitleLayout() orelse return;
     const shell = &app_state.shells[app_state.active_shell];
     const window_layout = @import("window_layout.zig");
+    @import("chat_composer.zig").refreshChatBrushes();
     const fill = app_state.g_chat_input_color;
     const border = window_layout.chatSurfaceBorderColor();
     const edge = window_layout.chatSurfaceBorderW();

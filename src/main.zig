@@ -1242,6 +1242,7 @@ comptime {
         _ = @import("chat_find_ui.zig");
         _ = @import("chat_send.zig");
         _ = @import("window_layout.zig");
+        _ = @import("window_frame.zig");
         _ = @import("rename.zig");
         _ = @import("changelog.zig");
         _ = @import("drawing.zig");
@@ -1352,6 +1353,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
+    if (@import("window_frame.zig").handle(hwnd, msg, wp, lp)) |result| return result;
     if (!app_state.g_account_locked and @import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
     if (msg == @import("console.zig").WM_STARTUP_SHELL_READY) {
         @import("console.zig").queueStartupShell(@ptrFromInt(@as(usize, @bitCast(lp))));
@@ -1585,6 +1587,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 @import("drawing.zig").paintDisconnectedShell(hdc);
                 paintBrowserPlaceholder(hdc);
                 paintBrowserSplitter(hdc);
+                @import("window_frame.zig").paint(hwnd, hdc);
                 canvas.deinit();
                 _ = EndPaint(hwnd, &ps);
                 launch_cache.painted(false);
@@ -1600,6 +1603,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("drawing.zig").paintDisconnectedShell(mem_dc);
             paintBrowserPlaceholder(mem_dc);
             paintBrowserSplitter(mem_dc);
+            @import("window_frame.zig").paint(hwnd, mem_dc);
             canvas.deactivate();
             if (saved_dc != 0) _ = RestoreDC(mem_dc, saved_dc);
             _ = BitBlt(hdc, paint_rc.left, paint_rc.top, pw, ph, mem_dc, paint_rc.left, paint_rc.top, GDI_SRCCOPY);

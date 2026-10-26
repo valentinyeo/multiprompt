@@ -18,11 +18,11 @@ From an authenticated checkout, submit the default branch's workflow and select 
 ```sh
 gh workflow run verify.yml -f feature=<name>
 gh run list --workflow verify.yml --event workflow_dispatch --limit 5 --json databaseId,headSha,displayTitle,url
-gh run watch <id> --interval 60
+timeout 1800 gh run watch <id> --interval 300
 gh run download <id>
 ```
 
-Use `appearance` for the first journey. Other names are `browser-corners`, `sessions`, `session-restore`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `session-tabs`, `favorites-groups`, `browser-switch-speed`, `chat-switch-speed`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `title-bar`, `chat-tables`, `chat-code-font`, `safe-updates`, `chat-view`, `chat-view-everywhere`, `chat-focus`, `chat-dictation`, `status-card`, `palette-order`, `remind-me`, `tab-names`, `browser-emulation`, `browser-own-profile`, `chat-first-paint` ([chat first paint](features/chat-first-paint.md)), `chat-send-latency` ([chat send latency](features/chat-send-latency.md)), and `relaunch-saved-sessions` (the release gate, [relaunch saved sessions](features/relaunch-saved-sessions.md)). [Chat delivery](features/chat-delivery.md) additionally selects `chat-delivery` for the production tmux-channel journey described below. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
+Use `appearance` for the first journey. Other names are `browser-corners`, `sessions`, `session-restore`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `session-tabs`, `favorites-groups`, `browser-switch-speed`, `chat-switch-speed`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `title-bar`, `window-controls`, `chat-tables`, `chat-code-font`, `safe-updates`, `chat-view`, `chat-view-everywhere`, `chat-focus`, `chat-dictation`, `status-card`, `palette-order`, `remind-me`, `tab-names`, `browser-emulation`, `browser-own-profile`, `chat-first-paint` ([chat first paint](features/chat-first-paint.md)), `chat-send-latency` ([chat send latency](features/chat-send-latency.md)), and `relaunch-saved-sessions` (the release gate, [relaunch saved sessions](features/relaunch-saved-sessions.md)). [Chat delivery](features/chat-delivery.md) additionally selects `chat-delivery` for the production tmux-channel journey described below. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
 
 ```sh
 gh workflow run verify.yml --ref ceo/IGSH-525 -f feature=appearance
@@ -98,7 +98,7 @@ The separate [verify-reconnect.yml](../../../.github/workflows/verify-reconnect.
 gh workflow run verify-reconnect.yml --ref ceo/IGSH-511 -f exe_source=build
 gh workflow run verify-reconnect.yml --ref ceo/IGSH-511 -f exe_source=v0.28.788
 gh run list --workflow verify-reconnect.yml --branch ceo/IGSH-511 --event workflow_dispatch --limit 5 --json databaseId,headSha,url
-gh run watch <id> --interval 60
+timeout 1800 gh run watch <id> --interval 300
 gh run download <id>
 ```
 

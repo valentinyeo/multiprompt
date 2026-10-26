@@ -274,6 +274,10 @@ test "only user-posted messages propagate input authority, never agent bind or n
     try std.testing.expectEqual(@as(u64, 0), focusGuardDispatchTick(0x8051, 0, 0));
     try std.testing.expectEqual(@as(u64, 0), focusGuardDispatchTick(0x113, 0, 0));
     try std.testing.expectEqual(clock, focusGuardDispatchTick(WM_KEYDOWN, 0, 0));
+    try std.testing.expectEqual(clock, focusGuardDispatchTick(@import("win32.zig").WM_NCLBUTTONDOWN, 0, 0));
+    foreground = win(9);
+    try std.testing.expect(!foregroundIsOurs());
+    try std.testing.expectEqual(@as(u64, 0), focusGuardDispatchTick(@import("win32.zig").WM_NCLBUTTONDOWN, 0, 0));
 }
 
 test "a different active session cannot redirect restoration away from the user's console" {

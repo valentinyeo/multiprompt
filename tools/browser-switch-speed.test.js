@@ -351,7 +351,7 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
   assert.match(workflow, /node --test --test-concurrency=1 tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
   assert.match(workflow, /paths:[\s\S]*?- tools\/browser-switch-speed.test.js/);
-  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners'\)\)/);
+  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls'\)\)/);
   const map = read(base + 'features/browser-switch-speed.md');
   assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']);
   assert.match(map, /on demand only/);

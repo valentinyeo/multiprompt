@@ -41,12 +41,21 @@ var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 ` + fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8');
+    const nonClientMessage = fs.readFileSync(path.join(root, 'src/win32.zig'), 'utf8').match(/^pub const WM_NCLBUTTONDOWN[^;]+;/m);
+    assert.ok(nonClientMessage, 'native frame input message comes from the shipped Win32 declarations');
+    fs.writeFileSync(path.join(dir, 'win32.zig'), nonClientMessage[0]);
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, (fixture.replace("fn reset() void {", production + "\nfn reset() void {")).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const zig = process.env.ZIG || 'zig';
     const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
+    const missingFrameInput = production.replace(', @import("win32.zig").WM_NCLBUTTONDOWN', '');
+    assert.notEqual(missingFrameInput, production);
+    fs.writeFileSync(file, (fixture.replace("fn reset() void {", missingFrameInput + "\nfn reset() void {")).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    const frameNegative = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.notEqual(frameNegative.status, 0, 'removing real frame input authority must fail');
+    assert.match(frameNegative.stderr, /only user-posted messages[^]*FAIL/);
     const broadOwner = production.replace('if (hwnd == bh or root == bh) return bh;',
       'if (root != null and browserPaneOwnsForegroundHwnd(hwnd, bh)) return bh;');
     assert.notEqual(broadOwner, production);
