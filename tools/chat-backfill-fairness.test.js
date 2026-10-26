@@ -55,7 +55,9 @@ function stagingContract(source, model) {
   const finish = model.slice(model.indexOf('    pub fn finish('), model.indexOf('\npub fn statusOnly('));
   assert.match(finish, /for \(self.pages.items\) \|page\| size \+= page.len/);
   assert.match(finish, /var i = self.pages.items.len;[^]*i -= 1;[^]*self.pages.items\[i\]/);
-  assert.match(finish, /appendSliceAssumeCapacity\(tail.rows.items\)/);
+  assert.match(finish, /recent.rows.appendSlice\(a, tail.rows.items\)/);
+  assert.match(finish, /recent.retainRows\(a, result\)/);
+  assert.match(finish, /result.rows = recent.rows/);
   assert.equal((finish.match(/result.render\(a\)/g) || []).length, 1);
   assert.doesNotMatch(finish, /TAIL_BYTES|MAX_CACHE_BYTES|@min|break;/);
   const ready = body(source, 'chatFileOnReady');
