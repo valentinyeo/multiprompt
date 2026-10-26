@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-skills')][string]$Feature = 'chat-delivery'
+    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history')][string]$Feature = 'chat-delivery'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -18,6 +18,7 @@ Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient,
 Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
+if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Fresh skills proof requires chat-delivery' }
 if ($env:CHAT_WIDTH_PROOF -eq '1') {
     if ($Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
     Add-Type -Path "$PSScriptRoot/layout-capture.cs"
@@ -32,7 +33,7 @@ $plans = @(
 )
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='busy'; text='composer stays usable'}) }
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
-if ($Feature -eq 'chat-skills') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
+if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
 if ($env:CHAT_REMOTE_PROOF -eq '1') { $plans = @(@{name='remote-sync'; mode='idle'; text='remote session follows live process'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; suggestion='Try asking about the next step'}
@@ -373,7 +374,7 @@ foreach ($plan in $plans) {
             $observation.steps = $steps
         }
         Save $standIn "$state/state.json"
-        if ($Feature -eq 'chat-skills') {
+        if ($env:CHAT_SKILLS_PROOF -eq '1') {
             New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-zebra" | Out-Null
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-zebra/SKILL.md", "---`nname: verify-zebra`ndescription: Existing fixture skill`n---`nFixture")
             New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-yak" | Out-Null
@@ -383,7 +384,7 @@ foreach ($plan in $plans) {
         if ($isHistory) { Shell-Run @('history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
-        if ($Feature -eq 'chat-skills') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
+        if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         Save $savedSession "$settings/session.json"
         if ($isRemote) {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
@@ -404,7 +405,7 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($Feature -eq 'chat-skills') {
+        if ($env:CHAT_SKILLS_PROOF -eq '1') {
             Type-Composer '/verify-zebra'
             if ([ChatDeliveryDesktop]::Text($composer) -cne '/verify-zebra') { throw 'Skill fixture did not type the slash and hyphen' }
             [void](Wait-For 'initial skill fetch applied' { (Read-Shared "$settings/debug.log") -match 'chat-ac: fetched host=0 bytes=[1-9]' } 20)
@@ -871,7 +872,7 @@ if ($env:CHAT_WIDTH_PROOF -eq '1') {
     if ($LASTEXITCODE -ne 0) { throw 'IGSH-898 message width pixel proof failed' }
     exit 0
 }
-if ($Feature -eq 'chat-skills') {
+if ($env:CHAT_SKILLS_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-skills-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-full-history') {
     & node "$PSScriptRoot/../chat-full-history-proof.mjs" $Evidence

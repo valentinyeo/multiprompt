@@ -70,3 +70,12 @@ gh workflow run verify.yml --ref ceo/IGSH-950 -f feature=chat-delivery -f remote
 This opt-in journey uses host index 2 and a separate remote home. Two question/answer turns arrive on one session, then a third arrives after the pane metadata changes to a new session. The old transcript remains readable. Each pair must reach the app cache within two seconds and appear in copied rendered text. The journey saves a terminal screenshot and a Chat View screenshot per turn. `chat-remote-sync-proof.mjs` independently checks the copied text, terminal frames, session change, delivery time and cleanup.
 
 The SSH host and remote home are synthetic boundaries, not a real server or OS login. The desktop, embedded reader, pane discovery and rendered transcript are real. Reader regressions separately cover noninteractive cross-user discovery and inaccessible or missing live transcripts. The Linux chat sync audit repeats the two-turn/resume case against its real renderer and requires zero drift.
+
+
+### Fresh skills proof (IGSH-923)
+
+Dispatch `feature=chat-delivery` with `chat_skills_proof=true`. This selects only the fresh-skills plan; normal chat delivery cases remain unchanged when the option is false. Download `verify-chat-delivery` evidence.
+
+The owned native composer uses real `mp_complete.py` discovery over isolated `SKILL.md` files, without running a provider. Warm the cache with zebra and yak, then add alpha. Reopen suggestions and select cached yak while the response is delayed. Require alpha within five seconds, keep yak selected after alpha changes its row index, and accept alpha with Tab. Add beta after typing reload-plugins, send it, and require another discovery before reopening suggestions.
+
+The same workflow first builds pinned pre-fix master `d1c9c8b7` and requires exactly the new-skill timeout after successful cache warm, Doctor and cleanup. The fixed app must pass `chat-skills-proof.mjs`, with screenshots, actual inserted composer text, discovery records and zero remaining owned processes. Release proof supplies the published tag, uses its checksum-verified executable, and repeats the identical journey. The deliberate 800 ms transport delay is not a real-network speed measurement.

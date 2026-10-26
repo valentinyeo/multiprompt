@@ -30,6 +30,11 @@ on:
         required: false
         default: false
         type: boolean
+      chat_skills_proof:
+        description: Check fresh skill discovery and stable selection through chat-delivery
+        required: false
+        default: false
+        type: boolean
       chat_width_proof:
         description: Capture wide and narrow message geometry with the chat-messages-only journey
         required: false
@@ -187,6 +192,7 @@ jobs:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
+      CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
@@ -217,7 +223,7 @@ jobs:
           HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-skills', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'relaunch-saved-sessions', 'chat-first-paint')) { throw 'Unknown feature map' }
+          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'relaunch-saved-sessions', 'chat-first-paint')) { throw 'Unknown feature map' }
           if ($env:FEATURE -eq 'appearance' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master' -and $env:HEAD_COMMIT_MESSAGE.Split([char]10)[0].Contains('IGSH-837 red proof') -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')) { throw 'IGSH-837 deliberate red master proof' }
           if ($env:FEATURE -eq 'chat-dictation' -and $env:RELEASE_TAG) { throw 'Chat dictation requires the branch offline fixture boundary' }
           if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed', 'title-bar') -and $env:RELEASE_TAG) { throw 'Browser emulation requires a branch build with matching extension and bridge' }
@@ -230,12 +236,12 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/title-bar.ps1", [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { throw ($errors | Out-String) }
           }
-          if ($env:FEATURE -in @('chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-skills')) {
+          if ($env:FEATURE -in @('chat-delivery', 'chat-messages-only', 'chat-full-history')) {
             [System.Management.Automation.Language.Parser]::ParseFile("$pwd/tools/verify-chat-delivery/drive.ps1", [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { throw ($errors | Out-String) }
           }
       - name: Install Zig 0.16.0
-        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-skills'
+        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history'
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP/zig.zip"
@@ -286,11 +292,11 @@ jobs:
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-skills'
+        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history'
         with:
           python-version: '3.12'
       - name: Compile chat delivery remote-shell boundary
-        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-skills'
+        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history'
         shell: pwsh
         run: |
           zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/ssh.exe
@@ -454,17 +460,17 @@ jobs:
           if ($proofList.Count -ne 28 -or $withoutRing -ne 0) { throw "Pre-fix rings were not observed in every theme/view/cycle (proofs=$($proofList.Count) withoutRing=$withoutRing)" }
           $global:LASTEXITCODE = 0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: env.FEATURE == 'chat-skills'
+        if: env.CHAT_SKILLS_PROOF == '1'
         with:
           persist-credentials: false
           ref: d1c9c8b725c8ee63271c98cfeae7ae4cee05dc78
           path: skill-negative-source
       - name: Build pre-fix master skill freshness control
-        if: env.FEATURE == 'chat-skills'
+        if: env.CHAT_SKILLS_PROOF == '1'
         working-directory: skill-negative-source
         run: zig build
       - name: Require pre-fix master to miss the new skill
-        if: env.FEATURE == 'chat-skills'
+        if: env.CHAT_SKILLS_PROOF == '1'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -477,7 +483,7 @@ jobs:
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           @{ revision = 'd1c9c8b725c8ee63271c98cfeae7ae4cee05dc78'; version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/negative/build.json
           try {
-            & .claude/skills/verify-multiprompt/control.ps1 -Feature chat-skills -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/negative"
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature chat-delivery -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/negative"
           } catch { Write-Host "Negative control returned: $_" }
           $observed = Get-Content evidence/negative/fresh-skills/observation.json -Raw | ConvertFrom-Json
           $clean = Get-Content evidence/negative/cleanup.json -Raw | ConvertFrom-Json
