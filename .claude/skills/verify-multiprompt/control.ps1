@@ -422,7 +422,21 @@ public static class VerifyNative {
     public static int PollCount;
     public static double PollMaxMs;
     public static double PollLastMs;
-    public static void ResetPollStats() { PollCount = 0; PollMaxMs = 0; PollLastMs = 0; }
+    public static double ProbeFirstMs;
+    public static double ProbeSecondMs;
+    public static void ResetPollStats() { PollCount = 0; PollMaxMs = 0; PollLastMs = 0; ProbeFirstMs = -1; ProbeSecondMs = -1; }
+    static double TimedCapture(int x, int y, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        graphics.CopyFromScreen(x, y, 0, 0, pixels.Size);
+        return (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+    }
+    static void ProbeCaptures(IntPtr console, IntPtr browser, Rect dock, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
+        int x, y;
+        if (browser != IntPtr.Zero) { x = dock.Left + (dock.Right - dock.Left) / 2; y = dock.Top + (dock.Bottom - dock.Top) * 3 / 4; }
+        else { Rect r; if (!GetWindowRect(console, out r)) return; x = r.Left + (r.Right - r.Left) / 2; y = r.Top + (r.Bottom - r.Top) * 3 / 4; }
+        ProbeFirstMs = TimedCapture(x, y, pixels, graphics);
+        ProbeSecondMs = TimedCapture(x, y, pixels, graphics);
+    }
     static bool PaintMatches(Rect dock, int rgb, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         bool matched = PaintMatchesCore(dock, rgb, pixels, graphics);
@@ -450,6 +464,7 @@ public static class VerifyNative {
                 if (SwitchReady(owner, console, suffix, browser, dock, composer, draft)) {
                     if (visible < 0) visible = timer.Elapsed.TotalMilliseconds;
                     if (painted < 0 && (browser == IntPtr.Zero || PaintMatches(dock, rgb, pixels, graphics))) painted = timer.Elapsed.TotalMilliseconds;
+                    if (painted >= 0 && ProbeFirstMs < 0) ProbeCaptures(console, browser, dock, pixels, graphics);
                     if (painted >= 0 && (!frozen || awake >= 0)) {
                         timer.Stop();
                         return new double[] { painted, visible, awake };
@@ -5254,7 +5269,7 @@ try {
             $traces = @{}
             foreach ($mode in $modes) {
                 $sampleCount = if ($mode.Contains('frozen_')) { 5 } else { 20 }
-                $timings[$mode] = @{ samples_ms = @($null) * $sampleCount; median_ms = $null; window_visible_ms = @($null) * $sampleCount; window_visible_median_ms = $null; paint_polls = @($null) * $sampleCount; paint_poll_max_ms = @($null) * $sampleCount; paint_poll_last_ms = @($null) * $sampleCount }
+                $timings[$mode] = @{ samples_ms = @($null) * $sampleCount; median_ms = $null; window_visible_ms = @($null) * $sampleCount; window_visible_median_ms = $null; paint_polls = @($null) * $sampleCount; paint_poll_max_ms = @($null) * $sampleCount; paint_poll_last_ms = @($null) * $sampleCount; probe_first_ms = @($null) * $sampleCount; probe_second_ms = @($null) * $sampleCount }
                 $timings.steps[$mode] = $null
                 $traces[$mode] = @()
             }
@@ -5512,6 +5527,8 @@ try {
                         $timings[$mode].paint_polls[$sample] = [VerifyNative]::PollCount
                         $timings[$mode].paint_poll_max_ms[$sample] = [VerifyNative]::PollMaxMs
                         $timings[$mode].paint_poll_last_ms[$sample] = [VerifyNative]::PollLastMs
+                        $timings[$mode].probe_first_ms[$sample] = [VerifyNative]::ProbeFirstMs
+                        $timings[$mode].probe_second_ms[$sample] = [VerifyNative]::ProbeSecondMs
                         if ($frozen) {
                             $freeze.window_visible_ms = $measurement[1]
                             $freeze.wake_flag_cleared_ms = $measurement[2]
