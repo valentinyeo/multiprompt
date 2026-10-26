@@ -30,6 +30,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Features
 
+- [Inline working dots](chat-working.md): screenshot pixels prove three animated dots in the next reply slot and their disappearance after the reply.
+
 - [Chat dictation](chat-dictation.md): Ctrl+D, all three stop methods, visible microphone state, immediate native draft insertion and typing while listening, with recorded audio and offline provider-response replay.
 - [Every session message](chat-full-history.md): all 50 messages on open and restart, with a pre-fix origin/master red control.
 
