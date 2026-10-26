@@ -1,5 +1,7 @@
 name: Retained chat history
 on:
+  push:
+    branches: [ceo/IGSH-934-red]
   pull_request:
     paths:
       - src/chat_history.zig
