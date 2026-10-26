@@ -4,32 +4,40 @@ on:
     branches: [ceo/IGSH-934-diagnose]
 permissions:
   contents: read
+  actions: read
 jobs:
   diagnose:
-    runs-on: windows-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Install pinned Zig
-        shell: pwsh
+      - name: Expose relevant failure diagnostics
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $zip = "$env:RUNNER_TEMP/zig.zip"
-          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-          tar -xf $zip -C $env:RUNNER_TEMP
-          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - name: Publish compiler errors as check annotations
-        shell: pwsh
+          gh run view 40309362340 --repo valentinyeo/multiprompt --log-failed > failed.log
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          lines = Path('failed.log').read_text().splitlines()
+          for i, line in enumerate(lines):
+              if re.search(r'not ok |error:|\.\.\.FAIL|TestExpectedEqual|TestUnexpectedResult|expected.*found', line, re.I):
+                  context = '\n'.join(lines[i:i + 18])[:7000]
+                  print('::error::' + context.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
+          PY
+      - name: Expose retention outcomes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $ErrorActionPreference = 'Continue'
-          zig build 2>&1 | Tee-Object -FilePath compile.log
-          $code = $LASTEXITCODE
-          if ($code -ne 0) {
-            foreach ($line in (Get-Content compile.log | Select-Object -Last 40)) {
-              $escaped = $line.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-              Write-Host "::error::$escaped"
-            }
-          }
-          exit $code
+          gh run download 40306742465 --repo valentinyeo/multiprompt -n verify-chat-full-history --dir red-proof
+          gh run download 40309362390 --repo valentinyeo/multiprompt -n verify-chat-full-history --dir green-proof
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          red = json.loads(Path('red-proof/full-history/observation.json').read_text(encoding='utf-8-sig'))
+          green = Path('green-proof/retention.json').read_text()
+          print('::notice::RED_RESULT ' + str(red['error']))
+          print('::notice::GREEN_RESULT ' + green.replace('\n', '%0A'))
+          PY
