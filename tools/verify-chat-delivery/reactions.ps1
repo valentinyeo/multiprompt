@@ -43,7 +43,14 @@ Shell-Run @('idle')
 })
 Restart-OwnedApp
 $restoredComposer = [ChatDeliveryDesktop]::Composer($main)
-if ($restoredComposer -eq [IntPtr]::Zero) { Press @(0x12, 0x43) 'Alt+C: restore Chat View' }
+if ($restoredComposer -eq [IntPtr]::Zero) {
+    Press @(0x12, 0x43) 'Alt+C: restore Chat View'
+} else {
+    Doctor
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Restart composer click requires owned foreground app' }
+    $actions.Add(@{case=$plan.name; input='real mouse click owned composer after restart'})
+    [ChatDeliveryDesktop]::PressClient($restoredComposer, $app.Id, 8, 8)
+}
 Bind-Transcript
 $observation.restartComposerText = [ChatDeliveryDesktop]::Text($composer)
 if ($observation.restartComposerText -cne $plan.text) { throw 'Restart lost the untouched composer draft' }
