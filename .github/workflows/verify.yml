@@ -425,7 +425,7 @@ jobs:
               Write-Host "Focus negative control returned: $_"
             }
             $red = Get-Content evidence/focus-negative/result.json -Raw | ConvertFrom-Json
-            if ($red.status -eq 'failed' -and $red.error -eq 'IGSH-807 focus ring pixels differ from the unfocused surface') { break }
+            if ($red.status -ne 'failed' -or (Test-Path evidence/focus-negative/focus-ring-proof.json)) { break }
             Write-Host "Focus negative control attempt $attempt ended on: $($red.error)"
           }
           if ($red.status -ne 'failed' -or $red.error -ne 'IGSH-807 focus ring pixels differ from the unfocused surface') { throw 'Pre-fix control did not fail specifically on focus-ring pixels after input cycling' }
