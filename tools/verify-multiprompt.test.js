@@ -1952,6 +1952,31 @@ test('IGSH-702 remind-me journey presses Ctrl+H and proves the picker by the app
   assert.match(read(skill + 'SKILL.md'), /`remind-me`/);
 });
 
+test('IGSH-901 tab-names journey seeds unflagged names once, reorders them and samples names through three restarts', () => {
+  assert.match(control, /ValidateSet\([^\n)]*'tab-names'/);
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'tab-names'/);
+  assert.match(control, /\$Feature -in @\('browser-own-profile', 'tab-names'\)/);
+  assert.match(control, /if \(\$Feature -eq 'tab-names'\) \{\s+\$seedFolder = Join-Path \$scratch 'GitHub'/);
+  const journey = control.slice(control.indexOf("        'tab-names' {"), control.indexOf("        'favorites-groups' {"));
+  assert.match(journey, /Press @\(0x11, 0x10, 0x26\)/);
+  assert.doesNotMatch(journey, /Press @\(0x71\)/);
+  assert.match(journey, /Restart-SessionRestore \$stage\[0\] \$stage\[1\]/);
+  assert.match(journey, /TotalSeconds -lt 45/);
+  assert.match(journey, /Tab names or order changed after/);
+  assert.match(journey, /A seeded name became manual before/);
+  for (const name of ['names-launch', 'names-restart-1', 'names-restart-2', 'names-restart-3', 'tab-names-order-survive-restarts']) assert.ok(journey.includes(name));
+  const seed = control.slice(control.indexOf("    if ($Feature -eq 'tab-names') {"), control.indexOf("    $job = New-Object VerifyJob"));
+  assert.doesNotMatch(seed, /manual\s*=\s*\$true/);
+  const map = read(skill + 'features/tab-names.md');
+  assert.match(map, /Seeding boundary/);
+  assert.match(map, /v0\.28\.893/);
+  assert.match(map, /Tab names or order changed/);
+  for (const heading of ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']) assert.ok(map.includes(heading));
+  assert.match(read(skill + 'features/README.md'), /\[Tab names\]\(tab-names.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`tab-names`/);
+  assert.match(read(skill + 'coverage.md'), /\| IGSH-901 \|[^\n]*\| tab-names \|/);
+});
+
 test('IGSH-706 inbox journey proves mute hides the published session without closing its tab and unmute restores it', () => {
   const inbox = control.slice(control.indexOf("        'inbox' {"), control.indexOf("        'remind-me' {"));
   const steps = [

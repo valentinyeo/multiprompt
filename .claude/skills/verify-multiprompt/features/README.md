@@ -12,7 +12,7 @@ Read the matching feature before dispatching. [Recent changes coverage](../cover
 
 ## Driving conventions
 
-Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, chat-dictation, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, chat-focus, status-card, palette-order, browser-own-profile and remind-me. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
+Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, chat-dictation, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, chat-focus, status-card, palette-order, browser-own-profile and remind-me; `tab-names` runs on request. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
 Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Browser-pane-locked targets an ownership-checked empty browser strip with real mouse input; workspace-focus also clicks workspace pills.
 
@@ -43,6 +43,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Relaunch saved sessions](relaunch-saved-sessions.md): the release gate. A seeded Starred workspace of 14 live sessions and 6 cached copies is launched and quit three times, the last two with every notification port occupied; each session must appear once and the selected chat must stay.
 - [Session restore](session-restore.md): reopen the selected workspace and CMD session after both normal close and process kill, using only app-created state.
 - [Remind Me](remind-me.md): press Ctrl+H on a tmux session, require the hour and evening preset rows in the app log, then Esc without choosing one.
+- [Tab names](tab-names.md): a seeded state of three unflagged tab names in one folder, reordered, then launch, close, kill and close again; every name and the order must hold for 45 seconds after each start, with v0.28.893 as the red control. Seeds `session.json` once; see its boundary.
 - [Palette order](palette-order.md): open an empty Ctrl+K with a seeded usage history file; require the Most used band, group headers, the removed per-tab row and renamed commands.
 - [Sessions](sessions.md): create a local CMD tab through Ctrl+K, rename it, run a command and check its file.
 - [Group headlines](group-rail.md): plain left-aligned group headlines with no fill, rail or chevron, and a headline click that hides and restores its sessions.
