@@ -5736,6 +5736,7 @@ try {
             $gapCase = @{ name = 'chat-switch-speed'; status = 'failed'; detail = 'Chat switch measurement did not complete'; phase = 'initial-console' }
             $result.checks += $gapCase
             $shellIds = @()
+            $toggleReady = $null
             $probeStarted = $false
             try {
                 Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq $sessionCount -and @($state.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq $sessionCount } 'five seeded remote sessions restored'
@@ -5746,7 +5747,7 @@ try {
                 $gapCase.phase = 'manual-tab-order'
                 Focus-Palette 'tab order' 6217
                 Press @(0x28) 'Down: Tab Order Manual'
-                Press @(0x0D) 'Enter: keep creation order for Ctrl+1 to Ctrl+5'
+                Press @(0x0D) 'Enter: keep saved order for Ctrl+1 to Ctrl+5'
                 Wait-Until {
                     $path = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
                     if (-not (Test-Path $path)) { return $false }
@@ -5757,7 +5758,9 @@ try {
                     $gapCase.phase = "session-setup-$tab"
                     Press @(0x11, (0x31 + $tab)) "Ctrl+$($tab + 1): select remote session $tab"
                     Wait-Until { $state = Read-Session; $state.active_tab -eq $tab } "remote session $tab selected" 30
+                    if ($null -ne $toggleReady) { Wait-Until { [DateTime]::UtcNow -ge $toggleReady } "Alt+C debounce elapsed before session $tab" }
                     Press @(0x12, 0x43) "Alt+C: open Chat View for session $tab"
+                    $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
                     Wait-Until { Test-TabChat (Read-Session).tabs[$tab] } "Chat View saved for session $tab" 30
                     $shownId = (Read-Session).tabs[$tab].shell_id
                     Wait-Until { ((Get-Content $log -Raw) -join '') -match ('\[switch\] chat content shown shell=' + $shownId + ' blocks=[1-9]') } "seeded transcript shown for session $tab" 60
