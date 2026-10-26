@@ -109,6 +109,7 @@ fn chatFlowText(dc: HANDLE, text: []const u16, area: RECT, _: bool, paint: bool,
 }
 fn fillRoundRectAA(_: HANDLE, rc: RECT, r: i32, color: DWORD) void { fill = color; filled = rc; radius = r; }
 fn fillBubbleAA(_: HANDLE, _: RECT, _: i32, _: DWORD, _: bool, _: bool) void {}
+fn fillBubbleStyled(_: HANDLE, rc: RECT, r: i32, color: DWORD, _: bool, _: bool) void { fill = color; filled = rc; radius = r; }
 fn chatCodePanelColor() DWORD { return 0; }
 fn chatPaintCodeHeader(_: HANDLE, _: RECT, _: ChatBlock) void {}
 fn chatPaintAgentHeader(_: HANDLE, _: ChatBlock, _: RECT) void { headers += 1; }
