@@ -710,7 +710,12 @@ foreach ($plan in $plans) {
                 Start-Sleep -Milliseconds $gaps[($n - 1) % $gaps.Count]
                 if ($n -eq 1) { Shot "$($plan.name)-action"; $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
                 Press @(0x0D) 'Enter: send composer' $true
-                $reached = Step 'send-reaches-shell' { (@((Fake-State).queue) | Select-Object -Last 1) -ceq $text } 10
+                $reached = $false
+                $deliveryWatch = [Diagnostics.Stopwatch]::StartNew()
+                while (-not $reached -and $deliveryWatch.Elapsed.TotalSeconds -lt 10) {
+                    $reached = ((@((Fake-State).queue) | Select-Object -Last 1) -ceq $text)
+                    if (-not $reached) { Start-Sleep -Milliseconds 200 }
+                }
                 $back = $null
                 $watch = [Diagnostics.Stopwatch]::StartNew()
                 while ($watch.Elapsed.TotalSeconds -lt 10) {
@@ -720,13 +725,25 @@ foreach ($plan in $plans) {
                     Start-Sleep -Milliseconds 250
                 }
                 [void](Step 'send-stays-gone' { $null -eq $back } 1)
-                $observation.sends.Add(@{n=$n; text=$text; reached=$reached; reappeared=$back})
+                $sendRecord = @{n=$n; text=$text; reached=$reached; reappeared=$back; tookQueue=$null}
+                $observation.sends.Add($sendRecord)
                 if ($n % 4 -eq 0) {
                     Shell-Input 'idle'
-                    [void](Step 'shell-took-queue' { $f = Fake-State; (@($f.queue).Count -eq 0) -and ($f.box -ceq '') } 5)
+                    $tookWatch = [Diagnostics.Stopwatch]::StartNew()
+                    $took = $false
+                    while (-not $took -and $tookWatch.Elapsed.TotalSeconds -lt 5) {
+                        $f = Fake-State
+                        $took = (@($f.queue).Count -eq 0) -and ($f.box -ceq '')
+                        if (-not $took) { Start-Sleep -Milliseconds 200 }
+                    }
+                    $sendRecord.tookQueue = $took
                     Shell-Input 'busy'
                 }
             }
+            [void](Step 'outbox-snapshot' {
+                if (Test-Path "$settings/chat-outbox.json") { Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-final.json" -Force } else { Set-Content -LiteralPath "$caseDir/outbox-final.json" -Value '{"queues":[]}' }
+                Test-Path "$caseDir/outbox-final.json"
+            } 5)
             Shot "$($plan.name)-done"
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isQueue) {
