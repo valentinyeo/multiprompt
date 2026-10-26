@@ -453,6 +453,11 @@ public static class VerifyNative {
         MouseAt(point.X, point.Y, 8);
         MouseAt(point.X, point.Y, 16);
     }
+    static System.Drawing.Color QueuedColor(System.Drawing.Color bg, System.Drawing.Color fill) {
+        return System.Drawing.Color.FromArgb((bg.R * 128 + 128) / 256 + (fill.R * 127 + 128) / 256,
+            (bg.G * 128 + 128) / 256 + (fill.G * 127 + 128) / 256,
+            (bg.B * 128 + 128) / 256 + (fill.B * 127 + 128) / 256);
+    }
     public static Point MessageBubblePoint(IntPtr hwnd) {
         Rect rect;
         if (!GetWindowRect(hwnd, out rect)) throw new InvalidOperationException("Transcript rectangle unavailable");
@@ -462,10 +467,12 @@ public static class VerifyNative {
             var bg = pixels.GetPixel(0, pixels.Height / 2);
             int shift = (2126 * bg.R + 7152 * bg.G + 722 * bg.B) / 10000 < 128 ? 53 : -26;
             var fill = System.Drawing.Color.FromArgb(Math.Max(0, Math.Min(255, bg.R + shift)), Math.Max(0, Math.Min(255, bg.G + shift)), Math.Max(0, Math.Min(255, bg.B + shift)));
+            var queuedFill = QueuedColor(bg, fill);
             for (int y = pixels.Height - 2; y > 0; y--) {
                 for (int x = pixels.Width - 2; x > 0; x--) {
-                    if (pixels.GetPixel(x, y).ToArgb() == fill.ToArgb() && pixels.GetPixel(x - 1, y).ToArgb() == fill.ToArgb() &&
-                        pixels.GetPixel(x, y - 1).ToArgb() == fill.ToArgb()) return new Point { X = rect.Left + x - 1, Y = rect.Top + y - 1 };
+                    int color = pixels.GetPixel(x, y).ToArgb();
+                    if ((color == fill.ToArgb() || color == queuedFill.ToArgb()) && pixels.GetPixel(x - 1, y).ToArgb() == color &&
+                        pixels.GetPixel(x, y - 1).ToArgb() == color) return new Point { X = rect.Left + x - 1, Y = rect.Top + y - 1 };
                 }
             }
         }
@@ -541,6 +548,16 @@ public static class VerifyNative {
             WindowFromPoint(points[0]) != hwnd || WindowFromPoint(points[1]) != hwnd)
             throw new InvalidOperationException("Selection evidence is not inside the owned transcript");
         int pad = Math.Max(8, (int)GetDpiForWindow(hwnd) / 6);
+        Rect rect;
+        if (!GetWindowRect(hwnd, out rect)) throw new InvalidOperationException("Transcript rectangle unavailable");
+        System.Drawing.Color bg;
+        using (var backdrop = new System.Drawing.Bitmap(1, 1))
+        using (var graphics = System.Drawing.Graphics.FromImage(backdrop)) {
+            graphics.CopyFromScreen(rect.Left, rect.Top + (rect.Bottom - rect.Top) / 2, 0, 0, backdrop.Size);
+            bg = backdrop.GetPixel(0, 0);
+        }
+        var queuedColors = new HashSet<int>();
+        foreach (var fill in new System.Drawing.Color[] { System.Drawing.Color.FromArgb(56, 78, 112), System.Drawing.Color.FromArgb(183, 206, 240), System.Drawing.Color.FromArgb(52, 68, 96) }) queuedColors.Add(QueuedColor(bg, fill).ToArgb());
         using (var pixels = new System.Drawing.Bitmap(points[1].X - points[0].X, pad * 2 + 1))
         using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
             DwmFlush();
@@ -551,6 +568,7 @@ public static class VerifyNative {
                     var c = pixels.GetPixel(x, y);
                     if ((c.R == 56 && c.G == 78 && c.B == 112) || (c.R == 183 && c.G == 206 && c.B == 240) ||
                         (c.R == 52 && c.G == 68 && c.B == 96)) count++;
+                    else if (queuedColors.Contains(c.ToArgb())) count++;
                 }
             }
             return count;
@@ -3636,7 +3654,7 @@ try {
                 $result.checks += $selectionCheck
                 $result.checks += $menuCheck
                 $typedCheck = @{ name = 'local-route-typed'; passed = $false; entry = 'Chat View Enter'; receivedBytes = $null; queued = $false }
-                $suggestionCheck = @{ name = 'local-route-suggestion'; passed = $false; entry = 'Chat View Enter'; received = '' }
+                $suggestionCheck = @{ name = 'local-route-suggestion'; passed = $false; entry = 'Chat View Ctrl+Enter'; received = '' }
                 $result.checks += $typedCheck
                 $result.checks += $suggestionCheck
                 $outboxPath = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
@@ -3681,7 +3699,24 @@ try {
                         } 'owned local Chat View composer focused'
                         $message = if ($mode -eq 'typed') { $typedMessage } else { 'local route suggestion delivered' }
                         Type-Text $message
-                        Press @(0x0D) 'Enter: send through normal Chat View outbox'
+                        if ($mode -eq 'suggestion') {
+                            Record 'Shift+Enter: insert a newline without sending'
+                            Assert-Foreground
+                            $composerHandle = [VerifyNative]::GetFocusedWindow($script:window)
+                            if ([VerifyNative]::GetAncestor($composerHandle, 2) -ne $script:window -or [VerifyNative]::Class($composerHandle) -cne 'Edit') { throw 'Newline proof lost the owned composer' }
+                            [VerifyNative]::KeyDown(0x10)
+                            try {
+                                [VerifyNative]::Chord(@(0x0D))
+                                Wait-Until { [VerifyNative]::EditText($composerHandle) -ceq ($message + "`r`n") } 'Shift+Enter keeps the complete draft and adds one newline'
+                            } finally { [VerifyNative]::KeyUp(0x10) }
+                            if ((Get-Item ($prefix + '-stdin.bin')).Length -ne 0) { throw 'Shift+Enter sent the draft' }
+                            Snapshot 'ctrl-enter-newline'
+                            Press @(0x08) 'Backspace: remove the newline before sending'
+                            Wait-Until { [VerifyNative]::EditText($composerHandle) -ceq $message } 'original message restored after newline proof'
+                            Press @(0x11, 0x0D) 'Ctrl+Enter: send through normal Chat View outbox'
+                        } else {
+                            Press @(0x0D) 'Enter: send through normal Chat View outbox'
+                        }
                         if ($mode -eq 'typed') {
                             Wait-Until {
                                 if (-not (Test-Path $outboxPath)) { return $false }
@@ -3692,6 +3727,8 @@ try {
                             Snapshot 'local-route-typed'
                         } else {
                             $suggestionCheck.console = $ready
+                            $wireMessage = ([string][char]27) + '[200~' + $message + ([string][char]27) + '[201~' + "`r"
+                            $suggestionCheck.expected = $wireMessage
                             Wait-Until {
                                 $stdin = [IO.File]::Open($prefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
                                 try {
@@ -3703,7 +3740,7 @@ try {
                                 } finally { $stdin.Dispose() }
                                 $received = [Text.Encoding]::ASCII.GetString($receivedBytes)
                                 $suggestionCheck.received = $received
-                                $received.Contains($message) -and $received.Contains("`r")
+                                $received -ceq $wireMessage
                             } 'local suggestion prompt receives the Chat View message and Enter on stdin'
                             $suggestionCheck.passed = $true
                             Snapshot 'local-route-suggestion'

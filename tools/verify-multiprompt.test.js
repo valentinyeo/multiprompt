@@ -1417,12 +1417,15 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   assert.ok(normalNamePoll, 'normal TIMER_NAME_POLL interval must be present');
   assert.ok(Number(detectionWait[1]) > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
   assert.match(chat, /FocusedElement.Current.NativeWindowHandle -eq \$composer.Current.NativeWindowHandle/);
-  const normalSend = /Type-Text \$message\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
+  const normalSend = /Type-Text \$message\s+if \(\$mode -eq 'suggestion'\) \{[\s\S]*?Press @\(0x11, 0x0D\) 'Ctrl\+Enter: send through normal Chat View outbox'\s+\} else \{\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
   assert.match(chat, normalSend);
   assert.doesNotMatch(chat.replace('Type-Text $message', 'Type-Text other'), normalSend);
-  const stdinDelivery = /\[IO.File\]::Open\(\$prefix \+ '-stdin.bin', \[IO.FileMode\]::Open, \[IO.FileAccess\]::Read, \[IO.FileShare\]::ReadWrite\)[\s\S]*?\$stdin\.CopyTo\(\$buffer\)[\s\S]*?\$received = \[Text.Encoding\]::ASCII.GetString\(\$receivedBytes\)[\s\S]*?\$received.Contains\(\$message\) -and \$received.Contains\("`r"\)/;
+  assert.match(chat, /\$composerHandle = \[VerifyNative\]::GetFocusedWindow\(\$script:window\)/);
+  assert.match(chat, /GetAncestor\(\$composerHandle, 2\) -ne \$script:window -or \[VerifyNative\]::Class\(\$composerHandle\) -cne 'Edit'/);
+  const stdinDelivery = /\[IO.File\]::Open\(\$prefix \+ '-stdin.bin', \[IO.FileMode\]::Open, \[IO.FileAccess\]::Read, \[IO.FileShare\]::ReadWrite\)[\s\S]*?\$stdin\.CopyTo\(\$buffer\)[\s\S]*?\$received = \[Text.Encoding\]::ASCII.GetString\(\$receivedBytes\)[\s\S]*?\$received -ceq \$wireMessage/;
+  assert.ok(chat.includes("$wireMessage = ([string][char]27) + '[200~' + $message + ([string][char]27) + '[201~' + \"`r\""));
   assert.match(chat, stdinDelivery);
-  assert.doesNotMatch(chat.replace('$received.Contains($message)', '$true'), stdinDelivery);
+  assert.doesNotMatch(chat.replace('$received -ceq $wireMessage', '$true'), stdinDelivery);
   assert.doesNotMatch(chat.replace('[IO.FileShare]::ReadWrite', '[IO.FileShare]::Read'), stdinDelivery);
   const draftProtection = /finally \{[\s\S]*?\$typedCheck.receivedBytes = \(Get-Item \(\$typedPrefix \+ '-stdin.bin'\)\).Length[\s\S]*?\$_.t -ceq \$typedMessage -and \$_.s -eq 0 -and \$_.x -eq 0[\s\S]*?\$typedCheck.receivedBytes -eq 0 -and \$typedCheck.queued[\s\S]*?if \(-not \$typedCheck.passed\) \{ throw/;
   assert.match(chat, draftProtection);
@@ -2042,4 +2045,24 @@ test('IGSH-905 six-line composer proof holds Shift until the native composer sho
   }
   const earlyRelease = helper.replace('[VerifyNative]::KeyDown(0x0D)', '[VerifyNative]::KeyUp(0x10)\n        [VerifyNative]::KeyDown(0x0D)');
   assert.notEqual(earlyRelease.split('[VerifyNative]::KeyUp(0x10)').length - 1, 1);
+});
+
+test('IGSH-911 native bubble and selection scans recognize exact delivered alpha tones', () => {
+  const samples = JSON.parse(read('tools/fixtures/IGSH-911/bubble-tones.json'));
+  const blend = control.slice(control.indexOf('static System.Drawing.Color QueuedColor('), control.indexOf('public static Point MessageBubblePoint('));
+  for (const channel of ['R', 'G', 'B']) assert.ok(blend.includes(`(bg.${channel} * 128 + 128) / 256 + (fill.${channel} * 127 + 128) / 256`));
+  const scan = control.slice(control.indexOf('public static Point MessageBubblePoint('), control.indexOf('public static Point[] SelectTranscriptText('));
+  assert.ok(scan.includes('var queuedFill = QueuedColor(bg, fill);'));
+  assert.match(scan, /color == fill.ToArgb\(\) \|\| color == queuedFill.ToArgb\(\)/);
+  assert.match(scan, /pixels.GetPixel\(x - 1, y\).ToArgb\(\) == color/);
+  assert.match(scan, /pixels.GetPixel\(x, y - 1\).ToArgb\(\) == color/);
+  const selection = control.slice(control.indexOf('public static int TranscriptSelectionPixels('), control.indexOf('public static int[] DictationMicPixels('));
+  assert.ok(selection.includes('queuedColors.Add(QueuedColor(bg, fill).ToArgb());'));
+  assert.ok(selection.includes('else if (queuedColors.Contains(c.ToArgb())) count++;'));
+  const queued = fill => samples.background.map((value, i) => Math.floor((value * 128 + 128) / 256) + Math.floor((fill[i] * 127 + 128) / 256));
+  assert.deepEqual(queued(samples.sending), samples.delivered);
+  assert.deepEqual(queued(samples.selection), samples.deliveredSelection);
+  assert.notDeepEqual(samples.selection, samples.deliveredSelection);
+  assert.notDeepEqual(samples.background.map((value, i) => Math.floor((value * 128 + samples.selection[i] * 127) / 255)), samples.deliveredSelection);
+  assert.ok(read('src/chat_render.zig').includes('.source_constant_alpha = 128'));
 });
