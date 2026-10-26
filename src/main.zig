@@ -1665,6 +1665,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (@import("chat_composer.zig").chatDictationClick(mx, my)) return 0;
+                if (chatTitleLayout()) |title| {
+                    const more = title.more;
+                    if (mx >= more.left and mx < more.right and my >= more.top and my < more.bottom) {
+                        more_menu.open();
+                        return 0;
+                    }
+                }
                 switch (chatButtonAt(mx, my)) {
                     3 => _ = PostMessageW(hwnd, WM_APP_CHAT_SEND, 0, 0),
                     4 => _ = PostMessageW(hwnd, WM_APP_CHAT_ATTACH, 0, 0),
@@ -1897,15 +1904,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     closeUrlPicker();
                 }
                 return 0;
-            }
-            if (chatViewOwnsInput()) {
-                if (chatTitleLayout()) |title| {
-                    const more = title.more;
-                    if (mx >= more.left and mx < more.right and my >= more.top and my < more.bottom) {
-                        more_menu.open();
-                        return 0;
-                    }
-                }
             }
             {
                 const tth_click = threadTitleHeight();

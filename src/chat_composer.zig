@@ -857,7 +857,7 @@ fn ensureChatControls() bool {
             0,
             L("EDIT"),
             L(""),
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
             0,
             0,
             100,

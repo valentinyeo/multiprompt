@@ -90,11 +90,12 @@ pub fn geometry(bounds: RECT, anchor: RECT) Geometry {
     const pad = uiScaled(8);
     const gap = uiScaled(8);
     const top_h = uiScaled(64);
-    const row_h = uiScaled(38);
     const width = @min(uiScaled(264), bounds.right - bounds.left - uiScaled(16));
     const right = @min(anchor.right, bounds.right - uiScaled(8));
     const left = @max(bounds.left + uiScaled(8), right - width);
     const panel_top = anchor.bottom + uiScaled(8);
+    const spare = bounds.bottom - uiScaled(8) - panel_top - 2 * pad - top_h - 4 * gap;
+    const row_h = std.math.clamp(@divTrunc(spare, 8), uiScaled(24), uiScaled(38));
     const inner_l = left + pad;
     const inner_r = right - pad;
     var g: Geometry = std.mem.zeroes(Geometry);
@@ -271,6 +272,9 @@ pub fn open() void {
     const main = app_state.g_main_hwnd orelse return;
     if (!chat_composer.chatViewOwnsInput()) return;
     const title = drawing.chatTitleLayout() orelse return;
+    var client: w.RECT = undefined;
+    _ = w.GetClientRect(main, &client);
+    if (drawing.reconnectButtonRect(client.right) != null) return;
     const pane = chat_composer.chatViewLayout().pane;
     const width = pane.right - pane.left;
     const height = pane.bottom - pane.top;
@@ -297,6 +301,7 @@ pub fn open() void {
     _ = focus.SetWindowPos(g_hwnd, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
     _ = w.SetCapture(g_hwnd);
     _ = w.InvalidateRect(g_hwnd, null, 0);
+    if (chat_composer.chatComposerFocusAllowed()) _ = focus.SetFocus(app_state.g_chat_composer_hwnd);
 }
 
 pub fn close() void {
