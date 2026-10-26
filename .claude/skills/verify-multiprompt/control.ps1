@@ -3097,11 +3097,13 @@ try {
             if ($stopped.ActiveProcesses -ne 0) { throw 'Favorites restart left owned descendants' }
             $job.Dispose()
             try {
-                $portSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../src/app_state.zig'))
-                $portList = [regex]::Match($portSource, 'pub const NOTIFY_PORTS = \[_\]u16\{([^}]+)\}')
-                if (-not $portList.Success) { throw 'Notification port list missing' }
-                foreach ($port in $portList.Groups[1].Value.Split(',')) {
-                    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, [int]$port.Trim())
+                $portSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../src/notify_ports.zig'))
+                $firstPort = [regex]::Match($portSource, 'pub const FIRST_PORT: u16 = (\d+);')
+                $portCount = [regex]::Match($portSource, 'pub const PORT_COUNT: usize = (\d+);')
+                if (-not $firstPort.Success -or -not $portCount.Success) { throw 'Notification port range missing' }
+                for ($offset = 0; $offset -lt [int]$portCount.Groups[1].Value; $offset++) {
+                    $port = [int]$firstPort.Groups[1].Value + $offset
+                    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $port)
                     $listener.Start()
                     $listeners += $listener
                 }
