@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
+const { names, queueName, sendName, cancelName, cancelTexts, cancelSteps, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
 const os = require('node:os');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -438,6 +438,51 @@ test('foreground uses the existing Alt and AttachThreadInput routine before keyb
   }
 });
 
+test('cancel-queued is wired into the journey, the workflow fallback and the feature map', () => {
+  assert.ok(drive.includes("name='cancel-queued'"));
+  for (const step of cancelSteps) assert.ok(drive.includes(`'${step}'`), step);
+  for (const text of Object.values(cancelTexts)) assert.ok(drive.includes(text), text);
+  assert.match(drive, /message menu items=/);
+  assert.match(drive, /Cancel message/);
+  assert.match(workflow, /'send-stays-gone', 'cancel-queued'\)/);
+  assert.match(read(skill + 'features/chat-delivery.md'), /`cancel-queued`[\s\S]*IGSH-1010/);
+});
+
+test('cancel-queued evidence fails when the wrong message is cancelled, the cancelled text still reaches Claude or a taken message offers Cancel', t => {
+  const files = new Map();
+  const base = path.join(root, 'tools/verify-chat-delivery/in-memory-cancel-evidence');
+  const built = cancelFiles(base);
+  for (const [file, value] of built.files) files.set(file, value);
+  files.set(path.join(base, 'actions.json'), JSON.stringify(built.actions));
+  mockFiles(t, files);
+  const row = () => evaluateEvidence(base).cases.find(entry => entry.name === cancelName);
+  assert.equal(row().passed, true, row().detail);
+  const positive = new Map(files);
+  const reset = () => { files.clear(); for (const [file, value] of positive) files.set(file, value); };
+  const file = rest => path.join(base, cancelName, rest);
+  const edit = (rest, change) => files.set(file(rest), change(files.get(file(rest))));
+  edit('transcript.jsonl', text => text + '\n' + JSON.stringify({ type: 'attachment', attachment: { type: 'queued_command', prompt: cancelTexts.b } }));
+  assert.match(row().detail, /only the messages that were not cancelled/);
+  reset();
+  edit('transcript.jsonl', text => text.split('\n').filter(line => !line.includes('"popAll"')).join('\n'));
+  assert.match(row().detail, /pulled its queue back once/);
+  reset();
+  edit('debug.log', text => text.replace('Reply,Copy,Cancel message', 'Reply,Copy'));
+  assert.match(row().detail, /offered Cancel message/);
+  reset();
+  edit('debug.log', text => text.replace(/\[chat\] message menu items=Reply,Copy$/, '[chat] message menu items=Reply,Copy,Cancel message'));
+  assert.match(row().detail, /offers no Cancel/);
+  reset();
+  edit('stand-in/agent-buffer.jsonl', text => text + '\n' + JSON.stringify({ ms: 1600, case: cancelName, argv: ['send-keys', '-t', '=verify-agent:', '-l', '--', cancelTexts.b] }));
+  assert.match(row().detail, /typed once and never again/);
+  reset();
+  edit('observation.json', text => text.replace('"ok":true', '"ok":false'));
+  assert.match(row().detail, /journey steps failed/);
+  reset();
+  files.set(path.join(base, 'actions.json'), JSON.stringify(built.actions.filter(action => action.input !== 'menu mnemonic n: Cancel message')));
+  assert.match(row().detail, /one Cancel choice/);
+});
+
 test('keyboard journey isolates each case and retains Doctor, screenshots, raw evidence and owned-job cleanup', () => {
   for (const name of names) assert.ok(drive.includes(`name='${name}'`));
   assert.match(drive, /foreach \(\$plan in \$plans\) \{[\s\S]*try \{[\s\S]*catch \{[\s\S]*finally \{/);
@@ -588,6 +633,56 @@ function sendFiles(base) {
   return { files: out, actions };
 }
 
+function cancelFiles(base) {
+  const name = cancelName;
+  const t = cancelTexts;
+  const out = new Map();
+  const put = (file, value) => out.set(path.join(base, file), JSON.stringify(value));
+  const log = (file, rows) => out.set(path.join(base, file), rows.map(row => JSON.stringify(row)).join('\n'));
+  const png = Buffer.alloc(15000);
+  Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
+  const event = (type, fields) => ({ type, timestamp: '2026-10-26T10:00:00.000Z', sessionId: 'sid', ...fields });
+  const queued = (operation, content) => event('queue-operation', { operation, content });
+  const survivors = [t.a, t.c];
+  log(`${name}/transcript.jsonl`, [
+    event('user', { message: { role: 'user', content: 'start' } }),
+    queued('enqueue', t.a), queued('enqueue', t.b), queued('enqueue', t.c),
+    queued('popAll', [t.a, t.b, t.c].join('\n')),
+    queued('enqueue', t.a), queued('enqueue', t.c),
+    event('attachment', { attachment: { type: 'queued_command', prompt: t.a } }),
+    event('attachment', { attachment: { type: 'queued_command', prompt: t.c } }),
+  ]);
+  const item = (state, text) => ({ text, state });
+  const view = rows => `2026-10-26 10:00:01.000 CHAT_QUEUE items=${JSON.stringify(rows)}`;
+  put(`${name}/observation.json`, {
+    name, text: t.a, mode: 'busy', actionMs: 1000, endMs: 3000, error: null, texts: t, cancelled: [t.b], survivors,
+    steps: cancelSteps.map(step => ({ name: step, ok: true, ms: 1500, waitedMs: 100 })),
+  });
+  out.set(path.join(base, `${name}/debug.log`), [
+    '2026-10-26 10:00:00.000 [chat] transcript load shell=1 ok bytes=900 ms=5',
+    view([item('queued', t.a), item('queued', t.b), item('queued', t.c)]),
+    '2026-10-26 10:00:02.000 [chat] message menu items=Reply,Copy,Cancel message',
+    view([item('queued', t.a), item('queued', t.c)]),
+    view([item('sent', t.a), item('sent', t.c)]),
+    '2026-10-26 10:00:03.000 [chat] message menu items=Reply,Copy',
+  ].join('\n'));
+  const send = (...argv) => ({ ms: 1500, case: name, argv: ['send-keys', '-t', '=verify-agent:', ...argv] });
+  log(`${name}/stand-in/agent-buffer.jsonl`, [
+    send('-l', '--', t.a), send('Enter'), send('-l', '--', t.b), send('Enter'), send('-l', '--', t.c), send('Enter'),
+    send('Up'), send('C-u'), send('C-u'), send('-l', '--', t.a), send('Enter'), send('-l', '--', t.c), send('Enter'),
+  ]);
+  put(`${name}/cleanup.json`, { remaining_owned_processes: 0, evidence_preserved: true, scratch_removed: true });
+  put(`${name}/process-tree.json`, { ActiveProcesses: 0 });
+  for (const suffix of ['before', 'action', 'menu', 'cancelled', 'taken-menu', 'final']) out.set(path.join(base, `${name}-${suffix}.png`), png);
+  const act = (input, extra) => ({ case: name, ms: 1000, input, ...extra });
+  const actions = [
+    act('Ctrl+1: select saved tmux tab'), act('Alt+C: open Chat View'),
+    ...[t.a, t.b, t.c].flatMap(text => [act('type composer text', { text }), act('Enter: send composer')]),
+    act('real right-click waiting message'), act('menu mnemonic n: Cancel message'), act('real right-click taken message'),
+  ];
+  return { files: out, actions };
+}
+
 function mockFiles(t, files) {
   t.mock.method(fs, 'existsSync', file => files.has(String(file)));
   t.mock.method(fs, 'readFileSync', (file, encoding) => {
@@ -637,7 +732,9 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
   for (const [file, value] of queue.files) files.set(file, value);
   const send = sendFiles(base);
   for (const [file, value] of send.files) files.set(file, value);
-  const allActions = [...actions, ...queue.actions, ...send.actions];
+  const cancel = cancelFiles(base);
+  for (const [file, value] of cancel.files) files.set(file, value);
+  const allActions = [...actions, ...queue.actions, ...send.actions, ...cancel.actions];
   put('actions.json', allActions);
   files.set(path.join(base, 'before.png'), png);
   files.set(path.join(base, 'after.png'), png);
@@ -866,7 +963,7 @@ test('queue-draft-sync is wired into the journey, the workflow fallback and the 
   for (const step of queueSteps) assert.ok(drive.includes(`'${step}'`), step);
   for (const text of Object.values(queueTexts)) assert.ok(drive.includes(text.replaceAll("\n", "`n")), text);
   assert.match(drive, /CHAT_QUEUE items=/);
-  assert.match(workflow, /@\('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync', 'send-stays-gone'\)/);
+  assert.match(workflow, /@\('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync', 'send-stays-gone', 'cancel-queued'\)/);
   assert.match(read(skill + 'features/chat-delivery.md'), /`queue-draft-sync`[\s\S]*CHAT_QUEUE items=/);
 });
 

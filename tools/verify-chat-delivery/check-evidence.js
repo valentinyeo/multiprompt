@@ -5,7 +5,21 @@ const path = require('node:path');
 const names = ['busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover'];
 const queueName = 'queue-draft-sync';
 const sendName = 'send-stays-gone';
-const allNames = [...names, queueName, sendName];
+const cancelName = 'cancel-queued';
+const allNames = [...names, queueName, sendName, cancelName];
+const cancelTexts = { a: 'cancel keep one', b: 'cancel target two', c: 'cancel keep three' };
+const cancelSteps = [
+  'chat-view-read-transcript',
+  'chat-lists-three-queued',
+  'shell-has-three-queued',
+  'cancel-offered-on-waiting-message',
+  'cancelled-message-left-the-queue',
+  'exactly-one-message-cancelled',
+  'chat-lists-survivors-queued',
+  'chat-marks-survivors-sent',
+  'shell-took-survivors',
+  'taken-message-has-no-cancel',
+];
 const queueTexts = {
   a: 'shell queued alpha',
   b: 'chat queued beta',
@@ -122,6 +136,68 @@ function evaluateSendCase(context) {
   const outboxStates = {};
   outbox.filter(message => sendTexts.includes(message.t)).forEach(message => { outboxStates[message.s] = (outboxStates[message.s] || 0) + 1; });
   return { sends: sendTexts.length, watchedSeconds: 10, longMessages: sendTexts.filter(text => text.length > 100).length, delivered, pending: sendTexts.length - delivered, outboxStates };
+}
+
+function evaluateCancelCase(context) {
+  const { root, json, lines, png } = context;
+  const name = cancelName;
+  const t = cancelTexts;
+  const observation = json(`${name}/observation.json`);
+  assert.equal(observation.name, name);
+  assert.equal(observation.error, null, observation.error || 'driver error');
+  assert.deepEqual(observation.texts, t, 'driver used the contract texts');
+  assert.deepEqual(observation.steps.map(step => step.name), cancelSteps, 'every journey step ran in order');
+  const failed = observation.steps.filter(step => step.ok !== true).map(step => step.name);
+  assert.ok(failed.length === 0, `journey steps failed: ${failed.join(', ')}`);
+  const sent = [t.a, t.b, t.c];
+  const transcript = lines(`${name}/transcript.jsonl`);
+  const operations = transcript.filter(row => row.type === 'queue-operation');
+  const enqueued = operations.filter(row => row.operation === 'enqueue').map(row => row.content);
+  assert.deepEqual(enqueued.slice(0, 3), sent, 'Claude queued the three messages in send order');
+  const popped = operations.filter(row => row.operation === 'popAll');
+  assert.equal(popped.length, 1, 'Claude pulled its queue back once');
+  assert.equal(popped[0].content, sent.join('\n'), 'the pull-back held all three waiting messages');
+  const cancelled = observation.cancelled;
+  assert.equal(cancelled.length, 1, 'exactly one message was cancelled');
+  assert.ok(sent.includes(cancelled[0]));
+  const survivors = sent.filter(text => text !== cancelled[0]);
+  assert.deepEqual(observation.survivors, survivors, 'the others stayed queued in their original order');
+  assert.deepEqual(enqueued.slice(3), survivors, 'the others were queued again in order and the cancelled text never was');
+  const taken = transcript.filter(row => row.type === 'attachment' && row.attachment.type === 'queued_command').map(row => row.attachment.prompt);
+  assert.deepEqual(taken, survivors, 'Claude took in only the messages that were not cancelled');
+  assert.ok(!taken.includes(cancelled[0]), 'the cancelled text never reached Claude');
+  const keys = lines(`${name}/stand-in/agent-buffer.jsonl`);
+  assert.ok(keys.length > 0 && keys.every(row => row.case === name));
+  const typed = keys.filter(row => row.argv.includes('-l')).map(row => row.argv.at(-1));
+  assert.equal(typed.filter(text => text === cancelled[0]).length, 1, 'the cancelled text was typed once and never again');
+  survivors.forEach(text => assert.equal(typed.filter(entry => entry === text).length, 2, 'a surviving message was typed again after the pull-back'));
+  assert.equal(keys.filter(row => row.argv.at(-1) === 'Up').length, 1, 'one Up key pulled the queue back');
+  const log = fs.readFileSync(path.join(root, name, 'debug.log'), 'utf8');
+  const menus = [...log.matchAll(/\[chat\] message menu items=([^\r\n]+)/g)].map(match => ({ items: match[1], at: match.index }));
+  const offered = menus.findIndex(menu => menu.items.includes('Cancel message'));
+  assert.ok(offered >= 0, 'a waiting message offered Cancel message');
+  const views = queueViews(log);
+  const waiting = firstView(views, 0, sent.map(text => ['queued', text]));
+  const afterCancel = firstView(views, waiting, survivors.map(text => ['queued', text]));
+  firstView(views, afterCancel, survivors.map(text => ['sent', text]));
+  assert.ok(views.slice(afterCancel).every(view => view.every(item => item.text !== cancelled[0])), 'the cancelled text never came back into the Chat View');
+  const lastMenu = menus.at(-1);
+  assert.ok(menus.length > offered + 1 && !lastMenu.items.includes('Cancel message'), 'a message Claude took in offers no Cancel');
+  assert.ok(lastMenu.at > log.lastIndexOf('CHAT_QUEUE items=' + JSON.stringify(survivors.map(text => ({ text, state: 'sent' })))) - 1, 'the last menu was opened after Claude took the messages');
+  const actions = json('actions.json').filter(action => action.case === name);
+  assert.equal(actions.filter(action => action.input === 'Enter: send composer').length, 3, 'one real Enter per message');
+  sent.forEach(text => assert.ok(actions.some(action => action.input === 'type composer text' && action.text === text)));
+  assert.equal(actions.filter(action => action.input === 'menu mnemonic n: Cancel message').length, 1, 'one Cancel choice');
+  assert.ok(actions.some(action => action.input === 'real right-click waiting message'));
+  assert.ok(actions.some(action => action.input === 'real right-click taken message'));
+  assert.equal(lines(`${name}/stand-in/unsupported.jsonl`).length, 0, 'no silently unsupported boundary operations');
+  const cleanup = json(`${name}/cleanup.json`);
+  assert.equal(cleanup.remaining_owned_processes, 0);
+  assert.equal(cleanup.evidence_preserved, true);
+  assert.equal(cleanup.scratch_removed, true);
+  assert.equal(json(`${name}/process-tree.json`).ActiveProcesses, 0);
+  for (const suffix of ['before', 'action', 'menu', 'cancelled', 'taken-menu', 'final']) png(`${name}-${suffix}.png`);
+  return { cancelled: cancelled[0], survivors, menusSeen: menus.length, upKeys: 1 };
 }
 
 function evaluateQueueCase(context) {
@@ -304,6 +380,11 @@ function evaluateEvidence(root) {
   } catch (error) {
     cases.push({ name: sendName, passed: false, detail: error.message });
   }
+  try {
+    cases.push({ name: cancelName, passed: true, detail: evaluateCancelCase({ root, json, lines, png }) });
+  } catch (error) {
+    cases.push({ name: cancelName, passed: false, detail: error.message });
+  }
   return { feature: 'chat-delivery', status: cases.every(row => row.passed) ? 'passed' : 'failed', agentBoundary, cases };
 }
 
@@ -316,4 +397,4 @@ if (require.main === module) {
   process.exitCode = result.status === 'passed' ? 0 : 1;
 }
 
-module.exports = { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence };
+module.exports = { names, queueName, sendName, cancelName, cancelTexts, cancelSteps, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence };
