@@ -356,10 +356,18 @@ pub const History = struct {
             try slot.value_ptr.rows.appendSlice(scratch, line);
             try slot.value_ptr.rows.append(scratch, '\n');
         }
+        var shared = false;
         lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            if (incoming.getPtr(try rowIdentity(scratch, line))) |entry| entry.known = true;
+            if (incoming.getPtr(try rowIdentity(scratch, line))) |entry| {
+                entry.known = true;
+                shared = true;
+            }
+        }
+        if (!shared and !std.mem.eql(u8, &self.sid, &previous.sid)) {
+            self.read_sid = self.sid;
+            return;
         }
         var rows: std.ArrayList(u8) = .empty;
         errdefer rows.deinit(a);
@@ -1721,6 +1729,20 @@ test "IGSH-934 rewritten sources retain messages, update overlaps and keep read 
     try std.testing.expectError(error.EmptyReset, h.apply(a, "@mp\t3\thistory\tok\tnew-sid\t0\t0\t11\t0\tclaude\tterm-1\t0\t\ttail\t0\n@@MP_END@@\n", 3, key));
     try std.testing.expectEqual(@as(usize, 4), h.blocks.items.len);
     try std.testing.expectError(error.InvalidHistory, h.apply(a, "@mp\t3\thistory\tok\tnew-sid\t0\t100\t10\t0\tclaude\tterm-1\t0\t\ttail\t0\n{\"role\":\"user\",\"id\":\"one\",\"text\":\"stale\"}\n@@MP_END@@\n", 3, key));
+}
+
+test "IGSH-950 a different live conversation replaces unrelated retained history" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(950, 2, false, "remote-tab", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\told\t0\t100\t9\t0\tclaude\tremote-tab\t0\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"old-answer\",\"text\":\"previous conversation\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tnew\t0\t100\t10\t0\tclaude\tremote-tab\t0\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"new-answer\",\"text\":\"current conversation\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 1), h.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("current conversation"), h.text.items);
+    try std.testing.expectEqualStrings("new", std.mem.sliceTo(&h.read_sid, 0));
 }
 
 test "IGSH-934 backfill after a source rewrite deduplicates already retained messages" {
