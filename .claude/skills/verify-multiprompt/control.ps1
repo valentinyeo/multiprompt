@@ -3266,6 +3266,7 @@ try {
                     Press @(0x12, 0x31) 'Alt+1: Starred before quitting'
                     Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.starred_view } 'Starred view before quitting'
                     $starred = Assert-RelaunchSessions "starred-before-launch-$launch" $relaunchSeed
+                    Snapshot 'action'
                     Restart-SessionRestore "relaunch-$launch" $false $false $openPorts
                     $after = Assert-RelaunchSessions "launch-$launch" $relaunchSeed
                     if ($after.selected -cne $starred.selected) { throw "launch-$launch selected chat changed from $($starred.selected) to $($after.selected)" }
@@ -3273,6 +3274,7 @@ try {
                     Snapshot "launch-$launch"
                     $launches += $after
                 }
+                Snapshot 'after'
                 Save-Json $launches 'relaunch-launches.json'
                 $result.checks += @{ name = 'relaunch-saved-sessions'; launches = 3; sessions = $relaunchSeed.live.Count; ghostsSeeded = $relaunchSeed.ghosts; groups = $relaunchSeed.groups.Count; occupiedPorts = @($script:relaunchListeners).Count }
             } finally {
