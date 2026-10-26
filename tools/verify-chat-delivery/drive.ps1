@@ -246,7 +246,11 @@ function Find-MessageMenu([scriptblock]$Accept, [string]$Label) {
             $start = (Read-Shared "$settings/debug.log").Length
             Doctor
             $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input=$Label; x=$x; y=$y})
-            [ChatDeliveryDesktop]::RightClickOwnedTranscript($main, $app.Id, $view, $x, $y)
+            try { [ChatDeliveryDesktop]::RightClickOwnedTranscript($main, $app.Id, $view, $x, $y) }
+            catch {
+                Start-Sleep -Milliseconds 500
+                continue
+            }
             Start-Sleep -Milliseconds 400
             $tail = (Read-Shared "$settings/debug.log").Substring($start)
             $menus = [regex]::Matches($tail, '\[chat\] message menu items=([^\r\n]+)')
@@ -254,7 +258,7 @@ function Find-MessageMenu([scriptblock]$Accept, [string]$Label) {
             $items = $menus[$menus.Count - 1].Groups[1].Value
             if (& $Accept $items) { return @{items=$items; x=$x; y=$y} }
             [ChatDeliveryDesktop]::Type(0x1B)
-            Start-Sleep -Milliseconds 300
+            Start-Sleep -Milliseconds 700
         }
     }
     $null
