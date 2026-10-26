@@ -15,6 +15,8 @@ const TIMER_CHAT_OUTBOX = @import("win32.zig").TIMER_CHAT_OUTBOX;
 const RECT = @import("win32.zig").RECT;
 const GetClientRect = @import("win32.zig").GetClientRect;
 const InvalidateRect = @import("win32.zig").InvalidateRect;
+const UpdateWindow = @import("win32.zig").UpdateWindow;
+const RedrawWindow = @import("win32.zig").RedrawWindow;
 const GetWindowTextW = @import("win32.zig").GetWindowTextW;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
 const Sleep = @import("win32.zig").Sleep;
@@ -44,6 +46,7 @@ const writeFileAtomicW = @import("file_io.zig").writeFileAtomicW;
 const appendJsonEscaped = @import("workspaces.zig").appendJsonEscaped;
 const logSessionAuditAlways = @import("diagnostics.zig").logSessionAuditAlways;
 const debugLog = @import("diagnostics.zig").debugLog;
+const send_latency = @import("send_latency.zig");
 const saveSession = @import("session.zig").saveSession;
 const appendJsonEscapedWide = @import("snippets.zig").appendJsonEscapedWide;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
@@ -382,6 +385,7 @@ pub fn chatSteerPrompt() void {
 }
 
 pub fn sendChatPrompt() void {
+    send_latency.markPressed();
     chatAcClose();
     if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var text_buf: [16384]u16 = undefined;
@@ -455,12 +459,13 @@ pub fn sendChatPrompt() void {
         showHeaderNoticeAscii("Could not save the message; keep it here and try again", 3500, true);
         return;
     };
+    send_latency.markEnqueued(app_state.g_chat_outbox.items[ei].id);
     app_state.g_chat_read_open_pending = false;
     app_state.g_chat_read_hold = false;
     app_state.g_chat_read_open_ready = true;
     _ = @import("chat_session.zig").chatReadMark(true);
     app_state.g_chat_outbox.items[ei].steer_pending = chat_steer_prompt;
-    chatOutboxTick();
+    _ = UpdateWindow(app_state.g_chat_transcript_hwnd);
     chatAcAfterSend(send_text);
     @import("inbox.zig").stampSessionUse(app_state.active_shell, false);
     app_state.g_chat_scroll_bottom_pending = true;
@@ -474,6 +479,8 @@ pub fn sendChatPrompt() void {
     app_state.g_chat_skill_name_len = 0;
     app_state.g_chat_skill_body_len = 0;
     @import("chat_composer.zig").clearChatReply();
+    _ = RedrawWindow(app_state.g_main_hwnd, null, null, 0x0100 | 0x0080);
+    chatOutboxTick();
     _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_REFRESH, 120, null);
 }
 

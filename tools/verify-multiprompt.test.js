@@ -2135,3 +2135,27 @@ test('IGSH-857: debug.log is read with shared access so a live app write cannot 
   assert.equal(control.split('(Read-SharedText $log)').length - 1, 4);
   assert.equal(control.split('Read-SharedText $launchLog').length - 1, 1);
 });
+
+test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that takes over 100 ms to draw', () => {
+  assert.match(control, /ValidateSet\([^\n)]*'chat-send-latency'/);
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'chat-send-latency'/);
+  assert.match(workflow, /fromJSON\('\["appearance", [^\n]*"chat-send-latency", "chat-first-paint"\]'\)/);
+  const journey = control.slice(control.indexOf("        'chat-send-latency' {"), control.indexOf("        'chat-focus' {"));
+  assert.ok(journey.length > 200, 'chat-send-latency journey missing');
+  assert.match(journey, /for \(\$n = 1; \$n -le 20; \$n\+\+\)/);
+  assert.match(journey, /Press @\(0x0D\)/);
+  assert.match(journey, /send-latency id=/);
+  assert.match(journey, /took longer than 100 ms/);
+  assert.doesNotMatch(journey, /Set-Content|Stop-Process/);
+  assert.match(journey, /0x276F/);
+  assert.match(journey, /claude agent/);
+  const map = read(skill + 'features/chat-send-latency.md');
+  for (const required of ['bubble-first', 'marks-only-in-log', 'IGSH-977', '100 ms']) assert.ok(map.includes(required), required);
+  assert.match(read(skill + 'features/README.md'), /\[Chat send latency\]\(chat-send-latency.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`chat-send-latency`/);
+  const marks = read('src/send_latency.zig');
+  assert.match(marks, /send-latency id=/);
+  assert.match(read('src/chat_send.zig'), /send_latency\.markPressed\(\)/);
+  assert.match(read('src/chat_render.zig'), /send_latency\.markPainted\(/);
+  assert.throws(() => assert.match(control.replace("'chat-send-latency'", ''), /ValidateSet\([^\n)]*'chat-send-latency'/));
+});

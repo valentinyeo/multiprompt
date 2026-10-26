@@ -43,6 +43,13 @@ const ShellSendResult = enum { ok, write_failed, enter_failed };
 const ReconnectState = struct { phase: enum { connected, ended, closed } = .connected, fn ok(_: *@This()) void {} };
 const Shell = struct { shell_id: u32 = 1, kind: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
 const g_main_hwnd: ?*anyopaque = null;
+const g_chat_transcript_hwnd: ?*anyopaque = @ptrFromInt(2);
+const send_latency = struct {
+    fn markPressed() void {}
+    fn markEnqueued(_: u64) void {}
+};
+fn UpdateWindow(_: anytype) i32 { return 1; }
+fn RedrawWindow(_: anytype, _: anytype, _: anytype, _: u32) i32 { return 1; }
 fn debugLog(_: []const u8) void {}
 fn sshOutboxFlushed(_: u32) void {}
 fn repositionActive() void {}
@@ -1351,6 +1358,7 @@ test('composer always persists through the same outbox before delivery', () => {
   const send = body('sendChatPrompt');
   assert.match(send, /chatEchoEnqueueForShell\(active_shell, send_text, \.queued\)/);
   assert.match(send, /chatOutboxTick\(\)/);
+  assert.match(send, /UpdateWindow\(g_chat_transcript_hwnd\)[\s\S]*SetWindowTextW\(g_chat_composer_hwnd[\s\S]*RedrawWindow\(g_main_hwnd[\s\S]*chatOutboxTick\(\)/);
   assert.doesNotMatch(send, /sendTextToActiveShellVerified|chatEchoConfirm/);
 });
 

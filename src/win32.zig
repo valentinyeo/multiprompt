@@ -1469,6 +1469,7 @@ pub extern "user32" fn GetSysColor(i32) callconv(WINAPI) DWORD;
 pub extern "gdi32" fn GetFontData(HANDLE, DWORD, DWORD, ?*anyopaque, DWORD) callconv(WINAPI) DWORD;
 
 pub extern "user32" fn UpdateWindow(hWnd: HANDLE) callconv(WINAPI) BOOL;
+pub extern "user32" fn RedrawWindow(hWnd: HANDLE, lprcUpdate: ?*const RECT, hrgnUpdate: HANDLE, flags: UINT) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn QueryPerformanceCounter(value: *i64) callconv(WINAPI) BOOL;
 pub extern "kernel32" fn QueryPerformanceFrequency(value: *i64) callconv(WINAPI) BOOL;
 
