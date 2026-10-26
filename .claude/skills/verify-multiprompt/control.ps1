@@ -4179,8 +4179,10 @@ try {
                 $stopCheck.workingEmptyPixels = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'composer-working-empty.png'), $script:window, $empty.card, $empty.stop, $null)
                 $stopSize = $empty.stop[2] - $empty.stop[0]
                 [VerifyNative]::MoveMouseClient($script:window, [int](($empty.stop[0] + $empty.stop[2]) / 2), [int](($empty.stop[1] + $empty.stop[3]) / 2), $true)
-                Start-Sleep -Milliseconds 600
-                Snapshot 'stop-hover'
+                Wait-Until {
+                    Snapshot 'stop-hover'
+                    [VerifyNative]::RegionDiff((Join-Path $Evidence 'composer-working-empty.png'), (Join-Path $Evidence 'stop-hover.png'), $script:window, $empty.stop[0] + [int]($stopSize / 4), $empty.stop[1] + [int]($stopSize / 4), $empty.stop[0] + [int]($stopSize / 2), $empty.stop[1] + [int]($stopSize / 2)) -gt 0
+                } 'pointer over Stop repaints the hovered button' -Seconds 10
                 $stopCheck.hoverLabelDiffPixels = [VerifyNative]::RegionDiff((Join-Path $Evidence 'composer-working-empty.png'), (Join-Path $Evidence 'stop-hover.png'), $script:window, $empty.stop[2] - 4 * $stopSize, $empty.card[1] - $stopSize, $empty.stop[2], $empty.card[1] - 1)
                 if ($stopCheck.hoverLabelDiffPixels -gt 4) { throw ('Stop button hover shows a label above the message box: ' + $stopCheck.hoverLabelDiffPixels + ' pixels changed') }
                 [VerifyNative]::MoveMouseClient($script:window, [int]($empty.card[0] + ($empty.card[2] - $empty.card[0]) / 2), $empty.card[1] - 3 * $stopSize, $false)
