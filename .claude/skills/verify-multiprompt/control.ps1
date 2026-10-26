@@ -642,6 +642,21 @@ public static class VerifyNative {
             return samples;
         }
     }
+    public static int RegionDiff(string before, string after, IntPtr owner, int left, int top, int right, int bottom) {
+        Rect frame;
+        Point origin = new Point();
+        if (!GetWindowRect(owner, out frame) || !ClientToScreen(owner, ref origin)) throw new InvalidOperationException("Region screen origin unavailable");
+        int dx = origin.X - frame.Left, dy = origin.Y - frame.Top, differing = 0;
+        using (var a = new System.Drawing.Bitmap(before))
+        using (var b = new System.Drawing.Bitmap(after)) {
+            for (int y = Math.Max(0, top); y < bottom; y++) {
+                for (int x = Math.Max(0, left); x < right; x++) {
+                    if (a.GetPixel(dx + x, dy + y).ToArgb() != b.GetPixel(dx + x, dy + y).ToArgb()) differing++;
+                }
+            }
+        }
+        return differing;
+    }
     public static void FocusOwnedWindow(IntPtr hwnd, uint pid, IntPtr owner) {
         uint actualPid;
         uint targetThread = GetWindowThreadProcessId(hwnd, out actualPid);
@@ -4162,6 +4177,15 @@ try {
                 $stopCheck.paintedAfterMs = [int]$stopClock.ElapsedMilliseconds
                 Snapshot 'composer-working-empty'
                 $stopCheck.workingEmptyPixels = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'composer-working-empty.png'), $script:window, $empty.card, $empty.stop, $null)
+                $stopSize = $empty.stop[2] - $empty.stop[0]
+                [VerifyNative]::MoveMouseClient($script:window, [int](($empty.stop[0] + $empty.stop[2]) / 2), [int](($empty.stop[1] + $empty.stop[3]) / 2), $true)
+                Wait-Until {
+                    Snapshot 'stop-hover'
+                    [VerifyNative]::RegionDiff((Join-Path $Evidence 'composer-working-empty.png'), (Join-Path $Evidence 'stop-hover.png'), $script:window, $empty.stop[0] + [int]($stopSize / 4), $empty.stop[1] + [int]($stopSize / 4), $empty.stop[0] + [int]($stopSize / 2), $empty.stop[1] + [int]($stopSize / 2)) -gt 0
+                } 'pointer over Stop repaints the hovered button' -Seconds 10
+                $stopCheck.hoverLabelDiffPixels = [VerifyNative]::RegionDiff((Join-Path $Evidence 'composer-working-empty.png'), (Join-Path $Evidence 'stop-hover.png'), $script:window, $empty.stop[2] - 4 * $stopSize, $empty.card[1] - [int]($stopSize / 2), $empty.stop[2], $empty.card[1] - 1)
+                if ($stopCheck.hoverLabelDiffPixels -gt 4) { throw ('Stop button hover shows a label above the message box: ' + $stopCheck.hoverLabelDiffPixels + ' pixels changed') }
+                [VerifyNative]::MoveMouseClient($script:window, [int]($empty.card[0] + ($empty.card[2] - $empty.card[0]) / 2), $empty.card[1] - 3 * $stopSize, $false)
                 Type-Text 'x'
                 Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -eq $typed.stop } 'Send replaces Stop after typing while working'
                 $typed = & $readStopFrame
