@@ -30,6 +30,11 @@ on:
         required: false
         default: false
         type: boolean
+      remote_switch_proof:
+        description: Measure 20 local and second-host long-history switches, CPU and native paint gaps
+        required: false
+        default: false
+        type: boolean
       remote_sync_proof:
         description: Follow the second host and alternate home through two turns and a new session
         required: false
@@ -209,6 +214,7 @@ jobs:
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
+      CHAT_SWITCH_PROOF: ${{ inputs.remote_switch_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
@@ -224,7 +230,7 @@ jobs:
       - name: Check verification contracts
         run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs
       - name: Check remote sync proof oracle
-        run: node --test tools/chat-remote-sync-proof.test.mjs
+        run: node --test tools/chat-remote-sync-proof.test.mjs tools/remote-switch-proof.test.mjs
       - name: Check accepted message pixel oracle
         run: node --test tools/chat-accepted-proof.test.mjs
       - name: Check inline working pixel oracle

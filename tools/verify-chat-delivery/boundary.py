@@ -357,6 +357,11 @@ def shell():
     if op == "retention-restore":
         Path(state()["transcript"]).write_bytes((ROOT / "retention-source-backup").read_bytes())
         return 0
+    if op == "switch-history":
+        for i in range(2000):
+            text = f"IGSH954 message {i:04d}\n\n" + "A realistic long conversation paragraph with **readable words** and enough detail to wrap within the chat column. " * 8
+            fake_event("assistant", message=dict(role="assistant", id="switch-" + str(i), content=[dict(type="text", text=text)]))
+        return 0
     if op == "history":
         for i in range(24):
             fake_event("user", message=dict(role="user", content=f"IGSH815 user {i:02d}"))
