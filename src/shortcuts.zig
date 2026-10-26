@@ -346,6 +346,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
     .{ .a = "Ctrl+C in Chat View", .b = "Copy the selection (right-click offers Reply and Copy)", .header = false },
     .{ .a = "Ctrl+A in Chat View", .b = "Select all transcript text (transcript focus; composer keeps its own Ctrl+A)", .header = false },
+    .{ .a = "Enter / Ctrl+Enter in Chat View", .b = "Send your message; Shift+Enter adds a new line; Enter inserts an open command suggestion", .header = false },
     .{ .a = "/ in Chat View", .b = "Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes", .header = false },
     .{ .a = "$ in Chat View (Codex)", .b = "Suggest Codex skills", .header = false },
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },
@@ -531,6 +532,7 @@ test "Chat View composer keeps native editing keys, app shortcuts fall through" 
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x25, false, false, 0));
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x09, false, false, 0));
 
+    try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x0D, true, false, 0));
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x41, true, false, 0));
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x43, true, false, 0));
     try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x56, true, false, 0));

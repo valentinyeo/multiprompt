@@ -1417,12 +1417,12 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   assert.ok(normalNamePoll, 'normal TIMER_NAME_POLL interval must be present');
   assert.ok(Number(detectionWait[1]) > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
   assert.match(chat, /FocusedElement.Current.NativeWindowHandle -eq \$composer.Current.NativeWindowHandle/);
-  const normalSend = /Type-Text \$message\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
+  const normalSend = /Type-Text \$message\s+if \(\$mode -eq 'suggestion'\) \{[\s\S]*?Press @\(0x11, 0x0D\) 'Ctrl\+Enter: send through normal Chat View outbox'\s+\} else \{\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
   assert.match(chat, normalSend);
   assert.doesNotMatch(chat.replace('Type-Text $message', 'Type-Text other'), normalSend);
-  const stdinDelivery = /\[IO.File\]::Open\(\$prefix \+ '-stdin.bin', \[IO.FileMode\]::Open, \[IO.FileAccess\]::Read, \[IO.FileShare\]::ReadWrite\)[\s\S]*?\$stdin\.CopyTo\(\$buffer\)[\s\S]*?\$received = \[Text.Encoding\]::ASCII.GetString\(\$receivedBytes\)[\s\S]*?\$received.Contains\(\$message\) -and \$received.Contains\("`r"\)/;
+  const stdinDelivery = /\[IO.File\]::Open\(\$prefix \+ '-stdin.bin', \[IO.FileMode\]::Open, \[IO.FileAccess\]::Read, \[IO.FileShare\]::ReadWrite\)[\s\S]*?\$stdin\.CopyTo\(\$buffer\)[\s\S]*?\$received = \[Text.Encoding\]::ASCII.GetString\(\$receivedBytes\)[\s\S]*?\$received -ceq \(\$message \+ "`r"\)/;
   assert.match(chat, stdinDelivery);
-  assert.doesNotMatch(chat.replace('$received.Contains($message)', '$true'), stdinDelivery);
+  assert.doesNotMatch(chat.replace('$received -ceq ($message + "`r")', '$true'), stdinDelivery);
   assert.doesNotMatch(chat.replace('[IO.FileShare]::ReadWrite', '[IO.FileShare]::Read'), stdinDelivery);
   const draftProtection = /finally \{[\s\S]*?\$typedCheck.receivedBytes = \(Get-Item \(\$typedPrefix \+ '-stdin.bin'\)\).Length[\s\S]*?\$_.t -ceq \$typedMessage -and \$_.s -eq 0 -and \$_.x -eq 0[\s\S]*?\$typedCheck.receivedBytes -eq 0 -and \$typedCheck.queued[\s\S]*?if \(-not \$typedCheck.passed\) \{ throw/;
   assert.match(chat, draftProtection);

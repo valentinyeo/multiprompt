@@ -3455,7 +3455,7 @@ try {
                 $result.checks += $selectionCheck
                 $result.checks += $menuCheck
                 $typedCheck = @{ name = 'local-route-typed'; passed = $false; entry = 'Chat View Enter'; receivedBytes = $null; queued = $false }
-                $suggestionCheck = @{ name = 'local-route-suggestion'; passed = $false; entry = 'Chat View Enter'; received = '' }
+                $suggestionCheck = @{ name = 'local-route-suggestion'; passed = $false; entry = 'Chat View Ctrl+Enter'; received = '' }
                 $result.checks += $typedCheck
                 $result.checks += $suggestionCheck
                 $outboxPath = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
@@ -3500,7 +3500,23 @@ try {
                         } 'owned local Chat View composer focused'
                         $message = if ($mode -eq 'typed') { $typedMessage } else { 'local route suggestion delivered' }
                         Type-Text $message
-                        Press @(0x0D) 'Enter: send through normal Chat View outbox'
+                        if ($mode -eq 'suggestion') {
+                            Record 'Shift+Enter: insert a newline without sending'
+                            Assert-Foreground
+                            $composerHandle = [IntPtr]$composer.Current.NativeWindowHandle
+                            [VerifyNative]::KeyDown(0x10)
+                            try {
+                                [VerifyNative]::Chord(@(0x0D))
+                                Wait-Until { [VerifyNative]::EditText($composerHandle) -ceq ($message + "`r`n") } 'Shift+Enter keeps the complete draft and adds one newline'
+                            } finally { [VerifyNative]::KeyUp(0x10) }
+                            if ((Get-Item ($prefix + '-stdin.bin')).Length -ne 0) { throw 'Shift+Enter sent the draft' }
+                            Snapshot 'ctrl-enter-newline'
+                            Press @(0x08) 'Backspace: remove the newline before sending'
+                            Wait-Until { [VerifyNative]::EditText($composerHandle) -ceq $message } 'original message restored after newline proof'
+                            Press @(0x11, 0x0D) 'Ctrl+Enter: send through normal Chat View outbox'
+                        } else {
+                            Press @(0x0D) 'Enter: send through normal Chat View outbox'
+                        }
                         if ($mode -eq 'typed') {
                             Wait-Until {
                                 if (-not (Test-Path $outboxPath)) { return $false }
@@ -3522,7 +3538,7 @@ try {
                                 } finally { $stdin.Dispose() }
                                 $received = [Text.Encoding]::ASCII.GetString($receivedBytes)
                                 $suggestionCheck.received = $received
-                                $received.Contains($message) -and $received.Contains("`r")
+                                $received -ceq ($message + "`r")
                             } 'local suggestion prompt receives the Chat View message and Enter on stdin'
                             $suggestionCheck.passed = $true
                             Snapshot 'local-route-suggestion'
