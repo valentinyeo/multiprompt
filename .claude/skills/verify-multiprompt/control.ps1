@@ -497,7 +497,7 @@ public static class VerifyNative {
                 Func<int, int, string> hex = (x, y) => (pixels.GetPixel(x, y).ToArgb() & 0xFFFFFF).ToString("X6");
                 return new Dictionary<string, object> {
                     { "width", width }, { "height", height }, { "clipped", clipped }, { "side", side },
-                    { "fill", hex(width - 8, height - 6) },
+                    { "fill", hex(width / 2, height - 6) },
                     { "cornerShown", shown(0, 0) && hex(0, 0) == hex(0, height / 2) },
                     { "corner", hex(0, 0) }, { "corner2", hex(2, 2) }, { "outerLeft", hex(0, height / 2) },
                     { "leftEdge", hex(side, height / 2) }, { "rightEdge", hex(width - 1 - side, height / 2) }
