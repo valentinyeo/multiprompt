@@ -538,15 +538,18 @@ foreach ($plan in $plans) {
             Bind-Transcript
             foreach ($turn in 1..3) {
                 if ($turn -eq 3) { Shell-Run @('resume', 'live-resumed-session') }
-                $view = [IntPtr]$views[0].Current.NativeWindowHandle
                 $timer = [Diagnostics.Stopwatch]::StartNew()
                 Shell-Run @('turn', [string]$turn)
                 $question = "Remote question $turn"
                 $answer = "Remote answer $turn"
                 [void](Wait-For 'newest rendered remote question and answer within two seconds' {
-                    if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $view)) { throw 'Owned transcript typing focus missing' }
-                    $actions.Add(@{case=$plan.name; input='focus owned remote transcript'; focus=[ChatDeliveryDesktop]::Focus($main)})
-                    Press @(0x11, 0x41) 'Ctrl+A: select rendered remote conversation'
+                    $paletteStart = (Read-Shared "$settings/debug.log").Length
+                    Press @(0x11, 0x4B) 'Ctrl+K: select remote conversation'
+                    [void](Wait-For 'remote palette ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+                    $query = 'chat view select all'
+                    foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+                    [void](Wait-For 'remote select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+                    Press @(0x0D) 'Enter: select remote conversation'
                     Press @(0x11, 0x43) 'Ctrl+C: copy rendered remote conversation'
                     $script:remoteCopied = [Windows.Forms.Clipboard]::GetText()
                     $script:remoteCopied.Contains($question) -and $script:remoteCopied.Contains($answer)
