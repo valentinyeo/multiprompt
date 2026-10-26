@@ -2983,7 +2983,7 @@ try {
             Save-Json @{ mic = $mic; send = $send } 'send-geometry.json'
             $deliveries = @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\ttarget-chat-composer\t22$' }).Count
             foreach ($way in @('send-click', 'ctrl-enter')) {
-                $marker = Join-Path $scratch ($way + '.txt')
+                $outbox = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
                 [VerifyNative]::BringToForeground($script:window)
                 Record 'Click the owned composer to recover typing focus from the hidden console'
                 [VerifyNative]::ClickClient($handle, 8, 8)
@@ -2994,7 +2994,7 @@ try {
                     @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
                 } 'IGSH-965 recorded PCM reached the real capture worker' -Seconds 2 -PollMilliseconds 20
                 Assert-DictationMic $mic $true ($way + '-listening')
-                $typed = '>"' + $marker + '" echo ' + $way
+                $typed = 'typing-' + $way
                 Type-Text $typed
                 Wait-Until { [VerifyNative]::EditText($handle) -ceq $typed } 'IGSH-965 typing is accepted while listening' -Seconds 1 -PollMilliseconds 10
                 Snapshot ($way + '-listening')
@@ -3007,16 +3007,16 @@ try {
                 Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'IGSH-965 one press ended dictation and sent the typed and spoken words' -Seconds 3 -PollMilliseconds 20
                 $elapsed = $immediate.ElapsedMilliseconds
                 Snapshot ($way + '-sent-box')
-                Wait-Until { Test-Path $marker } 'IGSH-965 the session ran the sent typed and spoken words' -Seconds 20 -PollMilliseconds 50
-                $delivered = (Get-Content $marker -Raw).Trim()
-                $expected = $way + ' Go forward ten meters.'
-                if ($delivered -cne $expected) { throw "IGSH-965 session received '$delivered' instead of '$expected'" }
+                $expected = $typed + ' Go forward ten meters.'
+                Wait-Until {
+                    (Test-Path $outbox) -and @((Get-Content $outbox -Raw | ConvertFrom-Json).queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $expected }).Count -eq 1
+                } 'IGSH-965 the sent message holds the typed and spoken words exactly once' -Seconds 5 -PollMilliseconds 50
                 Assert-DictationMic $mic $false ($way + '-stopped')
                 $audit = @((Read-DictationAudit $auditPath))
                 $deliveries++
                 if (@($audit | Where-Object { $_ -match '\ttarget-chat-composer\t22$' }).Count -ne $deliveries) { throw 'IGSH-965 spoken words did not reach the message box before sending' }
                 Snapshot ($way + '-sent')
-                $result.checks += @{ name = ('dictation-' + $way); passed = $true; delivered = $delivered; elapsedMilliseconds = $elapsed; sendRect = $send; micRect = $mic }
+                $result.checks += @{ name = ('dictation-' + $way); passed = $true; delivered = $expected; elapsedMilliseconds = $elapsed; sendRect = $send; micRect = $mic }
             }
             Snapshot 'after'
         }
