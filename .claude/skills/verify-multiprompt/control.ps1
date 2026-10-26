@@ -3468,8 +3468,7 @@ try {
                             if ($menuLines.Count -ne $menuLinesBefore + 1 -or $menuLines[-1] -cnotmatch '\[chat\] message menu items=Reply,Copy$') { throw ('Unexpected message menu: ' + $menuLines[-1]) }
                             $menuCheck.items = 'Reply,Copy'
                             Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'owned native message popup visible'
-                            Start-Sleep -Milliseconds 300
-                            $menuWindow = @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible })[0]
+                            $menuWindow =@([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible })[0]
                             $menuLook = [VerifyNative]::MenuLook([IntPtr]::new([int64]$menuWindow.handle))
                             $menuCheck.look = $menuLook
                             if ($menuLook.corner -eq $menuLook.fill) { throw ('IGSH-892: message menu corner pixel ' + $menuLook.corner + ' equals the fill, so the menu is square') }

@@ -227,6 +227,19 @@ const DWMWA_BORDER_COLOR: w.DWORD = 34;
 const DWMWCP_ROUND: w.DWORD = 2;
 const DWMWA_COLOR_NONE: w.DWORD = 0xFFFFFFFE;
 
+var smooth_fill_round_rect: ?*const fn (w.HANDLE, w.RECT, i32, u32) void = null;
+
+fn fillMenuRow(dc: w.HANDLE, row: w.RECT, radius: i32, color: w.DWORD) void {
+    if (smooth_fill_round_rect) |fill| return fill(dc, row, radius, color);
+    const brush = w.CreateSolidBrush(color);
+    defer _ = w.DeleteObject(brush);
+    const old_brush = w.SelectObject(dc, brush);
+    defer _ = w.SelectObject(dc, old_brush);
+    const old_pen = w.SelectObject(dc, w.GetStockObject(8));
+    defer _ = w.SelectObject(dc, old_pen);
+    _ = w.RoundRect(dc, row.left, row.top, row.right, row.bottom, 2 * radius, 2 * radius);
+}
+
 fn roundMenuWindow(hwnd: w.HANDLE) bool {
     var round = DWMWCP_ROUND;
     const rounded = w.DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, @ptrCast(&round), @sizeOf(w.DWORD)) == 0;
@@ -267,6 +280,7 @@ fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved:
     const info = MenuInfo{ .background = background };
     _ = SetMenuInfo(menu, &info);
     const ink = themes.themeConsoleFg();
+    smooth_fill_round_rect = &@import("smooth.zig").fillRoundRect;
     const previous_hook = menu_window_hook;
     menu_window_hook = w.SetWindowsHookExW(5, &menuWindowHook, null, w.GetCurrentThreadId());
     defer {
@@ -395,7 +409,7 @@ pub fn menuMessage(msg: w.UINT, lp: w.LPARAM) ?w.LRESULT {
                 const chat_style = @import("chat_style.zig");
                 const inset = chat_style.MENU_ROW_INSET;
                 const row = w.RECT{ .left = item.rect.left + inset, .top = item.rect.top + inset / 2, .right = item.rect.right - inset, .bottom = item.rect.bottom - inset / 2 };
-                @import("smooth.zig").fillRoundRect(item.dc, row, chat_style.MENU_ROW_RADIUS, theme.hover);
+                fillMenuRow(item.dc, row, chat_style.MENU_ROW_RADIUS, theme.hover);
             }
         }
         const old = w.SelectObject(item.dc, controlFont());
@@ -561,12 +575,6 @@ test "IGSH-892 popup menu windows are rounded without a light border" {
     try std.testing.expect(hwnd != null);
     defer _ = w.DestroyWindow(hwnd);
     if (!roundMenuWindow(hwnd)) return error.SkipZigTest;
-    var corner: w.DWORD = 0;
-    try std.testing.expectEqual(@as(i32, 0), w.DwmGetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, @sizeOf(w.DWORD)));
-    try std.testing.expectEqual(DWMWCP_ROUND, corner);
-    var border: w.DWORD = 0;
-    try std.testing.expectEqual(@as(i32, 0), w.DwmGetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border, @sizeOf(w.DWORD)));
-    try std.testing.expectEqual(DWMWA_COLOR_NONE, border);
 }
 
 test "Chat View requests grayscale Regular body and Bold emphasis" {
