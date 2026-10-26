@@ -40,7 +40,7 @@ test('the production Windows quoting algorithm preserves spaces, quotes and trai
   ]) assert.equal(quoteArgument(arg), expected);
   const builder = body(bridge, 'buildChromeLaunchCommand');
   assert.match(builder, /appendChromeArgument\(&command, exe\)/);
-  assert.match(builder, /--remote-debugging-pipe --enable-unsafe-extension-debugging --disable-background-networking --disable-component-update --disable-default-apps --disable-sync --metrics-recording-only --no-service-autorun --disable-features=Translate,OptimizationHintsExample/);
+  assert.match(builder, /--remote-debugging-pipe --enable-unsafe-extension-debugging --disable-background-networking --disable-component-update --disable-default-apps --disable-sync --metrics-recording-only --no-service-autorun --disable-backgrounding-occluded-windows --disable-features=Translate,OptimizationHintsExample/);
   const assertNoIoPipes = source => assert.doesNotMatch(source, /--remote-debugging-io-pipes/);
   assertNoIoPipes(builder);
   assert.throws(() => assertNoIoPipes(`${builder} --remote-debugging-io-pipes=123,456`));
