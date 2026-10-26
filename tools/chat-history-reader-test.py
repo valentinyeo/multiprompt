@@ -2143,9 +2143,10 @@ class SharedQueueDraftTest(unittest.TestCase):
         def run(argv, **kwargs):
             shown = ''
             if 'capture-pane' in argv:
-                shown = '❯ ' + state['box'].replace('\n', '\n  ') + '\n' + '─' * 20 + '\n'
-                if state['queue']:
-                    shown += '  Press up to edit queued messages\n'
+                if state['queue'] and not state['box']:
+                    shown = '❯ \x1b[2mPress up to edit queued messages\x1b[0m\n' + '─' * 20 + '\n'
+                else:
+                    shown = '❯ ' + state['box'].replace('\n', '\n  ') + '\n' + '─' * 20 + '\n'
             elif 'send-keys' in argv:
                 key = argv[-1]
                 if '-l' in argv:
@@ -2198,12 +2199,42 @@ class SharedQueueDraftTest(unittest.TestCase):
         self.assertEqual(state['keys'], [])
         self.assertEqual(state['box'], '')
 
-    def test_IGSH_1010_cancel_queued_retypes_survivors_when_the_cancelled_message_was_taken_first(self):
+    def test_IGSH_1010_cancel_queued_leaves_an_unexpected_queue_in_the_box_untouched(self):
         state, run = self.fake_claude(['survivor'])
         with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=run):
             wire = reader.cancel_queued_response(dict(op='cancel_queued', id=9, tmux='term-1', text='taken', keep=['survivor']))
-        self.assertIn('\tcancel_queued\terror\tnot_queued\t0\n', wire)
-        self.assertEqual(state['queue'], ['survivor'])
+        self.assertIn('\tcancel_queued\terror\tqueue_mismatch\t0\n', wire)
+        self.assertEqual(state['box'], 'survivor')
+        self.assertEqual(state['submitted'], [])
+
+    def test_IGSH_1010_cancel_queued_matches_whole_messages_not_fragments(self):
+        state, run = self.fake_claude(['look at this'])
+        with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.cancel_queued_response(dict(op='cancel_queued', id=9, tmux='term-1', text='ok', keep=['look at this']))
+        self.assertIn('\tcancel_queued\terror\tqueue_mismatch\t0\n', wire)
+        self.assertEqual(state['box'], 'look at this')
+        self.assertEqual(state['submitted'], [])
+
+    def test_IGSH_1010_cancel_queued_types_every_survivor_once_when_texts_repeat(self):
+        state, run = self.fake_claude(['same', 'same', 'other'])
+        with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.cancel_queued_response(dict(op='cancel_queued', id=9, tmux='term-1', text='same', keep=['same', 'other']))
+        self.assertIn('\tcancel_queued\tok\t-\t0\n', wire)
+        self.assertEqual(state['queue'], ['same', 'other'])
+
+    def test_IGSH_1010_cancel_queued_refuses_a_claude_that_selects_one_queued_message(self):
+        state, run = self.fake_claude(['one'])
+        original = run
+
+        def select_ui(argv, **kwargs):
+            done = original(argv, **kwargs)
+            if 'capture-pane' in argv:
+                done.stdout = done.stdout.replace('edit queued messages', 'select a queued message to edit')
+            return done
+        with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=select_ui):
+            wire = reader.cancel_queued_response(dict(op='cancel_queued', id=9, tmux='term-1', text='one', keep=[]))
+        self.assertIn('\tcancel_queued\terror\tqueue_ui_unsupported\t0\n', wire)
+        self.assertEqual(state['keys'], [])
 
     def test_IGSH_1010_cancel_queued_rejects_bad_requests_and_is_routed(self):
         for query in (dict(tmux='bad name', text='x', keep=[]), dict(tmux='term-1', text='', keep=[]), dict(tmux='term-1', text='x', keep='y'), dict(tmux='term-1', text='x', keep=['a\x00'])):

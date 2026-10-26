@@ -130,6 +130,9 @@ def fake_write(claude):
     (ROOT / "claude.json").write_text(json.dumps(claude, ensure_ascii=True), encoding="utf-8")
 
 
+QUEUE_HINT = "Press up to edit queued messages"
+
+
 def fake_suggestion_shown(claude):
     return claude["mode"] == "idle" and not claude["box"]
 
@@ -143,9 +146,9 @@ def fake_screen(claude, escapes):
     first = rows[0]
     if fake_suggestion_shown(claude):
         first = SGR_DIM + claude["suggestion"] + SGR_RESET if escapes else claude["suggestion"]
+    elif claude["queue"] and not claude["box"]:
+        first = SGR_DIM + QUEUE_HINT + SGR_RESET if escapes else QUEUE_HINT
     lines += ["❯ " + first, *("  " + row for row in rows[1:]), "─" * 50]
-    if claude["queue"]:
-        lines.append("  Press up to edit queued messages")
     return "\n".join(lines) + "\n"
 
 

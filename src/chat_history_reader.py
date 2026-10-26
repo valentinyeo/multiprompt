@@ -1475,14 +1475,6 @@ def prompt_box_text(target):
     return "\n".join(" ".join(line.split()) for line in draft.split("\n")).strip()
 
 
-def queue_hint_shown(target):
-    try:
-        shown = subprocess.run(["tmux", "capture-pane", "-p", "-J", "-t", target], capture_output=True, text=True, timeout=5).stdout
-    except (OSError, subprocess.SubprocessError, UnicodeError):
-        return False
-    return isinstance(shown, str) and "edit queued messages" in shown
-
-
 def stop_response(q):
     rid = q.get("id", 0)
     name = q.get("tmux")
@@ -1571,6 +1563,45 @@ def send_response(q):
     return f"@mp\t{rid}\tsend\t{status}\t{reason or '-'}\t0\n{END}\n"
 
 
+QUEUE_HINT = "edit queued messages"
+QUEUE_SELECT_HINT = "select a queued message"
+
+
+def box_plain_text(shown):
+    plain = ["".join(char for char, _dim, _inverse in styled_chars(line)) for line in shown.splitlines()]
+    starts = [i for i, line in enumerate(plain) if line.startswith("❯")]
+    if not starts:
+        return ""
+    rows = []
+    for i in range(starts[-1], len(plain)):
+        if plain[i].startswith("─"):
+            break
+        rows.append(plain[i])
+    return " ".join(rows)
+
+
+def queue_hint_state(target):
+    try:
+        shown = subprocess.run(["tmux", "capture-pane", "-p", "-e", "-J", "-t", target], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return "none"
+    plain = box_plain_text(shown) if isinstance(shown, str) else ""
+    if QUEUE_SELECT_HINT in plain:
+        return "select"
+    return "edit" if QUEUE_HINT in plain else "none"
+
+
+def queue_matches(pulled, target, keep):
+    flat = lambda value: "".join(value.split())
+    pulled_flat = flat(pulled)
+    if not pulled_flat:
+        return False
+    for i in range(len(keep) + 1):
+        if "".join(flat(item) for item in keep[:i] + [target] + keep[i:]) == pulled_flat:
+            return True
+    return False
+
+
 def cancel_queued_response(q):
     rid = q.get("id", 0)
     name = q.get("tmux")
@@ -1593,31 +1624,32 @@ def cancel_queued_response(q):
                 if stuck or not box_is_empty(left):
                     reason = "box_not_clear"
             if reason is None:
-                pulled = ""
-                if queue_hint_shown(target):
+                state = queue_hint_state(target)
+                if state == "select":
+                    reason = "queue_ui_unsupported"
+                elif state == "none":
+                    reason = "not_queued"
+                else:
                     subprocess.run(["tmux", "send-keys", "-t", target, "Up"], check=True, capture_output=True, timeout=5)
+                    pulled = ""
                     for _ in range(20):
                         time.sleep(0.1)
                         pulled = prompt_box_text(target)
                         if pulled:
                             break
-                pulled_flat = "".join(pulled.split())
-                cancelled = bool(pulled_flat) and "".join(text.split()) in pulled_flat
-                retype = [item for item in keep if "".join(item.split()) in pulled_flat]
-                if pulled:
-                    box, stuck = clear_prompt_box(target, pulled)
-                    if not stuck and not box_is_empty(box):
-                        reason = "box_not_clear"
-                if reason is None:
-                    for item in retype:
-                        again = send_response(dict(id=rid, tmux=name, text=item))
-                        if "\tsend\terror\t" in again:
-                            reason = "requeue_failed"
-                            break
-                if draft and reason != "box_not_clear":
-                    type_into_box(target, draft, rid)
-                if reason is None and not cancelled:
-                    reason = "not_queued"
+                    if not queue_matches(pulled, text, keep):
+                        reason = "queue_mismatch"
+                    else:
+                        box, stuck = clear_prompt_box(target, pulled)
+                        if stuck or not box_is_empty(box):
+                            reason = "box_not_clear"
+                        else:
+                            for item in keep:
+                                again = send_response(dict(id=rid, tmux=name, text=item))
+                                if "\tsend\terror\t" in again:
+                                    reason = "requeue_failed"
+            if draft and reason not in ("box_not_clear", "queue_mismatch") and box_is_empty(prompt_box_text(target)):
+                type_into_box(target, draft, rid)
         except (OSError, subprocess.SubprocessError, UnicodeError):
             reason = "tmux_cancel_failed"
     status = "error" if reason else "ok"
