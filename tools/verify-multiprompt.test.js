@@ -1420,6 +1420,8 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   const normalSend = /Type-Text \$message\s+if \(\$mode -eq 'suggestion'\) \{[\s\S]*?Press @\(0x11, 0x0D\) 'Ctrl\+Enter: send through normal Chat View outbox'\s+\} else \{\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
   assert.match(chat, normalSend);
   assert.doesNotMatch(chat.replace('Type-Text $message', 'Type-Text other'), normalSend);
+  assert.match(chat, /\$composerHandle = \[VerifyNative\]::GetFocusedWindow\(\$script:window\)/);
+  assert.match(chat, /GetAncestor\(\$composerHandle, 2\) -ne \$script:window -or \[VerifyNative\]::Class\(\$composerHandle\) -cne 'Edit'/);
   const stdinDelivery = /\[IO.File\]::Open\(\$prefix \+ '-stdin.bin', \[IO.FileMode\]::Open, \[IO.FileAccess\]::Read, \[IO.FileShare\]::ReadWrite\)[\s\S]*?\$stdin\.CopyTo\(\$buffer\)[\s\S]*?\$received = \[Text.Encoding\]::ASCII.GetString\(\$receivedBytes\)[\s\S]*?\$received -ceq \$wireMessage/;
   assert.ok(chat.includes("$wireMessage = ([string][char]27) + '[200~' + $message + ([string][char]27) + '[201~' + \"`r\""));
   assert.match(chat, stdinDelivery);

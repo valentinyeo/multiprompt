@@ -3503,7 +3503,8 @@ try {
                         if ($mode -eq 'suggestion') {
                             Record 'Shift+Enter: insert a newline without sending'
                             Assert-Foreground
-                            $composerHandle = [IntPtr]$composer.Current.NativeWindowHandle
+                            $composerHandle = [VerifyNative]::GetFocusedWindow($script:window)
+                            if ([VerifyNative]::GetAncestor($composerHandle, 2) -ne $script:window -or [VerifyNative]::Class($composerHandle) -cne 'Edit') { throw 'Newline proof lost the owned composer' }
                             [VerifyNative]::KeyDown(0x10)
                             try {
                                 [VerifyNative]::Chord(@(0x0D))
