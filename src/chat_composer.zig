@@ -276,6 +276,7 @@ pub fn chatDictationSync() void {
         chat_dictation_started_ms = 0;
         if (app_state.g_main_hwnd != null) _ = @import("win32.zig").KillTimer(app_state.g_main_hwnd, app_state.TIMER_CHAT_DICTATION);
     }
+    chatComposerButtonsRefresh();
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
