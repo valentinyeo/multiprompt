@@ -91,7 +91,7 @@ test('IGSH-816 default evidence evaluation requires the CLEAN pair and rejects t
   const path = require('node:path');
   const { evaluate } = await import('./chat-messages-only-proof.mjs');
   const messages = [{ role: 'user', text: 'start the fake session' }, { role: 'assistant', text: 'The fake session is ready.' }];
-  const tools = Array.from({ length: 12 }, (_, id) => ({ role: 'tool', id, status: 'ok', detail: 'verified', text: ['Ran Check app-smoke state', 'Ran Inspect app-smoke run details', 'Ran Read commit statuses on PR head'][id % 3] }));
+  const tools = Array.from({ length: 12 }, (_, id) => ({ role: 'tool', id, status: 'ok', detail: 'verified', text: id === 0 ? 'TodoWrite' : ['Ran Check app-smoke state', 'Ran Inspect app-smoke run details', 'Ran Read commit statuses on PR head'][id % 3] }));
   const rows = values => [{}, ...values].map(row => JSON.stringify(row)).join('\n');
   const files = new Map([
     ['messages-only/observation.json', JSON.stringify({ error: null, composerText: 'composer stays usable', transcript: geometry.transcript, cleanChat: { rows: geometry.rows, working: geometry.working } })],
@@ -109,6 +109,11 @@ test('IGSH-816 default evidence evaluation requires the CLEAN pair and rejects t
     return files.get(name);
   });
   assert.equal(evaluate(root, false).cleanChat.rows.onInk, 0);
+  const withoutTodo = rows([...messages, ...tools.map(row => row.id === 0 ? { ...row, text: 'Ran Check app-smoke state' } : row)]);
+  const withTodo = files.get('messages-only/app-cache.jsonl');
+  files.set('messages-only/app-cache.jsonl', withoutTodo);
+  assert.throws(() => evaluate(root, false), /TodoWrite/);
+  files.set('messages-only/app-cache.jsonl', withTodo);
   files.set('clean-chat-on.bmp', bmp(frame()));
   assert.throws(() => evaluate(root, false), /ON still paints status\/outbox\/footer rows/);
   files.delete('clean-chat-on.bmp');
@@ -153,4 +158,18 @@ test('IGSH-816 feature map names every CLEAN artifact, exact palette steps and t
   assert.equal(gates.length, 10);
   const { readChangelogEntry } = require('./changelog-entry.js');
   assert.match(readChangelogEntry('IGSH-816'), /Choose CLEAN chat[\s\S]*keeping messages and the working indicator/);
+});
+
+test('IGSH-857 the stand-in agent writes the todo before the baseline so the status row never appears mid-proof', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+  const driver = read('tools/verify-chat-delivery/drive.ps1');
+  const boundary = read('tools/verify-chat-delivery/boundary.py');
+  const todo = driver.indexOf("Shell-Input 'todo'");
+  assert.ok(todo > 0 && todo < driver.indexOf("Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript'"));
+  assert.ok(todo < driver.indexOf('$observation.transcript = @{'));
+  assert.match(driver.slice(todo, driver.indexOf('$observation.transcript = @{')), /Wait-For 'owned status row above the transcript once the todo is read'/);
+  assert.match(boundary, /if op == "todo":[\s\S]*?name="TodoWrite"/);
+  assert.match(boundary, /if op == "activity":[\s\S]*?for i in range\(11\):/);
 });

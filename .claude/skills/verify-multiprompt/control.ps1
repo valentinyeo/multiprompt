@@ -1717,10 +1717,35 @@ function Press-ShiftEnter([string]$Label) {
     Record 'Shift released after Shift+Enter'
 }
 
+function Activate-OwnedFrame {
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        [void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)
+        [void][VerifyNative]::SetForegroundWindow($script:window)
+        if ([VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window) { return }
+        Start-Sleep -Milliseconds 100
+    }
+}
+
+function Retry-PaletteOpen([string]$Log, [int]$Start) {
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(6)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            if ((((Get-Content $Log -Raw) -join '').Substring($Start)) -match '\[palette\] ready chars=0 count=\d+ target=\d+') { return }
+            Start-Sleep -Milliseconds 200
+        }
+        if ($attempt -eq 3) { return }
+        Record ('Command palette trace missing after Ctrl+K attempt ' + $attempt)
+        Activate-OwnedFrame
+        Press @(0x11, 0x4B) 'Ctrl+K: open command palette again'
+    }
+}
+
 function Focus-Palette([string]$Query, [int]$Target) {
+    if ([VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -ne $script:window) { Activate-OwnedFrame }
     $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
     $start = ((Get-Content $log -Raw) -join '').Length
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
+    Retry-PaletteOpen $log $start
     Wait-Until {
         $trace = ((Get-Content $log -Raw) -join '').Substring($start)
         if ($trace -notmatch '\[palette\] ready chars=0 count=\d+ target=\d+') { return $false }

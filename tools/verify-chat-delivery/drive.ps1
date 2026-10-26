@@ -401,8 +401,20 @@ foreach ($plan in $plans) {
             }
             Type-Composer $plan.text
             if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Composer typing failed' }
+            Shell-Input 'todo'
+            [void](Wait-For 'todo task in app-written cache' { (Read-Shared $cache.FullName).Contains('TodoWrite') })
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
             $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+            $todoStatus = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Static')
+            [void](Wait-For 'owned status row above the transcript once the todo is read' {
+                $viewRows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
+                if ($viewRows.Count -ne 1) { return $false }
+                $viewBounds = $viewRows[0].Current.BoundingRectangle
+                @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $todoStatus) | Where-Object {
+                    $r = $_.Current.BoundingRectangle
+                    -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $viewBounds.Left -and $r.Width -eq $viewBounds.Width -and $r.Bottom -eq $viewBounds.Top -and $r.Height -gt 0
+                }).Count -eq 1
+            })
             $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
             if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
             $bounds = $views[0].Current.BoundingRectangle

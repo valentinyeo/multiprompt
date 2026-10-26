@@ -3,7 +3,7 @@
 ## Sub-features
 
 - Tool/activity blocks never paint ticks, summaries, details, diffs or images and reserve no height or surrounding gap.
-- The transcript cache still contains all twelve completed calls and results, including the three reported app-smoke/status summaries.
+- The transcript cache still contains all twelve completed calls and results, including the three reported app-smoke/status summaries. The first of the twelve is a TodoWrite call, because the status row above the transcript exists only when the session has todos; the CLEAN on/off comparison needs that row.
 - Real message rectangles and pixels stay unchanged when those calls stream in. The existing composer draft remains editable and unchanged.
 - A centered compact pill above the composer counts new messages that arrive while the reader is scrolled up, with a down arrow, the full count and a separate close control. It reserves its own row outside the transcript, above any visible permission row; ordinary working state reserves no strip.
 - Only new transcript message starts count. Initial loads, older pages, repeated refreshes, streamed continuations, Markdown blocks and tool activity never count.

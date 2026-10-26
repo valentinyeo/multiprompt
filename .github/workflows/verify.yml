@@ -411,13 +411,23 @@ jobs:
           $version = $Matches[1]
           $exe = "$pwd/negative-focus-source/zig-out/bin/multiprompt.exe"
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          @{ revision = $revision; version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/focus-negative/build.json
-          try {
-            & .claude/skills/verify-multiprompt/control.ps1 -Feature pane-layout -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/focus-negative"
-          } catch {
-            Write-Host "Focus negative control returned: $_"
+          $build = @{ revision = $revision; version = $version; sha256 = $hash } | ConvertTo-Json
+          $red = $null
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            if ($attempt -gt 1) {
+              Move-Item evidence/focus-negative "evidence/focus-negative-attempt-$($attempt - 1)"
+              New-Item -ItemType Directory -Force evidence/focus-negative | Out-Null
+            }
+            $build | Set-Content evidence/focus-negative/build.json
+            try {
+              & .claude/skills/verify-multiprompt/control.ps1 -Feature pane-layout -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/focus-negative"
+            } catch {
+              Write-Host "Focus negative control returned: $_"
+            }
+            $red = Get-Content evidence/focus-negative/result.json -Raw | ConvertFrom-Json
+            if ($red.status -ne 'failed' -or (Test-Path evidence/focus-negative/focus-ring-proof.json)) { break }
+            Write-Host "Focus negative control attempt $attempt ended on: $($red.error)"
           }
-          $red = Get-Content evidence/focus-negative/result.json -Raw | ConvertFrom-Json
           if ($red.status -ne 'failed' -or $red.error -ne 'IGSH-807 focus ring pixels differ from the unfocused surface') { throw 'Pre-fix control did not fail specifically on focus-ring pixels after input cycling' }
           if (-not $red.scratchRemoved -or $red.cleanup -ne 'owned process tree stopped; scratch copied to evidence/data then removed') { throw 'Focus control cleanup failed' }
           $tree = Get-Content evidence/focus-negative/process-tree.json -Raw | ConvertFrom-Json
