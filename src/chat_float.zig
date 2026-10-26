@@ -42,7 +42,6 @@ pub fn collectHoles(out: *HoleList) void {
             if (window_layout.chatPermissionRect(action)) |rc| out.add(rc, drawing.uiScaled(6));
         }
     }
-    }
 }
 
 fn signature(window: RECT, holes: *const HoleList) u64 {
