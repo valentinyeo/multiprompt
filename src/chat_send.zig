@@ -2627,6 +2627,7 @@ fn chatStopTmuxThread(key: @import("chat_transcript.zig").Identity, digit: u8) v
 
 pub fn chatShellEditQueued() bool {
     if (!app_state.g_chat_active) return false;
+    @import("chat_composer.zig").chatShellDraftArmPull();
     return chatShellOp(app_state.active_shell, "edit_queued", null, null);
 }
 

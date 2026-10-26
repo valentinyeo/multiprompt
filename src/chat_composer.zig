@@ -1796,6 +1796,10 @@ pub fn chatShellDraftPull(shell_id: u32, status: *const chat_transcript.Status) 
     _ = InvalidateRect(app_state.g_chat_composer_hwnd, null, 1);
 }
 
+pub fn chatShellDraftArmPull() void {
+    shell_draft.armPull(GetTickCount64());
+}
+
 pub fn chatShellDraftNoteSend() void {
     shell_draft.onSend(GetTickCount64());
 }

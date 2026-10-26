@@ -8,6 +8,7 @@ pub const DRAFT_PUSH_CAP: usize = 4000;
 pub const PUSH_QUIET_MS: u64 = 4000;
 pub const FRESH_EDIT_MS: u64 = 3000;
 pub const SEND_QUIET_MS: u64 = 2000;
+pub const PULL_ARM_MS: u64 = 5000;
 
 pub const Row = struct {
     text: [TEXT_CAP]u16 = @splat(0),
@@ -170,10 +171,21 @@ pub const Draft = struct {
     edit_ms: u64 = 0,
     push_ms: u64 = 0,
     quiet_until_ms: u64 = 0,
+    pull_until_ms: u64 = 0,
     edit_pending: bool = false,
     push_in_flight: std.atomic.Value(bool) = .init(false),
 
+    pub fn armPull(self: *Draft, now: u64) void {
+        self.pull_until_ms = now + PULL_ARM_MS;
+    }
+
     pub fn onShell(self: *Draft, shell_id: u32, shell: []const u16, composer: []const u16, focused: bool, now: u64) Pull {
+        const pull = self.decide(shell_id, shell, composer, focused, now);
+        if (pull == .apply and now >= self.pull_until_ms) return .none;
+        return pull;
+    }
+
+    fn decide(self: *Draft, shell_id: u32, shell: []const u16, composer: []const u16, focused: bool, now: u64) Pull {
         const shell_hash = draftHash(shell);
         const composer_hash = draftHash(composer);
         const composer_blank = isBlankDraft(composer);
@@ -371,8 +383,43 @@ test "draft hash ignores carriage returns and edge blanks" {
     try std.testing.expect(draftHash(w("a")) != draftHash(w("b")));
 }
 
-test "a shell draft fills an empty unfocused composer and a cleared shell box clears it" {
+fn armedDraft() Draft {
     var draft: Draft = .{};
+    draft.armPull(0);
+    draft.pull_until_ms = std.math.maxInt(u64);
+    return draft;
+}
+
+test "IGSH-930 an agent message pasted into the shell box never fills an empty composer" {
+    var draft: Draft = .{};
+    try std.testing.expectEqual(Pull.none, draft.onShell(1, w(""), w(""), false, 1000));
+    try std.testing.expectEqual(Pull.none, draft.onShell(1, w("[Pasted text #3 +12 lines]"), w(""), false, 9000));
+    try std.testing.expectEqual(Pull.none, draft.onShell(1, w("[Pasted text #3 +12 lines]"), w(""), true, 20000));
+}
+
+test "IGSH-930 an agent message in a freshly seen shell never fills an empty composer" {
+    var draft: Draft = .{};
+    try std.testing.expectEqual(Pull.none, draft.onShell(4, w("agent report"), w(""), false, 1000));
+}
+
+test "IGSH-930 an agent message never replaces an older unfocused composer draft" {
+    var draft: Draft = .{};
+    _ = draft.onShell(1, w("x"), w("x"), false, 1000);
+    draft.onComposerEdit(1100);
+    try std.testing.expectEqual(Pull.none, draft.onShell(1, w("[Pasted text #1]"), w("x more"), false, 30000));
+}
+
+test "IGSH-930 the shell draft is pulled only after Edit Queued Messages arms it and only for a short window" {
+    var draft: Draft = .{};
+    _ = draft.onShell(1, w(""), w(""), false, 1000);
+    draft.armPull(2000);
+    try std.testing.expectEqual(Pull.apply, draft.onShell(1, w("queued one"), w(""), false, 2500));
+    draft.applied(w("queued one"));
+    try std.testing.expectEqual(Pull.none, draft.onShell(1, w("agent paste"), w("queued one"), false, 2000 + PULL_ARM_MS));
+}
+
+test "a shell draft fills an empty unfocused composer and a cleared shell box clears it" {
+    var draft = armedDraft();
     try std.testing.expectEqual(Pull.none, draft.onShell(1, w(""), w(""), false, 1000));
     try std.testing.expectEqual(Pull.apply, draft.onShell(1, w("shell draft"), w(""), false, 2000));
     draft.applied(w("shell draft"));
@@ -394,7 +441,7 @@ test "a shell clear does not erase unsent composer text" {
 }
 
 test "when both differ and neither is fresh the shell edit wins unfocused" {
-    var draft: Draft = .{};
+    var draft = armedDraft();
     _ = draft.onShell(1, w("x"), w("x"), false, 1000);
     draft.onComposerEdit(1100);
     try std.testing.expectEqual(Pull.none, draft.onShell(1, w("shell"), w("x more"), false, 2000));
@@ -423,7 +470,7 @@ test "a send cancels a pending push and quiets pushes briefly" {
 }
 
 test "the shell box is not pulled while a send is typing into it" {
-    var draft: Draft = .{};
+    var draft = armedDraft();
     _ = draft.onShell(1, w(""), w(""), false, 1000);
     draft.onSend(5000);
     try std.testing.expectEqual(Pull.none, draft.onShell(1, w("message being sent"), w(""), false, 5500));
