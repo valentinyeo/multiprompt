@@ -912,7 +912,7 @@ test "IGSH-907 Chat View header ignores capacity while terminal keeps it" {
     app_state.shells[0] = app_state.empty_shell;
     app_state.shells[0].kind = .tmux;
     app_state.shells[0].tmux_host = 1;
-    const name = L("Session title stays unchanged");
+    const name = std.unicode.utf8ToUtf16LeStringLiteral("Session title stays unchanged");
     @memcpy(app_state.shells[0].name[0..name.len], name);
     app_state.shells[0].name_len = name.len;
     const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
@@ -970,6 +970,7 @@ test "IGSH-907 Chat View header ignores capacity while terminal keeps it" {
             }
         }
     }
+    std.debug.print("IGSH-907 chat_equal={} terminal_equal={}\n", .{ chat_equal, terminal_equal });
     try std.testing.expect(!terminal_equal);
     try std.testing.expect(chat_equal);
 }
