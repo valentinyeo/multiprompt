@@ -1306,8 +1306,28 @@ test "ISSUE-460 both saved laptop entries stay failed until positive background 
     try std.testing.expectEqual(@as(usize, 0), writes + enters);
 }
 
+test "IGSH-975 popup snapshot sends the clicked reply after live blocks change" {
+    defer clear();
+    const quote = std.unicode.utf8ToUtf16LeStringLiteral("The clicked reply");
+    const reference = chat_reaction.reference("msg_clicked");
+    const snapshot = try std.heap.page_allocator.dupe(u16, quote);
+    defer std.heap.page_allocator.free(snapshot);
+    g_chat_capture = std.unicode.utf8ToUtf16LeStringLiteral("An earlier reply now occupies this index");
+    g_chat_last_len = g_chat_capture.len;
+    g_chat_blocks[0] = .{ .start = 0, .len = g_chat_last_len, .role = .prose, .reaction_reference = chat_reaction.reference("msg_earlier") };
+    g_chat_block_count = 1;
+    const draft = std.unicode.utf8ToUtf16LeStringLiteral("draft stays here");
+    composer_text = draft;
+    chatReactToMessage(reference, snapshot, .like);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    const sent = chat_reaction.parse(g_chat_outbox.items[0].text).?;
+    try std.testing.expectEqual(reference, sent.reference);
+    try std.testing.expectEqualSlices(u16, quote, sent.quote);
+    try std.testing.expectEqualSlices(u16, draft, composer_text);
+}
+
 `;
-const names = ['chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatTmuxSendFinish', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry'];
+const names = ['chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatTmuxSendFinish', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry'];
 const sourceOutboxTests = ['Chat View outbox is FIFO and capped per key', 'Chat View outbox flush skips unconfirmed entries and keeps FIFO order', 'ISSUE-460 session queued evidence cannot release the next outbox entry', 'IGSH-564 busy tmux session still gets the queued message typed'].map(name => {
   const start = source.indexOf(`test "${name}" {`);
   assert.ok(start >= 0, name);
@@ -1326,7 +1346,9 @@ function runHarness(control = false) {
       .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
       .replaceAll('@import("inbox.zig").findShellById', 'findShellById')
       .replaceAll('@import("inbox.zig").stampSessionUse', 'stampSessionUse')
-      .replaceAll('@import("chat_composer.zig").clearChatReply', 'clearChatReply');
+      .replaceAll('@import("chat_composer.zig").clearChatReply', 'clearChatReply')
+      .replaceAll('@import("chat_composer.zig").chatAcAgent', 'chatAcAgent')
+      .replaceAll('@import("chat_send.zig").sendChatMessage', 'sendChatMessage');
     functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk').replaceAll('@import("console.zig").showReconnectedConsole', 'showReconnectedConsole').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent') : 'fn sshReconnectOk(_: u32) void {}');
     if (control === 'steer-before') {
       functions = functions.replace('    chatEchoPushQueuedForShell(idx);', '    _ = idx;');
@@ -1338,13 +1360,18 @@ function runHarness(control = false) {
       functions = functions.replace('const facts = chatEchoDeliveryEvidence(e);', 'const facts: chat_echo.DeliveryEvidence = .{};');
       assert.notEqual(functions, names.map(body).join('\n'));
     }
+    if (control === 'reaction-index') {
+      const original = functions;
+      functions = functions.replace('const line = chat_reaction.format(emoji, reference, quote, &out)', 'const wrong = g_chat_blocks[0];\n    _ = reference;\n    _ = quote;\n    const line = chat_reaction.format(emoji, wrong.reaction_reference, g_chat_capture[wrong.start..][0..wrong.len], &out)');
+      assert.notEqual(functions, original);
+    }
     if (control === 'repeats' || control === 'unreadable') {
       const old = fs.readFileSync('tools/fixtures/chat-before-2b45249.zig', 'utf8');
       const oldBody = name => { const start = old.indexOf(`fn ${name}(`); return old.slice(start, old.indexOf('\n}', start) + 2); };
       functions = functions.replace(body('chatEchoMatchActive'), oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '')) + '\n' + oldBody('chatEchoRepresentedBlock');
     }
     fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + sourceOutboxTests).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
+    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'reaction-index' ? 'IGSH-975 popup snapshot' : control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 test('correctness repeats and unreadable: executed production outbox, write reservation and matching handle restart, busy/idle, repeated text and cache reload', () => {
@@ -1434,4 +1461,11 @@ test('ISSUE-501 reconnect flush uses the production reservation confirmation and
   const result = runHarness('issue501');
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stderr, /All 1 tests passed/);
+});
+
+
+test('IGSH-975 clicked-target oracle rejects a live-index lookup after a popup snapshot', () => {
+  const result = runHarness('reaction-index');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /FAIL \(TestExpectedEqual\)/);
 });

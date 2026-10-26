@@ -3410,14 +3410,10 @@ pub fn chatCopyCodeKeyDown(vk: WPARAM) bool {
     return chatViewOwnsInput() and chat_code.copyKey(vk, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0);
 }
 
-pub fn chatReactToBlock(index: usize, emoji: chat_reaction.Emoji) void {
-    if (index >= app_state.g_chat_block_count or @import("chat_composer.zig").chatAcAgent() != .claude) return;
-    const block = app_state.g_chat_blocks[index];
-    if (block.role != .prose and block.role != .code) return;
-    const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
-    const display = chatBlockDisplayRange(buf, block);
+pub fn chatReactToMessage(reference: u64, quote: []const u16, emoji: chat_reaction.Emoji) void {
+    if (@import("chat_composer.zig").chatAcAgent() != .claude) return;
     var out: [256]u16 = undefined;
-    const line = chat_reaction.format(emoji, block.reaction_reference, buf[display.start..][0..display.len], &out) orelse return;
+    const line = chat_reaction.format(emoji, reference, quote, &out) orelse return;
     if (!@import("chat_send.zig").sendChatMessage(line)) showHeaderNoticeAscii("Could not send the reaction; try again", 3500, true);
 }
 
@@ -3426,7 +3422,10 @@ pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
     while (i > 0) {
         i -= 1;
         if (app_state.g_chat_blocks[i].role == .prose or app_state.g_chat_blocks[i].role == .code) {
-            chatReactToBlock(i, emoji);
+            const block = app_state.g_chat_blocks[i];
+            const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
+            const display = chatBlockDisplayRange(buf, block);
+            chatReactToMessage(block.reaction_reference, buf[display.start..][0..display.len], emoji);
             return;
         }
     }
@@ -4782,10 +4781,15 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             }
             if (block_at == null and echo_index != null and message_text.len > 0) reply_text = std.heap.page_allocator.dupe(u16, message_text) catch null;
             defer if (reply_text) |text| std.heap.page_allocator.free(text);
+            const reaction_identity = chatFileIdentity();
+            var reaction_sid = reaction_identity.sid;
+            if (chatHistoryEntry(reaction_identity)) |entry| reaction_sid = entry.history.sid;
+            const reaction_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+            const reaction_reference = if (block_at) |index| app_state.g_chat_blocks[index].reaction_reference else 0;
             var items = chatContextMenuItems(chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions);
             if (block_at) |index| {
                 const role = app_state.g_chat_blocks[index].role;
-                if ((role == .prose or role == .code) and @import("chat_composer.zig").chatAcAgent() == .claude) {
+                if ((role == .prose or role == .code) and reply_text != null and @import("chat_composer.zig").chatAcAgent() == .claude) {
                     const Item = @import("fonts.zig").MessageMenuItem;
                     std.mem.copyBackwards(Item, items.items[3..][0..items.len], items.items[0..items.len]);
                     @memcpy(items.items[0..3], &[_]Item{ .reaction_like, .reaction_dislike, .reaction_heart });
@@ -4805,7 +4809,16 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             _ = SetForegroundWindow(app_state.g_main_hwnd);
             const cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null);
             switch (cmd) {
-                8, 9, 10 => if (block_at) |index| chatReactToBlock(index, @enumFromInt(cmd - 8)),
+                8, 9, 10 => if (reply_text) |quote| {
+                    const current_identity = chatFileIdentity();
+                    var current_sid = current_identity.sid;
+                    if (chatHistoryEntry(current_identity)) |entry| current_sid = entry.history.sid;
+                    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != reaction_shell_id or !std.meta.eql(reaction_identity, current_identity) or !std.mem.eql(u8, &reaction_sid, &current_sid)) {
+                        showHeaderNoticeAscii("Conversation changed; open the menu again", 3500, true);
+                        return 0;
+                    }
+                    chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
+                },
                 7 => if (link_text) |text| chatCopyTextToClipboard(text),
                 1 => chatCopyTextToClipboard(if (items.copy_target == .selection) selection_text else message_text),
                 5 => if (echo_id) |id| chatEchoSendAgain(id),
