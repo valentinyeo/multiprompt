@@ -1001,35 +1001,30 @@ pub fn chatAcOnFetchDone(id: u32, slot_index: usize) void {
     const slot = &app_state.g_chat_ac_slots[slot_index];
     if (slot.pending != id) return;
     slot.pending = 0;
-    slot.active = 1 - slot.active;
-    slot.len = slot.pending_len;
     slot.fetched = GetTickCount64();
-    const parsed = chat_complete.parseResponse(slot.bytes[slot.active][0..slot.len], &slot.entries) orelse {
-        slot.count = 0;
-        slot.status = .@"error";
-        if (app_state.g_chat_ac.open and app_state.g_chat_ac.slot == slot_index) {
-            app_state.g_chat_ac.count = 0;
-            chatAcLayout();
+    const next = 1 - slot.active;
+    var entries: [512]chat_complete.Entry = undefined;
+    const parsed = chat_complete.parseResponse(slot.bytes[next][0..slot.pending_len], &entries);
+    if (parsed != null and parsed.?.header.id == id and parsed.?.header.status != .@"error") {
+        if (parsed.?.header.status != .loading or parsed.?.n > 0 or slot.count == 0) {
+            slot.active = next;
+            slot.len = slot.pending_len;
+            slot.count = parsed.?.n;
+            @memcpy(slot.entries[0..slot.count], entries[0..slot.count]);
         }
-        return;
-    };
-    if (parsed.header.id != id) {
+        slot.status = parsed.?.header.status;
+    } else {
         slot.status = .@"error";
-        slot.count = 0;
-        if (app_state.g_chat_ac.open and app_state.g_chat_ac.slot == slot_index) {
-            app_state.g_chat_ac.count = 0;
-            chatAcLayout();
-        }
-        return;
     }
-    slot.count = parsed.n;
-    slot.status = parsed.header.status;
     if (app_state.g_chat_ac.open and app_state.g_chat_ac.slot == slot_index) {
         var text: [16384]u16 = undefined;
         const n = GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len);
         chatAcRank(text[0..@intCast(@max(0, n))], app_state.g_chat_ac.token);
     }
-    if (app_state.g_chat_ac.open and app_state.g_chat_ac.slot == slot_index and !slot.retry_used and (slot.status == .stale or slot.status == .loading))
+    if (slot.refresh_pending) {
+        slot.refresh_pending = false;
+        if (slot.status != .@"error") chatAcRequest(slot_index);
+    } else if (app_state.g_chat_ac.open and app_state.g_chat_ac.slot == slot_index and !slot.retry_used and (slot.status == .stale or slot.status == .loading))
         _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_AC_DEBOUNCE, 4000, null);
 }
 
@@ -1093,7 +1088,8 @@ fn chatAcOnComposerChanged() void {
         @memcpy(slot.session[0..session.len], session);
         @memcpy(slot.cwd[0..cwd.len], cwd);
     }
-    if (!app_state.g_chat_ac.open or app_state.g_chat_ac.slot != index or app_state.g_chat_ac.token.start != token.start or app_state.g_chat_ac.token.mode != token.mode) {
+    const opening = !app_state.g_chat_ac.open or app_state.g_chat_ac.slot != index or app_state.g_chat_ac.token.start != token.start or app_state.g_chat_ac.token.mode != token.mode;
+    if (opening) {
         app_state.g_chat_ac.query_len = 0;
         app_state.g_chat_ac.selected_len = 0;
     }
@@ -1103,7 +1099,28 @@ fn chatAcOnComposerChanged() void {
     app_state.g_chat_ac.token = token;
     const slot = &app_state.g_chat_ac_slots[index];
     chatAcRank(text[0..@intCast(n)], token);
-    if (slot.pending == 0 and (slot.fetched == 0 or GetTickCount64() -| slot.fetched > (if (slot.status == .@"error") @as(u64, 60_000) else if (slot.status == .loading) @as(u64, 4_000) else 600_000))) chatAcRequest(index);
+    if (opening and slot.pending != 0) slot.refresh_pending = true;
+    const elapsed = GetTickCount64() -| slot.fetched;
+    if (slot.pending == 0 and (slot.fetched == 0 or (if (slot.status == .@"error") elapsed >= 60_000 else opening or (slot.status == .loading and elapsed >= 4_000)))) chatAcRequest(index);
+}
+
+pub fn chatAcAfterSend(text: []const u16) void {
+    if (!std.mem.eql(u16, std.mem.trim(u16, text, &.{ ' ', '\t', '\r', '\n' }), std.unicode.utf8ToUtf16LeStringLiteral("/reload-plugins"))) return;
+    if (chatAcAgent() != .claude or app_state.active_shell >= app_state.shell_count) return;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (!isRemoteShellKind(shell.kind)) return;
+    const host: u8 = if (shell.kind == .tmux) shell.tmux_host else if (shell.kind == .vps2) 1 else 0;
+    const session = if (shell.kind == .tmux) shell.tmux_session[0..shell.tmux_session_len] else "";
+    const cwd = shell.claude_cwd[0..shell.claude_cwd_len];
+    for (&app_state.g_chat_ac_slots, 0..) |*slot, i| {
+        if (slot.agent != .claude or slot.host != host or !std.mem.eql(u8, std.mem.sliceTo(&slot.session, 0), session) or
+            !std.mem.eql(u8, std.mem.sliceTo(&slot.cwd, 0), cwd)) continue;
+        if (slot.pending != 0) {
+            slot.refresh_pending = true;
+        } else {
+            chatAcRequest(i);
+        }
+    }
 }
 
 pub fn chatAcOpenBrowse() void {

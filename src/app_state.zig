@@ -1057,6 +1057,7 @@ const ChatAcSlot = struct {
     status: chat_complete.Status = .loading,
     fetched: u64 = 0,
     pending: u32 = 0,
+    refresh_pending: bool = false,
 };
 const ChatAc = struct {
     open: bool = false,
