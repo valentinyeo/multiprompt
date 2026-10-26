@@ -47,8 +47,9 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Test summary calculations
-        run: node --test candidate/tools/chat-bench-ab-summary.test.js candidate/tools/chat-bench-ab-extra.test.js candidate/tools/chat-bench-reader.test.mjs
+      - name: Test benchmark contracts
+        working-directory: candidate
+        run: node --test tools/chat-bench-ab-summary.test.js tools/chat-bench-ab-extra.test.js tools/chat-bench-reader.test.mjs tools/chat-bench.test.js tools/chat-bench/receipt.test.mjs
       - name: Download and verify release executables
         env:
           GH_TOKEN: ${{ github.token }}
