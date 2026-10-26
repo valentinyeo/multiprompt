@@ -59,6 +59,9 @@ pub const CHANGELOG = blk: {
 };
 
 const SOURCE_CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.884", .items = &.{
+        .{ .text = "The skill list stays steady while you search.", .ticket = "IGSH-922" },
+    } },
     .{ .ver = "0.28.883", .items = &.{
         .{ .text = "Right-click menus now have rounded corners, no thin border and a soft rounded highlight, matching the chat.", .ticket = "IGSH-892" },
     } },
