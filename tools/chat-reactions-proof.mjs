@@ -46,7 +46,7 @@ export function assertBadge(frame, users = 1) {
   assert.equal(frame.dim.length, 0, 'reaction must not add a queued bubble');
   assert.equal(frame.pill.length, 1, 'exactly one reaction badge');
   const [first, second] = frame.agent, [pill] = frame.pill;
-  assert.ok(pill.top > first.top && pill.bottom <= first.bottom && pill.bottom < second.top, 'badge stays inside the first same-prefix reply');
+  assert.ok(pill.top >= first.bottom && pill.top - first.bottom <= 8 && pill.bottom < second.top && pill.left >= first.left && pill.right <= first.right, 'badge stays attached below the first same-prefix reply');
   assert.ok(pill.right - pill.left < 100 && pill.bottom - pill.top < 40, 'small badge, not a bubble');
   assert.ok(pill.ink > 8, 'badge glyph must actually be painted');
 }

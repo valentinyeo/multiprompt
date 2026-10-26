@@ -10,14 +10,14 @@ function fixture() {
   };
   fill(0, 0, 300, 300, 0x202020);
   fill(20, 10, 250, 45, 0x555555);
-  fill(20, 60, 250, 145, 0x444444);
+  fill(20, 60, 250, 116, 0x444444);
   fill(20, 165, 250, 230, 0x444444);
   fill(28, 120, 68, 142, 0x585858);
   fill(42, 126, 53, 136, 0xffffff);
   return { image, fill };
 }
 
-test('real filled badge inside the first reply accepted', () => {
+test('real filled badge attached below the first reply accepted', () => {
   assertBadge(inspect(fixture().image, area));
 });
 for (const [name, mutate] of [
