@@ -8084,6 +8084,8 @@ pub fn main(init: std.process.Init) void {
     }
 
     app_state.g_main_hwnd = hwnd;
+    freeze_recorder.start(hwnd, APP_VERSION);
+    defer freeze_recorder.stop();
     @import("browser_pane.zig").installBrowserDockHooks();
     defer @import("browser_pane.zig").uninstallBrowserDockHooks();
     defer if (app_state.g_account_instance_mutex != null) {
@@ -8101,8 +8103,6 @@ pub fn main(init: std.process.Init) void {
 
     _ = PostMessageW(hwnd, update_release.WM_RESPONSIVE, 0, 0);
     update_release.beginCheck();
-    freeze_recorder.start(hwnd, APP_VERSION);
-    defer freeze_recorder.stop();
     var msg: MSG = std.mem.zeroes(MSG);
     while (GetMessageW(&msg, null, 0, 0) > 0) {
         _ = TranslateMessage(&msg);

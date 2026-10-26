@@ -126,6 +126,7 @@ fn worker(_: ?*anyopaque) callconv(.winapi) u32 {
     var detector: Detector = .{};
     while (win.WaitForSingleObject(g_stop, 500) == 0x102) {
         if (win.IsWindow(g_window) == 0) break;
+        if (win.IsWindowVisible(g_window) == 0) continue;
         const started = awakeMillis();
         var reply: usize = 0;
         const responsive = win.SendMessageTimeoutW(g_window, 0, 0, 0, 0x0001 | 0x0020, 1000, &reply) != 0;
