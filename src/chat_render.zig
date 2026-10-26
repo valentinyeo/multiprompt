@@ -5239,8 +5239,6 @@ const CleanChatScene = enum {
     remove,
     shell_queue,
     injected_queue,
-    model,
-    context,
     todo_summary,
     todo_done,
     todo_working,
@@ -5364,27 +5362,18 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             chatPaintShellRow(dc, &row, rc);
             crop.top = natural_bottom + (if (row.injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
         },
-        .model, .context, .todo_summary, .todo_done, .todo_working, .todo_pending, .todo_chevron => {
+        .todo_summary, .todo_done, .todo_working, .todo_pending, .todo_chevron => {
             var status: chat_transcript.Status = .{};
-            switch (scene) {
-                .model => {
-                    status.model_len = 6;
-                    @memcpy(status.model[0..6], std.unicode.utf8ToUtf16LeStringLiteral("Claude"));
-                },
-                .context => status.percent_left = 42,
-                else => {
-                    status.todos_known = true;
-                    status.total = 1;
-                    status.done = 1;
-                    status.todos[0].len = 9;
-                    @memcpy(status.todos[0].text[0..9], std.unicode.utf8ToUtf16LeStringLiteral("Task text"));
-                    status.todos[0].status = switch (scene) {
-                        .todo_done => .completed,
-                        .todo_working => .in_progress,
-                        else => .pending,
-                    };
-                },
-            }
+            status.todos_known = true;
+            status.total = 1;
+            status.done = 1;
+            status.todos[0].len = 9;
+            @memcpy(status.todos[0].text[0..9], std.unicode.utf8ToUtf16LeStringLiteral("Task text"));
+            status.todos[0].status = switch (scene) {
+                .todo_done => .completed,
+                .todo_working => .in_progress,
+                else => .pending,
+            };
             chatPaintStatus(dc, &status, area, brush);
             if (scene == .todo_done or scene == .todo_working or scene == .todo_pending) crop.top = uiScaled(28);
             if (scene == .todo_chevron) crop.left = width - uiScaled(24);
@@ -5533,14 +5522,6 @@ test "IGSH-816 CLEAN hides Send again row pixels" {
 
 test "IGSH-816 CLEAN hides Remove row pixels" {
     try expectCleanChatRowHidden(.remove);
-}
-
-test "IGSH-816 CLEAN hides model footer pixels" {
-    try expectCleanChatRowHidden(.model);
-}
-
-test "IGSH-816 CLEAN hides context-left footer pixels" {
-    try expectCleanChatRowHidden(.context);
 }
 
 test "IGSH-816 CLEAN hides todo summary footer pixels" {

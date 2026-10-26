@@ -223,7 +223,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | + button / Ctrl+V in Chat View | Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File) |
 | Right-click message → Reply / Ctrl+K "Chat View: Reply to latest agent message" | Quote a message above your reply; select text and press Enter to quote only the selection; click × or press Esc with an empty composer to cancel |
 | Ctrl+K "Chat View: Open or fold all tool steps" | Open every tool step's details, or fold them all; click one tool line to toggle it |
-| Ctrl+K "Chat View: Toggle todo list" | Show or hide this tab's agent todo list below the model and context header; also click the header |
+| Ctrl+K "Chat View: Toggle todo list" | Show or hide this tab's agent todo list below the title; also click the todo count |
 | Ctrl+Shift+D in Chat View | Copy latest code block (also its Copy button or Ctrl+K) |
 | Drag in Chat View | Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll |
 | Ctrl+C in Chat View | Copy the selection (right-click offers Reply and Copy) |
@@ -293,7 +293,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 
 ### Chat View status and todos
 
-The header shows the latest model, context left, and completed todo count when available, for example `Opus 5.5 · 62% context left · 3 of 7 done`.
+The header shows the completed todo count when available, for example `3 of 7 done`; the model and context left are not shown.
 Click the header or use Ctrl+K → `Chat View: Toggle todo list` to expand or collapse the active tab's list.
 Completed items use ✓, the current item uses ▸, and pending items use ○.
 The list scrolls independently when long; transcript scrolling and selection remain below it.
