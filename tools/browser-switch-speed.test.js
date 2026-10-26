@@ -102,7 +102,7 @@ test('browser-off waits on a target-specific pixel read by the same BitBlt probe
   assert.throws(() => assertsOffProbe(native.replace('BitBlt(target, 0, 0, pixels.Width', 'graphics.CopyFromScreen(x, y, 0, 0, pixels.Size); BitBlt(target, 0, 0, pixels.Width'), journey));
   assert.throws(() => assertsOffProbe(native, journey.replaceAll('[VerifyNative]::SolidPatch($consoleArea)', '$plainRgb')));
   assert.throws(() => assertsOffProbe(native, journey.replace('$paintRgb = if ($browserOn) { $rgb } else { $consoleRgb }', '$paintRgb = $rgb')));
-  assert.throws(() => assertsOffProbe(native, journey.replace("$drafts = @('Wswitch-paint-0', '.switch-paint-1')", "$drafts = @('switch-paint-0', 'switch-paint-1')")));
+  assert.throws(() => assertsOffProbe(native, journey.replace("$drafts = @('Wswitch-paint-0', 'Iswitch-paint-1')", "$drafts = @('switch-paint-0', 'switch-paint-1')")));
   assert.throws(() => assertsOffProbe(native, journey.replace("Wait-Until { [VerifyNative]::PagePainted($docks[0], $paintRgb[0], $paintPatch[0]) }", "if ($browserOn) { Wait-Until { [VerifyNative]::PagePainted($docks[0], $paintRgb[0], $paintPatch[0]) }")));
 });
 

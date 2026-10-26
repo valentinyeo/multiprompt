@@ -5319,7 +5319,7 @@ try {
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $colors = @('#db2855', '#26b8d4')
             $rgb = @(0xDB2855, 0x26B8D4)
-            $drafts = @('Wswitch-paint-0', '.switch-paint-1')
+            $drafts = @('Wswitch-paint-0', 'Iswitch-paint-1')
             $consoleCodes = @('1F', '2F')
             $consoleRgb = @(-1, -1)
             $regions = @{}
