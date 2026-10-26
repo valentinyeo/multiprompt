@@ -293,7 +293,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 
 ### Chat View status and todos
 
-The header shows the latest model, context left, and completed todo count when available, for example `Opus 5.5 · 62% context left · 3 of 7 done`.
+The header shows the completed todo count when available, for example `3 of 7 done`; the model and context left are not shown.
 Click the header or use Ctrl+K → `Chat View: Toggle todo list` to expand or collapse the active tab's list.
 Completed items use ✓, the current item uses ▸, and pending items use ○.
 The list scrolls independently when long; transcript scrolling and selection remain below it.

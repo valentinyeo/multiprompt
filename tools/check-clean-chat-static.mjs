@@ -21,7 +21,7 @@ const body = name => {
 };
 const contains = (source, text) => assert.ok(source.includes(text), text);
 const absent = (source, text) => assert.ok(!source.includes(text), text);
-const scenes = ['sending', 'queued', 'waiting', 'not_sent', 'unconfirmed', 'retry', 'remove', 'shell_queue', 'injected_queue', 'model', 'context', 'todo_summary', 'todo_done', 'todo_working', 'todo_pending', 'todo_chevron', 'empty', 'missing', 'loading', 'failed', 'tool', 'tool_detail', 'tool_diff'];
+const scenes = ['sending', 'queued', 'waiting', 'not_sent', 'unconfirmed', 'retry', 'remove', 'shell_queue', 'injected_queue', 'todo_summary', 'todo_done', 'todo_working', 'todo_pending', 'todo_chevron', 'empty', 'missing', 'loading', 'failed', 'tool', 'tool_detail', 'tool_diff'];
 
 switch (process.argv[2]) {
   case 'inventory': {
