@@ -46,6 +46,7 @@ test('IGSH-911 composer CR and Ctrl+Enter LF send once; Shift+Enter and autocomp
   const VK_MENU = 0x12;
   const WM_APP_CHAT_SEND = 123;
   const CHAT_AC_ENTER_SENDS = false;
+  var lp: isize = 0x001C0000;
   var ctrl_down = false;
   var shift_down = false;
   var sends: usize = 0;
@@ -90,6 +91,9 @@ test('IGSH-911 composer CR and Ctrl+Enter LF send once; Shift+Enter and autocomp
       try std.testing.expectEqual(@as(i32, 0), character(0x0A));
       try std.testing.expectEqual(@as(usize, 4), sends);
       try std.testing.expectEqual(@as(i32, 1), character('x'));
+      try std.testing.expectEqual(@as(usize, 4), sends);
+      lp = 0x00240000;
+      try std.testing.expectEqual(@as(i32, 1), character(0x0A));
       try std.testing.expectEqual(@as(usize, 4), sends);
       try std.testing.expect(chatComposerOwnsKey(WM_KEYDOWN, 0x0D, true, false, 0));
   }

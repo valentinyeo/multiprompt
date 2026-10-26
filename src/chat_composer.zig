@@ -1387,7 +1387,7 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
             return 0;
         }
         if (wp == 0x1B or wp == 0x0B or (wp == 0x09 and app_state.g_chat_ac.open) or ((wp == 0x2F or wp == 0x1F) and isCtrlDown() and (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0)) return 0;
-        if (wp == 0x0D or wp == 0x0A) {
+        if (wp == 0x0D or (wp == 0x0A and ((lp >> 16) & 0xFF) == 0x1C)) {
             const shift = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
             if (!shift) {
                 if (wp == 0x0D and app_state.g_chat_ac.open and !CHAT_AC_ENTER_SENDS) {
