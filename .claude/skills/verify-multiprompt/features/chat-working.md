@@ -6,11 +6,11 @@
 - Animation changes the dots, without changing message geometry.
 - Finishing or waiting for permission removes the indicator.
 
-## User entry points
+## How to get to it (user POV)
 
 Open Chat View with Alt+C while an agent works.
 
-## Driving recipe
+## Driving it with control.ps1
 
 Dispatch `verify.yml` with `feature=chat-working`, optionally `tag=v<version>`.
 The job-only console stand-in prints a question and Claude's working line.
