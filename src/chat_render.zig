@@ -1713,6 +1713,32 @@ fn chatDimQueuedBubble(hdc: HANDLE, bubble: RECT) void {
     _ = Blend.GdiAlphaBlend(hdc, bubble.left, bubble.top, bubble.right - bubble.left, bubble.bottom - bubble.top, dc, 0, 0, 1, 1, .{ .source_constant_alpha = 128, .alpha_format = 0 });
 }
 
+pub fn chatTopFadeHeight() i32 {
+    return uiScaled(16);
+}
+
+fn chatPaintTopFade(hdc: HANDLE, w: i32) void {
+    const win = @import("win32.zig");
+    const Blend = struct {
+        extern "gdi32" fn GdiAlphaBlend(HANDLE, i32, i32, i32, i32, HANDLE, i32, i32, i32, i32, win.BLENDFUNCTION) callconv(WINAPI) win.BOOL;
+    };
+    const dc = CreateCompatibleDC(hdc) orelse return;
+    defer _ = DeleteDC(dc);
+    const bitmap = CreateCompatibleBitmap(hdc, 1, 1) orelse return;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    const brush = CreateSolidBrush(themeConsoleBg());
+    defer _ = DeleteObject(brush);
+    _ = FillRect(dc, &RECT{ .left = 0, .top = 0, .right = 1, .bottom = 1 }, brush);
+    const height = chatTopFadeHeight();
+    var row: i32 = 0;
+    while (row < height) : (row += 1) {
+        const alpha: u8 = @intCast(@divTrunc(255 * (height - row), height));
+        _ = Blend.GdiAlphaBlend(hdc, 0, row, w, 1, dc, 0, 0, 1, 1, .{ .source_constant_alpha = alpha, .alpha_format = 0 });
+    }
+}
+
 fn chatPaintShellRow(hdc: HANDLE, row: *const chat_shell_sync.Row, rc: RECT) void {
     const text = row.slice();
     _ = SetBkMode(hdc, TRANSPARENT);
@@ -2454,6 +2480,10 @@ fn chatPaintScrollUi(canvas: *@import("smooth.zig").Canvas, hdc: HANDLE, w: i32,
     if (!app_state.g_chat_scrolled_up) return;
     const ring = RECT{ .left = box.left - 1, .top = box.top - 1, .right = box.right + 1, .bottom = box.bottom + 1 };
     const face = RECT{ .left = box.left, .top = box.top, .right = box.right, .bottom = box.bottom };
+    const gap = @import("chat_float.zig").moat();
+    const clear = themeConsoleBg();
+    @import("smooth.zig").fillEllipse(hdc, .{ .left = ring.left - gap, .top = ring.top - gap, .right = ring.right + gap, .bottom = ring.bottom + gap }, clear);
+    if (chatScrollJumpBadgeBox(w, h)) |badge| fillRoundRectAA(hdc, .{ .left = badge.left - gap, .top = badge.top - gap, .right = badge.right + gap, .bottom = badge.bottom + gap }, uiScaled(9) + gap, clear);
     @import("smooth.zig").fillEllipse(hdc, ring, if (app_state.g_light_theme) RGB(176, 184, 196) else RGB(96, 108, 126));
     @import("smooth.zig").fillEllipse(hdc, face, if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(50, 58, 72));
     const cx = @divTrunc(box.left + box.right, 2);
@@ -4843,6 +4873,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             }
         } else g_note_logged = false;
     }
+    chatPaintTopFade(mem_dc, w);
     chatPaintScrollUi(&canvas, mem_dc, w, @max(1, h - app_state.g_chat_bottom_inset));
     @import("chat_find_ui.zig").paint(mem_dc, w);
 }
@@ -6607,14 +6638,80 @@ fn floatProofRegion(window: RECT) HANDLE {
 
 fn floatProofInk(pixels: []const u32, stride: usize, bg: u32, left: i32, top: i32, right: i32, bottom: i32) usize {
     var count: usize = 0;
+    const rows: i32 = @intCast(pixels.len / stride);
+    const columns: i32 = @intCast(stride);
     var y = @max(0, top);
-    while (y < bottom) : (y += 1) {
+    while (y < @min(bottom, rows)) : (y += 1) {
         var x = @max(0, left);
-        while (x < right) : (x += 1) {
+        while (x < @min(right, columns)) : (x += 1) {
             if (scrollProofColor(pixels[@as(usize, @intCast(y)) * stride + @as(usize, @intCast(x))]) != bg) count += 1;
         }
     }
     return count;
+}
+
+fn floatProofRing(pixels: []const u32, stride: usize, bg: u32, rect: RECT, round: i32, gap: i32) usize {
+    const cy = rect.top + @divTrunc(rect.bottom - rect.top, 2);
+    var count: usize = 0;
+    count += floatProofInk(pixels, stride, bg, rect.left + round, rect.top - gap, rect.right - round, rect.top - 2);
+    count += floatProofInk(pixels, stride, bg, rect.left + round, rect.bottom + 2, rect.right - round, rect.bottom + gap);
+    count += floatProofInk(pixels, stride, bg, rect.left - gap, cy - 2, rect.left - 2, cy + 2);
+    count += floatProofInk(pixels, stride, bg, rect.right + 2, cy - 2, rect.right + gap, cy + 2);
+    return count;
+}
+
+test "IGSH-1001 the scroll-down button sits on a clear gap, not on chat text" {
+    const w = @import("win32.zig");
+    const GdiFlush = struct {
+        extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
+    }.GdiFlush;
+    const dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(dc);
+    const width = 400;
+    const height = 300;
+    const info: w.BITMAPINFO = .{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(bitmap);
+    const old_bitmap = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old_bitmap);
+    const pixels = @as([*]const u32, @ptrCast(@alignCast(bits.?)))[0 .. width * height];
+    const old_content = app_state.g_chat_content_h;
+    const old_scroll = app_state.g_chat_scroll_y;
+    const old_up = app_state.g_chat_scrolled_up;
+    const old_last = chat_scroll_last_ms;
+    const old_drag = chat_scroll_drag;
+    defer {
+        app_state.g_chat_content_h = old_content;
+        app_state.g_chat_scroll_y = old_scroll;
+        app_state.g_chat_scrolled_up = old_up;
+        chat_scroll_last_ms = old_last;
+        chat_scroll_drag = old_drag;
+    }
+    app_state.g_chat_content_h = 3000;
+    app_state.g_chat_scroll_y = 1200;
+    app_state.g_chat_scrolled_up = true;
+    chat_scroll_last_ms = null;
+    chat_scroll_drag = null;
+    var canvas = @import("smooth.zig").Canvas.init(dc);
+    defer canvas.deinit();
+    const bg = themeConsoleBg();
+    const ink = RGB(200, 60, 60);
+    var everything = RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
+    const brush = CreateSolidBrush(ink);
+    _ = FillRect(dc, &everything, brush);
+    _ = DeleteObject(brush);
+    chatPaintScrollUi(&canvas, dc, width, height);
+    _ = GdiFlush();
+    const box = chatScrollJumpBox(width, height);
+    const gap = @import("chat_float.zig").moat();
+    const round = @divTrunc(box.right - box.left, 2) - 5;
+    const box_rc = RECT{ .left = box.left, .top = box.top, .right = box.right, .bottom = box.bottom };
+    const not_clear = floatProofRing(pixels, width, bg, box_rc, round, gap - 1);
+    std.debug.print("IGSH-1001 scroll-down button: gap pixels still showing chat text={d}\n", .{not_clear});
+    try std.testing.expectEqual(@as(usize, 0), not_clear);
+    const beside = pixels[@as(usize, @intCast(box.top + @divTrunc(box.bottom - box.top, 2))) * width + @as(usize, @intCast(box.left - gap - 4))];
+    try std.testing.expectEqual(ink, scrollProofColor(beside));
 }
 
 test "IGSH-933 messages scroll behind the floating title pill and into the message box" {
@@ -6774,14 +6871,19 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     const fill = app_state.g_chat_input_color;
     const title_layout = @import("drawing.zig").chatTitleLayout() orelse return error.TestUnexpectedResult;
     const beside_right = (if (title_layout.has_meta) title_layout.meta_pill.right else pill.right) + uiScaled(8);
-    const Position = enum { middle, top, bottom };
+    const Position = enum { middle, top, bottom, sweep };
+    const sweep_steps = 24;
+    const gap = @import("chat_float.zig").moat();
+    var sweep_outside: usize = 0;
     const straddle = app_state.g_chat_layout_rects[block_count / 2];
     const middle_scroll = std.math.clamp(straddle.top + @divTrunc(straddle.bottom - straddle.top, 2) - (layout.composer_card.top - window.top), 0, max_scroll);
-    for ([_]Position{ .middle, .top, .bottom }) |position| {
+    for (0..3 + sweep_steps) |case| {
+        const position: Position = if (case < 3) ([_]Position{ .middle, .top, .bottom })[case] else .sweep;
         app_state.g_chat_scroll_y = switch (position) {
             .middle => middle_scroll,
             .top => 0,
             .bottom => max_scroll,
+            .sweep => std.math.clamp(middle_scroll + @as(i32, @intCast(case - 3)) * 3, 0, max_scroll),
         };
         var frame_rc = RECT{ .left = 0, .top = 0, .right = frame_w, .bottom = frame_h };
         const frame_brush = CreateSolidBrush(bg);
@@ -6812,12 +6914,23 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         const above_card = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(40), layout.transcript.right, card.top);
         const gap_strip = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(12), layout.transcript.right, card.top - uiScaled(1));
         const below_pill = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.bottom + uiScaled(2), layout.transcript.right, pill.bottom + uiScaled(40));
-        std.debug.print("IGSH-933 {s}: beside pill left={d} right={d}, above card={d}, gap={d}, below pill={d}\n", .{ @tagName(position), left_band, right_band, above_card, gap_strip, below_pill });
+        const pill_ring = floatProofRing(frame_pixels, frame_w, bg, pill, @divTrunc(pill.bottom - pill.top, 2), gap);
+        const card_ring = floatProofRing(frame_pixels, frame_w, bg, card, @import("window_layout.zig").chatSurfaceRadius(), gap);
+        const top_edge = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, window.top, layout.transcript.right - uiScaled(16), window.top + 1);
+        if (position != .sweep) std.debug.print("IGSH-933 {s}: beside pill left={d} right={d}, above card={d}, gap={d}, below pill={d}\n", .{ @tagName(position), left_band, right_band, above_card, gap_strip, below_pill });
+        std.debug.print("IGSH-1001 {s} {d}: ring pill={d} card={d}, top edge={d}\n", .{ @tagName(position), case, pill_ring, card_ring, top_edge });
+        try std.testing.expectEqual(@as(usize, 0), pill_ring);
+        try std.testing.expectEqual(@as(usize, 0), card_ring);
+        try std.testing.expectEqual(@as(usize, 0), top_edge);
+        if (position == .sweep) {
+            sweep_outside += floatProofInk(frame_pixels, frame_w, bg, pill.left - gap - uiScaled(14), pill.top, pill.left - gap - 1, pill.bottom);
+            sweep_outside += floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - gap - uiScaled(14), layout.transcript.right, card.top - gap - 1);
+        }
         switch (position) {
+            .sweep => {},
             .middle => {
                 try std.testing.expect(left_band > 100);
                 try std.testing.expect(above_card > 200);
-                try std.testing.expect(gap_strip > 40);
             },
             .top => {
                 try std.testing.expectEqual(@as(usize, 0), left_band);
@@ -6833,10 +6946,12 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         var enabled: [8]u8 = undefined;
         if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
             switch (position) {
+                .sweep => if (case == 3 + 8) try scrollProofSave(L("chat-scroll-behind-sweep.bmp"), frame_bytes, frame_info.header),
                 .middle => try scrollProofSave(L("chat-scroll-behind-middle.bmp"), frame_bytes, frame_info.header),
                 .top => try scrollProofSave(L("chat-scroll-behind-top.bmp"), frame_bytes, frame_info.header),
                 .bottom => try scrollProofSave(L("chat-scroll-behind-bottom.bmp"), frame_bytes, frame_info.header),
             }
         }
     }
+    try std.testing.expect(sweep_outside > 200);
 }
