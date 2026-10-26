@@ -32,6 +32,7 @@ $plans = @(
 )
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='busy'; text='composer stays usable'}) }
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
+if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
@@ -71,7 +72,7 @@ function Shot([string]$Name) {
     }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -325,7 +326,8 @@ foreach ($plan in $plans) {
     $isQueue = $plan.name -eq 'queue-draft-sync'
     $isActivity = $plan.name -eq 'messages-only'
     $isHistory = $plan.name -eq 'full-history'
-    $hasTranscript = $isQueue -or $isActivity -or $isHistory
+    $isSending = $env:CHAT_SENDING_PROOF -eq '1'
+    $hasTranscript = $isQueue -or $isActivity -or $isHistory -or $isSending
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -341,6 +343,7 @@ foreach ($plan in $plans) {
         [IO.File]::WriteAllText("$settings/ssh-path.txt", $Ssh)
         $seed = @{name=$plan.name; mode=$plan.mode; suggestion=$observation.suggestion}
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
+        if ($isSending) { $seed.sendingProof = $true }
         $standIn = $seed
         if ($hasTranscript) {
             $sid = 'a1b2c3d4-0682-4000-8000-000000000682'
@@ -685,9 +688,25 @@ foreach ($plan in $plans) {
                 Press @(0x11, 0x58) 'Ctrl+X: steer prefix' $true
                 Press @(0x11, 0x53) 'Ctrl+S: steer send' $true
             } else { Press @(0x0D) 'Enter: send composer' $true }
+            if ($isSending) {
+                [void](Wait-For 'transport blocked while message is in flight' { Test-Path "$state/send-blocked" })
+                [void](Wait-For 'composer cleared after sending' { ([ChatDeliveryDesktop]::Text($composer)) -ceq '' })
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+                $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+                $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
+                if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
+                $bounds = $views[0].Current.BoundingRectangle
+                $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
+                Start-Sleep -Milliseconds 200
+                Shot 'sending-immediate'
+                $observation.blockedAtCapture = (Test-Path "$state/send-blocked") -and -not (Test-Path "$state/release-send")
+                [IO.File]::WriteAllText("$state/release-send", '')
+                [void](Wait-For 'exact message delivered to fake agent queue' { @((Fake-State).queue) -contains $plan.text })
+            }
             $deadline = $observation.actionMs + 15000
             while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $deadline) { Start-Sleep -Milliseconds 100 }
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            if ($isSending) { Shot 'sending-delivered' }
         }
         Doctor $true
         Copy-Item "$settings/session.json" "$caseDir/session-chat.json"
@@ -732,6 +751,11 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_SENDING_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-sending-status-proof.mjs" $Evidence
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+    exit 0
+}
 if ($env:CHAT_WIDTH_PROOF -eq '1') {
     $observed = Get-Content "$Evidence/messages-only/observation.json" -Raw | ConvertFrom-Json
     $clean = Get-Content "$Evidence/cleanup.json" -Raw | ConvertFrom-Json

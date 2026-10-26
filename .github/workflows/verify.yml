@@ -20,6 +20,11 @@ on:
         description: Optional release tag instead of building this branch
         required: false
         type: string
+      sending_status_proof:
+        description: Capture the same message in flight and after delivery
+        required: false
+        default: false
+        type: boolean
       chat_width_proof:
         description: Capture wide and narrow message geometry with the chat-messages-only journey
         required: false
@@ -176,6 +181,7 @@ jobs:
     env:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
+      CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
       FEATURE: ${{ matrix.feature }}
@@ -190,7 +196,7 @@ jobs:
       - name: Check verification contracts
         run: node --test tools/verify-multiprompt.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js
       - name: Check unread divider contracts
-        run: node --test tools/chat-unread-divider.test.js
+        run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs
       - name: Check workspace focus journey contract
         run: node tools/check-workspace-focus.mjs
       - name: Check browser recovery journey contract
