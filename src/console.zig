@@ -2391,12 +2391,12 @@ pub fn closeBackgroundShell(idx: u32) void {
 
 pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     if (idx >= app_state.shell_count) return;
-    const background = closing_in_background;
     @import("chat_composer.zig").chatDraftCloseForShell(idx);
     accountRecordClose(idx);
     chatOutboxDropForShell(idx);
     _ = parkMainWindowBeforeActiveShellRemoval(idx);
     if (webView2OwnsShell(idx)) closeWebView2();
+    const background = closing_in_background;
     if (!background) commitRename();
 
     stickyRemove(app_state.shells[idx].shell_id);
