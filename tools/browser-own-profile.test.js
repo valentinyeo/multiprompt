@@ -31,7 +31,7 @@ test('IGSH-672 the opt-in file is a read-only list of workspace ids next to the 
   assert.match(launchToken, /win32OpenRead\(config_path\) orelse return null/);
   assert.doesNotMatch(launchToken, /win32OpenWrite|DeleteFile|MoveFile/);
   assert.doesNotMatch(pane, /win32OpenWrite\([^)]*ownProfileConfigPath|ownProfileConfigPath[^\n]*win32OpenWrite/);
-  assert.match(body(own, 'listed'), /std\.mem\.trim\(u8, line, " \\t\\r"\), workspace_id/);
+  assert.match(body(own, 'seed'), /std\.mem\.trim\(u8, raw, " \\t\\r"\)/);
 });
 
 test('IGSH-672 token and folder derivation match SHA-256 in Zig and in the verify journey', () => {
@@ -103,4 +103,20 @@ test('IGSH-894 the journey pins the twelve old notify ports and sends a real scr
   assert.match(journey, /Send-ProfileScreenshot 'own' \$ownToken 2/);
   assert.match(control, /--profile \$Profile /);
   assert.match(control, /expected \$ExpectedUpload uploads but the receiver saw/);
+});
+
+test('IGSH-989 the launch looks the opt-in up by workspace name as well as id, so a regenerated id keeps the own profile', () => {
+  const launch = body(pane, 'ownProfileTokenForLaunch');
+  assert.match(launch, /shellWorkspaceNameForOwnProfile\(idx\)/);
+  assert.match(launch, /browser_own_profile\.seed\(listing\[0\.\.listing_len\], workspace_id, workspace_name\)/);
+  assert.doesNotMatch(launch, /workspace_id\.len == 0\) return null/);
+  assert.match(body(pane, 'shellWorkspaceNameForOwnProfile'), /g_ws_names\[ws\]/);
+  assert.match(own, /test "IGSH-989 opt-in by workspace name survives a regenerated workspace id"/);
+});
+
+test('IGSH-989 the verify journey rewrites the workspace id between launches and requires the same own profile', () => {
+  const journey = control.slice(control.indexOf("'browser-own-profile' {\n            if ((Get-OwnProfileToken"));
+  assert.match(journey, /Restart-SessionRestore 'own-profile-restart' \$false \$false \{/);
+  assert.match(journey, /ws-regenerated-989/);
+  assert.match(journey, /\$ownWorkspaceName \+ '=' \+ \$ownWorkspaceId/);
 });

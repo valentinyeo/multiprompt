@@ -5550,6 +5550,8 @@ try {
             Wait-Until { $script:ownSession = Read-Session; $null -ne $script:ownSession -and $script:ownSession.workspace_count -eq $before + 1 -and $script:ownSession.active_workspace -ne 0 } 'new workspace persisted'
             $ownWorkspace = $script:ownSession.active_workspace
             $ownWorkspaceId = $script:ownSession.workspaces[$ownWorkspace].wid
+            $ownWorkspaceName = $script:ownSession.workspaces[$ownWorkspace].name
+            if ([string]::IsNullOrWhiteSpace($ownWorkspaceName) -or $ownWorkspaceName -ceq $script:ownSession.workspaces[0].name) { throw 'Expected a distinct workspace name' }
             if ([string]::IsNullOrWhiteSpace($ownWorkspaceId) -or $ownWorkspaceId -ceq $script:ownSession.workspaces[0].wid) { throw 'Expected a distinct workspace identity' }
             $ownToken = Get-OwnProfileToken $ownWorkspaceId
             $ownRoot = [IO.Path]::GetFullPath((Join-Path $ownBase ('chrome/' + $ownToken))).TrimEnd('\')
@@ -5587,19 +5589,29 @@ try {
             Press @(0x12, 0x51) 'Alt+Q: focus the own-profile browser'
             $null = Assert-WorkspaceBrowser 'own-altq' $ownRoot $ownWorkspace
             Send-ProfileScreenshot 'own' $ownToken 2
-            Restart-SessionRestore 'own-profile-restart' $false
+            Restart-SessionRestore 'own-profile-restart' $false $false {
+                Record 'Regenerate the opted-in workspace id in session.json and key the opt-in by workspace name, as after an account layout sync'
+                $sessionPath = Join-Path $scratch 'roaming/ZigShell/session.json'
+                $sessionText = [IO.File]::ReadAllText($sessionPath)
+                $idField = '"wid":"' + $ownWorkspaceId + '"'
+                if (-not $sessionText.Contains($idField)) { throw 'Opted-in workspace id missing from session.json before regeneration' }
+                [IO.File]::WriteAllText($sessionPath, $sessionText.Replace($idField, '"wid":"ws-regenerated-989"'))
+                [IO.File]::WriteAllText($optIn, $ownWorkspaceName + '=' + $ownWorkspaceId + "`n")
+            }
             Wait-Until {
                 $state = Read-Inbox
                 $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
                 $selected.Count -eq 1 -and $selected[0].ws -eq $ownWorkspace
             } 'restored selection is the opted-in workspace'
+            $regenerated = (Read-Session).workspaces[$ownWorkspace].wid
+            if ($regenerated -cne 'ws-regenerated-989') { throw ('Workspace id did not stay regenerated: ' + $regenerated) }
             $script:browserShellId = (Read-Inbox).active_shell_id
             Wait-Until {
                 $pane = Read-BrowserPane
                 $null -ne $pane -and $pane.browser_state -eq 'connected' -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero
             } 'restored opted-in pane docked without an open command' 90
             $restoredProof = Get-PaneUserDataDir ([VerifyNative]::DockedPaneWindow($script:window))
-            if ($restoredProof.userDataDir -ine $ownRoot) { throw ('Restored opted-in workspace lost its own browser profile: ' + $restoredProof.userDataDir) }
+            if ($restoredProof.userDataDir -ine $ownRoot) { throw ('Restored opted-in workspace lost its own browser profile after its workspace id changed: ' + $restoredProof.userDataDir) }
             Wait-OwnProfilePipe $ownToken 'restored'
             Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'restored opted-in pane bound through its own native host' 60
             Press @(0x12, 0x32) 'Alt+2: switch to stored workspace 0'
