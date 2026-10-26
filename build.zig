@@ -632,6 +632,9 @@ pub fn build(b: *std.Build) void {
     const zsb_session_open_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-open.test.js" });
     test_step.dependOn(&zsb_session_open_tests.step);
     vps_test_step.dependOn(&zsb_session_open_tests.step);
+    const zsb_session_edit_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-edit.test.js" });
+    test_step.dependOn(&zsb_session_edit_tests.step);
+    vps_test_step.dependOn(&zsb_session_edit_tests.step);
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
     vps_test_step.dependOn(&zsb_deadline_tests.step);

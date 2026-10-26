@@ -69,3 +69,22 @@ Run `zsb emulate iphone` (390 by 844) or `zsb emulate pixel` (412 by 915) to pre
 The preview stays on that tab through page links, reloads and ordinary zsb CDP or screenshot commands. Reload an already-open page if its content depends on the request's user agent. Run `zsb emulate off` to restore the normal desktop viewport, user agent and touch settings. New tabs are independent; `zsb navigate` can open a new tab rather than navigate the emulated one.
 
 Closing the tab, externally detaching its debugger, or restarting the extension/browser ends its preview. This changes Chromium's page environment, not the browser engine. F12 and browser DevTools shortcuts are browser-chrome controls and remain outside zsb's page-key automation.
+
+## Repairing tabs from the command line
+
+Four more app-level commands fix a tab layout without a keyboard, a restart or a window switch. Each runs in the background, never changes the active tab, workspace or foreground window, and saves the layout at once so a restart keeps it. Every reply is JSON, and a refusal exits nonzero with `ok:false` and an `error` code.
+
+```bash
+zsb session-rename --tab 42 --name "Runner 7"
+zsb session-rebind --tab 42 --host "remote-1" --tmux "runner-9"
+zsb session-move --tab 42 --workspace "Research" --group "Ops"
+zsb session-move --tab 42 --ungrouped
+zsb session-close --tab 42
+```
+
+- `session-rename` sets a manual title (1–63 UTF-16 units, no control characters) and replies `{"ok":true,"renamed":true,"tab":42}`.
+- `session-rebind` points an existing remote tab at another tmux session and reconnects it, keeping its title, group and place. `--host` is optional and defaults to the tab's own host. It replies `{"ok":true,"rebound":true,"tab":42,"state":"connecting"}`; follow it with `session-status --tab 42`. A session another tab already uses returns `{"ok":false,"error":"duplicate_session","tab":43}` with that tab's id and changes nothing. A tab that is not a remote tab returns `not_remote_tab`, and a locked account returns `account_locked`.
+- `session-move` takes `--workspace`, `--group` or `--ungrouped` (one of them is required, `--group` and `--ungrouped` are exclusive) and matches names exactly, like `session-open`. Moving to another workspace without `--group` leaves the tab ungrouped. Unknown names return `unknown_workspace` or `unknown_group` with `valid_names`, and a snoozed workspace returns `workspace_snoozed`.
+- `session-close` closes one tab and replies `{"ok":true,"closed":true,"tab":42}`. It does not touch the remote tmux session.
+
+`session-move`, `session-rebind` and `session-close` refuse the active tab with `active_tab`, because moving or closing it would change what the user is looking at. `session-close` refuses a pinned tab with `pinned_tab`. An unknown tab id returns `unknown_tab`. `workspace-list` now also reports each remote tab's `state` (`connecting`, `connected` or `disconnected`), and `null` for local shells.

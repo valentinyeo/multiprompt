@@ -1301,7 +1301,8 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         "get-text",         "insert",         "key",            "links",
         "navigate",         "open",           "pane-info",      "reload",
         "reset",            "resolve-window", "routing-audit",  "screenshot",
-        "script",           "session-open",   "session-status", "shoturl",
+        "script",           "session-close",  "session-move",   "session-open",
+        "session-rebind",   "session-rename", "session-status", "shoturl",
         "sidebar",          "snapshot",       "status",         "tab",
         "tabs",             "text",           "type",           "url",
         "version",          "workspace-list",
@@ -1328,7 +1329,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         }
     }
 
-    if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status")) {
+    if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status") or zsbIsTabVerb(argv[0])) {
         sendZsbWorkspaceResponse(client, argv[0..argc]);
         return;
     }
@@ -1948,14 +1949,22 @@ fn parseZsbSessionOpenArgs(argv: []const []const u8) !ZsbSessionOpenArgs {
         if (!matched) return error.BadArgs;
     }
     for (values) |value| if (value.len == 0) return error.BadArgs;
-    if (values[3].len > 63) return error.InvalidTmux;
-    for (values[3]) |c| if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.') return error.InvalidTmux;
-    var name_buf: [64]u16 = undefined;
-    const name_len = std.unicode.utf8ToUtf16Le(&name_buf, values[4]) catch return error.InvalidName;
-    if (name_len == 0 or name_len > 63) return error.InvalidName;
-    var codepoints = (std.unicode.Utf8View.init(values[4]) catch return error.InvalidName).iterator();
-    while (codepoints.nextCodepoint()) |c| if (c < 32 or (c >= 127 and c <= 159)) return error.InvalidName;
+    try validateZsbTmux(values[3]);
+    try validateZsbName(values[4]);
     return .{ .workspace = values[0], .group = values[1], .host = values[2], .tmux = values[3], .name = values[4] };
+}
+
+fn validateZsbTmux(tmux: []const u8) !void {
+    if (tmux.len == 0 or tmux.len > 63) return error.InvalidTmux;
+    for (tmux) |c| if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.') return error.InvalidTmux;
+}
+
+fn validateZsbName(name: []const u8) !void {
+    var name_buf: [64]u16 = undefined;
+    const name_len = std.unicode.utf8ToUtf16Le(&name_buf, name) catch return error.InvalidName;
+    if (name_len == 0 or name_len > 63) return error.InvalidName;
+    var codepoints = (std.unicode.Utf8View.init(name) catch return error.InvalidName).iterator();
+    while (codepoints.nextCodepoint()) |c| if (c < 32 or (c >= 127 and c <= 159)) return error.InvalidName;
 }
 
 fn parseZsbSessionStatusArgs(argv: []const []const u8) !u32 {
@@ -2050,6 +2059,9 @@ fn zsbWorkspaceTabs(out: []u8, pos: *usize, workspace: u8, group: u32) bool {
             if (!zsbAppendJsonString(out, pos, shell.tmux_session[0..shell.tmux_session_len])) return false;
         } else if (!appendAsciiBuf(out, pos, "null")) return false;
         if (!diagJsonBoolField(out, pos, &first, "active", i == app_state.active_shell)) return false;
+        if (@import("capacity.zig").remoteHostForShell(&shell) != null) {
+            if (!zsbAppendSessionState(out, pos, &shell)) return false;
+        } else if (!appendAsciiBuf(out, pos, ",\"state\":null")) return false;
         if (!appendAsciiBuf(out, pos, "}")) return false;
     }
     return appendAsciiBuf(out, pos, "]");
@@ -2146,6 +2158,249 @@ fn zsbSessionOpen(argv: []const []const u8, out: []u8, comptime spawn: anytype, 
     return pos;
 }
 
+const ZsbTabFlag = enum(u3) { tab, workspace, group, host, tmux, name };
+
+const ZsbTabArgs = struct {
+    tab: u32 = 0,
+    workspace: ?[]const u8 = null,
+    group: ?[]const u8 = null,
+    ungrouped: bool = false,
+    host: ?[]const u8 = null,
+    tmux: ?[]const u8 = null,
+    name: ?[]const u8 = null,
+};
+
+const ZsbTabSpec = struct {
+    verb: []const u8,
+    allowed: []const ZsbTabFlag,
+    required: []const ZsbTabFlag,
+    ungrouped: bool = false,
+};
+
+fn zsbTabFlagFor(arg: []const u8) ?ZsbTabFlag {
+    inline for (@typeInfo(ZsbTabFlag).@"enum".fields) |field| {
+        if (arg.len == field.name.len + 2 and std.mem.startsWith(u8, arg, "--") and std.mem.eql(u8, arg[2..], field.name)) return @field(ZsbTabFlag, field.name);
+    }
+    return null;
+}
+
+fn zsbTabFlagListed(list: []const ZsbTabFlag, flag: ZsbTabFlag) bool {
+    for (list) |entry| if (entry == flag) return true;
+    return false;
+}
+
+fn parseZsbTabArgs(argv: []const []const u8, spec: ZsbTabSpec) !ZsbTabArgs {
+    if (argv.len == 0 or !std.mem.eql(u8, argv[0], spec.verb)) return error.BadArgs;
+    var values: [6]?[]const u8 = @splat(null);
+    var ungrouped = false;
+    var i: usize = 1;
+    while (i < argv.len) {
+        if (spec.ungrouped and std.mem.eql(u8, argv[i], "--ungrouped")) {
+            if (ungrouped) return error.BadArgs;
+            ungrouped = true;
+            i += 1;
+            continue;
+        }
+        const flag = zsbTabFlagFor(argv[i]) orelse return error.BadArgs;
+        const slot = @intFromEnum(flag);
+        if (!zsbTabFlagListed(spec.allowed, flag) or i + 1 >= argv.len or values[slot] != null or argv[i + 1].len == 0) return error.BadArgs;
+        values[slot] = argv[i + 1];
+        i += 2;
+    }
+    for (spec.required) |flag| if (values[@intFromEnum(flag)] == null) return error.BadArgs;
+    var result: ZsbTabArgs = .{
+        .workspace = values[@intFromEnum(ZsbTabFlag.workspace)],
+        .group = values[@intFromEnum(ZsbTabFlag.group)],
+        .ungrouped = ungrouped,
+        .host = values[@intFromEnum(ZsbTabFlag.host)],
+        .tmux = values[@intFromEnum(ZsbTabFlag.tmux)],
+        .name = values[@intFromEnum(ZsbTabFlag.name)],
+    };
+    if (values[@intFromEnum(ZsbTabFlag.tab)]) |tab_text| {
+        for (tab_text) |c| if (!std.ascii.isDigit(c)) return error.BadArgs;
+        result.tab = std.fmt.parseInt(u32, tab_text, 10) catch return error.BadArgs;
+        if (result.tab == 0) return error.BadArgs;
+    }
+    if (result.tmux) |tmux| try validateZsbTmux(tmux);
+    if (result.name) |name| try validateZsbName(name);
+    if (result.group != null and result.ungrouped) return error.BadArgs;
+    return result;
+}
+
+fn zsbTabParseError(out: []u8, err: anyerror) usize {
+    return zsbWorkspaceError(out, switch (err) {
+        error.InvalidTmux => "invalid_tmux",
+        error.InvalidName => "invalid_name",
+        else => "bad_args",
+    });
+}
+
+fn zsbShellIndexForTab(tab: u32) ?u32 {
+    for (app_state.shells[0..app_state.shell_count], 0..) |shell, i| {
+        if (shell.shell_id == tab) return @intCast(i);
+    }
+    return null;
+}
+
+fn zsbFindWorkspaceSlot(name: []const u8, names: *[MAX_LWS][]const u8, bufs: *[MAX_LWS][32]u8) ?u8 {
+    var found: ?u8 = null;
+    for (0..app_state.g_lws_count) |wi| {
+        names[wi] = workspaceDisplayName(@intCast(wi), &bufs[wi]);
+        if (std.mem.eql(u8, names[wi], name)) found = @intCast(wi);
+    }
+    return found;
+}
+
+fn zsbTabReply(out: []u8, key: []const u8, tab: u32, shell: ?*const app_state.Shell) usize {
+    const text = std.fmt.bufPrint(out, "{{\"ok\":true,\"{s}\":true,\"tab\":{d}", .{ key, tab }) catch return 0;
+    var pos = text.len;
+    if (shell) |sh| if (!zsbAppendSessionState(out, &pos, sh)) return 0;
+    if (!appendAsciiBuf(out, &pos, "}\n")) return 0;
+    return pos;
+}
+
+fn zsbTabClose(argv: []const []const u8, out: []u8, comptime ops: type) usize {
+    const args = parseZsbTabArgs(argv, .{ .verb = "session-close", .allowed = &.{.tab}, .required = &.{.tab} }) catch |err| return zsbTabParseError(out, err);
+    const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
+    if (idx == app_state.active_shell) return zsbWorkspaceError(out, "active_tab");
+    if (@import("capacity.zig").remoteHostForShell(&app_state.shells[idx]) == null) return zsbWorkspaceError(out, "not_remote_tab");
+    if (app_state.shells[idx].pinned_top) return zsbWorkspaceError(out, "pinned_tab");
+    ops.close(idx);
+    if (zsbShellIndexForTab(args.tab) != null) return zsbWorkspaceError(out, "close_failed");
+    ops.persist();
+    return zsbTabReply(out, "closed", args.tab, null);
+}
+
+fn zsbTabRename(argv: []const []const u8, out: []u8, comptime ops: type) usize {
+    const args = parseZsbTabArgs(argv, .{ .verb = "session-rename", .allowed = &.{ .tab, .name }, .required = &.{ .tab, .name } }) catch |err| return zsbTabParseError(out, err);
+    const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
+    const shell = &app_state.shells[idx];
+    const name = args.name.?;
+    shell.name_len = @intCast(std.unicode.utf8ToUtf16Le(&shell.name, name) catch return zsbWorkspaceError(out, "invalid_name"));
+    shell.name[shell.name_len] = 0;
+    shell.name_source = .manual;
+    ops.persist();
+    return zsbTabReply(out, "renamed", args.tab, null);
+}
+
+fn zsbTabMove(argv: []const []const u8, out: []u8, comptime ops: type) usize {
+    const args = parseZsbTabArgs(argv, .{ .verb = "session-move", .allowed = &.{ .tab, .workspace, .group }, .required = &.{.tab}, .ungrouped = true }) catch |err| return zsbTabParseError(out, err);
+    if (args.workspace == null and args.group == null and !args.ungrouped) return zsbWorkspaceError(out, "bad_args");
+    const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
+    if (idx == app_state.active_shell) return zsbWorkspaceError(out, "active_tab");
+    if (args.workspace != null and !app_state.g_single_window) return zsbWorkspaceError(out, "single_window_only");
+    var ws_names: [MAX_LWS][]const u8 = undefined;
+    var ws_bufs: [MAX_LWS][32]u8 = undefined;
+    var target_ws = app_state.shells[idx].workspace;
+    if (args.workspace) |requested| {
+        target_ws = zsbFindWorkspaceSlot(requested, &ws_names, &ws_bufs) orelse
+            return zsbUnknownName(out, "unknown_workspace", ws_names[0..app_state.g_lws_count]);
+        if (app_state.g_ws_snoozed[target_ws]) return zsbWorkspaceError(out, "workspace_snoozed");
+    }
+    var target_group = app_state.shells[idx].group_id;
+    if (args.ungrouped) target_group = 0;
+    if (args.group) |requested| {
+        var group_names: [app_state.MAX_GROUPS][]const u8 = undefined;
+        var group_bufs: [app_state.MAX_GROUPS][256]u8 = undefined;
+        var group_id: ?u32 = null;
+        for (app_state.groups[0..app_state.group_count], 0..) |group, gi| {
+            const len = std.unicode.utf16LeToUtf8(&group_bufs[gi], group.name[0..group.name_len]) catch return zsbWorkspaceError(out, "invalid_group_name");
+            group_names[gi] = group_bufs[gi][0..len];
+            if (std.mem.eql(u8, group_names[gi], requested)) group_id = group.id;
+        }
+        target_group = group_id orelse return zsbUnknownName(out, "unknown_group", group_names[0..app_state.group_count]);
+    }
+    if (args.workspace != null and args.group == null and !args.ungrouped and target_ws != app_state.shells[idx].workspace) target_group = 0;
+    app_state.shells[idx].workspace = target_ws;
+    app_state.shells[idx].group_id = target_group;
+    ops.commitMove(target_ws);
+    return zsbTabReply(out, "moved", args.tab, null);
+}
+
+fn zsbTabRebind(argv: []const []const u8, out: []u8, comptime ops: type) usize {
+    const args = parseZsbTabArgs(argv, .{ .verb = "session-rebind", .allowed = &.{ .tab, .host, .tmux }, .required = &.{ .tab, .tmux } }) catch |err| return zsbTabParseError(out, err);
+    const idx = zsbShellIndexForTab(args.tab) orelse return zsbWorkspaceError(out, "unknown_tab");
+    if (idx == app_state.active_shell) return zsbWorkspaceError(out, "active_tab");
+    const shell = &app_state.shells[idx];
+    if (shell.kind != .tmux and shell.kind != .vps and shell.kind != .vps2) return zsbWorkspaceError(out, "not_remote_tab");
+    var host: u8 = @import("capacity.zig").remoteHostForShell(shell) orelse TMUX_HOST_DE;
+    if (args.host) |requested| {
+        var host_names: [3][]const u8 = undefined;
+        var host_id: ?u8 = null;
+        for ([_]u8{ TMUX_HOST_DE, TMUX_HOST_UK, TMUX_HOST_INNE }, 0..) |candidate, hi| {
+            host_names[hi] = tmuxSshTarget(candidate);
+            if (std.mem.eql(u8, host_names[hi], requested)) host_id = candidate;
+        }
+        host = host_id orelse return zsbUnknownName(out, "unknown_host", &host_names);
+    }
+    const tmux = args.tmux.?;
+    if (findLocalTmuxTab(host, tmux)) |other| {
+        if (other != idx) {
+            const text = std.fmt.bufPrint(out, "{{\"ok\":false,\"error\":\"duplicate_session\",\"tab\":{d}}}\n", .{app_state.shells[other].shell_id}) catch return 0;
+            return text.len;
+        }
+    }
+    if (app_state.g_account_locked) return zsbWorkspaceError(out, "account_locked");
+    if (shell.console_inflight) return zsbWorkspaceError(out, "tab_busy");
+    const old_kind = shell.kind;
+    const old_host = shell.tmux_host;
+    const old_session = shell.tmux_session;
+    const old_session_len = shell.tmux_session_len;
+    const old_reconnect = shell.ssh_reconnect;
+    const changed = old_host != host or old_session_len != tmux.len or !std.mem.eql(u8, old_session[0..old_session_len], tmux);
+    shell.kind = .tmux;
+    shell.tmux_host = host;
+    @memcpy(shell.tmux_session[0..tmux.len], tmux);
+    shell.tmux_session_len = @intCast(tmux.len);
+    shell.ssh_reconnect.create_session = false;
+    if (!ops.respawn(idx)) {
+        shell.kind = old_kind;
+        shell.tmux_host = old_host;
+        shell.tmux_session = old_session;
+        shell.tmux_session_len = old_session_len;
+        shell.ssh_reconnect = old_reconnect;
+        return zsbWorkspaceError(out, "spawn_failed");
+    }
+    if (changed) {
+        const rebound = &app_state.shells[idx];
+        rebound.claude_sid_len = 0;
+        rebound.claude_cwd_len = 0;
+        rebound.claude_session = false;
+        rebound.preview_len = 0;
+    }
+    ops.persist();
+    return zsbTabReply(out, "rebound", args.tab, &app_state.shells[idx]);
+}
+
+const ZsbTabOps = struct {
+    fn close(idx: u32) void {
+        @import("console.zig").closeBackgroundShell(idx);
+    }
+    fn respawn(idx: u32) bool {
+        return @import("console.zig").respawnShellInPlace(idx, true);
+    }
+    fn commitMove(workspace: u8) void {
+        @import("sidebar.zig").pruneEmptyGroups();
+        @import("sidebar.zig").normalizeGroupOrder();
+        @import("workspaces.zig").commitPillMove(workspace, false);
+    }
+    fn persist() void {
+        saveSession();
+    }
+};
+
+fn zsbIsTabVerb(verb: []const u8) bool {
+    return std.mem.eql(u8, verb, "session-close") or std.mem.eql(u8, verb, "session-rebind") or
+        std.mem.eql(u8, verb, "session-rename") or std.mem.eql(u8, verb, "session-move");
+}
+
+fn zsbTabCommand(args: []const []const u8, out: []u8, comptime ops: type) usize {
+    if (std.mem.eql(u8, args[0], "session-close")) return zsbTabClose(args, out, ops);
+    if (std.mem.eql(u8, args[0], "session-rebind")) return zsbTabRebind(args, out, ops);
+    if (std.mem.eql(u8, args[0], "session-rename")) return zsbTabRename(args, out, ops);
+    return zsbTabMove(args, out, ops);
+}
+
 pub fn handleZsbWorkspaceRequest() void {
     while (!app_state.g_zsb_workspace_mutex.tryLock()) Sleep(0);
     defer app_state.g_zsb_workspace_mutex.unlock();
@@ -2158,6 +2413,8 @@ pub fn handleZsbWorkspaceRequest() void {
         if (args.len == 1) zsbWorkspaceList(out) else zsbWorkspaceError(out, "bad_args")
     else if (std.mem.eql(u8, args[0], "session-status"))
         zsbSessionStatus(args, out)
+    else if (zsbIsTabVerb(args[0]))
+        zsbTabCommand(args, out, ZsbTabOps)
     else
         zsbSessionOpen(args, out, @import("console.zig").spawnBackgroundTmuxSession, saveSession);
     if (len == 0) len = zsbWorkspaceError(out, "response_too_large");
@@ -2561,6 +2818,204 @@ test "workspace-list includes inactive workspaces grouped and ungrouped tabs wit
     try std.testing.expectEqualStrings("remote-1", tab.object.get("host").?.string);
     try std.testing.expectEqualStrings("runner-7", tab.object.get("tmux").?.string);
     try std.testing.expect(!tab.object.get("active").?.bool);
+    try std.testing.expect(local.object.get("state").? == .null);
+    try std.testing.expectEqualStrings("connecting", tab.object.get("state").?.string);
     var tiny: [8]u8 = undefined;
     try std.testing.expectEqual(@as(usize, 0), zsbWorkspaceList(&tiny));
+}
+
+const ZsbTabTestOps = struct {
+    var closed: usize = 0;
+    var respawned: usize = 0;
+    var respawn_ok = true;
+    var moved: usize = 0;
+    var move_workspace: u8 = 0;
+    var persisted: usize = 0;
+
+    fn reset() void {
+        closed = 0;
+        respawned = 0;
+        respawn_ok = true;
+        moved = 0;
+        move_workspace = 0;
+        persisted = 0;
+    }
+
+    fn close(idx: u32) void {
+        closed += 1;
+        var i = idx;
+        while (i + 1 < app_state.shell_count) : (i += 1) app_state.shells[i] = app_state.shells[i + 1];
+        app_state.shell_count -= 1;
+        if (app_state.active_shell > idx) app_state.active_shell -= 1;
+    }
+
+    fn respawn(idx: u32) bool {
+        _ = idx;
+        respawned += 1;
+        return respawn_ok;
+    }
+
+    fn commitMove(workspace: u8) void {
+        moved += 1;
+        move_workspace = workspace;
+    }
+
+    fn persist() void {
+        persisted += 1;
+    }
+};
+
+fn zsbTabTestOpen(session: []const u8, out: []u8) !void {
+    const args = [_][]const u8{ "session-open", "--workspace", "Research", "--group", "Ops", "--host", "remote-1", "--tmux", session, "--name", "Agent" };
+    const len = zsbSessionOpen(&args, out, ZsbWorkspaceTest.spawn, ZsbWorkspaceTest.persist);
+    try std.testing.expect(std.mem.startsWith(u8, out[0..len], "{\"ok\":true,\"created\":true"));
+}
+
+fn zsbTabTestRun(argv: []const []const u8, out: []u8) []const u8 {
+    return out[0..zsbTabCommand(argv, out, ZsbTabTestOps)];
+}
+
+test "tab verbs reject malformed arguments before touching any tab" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    ZsbTabTestOps.reset();
+    var out: [4096]u8 = undefined;
+    try zsbTabTestOpen("runner-7", &out);
+    const bad = [_][]const []const u8{
+        &.{"session-close"},
+        &.{ "session-close", "--tab" },
+        &.{ "session-close", "--tab", "0" },
+        &.{ "session-close", "--tab", "-1" },
+        &.{ "session-close", "--tab", "4294967296" },
+        &.{ "session-close", "--tab", "42", "--tab", "42" },
+        &.{ "session-close", "--tab", "42", "--name", "x" },
+        &.{ "session-close", "--tab", "42", "extra" },
+        &.{ "session-rename", "--tab", "42" },
+        &.{ "session-rename", "--name", "x" },
+        &.{ "session-rebind", "--tab", "42" },
+        &.{ "session-rebind", "--tab", "42", "--tmux", "" },
+        &.{ "session-move", "--tab", "42" },
+        &.{ "session-move", "--tab", "42", "--group", "Ops", "--ungrouped" },
+        &.{ "session-move", "--tab", "42", "--ungrouped", "--ungrouped" },
+        &.{ "session-rename", "--tab", "42", "--workspace", "Home", "--name", "x" },
+    };
+    for (bad) |argv| {
+        try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"bad_args\"}\n", zsbTabTestRun(argv, &out));
+    }
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"invalid_tmux\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "42", "--tmux", "a;b" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"invalid_name\"}\n", zsbTabTestRun(&.{ "session-rename", "--tab", "42", "--name", "bad\x07name" }, &out));
+    try std.testing.expectEqual(@as(usize, 0), ZsbTabTestOps.closed + ZsbTabTestOps.respawned + ZsbTabTestOps.moved + ZsbTabTestOps.persisted);
+    try std.testing.expectEqual(@as(u32, 2), app_state.shell_count);
+}
+
+test "session-close removes a background tab and refuses the active, pinned and unknown tab" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    ZsbTabTestOps.reset();
+    var out: [4096]u8 = undefined;
+    try zsbTabTestOpen("runner-7", &out);
+    const active_id = app_state.shells[app_state.active_shell].shell_id;
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"active_tab\"}\n", zsbTabTestRun(&.{ "session-close", "--tab", "41" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-close", "--tab", "99" }, &out));
+    app_state.shells[1].pinned_top = true;
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"pinned_tab\"}\n", zsbTabTestRun(&.{ "session-close", "--tab", "42" }, &out));
+    app_state.shells[1].pinned_top = false;
+    app_state.shells[1].kind = .cmd;
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"not_remote_tab\"}\n", zsbTabTestRun(&.{ "session-close", "--tab", "42" }, &out));
+    app_state.shells[1].kind = .tmux;
+    try std.testing.expectEqual(@as(usize, 0), ZsbTabTestOps.closed);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"closed\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-close", "--tab", "42" }, &out));
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.closed);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
+    try std.testing.expectEqual(@as(u32, 1), app_state.shell_count);
+    try std.testing.expectEqual(active_id, app_state.shells[app_state.active_shell].shell_id);
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-close", "--tab", "42" }, &out));
+}
+
+test "session-rename sets a manual title with Unicode and keeps the active tab" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    ZsbTabTestOps.reset();
+    var out: [4096]u8 = undefined;
+    try zsbTabTestOpen("runner-7", &out);
+    const active = app_state.active_shell;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"renamed\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-rename", "--name", "Runner ✓ 7", "--tab", "42" }, &out));
+    var title: [64]u8 = undefined;
+    const len = try std.unicode.utf16LeToUtf8(&title, app_state.shells[1].name[0..app_state.shells[1].name_len]);
+    try std.testing.expectEqualStrings("Runner ✓ 7", title[0..len]);
+    try std.testing.expectEqual(app_state.NameSource.manual, app_state.shells[1].name_source);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
+    try std.testing.expectEqual(active, app_state.active_shell);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"renamed\":true,\"tab\":41}\n", zsbTabTestRun(&.{ "session-rename", "--tab", "41", "--name", "Active too" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-rename", "--tab", "99", "--name", "x" }, &out));
+}
+
+test "session-move changes workspace and group by name and refuses the active tab and unknown names" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    ZsbTabTestOps.reset();
+    var out: [4096]u8 = undefined;
+    try zsbTabTestOpen("runner-7", &out);
+    const active = app_state.active_shell;
+    try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].workspace);
+    try std.testing.expectEqual(@as(u32, 7), app_state.shells[1].group_id);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"moved\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-move", "--tab", "42", "--workspace", "Home" }, &out));
+    try std.testing.expectEqual(@as(u8, 0), app_state.shells[1].workspace);
+    try std.testing.expectEqual(@as(u32, 0), app_state.shells[1].group_id);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.moved);
+    try std.testing.expectEqual(@as(u8, 0), ZsbTabTestOps.move_workspace);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"moved\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-move", "--tab", "42", "--group", "Ops" }, &out));
+    try std.testing.expectEqual(@as(u8, 0), app_state.shells[1].workspace);
+    try std.testing.expectEqual(@as(u32, 7), app_state.shells[1].group_id);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"moved\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-move", "--tab", "42", "--workspace", "Research", "--group", "Ops" }, &out));
+    try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].workspace);
+    try std.testing.expectEqual(@as(u32, 7), app_state.shells[1].group_id);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"moved\":true,\"tab\":42}\n", zsbTabTestRun(&.{ "session-move", "--tab", "42", "--ungrouped" }, &out));
+    try std.testing.expectEqual(@as(u8, 1), app_state.shells[1].workspace);
+    try std.testing.expectEqual(@as(u32, 0), app_state.shells[1].group_id);
+    try std.testing.expectEqual(@as(usize, 4), ZsbTabTestOps.moved);
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_workspace\",\"valid_names\":[\"Home\",\"Research\"]}\n", zsbTabTestRun(&.{ "session-move", "--tab", "42", "--workspace", "Nowhere" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_group\",\"valid_names\":[\"Ops\"]}\n", zsbTabTestRun(&.{ "session-move", "--tab", "42", "--group", "Nowhere" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"active_tab\"}\n", zsbTabTestRun(&.{ "session-move", "--tab", "41", "--workspace", "Research" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-move", "--tab", "99", "--ungrouped" }, &out));
+    app_state.g_ws_snoozed[0] = true;
+    defer app_state.g_ws_snoozed[0] = false;
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"workspace_snoozed\"}\n", zsbTabTestRun(&.{ "session-move", "--tab", "42", "--workspace", "Home" }, &out));
+    try std.testing.expectEqual(@as(usize, 4), ZsbTabTestOps.moved);
+    try std.testing.expectEqual(active, app_state.active_shell);
+    try std.testing.expectEqual(@as(u8, 0), app_state.g_active_workspace);
+}
+
+test "session-rebind points a tab at another session and refuses duplicates locked accounts and local tabs" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    ZsbTabTestOps.reset();
+    const was_locked = app_state.g_account_locked;
+    defer app_state.g_account_locked = was_locked;
+    app_state.g_account_locked = false;
+    var out: [4096]u8 = undefined;
+    try zsbTabTestOpen("runner-7", &out);
+    try zsbTabTestOpen("runner-8", &out);
+    const active = app_state.active_shell;
+    try std.testing.expectEqualStrings("{\"ok\":true,\"rebound\":true,\"tab\":43,\"state\":\"connecting\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-9" }, &out));
+    try std.testing.expectEqualStrings("runner-9", app_state.shells[2].tmux_session[0..app_state.shells[2].tmux_session_len]);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.respawned);
+    try std.testing.expectEqual(@as(usize, 1), ZsbTabTestOps.persisted);
+    try std.testing.expectEqualStrings("{\"ok\":true,\"rebound\":true,\"tab\":43,\"state\":\"connecting\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-9", "--host", "remote-1" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"duplicate_session\",\"tab\":42}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-7" }, &out));
+    try std.testing.expectEqualStrings("runner-9", app_state.shells[2].tmux_session[0..app_state.shells[2].tmux_session_len]);
+    try std.testing.expectEqual(@as(usize, 2), ZsbTabTestOps.respawned);
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_host\",\"valid_names\":[\"remote-1\",\"remote-2\",\"remote-3\"]}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10", "--host", "nowhere" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"unknown_tab\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "99", "--tmux", "runner-10" }, &out));
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"active_tab\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "41", "--tmux", "runner-10" }, &out));
+    app_state.shells[2].kind = .cmd;
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"not_remote_tab\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10" }, &out));
+    app_state.shells[2].kind = .tmux;
+    ZsbTabTestOps.respawn_ok = false;
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"spawn_failed\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10" }, &out));
+    try std.testing.expectEqualStrings("runner-9", app_state.shells[2].tmux_session[0..app_state.shells[2].tmux_session_len]);
+    ZsbTabTestOps.respawn_ok = true;
+    app_state.g_account_locked = true;
+    try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"account_locked\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10" }, &out));
+    try std.testing.expectEqual(active, app_state.active_shell);
 }

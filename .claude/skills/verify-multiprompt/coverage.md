@@ -102,6 +102,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 | IGSH-591 | Group lines stay clear of the selected session row. | group-rail | covered | — |
 | IGSH-678 | Chat View code uses Nordwand Mono SemiBold, 2 pt smaller, with smooth edges on diff rows. | chat-code-font | partial | Live code size and face come from a real console code block; diff rows come from the branch painter with a synthetic tool block. A live diff preview needs an agent transcript on the runner. |
 | IGSH-847 | Agents can distinguish a created tab from a connected or failed SSH session. | session-open | partial | Journey requires disconnected status and the exact logged nonzero exit code; updated journey and CI not run yet. Successful remote attachment still needs credentials. |
+| IGSH-988 | Agents can rename, rebind, move and close terminal tabs from the command line without touching the active tab. | session-tabs | partial | Journey drives four background tabs through the real local listener, checks the saved layout and a restart; successful remote attachment after a rebind is not verified because no server is supplied. |
 
 ## Live results on this pass
 
@@ -115,6 +116,7 @@ These are the supplied real GitHub runs on this branch, not new executions by th
 | inbox | 39871210688, v0.28.821 | passed |
 | command-palette | 39871210688, v0.28.821 | passed |
 | session-open | 39871210688, v0.28.821 | Previous journey passed; IGSH-847 status assertions not run |
+| session-tabs | not run in this pass; added by IGSH-988 with its own GitHub runs | — |
 | favorites-groups | 39871210688, v0.28.821 | passed |
 | browser-pane-stuck | 39871210688, v0.28.821 | passed |
 | browser-pane-locked | 39871210688, v0.28.821 | passed |
