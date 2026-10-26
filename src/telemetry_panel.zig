@@ -1153,6 +1153,20 @@ pub fn showSidebarAiUsageMenu() void {
     var point = w.POINT{ .x = card.left, .y = card.top - @import("window_layout.zig").paneGap() };
     _ = w.ClientToScreen(app_state.g_main_hwnd, &point);
     _ = @import("fonts.zig").trackPopupMenuWithInks(menu, w.TPM_RETURNCMD | 0x0020, point.x, point.y, 0, app_state.g_main_hwnd, null, &inks);
+    const closing_time: w.DWORD = @bitCast(w.GetMessageTime());
+    var pending: w.MSG = undefined;
+    if (w.PeekMessageW(&pending, app_state.g_main_hwnd, w.WM_LBUTTONDOWN, w.WM_LBUTTONDBLCLK, 0) == 0) return;
+    var mouse = pending.pt;
+    if (w.ScreenToClient(app_state.g_main_hwnd, &mouse) == 0) return;
+    var diagnostic: [192]u8 = undefined;
+    if (std.fmt.bufPrint(&diagnostic, "usage panel close: message={d} time={d} closing={d} x={d} y={d}", .{ pending.message, pending.time, closing_time, mouse.x, mouse.y })) |text| {
+        @import("diagnostics.zig").debugLog(text);
+    } else |_| {}
+    if ((pending.message == w.WM_LBUTTONDOWN or pending.message == w.WM_LBUTTONDBLCLK) and pending.time == closing_time and
+        mouse.x >= card.left and mouse.x < card.right and mouse.y >= card.top and mouse.y < card.bottom)
+    {
+        _ = w.PeekMessageW(&pending, app_state.g_main_hwnd, pending.message, pending.message, 1);
+    }
 }
 
 test "IGSH-908 native usage menu retains distinct pools, quota data and reset rows" {

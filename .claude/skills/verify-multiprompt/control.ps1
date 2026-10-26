@@ -6155,11 +6155,12 @@ try {
                 if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Usage pace screenshot coordinates unavailable' }
                 $offsetX = $origin.X - $frame.Left
                 $expected = @($usagePaceSnapshot.accounts | ForEach-Object { foreach ($name in @('week', 'five_hour')) { if ($null -ne $_.$name.used) { $_.$name.pace.verdict } } } | Where-Object { $_ -in @('above', 'below') } | Sort-Object -Unique)
-                $closedInk = Measure-UsagePaceInk -Name 'pill-closed' -Bounds @($offsetX, $pages[2].top, ($offsetX + [int][Math]::Round(240 * $scale)), ($pages[2].bottom + 1))
+                $pillBounds = @($offsetX, $pages[2].top, ($offsetX + [int][Math]::Round(240 * $scale)), ($pages[2].bottom + 1))
+                $closedInk = Measure-UsagePaceInk -Name 'pill-closed' -Bounds $pillBounds
                 foreach ($grade in $expected) {
                     if ($closedInk[$grade] -lt 12) { throw "IGSH-997: usage pill lacks $grade pace ink" }
                 }
-                $paceProof = [ordered]@{ expectedInks = $expected; closed = $closedInk; panel = $null; sourceTs = $usageSourceTs; replayTs = $usagePaceSnapshot.ts; sourceSha256 = (Get-FileHash $env:VERIFY_USAGE_PACE_FILE -Algorithm SHA256).Hash.ToLowerInvariant(); normalSshReads = @(Get-Content (Join-Path $scratch 'usage-ssh-read.log')).Count }
+                $paceProof = [ordered]@{ expectedInks = $expected; closed = $closedInk; panel = $null; bounds = @{ closed = $pillBounds; panel = $null }; sourceTs = $usageSourceTs; replayTs = $usagePaceSnapshot.ts; sourceSha256 = (Get-FileHash $env:VERIFY_USAGE_PACE_FILE -Algorithm SHA256).Hash.ToLowerInvariant(); normalSshReads = @(Get-Content (Join-Path $scratch 'usage-ssh-read.log')).Count }
             }
             $pillX = [int][Math]::Round(60 * $scale)
             $pillY = $client.Bottom - [int][Math]::Round(14 * $scale)
@@ -6174,7 +6175,8 @@ try {
             if ($paceProof) {
                 $panel = New-Object VerifyNative+Rect
                 if (-not [VerifyNative]::GetWindowRect([IntPtr]::new([int64]$menu.handle), [ref]$panel)) { throw 'Usage pace panel rectangle unavailable' }
-                $paceProof.panel = Measure-UsagePaceInk -Name 'pill-open' -Bounds @(($panel.Left - $frame.Left), ($panel.Top - $frame.Top), ($panel.Right - $frame.Left), ($panel.Bottom - $frame.Top))
+                $paceProof.bounds.panel = @(($panel.Left - $frame.Left), ($panel.Top - $frame.Top), ($panel.Right - $frame.Left), ($panel.Bottom - $frame.Top))
+                $paceProof.panel = Measure-UsagePaceInk -Name 'pill-open' -Bounds $paceProof.bounds.panel
                 foreach ($grade in $paceProof.expectedInks) {
                     if ($paceProof.panel[$grade] -lt 12) { throw "IGSH-997: expanded panel lacks $grade pace ink" }
                 }
