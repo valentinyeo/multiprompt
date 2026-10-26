@@ -257,7 +257,7 @@ fn chatBenchGeometry() void {
         .pane_left = if (browser) |bl| bl.console_x else SIDEBAR_W(),
         .pane_right = if (browser) |bl| bl.console_x + bl.console_w else client.right,
         .layout = layout,
-        .title = threadTitleNameRectFor(client.right, app_state.active_shell),
+        .title = if (@import("drawing.zig").chatTitleLayout()) |title| title.text else threadTitleNameRectFor(client.right, app_state.active_shell),
         .transcript = transcript,
         .composer = composer,
         .blocks = app_state.g_chat_block_count,
