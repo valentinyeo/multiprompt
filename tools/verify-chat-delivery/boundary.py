@@ -144,6 +144,8 @@ def fake_screen(claude, escapes):
     if fake_suggestion_shown(claude):
         first = SGR_DIM + claude["suggestion"] + SGR_RESET if escapes else claude["suggestion"]
     lines += ["❯ " + first, *("  " + row for row in rows[1:]), "─" * 50]
+    if claude["queue"]:
+        lines.append("  Press up to edit queued messages")
     return "\n".join(lines) + "\n"
 
 

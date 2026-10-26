@@ -1475,6 +1475,14 @@ def prompt_box_text(target):
     return "\n".join(" ".join(line.split()) for line in draft.split("\n")).strip()
 
 
+def queue_hint_shown(target):
+    try:
+        shown = subprocess.run(["tmux", "capture-pane", "-p", "-J", "-t", target], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return False
+    return isinstance(shown, str) and "edit queued messages" in shown
+
+
 def stop_response(q):
     rid = q.get("id", 0)
     name = q.get("tmux")
@@ -1585,13 +1593,14 @@ def cancel_queued_response(q):
                 if stuck or not box_is_empty(left):
                     reason = "box_not_clear"
             if reason is None:
-                subprocess.run(["tmux", "send-keys", "-t", target, "Up"], check=True, capture_output=True, timeout=5)
                 pulled = ""
-                for _ in range(20):
-                    time.sleep(0.1)
-                    pulled = prompt_box_text(target)
-                    if pulled:
-                        break
+                if queue_hint_shown(target):
+                    subprocess.run(["tmux", "send-keys", "-t", target, "Up"], check=True, capture_output=True, timeout=5)
+                    for _ in range(20):
+                        time.sleep(0.1)
+                        pulled = prompt_box_text(target)
+                        if pulled:
+                            break
                 pulled_flat = "".join(pulled.split())
                 cancelled = bool(pulled_flat) and "".join(text.split()) in pulled_flat
                 retype = [item for item in keep if "".join(item.split()) in pulled_flat]

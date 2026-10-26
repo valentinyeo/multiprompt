@@ -2144,6 +2144,8 @@ class SharedQueueDraftTest(unittest.TestCase):
             shown = ''
             if 'capture-pane' in argv:
                 shown = '❯ ' + state['box'].replace('\n', '\n  ') + '\n' + '─' * 20 + '\n'
+                if state['queue']:
+                    shown += '  Press up to edit queued messages\n'
             elif 'send-keys' in argv:
                 key = argv[-1]
                 if '-l' in argv:
@@ -2187,6 +2189,14 @@ class SharedQueueDraftTest(unittest.TestCase):
         self.assertIn('\tcancel_queued\terror\tnot_queued\t0\n', wire)
         self.assertEqual(state['box'], '')
         self.assertEqual(state['submitted'], [])
+
+    def test_IGSH_1010_cancel_queued_never_recalls_the_taken_message_from_history(self):
+        state, run = self.fake_claude([], recall='taken')
+        with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.cancel_queued_response(dict(op='cancel_queued', id=9, tmux='term-1', text='taken', keep=[]))
+        self.assertIn('\tcancel_queued\terror\tnot_queued\t0\n', wire)
+        self.assertEqual(state['keys'], [])
+        self.assertEqual(state['box'], '')
 
     def test_IGSH_1010_cancel_queued_retypes_survivors_when_the_cancelled_message_was_taken_first(self):
         state, run = self.fake_claude(['survivor'])
