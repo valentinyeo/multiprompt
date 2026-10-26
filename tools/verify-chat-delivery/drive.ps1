@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history')][string]$Feature = 'chat-delivery'
+    [ValidateSet('chat-delivery', 'chat-messages-only', 'chat-full-history', 'chat-working')][string]$Feature = 'chat-delivery'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -33,6 +33,7 @@ $plans = @(
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='busy'; text='composer stays usable'}) }
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
+if ($Feature -eq 'chat-working') { $plans = @(@{name='inline-working'; mode='busy'; text='Please respond.'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
@@ -323,11 +324,12 @@ foreach ($plan in $plans) {
     $job = $null
     $main = [IntPtr]::Zero
     $composer = [IntPtr]::Zero
+    $isWorking = $Feature -eq 'chat-working'
     $isQueue = $plan.name -eq 'queue-draft-sync'
     $isActivity = $plan.name -eq 'messages-only'
     $isHistory = $plan.name -eq 'full-history'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
-    $hasTranscript = $isQueue -or $isActivity -or $isHistory -or $isSending
+    $hasTranscript = $isWorking -or $isQueue -or $isActivity -or $isHistory -or $isSending
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -362,6 +364,10 @@ foreach ($plan in $plans) {
         }
         Save $standIn "$state/state.json"
         if ($hasTranscript) { Shell-Run @('init') }
+        if ($isWorking) {
+            $question = @{type='user'; uuid='question-924'; sessionId=$sid; timestamp=[DateTime]::UtcNow.ToString('o'); message=@{role='user'; content='Please respond.'}}
+            [IO.File]::WriteAllText($transcript, (($question | ConvertTo-Json -Depth 8 -Compress) + "`n"), [Text.UTF8Encoding]::new($false))
+        }
         if ($isHistory) { Shell-Run @('history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         Save @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})} "$settings/session.json"
@@ -379,6 +385,10 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
+        if ($isWorking) {
+            . "$PSScriptRoot/working.ps1"
+            continue
+        }
         if ($isHistory) {
             Assert-FullHistory 'open'
             Copy-Item "$settings/chatcache" "$caseDir/cache-before-restart" -Recurse -Force
@@ -751,6 +761,15 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($Feature -eq 'chat-working') {
+    $observed = Get-Content "$Evidence/inline-working/observation.json" -Raw | ConvertFrom-Json
+    $clean = Get-Content "$Evidence/cleanup.json" -Raw | ConvertFrom-Json
+    $ok = -not $observed.error -and $clean.remaining_owned_processes -eq 0 -and $clean.scratch_removed -and $clean.evidence_preserved -and (Test-Path "$Evidence/working-copy.json")
+    if ($ok) { Copy-Item "$Evidence/working-after.png" "$Evidence/after.png" -Force }
+    Save @{feature=$Feature; status=$(if ($ok) { 'passed' } else { 'failed' }); version=$ExpectedVersion; sha256=$ExpectedHash; scratchRemoved=$clean.scratch_removed; cleanup=$(if ($ok) { 'owned process tree stopped; provider transcript and evidence preserved; scratch removed' } else { 'QA or cleanup failed' }); error=$observed.error} "$Evidence/result.json"
+    if (-not $ok) { throw "Working journey failed: $($observed.error)" }
+    exit 0
+}
 if ($env:CHAT_SENDING_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-sending-status-proof.mjs" $Evidence
     if ($LASTEXITCODE -ne 0) { exit 1 }
