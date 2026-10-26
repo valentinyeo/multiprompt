@@ -18,7 +18,10 @@ ARGS = sys.argv[2:]
 
 
 def state():
-    return json.loads((ROOT / "state.json").read_text(encoding="utf-8-sig"))
+    value = json.loads((ROOT / "state.json").read_text(encoding="utf-8-sig"))
+    if value.get("binding"):
+        value["bindingStatus"] = not (ROOT / "binding-status-hidden").exists()
+    return value
 
 
 def record(file, **values):
@@ -73,6 +76,9 @@ def ctrl_k(buffer, cursor):
 
 
 def screen(value, buffer=None):
+    if value.get("binding"):
+        status = "[workspace] 0:bash*" if value.get("bindingStatus") else "Status temporarily hidden"
+        return "Named terminal: workspace\nExisting conversation sentinel\n\n" + status + "\n"
     head = "Claude Code\n\n" + ("Working... (esc to interrupt)\n" if value["mode"] == "busy" else "Ready\n") + "\n"
     if stateful(value):
         if buffer is None:
@@ -688,6 +694,10 @@ def ssh():
         record("declined.jsonl", operation="remote command", kind=kind, argv=ARGS, command=command, exitCode=exit_code)
         sys.stdout.write(output)
         return exit_code
+    if state().get("binding") and "exec ${SHELL:-bash} -l" in command:
+        record("invocations.jsonl", kind="login", session="workspace")
+        attach("workspace")
+        return 0
     python = re.search(r"\bpython3\s", command)
     if python:
         remote = shlex.split(command[python.start():])
@@ -702,14 +712,27 @@ def ssh():
     if "tmux list-clients" in command:
         record("invocations.jsonl", kind="probe", operation="list-clients/list-sessions")
         names = session_names()
-        print("\n".join(names) + "\n" + "".join(f"@@S {name}\n" for name in names) + "@@LS_OK@@\n@@MP_LIVE@@")
+        identity = "".join(f"@@I {name}|{state().get('generation', '1700:123:$7')}\n" for name in names) if state().get("binding") else ""
+        print("\n".join(names) + "\n" + identity + "".join(f"@@S {name}\n" for name in names) + "@@LS_OK@@\n@@MP_LIVE@@")
         return 0
     if "tmux list-sessions" in command:
         record("invocations.jsonl", kind="list", operation="list-sessions")
         for name in session_names():
             print(name + "\t1\t1")
         return 0
-    match = re.search(r"tmux attach -t ['\"]?([A-Za-z0-9._:-]+)", command)
+    if state().get("binding") and "tmux if-shell -F -t " in command:
+        expected = re.search(r"#\{==:#\{start_time\}:#\{pid\}:#\{session_id\},([0-9:$]+)\}", command)
+        current = state().get("generation", "1700:123:$7")
+        if not expected:
+            raise RuntimeError("Guarded attach omitted the expected generation")
+        if expected[1] != current:
+            record("invocations.jsonl", kind="refused", expected=expected[1], actual=current, command=command)
+            print("Saved terminal session changed; refusing to attach.")
+            return 0
+        record("invocations.jsonl", kind="attach", session="workspace", identity=current, command=command)
+        attach("workspace")
+        return 0
+    match = re.search(r"tmux attach -t ['\"]?=?([A-Za-z0-9._:-]+)", command)
     if match and match[1] in session_names():
         record("invocations.jsonl", kind="attach", session=match[1])
         (attach_fake if state().get("fake") else attach)(match[1])

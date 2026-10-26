@@ -79,6 +79,7 @@ int main(int argc, char **argv) {
     else { name = strstr(cmd, "tmux new-session -A -s "); if (name) { name += strlen("tmux new-session -A -s "); create = 1; } }
     if (!name) { if (strstr(cmd, "MP_RELAY")) puts("MP_RELAY_LEGACY"); return 0; }
     while (*name == '\'' || *name == '"') name++;
+    if (!create && *name == '=') name++;
     name[strcspn(name, " '\";\r\n")] = 0;
     if (create && !exists(name)) {
         snprintf(path, sizeof(path), "%s\\sessions.txt", root);

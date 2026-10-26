@@ -1877,7 +1877,7 @@ pub fn detachTabToNewWindow(idx: u32) void {
     const exe_len = GetModuleFileNameW(null, &exe_buf, 512);
     if (exe_len == 0 or exe_len >= 512) return;
 
-    var cmd_buf: [1024]u16 = undefined;
+    var cmd_buf: [2048]u16 = undefined;
     var pos: usize = 0;
 
     cmd_buf[pos] = '"';
@@ -1929,7 +1929,7 @@ pub fn detachTabToNewWindow(idx: u32) void {
     }
 
     const writeNum = struct {
-        fn f(buf: *[1024]u16, p: *usize, val: usize) void {
+        fn f(buf: *[2048]u16, p: *usize, val: usize) void {
             var digs: [20]u8 = undefined;
             var dl: usize = 0;
             var v = val;
@@ -2030,6 +2030,16 @@ pub fn detachTabToNewWindow(idx: u32) void {
     for (0..tmux_len) |ti| {
         const ch = shell.tmux_session[ti];
         cmd_buf[pos] = if (ch != '"') @intCast(ch) else '_';
+        pos += 1;
+    }
+    cmd_buf[pos] = '"';
+    pos += 1;
+    cmd_buf[pos] = ' ';
+    pos += 1;
+    cmd_buf[pos] = '"';
+    pos += 1;
+    for (shell.tmux_identity[0..shell.tmux_identity_len]) |c| {
+        cmd_buf[pos] = c;
         pos += 1;
     }
     cmd_buf[pos] = '"';
@@ -2136,6 +2146,8 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     const tlen: u32 = @min(shell.tmux_session_len, 63);
     if (tlen > 0) @memcpy(transfer.tmux[0..tlen], shell.tmux_session[0..tlen]);
     transfer.tmux_len = tlen;
+    transfer.tmux_identity = shell.tmux_identity;
+    transfer.tmux_identity_len = shell.tmux_identity_len;
 
     const flen: u32 = @min(shell.favicon_path_len, 511);
     if (flen > 0) @memcpy(transfer.favicon_path[0..flen], shell.favicon_path[0..flen]);
@@ -2262,6 +2274,9 @@ pub fn reopenLastClosedShell() void {
     defer app_state.g_pending_tmux_host = 0;
     app_state.g_pending_chat_id = entry.chat_id;
     defer app_state.g_pending_chat_id = 0;
+    const previous_identity = app_state.g_pending_tmux_identity;
+    app_state.g_pending_tmux_identity = entry.tmux_identity[0..entry.tmux_identity_len];
+    defer app_state.g_pending_tmux_identity = previous_identity;
     if (spawnShellWithSession(entry.kind, ts, cwd, null)) {
         app_state.shells[app_state.shell_count - 1].favorite = entry.favorite;
         if (entry.group) |saved| app_state.shells[app_state.shell_count - 1].group_id = restoreSessionGroup(saved, app_state.shells[app_state.shell_count - 1].workspace, false);
@@ -3680,6 +3695,16 @@ fn exportSlotSessionFile(slot: u8) bool {
             pos += th.len;
             pos += writeUintTo(json_buf[pos..], app_state.shells[i].tmux_host);
         }
+        if (app_state.shells[i].tmux_identity_len > 0) {
+            const identity_prefix = ",\"tmux_identity\":\"";
+            @memcpy(json_buf[pos .. pos + identity_prefix.len], identity_prefix);
+            pos += identity_prefix.len;
+            const identity = app_state.shells[i].tmux_identity[0..app_state.shells[i].tmux_identity_len];
+            @memcpy(json_buf[pos .. pos + identity.len], identity);
+            pos += identity.len;
+            json_buf[pos] = '"';
+            pos += 1;
+        }
         if (app_state.shells[i].kind == .cmd or app_state.shells[i].kind == .pwsh or app_state.shells[i].kind == .bash) {
             if (app_state.shells[i].cached_cwd_len > 0) {
                 const cwd_pre = ",\"cwd\":\"";
@@ -4270,6 +4295,9 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             }
         }
 
+        const previous_identity = app_state.g_pending_tmux_identity;
+        app_state.g_pending_tmux_identity = tabs[t].tmux_identity[0..tabs[t].tmux_identity_len];
+        defer app_state.g_pending_tmux_identity = previous_identity;
         app_state.g_pending_tmux_host = tabs[t].tmux_host;
         defer app_state.g_pending_tmux_host = 0;
         const ok = if (reclaimed)
@@ -4286,6 +4314,8 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             }
             app_state.shells[idx].name[tabs[t].name_len] = 0;
             app_state.shells[idx].name_len = tabs[t].name_len;
+            app_state.shells[idx].tmux_identity = tabs[t].tmux_identity;
+            app_state.shells[idx].tmux_identity_len = tabs[t].tmux_identity_len;
             app_state.shells[idx].name_source = if (tabs[t].manual) .manual else if (tabs[t].sem) .semantic else .default;
             app_state.shells[idx].restored_name_hold = app_state.shells[idx].name_source == .default and tabs[t].name_len > 0;
             if (tabs[t].tmux_session_len > 0) {

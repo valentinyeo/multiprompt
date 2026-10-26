@@ -239,6 +239,16 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += 1;
         }
 
+        if (app_state.shells[i].tmux_identity_len > 0) {
+            const identity_prefix = ",\"tmux_identity\":\"";
+            @memcpy(json_buf[pos .. pos + identity_prefix.len], identity_prefix);
+            pos += identity_prefix.len;
+            const identity = app_state.shells[i].tmux_identity[0..app_state.shells[i].tmux_identity_len];
+            @memcpy(json_buf[pos .. pos + identity.len], identity);
+            pos += identity.len;
+            json_buf[pos] = '"';
+            pos += 1;
+        }
         if (app_state.shells[i].kind == .cmd or app_state.shells[i].kind == .pwsh or app_state.shells[i].kind == .bash) {
             if (app_state.shells[i].cached_cwd_len > 0) {
                 const cwd = app_state.shells[i].cached_cwd[0..app_state.shells[i].cached_cwd_len];
@@ -906,6 +916,8 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     shell.group_id = tab.group_id;
     shell.starred_group_id = tab.starred_group_id;
     shell.tmux_host = tab.tmux_host;
+    shell.tmux_identity = tab.tmux_identity;
+    shell.tmux_identity_len = tab.tmux_identity_len;
     shell.workspace = tab.workspace;
     shell.last_active = if (tab.last_active != 0) tab.last_active else nowFileTime();
     shell.last_viewed = tab.last_viewed;
@@ -1168,6 +1180,9 @@ test "ISSUE-611 failed remote restore keeps Chat View and browser state" {
     const tmux_session = "issue-611";
     @memcpy(tab.tmux_session[0..tmux_session.len], tmux_session);
     tab.tmux_session_len = tmux_session.len;
+    const identity = "1700:123:$7";
+    @memcpy(tab.tmux_identity[0..identity.len], identity);
+    tab.tmux_identity_len = identity.len;
     tab.last_active = 1;
     tab.cv = true;
     tab.kaw = true;
@@ -1198,6 +1213,7 @@ test "ISSUE-611 failed remote restore keeps Chat View and browser state" {
     try std.testing.expectEqual(@as(u32, 1), app_state.shell_count);
     const shell = &app_state.shells[idx];
     try std.testing.expectEqual(tab.kind, shell.kind);
+    try std.testing.expectEqualStrings(identity, shell.tmux_identity[0..shell.tmux_identity_len]);
     try std.testing.expect(shell.chat_view_on);
     try std.testing.expect(shell.keep_awake);
     try std.testing.expect(shell.full_width);
@@ -1328,6 +1344,9 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
         }
     }
 
+    const previous_identity = app_state.g_pending_tmux_identity;
+    app_state.g_pending_tmux_identity = tabs[t].tmux_identity[0..tabs[t].tmux_identity_len];
+    defer app_state.g_pending_tmux_identity = previous_identity;
     app_state.g_pending_tmux_host = tabs[t].tmux_host;
     defer app_state.g_pending_tmux_host = 0;
     const ok = if (reclaimed)
@@ -1350,6 +1369,8 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
         app_state.shells[idx].name_source = .default;
     }
     app_state.shells[idx].tmux_host = tabs[t].tmux_host;
+    app_state.shells[idx].tmux_identity = tabs[t].tmux_identity;
+    app_state.shells[idx].tmux_identity_len = tabs[t].tmux_identity_len;
     if (tabs[t].tmux_session_len > 0) {
         @memcpy(app_state.shells[idx].tmux_session[0..tabs[t].tmux_session_len], tabs[t].tmux_session[0..tabs[t].tmux_session_len]);
         app_state.shells[idx].tmux_session_len = tabs[t].tmux_session_len;
@@ -2359,4 +2380,12 @@ test "IGSH-890 recovering ghosts never guesses across hosts or drops local termi
     try std.testing.expectEqual(@as(u32, 0), tabs[0].starred_group_id);
     try std.testing.expectEqual(@as(u32, 0), tabs[1].starred_group_id);
     try std.testing.expectEqual(@as(u8, 1), tabs[1].tmux_host);
+}
+
+test "IGSH-985 saved remote generation survives parsing without inventing legacy identity" {
+    const json = "{\"tabs\":[{\"kind\":\"tmux\",\"name\":\"Known\",\"tmux_session\":\"same-name\",\"tmux_identity\":\"1700:123:$7\"},{\"kind\":\"tmux\",\"name\":\"Legacy\",\"tmux_session\":\"legacy\"}]}";
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    try std.testing.expectEqual(@as(u32, 2), parseSessionTabs(json, &tabs));
+    try std.testing.expectEqualStrings("1700:123:$7", tabs[0].tmux_identity[0..tabs[0].tmux_identity_len]);
+    try std.testing.expectEqual(@as(u32, 0), tabs[1].tmux_identity_len);
 }

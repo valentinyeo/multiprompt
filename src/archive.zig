@@ -211,6 +211,7 @@ fn parseArchiveJson(allocator: std.mem.Allocator, json: []const u8, parsed: *std
         var e = ArchivedEntry{};
         e.name_len = json_reader.copyString(obj, "name", &e.name);
         e.tmux_session_len = json_reader.copyString(obj, "tmux_session", &e.tmux_session);
+        e.tmux_identity_len = json_reader.copyString(obj, "tmux_identity", &e.tmux_identity);
         e.claude_sid_len = json_reader.copyString(obj, "csid", &e.claude_sid);
         e.claude_cwd_len = json_reader.copyString(obj, "ccwd", &e.claude_cwd);
         if (json_reader.uint(obj, "host") == 1) e.tmux_host = 1;
@@ -238,6 +239,10 @@ fn serializeArchiveJson(entries: []const ArchivedEntry, out: []u8) ?usize {
         @memcpy(out[pos .. pos + ts_pre.len], ts_pre);
         pos += ts_pre.len;
         appendJsonEscaped(out, &pos, e.tmux_session[0..e.tmux_session_len]);
+        const identity_prefix = "\",\"tmux_identity\":\"";
+        @memcpy(out[pos .. pos + identity_prefix.len], identity_prefix);
+        pos += identity_prefix.len;
+        appendJsonEscaped(out, &pos, e.tmux_identity[0..e.tmux_identity_len]);
         const h_pre = "\",\"host\":";
         @memcpy(out[pos .. pos + h_pre.len], h_pre);
         pos += h_pre.len;
@@ -415,6 +420,8 @@ fn applyArchivedEntryToShell(idx: u32, entry: *const ArchivedEntry) void {
         setShellName(&app_state.shells[idx], entry.name[0..entry.name_len]);
         app_state.shells[idx].name_source = .default;
     }
+    app_state.shells[idx].tmux_identity = entry.tmux_identity;
+    app_state.shells[idx].tmux_identity_len = entry.tmux_identity_len;
     if (entry.tmux_session_len > 0) {
         @memcpy(app_state.shells[idx].tmux_session[0..entry.tmux_session_len], entry.tmux_session[0..entry.tmux_session_len]);
         app_state.shells[idx].tmux_session_len = entry.tmux_session_len;
@@ -482,6 +489,8 @@ pub fn resurrectArchivedByKey(hwnd: HANDLE, host: u8, session: []const u8) bool 
     const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
     if (!capacityAdmitNewAgent(host, workspace, "Claude resurrection")) return false;
     var ar_run = ar_copy;
+    ar_run.tmux_identity = @splat(0);
+    ar_run.tmux_identity_len = 0;
     {
         var uniq: [64]u8 = undefined;
         const base_len: usize = @min(@as(usize, ar_copy.tmux_session_len), 48);
@@ -947,6 +956,8 @@ pub fn archiveTabAt(i: usize) void {
     const ts_len: u32 = @intCast(@min(app_state.shells[i].tmux_session_len, @as(u32, 63)));
     @memcpy(entry.tmux_session[0..ts_len], app_state.shells[i].tmux_session[0..ts_len]);
     entry.tmux_session_len = ts_len;
+    entry.tmux_identity = app_state.shells[i].tmux_identity;
+    entry.tmux_identity_len = app_state.shells[i].tmux_identity_len;
     entry.tmux_host = app_state.shells[i].tmux_host;
     const cs_len: u32 = @intCast(@min(app_state.shells[i].claude_sid_len, @as(u32, 39)));
     if (cs_len > 0) {
