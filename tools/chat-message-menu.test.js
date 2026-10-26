@@ -36,7 +36,7 @@ test('IGSH-718 production pure item expressions preserve ordering and selection 
   assert.throws(() => menuModel(chat.replace('fn chatContextMenuItems(', 'fn removedMenu(')));
 });
 
-test('IGSH-718 native popup is opt-in themed with icons, mnemonics and existing contextual actions', () => {
+test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons, mnemonics and existing contextual actions', () => {
   const handler = chat.slice(chat.indexOf('        WM_RBUTTONDOWN => {'), chat.indexOf('        WM_MOUSEWHEEL, WM_MOUSEHWHEEL => {'));
   assert.doesNotMatch(handler, /Copy Message|Select All|2 => chatSelectAll|3 => chatCopyTextToClipboard/);
   assert.match(chat, /const TrackPopupMenu = @import\("fonts.zig"\).trackMessagePopupMenu/);
@@ -45,12 +45,19 @@ test('IGSH-718 native popup is opt-in themed with icons, mnemonics and existing 
   assert.match(handler, /items.copy_target == .selection\) selection_text else message_text/);
   assert.match(handler, /debugLog\(menu_log\[0\.\.menu_log_len\]\)/);
   assert.match(handler, /\[chat\] message menu items=/);
-  assert.match(fonts, /pub fn trackPopupMenu\([^]*?return trackPopupMenuStyled\(menu, flags, x, y, reserved, owner, rect, null\);/);
+  assert.match(fonts, /pub fn trackPopupMenu\([^]*?return trackThemedPopupMenu\(menu, flags, x, y, reserved, owner, rect, false\);/);
+  assert.match(fonts, /pub fn trackMessagePopupMenu\([^]*?return trackThemedPopupMenu\(menu, flags, x, y, reserved, owner, rect, true\);/);
+  assert.match(fonts, /chat_style.menuLook\(if \(bound\) \|theme\| theme.background\(\) else unboundBackground\(\)\)/);
+  assert.match(read('src/main.zig'), /bindMenuTheme\(\.\{\s*\.background = &@import\("themes.zig"\).themeConsoleBg,\s*\.foreground = &@import\("themes.zig"\).themeConsoleFg,\s*\.fill_round_rect = &@import\("smooth.zig"\).fillRoundRect/);
+  assert.match(fonts, /DWMWCP_ROUND/);
+  assert.match(fonts, /SetWindowsHookExW\(12, &menuWindowHook/);
+  assert.match(fonts, /info\.message == 0x47 or info\.message == 0x18\) styleMenuWindow\(info\.hwnd\)/);
+  assert.match(fonts, /fn styleMenuWindow[^]*?roundMenuWindow\(hwnd\)[^]*?clipMenuWindow\(hwnd\)/);
+  assert.match(fonts, /WindowFromDC\(item\.dc\)\) \|menu_window\| styleMenuWindow\(menu_window\)/);
+  assert.match(fonts, /SetWindowRgn\(hwnd, region, 1\)/);
   assert.match(fonts, /mask: u32 = 2/);
-  assert.match(fonts, /SetMenuInfo\(menu, &info\)/);
-  assert.match(fonts, /themeSidebarBg\(\)/);
-  assert.match(fonts, /themeConsoleFg\(\)/);
-  assert.match(fonts, /style.shift\(bg, if \(style.isDark\(bg\)\) 20 else -12\)/);
+  assert.match(fonts, /SetMenuInfo\(menu, &info\)[^]*?defer _ = SetMenuInfo\(menu, &MenuInfo\{ \.background = null \}\)/);
+  assert.match(fonts, /theme.foreground\(\)/);
   assert.match(fonts, /previous_style = message_menu_style[^]*?defer message_menu_style = previous_style/);
   assert.match(fonts, /GetTextFaceW[^]*?Segoe Fluent Icons[^]*?Segoe MDL2 Assets/);
   for (const [item, glyph] of [['reply', 'E97A'], ['copy', 'E8C8'], ['copy_link', 'E71B'], ['send_again', 'E724'], ['remove', 'E74D']]) {
@@ -82,7 +89,11 @@ test('IGSH-718 journey requires real owned mouse input, exact new log, popup dis
   assert.match(control, /MouseAt\(point.X, point.Y, 8\);\s*MouseAt\(point.X, point.Y, 16\)/);
   assert.match(control, /\$menuLines.Count -ne \$menuLinesBefore \+ 1/);
   assert.ok(control.includes("items=Reply,Copy$'"));
-  assert.match(control, /Snapshot 'message-menu'\s*Press @\(0x1B\)/);
+  assert.match(control, /Snapshot 'message-menu'\s*if \(\$menuLook\.cornerShown\)/);
+  assert.match(control, /Press @\(0x1B\) 'Esc: dismiss message menu'/);
+  assert.match(control, /\$menuLook = \[VerifyNative\]::MenuLook\(/);
+  assert.match(control, /\$menuLook\.cornerShown\) \{ throw/);
+  assert.match(control, /\$menuLook\.leftEdge -ne \$menuLook\.fill -or \$menuLook\.rightEdge -ne \$menuLook\.fill\) \{ throw/);
   assert.match(control, /class -eq '#32768' -and \$_.visible \}\).Count -eq 0/);
   for (const name of ['message-menu', 'grey-buttons']) assert.ok(control.includes(`name = '${name}'; passed = $false; reason = 'not reached'`));
   assert.match(control, /new System.Drawing.Bitmap\(image\)/);

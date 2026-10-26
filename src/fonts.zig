@@ -213,25 +213,158 @@ extern "user32" fn SetMenuInfo(w.HANDLE, *const MenuInfo) callconv(w.WINAPI) w.B
 
 const MessageMenuStyle = struct {
     background: w.HANDLE,
-    hover: w.HANDLE,
+    hover: w.DWORD,
     ink: w.DWORD,
+    dim: w.DWORD,
     icons: w.HANDLE,
+    show_icons: bool,
 };
 var message_menu_style: ?MessageMenuStyle = null;
+threadlocal var menu_window_hook: w.HANDLE = null;
+threadlocal var menu_clip_hwnd: w.HANDLE = null;
+threadlocal var menu_clip_width: i32 = 0;
+threadlocal var menu_clip_height: i32 = 0;
+const menu_window_radius: i32 = 12;
+
+const DWMWA_WINDOW_CORNER_PREFERENCE: w.DWORD = 33;
+const DWMWA_BORDER_COLOR: w.DWORD = 34;
+const DWMWCP_ROUND: w.DWORD = 2;
+const DWMWA_COLOR_NONE: w.DWORD = 0xFFFFFFFE;
+
+var smooth_fill_round_rect: ?*const fn (w.HANDLE, w.RECT, i32, u32) void = null;
+
+pub const MenuTheme = struct {
+    background: *const fn () w.DWORD,
+    foreground: *const fn () w.DWORD,
+    fill_round_rect: *const fn (w.HANDLE, w.RECT, i32, u32) void,
+};
+
+var menu_theme: ?MenuTheme = null;
+
+pub fn bindMenuTheme(theme: MenuTheme) void {
+    menu_theme = theme;
+}
+
+fn unboundBackground() w.DWORD {
+    return 0x1E1E1E;
+}
+
+fn unboundForeground() w.DWORD {
+    return 0xFFFFFF;
+}
+
+fn cornerInset(radius: i32, from_edge: i32) i32 {
+    if (from_edge >= radius) return 0;
+    const dy = radius - from_edge - 1;
+    return radius - @as(i32, @intFromFloat(@sqrt(@as(f32, @floatFromInt(radius * radius - dy * dy)))));
+}
+
+fn fillMenuRow(dc: w.HANDLE, row: w.RECT, radius: i32, color: w.DWORD) void {
+    if (smooth_fill_round_rect) |fill| return fill(dc, row, radius, color);
+    const brush = w.CreateSolidBrush(color);
+    defer _ = w.DeleteObject(brush);
+    var y = row.top;
+    while (y < row.bottom) : (y += 1) {
+        const inset = cornerInset(radius, @min(y - row.top, row.bottom - 1 - y));
+        const span = w.RECT{ .left = row.left + inset, .top = y, .right = row.right - inset, .bottom = y + 1 };
+        _ = w.FillRect(dc, &span, brush);
+    }
+}
+
+fn clipMenuWindow(hwnd: w.HANDLE) void {
+    var outer: w.RECT = undefined;
+    var inner: w.RECT = undefined;
+    if (w.GetWindowRect(hwnd, &outer) == 0 or w.GetClientRect(hwnd, &inner) == 0) return;
+    const width = outer.right - outer.left;
+    const height = outer.bottom - outer.top;
+    if (menu_clip_hwnd == hwnd and menu_clip_width == width and menu_clip_height == height) return;
+    menu_clip_hwnd = hwnd;
+    menu_clip_width = width;
+    menu_clip_height = height;
+    const side = @max(0, @divTrunc(width - (inner.right - inner.left), 2));
+    const edge = @max(0, @divTrunc(height - (inner.bottom - inner.top), 2));
+    const radius = @min(menu_window_radius, @divTrunc(height - 2 * edge, 2));
+    const region = w.CreateRectRgn(side, edge + radius, width - side, height - edge - radius);
+    var row: i32 = 0;
+    while (row < radius) : (row += 1) {
+        const inset = cornerInset(radius, row);
+        const top = w.CreateRectRgn(side + inset, edge + row, width - side - inset, edge + row + 1);
+        const bottom = w.CreateRectRgn(side + inset, height - edge - row - 1, width - side - inset, height - edge - row);
+        _ = w.CombineRgn(region, region, top, 2);
+        _ = w.CombineRgn(region, region, bottom, 2);
+        _ = w.DeleteObject(top);
+        _ = w.DeleteObject(bottom);
+    }
+    _ = w.SetWindowRgn(hwnd, region, 1);
+}
+
+fn roundMenuWindow(hwnd: w.HANDLE) bool {
+    var round = DWMWCP_ROUND;
+    const rounded = w.DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, @ptrCast(&round), @sizeOf(w.DWORD)) == 0;
+    var none = DWMWA_COLOR_NONE;
+    const borderless = w.DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, @ptrCast(&none), @sizeOf(w.DWORD)) == 0;
+    return rounded and borderless;
+}
+
+const WindowReturn = extern struct {
+    result: w.LRESULT,
+    lparam: w.LPARAM,
+    wparam: w.WPARAM,
+    message: u32,
+    hwnd: w.HANDLE,
+};
+
+fn menuWindowHook(code: i32, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
+    if (code >= 0 and lp != 0) {
+        const info: *const WindowReturn = @ptrFromInt(@as(usize, @bitCast(lp)));
+        if (info.message == 0x47 or info.message == 0x18) styleMenuWindow(info.hwnd);
+    }
+    return w.CallNextHookEx(menu_window_hook, code, wp, lp);
+}
+
+fn styleMenuWindow(hwnd: w.HANDLE) void {
+    var class: [8]u16 = @splat(0);
+    const len = w.GetClassNameW(hwnd, &class, class.len);
+    if (len > 0 and std.mem.eql(u16, class[0..@intCast(len)], L("#32768"))) {
+        _ = roundMenuWindow(hwnd);
+        clipMenuWindow(hwnd);
+    }
+}
 
 pub fn trackMessagePopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT) w.BOOL {
-    const themes = @import("themes.zig");
-    const style = @import("chat_style.zig");
-    const bg = themes.themeSidebarBg();
-    const background = w.CreateSolidBrush(bg);
+    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, true);
+}
+
+fn mixColor(a: w.DWORD, b: w.DWORD) w.DWORD {
+    const r = ((a & 0xFF) + (b & 0xFF)) / 2;
+    const g = (((a >> 8) & 0xFF) + ((b >> 8) & 0xFF)) / 2;
+    const bl = (((a >> 16) & 0xFF) + ((b >> 16) & 0xFF)) / 2;
+    return r | (g << 8) | (bl << 16);
+}
+
+fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, show_icons: bool) w.BOOL {
+    const chat_style = @import("chat_style.zig");
+    const bound = menu_theme;
+    const look = chat_style.menuLook(if (bound) |theme| theme.background() else unboundBackground());
+    const background = w.CreateSolidBrush(look.fill);
     defer _ = w.DeleteObject(background);
-    const hover = w.CreateSolidBrush(style.shift(bg, if (style.isDark(bg)) 20 else -12));
-    defer _ = w.DeleteObject(hover);
-    const icons = messageMenuIconFont();
-    defer _ = w.DeleteObject(icons);
+    const icons = if (show_icons) messageMenuIconFont() else w.GetStockObject(13);
+    defer if (show_icons) {
+        _ = w.DeleteObject(icons);
+    };
     const info = MenuInfo{ .background = background };
     _ = SetMenuInfo(menu, &info);
-    return trackPopupMenuStyled(menu, flags, x, y, reserved, owner, rect, .{ .background = background, .hover = hover, .ink = themes.themeConsoleFg(), .icons = icons });
+    defer _ = SetMenuInfo(menu, &MenuInfo{ .background = null });
+    const ink = if (bound) |theme| theme.foreground() else unboundForeground();
+    smooth_fill_round_rect = if (bound) |theme| theme.fill_round_rect else null;
+    menu_clip_hwnd = null;
+    const previous_hook = menu_window_hook;
+    menu_window_hook = w.SetWindowsHookExW(12, &menuWindowHook, null, w.GetCurrentThreadId());
+    defer {
+        if (menu_window_hook != null) _ = w.UnhookWindowsHookEx(menu_window_hook);
+        menu_window_hook = previous_hook;
+    }
+    return trackPopupMenuStyled(menu, flags, x, y, reserved, owner, rect, .{ .background = background, .hover = look.hover, .ink = ink, .dim = mixColor(ink, look.fill), .icons = icons, .show_icons = show_icons });
 }
 
 pub fn messageMenuIconFont() w.HANDLE {
@@ -275,7 +408,7 @@ const DrawItem = extern struct {
 var menu_labels: []MenuLabel = &.{};
 
 pub fn trackPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT) w.BOOL {
-    return trackPopupMenuStyled(menu, flags, x, y, reserved, owner, rect, null);
+    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, false);
 }
 
 fn trackPopupMenuStyled(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, style: ?MessageMenuStyle) w.BOOL {
@@ -337,7 +470,7 @@ pub fn menuMessage(msg: w.UINT, lp: w.LPARAM) ?w.LRESULT {
         var size: w.SIZE = .{ .cx = 0, .cy = 16 };
         _ = w.GetTextExtentPoint32W(dc, &label.text, label.len, &size);
         item.width = @intCast(size.cx + 48);
-        item.height = @intCast(@max(24, size.cy + 8));
+        item.height = @intCast(@max(if (message_menu_style != null) @as(i32, @import("chat_style.zig").MENU_ROW_HEIGHT) else 24, size.cy + 8));
         return 1;
     }
     if (msg == 0x2b) {
@@ -347,19 +480,31 @@ pub fn menuMessage(msg: w.UINT, lp: w.LPARAM) ?w.LRESULT {
         const selected = item.state & 1 != 0;
         const disabled = item.state & 6 != 0;
         const style = message_menu_style;
-        _ = w.FillRect(item.dc, &item.rect, if (style) |theme| (if (selected) theme.hover else theme.background) else @ptrFromInt(@as(usize, if (selected) 14 else 5) + 1));
+        if (style != null) {
+            if (w.WindowFromDC(item.dc)) |menu_window| styleMenuWindow(menu_window);
+        }
+        _ = w.FillRect(item.dc, &item.rect, if (style) |theme| theme.background else @ptrFromInt(@as(usize, if (selected) 14 else 5) + 1));
+        if (style) |theme| {
+            if (selected) {
+                const chat_style = @import("chat_style.zig");
+                const inset = chat_style.MENU_ROW_INSET;
+                const row = w.RECT{ .left = item.rect.left + inset, .top = item.rect.top + inset / 2, .right = item.rect.right - inset, .bottom = item.rect.bottom - inset / 2 };
+                fillMenuRow(item.dc, row, chat_style.MENU_ROW_RADIUS, theme.hover);
+            }
+        }
         const old = w.SelectObject(item.dc, controlFont());
         defer _ = w.SelectObject(item.dc, old);
         const old_mode = w.SetBkMode(item.dc, 1);
         defer _ = w.SetBkMode(item.dc, old_mode);
-        const old_color = w.SetTextColor(item.dc, if (style) |theme| theme.ink else w.GetSysColor(if (disabled) 17 else if (selected) 14 else 7));
+        const old_color = w.SetTextColor(item.dc, if (style) |theme| (if (disabled) theme.dim else theme.ink) else w.GetSysColor(if (disabled) 17 else if (selected) 14 else 7));
         defer _ = w.SetTextColor(item.dc, old_color);
         var text_rect = item.rect;
-        text_rect.left += if (style != null) @as(i32, 36) else 28;
+        text_rect.left += if (style) |theme| (if (theme.show_icons) @as(i32, 36) else 28) else 28;
         _ = w.DrawTextW(item.dc, &label.text, label.len, &text_rect, w.DT_SINGLELINE | w.DT_VCENTER);
-        if (style) |theme| {
+        const icons_on = if (style) |theme| theme.show_icons else false;
+        if (icons_on) {
             if (std.enums.fromInt(MessageMenuItem, label.id)) |action| {
-                const old_icon = w.SelectObject(item.dc, theme.icons);
+                const old_icon = w.SelectObject(item.dc, style.?.icons);
                 defer _ = w.SelectObject(item.dc, old_icon);
                 var icon_rect = item.rect;
                 icon_rect.left += 10;
@@ -453,6 +598,63 @@ test "owner drawn menu measurement and mnemonics use the active Plex labels" {
     try std.testing.expectEqual(@as(?w.LRESULT, 2 << 16), menuChar('C'));
     labels[0].state = 1;
     try std.testing.expect(menuChar('c') == null);
+}
+
+fn drawMenuRowForTest(selected: bool, bg: w.DWORD) !struct { fill: w.DWORD, hover: w.DWORD, corner: w.DWORD, middle: w.DWORD, edge: w.DWORD } {
+    const chat_style = @import("chat_style.zig");
+    const look = chat_style.menuLook(bg);
+    const screen = w.GetDC(null);
+    defer _ = w.ReleaseDC(null, screen);
+    const dc = w.CreateCompatibleDC(screen);
+    try std.testing.expect(dc != null);
+    defer _ = w.DeleteDC(dc);
+    const bitmap = w.CreateCompatibleBitmap(screen, 200, 40);
+    try std.testing.expect(bitmap != null);
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const background = w.CreateSolidBrush(look.fill);
+    defer _ = w.DeleteObject(background);
+    var labels = [_]MenuLabel{.{ .len = 5, .id = 4 }};
+    @memcpy(labels[0].text[0..5], L("Reply"));
+    menu_labels = &labels;
+    defer menu_labels = &.{};
+    message_menu_style = .{ .background = background, .hover = look.hover, .ink = 0xFFFFFF, .dim = 0x808080, .icons = w.GetStockObject(13), .show_icons = false };
+    defer message_menu_style = null;
+    var item = std.mem.zeroes(DrawItem);
+    item.kind = 1;
+    item.state = if (selected) 1 else 0;
+    item.dc = dc;
+    item.rect = .{ .left = 0, .top = 0, .right = 200, .bottom = chat_style.MENU_ROW_HEIGHT };
+    item.data = @intFromPtr(&labels[0]);
+    try std.testing.expectEqual(@as(?w.LRESULT, 1), menuMessage(0x2b, @bitCast(@intFromPtr(&item))));
+    return .{
+        .fill = look.fill,
+        .hover = look.hover,
+        .corner = w.GetPixel(dc, chat_style.MENU_ROW_INSET, chat_style.MENU_ROW_INSET / 2),
+        .middle = w.GetPixel(dc, 150, chat_style.MENU_ROW_HEIGHT / 2),
+        .edge = w.GetPixel(dc, 0, chat_style.MENU_ROW_HEIGHT / 2),
+    };
+}
+
+test "IGSH-892 right-click menu rows use chat bubble colours with a rounded hover highlight" {
+    inline for (.{ 0x1E1E1E, 0xFFFFFF }) |bg| {
+        const rest = try drawMenuRowForTest(false, bg);
+        try std.testing.expectEqual(rest.fill, rest.middle);
+        try std.testing.expectEqual(rest.fill, rest.corner);
+        const hovered = try drawMenuRowForTest(true, bg);
+        try std.testing.expectEqual(hovered.hover, hovered.middle);
+        try std.testing.expectEqual(hovered.fill, hovered.corner);
+        try std.testing.expectEqual(hovered.fill, hovered.edge);
+        try std.testing.expect(hovered.hover != hovered.fill);
+    }
+}
+
+test "IGSH-892 popup menu windows are rounded without a light border" {
+    const hwnd = w.CreateWindowExW(0, L("#32768"), null, 0x80000000, 0, 0, 100, 100, null, null, null, null);
+    try std.testing.expect(hwnd != null);
+    defer _ = w.DestroyWindow(hwnd);
+    if (!roundMenuWindow(hwnd)) return error.SkipZigTest;
 }
 
 test "Chat View requests grayscale Regular body and Bold emphasis" {

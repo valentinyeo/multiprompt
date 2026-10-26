@@ -479,6 +479,33 @@ public static class VerifyNative {
         }
         throw new InvalidOperationException("No painted user message bubble in transcript");
     }
+    [DllImport("user32.dll")] static extern int GetWindowRgn(IntPtr hwnd, IntPtr region);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")] static extern bool PtInRegion(IntPtr region, int x, int y);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr handle);
+    public static Dictionary<string, object> MenuLook(IntPtr menu) {
+        Rect rect, client;
+        if (!GetWindowRect(menu, out rect) || !GetClientRect(menu, out client)) throw new InvalidOperationException("Menu rectangle unavailable");
+        int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
+        int side = Math.Max(0, (width - (client.Right - client.Left)) / 2);
+        IntPtr region = CreateRectRgn(0, 0, 0, 0);
+        try {
+            bool clipped = GetWindowRgn(menu, region) > 0;
+            Func<int, int, bool> shown = (x, y) => !clipped || PtInRegion(region, x, y);
+            using (var pixels = new System.Drawing.Bitmap(width, height))
+            using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+                graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, pixels.Size);
+                Func<int, int, string> hex = (x, y) => (pixels.GetPixel(x, y).ToArgb() & 0xFFFFFF).ToString("X6");
+                return new Dictionary<string, object> {
+                    { "width", width }, { "height", height }, { "clipped", clipped }, { "side", side },
+                    { "fill", hex(width / 2, height - 6) },
+                    { "cornerShown", shown(0, 0) && hex(0, 0) == hex(0, height / 2) },
+                    { "corner", hex(0, 0) }, { "corner2", hex(2, 2) }, { "outerLeft", hex(0, height / 2) },
+                    { "leftEdge", hex(side, height / 2) }, { "rightEdge", hex(width - 1 - side, height / 2) }
+                };
+            }
+        } finally { DeleteObject(region); }
+    }
     public static Point[] SelectTranscriptText(IntPtr hwnd, uint pid, IntPtr owner) {
         Point bubble = MessageBubblePoint(hwnd);
         Rect rect;
@@ -3874,7 +3901,12 @@ try {
                                 if ($menuLines.Count -ne $menuLinesBefore + 1 -or $menuLines[-1] -cnotmatch '\[chat\] message menu items=Reply,Copy$') { throw ('Unexpected message menu: ' + $menuLines[-1]) }
                                 $menuCheck.items = 'Reply,Copy'
                                 Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 1 } 'owned native message popup visible'
+                                $menuWindow = @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible })[0]
+                                $menuLook = [VerifyNative]::MenuLook([IntPtr]::new([int64]$menuWindow.handle))
+                                $menuCheck.look = $menuLook
                                 Snapshot 'message-menu'
+                                if ($menuLook.cornerShown) { throw 'IGSH-892: message menu corner is still drawn, so the menu is square' }
+                                if ($menuLook.leftEdge -ne $menuLook.fill -or $menuLook.rightEdge -ne $menuLook.fill) { throw ('IGSH-892: message menu has a border: edges ' + $menuLook.leftEdge + ' and ' + $menuLook.rightEdge + ' differ from fill ' + $menuLook.fill) }
                                 Press @(0x1B) 'Esc: dismiss message menu'
                                 Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'no visible owned native popup after Esc'
                                 $menuCheck.passed = $true

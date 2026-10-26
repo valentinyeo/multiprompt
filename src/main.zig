@@ -7897,6 +7897,11 @@ pub fn main(init: std.process.Init) void {
 
     defer @import("fonts.zig").unregister();
     if (!@import("fonts.zig").register()) return;
+    @import("fonts.zig").bindMenuTheme(.{
+        .background = &@import("themes.zig").themeConsoleBg,
+        .foreground = &@import("themes.zig").themeConsoleFg,
+        .fill_round_rect = &@import("smooth.zig").fillRoundRect,
+    });
 
     if (parseSyncAuthCallbackArg()) |callback_url| {
         if (handleSyncAuthCallback(callback_url)) {
