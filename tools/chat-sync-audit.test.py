@@ -374,6 +374,25 @@ class ChatSyncAuditTest(unittest.TestCase):
                 self.assertEqual(findings[0]['text'], text)
                 self.assertEqual(findings[0]['transcript_lines'], [])
 
+    def test_igsh1007_text_above_blinked_off_advisor_line_is_not_missing_chat(self):
+        reader = audit.load_reader()
+        text = 'The neutral change is ready for an advisor review before the next step.'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_bytes(b'')
+            wire = self.wire([]).replace('\t0\t100\t', '\t0\t0\t')
+            capture = '● ' + text + '\n\n  Ran 5 shell commands\n\n  Advising using Fable 5.1\n\n✽ Working… (2m 12s · ↓ 10.0k tokens)\n' + '\n' * 8
+            def command(argv, **kwargs):
+                return capture if argv[0] == 'tmux' else ''.join(
+                    json.dumps(dict(probe=index, present=False)) + '\n' for index in range(argv.count('--contains')))
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', path)), \
+                 patch.object(reader, 'claude_session_metadata', return_value=(None, None)), \
+                 patch.object(reader, 'read_process_cwd', return_value=''), \
+                 patch.object(reader, 'response', return_value=wire), patch.object(audit, 'run', side_effect=command), \
+                 patch.object(audit.time, 'sleep') as sleep:
+                self.assertEqual([item['advising'] for item in audit.pane_candidates(capture)], [True])
+                self.assertEqual(audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, Path('neutral-audit'), sleep), [])
+
     def test_igsh686_text_around_finished_advisor_waits_for_message_write(self):
         reader = audit.load_reader()
         texts = ['Calling the advisor before committing to the fix plan.',
