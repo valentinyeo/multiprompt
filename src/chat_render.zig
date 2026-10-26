@@ -1774,9 +1774,10 @@ fn chatPaintWorking(hdc: HANDLE, now: u64) void {
 pub fn chatRelayout(client_width: i32) void {
     g_working_rect = null;
     app_state.g_chat_layout_dirty = false;
-    if (app_state.g_chat_layout_width != client_width or app_state.g_chat_layout_scale != uiScaled(1024) or app_state.g_chat_layout_font_pt != app_state.g_chat_font_pt or app_state.g_chat_find_layout_open != app_state.g_chat_find_open) app_state.g_chat_layout_reuse = 0;
+    if (app_state.g_chat_layout_width != client_width or app_state.g_chat_layout_scale != uiScaled(1024) or app_state.g_chat_layout_top_pad != app_state.g_chat_top_pad or app_state.g_chat_layout_font_pt != app_state.g_chat_font_pt or app_state.g_chat_find_layout_open != app_state.g_chat_find_open) app_state.g_chat_layout_reuse = 0;
     app_state.g_chat_layout_width = client_width;
     app_state.g_chat_layout_scale = uiScaled(1024);
+    app_state.g_chat_layout_top_pad = app_state.g_chat_top_pad;
     app_state.g_chat_layout_font_pt = app_state.g_chat_font_pt;
     app_state.g_chat_find_layout_open = app_state.g_chat_find_open;
     if (client_width <= 0 or app_state.g_chat_transcript_hwnd == null) {
@@ -1817,7 +1818,7 @@ pub fn chatRelayout(client_width: i32) void {
         }
     }
     app_state.g_chat_img_mutex.unlock();
-    var y: i32 = if (reuse > 0) app_state.g_chat_layout_rects[reuse - 1].bottom else if (app_state.g_chat_find_open) uiScaled(app_state.CHAT_FIND_TOP_H) else 0;
+    var y: i32 = if (reuse > 0) app_state.g_chat_layout_rects[reuse - 1].bottom else app_state.g_chat_top_pad + (if (app_state.g_chat_find_open) uiScaled(app_state.CHAT_FIND_TOP_H) else 0);
     var has_previous = false;
     for (app_state.g_chat_blocks[0..reuse]) |block| {
         if (block.role != .tool) {
@@ -1882,17 +1883,27 @@ pub fn chatRelayout(client_width: i32) void {
     app_state.g_chat_content_h = y;
 }
 
+pub fn chatViewClientRect(rc: *RECT) void {
+    _ = GetClientRect(app_state.g_chat_transcript_hwnd, rc);
+    rc.bottom = @max(rc.top + 1, rc.bottom - app_state.g_chat_bottom_inset);
+}
+
+pub fn chatTopPad() i32 {
+    const title_h = @import("browser_pane.zig").threadTitleHeight();
+    return if (title_h > 0) title_h + uiScaled(8) else 0;
+}
+
 pub fn chatMaxScroll() i32 {
     if (app_state.g_chat_transcript_hwnd == null) return 0;
     var client_rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client_rc);
+    chatViewClientRect(&client_rc);
     return @max(0, app_state.g_chat_content_h - (client_rc.bottom - client_rc.top));
 }
 
 pub fn chatMinScroll() i32 {
     if (app_state.g_chat_transcript_hwnd == null) return 0;
     var client_rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client_rc);
+    chatViewClientRect(&client_rc);
     return @min(0, app_state.g_chat_content_h - (client_rc.bottom - client_rc.top));
 }
 
@@ -1908,7 +1919,7 @@ pub fn chatJumpToNewest() void {
     chatScrollBy(-app_state.g_chat_content_h);
     if (app_state.g_chat_transcript_hwnd == null) return;
     var client: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
+    chatViewClientRect(&client);
     chatScrollStateChanged(client.bottom - client.top);
 }
 
@@ -1933,7 +1944,7 @@ pub fn chatScrollBy(delta_px: i32) void {
     app_state.g_chat_scroll_y = new_y;
     chatScrollActivity();
     var client: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
+    chatViewClientRect(&client);
     chatScrollStateChanged(client.bottom - client.top);
     if (app_state.g_chat_scrolled_up) app_state.g_chat_scroll_bottom_pending = false;
     app_state.g_chat_hover_copy = null;
@@ -2356,7 +2367,7 @@ pub fn chatImageReady() void {
     app_state.g_chat_layout_reuse = 0;
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null or app_state.g_chat_block_count == 0) return;
     var client_rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client_rc);
+    chatViewClientRect(&client_rc);
     const viewport_h = client_rc.bottom - client_rc.top;
     chatRelayoutPreservingScroll(client_rc.right - client_rc.left, viewport_h);
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
@@ -4256,7 +4267,7 @@ fn chatPaintEmpty(hdc: HANDLE, width: i32, message: LPCWSTR) void {
     _ = SetBkMode(hdc, TRANSPARENT);
     const old_font = SelectObject(hdc, chatMetadataFont());
     _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)));
-    var load_rc = RECT{ .left = uiScaled(16), .top = uiScaled(12), .right = width - uiScaled(16), .bottom = uiScaled(44) };
+    var load_rc = RECT{ .left = uiScaled(16), .top = uiScaled(12) + app_state.g_chat_top_pad, .right = width - uiScaled(16), .bottom = uiScaled(44) + app_state.g_chat_top_pad };
     if (app_state.g_chat_find_open) {
         load_rc.top += uiScaled(app_state.CHAT_FIND_TOP_H);
         load_rc.bottom += uiScaled(app_state.CHAT_FIND_TOP_H);
@@ -4300,6 +4311,70 @@ fn chatPaintReadDivider(hdc: HANDLE, width: i32) void {
     _ = chatDrawText(hdc, L("New"), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
+pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) void {
+    var client_rc = RECT{ .left = 0, .top = 0, .right = w, .bottom = h };
+    var canvas = @import("smooth.zig").Canvas.init(mem_dc);
+    defer canvas.deinit();
+    const bg_brush = CreateSolidBrush(themeConsoleBg());
+    _ = FillRect(mem_dc, &client_rc, bg_brush);
+    _ = DeleteObject(bg_brush);
+    if (app_state.active_shell < app_state.shell_count) {
+        const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
+        const first = if (chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], app_state.g_chat_scroll_y)) |anchor| anchor.index else app_state.g_chat_block_count;
+        for (first..app_state.g_chat_block_count) |i| {
+            if (app_state.g_chat_blocks[i].role == .tool) continue;
+            var rc = app_state.g_chat_layout_rects[i];
+            rc.left += app_state.g_chat_content_left;
+            rc.right += app_state.g_chat_content_left;
+            rc.top -= app_state.g_chat_scroll_y;
+            rc.bottom -= app_state.g_chat_scroll_y;
+            if (rc.top > h) break;
+            if (rc.bottom <= paint.top or rc.top >= paint.bottom or rc.right <= paint.left or rc.left >= paint.right) continue;
+            chatPaintBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], rc);
+            chatPaintBlockImages(mem_dc, i, rc);
+            @import("chat_find_ui.zig").paintMatch(mem_dc, app_state.g_chat_blocks[i], rc);
+            if (app_state.g_voice_state == .speaking and app_state.g_voice_highlight != null and
+                i >= app_state.g_voice_highlight.?.start and i < app_state.g_voice_highlight.?.end)
+            {
+                const mark = CreateSolidBrush(if (app_state.g_light_theme) RGB(130, 159, 191) else RGB(90, 123, 163));
+                var stripe = RECT{ .left = rc.right - uiScaled(4), .top = rc.top, .right = rc.right - uiScaled(2), .bottom = rc.bottom };
+                _ = FillRect(mem_dc, &stripe, mark);
+                _ = DeleteObject(mark);
+            }
+        }
+        chatPaintReadDivider(mem_dc, w);
+        for (0..app_state.g_chat_echo_layout_count) |i| {
+            var rc = app_state.g_chat_echo_layout[i];
+            rc.top -= app_state.g_chat_scroll_y;
+            rc.bottom -= app_state.g_chat_scroll_y;
+            if (rc.bottom < 0 or rc.top > h) continue;
+            if (rc.bottom <= paint.top or rc.top >= paint.bottom or rc.right <= paint.left or rc.left >= paint.right) continue;
+            const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse continue;
+            const display = chatSelectionDisplay(app_state.g_chat_block_count + i) orelse continue;
+            chatPaintEcho(mem_dc, app_state.g_chat_outbox.items[ei], rc, display.start);
+        }
+        for (0..g_shell_rect_count) |i| {
+            var rc = g_shell_rect[i];
+            rc.top -= app_state.g_chat_scroll_y;
+            rc.bottom -= app_state.g_chat_scroll_y;
+            if (rc.bottom < 0 or rc.top > h) continue;
+            if (rc.bottom <= paint.top or rc.top >= paint.bottom or rc.right <= paint.left or rc.left >= paint.right) continue;
+            chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
+        }
+        chatPaintWorking(mem_dc, GetTickCount64());
+        if (app_state.g_chat_block_count == 0 and g_working_rect == null) {
+            const entry = chatHistoryEntry(chatFileIdentity());
+            const message = if (entry) |e|
+                (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else if (e.pending or app_state.g_chat_switch_loading) L("Loading conversation...") else L("No conversation yet"))
+            else
+                L("No conversation yet");
+            chatPaintEmpty(mem_dc, w, message);
+        }
+    }
+    chatPaintScrollUi(&canvas, mem_dc, w, @max(1, h - app_state.g_chat_bottom_inset));
+    @import("chat_find_ui.zig").paint(mem_dc, w);
+}
+
 fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
@@ -4313,7 +4388,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         WM_ERASEBKGND => return 1,
         WM_SIZE => {
             var client_rc: RECT = std.mem.zeroes(RECT);
-            _ = GetClientRect(hwnd, &client_rc);
+            chatViewClientRect(&client_rc);
             chatRelayoutPreservingScroll(client_rc.right - client_rc.left, client_rc.bottom - client_rc.top);
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
@@ -4345,67 +4420,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             defer _ = DeleteObject(bmp);
             const old_bmp = SelectObject(mem_dc, bmp);
             defer _ = SelectObject(mem_dc, old_bmp);
-            var canvas = @import("smooth.zig").Canvas.init(mem_dc);
-            defer canvas.deinit();
-            const bg_brush = CreateSolidBrush(themeConsoleBg());
-            _ = FillRect(mem_dc, &client_rc, bg_brush);
-            _ = DeleteObject(bg_brush);
-            if (app_state.active_shell < app_state.shell_count) {
-                const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
-                const first = if (chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], app_state.g_chat_scroll_y)) |anchor| anchor.index else app_state.g_chat_block_count;
-                for (first..app_state.g_chat_block_count) |i| {
-                    if (app_state.g_chat_blocks[i].role == .tool) continue;
-                    var rc = app_state.g_chat_layout_rects[i];
-                    rc.left += app_state.g_chat_content_left;
-                    rc.right += app_state.g_chat_content_left;
-                    rc.top -= app_state.g_chat_scroll_y;
-                    rc.bottom -= app_state.g_chat_scroll_y;
-                    if (rc.top > h) break;
-                    if (rc.bottom <= ps.rcPaint.top or rc.top >= ps.rcPaint.bottom or rc.right <= ps.rcPaint.left or rc.left >= ps.rcPaint.right) continue;
-                    chatPaintBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], rc);
-                    chatPaintBlockImages(mem_dc, i, rc);
-                    @import("chat_find_ui.zig").paintMatch(mem_dc, app_state.g_chat_blocks[i], rc);
-                    if (app_state.g_voice_state == .speaking and app_state.g_voice_highlight != null and
-                        i >= app_state.g_voice_highlight.?.start and i < app_state.g_voice_highlight.?.end)
-                    {
-                        const mark = CreateSolidBrush(if (app_state.g_light_theme) RGB(130, 159, 191) else RGB(90, 123, 163));
-                        var stripe = RECT{ .left = rc.right - uiScaled(4), .top = rc.top, .right = rc.right - uiScaled(2), .bottom = rc.bottom };
-                        _ = FillRect(mem_dc, &stripe, mark);
-                        _ = DeleteObject(mark);
-                    }
-                }
-                chatPaintReadDivider(mem_dc, w);
-                for (0..app_state.g_chat_echo_layout_count) |i| {
-                    var rc = app_state.g_chat_echo_layout[i];
-                    rc.top -= app_state.g_chat_scroll_y;
-                    rc.bottom -= app_state.g_chat_scroll_y;
-                    if (rc.bottom < 0 or rc.top > h) continue;
-                    if (rc.bottom <= ps.rcPaint.top or rc.top >= ps.rcPaint.bottom or rc.right <= ps.rcPaint.left or rc.left >= ps.rcPaint.right) continue;
-                    const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse continue;
-                    const display = chatSelectionDisplay(app_state.g_chat_block_count + i) orelse continue;
-                    chatPaintEcho(mem_dc, app_state.g_chat_outbox.items[ei], rc, display.start);
-                }
-                for (0..g_shell_rect_count) |i| {
-                    var rc = g_shell_rect[i];
-                    rc.top -= app_state.g_chat_scroll_y;
-                    rc.bottom -= app_state.g_chat_scroll_y;
-                    if (rc.bottom < 0 or rc.top > h) continue;
-                    if (rc.bottom <= ps.rcPaint.top or rc.top >= ps.rcPaint.bottom or rc.right <= ps.rcPaint.left or rc.left >= ps.rcPaint.right) continue;
-                    chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
-                }
-                chatPaintWorking(mem_dc, GetTickCount64());
-                if (app_state.g_chat_block_count == 0 and g_working_rect == null) {
-                    const entry = chatHistoryEntry(chatFileIdentity());
-                    const message = if (entry) |e|
-                        (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else if (e.pending or app_state.g_chat_switch_loading) L("Loading conversation...") else L("No conversation yet"))
-                    else
-                        L("No conversation yet");
-                    chatPaintEmpty(mem_dc, w, message);
-                }
-            }
-            chatPaintScrollUi(&canvas, mem_dc, w, h);
-            @import("chat_find_ui.zig").paint(mem_dc, w);
-            canvas.deinit();
+            chatPaintTranscriptContent(mem_dc, w, h, ps.rcPaint);
             painted = BitBlt(hdc, 0, 0, w, h, mem_dc, 0, 0, GDI_SRCCOPY) != 0;
             return 0;
         },
@@ -4665,7 +4680,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 return 0;
             }
             var client_rc: RECT = std.mem.zeroes(RECT);
-            _ = GetClientRect(hwnd, &client_rc);
+            chatViewClientRect(&client_rc);
             const page = @max(uiScaled(24), client_rc.bottom - client_rc.top - uiScaled(24));
             switch (wp) {
                 0x21 => chatScrollBy(page),
@@ -4694,7 +4709,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 var pt: POINT = undefined;
                 if (GetCursorPos(&pt) == 0 or ScreenToClient(hwnd, &pt) == 0) return 0;
                 var client_rc: RECT = std.mem.zeroes(RECT);
-                _ = GetClientRect(hwnd, &client_rc);
+                chatViewClientRect(&client_rc);
                 if (pt.y < 0) {
                     chatScrollBy(uiScaled(24));
                 } else if (pt.y > client_rc.bottom) {

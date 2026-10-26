@@ -1150,6 +1150,10 @@ pub var g_chat_bubble_pos: []chat_style.BubblePos = &g_chat_bubble_storage;
 pub var g_chat_layout_width: i32 = 0;
 pub var g_chat_layout_reuse: usize = 0;
 pub var g_chat_layout_scale: i32 = 0;
+pub var g_chat_layout_top_pad: i32 = 0;
+pub var g_chat_top_pad: i32 = 0;
+pub var g_chat_bottom_inset: i32 = 0;
+pub var g_chat_hole_signature: u64 = 0;
 pub var g_chat_layout_font_pt: i32 = 0;
 pub var g_chat_layout_dirty = false;
 pub var g_chat_content_h: i32 = 0;
@@ -2463,6 +2467,7 @@ pub var g_webview2_focus_retries: u8 = 0;
 pub const ChatViewLayout = struct {
     pane: RECT,
     transcript: RECT,
+    transcript_window: RECT,
     composer_card: RECT,
     composer: RECT,
     send_btn: RECT,
@@ -2529,6 +2534,7 @@ pub const ChatLayoutSnapshot = struct {
     stable_blocks: usize,
     width: i32,
     scale: i32,
+    top_pad: i32,
     font_pt: i32,
     clean: bool,
     boundary: chat_history.ReadBoundary,

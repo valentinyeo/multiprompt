@@ -276,7 +276,7 @@ pub fn chatSurfaceBorderColor() DWORD {
     return customColorOr("overlay_border", if (app_state.g_light_theme) RGB(226, 229, 234) else RGB(41, 45, 55));
 }
 
-fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, radius: i32) void {
+pub fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, radius: i32) void {
     const edge = chatSurfaceBorderW();
     fillRoundRectAA(hdc, rc, radius, border_color);
     fillRoundRectAA(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, @max(0, radius - edge), color);
@@ -498,6 +498,9 @@ pub fn invalidateSpinnerRects() void {
             .right = title_left + 56,
             .bottom = threadTitleTop() + threadTitleHeight(),
         };
+        if (app_state.g_chat_active) {
+            if (@import("drawing.zig").chatTitleLayout()) |title| title_rc = title.pill;
+        }
         _ = InvalidateRect(app_state.g_main_hwnd, &title_rc, 0);
     }
 }
