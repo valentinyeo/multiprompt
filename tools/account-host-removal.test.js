@@ -11,10 +11,10 @@ const hosts = [0, 1, 2].map(slot => ({ slot, name: `Server ${slot + 1}`, hostnam
 const layout = { schema: 1, revision: 1, workspaces: [], tabs: [], hosts };
 
 function merge(source, previous, incoming, tokens) {
-  const start = source.indexOf("        if (!layoutFeature(request, 'settings'))");
+  const start = source.indexOf("        if (!layoutFeature(req, 'settings'))");
   const end = source.indexOf('        const stored = new Map(', start);
   assert.ok(start >= 0 && end > start);
-  const context = { previousLayout: structuredClone(previous), layout: structuredClone(incoming), request: new Request('https://example.com', { headers: { 'X-Layout-Features': tokens } }) };
+  const context = { previousLayout: structuredClone(previous), layout: structuredClone(incoming), req: new Request('https://example.com', { headers: { 'X-Layout-Features': tokens } }) };
   vm.runInNewContext(source.slice(source.indexOf('const layoutFeature ='), source.indexOf('function layoutResponse')) + source.slice(start, end), context);
   return JSON.parse(JSON.stringify(context.layout));
 }

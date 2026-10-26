@@ -100,7 +100,7 @@ test('open starts tmux when missing and registers the session in the default wor
   assert.equal(result.code, 0, result.errors.join('\n'));
   assert.deepEqual(result.tmuxCalls.map(c => c[0]), ['has-session', 'new-session']);
   assert.match(result.lines[0], /opened fresh-one \(tmux session started\) \(revision 4\)/);
-  const added = (await stored()).layout.tabs.at(-1);
+  const added = (await stored()).layout.tabs.find(t => t.tmux_session === 'fresh-one');
   assert.deepEqual(added, { kind: 'tmux', name: 'Fresh one', tmux_session: 'fresh-one', tmux_host: 0, workspace: 'inne' });
   const again = await cli(['open', 'fresh-one', '--no-tmux'], innerKey);
   assert.match(again.lines[0], /already open/);
