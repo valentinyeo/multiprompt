@@ -161,7 +161,7 @@ function seamContract(source) {
   const fixture = source.slice(source.indexOf('fn dictationFixtureEnabled('), source.indexOf('fn captureDictationPcm('));
   for (const required of ['"GITHUB_ACTIONS", "true"', '"RUNNER_OS", "Windows"', '"MULTIPROMPT_NO_LOGIN", "1"', '"MULTIPROMPT_DICTATION_FIXTURE"', 'win32OpenRead(file)', 'win32ReadAll(handle, out)']) assert.ok(fixture.includes(required), required);
   const capture = source.slice(source.indexOf('fn captureDictationPcm('), source.indexOf('fn deepgramTranscribePcm('));
-  assert.match(capture, /if \(dictationFixtureEnabled\(\)\) \{\s*const n = readDictationFixture\("goforward.pcm", audio.buf\);[\s\S]*?while \(app_state.g_dictation_recording.load\(.acquire\)\) Sleep\(1\);\s*return;/);
+  assert.match(capture, /if \(dictationFixtureEnabled\(\)\) \{\s*const n = readDictationFixture\("goforward.pcm", audio.buf\);[\s\S]*?while \(app_state.g_dictation_recording.load\(.acquire\)\) \{[\s\S]*?Sleep\(100\);\s*\}\s*app_state.g_dictation_level.store\(0, .release\);\s*return;/);
   const transcribe = source.slice(source.indexOf('fn deepgramTranscribePcm('), source.indexOf('fn dictationWorkerThread('));
   const offline = transcribe.slice(0, transcribe.indexOf('    var key_buf:'));
   for (const required of ['if (dictationFixtureEnabled())', 'readDictationFixture("goforward.pcm", expected)', '!std.mem.eql(u8, audio, expected[0..expected_len])', 'readDictationFixture("response.json", &response)', 'parseDeepgramTranscript(response[0..n], transcript_out)']) assert.ok(offline.includes(required), required);
