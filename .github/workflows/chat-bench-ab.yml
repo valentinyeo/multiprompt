@@ -48,7 +48,7 @@ jobs:
         with:
           node-version: 22
       - name: Test summary calculations
-        run: node --test candidate/tools/chat-bench-ab-summary.test.js candidate/tools/chat-bench-ab-extra.test.js
+        run: node --test candidate/tools/chat-bench-ab-summary.test.js candidate/tools/chat-bench-ab-extra.test.js candidate/tools/chat-bench-reader.test.mjs
       - name: Download and verify release executables
         env:
           GH_TOKEN: ${{ github.token }}
