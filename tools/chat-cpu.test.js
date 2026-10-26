@@ -694,3 +694,29 @@ test "folded user reaction keeps the New divider without a user bubble" {
   const result = run(prelude + body(source, 'chatRelayout') + checks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
+
+test('IGSH-1012 no New divider is drawn when only hidden messages follow it', () => {
+  const prelude = layout
+    .replace('fn chatReadBoundary() ReadBoundary { return .{}; }', 'fn chatReadBoundary() ReadBoundary { return .{ .index = 1 }; }')
+    .replace("var g_chat_capture: [1]u16 = .{'x'};", 'var g_chat_capture: [256]u16 = @splat(0);');
+  const checks = `
+test "hidden reaction and its lone reply leave no New divider" {
+    defer g_reaction_view.deinit(std.heap.page_allocator);
+    var formatted: [256]u16 = undefined;
+    const line = chat_reaction.format(.like, 1, &.{'x'}, &formatted).?;
+    g_chat_capture[0] = 'x';
+    @memcpy(g_chat_capture[1..][0..line.len], line);
+    g_chat_last_len = 1 + line.len;
+    blocks[0] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 1, .reaction_reference = 1 };
+    blocks[1] = .{ .start = 1, .len = line.len, .role = .user, .first = true, .message_id = 3 };
+    blocks[2] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 2, .reaction_reference = 2 };
+    g_chat_block_count = 3;
+    chatRelayout(400);
+    try std.testing.expect(g_reaction_view.hides(1));
+    try std.testing.expect(g_reaction_view.hides(2));
+    try std.testing.expectEqual(@as(?usize, null), g_chat_read_boundary.index);
+}
+`;
+  const result = run(prelude + body(source, 'chatRelayout') + checks);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});

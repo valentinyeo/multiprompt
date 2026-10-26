@@ -141,7 +141,7 @@ pub const View = struct {
     fn hideReplies(self: *View, blocks: []const md.Block, from: usize) void {
         var end = from;
         var count: usize = 0;
-        while (end < blocks.len and blocks[end].role != .user) : (end += 1) {
+        while (end < blocks.len and blocks[end].role != .user and blocks[end].role != .injected) : (end += 1) {
             const block = blocks[end];
             if (block.role != .prose and block.role != .code) continue;
             if (block.first or count == 0) count += 1;
@@ -202,6 +202,13 @@ pub const View = struct {
 
     pub fn hides(self: *const View, index: usize) bool {
         return index < self.hidden.items.len and self.hidden.items[index];
+    }
+
+    pub fn visibleFrom(self: *const View, blocks: []const md.Block, from: usize) bool {
+        for (blocks[@min(from, blocks.len)..], from..) |block, index| {
+            if (block.role != .tool and !self.hides(index)) return true;
+        }
+        return false;
     }
 
     pub fn mask(self: *const View, index: usize) u8 {
@@ -335,4 +342,11 @@ test "IGSH-1012 a lone session reply to a reaction is hidden and other replies s
     try std.testing.expect(view.hides(2));
     try std.testing.expect(!view.hides(3));
     try std.testing.expect(!view.hides(4));
+    const note: md.Block = .{ .start = reply_start + ack.len, .len = more.len, .role = .injected, .first = true };
+    _ = try view.build(a, &[_]md.Block{ target, react, note, answer }, capture, &.{});
+    try std.testing.expect(!view.hides(2));
+    try std.testing.expect(!view.hides(3));
+    _ = try view.build(a, &[_]md.Block{ target, react, ack_block }, capture, &.{});
+    try std.testing.expect(!view.visibleFrom(&[_]md.Block{ target, react, ack_block }, 1));
+    try std.testing.expect(view.visibleFrom(&[_]md.Block{ target, react, ack_block }, 0));
 }
