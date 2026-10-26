@@ -317,16 +317,18 @@ const WindowReturn = extern struct {
 fn menuWindowHook(code: i32, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
     if (code >= 0 and lp != 0) {
         const info: *const WindowReturn = @ptrFromInt(@as(usize, @bitCast(lp)));
-        if (info.message == 0x47) {
-            var class: [8]u16 = @splat(0);
-            const len = w.GetClassNameW(info.hwnd, &class, class.len);
-            if (len > 0 and std.mem.eql(u16, class[0..@intCast(len)], L("#32768"))) {
-                _ = roundMenuWindow(info.hwnd);
-                clipMenuWindow(info.hwnd);
-            }
-        }
+        if (info.message == 0x47 or info.message == 0x18) styleMenuWindow(info.hwnd);
     }
     return w.CallNextHookEx(menu_window_hook, code, wp, lp);
+}
+
+fn styleMenuWindow(hwnd: w.HANDLE) void {
+    var class: [8]u16 = @splat(0);
+    const len = w.GetClassNameW(hwnd, &class, class.len);
+    if (len > 0 and std.mem.eql(u16, class[0..@intCast(len)], L("#32768"))) {
+        _ = roundMenuWindow(hwnd);
+        clipMenuWindow(hwnd);
+    }
 }
 
 pub fn trackMessagePopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT) w.BOOL {
@@ -478,6 +480,9 @@ pub fn menuMessage(msg: w.UINT, lp: w.LPARAM) ?w.LRESULT {
         const selected = item.state & 1 != 0;
         const disabled = item.state & 6 != 0;
         const style = message_menu_style;
+        if (style != null) {
+            if (w.WindowFromDC(item.dc)) |menu_window| styleMenuWindow(menu_window);
+        }
         _ = w.FillRect(item.dc, &item.rect, if (style) |theme| theme.background else @ptrFromInt(@as(usize, if (selected) 14 else 5) + 1));
         if (style) |theme| {
             if (selected) {

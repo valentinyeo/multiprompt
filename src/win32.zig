@@ -572,6 +572,7 @@ pub extern "user32" fn InvalidateRect(HANDLE, ?*const RECT, BOOL) callconv(WINAP
 pub extern "user32" fn BeginPaint(HANDLE, *PAINTSTRUCT) callconv(WINAPI) HANDLE;
 pub extern "user32" fn EndPaint(HANDLE, *const PAINTSTRUCT) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetDC(HANDLE) callconv(WINAPI) HANDLE;
+pub extern "user32" fn WindowFromDC(HANDLE) callconv(WINAPI) HANDLE;
 pub extern "user32" fn GetWindowDC(HANDLE) callconv(WINAPI) HANDLE;
 pub const PW_RENDERFULLCONTENT: UINT = 0x00000002;
 pub extern "user32" fn PrintWindow(HANDLE, HANDLE, UINT) callconv(WINAPI) BOOL;
