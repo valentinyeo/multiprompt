@@ -2167,6 +2167,10 @@ fn chatPaintScrollUi(canvas: *@import("smooth.zig").Canvas, hdc: HANDLE, w: i32,
     if (!app_state.g_chat_scrolled_up) return;
     const ring = RECT{ .left = box.left - 1, .top = box.top - 1, .right = box.right + 1, .bottom = box.bottom + 1 };
     const face = RECT{ .left = box.left, .top = box.top, .right = box.right, .bottom = box.bottom };
+    const gap = @import("chat_float.zig").moat();
+    const clear = themeConsoleBg();
+    @import("smooth.zig").fillEllipse(hdc, .{ .left = ring.left - gap, .top = ring.top - gap, .right = ring.right + gap, .bottom = ring.bottom + gap }, clear);
+    if (chatScrollJumpBadgeBox(w, h)) |badge| fillRoundRectAA(hdc, .{ .left = badge.left - gap, .top = badge.top - gap, .right = badge.right + gap, .bottom = badge.bottom + gap }, uiScaled(9) + gap, clear);
     @import("smooth.zig").fillEllipse(hdc, ring, if (app_state.g_light_theme) RGB(176, 184, 196) else RGB(96, 108, 126));
     @import("smooth.zig").fillEllipse(hdc, face, if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(50, 58, 72));
     const cx = @divTrunc(box.left + box.right, 2);
