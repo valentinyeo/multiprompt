@@ -130,9 +130,11 @@ pub fn activePaneRects(client: RECT) PaneRects {
 pub fn activePaneContentRect(client: RECT) RECT {
     const pane = activePaneRects(client).primary;
     const inset = paneFocusInset();
+    const controls = @import("window_frame.zig").controlsRect(client.right);
+    const top = if (!app_state.g_chat_active and pane.right > controls.left) @max(pane.top + inset, controls.bottom - threadTitleHeight()) else pane.top + inset;
     return .{
         .left = pane.left + inset,
-        .top = pane.top + inset,
+        .top = top,
         .right = pane.right - inset,
         .bottom = pane.bottom - inset,
     };
@@ -178,7 +180,7 @@ pub fn repositionActive() void {
     if (LOOK_UNIFIED) {
         ensureDevThemeInitialized();
         const pane = activePaneContentRect(rc);
-        const con_top = @max(pane.top + threadTitleHeight(), @import("window_frame.zig").controlsRect(rc.right).bottom);
+        const con_top = pane.top + threadTitleHeight();
         const h = pane.bottom - con_top;
         const sh = app_state.shells[app_state.active_shell].hwnd;
         var st = GetWindowLongPtrW(sh, GWL_STYLE);

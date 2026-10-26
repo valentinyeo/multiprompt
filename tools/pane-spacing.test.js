@@ -385,7 +385,7 @@ test "all production pane consumers share outer margins and gaps" {
                                 const expected = centeredConsoleColumn(inner.right, inner.left, 0, consoleCellW());
                                 try std.testing.expectEqual(if (full) inner.left else expected.left, shell_rect.left);
                                 try std.testing.expectEqual(if (full) inner.right - inner.left else expected.width, shell_rect.right - shell_rect.left);
-                                try std.testing.expectEqual(@max(inner.top + threadTitleHeight(), controlsRect(test_client.right).bottom), shell_rect.top);
+                                try std.testing.expectEqual(inner.top + threadTitleHeight(), shell_rect.top);
                                 try std.testing.expectEqual(inner.bottom, shell_rect.bottom);
                             }
                             const content = chat_style.contentColumn(inner.left, inner.right - inner.left, uiScaled(960));

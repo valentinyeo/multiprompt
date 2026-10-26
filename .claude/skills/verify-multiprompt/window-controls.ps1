@@ -45,7 +45,7 @@ foreach ($mode in @('restored', 'maximized')) {
         $hits = @(0..2 | ForEach-Object { [WindowControlsProof]::Hit($script:window, ($geometry[6] - (3 - $_) * $buttonW + [int]($buttonW / 2)), ([int]($buttonH / 2))) })
         $proofs += @{ mode = $mode; theme = $theme; dpi = $dpi; geometry = $geometry; pixels = $pixels; hits = $hits; screenshot = $shot + '.png' }
         Save-Json $proofs 'window-controls-pixels.json'
-        if ($pixels.topInset -gt 1 -or $pixels.separatorTopPixels -ne 6 -or @($pixels.glyphPixels | Where-Object { $_ -lt 8 }).Count -ne 0) { throw 'Custom frame screenshot lost a glyph, top separator or reclaimed caption' }
+        if ($pixels.topInset -gt 1 -or $pixels.separatorTopPixels -ne 6 -or @($pixels.glyphPixels | Where-Object { $_ -lt 8 -or $_ -gt 150 }).Count -ne 0) { throw 'Custom frame screenshot lost a glyph, top separator or reclaimed caption' }
         if (($hits -join ',') -ne '8,9,20') { throw "Custom frame controls have wrong native hit areas: $hits" }
     }
 }

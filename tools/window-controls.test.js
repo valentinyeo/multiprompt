@@ -29,7 +29,7 @@ test('IGSH-1000 screenshots prove three glyphs and top-edge separator in both wi
   assert.match(journey, /foreach \(\$mode in @\('restored', 'maximized'\)\)/);
   assert.match(journey, /foreach \(\$theme in @\('dark', 'light', 'amoled'\)\)/);
   assert.match(journey, /separatorTopPixels -ne 6/);
-  assert.match(journey, /glyphPixels \| Where-Object \{ \$_ -lt 8 \}/);
+  assert.match(journey, /glyphPixels \| Where-Object \{ \$_ -lt 8 -or \$_ -gt 150 \}/);
   assert.match(journey, /-ne '8,9,20'/);
   assert.match(read(base + 'control.ps1'), /windowControls.closed -or -not \$process.HasExited/);
 });
