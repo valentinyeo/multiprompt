@@ -3004,8 +3004,10 @@ try {
                     'send-click' { [VerifyNative]::ClickClient($script:window, [int](($send[0] + $send[2]) / 2), [int](($send[1] + $send[3]) / 2)) }
                     'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }
                 }
-                Wait-Until { [VerifyNative]::EditText($handle) -ceq '' -and (Test-Path $marker) } 'IGSH-965 one press ended dictation and sent the typed and spoken words' -Seconds 5 -PollMilliseconds 20
+                Wait-Until { [VerifyNative]::EditText($handle) -ceq '' } 'IGSH-965 one press ended dictation and sent the typed and spoken words' -Seconds 3 -PollMilliseconds 20
                 $elapsed = $immediate.ElapsedMilliseconds
+                Snapshot ($way + '-sent-box')
+                Wait-Until { Test-Path $marker } 'IGSH-965 the session ran the sent typed and spoken words' -Seconds 20 -PollMilliseconds 50
                 $delivered = (Get-Content $marker -Raw).Trim()
                 $expected = $way + ' Go forward ten meters.'
                 if ($delivered -cne $expected) { throw "IGSH-965 session received '$delivered' instead of '$expected'" }

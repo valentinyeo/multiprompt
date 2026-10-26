@@ -112,7 +112,7 @@ function sendContract(source) {
     "Assert-DictationMic $mic $true ($way + '-listening')", "$typed = '>\"' + $marker + '\" echo ' + $way", 'Type-Text $typed',
     "Snapshot ($way + '-listening')",
     "'send-click' { [VerifyNative]::ClickClient($script:window,", "'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }",
-    "[VerifyNative]::EditText($handle) -ceq '' -and (Test-Path $marker)",
+    "[VerifyNative]::EditText($handle) -ceq ''", 'Test-Path $marker',
     "$expected = $way + ' Go forward ten meters.'", 'if ($delivered -cne $expected) { throw',
     "Assert-DictationMic $mic $false ($way + '-stopped')", '$deliveries++', "Snapshot ($way + '-sent')",
     "name = ('dictation-' + $way)",
@@ -132,7 +132,7 @@ function sendContract(source) {
 
 test('IGSH-965 one press on send or Ctrl+Enter while dictating stops, appends the spoken words and sends them to the session', () => {
   sendContract(driver);
-  for (const required of ["'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }", 'if ($delivered -cne $expected) { throw', '$send = Get-DictationSend $mic', "[VerifyNative]::EditText($handle) -ceq '' -and (Test-Path $marker)", '- [Math]::Floor(6 * $scale) - $size']) {
+  for (const required of ["'ctrl-enter' { [VerifyNative]::Chord(@(0x11, 0x0D)) }", 'if ($delivered -cne $expected) { throw', '$send = Get-DictationSend $mic', "[VerifyNative]::EditText($handle) -ceq ''", 'Test-Path $marker', '- [Math]::Floor(6 * $scale) - $size']) {
     const broken = driver.replaceAll(required, 'REMOVED');
     assert.notEqual(broken, driver, required);
     assert.throws(() => sendContract(broken), assert.AssertionError, required);
