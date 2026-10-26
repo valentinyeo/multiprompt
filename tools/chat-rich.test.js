@@ -48,7 +48,8 @@ test('role paint and hit testing omit sender headers and timestamps', () => {
   assert.match(body('refreshChatBlockCache'), /chat_style\.markScreenMessages/);
   assert.match(body('chatUserBubbleColor'), /chat_style\.bubbleColors/);
   assert.match(body('chatRelayout'), /chat_style\.bubblePositions/);
-  assert.match(body('chatPaintBlock'), /fillBubbleAA/);
+  assert.match(body('chatPaintBlock'), /fillBubbleStyled/);
+  assert.match(body('fillBubbleStyled'), /fillBubbleAA/);
   assert.match(body('chatTranscriptCharAt'), /chat_style\.topInset/);
   assert.doesNotMatch(body('chatPaintTime'), /block\.time|block\.zone/);
   assert.match(docs, /Chat View message styles/);
