@@ -539,13 +539,13 @@ foreach ($plan in $plans) {
             foreach ($turn in 1..3) {
                 if ($turn -eq 3) { Shell-Run @('resume', 'live-resumed-session') }
                 $view = [IntPtr]$views[0].Current.NativeWindowHandle
-                $actions.Add(@{case=$plan.name; input='click owned remote transcript before timed turn'})
-                [ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, $view, 80, 120)
                 $timer = [Diagnostics.Stopwatch]::StartNew()
                 Shell-Run @('turn', [string]$turn)
                 $question = "Remote question $turn"
                 $answer = "Remote answer $turn"
                 [void](Wait-For 'newest rendered remote question and answer within two seconds' {
+                    if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $view)) { throw 'Owned transcript typing focus missing' }
+                    $actions.Add(@{case=$plan.name; input='focus owned remote transcript'; focus=[ChatDeliveryDesktop]::Focus($main)})
                     Press @(0x11, 0x41) 'Ctrl+A: select rendered remote conversation'
                     Press @(0x11, 0x43) 'Ctrl+C: copy rendered remote conversation'
                     $script:remoteCopied = [Windows.Forms.Clipboard]::GetText()
