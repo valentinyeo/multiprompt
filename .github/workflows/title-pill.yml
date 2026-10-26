@@ -25,6 +25,16 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  pane-layout:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: pane-layout
+      tag: ${{ inputs.tag || '' }}
+  browser-pane-stuck:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: browser-pane-stuck
+      tag: ${{ inputs.tag || '' }}
   pixels:
     name: title-pill (${{ matrix.theme }})
     runs-on: windows-latest

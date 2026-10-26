@@ -7279,7 +7279,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     app_state.shells[0] = app_state.empty_shell;
     app_state.shells[0].pid = 1;
     app_state.shells[0].ai_agent = 1;
-    const session_name = std.unicode.utf8ToUtf16LeStringLiteral("Floating title session");
+    const session_name = std.unicode.utf8ToUtf16LeStringLiteral("Chat session");
     @memcpy(app_state.shells[0].name[0..session_name.len], session_name);
     app_state.shells[0].name_len = session_name.len;
     drawing.resetFontCache();
