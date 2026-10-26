@@ -2293,8 +2293,8 @@ function Assert-RelaunchSessions([string]$Stage, $Seed) {
     return @{ stage = $Stage; published = $published.Count; saved = @($saved.tabs).Count; groups = $savedGroups.Count; selected = $selected[0].name; starred_view = [bool]$state.starred_view }
 }
 
+Write-Host 'Launch: validate executable and prepare isolated profile'
 try {
-    Write-Host 'Launch: validate executable and prepare isolated profile'
     if ($Feature -eq 'title-bar') {
         Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot 'title-bar-native.cs')
         [CaptionProof]::SetDpi([int]$env:CAPTION_DPI)
