@@ -3983,8 +3983,22 @@ try {
                 if ($empty.size -le 0 -or $stopW -ne $empty.size -or $stopH -ne $empty.size) { throw ('Stop rect is ' + $stopW + 'x' + $stopH + ', expected the ' + $empty.size + ' px send size') }
                 if (-not (& $insideCard $empty.stop $empty.card)) { throw ('Stop rect ' + ($empty.stop -join ',') + ' is outside composer card ' + ($empty.card -join ',')) }
                 if ($null -ne $empty.send) { throw ('Send rect ' + ($empty.send -join ',') + ' is drawn while the composer is empty and the agent is working') }
-                Snapshot 'stop-in-box'
+                $stopClock = [Diagnostics.Stopwatch]::StartNew()
+                $stopCheck.paintAttempts = 0
+                Wait-Until {
+                    $stopCheck.paintAttempts++
+                    Snapshot 'stop-in-box'
+                    try {
+                        $stopCheck.stopPixels = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'stop-in-box.png'), $script:window, $empty.card, $empty.stop, $null)
+                        $true
+                    } catch {
+                        $stopCheck.stopPixelsReason = $_.Exception.Message
+                        $false
+                    }
+                } 'stop-in-box screenshot paints the grey Stop disc in the logged Stop slot' -Seconds 10
+                $stopCheck.paintedAfterMs = [int]$stopClock.ElapsedMilliseconds
                 Snapshot 'composer-working-empty'
+                $stopCheck.workingEmptyPixels = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'composer-working-empty.png'), $script:window, $empty.card, $empty.stop, $null)
                 Type-Text 'x'
                 Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -eq $typed.stop } 'Send replaces Stop after typing while working'
                 $typed = & $readStopFrame
