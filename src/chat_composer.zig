@@ -751,15 +751,32 @@ fn chatAcLayout() void {
     _ = InvalidateRect(app_state.g_chat_ac_hwnd, null, 0);
 }
 
+var chat_ac_window_clears: usize = 0;
+
 fn chatAcPaint(hwnd: HANDLE) void {
     var ps: PAINTSTRUCT = undefined;
-    const dc = BeginPaint(hwnd, &ps);
-    if (dc == null) return;
+    const target = BeginPaint(hwnd, &ps);
+    if (target == null) return;
     defer _ = EndPaint(hwnd, &ps);
     var rc: RECT = std.mem.zeroes(RECT);
     _ = GetClientRect(hwnd, &rc);
+    const w = @import("win32.zig");
+    const memory = w.CreateCompatibleDC(target);
+    defer if (memory != null) {
+        _ = w.DeleteDC(memory);
+    };
+    const bitmap = if (memory != null) w.CreateCompatibleBitmap(target, rc.right, rc.bottom) else null;
+    defer if (bitmap != null) {
+        _ = DeleteObject(bitmap);
+    };
+    const old_bitmap = if (bitmap != null) SelectObject(memory, bitmap) else null;
+    defer if (old_bitmap != null) {
+        _ = SelectObject(memory, old_bitmap);
+    };
+    const dc = if (old_bitmap != null) memory else target;
     const background = CreateSolidBrush(customColorOr("overlay_bg", if (app_state.g_light_theme) RGB(250, 250, 252) else RGB(38, 40, 47)));
     _ = FillRect(dc, &rc, background);
+    if (@import("builtin").is_test and @import("win32.zig").WindowFromDC(dc) == hwnd) chat_ac_window_clears += 1;
     _ = DeleteObject(background);
     _ = SelectObject(dc, ensureChatFont());
     _ = SetBkMode(dc, TRANSPARENT);
@@ -816,6 +833,7 @@ fn chatAcPaint(hwnd: HANDLE) void {
     var footer_rc = RECT{ .left = uiScaled(12), .top = rc.bottom - uiScaled(30), .right = rc.right - uiScaled(12), .bottom = rc.bottom };
     _ = SetTextColor(dc, customColorOr("hint", RGB(135, 139, 147)));
     drawAscii(dc, label, &footer_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    if (dc != target) _ = w.BitBlt(target, 0, 0, rc.right, rc.bottom, dc, 0, 0, w.GDI_SRCCOPY);
 }
 
 fn chatAcWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
@@ -2296,6 +2314,109 @@ test "IGSH-812 typing is never blocked while listening" {
 
 test "IGSH-885 a reply arriving while dictating leaves the draft and the recording alone" {
     try testChatDictation(.reply);
+}
+
+test "IGSH-922 slash filtering presents one completed popup frame" {
+    const w = @import("win32.zig");
+    const Spy = struct {
+        var paints: usize = 0;
+        extern "gdi32" fn GdiFlush() callconv(WINAPI) BOOL;
+        fn snapshot(hwnd: HANDLE, step: usize) !void {
+            var rc: RECT = undefined;
+            try std.testing.expect(GetClientRect(hwnd, &rc) != 0);
+            const source = GetDC(hwnd) orelse return error.TestUnexpectedResult;
+            defer _ = ReleaseDC(hwnd, source);
+            const memory = w.CreateCompatibleDC(source) orelse return error.TestUnexpectedResult;
+            defer _ = w.DeleteDC(memory);
+            const info = w.BITMAPINFO{ .header = .{ .width = rc.right, .height = -rc.bottom } };
+            var bits: ?*anyopaque = null;
+            const bitmap = w.CreateDIBSection(source, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+            defer _ = DeleteObject(bitmap);
+            const old = SelectObject(memory, bitmap);
+            defer _ = SelectObject(memory, old);
+            try std.testing.expect(w.BitBlt(memory, 0, 0, rc.right, rc.bottom, source, 0, 0, w.GDI_SRCCOPY) != 0);
+            try std.testing.expect(GdiFlush() != 0);
+            const size: usize = @intCast(rc.right * rc.bottom * 4);
+            const bmp = try std.testing.allocator.alloc(u8, 54 + size);
+            defer std.testing.allocator.free(bmp);
+            @memset(bmp[0..54], 0);
+            @memcpy(bmp[0..2], "BM");
+            std.mem.writeInt(u32, bmp[2..6], @intCast(bmp.len), .little);
+            std.mem.writeInt(u32, bmp[10..14], 54, .little);
+            @memcpy(bmp[14..54], std.mem.asBytes(&info.header));
+            @memcpy(bmp[54..], @as([*]u8, @ptrCast(bits.?))[0..size]);
+            var path: [64]u8 = undefined;
+            try std.testing.expect(@import("file_io.zig").writeFileAtomicW(try std.fmt.bufPrint(&path, "skill-search-{d}.bmp", .{step}), bmp));
+        }
+        fn proc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+            if (msg == WM_PAINT) paints += 1;
+            return chatAcWndProc(hwnd, msg, wp, lp);
+        }
+    };
+    const saved = .{
+        .main = app_state.g_main_hwnd,
+        .popup = app_state.g_chat_ac_hwnd,
+        .chat = app_state.g_chat_active,
+        .ac = app_state.g_chat_ac,
+        .count = app_state.shell_count,
+        .entries = app_state.g_chat_ac_slots[0].entries[0..4].*,
+        .slot_count = app_state.g_chat_ac_slots[0].count,
+        .status = app_state.g_chat_ac_slots[0].status,
+    };
+    defer {
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_ac_hwnd = saved.popup;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_chat_ac = saved.ac;
+        app_state.shell_count = saved.count;
+        app_state.g_chat_ac_slots[0].entries[0..4].* = saved.entries;
+        app_state.g_chat_ac_slots[0].count = saved.slot_count;
+        app_state.g_chat_ac_slots[0].status = saved.status;
+    }
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000 | WS_VISIBLE, 0, 0, 1000, 800, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    ensureChatAcClass();
+    const popup = CreateWindowExW(0, L("ZigShellChatSuggest"), L(""), WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 100, 100, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(popup);
+    _ = SetWindowLongPtrW(popup, -4, @bitCast(@intFromPtr(&Spy.proc)));
+    app_state.g_main_hwnd = parent;
+    app_state.g_chat_ac_hwnd = popup;
+    app_state.g_chat_active = true;
+    app_state.shell_count = 0;
+    app_state.g_chat_ac = .{ .open = true };
+    for ([_][]const u8{ "skill-one", "skill-two", "search", "other" }, 0..) |name, i| {
+        app_state.g_chat_ac_slots[0].entries[i] = .{ .kind = 'S', .name = name, .hint = "", .desc = "" };
+    }
+    app_state.g_chat_ac_slots[0].count = 4;
+    app_state.g_chat_ac_slots[0].status = .ok;
+    _ = w.UpdateWindow(parent);
+    var inline_paints: usize = 0;
+    var queued_paints: usize = 0;
+    const clears_before = chat_ac_window_clears;
+    for ([_][]const u16{ std.mem.span(L("/")), std.mem.span(L("/s")), std.mem.span(L("/sk")), std.mem.span(L("/ski")), std.mem.span(L("/skiz")), std.mem.span(L("/ski")) }, [_]usize{ 4, 3, 2, 2, 0, 2 }, 0..) |text, expected_count, step| {
+        Spy.paints = 0;
+        const step_clears = chat_ac_window_clears;
+        const token = chat_complete.tokenAtCaret(text, text.len, .claude) orelse return error.TestUnexpectedResult;
+        chatAcRank(text, token);
+        chatAcRank(text, token);
+        inline_paints += Spy.paints;
+        const inline_count = Spy.paints;
+        _ = w.UpdateWindow(popup);
+        queued_paints += Spy.paints - inline_count;
+        std.debug.print("IGSH-922 chars={d} matches={d} inline_paints={d} queued_paints={d} visible_clears={d}\n", .{ text.len, app_state.g_chat_ac.count, inline_count, Spy.paints - inline_count, chat_ac_window_clears - step_clears });
+        try std.testing.expectEqual(expected_count, app_state.g_chat_ac.count);
+        try std.testing.expect(IsWindowVisible(popup) != 0);
+        try Spy.snapshot(popup, step);
+        if (expected_count > 0) {
+            const dc = GetDC(popup) orelse return error.TestUnexpectedResult;
+            defer _ = ReleaseDC(popup, dc);
+            try std.testing.expectEqual(customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)), w.GetPixel(dc, 2, 2));
+        }
+    }
+    std.debug.print("IGSH-922 searches=6 inline_paints={d} queued_paints={d} visible_clears={d}\n", .{ inline_paints, queued_paints, chat_ac_window_clears - clears_before });
+    try std.testing.expectEqual(@as(usize, 0), inline_paints);
+    try std.testing.expectEqual(@as(usize, 6), queued_paints);
+    try std.testing.expectEqual(@as(usize, 0), chat_ac_window_clears - clears_before);
 }
 
 test "IGSH-836 skill keyboard survives stationary hover and real movement or click takes over" {
