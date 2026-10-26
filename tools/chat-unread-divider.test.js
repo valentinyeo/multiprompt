@@ -78,13 +78,17 @@ test('IGSH-814 existing messages-only recipe exercises real reopen, restart, gap
   const driver = read('tools/verify-chat-delivery/drive.ps1');
   const press = driver.slice(driver.indexOf('function Press('), driver.indexOf('function Read-Shared('));
   assert.ok(press.indexOf("existing Alt+C debounce elapsed") < press.indexOf('    Doctor'), 'ownership is checked after the debounce, immediately before input');
-  for (const phrase of ['leave the read chat', "Shell-Input 'messages' '2'", 'Restart-OwnedApp', 'reopen chat after offline arrivals', 'reopened long chat lands at the newest message', 'long chat holds 120 more messages', 'arrival while at the bottom keeps the view pinned to the newest message', "Shell-Input 'forget-message' $readId", 'bottom clears the divider', 'sending clears the divider', 'all-read reopen has no divider']) assert.ok(driver.includes(phrase), phrase);
+  for (const phrase of ['leave the read chat', "Shell-Input 'messages' '2'", 'Restart-OwnedApp', 'reopen chat after offline arrivals', 'reopened long chat lands at the newest message', 'long chat holds 120 more messages', 'arrival while at the bottom keeps the view pinned to the newest message', "Shell-Input 'forget-message' $readId", 'bottom retains the visit divider', 'sending retains the visit divider', 'all-read reopen has no divider']) assert.ok(driver.includes(phrase), phrase);
   assert.match(driver, /Copy-Item \$cache.FullName "\$caseDir\/app-cache-reopened.jsonl"/);
   assert.match(driver, /Copy-Item "\$settings\/session.json" "\$caseDir\/session-read-anchor.json"/);
   assert.match(driver, /Require-Divider 1 0 'one divider on reopen'/);
   assert.match(driver, /\$divider.offset -ne \$unreadOffset/);
   assert.match(read('.github/workflows/verify.yml'), /node --test tools\/chat-unread-divider.test.js/);
   const proof = read('tools/chat-messages-only-proof.mjs');
+  const sent = /\$observation\.unreadDivider = @\{passed=\$true; transitions=@\(([^)]*)\)/.exec(driver);
+  const accepted = /assert\.deepEqual\(observation\.unreadDivider\.transitions, \[([^\]]*)\]\)/.exec(proof);
+  assert.ok(sent && accepted, 'unread transition contract must exist in writer and reader');
+  assert.deepEqual(sent[1].match(/'[^']*'/g), accepted[1].match(/'[^']*'/g), 'update unread transition writer and reader together');
   assert.match(proof, /verifyUnreadDivider\(root\);/);
   assert.match(proof, /cache.slice\(read \+ 1\).find/);
   assert.match(proof, /dividerPixels\(image\('unread-divider-reopened'\).*1\)/);
