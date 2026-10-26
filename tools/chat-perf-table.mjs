@@ -21,7 +21,7 @@ export function buildRow(dir, ref) {
   const read = name => fs.existsSync(path.join(dir, name)) ? fs.readFileSync(path.join(dir, name), 'utf8') : null;
   const identity = (read('identity.txt') ?? '').split('\n');
   const runs = [];
-  for (let index = 1; read(`run-${index}.log`) !== null; index++) runs.push(parseRun(read(`run-${index}.log`), Number((read(`run-${index}.exit`) ?? '').trim())));
+  for (let index = 1; read(`run-${index}.log`) !== null; index++) runs.push(parseRun(read(`run-${index}.log`), read(`run-${index}.exit`) === null ? null : Number(read(`run-${index}.exit`).trim())));
   return { ref, sha: identity[0] || '', subject: identity[1] || '', unsupported: read('unsupported.txt') !== null, runs };
 }
 
@@ -38,7 +38,7 @@ export function summarizeRow(row) {
 function refOrder(a, b) {
   const tag = /^v(\d+)\.(\d+)\.(\d+)$/;
   const left = tag.exec(a.ref), right = tag.exec(b.ref);
-  if (left && right) return Number(left[3]) - Number(right[3]);
+  if (left && right) return Number(left[1]) - Number(right[1]) || Number(left[2]) - Number(right[2]) || Number(left[3]) - Number(right[3]);
   if (left) return -1;
   if (right) return 1;
   return 0;
@@ -48,7 +48,7 @@ export function markdown(rows) {
   const lines = [
     '# Chat perf bisect',
     '',
-    'Native 50 MB history benchmark (zig build test-chat-perf) on a GitHub-hosted Ubuntu 24.04 runner, Debug build. Cells are median [min, max] milliseconds over the measured runs.',
+    'Native 50 MB history benchmark (zig build test-chat-perf) on a GitHub-hosted Ubuntu 24.04 runner, ReleaseFast build. Cells are median [min, max] milliseconds over the measured runs.',
     '',
     '| Ref | Commit | Runs | Parse ms | Append ms | Reconcile ms | Subject |',
     '| --- | --- | ---: | ---: | ---: | ---: | --- |',

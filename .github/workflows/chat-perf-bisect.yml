@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       refs:
-        description: Space separated release tags or commit SHAs, such as v0.28.900 v0.28.917
+        description: Space separated release tags or full 40 character commit SHAs, such as v0.28.900 v0.28.917
         required: true
         default: v0.28.900 v0.28.917
         type: string
@@ -48,7 +48,7 @@ jobs:
           import fs from 'node:fs';
           const { REFS, REPEATS, GITHUB_OUTPUT } = process.env;
           const refs = REFS.trim().split(/\s+/);
-          if (refs.length < 1 || refs.length > 40 || refs.some(ref => !/^(v\d+\.\d+\.\d+|[0-9a-f]{7,40})$/.test(ref))) throw new Error('refs must be 1 to 40 release tags or commit SHAs');
+          if (refs.length < 1 || refs.length > 40 || refs.some(ref => !/^(v\d+\.\d+\.\d+|[0-9a-f]{40})$/.test(ref))) throw new Error('refs must be 1 to 40 release tags or full commit SHAs');
           if (!/^[1-5]$/.test(REPEATS)) throw new Error('repeats must be 1 to 5');
           fs.appendFileSync(GITHUB_OUTPUT, `refs=${JSON.stringify(refs)}\n`);
           NODE
