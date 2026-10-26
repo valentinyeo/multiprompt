@@ -2122,21 +2122,21 @@ function New-RelaunchSeed {
     $groups = @(@{ id = 1; name = 'Hypertask' }, @{ id = 2; name = 'Software Factory' }, @{ id = 3; name = 'inne' })
     $tabs = New-Object System.Collections.ArrayList
     $live = New-Object System.Collections.ArrayList
-    $shellId = 100
+    $seedId = 100
     foreach ($i in 1..14) {
         $name = 'Relaunch {0:00}' -f $i
         $group = ($i % 3) + 1
-        $tab = [ordered]@{ kind = 'cmd'; name = $name; shell_id = $shellId; workspace = $(if ($i -le 10) { 0 } else { 1 }); group_id = $group }
+        $tab = [ordered]@{ kind = 'cmd'; name = $name; shell_id = $seedId; workspace = $(if ($i -le 10) { 0 } else { 1 }); group_id = $group }
         if ($i -le 12) { $tab.favorite = $true; $tab.starred_group_id = $group }
         [void]$tabs.Add($tab)
         [void]$live.Add($name)
-        $shellId++
+        $seedId++
     }
     foreach ($i in 1, 3, 5, 7, 9, 11) {
         $name = 'Relaunch {0:00}' -f $i
         $group = ($i % 3) + 1
-        [void]$tabs.Add([ordered]@{ kind = 'tmux'; name = $name; shell_id = $shellId; workspace = $(if ($i -le 10) { 0 } else { 1 }); favorite = $true; starred_group_id = $group })
-        $shellId++
+        [void]$tabs.Add([ordered]@{ kind = 'tmux'; name = $name; shell_id = $seedId; workspace = $(if ($i -le 10) { 0 } else { 1 }); favorite = $true; starred_group_id = $group })
+        $seedId++
     }
     $selected = 'Relaunch 07'
     $selectedIndex = 0
@@ -4301,7 +4301,7 @@ try {
                 $consoles = @{}
                 $browsers = @{}
                 $docks = @{}
-                $shellIds = @($state.tabs[0].shell_id, $state.tabs[1].shell_id)
+                $seedIds = @($state.tabs[0].shell_id, $state.tabs[1].shell_id)
                 foreach ($tab in @(0, 1)) {
                     $gapCase.phase = "console-identification-$tab"
                     Press @(0x11, (0x31 + $tab)) ('Ctrl+' + ($tab + 1) + ': identify timing console')
@@ -4333,7 +4333,7 @@ try {
                         foreach ($tab in @(0, 1)) {
                             Press @(0x11, (0x31 + $tab)) 'Select session to enable Chat View'
                             Wait-WorkspaceSurface $initial.active_workspace $tab $false
-                            $script:browserShellId = $shellIds[$tab]
+                            $script:browserShellId = $seedIds[$tab]
                             Press-CloseBrowserPane 'Alt+A: close browser pane for Chat View baseline'
                             $null = Assert-BrowserPane 'closed' ('chat-baseline-' + $tab)
                             $browsers[$tab] = [IntPtr]::Zero
@@ -4356,7 +4356,7 @@ try {
                             $gapCase.phase = "$mode-setup-$tab"
                             Press @(0x11, (0x31 + $tab)) ('Ctrl+' + ($tab + 1) + ': open this session browser')
                             Wait-WorkspaceSurface $initial.active_workspace $tab $chat ($composerHandle.ToInt32())
-                            $script:browserShellId = $shellIds[$tab]
+                            $script:browserShellId = $seedIds[$tab]
                             $pane = Open-BrowserPane ($mode + '-' + $tab)
                             Wait-SwitchNativeHost
                             Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_state -eq 'connected' -and $pane.browser_window_id -gt 0 -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero } 'connected timing browser with app-published CDP binding in its session' 30
@@ -4407,7 +4407,7 @@ try {
                             [VerifyNative]::Chord(@(0x11, 0x4C))
                             if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.ClassName -ne 'OmniboxViewViews') { throw 'Ctrl+L did not focus the browser address bar' }
                             [VerifyNative]::Chord(@(0x12, 0x51))
-                            if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw 'IGSH-724 Alt+Q did not restore the session input' }
+                            if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $seedIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw 'IGSH-724 Alt+Q did not restore the session input' }
                             [VerifyNative]::Chord(@(0x12, 0x51))
                             $pageKeys = 0
                             foreach ($key in @(0x20, 0x28, 0x4A, 0x4B)) {
@@ -4427,14 +4427,14 @@ try {
                             $pageKeys++
                             if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw 'IGSH-724 opening a pane sent Space to browser chrome' }
                             [VerifyNative]::Chord(@(0x12, 0x51))
-                            if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw 'IGSH-724 page-to-input return lost session typing focus' }
+                            if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $seedIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw 'IGSH-724 page-to-input return lost session typing focus' }
                             $result.checks += @{ name = 'IGSH-724 browser-page-focus'; mode = $mode; tab = $tab; pageKeys = $pageKeys; ctrlL = $true; f6 = $true; inputReturn = $true }
                             $browsers[$tab] = $browser
                             $docks[$tab] = $dock
                         }
                         if ($browsers[0] -eq $browsers[1]) { throw 'Timing sessions do not have distinct browser HWNDs' }
                         $identities = foreach ($tab in @(0, 1)) {
-                            @{ tab = $tab; shellId = $shellIds[$tab]; consoleHwnd = $consoles[$tab].ToInt64(); browserHwnd = $browsers[$tab].ToInt64(); dock = $docks[$tab]; color = $colors[$tab] }
+                            @{ tab = $tab; shellId = $seedIds[$tab]; consoleHwnd = $consoles[$tab].ToInt64(); browserHwnd = $browsers[$tab].ToInt64(); dock = $docks[$tab]; color = $colors[$tab] }
                         }
                         Save-Json @($identities) ("$mode-window-identities.json")
                     }
@@ -4443,10 +4443,10 @@ try {
                             $gapCase.phase = "$mode-reset-$tab"
                             Press @(0x11, (0x31 + $tab)) 'Select session to verify its freeze marker is cleared before fresh sampling'
                             Wait-WorkspaceSurface $initial.active_workspace $tab $chat ($composerHandle.ToInt32())
-                            Wait-Until { $false -eq (Read-BrowserFrozen $shellIds[$tab]) } 'active browser freeze marker cleared'
+                            Wait-Until { $false -eq (Read-BrowserFrozen $seedIds[$tab]) } 'active browser freeze marker cleared'
                         }
                         Wait-Until {
-                            $panes = @((Read-Inbox).shells | Where-Object { $_.sid -in $shellIds -and $_.browser_state -eq 'connected' -and $_.browser_window_id -gt 0 })
+                            $panes = @((Read-Inbox).shells | Where-Object { $_.sid -in $seedIds -and $_.browser_state -eq 'connected' -and $_.browser_window_id -gt 0 })
                             $panes.Count -eq 2
                         } 'both timing browsers have app-published CDP window bindings' 30
                     }
@@ -4461,20 +4461,20 @@ try {
                         Doctor
                         if ($frozen) {
                             $frozenLogStart = ((Get-Content $log -Raw) -join '').Length
-                            $freeze = @{ mode = $mode; sample = $sample; target = $target; shellId = $shellIds[$target]; marker = "panehib-zss-$($shellIds[$target]).flag"; status = 'waiting'; wait_ms = $null; marker_cleared = $false; window_visible_ms = $null; wake_flag_cleared_ms = $null; target_color_painted_ms = $null; log_start = $frozenLogStart; log_end = $null }
+                            $freeze = @{ mode = $mode; sample = $sample; target = $target; shellId = $seedIds[$target]; marker = "panehib-zss-$($seedIds[$target]).flag"; status = 'waiting'; wait_ms = $null; marker_cleared = $false; window_visible_ms = $null; wake_flag_cleared_ms = $null; target_color_painted_ms = $null; log_start = $frozenLogStart; log_end = $null }
                             [void]$frozenSwitches.Add($freeze)
-                            if ($false -ne (Read-BrowserFrozen $shellIds[$target])) { throw 'Target already frozen; expected a fresh freeze after its last activation' }
+                            if ($false -ne (Read-BrowserFrozen $seedIds[$target])) { throw 'Target already frozen; expected a fresh freeze after its last activation' }
                             $parked = [Diagnostics.Stopwatch]::StartNew()
                             Wait-Until {
                                 $state = Read-Session
-                                $null -ne $state -and $state.active_tab -eq (1 - $target) -and $state.tabs[$target].shell_id -eq $shellIds[$target] -and
-                                    ($true -eq (Read-BrowserFrozen $shellIds[$target]))
+                                $null -ne $state -and $state.active_tab -eq (1 - $target) -and $state.tabs[$target].shell_id -eq $seedIds[$target] -and
+                                    ($true -eq (Read-BrowserFrozen $seedIds[$target]))
                             } "fresh app-published freeze marker for parked target $target" 150
                             $freeze.wait_ms = $parked.Elapsed.TotalMilliseconds
                             $freeze.status = 'frozen'
                             $freeze.observed_utc = [DateTime]::UtcNow.ToString('o')
                             $bridgePath = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
-                            $freezeWindow = @((Read-Inbox).shells | Where-Object { $_.sid -eq $shellIds[$target] })[0].browser_window_id
+                            $freezeWindow = @((Read-Inbox).shells | Where-Object { $_.sid -eq $seedIds[$target] })[0].browser_window_id
                             Wait-Until {
                                 $workers = @(Get-CimInstance Win32_Process -Filter "Name = 'zigshell-bridge.exe'" | Where-Object {
                                     $_.ExecutablePath -ceq $bridgePath -and $_.CommandLine -match ('--window\s+' + $freezeWindow + '\s+cdp\s+Page\.setWebLifecycleState\s+') -and $_.CommandLine.Contains('frozen')
@@ -4486,11 +4486,11 @@ try {
                             Assert-Foreground
                         }
                         $source = 1 - $target
-                        [VerifyNative]::RequireSwitchStart($script:window, $composerHandle, $consoles[$source], ('ZigShell-' + $shellIds[$source]), $browsers[$source], $docks[$source], $drafts[$source], $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $drafts[$target])
-                        Record ("Ctrl+Tab timing $mode sample=$sample target=$target shellId=" + $shellIds[$target])
+                        [VerifyNative]::RequireSwitchStart($script:window, $composerHandle, $consoles[$source], ('ZigShell-' + $seedIds[$source]), $browsers[$source], $docks[$source], $drafts[$source], $consoles[$target], ('ZigShell-' + $seedIds[$target]), $browsers[$target], $docks[$target], $drafts[$target])
+                        Record ("Ctrl+Tab timing $mode sample=$sample target=$target shellId=" + $seedIds[$target])
                         $logStart = ((Get-Content $log -Raw) -join '').Length
-                        $frozenMarker = if ($frozen) { Join-Path $scratch ("roaming/ZigShell/panehib-zss-$($shellIds[$target]).flag") } else { $null }
-                        $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $rgb[$target], $frozenMarker)
+                        $frozenMarker = if ($frozen) { Join-Path $scratch ("roaming/ZigShell/panehib-zss-$($seedIds[$target]).flag") } else { $null }
+                        $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $seedIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $rgb[$target], $frozenMarker)
                         $timings[$mode].samples_ms[$sample] = $measurement[0]
                         $timings[$mode].window_visible_ms[$sample] = $measurement[1]
                         if ($frozen) {
@@ -4512,9 +4512,9 @@ try {
                         $traces[$mode] += $steps
                         if ($frozen) {
                             $frozenText = $debugAfter.Substring($freeze.log_start)
-                            $idPattern = 'shell=' + $shellIds[$target] + ' '
+                            $idPattern = 'shell=' + $seedIds[$target] + ' '
                             if ($frozenText -notmatch ('(?s)browser freeze confirmed: ' + $idPattern + '.*hook: Ctrl\+Tab shift=0 -> NEXT_TAB.*browser wake sent: ' + $idPattern + '.*switchToShell: ' + (1 - $target) + ' -> ' + $target + ' ')) { throw "Frozen target $target was not frozen before Ctrl+Tab and woken by it in the app log" }
-                            Wait-Until { $false -eq (Read-BrowserFrozen $shellIds[$target]) } 'target freeze marker removed by app wake'
+                            Wait-Until { $false -eq (Read-BrowserFrozen $seedIds[$target]) } 'target freeze marker removed by app wake'
                             $freeze.marker_cleared = $true
                             $freeze.status = 'painted-and-awake'
                             $freeze.log_end = ((Get-Content $log -Raw) -join '').Length
@@ -4572,7 +4572,7 @@ try {
                 if ($gapCase.status -ne 'passed' -and $gapCase.phase -like '*sample-*') {
                     try {
                         Save-Json @{ expected = $rgb[$target]; normal = @([VerifyNative]::ReadSwitchScreenPatch($docks[$target], $false)); layered = @([VerifyNative]::ReadSwitchScreenPatch($docks[$target], $true)); dock = $docks[$target] } 'switch-failure-screen-patch.json'
-                        $diagnosticPane = @((Read-Inbox).shells | Where-Object { $_.sid -eq $shellIds[$target] })[0]
+                        $diagnosticPane = @((Read-Inbox).shells | Where-Object { $_.sid -eq $seedIds[$target] })[0]
                         $expression = 'JSON.stringify({url:location.href,visibility:document.visibilityState,focused:document.hasFocus(),html:document.documentElement.outerHTML,rect:document.documentElement.getBoundingClientRect().toJSON(),bodyRect:document.body.getBoundingClientRect().toJSON(),htmlBg:getComputedStyle(document.documentElement).backgroundColor,bodyBg:getComputedStyle(document.body).backgroundColor})'
                         $probes = @(
                             @{ name = 'tabs'; method = $null; params = $null },
