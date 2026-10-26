@@ -1363,6 +1363,8 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
         app_state.shells[idx].name_source = .default;
     }
     app_state.shells[idx].tmux_host = tabs[t].tmux_host;
+    app_state.shells[idx].tmux_identity = tabs[t].tmux_identity;
+    app_state.shells[idx].tmux_identity_len = tabs[t].tmux_identity_len;
     if (tabs[t].tmux_session_len > 0) {
         @memcpy(app_state.shells[idx].tmux_session[0..tabs[t].tmux_session_len], tabs[t].tmux_session[0..tabs[t].tmux_session_len]);
         app_state.shells[idx].tmux_session_len = tabs[t].tmux_session_len;
