@@ -82,11 +82,10 @@ Press @(0x11, 0x4C) 'Ctrl+L: open synthetic white corner control page'
 Type-Text 'data:text/html,<title>Corner control</title><body style="margin:0;background:white;height:100vh"></body>'
 Press @(0x0D) 'Enter: render white corner control page'
 Wait-Until { [VerifyNative]::Title($browser) -match 'Corner control' } 'synthetic white page loaded' 20
-Press @(0x11, 0x31) 'Ctrl+1: select browser-owning first session'
 Focus-Palette 'new cmd' 2000
 Press @(0x0D) 'Enter: create second session for real chat switches'
 Wait-Until { @((Read-Session).tabs).Count -eq 2 } 'two real sessions for switching'
-Press @(0x11, 0x31) 'Ctrl+1: restore browser-owning session'
+Press @(0x11, 0x09) 'Ctrl+Tab: return to browser-owning session'
 Wait-Until { [VerifyNative]::PaneWindow($script:window) -eq $browser } 'original browser visible'
 Snapshot 'action'
 $proofs = @()
@@ -99,9 +98,9 @@ for ($cycle = 0; $cycle -lt 20; $cycle++) {
         }
         1 {
             Activate-OwnedFrame
-            Press @(0x11, 0x32) 'Ctrl+2: switch away from browser session'
+            Press @(0x11, 0x09) 'Ctrl+Tab: switch away from browser session'
             Wait-Until { (Read-Session).active_tab -eq 1 } 'second session selected'
-            Press @(0x11, 0x31) 'Ctrl+1: switch back to browser session'
+            Press @(0x11, 0x09) 'Ctrl+Tab: switch back to browser session'
         }
         2 {
             Doctor
