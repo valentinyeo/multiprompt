@@ -243,7 +243,7 @@ function launchJourneyContract(source) {
   assert.ok(press.indexOf('Assert-Foreground') >= 0);
   assert.ok(press.indexOf('[VerifyNative]::Chord($Keys)') > press.indexOf('Assert-Foreground'));
   assert.equal((journey.match(/Open-BrowserPane /g) || []).length, 1);
-  const setup = source.slice(source.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint'))"), source.indexOf("    if ($Feature -eq 'appearance') {"));
+  const setup = source.slice(source.indexOf("    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners'))"), source.indexOf("    if ($Feature -eq 'appearance') {"));
   assert.match(setup, /Microsoft\/Edge\/Application\/msedge.exe/);
   assert.match(setup, /Join-Path \$env:LOCALAPPDATA 'ZigShell\/EdgeUserData'/);
   assert.match(setup, /\$warmupJob.Start\(\$edge/);
@@ -364,7 +364,7 @@ test('launch selection accepts both isolated engines and slash styles but exclud
 });
 
 test('setup contract rejects Chrome overrides and palette switching', () => {
-  const setupStart = "    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint')) {";
+  const setupStart = "    if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners')) {";
   for (const addition of [
     "        if ($Feature -eq 'browser-pane-locked') {}",
     "        $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData'",
@@ -438,7 +438,7 @@ test('real-input journey requires exact dock geometry after drag and each maximi
 
 test('pane-lock journey is mapped, indexed, allowed and included in the pull-request matrix', () => {
   assert.match(driver, /ValidateSet\([^\n]*'browser-pane-locked'/);
-  assert.match(driver, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint'\)\)/);
+  assert.match(driver, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners'\)\)/);
   const features = JSON.parse(workflow.match(/feature:.*github\.event_name == 'pull_request'.*fromJSON\('(\[[^']+\])'\)/)[1]);
   for (const feature of ['appearance', 'workspace-focus', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'pane-layout']) assert.ok(features.includes(feature));
   assert.match(workflow, /\$env:FEATURE -notin @\([^\n]*'browser-pane-locked'/);
