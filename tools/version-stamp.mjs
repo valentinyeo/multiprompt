@@ -8,6 +8,7 @@ const mainPath = 'src/main.zig';
 const changelogPath = 'src/changelog.zig';
 const versionLine = /^pub const APP_VERSION = (?:build_config\.app_version orelse )?"(\d+)\.(\d+)\.(\d+)";$/m;
 const changelogStart = /(?:pub const CHANGELOG|const SOURCE_CHANGELOG) = \[_\]ChangelogEntry\{/;
+export const behindTheScenes = 'Behind the scenes fixes.';
 export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the version is stamped after merge (node tools/version-stamp.mjs release)';
 
 export function plainChange(line) {
@@ -92,7 +93,7 @@ export function buildChangelog(files, tag, history = []) {
     previous = fragmentFiles(step.files);
   }
   const added = addedSince(fragmentFiles(files), previous);
-  stamp(tag, Object.keys(added).length ? added : { 'changelog.d/IGSH-834-maintenance.md': 'Updates include the latest improvements.\n' });
+  stamp(tag, Object.keys(added).length ? added : { 'changelog.d/IGSH-834-maintenance.md': `${behindTheScenes}\n` });
   return result[changelogPath];
 }
 

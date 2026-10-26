@@ -6,13 +6,15 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 function assertCardNotes(source) {
-  assert.match(source, /for \(0\.\.card_notes\.count\)/);
+  assert.match(source, /for \(0\.\.shown\)/);
   assert.match(source, /card_notes\.line\(i\)/);
   assert.match(source, /DrawTextW/);
-  assert.match(source, /card_notes\.more\(&more_buf\)/);
-  assert.match(source, /\[update\] card notes n=\{d\} first=\{s\}/);
+  assert.match(source, /card_notes\.more\(&more_buf, false\)/);
+  assert.match(source, /\[update\] card view=\{s\} n=\{d\} first=\{s\}/);
   assert.match(source, /\[update\] card note \{d\}=\{s\}/);
   assert.match(source, /\[update\] card remaining=/);
+  assert.match(source, /\[update\] more row=\{d\},\{d\}/);
+  assert.match(source, /if \(cardHasToggle\(\) and ptInRect\(updateCardMoreRect\(card\), x, y\)\) return 4/);
 }
 
 test('release asset includes every historical version, plain lines only, and the offered version rather than embedded-only notes', async () => {
@@ -75,11 +77,11 @@ test('updater stages checksum-verified notes before publishing ready, without a 
   assert.doesNotMatch(zig, /@import\("changelog.zig"\)/);
 });
 
-test('existing card uses the same growing rectangle for layout and hits, with five Unicode note rows and remaining count', () => {
+test('existing card uses the same growing rectangle for layout and hits, with three Unicode note rows, an expandable full list and remaining count', () => {
   const card = read('src/update_card.zig');
   assertCardNotes(card);
   assert.equal((card.match(/update_release.cardNotes\(/g) || []).length, 2);
-  assert.match(card, /const rows = card_notes.count \+ @intFromBool\(card_notes.total > card_notes.count\)/);
+  assert.match(card, /const rows = card_notes.shown\(card_expanded\) \+ @intFromBool\(cardHasToggle\(\)\)/);
   assert.match(card, /return updateCardHeight\(\) \+ @import\("window_layout.zig"\).paneGap\(\)/);
   assert.match(card, /\.top = sticky.top - @import\("window_layout.zig"\).paneGap\(\) - updateCardHeight\(\)/);
   assert.match(card, /const card = updateCardRect\(\)/);
@@ -88,13 +90,16 @@ test('existing card uses the same growing rectangle for layout and hits, with fi
   const notes = read('src/update_notes.zig');
   for (const name of [
     'IGSH-728 picks only versions between installed and offered, newest first',
-    'IGSH-728 shows at most five lines then +N more',
+    'IGSH-948 shows three lines then and N more, and the full list when expanded',
+    'IGSH-948 keeps sixteen lines and counts the rest as more even when expanded',
+    'IGSH-948 groups quiet releases into one behind the scenes line and never shows filler',
     'IGSH-728 skips ticket ids, file paths, file names and PR numbers',
   ]) assert.ok(notes.includes(`test "${name}"`));
-  assert.match(notes, /lines: \[5\]\[512\]u8/);
+  assert.match(notes, /lines: \[16\]\[512\]u8/);
   assert.match(notes, /!versionNewer\(installed, release.version\) or versionNewer\(offered, release.version\)/);
   assert.match(notes, /while \(at < result.count and !versionNewer\(versions\[at\], release.version\)\)/);
-  assert.match(notes, /"\+\{d\} more", .\{self.total - self.count\}/);
+  assert.match(notes, /"and \{d\} more", \.\{rest\}/);
+  assert.match(notes, /pub const BEHIND_THE_SCENES = "Behind the scenes fixes\.";/);
 });
 
 test('master painter fails the exact card-note observability contract required by the new journey', () => {
@@ -109,8 +114,12 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(suite, /Start-Process \$cardExe -ArgumentList "--update-ready \$cardEventName"/);
   assert.match(suite, /\$cardMutex.WaitOne\(\)/);
   assert.match(suite, /Update card did not paint release notes/);
-  assert.match(suite, /card notes n=5 first=Typing feels faster/);
-  assert.match(suite, /card remaining=\\\+2 more/);
+    assert.match(suite, /card remaining=and 1 more/);
+  assert.match(suite, /card view=collapsed n=3 first=Typing feels faster/);
+  assert.match(suite, /card view=expanded n=4 first=Typing feels faster/);
+  assert.match(suite, /PostMessage\(\$cardProcess.MainWindowHandle, 0x201, \[IntPtr\]1, \$moreClick\)/);
+  assert.match(suite, /Card showed generic filler text/);
+  assert.match(suite, /update-card-expanded.png/);
   assert.match(suite, /\$note.Groups\[1\].Value -ceq \$expectedNotes\[\$i\]/);
   assert.match(suite, /\$observedNotes \| ConvertTo-Json/);
   assert.match(suite, /PrintWindow\(\$cardProcess.MainWindowHandle/);
@@ -119,10 +128,19 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   const journey = read('tools/update-release-journey.ps1');
   assert.match(journey, /update card shows aggregated plain notes/);
   assert.match(journey, /Missing update card screenshot/);
+  assert.match(journey, /update card opens the full list on click/);
   assert.match(read('.claude/skills/verify-multiprompt/features/safe-updates.md'), /update-card-notes.png/);
   const fixture = read('tools/update-release-fixtures.mjs');
   for (const version of ['9.8.0', '9.9.0', '9.10.0', '10.0.0']) assert.ok(fixture.includes(version));
+  assert.match(fixture, /version: '9.9.0', changes: \['Middle change.'\]/);
   assert.match(fixture, /names.push\('release-notes.json'\)/);
+});
+
+test('quiet releases use the same behind the scenes line in the stamper and the card, never the old filler', async () => {
+  const { behindTheScenes } = await import('./version-stamp.mjs');
+  assert.equal(behindTheScenes, 'Behind the scenes fixes.');
+  assert.ok(read('src/update_notes.zig').includes(`BEHIND_THE_SCENES = "${behindTheScenes}"`));
+  assert.equal(read('tools/version-stamp.mjs').includes('latest improvements'), false);
 });
 
 test('changed implementation is comment-free and leaves no error log', async () => {

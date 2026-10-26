@@ -389,7 +389,8 @@ test('build changelog uses the tag and fragments without changing source default
   assert.match(generated, /A useful improvement/);
   assert.deepEqual(files, saved);
   assert.equal(buildChangelog(files, 'v0.28.735'), changelog);
-  assert.match(buildChangelog(base(), 'v0.28.900'), /Updates include the latest improvements/);
+  assert.match(buildChangelog(base(), 'v0.28.900'), /Behind the scenes fixes\./);
+  assert.doesNotMatch(buildChangelog(base(), 'v0.28.900'), /latest improvements/);
   assert.match(buildChangelog({ ...files, 'src/changelog.zig': changelog.replace('pub const CHANGELOG', 'const SOURCE_CHANGELOG') }, 'v0.28.900'), /const SOURCE_CHANGELOG = \[_\]ChangelogEntry\{\n    \.\{ \.ver = "0\.28\.900"/);
   for (const invalid of ['0.28.900', 'v0.28.900;bad', 'v0.28.900\n', 'v00.28.900']) assert.throws(() => buildChangelog(files, invalid), /Invalid release tag/);
   const r = repo(t, files);
@@ -419,7 +420,8 @@ test('IGSH-889 a release lists only fragments added since the previous release',
   assert.match(generated, /A new improvement/);
   assert.doesNotMatch(generated, /An old improvement/);
   const quiet = buildChangelog({ ...base(), ...old }, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
-  assert.match(quiet, /Updates include the latest improvements/);
+  assert.match(quiet, /Behind the scenes fixes\./);
+  assert.doesNotMatch(quiet, /latest improvements/);
   assert.doesNotMatch(quiet, /An old improvement/);
 
   const r = repo(t, { ...base(), ...old });

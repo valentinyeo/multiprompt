@@ -3,19 +3,32 @@ const versionNewer = @import("update_check.zig").versionNewer;
 
 pub const Release = struct { version: []const u8, changes: []const []const u8 };
 pub const Document = struct { version: []const u8, releases: []const Release };
+pub const COLLAPSED_LINES = 3;
+pub const BEHIND_THE_SCENES = "Behind the scenes fixes.";
+const LEGACY_FILLER = "Updates include the latest improvements.";
+
 pub const Notes = struct {
-    lines: [5][512]u8 = @splat(@splat(0)),
-    lengths: [5]usize = @splat(0),
+    lines: [16][512]u8 = @splat(@splat(0)),
+    lengths: [16]usize = @splat(0),
     count: usize = 0,
     total: usize = 0,
+
+    pub fn shown(self: *const Notes, expanded: bool) usize {
+        return if (expanded) self.count else @min(self.count, COLLAPSED_LINES);
+    }
+
+    pub fn hidden(self: *const Notes, expanded: bool) usize {
+        return self.total - self.shown(expanded);
+    }
 
     pub fn line(self: *const Notes, i: usize) []const u8 {
         return self.lines[i][0..self.lengths[i]];
     }
 
-    pub fn more(self: *const Notes, buf: []u8) []const u8 {
-        if (self.total <= self.count) return "";
-        return std.fmt.bufPrint(buf, "+{d} more", .{self.total - self.count}) catch "";
+    pub fn more(self: *const Notes, buf: []u8, expanded: bool) []const u8 {
+        const rest = self.hidden(expanded);
+        if (rest == 0) return "";
+        return std.fmt.bufPrint(buf, "and {d} more", .{rest}) catch "";
     }
 };
 
@@ -40,14 +53,31 @@ pub fn plain(text: []const u8) bool {
     return true;
 }
 
+fn behindTheScenes(text: []const u8) bool {
+    return std.mem.eql(u8, text, BEHIND_THE_SCENES) or std.mem.eql(u8, text, LEGACY_FILLER);
+}
+
+fn append(result: *Notes, text: []const u8) void {
+    result.total += 1;
+    if (result.count == result.lines.len) return;
+    @memcpy(result.lines[result.count][0..text.len], text);
+    result.lengths[result.count] = text.len;
+    result.count += 1;
+}
+
 pub fn pick(releases: []const Release, installed: []const u8, offered: []const u8) Notes {
     var result = Notes{};
-    var versions: [5][]const u8 = undefined;
+    var versions: [16][]const u8 = undefined;
+    var internal: usize = 0;
     for (releases) |release| {
         if (!versionNewer(installed, release.version) or versionNewer(offered, release.version)) continue;
         for (release.changes) |raw| {
             const text = std.mem.trim(u8, raw, " \t\r\n");
             if (!plain(text)) continue;
+            if (behindTheScenes(text)) {
+                internal += 1;
+                continue;
+            }
             result.total += 1;
             var at: usize = 0;
             while (at < result.count and !versionNewer(versions[at], release.version)) at += 1;
@@ -63,6 +93,16 @@ pub fn pick(releases: []const Release, installed: []const u8, offered: []const u
             versions[at] = release.version;
             result.count = @min(result.count + 1, result.lines.len);
         }
+    }
+    if (internal > 0) {
+        var buf: [64]u8 = undefined;
+        const text: []const u8 = if (result.total == 0)
+            (if (internal == 1) BEHIND_THE_SCENES else std.fmt.bufPrint(&buf, "{d} behind the scenes fixes.", .{internal}) catch BEHIND_THE_SCENES)
+        else if (internal == 1)
+            "Plus 1 behind the scenes fix."
+        else
+            std.fmt.bufPrint(&buf, "Plus {d} behind the scenes fixes.", .{internal}) catch "Plus behind the scenes fixes.";
+        append(&result, text);
     }
     return result;
 }
@@ -82,14 +122,45 @@ test "IGSH-728 picks only versions between installed and offered, newest first" 
     try std.testing.expectEqual(@as(usize, 0), pick(&releases, "1.11.0", "1.9.0").count);
 }
 
-test "IGSH-728 shows at most five lines then +N more" {
-    const releases = [_]Release{.{ .version = "1.1.0", .changes = &.{ "One.", "Two.", "Three.", "Four.", "Five.", "Six.", "Seven." } }};
+test "IGSH-948 shows three lines then and N more, and the full list when expanded" {
+    const releases = [_]Release{.{ .version = "1.1.0", .changes = &.{ "One.", "Two.", "Three.", "Four." } }};
     const notes = pick(&releases, "1.0.0", "1.1.0");
-    try std.testing.expectEqual(@as(usize, 5), notes.count);
-    try std.testing.expectEqualStrings("Five.", notes.line(4));
+    try std.testing.expectEqual(@as(usize, 4), notes.count);
+    try std.testing.expectEqual(@as(usize, 3), notes.shown(false));
+    try std.testing.expectEqual(@as(usize, 4), notes.shown(true));
     var buf: [32]u8 = undefined;
-    try std.testing.expectEqualStrings("+2 more", notes.more(&buf));
-    try std.testing.expectEqualStrings("", (Notes{}).more(&buf));
+    try std.testing.expectEqualStrings("and 1 more", notes.more(&buf, false));
+    try std.testing.expectEqualStrings("", notes.more(&buf, true));
+    try std.testing.expectEqualStrings("", (Notes{}).more(&buf, false));
+}
+
+test "IGSH-948 keeps sixteen lines and counts the rest as more even when expanded" {
+    const releases = [_]Release{.{ .version = "1.1.0", .changes = &.{ "A1.", "A2.", "A3.", "A4.", "A5.", "A6.", "A7.", "A8.", "A9.", "B1.", "B2.", "B3.", "B4.", "B5.", "B6.", "B7.", "B8.", "B9." } }};
+    const notes = pick(&releases, "1.0.0", "1.1.0");
+    try std.testing.expectEqual(@as(usize, 16), notes.count);
+    try std.testing.expectEqual(@as(usize, 18), notes.total);
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("and 15 more", notes.more(&buf, false));
+    try std.testing.expectEqualStrings("and 2 more", notes.more(&buf, true));
+}
+
+test "IGSH-948 groups quiet releases into one behind the scenes line and never shows filler" {
+    const releases = [_]Release{
+        .{ .version = "1.1.0", .changes = &.{"Typing feels faster."} },
+        .{ .version = "1.2.0", .changes = &.{"Updates include the latest improvements."} },
+        .{ .version = "1.3.0", .changes = &.{BEHIND_THE_SCENES} },
+    };
+    const notes = pick(&releases, "1.0.0", "1.3.0");
+    try std.testing.expectEqual(@as(usize, 2), notes.count);
+    try std.testing.expectEqualStrings("Typing feels faster.", notes.line(0));
+    try std.testing.expectEqualStrings("Plus 2 behind the scenes fixes.", notes.line(1));
+    const quiet = pick(releases[2..], "1.2.0", "1.3.0");
+    try std.testing.expectEqual(@as(usize, 1), quiet.count);
+    try std.testing.expectEqualStrings("Behind the scenes fixes.", quiet.line(0));
+    const single = pick(&releases, "1.1.0", "1.2.0");
+    try std.testing.expectEqualStrings("Behind the scenes fixes.", single.line(0));
+    const mixed = pick(releases[0..2], "1.0.0", "1.2.0");
+    try std.testing.expectEqualStrings("Plus 1 behind the scenes fix.", mixed.line(1));
 }
 
 test "IGSH-728 skips ticket ids, file paths, file names and PR numbers" {
