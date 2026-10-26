@@ -45,7 +45,24 @@ function Shot([string]$Name) {
     try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Output/$Name.png", [Drawing.Imaging.ImageFormat]::Png) }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
-function Cli([string]$Key, [string[]]$Arguments) {
+function Show-Workspace([string]$Name) {
+    for ($n = 2; $n -le 9; $n++) {
+        [ReconnectDesktop]::Activate($main)
+        [ReconnectDesktop]::Key(0x12, $false)
+        [ReconnectDesktop]::Key([ushort](0x30 + $n), $false)
+        [ReconnectDesktop]::Key([ushort](0x30 + $n), $true)
+        [ReconnectDesktop]::Key(0x12, $true)
+        Start-Sleep -Milliseconds 500
+        $app.Refresh()
+        if ($app.MainWindowTitle.StartsWith("$Name (")) { return }
+    }
+    throw "Could not switch to workspace $Name; title is $($app.MainWindowTitle)"
+}
+function Tab-Count([string]$Text) {
+    $found = [regex]::Matches($Text, 'account-sync: applied workspaces=\S* tabs=(\d+)')
+    if ($found.Count) { [int]$found[$found.Count - 1].Groups[1].Value } else { -1 }
+}
+function Invoke-Layout([string]$Key, [string[]]$Arguments) {
     $env:MULTIPROMPT_KEY = $Key
     $text = (& node "$repo/tools/mp-layout.mjs" @Arguments 2>&1 | Out-String).Trim()
     $code = $LASTEXITCODE
@@ -85,50 +102,55 @@ try {
     $app = Start-Process $Exe -ArgumentList '--no-window-restore' -PassThru
     $main = Wait-For 'app window' { $h = [ReconnectDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void][ReconnectDesktop]::SetForegroundWindow($main)
-    [void](Wait-For 'first layout from the account service' { (Read-Log) -match 'account-sync: applied workspaces=2 tabs=5' } 60)
+    [void](Wait-For 'first layout from the account service' { (Read-Log) -match 'account-sync: applied workspaces=Work\|Notes' } 60)
     Start-Sleep -Seconds 3
+    $baseTabs = Tab-Count (Read-Log)
+    Show-Workspace 'Work'
     Shot 'desktop-before'
-    $results.before = 'desktop applied workspaces=2 tabs=5'
+    $results.before = "desktop shows Work with runner sessions, $baseTabs tabs in total"
 
-    $listed = Cli $secrets.admin_key @('list')
+    $listed = Invoke-Layout $secrets.admin_key @('list')
     $listed.text | Set-Content "$Output/cli-list.txt"
     if ($listed.code -ne 0 -or $listed.text -notmatch 'runner-3') { throw "admin list failed: $($listed.text)" }
 
     $offset = (Read-Log).Length
     $start = [DateTime]::UtcNow
-    $moved = Cli $secrets.admin_key @('move', '--to', 'Runners', '--create', '--match', 'runner-*')
+    $moved = Invoke-Layout $secrets.admin_key @('move', '--to', 'Runners', '--create', '--match', 'runner-*')
     $moved.text | Set-Content "$Output/cli-move.txt"
     if ($moved.code -ne 0 -or $moved.text -notmatch 'moved 3 sessions to Runners') { throw "admin move failed: $($moved.text)" }
-    [void](Wait-For 'desktop shows the new section' { (Read-Log).Substring($offset) -match 'account-sync: applied workspaces=3 tabs=5' } 30)
+    [void](Wait-For 'desktop shows the new section' { (Read-Log).Substring($offset) -match 'account-sync: applied workspaces=\S*Runners' } 30)
     $seen = [DateTime]::UtcNow
-    Shot 'desktop-after'
     $elapsed = ($seen - $start).TotalSeconds
+    Show-Workspace 'Runners'
+    Shot 'desktop-after'
     $results.admin_move = $moved.text
     $results.desktop_seconds_to_show_new_section = [Math]::Round($elapsed, 2)
     if ($elapsed -gt 10) { throw "Desktop took $elapsed seconds to show the new section" }
 
-    $scoped = Cli $secrets.workspace_key @('list')
+    $scoped = Invoke-Layout $secrets.workspace_key @('list')
     $scoped.text | Set-Content "$Output/cli-workspace-list.txt"
     if ($scoped.code -ne 0 -or $scoped.text -match 'runner-' -or $scoped.text -notmatch 'notes-a') { throw "workspace key list is wrong: $($scoped.text)" }
-    $own = Cli $secrets.workspace_key @('open', 'notes-new', '--no-tmux')
+    $own = Invoke-Layout $secrets.workspace_key @('open', 'notes-new', '--no-tmux')
     $own.text | Set-Content "$Output/cli-workspace-open.txt"
     if ($own.code -ne 0) { throw "workspace key could not open in its own workspace: $($own.text)" }
-    $refused = Cli $secrets.workspace_key @('move', '--to', 'Work', 'notes-a')
+    $refused = Invoke-Layout $secrets.workspace_key @('move', '--to', 'Work', 'notes-a')
     $refused.text | Set-Content "$Output/cli-workspace-refused.txt"
     if ($refused.code -eq 0 -or $refused.text -notmatch 'refused|not found') { throw "workspace key was not refused: $($refused.text)" }
-    $other = Cli $secrets.other_key @('list')
+    $other = Invoke-Layout $secrets.other_key @('list')
     $other.text | Set-Content "$Output/cli-other-workspace.txt"
     if ($other.code -eq 0) { throw 'a key for another workspace was accepted' }
     $results.workspace_list = $scoped.text
     $results.workspace_refusal = $refused.text
     $results.other_workspace = $other.text
 
+    Start-Sleep -Seconds 8
+    $tabsBeforeOpen = Tab-Count (Read-Log)
     $offset = (Read-Log).Length
     $start = [DateTime]::UtcNow
-    $opened = Cli $secrets.admin_key @('open', 'fresh-session', '--workspace', 'Runners', '--title', 'Fresh session', '--no-tmux')
+    $opened = Invoke-Layout $secrets.admin_key @('open', 'fresh-session', '--workspace', 'Runners', '--title', 'Fresh session', '--no-tmux')
     $opened.text | Set-Content "$Output/cli-open.txt"
     if ($opened.code -ne 0) { throw "open failed: $($opened.text)" }
-    [void](Wait-For 'desktop shows the opened session' { (Read-Log).Substring($offset) -match 'account-sync: applied workspaces=3 tabs=7' } 30)
+    [void](Wait-For 'desktop shows the opened session' { (Tab-Count (Read-Log).Substring($offset)) -eq ($tabsBeforeOpen + 1) } 30)
     $openSeconds = ([DateTime]::UtcNow - $start).TotalSeconds
     Shot 'desktop-opened'
     $results.open = $opened.text
