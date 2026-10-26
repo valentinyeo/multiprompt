@@ -958,7 +958,7 @@ pub fn chatFileOnReady() void {
                 entry.history = history;
             }
             if (!disk and history.received_ms != 0) entry.history.received_ms = history.received_ms;
-            if (belongs_to_active and app_state.g_chat_active and !disk and !history.more) app_state.g_chat_read_open_ready = true;
+            if (belongs_to_active and app_state.g_chat_active and !disk and !history.more) app_state.g_chat_read_open_ready = foregroundIsOurs();
             if (belongs_to_active and app_state.g_chat_active and added > 0) {
                 const had_messages = app_state.g_chat_new_messages.count() != 0;
                 app_state.g_chat_new_messages.arrive(added, app_state.g_chat_scrolled_up);
@@ -1004,6 +1004,7 @@ pub fn chatFileOnReady() void {
         refreshChatTranscript(false);
         if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
+    if (app_state.g_chat_read_open_ready) _ = chatReadBoundary();
 }
 
 test "Chat View builds a tmux-name identity when a tmux tab lost its sid" {
@@ -1206,7 +1207,9 @@ pub fn chatReadBoundary() chat_history.ReadBoundary {
     if (!app_state.g_chat_active) return .{};
     if (app_state.active_shell >= app_state.shell_count or !app_state.g_chat_blocks_from_file or
         app_state.g_chat_cache_shell_id != app_state.shells[app_state.active_shell].shell_id) return .{};
-    return chat_history.unreadBoundary(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_read_visit_marker);
+    const boundary = chat_history.unreadBoundary(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_read_visit_marker);
+    if (app_state.g_chat_read_open_ready and boundary.index == null) app_state.g_chat_read_visit_marker = 0;
+    return boundary;
 }
 
 pub fn chatReadMark(bottom: bool) bool {
@@ -1238,6 +1241,13 @@ pub fn chatReadMark(bottom: bool) bool {
     app_state.g_chat_layout_dirty = true;
     saveSession();
     return true;
+}
+
+pub fn chatReadDeactivate() void {
+    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
+    _ = chatReadMark(false);
+    if (app_state.g_chat_read_visit_marker == 0) app_state.g_chat_read_visit_marker = app_state.shells[app_state.active_shell].last_read_message_id;
+    app_state.g_chat_read_open_ready = false;
 }
 
 pub fn chatDeferTranscriptLoad() void {
