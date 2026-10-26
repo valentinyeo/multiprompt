@@ -184,6 +184,8 @@ const CHAT_FIND_TOP_H: i32 = 52;
 var g_chat_layout_width: i32 = 0;
 var g_chat_layout_scale: i32 = 0;
 var g_chat_layout_font_pt: i32 = 0;
+var g_chat_layout_top_pad: i32 = 0;
+var g_chat_top_pad: i32 = 0;
 var fake_ui_scale: i32 = 100;
 var g_chat_layout_reuse: usize = 0;
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };

@@ -892,7 +892,7 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
         @memset(pixels, 0);
         paintThreadTitle(dc, width);
         _ = gdi.GdiFlush();
-        const title_rect = threadTitleNameRectFor(width, 0) orelse return error.TestUnexpectedResult;
+        const title_rect = (if (chatTitleLayout()) |pill_layout| pill_layout.text else threadTitleNameRectFor(width, 0)) orelse return error.TestUnexpectedResult;
         var ink: usize = 0;
         var y = title_rect.top;
         while (y < title_rect.bottom) : (y += 1) {

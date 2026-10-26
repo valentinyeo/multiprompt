@@ -6211,7 +6211,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         try std.testing.expect(outline != bg and outline != fill);
 
         const left_band = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.top, pill.left - uiScaled(8), pill.bottom);
-        const right_band = floatProofInk(frame_pixels, frame_w, bg, pill.right + uiScaled(8), pill.top, layout.transcript.right, pill.bottom);
+        const right_band = floatProofInk(frame_pixels, frame_w, bg, pill.right + uiScaled(8), pill.top, layout.transcript.right - uiScaled(16), pill.bottom);
         const above_card = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(40), layout.transcript.right, card.top);
         const gap_strip = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(12), layout.transcript.right, card.top - uiScaled(1));
         const below_pill = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.bottom + uiScaled(2), layout.transcript.right, pill.bottom + uiScaled(40));
