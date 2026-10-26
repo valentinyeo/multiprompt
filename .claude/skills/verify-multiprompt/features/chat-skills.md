@@ -8,7 +8,7 @@ New skills appear when slash suggestions reopen. Cached results remain usable du
 
 Open Chat View in a remote Claude session. Type a slash and a skill prefix. Tab accepts the selected skill.
 
-## Driving it
+## Driving it with control.ps1
 
 Dispatch verify.yml with feature=chat-skills and this branch, or a published release tag. The existing isolated desktop driver owns its app, profile and fake SSH transport. The transport calls the real mp_complete.py discovery over real SKILL.md files; no provider runs. A prepared built-in cache avoids provider initialization, without replacing skill discovery.
 
