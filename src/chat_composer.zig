@@ -1535,6 +1535,7 @@ pub fn openChatView() void {
     if (app_state.g_main_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     if (app_state.g_chat_browser_swap.shell_id == 0) {
         app_state.g_chat_switch_started = GetTickCount64();
+        app_state.g_chat_switch_content_sid = app_state.shells[app_state.active_shell].shell_id;
         app_state.g_chat_browser_swap.request(app_state.shells[app_state.active_shell].shell_id, app_state.g_chat_switch_started);
         _ = SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_CHAT_BROWSER_SWAP, @import("chat_switch.zig").paint_deadline_ms, null);
         app_state.g_chat_switch_browser_sid = 0;

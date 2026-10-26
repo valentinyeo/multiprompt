@@ -1233,7 +1233,6 @@ pub fn chatReadMark(bottom: bool) bool {
     if (!bottom and shell.last_read_message_id != 0 and (previous == null or read <= previous.?)) return false;
     if (shell.last_read_message_id == blocks[read].message_id) return false;
     shell.last_read_message_id = blocks[read].message_id;
-    app_state.g_chat_layout_reuse = 0;
     app_state.g_chat_layout_dirty = true;
     saveSession();
     return true;
@@ -1322,6 +1321,20 @@ pub fn chatSwitchDidPaint() void {
         debugLog(line);
     }
     _ = PostMessageW(app_state.g_main_hwnd, WM_TIMER, TIMER_CHAT_BROWSER_SWAP, 0);
+}
+
+pub fn chatSwitchContentPainted() void {
+    const sid = app_state.g_chat_switch_content_sid;
+    if (sid == 0 or !app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.shells[app_state.active_shell].shell_id != sid) return;
+    if (app_state.g_chat_block_count == 0 or app_state.g_chat_layout_dirty or app_state.g_chat_cache_shell_id != sid) return;
+    app_state.g_chat_switch_content_sid = 0;
+    if (!verboseLoggingEnabled()) return;
+    var client: RECT = std.mem.zeroes(RECT);
+    if (app_state.g_chat_transcript_hwnd != null) _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
+    var buf: [160]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "[switch] chat content shown shell={d} blocks={d} ms={d} layout_w={d} client_w={d}", .{ sid, app_state.g_chat_block_count, GetTickCount64() -| app_state.g_chat_switch_started, app_state.g_chat_layout_width, client.right - client.left }) catch return;
+    debugLog(line);
 }
 
 pub fn chatSwitchBrowserTick() void {
@@ -1706,6 +1719,8 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     };
     app_state.g_chat_histories = .empty;
     defer {
+        app_state.g_chat_read_visit_marker = 0;
+        app_state.g_chat_read_boundary = .{};
         for (0..5) |i| chatHistoryForget(@intCast(87400 + i));
         app_state.g_chat_histories.deinit(a);
         app_state.g_chat_histories = saved.histories;
@@ -1789,4 +1804,20 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     app_state.g_chat_layout_reuse = 0;
     chatRelayout(800);
     try std.testing.expectEqual(app_state.g_chat_content_h, incremental_h);
+    var marker: u64 = 0;
+    for (app_state.g_chat_blocks[0..counts[last]]) |block| {
+        if (block.role != .tool and block.message_id != 0) marker = block.message_id;
+    }
+    app_state.g_chat_read_visit_marker = marker;
+    const divider_started = perfNow();
+    chatRelayout(800);
+    const divider_ms = perfMs(divider_started);
+    std.debug.print("IGSH-927 unread divider relayout blocks={d} reuse={d} ms={d}\n", .{ app_state.g_chat_block_count, app_state.g_chat_layout_reuse, divider_ms });
+    try std.testing.expect(app_state.g_chat_read_boundary.index != null);
+    try std.testing.expect(app_state.g_chat_read_boundary.index.? >= counts[last] -| 8);
+    try std.testing.expect(divider_ms < 100);
+    const divider_h = app_state.g_chat_content_h;
+    app_state.g_chat_layout_reuse = 0;
+    chatRelayout(800);
+    try std.testing.expectEqual(divider_h, app_state.g_chat_content_h);
 }

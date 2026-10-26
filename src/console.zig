@@ -2592,6 +2592,7 @@ pub fn switchToShell(idx: u32) void {
     if (defer_browser) {
         app_state.g_chat_browser_swap.request(app_state.shells[idx].shell_id, switch_started);
         app_state.g_chat_switch_started = switch_started;
+        app_state.g_chat_switch_content_sid = app_state.shells[idx].shell_id;
         app_state.g_chat_switch_browser_sid = 0;
         cancelBrowserVisibilitySettle();
         cancelPendingNativeBrowserFocus();

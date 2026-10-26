@@ -198,6 +198,7 @@ const chatPerf = @import("chat_session.zig").chatPerf;
 const chatHistoryEntry = @import("chat_session.zig").chatHistoryEntry;
 const chatFileRequest = @import("chat_session.zig").chatFileRequest;
 const chatSwitchDidPaint = @import("chat_session.zig").chatSwitchDidPaint;
+const chatSwitchContentPainted = @import("chat_session.zig").chatSwitchContentPainted;
 const refreshChatTranscript = @import("chat_session.zig").refreshChatTranscript;
 const chatRelayoutPreservingScroll = @import("chat_session.zig").chatRelayoutPreservingScroll;
 const ChatHit = @import("app_state.zig").ChatHit;
@@ -1797,7 +1798,10 @@ pub fn chatRelayout(client_width: i32) void {
     const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
     chat_style.bubblePositions(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_bubble_pos[0..app_state.g_chat_block_count]);
     const boundary = @import("chat_session.zig").chatReadBoundary();
-    if (!std.meta.eql(boundary, app_state.g_chat_read_boundary)) app_state.g_chat_layout_reuse = 0;
+    if (!std.meta.eql(boundary, app_state.g_chat_read_boundary)) {
+        const count = app_state.g_chat_block_count;
+        app_state.g_chat_layout_reuse = @min(app_state.g_chat_layout_reuse, boundary.index orelse count, app_state.g_chat_read_boundary.index orelse count);
+    }
     app_state.g_chat_read_boundary = boundary;
     var reuse = @min(app_state.g_chat_layout_reuse, app_state.g_chat_block_count);
     app_state.g_chat_img_pass +%= 1;
@@ -4326,6 +4330,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             defer {
                 _ = EndPaint(hwnd, &ps);
                 if (painted) chatSwitchDidPaint();
+                if (painted) chatSwitchContentPainted();
                 if (painted) chatBenchPaint();
                 if (painted) @import("launch_cache.zig").painted(true);
             }

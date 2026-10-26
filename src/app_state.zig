@@ -1139,6 +1139,7 @@ pub var g_chat_switch_preparing = false;
 pub var g_chat_switch_started: u64 = 0;
 pub var g_chat_switch_painted_ms: u64 = 0;
 pub var g_chat_switch_browser_sid: u32 = 0;
+pub var g_chat_switch_content_sid: u32 = 0;
 pub var g_chat_file_valid = false;
 pub var g_chat_file_request_id: u32 = 0;
 pub var g_chat_code_font: HANDLE = null;
