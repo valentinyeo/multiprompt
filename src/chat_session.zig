@@ -1305,11 +1305,13 @@ pub fn chatDeferTranscriptLoad() void {
 
 pub fn chatSwitchDidPaint() void {
     if (app_state.g_chat_active and app_state.g_chat_blocks_from_file) {
-        if (chatHistoryEntry(chatCacheIdentity())) |entry| {
-            if (entry.history.received_ms != 0) {
+        for (app_state.g_chat_histories.items) |entry| {
+            if (entry.retired or !chat_history.sameSession(entry.key, app_state.g_chat_file_key)) continue;
+            if (entry.history.received_ms != 0 and entry.history.revision == app_state.g_chat_last_hash) {
                 chatPerf("receive to paint", entry.history.received_ms, app_state.g_chat_block_count);
                 entry.history.received_ms = 0;
             }
+            break;
         }
     }
     if (app_state.g_chat_switch_preparing or !app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return;
