@@ -24,6 +24,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 - **Changelog fragments are for the end user:** one short plain sentence per line, no internal names. Engineering detail goes in the commit message.
 - **Never use Ctrl+Alt shortcuts** (AltGr on US-International layouts).
 - The browser extension targets Chrome and loads unpacked from `extension/`.
+- **The Chat View shows no status elements around messages:** no sending clock, "Sending...", read checks, ETA, model or capacity badges. Only a real send failure may show. Valentin removed these one by one; do not add new ones.
 - Keep this file under 80 lines.
 
 ## Rules and what enforces them
@@ -38,3 +39,4 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
 | Never commit secrets or private information. | `secret-scan` in `.github/workflows/gitleaks.yml`; review for non-secret private information |
+| No status elements around Chat View messages. | Chat View status-free journey (IGSH-931); fails on any status text or icon under a message |
