@@ -27,10 +27,10 @@ for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0'
   for (const [i, bytes] of [app, bridge, fs.readFileSync(path.join(root, 'extension.zip'))].entries()) fs.writeFileSync(path.join(dir, names[i]), bytes);
   const releases = version === '9.10.0' ? [
     { version: '9.8.0', changes: ['Older change.'] },
-    { version: '9.9.0', changes: ['Middle change.', 'Another middle change.', 'Last middle change.'] },
+    { version: '9.9.0', changes: ['Middle change.'] },
     { version: '10.0.0', changes: ['Not offered yet.'] },
     { version: '0.0.0', changes: ['Already installed.'] },
-    { version, changes: ['Typing feels faster.', 'Chats keep your place.', 'Tabs open sooner.', 'Fix IGSH-123.', 'Fix src/main.zig.'] },
+    { version, changes: ['Typing feels faster.', 'Chats keep your place.', 'Fix IGSH-123.', 'Fix src/main.zig.'] },
   ] : [{ version, changes: ['Typing feels faster.'] }];
   fs.writeFileSync(path.join(dir, 'release-notes.json'), JSON.stringify({ version, releases }));
   names.push('release-notes.json');

@@ -114,10 +114,21 @@ pub fn updateCardVisible() bool {
 
 var card_notes: @import("update_notes.zig").Notes = .{};
 var card_notes_logged = false;
+var card_expanded = false;
+
+fn cardHasToggle() bool {
+    return card_notes.total > @import("update_notes.zig").COLLAPSED_LINES;
+}
 
 fn updateCardHeight() i32 {
-    const rows = card_notes.count + @intFromBool(card_notes.total > card_notes.count);
+    const rows = card_notes.shown(card_expanded) + @intFromBool(cardHasToggle());
     return uiScaled(UPDATE_CARD_H) + @as(i32, @intCast(rows)) * uiScaled(18);
+}
+
+pub fn updateCardToggleNotes() void {
+    if (!cardHasToggle()) return;
+    card_expanded = !card_expanded;
+    card_notes_logged = false;
 }
 
 pub fn updateCardSpan() i32 {
@@ -143,6 +154,11 @@ fn updateCardCloseRect(card: RECT) RECT {
     return .{ .left = card.right - uiScaled(24), .top = card.top + uiScaled(3), .right = card.right - uiScaled(4), .bottom = card.top + uiScaled(23) };
 }
 
+fn updateCardMoreRect(card: RECT) RECT {
+    const top = card.top + uiScaled(46) + @as(i32, @intCast(card_notes.shown(card_expanded))) * uiScaled(18);
+    return .{ .left = card.left + uiScaled(10), .top = top, .right = card.right - uiScaled(10), .bottom = top + uiScaled(18) };
+}
+
 fn ptInRect(r: RECT, x: i32, y: i32) bool {
     return x >= r.left and x < r.right and y >= r.top and y < r.bottom;
 }
@@ -153,6 +169,7 @@ pub fn updateCardHit(x: i32, y: i32) u8 {
     if (!ptInRect(card, x, y)) return 0;
     if (ptInRect(updateCardCloseRect(card), x, y)) return 2;
     if (ptInRect(updateCardButtonRect(card), x, y)) return 1;
+    if (cardHasToggle() and ptInRect(updateCardMoreRect(card), x, y)) return 4;
     return 3;
 }
 
@@ -165,6 +182,7 @@ pub fn updateCardPoll() void {
         if (!release_ready or !std.mem.eql(u8, version, app_state.g_update_ver[0..app_state.g_update_ver_len])) {
             card_notes = update_release.cardNotes(version);
             card_notes_logged = false;
+            card_expanded = false;
             restart_status = "";
         }
         release_ready = true;
@@ -204,6 +222,7 @@ pub fn updateCardPoll() void {
     if (!update_check.versionDiffers(APP_VERSION, found)) return;
     card_notes = update_release.cardNotes(found);
     card_notes_logged = false;
+    card_expanded = false;
     @memcpy(app_state.g_update_ver[0..found.len], found);
     app_state.g_update_ver_len = found.len;
     debugLog2("update-card: new version ready ", found);
@@ -302,26 +321,32 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     drawAscii(hdc, "x", &close_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 
     _ = SetTextColor(hdc, dim);
-    for (0..card_notes.count) |i| {
+    const shown = card_notes.shown(card_expanded);
+    for (0..shown) |i| {
         var note_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(46) + @as(i32, @intCast(i)) * uiScaled(18), .right = card.right - uiScaled(10), .bottom = card.top + uiScaled(46) + @as(i32, @intCast(i + 1)) * uiScaled(18) };
         var wide: [512]u16 = undefined;
         const n = std.unicode.utf8ToUtf16Le(&wide, card_notes.line(i)) catch continue;
         _ = @import("win32.zig").DrawTextW(hdc, &wide, @intCast(n), &note_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
-    if (card_notes.total > card_notes.count) {
-        var more_buf: [32]u8 = undefined;
-        var more_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(46) + @as(i32, @intCast(card_notes.count)) * uiScaled(18), .right = card.right - uiScaled(10), .bottom = card.bottom - uiScaled(26) };
-        drawAscii(hdc, card_notes.more(&more_buf), &more_rc, DT_SINGLELINE | DT_NOPREFIX);
+    var more_buf: [32]u8 = undefined;
+    const more_text: []const u8 = if (card_expanded) "Show less" else card_notes.more(&more_buf, false);
+    if (cardHasToggle()) {
+        _ = SetTextColor(hdc, accent);
+        var more_rc = updateCardMoreRect(card);
+        drawAscii(hdc, more_text, &more_rc, DT_SINGLELINE | DT_NOPREFIX);
     }
     if (!card_notes_logged) {
         card_notes_logged = true;
         var log_buf: [640]u8 = undefined;
         const restart_button = updateCardButtonRect(card);
         debugLog(std.fmt.bufPrint(&log_buf, "[update] restart button={d},{d}", .{ @divTrunc(restart_button.left + restart_button.right, 2), @divTrunc(restart_button.top + restart_button.bottom, 2) }) catch "[update] restart button unavailable");
-        debugLog(std.fmt.bufPrint(&log_buf, "[update] card notes n={d} first={s}", .{ card_notes.count, if (card_notes.count > 0) card_notes.line(0) else "" }) catch "[update] card notes unavailable");
-        for (0..card_notes.count) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] card note {d}={s}", .{ i, card_notes.line(i) }) catch continue);
-        var more_buf: [32]u8 = undefined;
-        debugLog2("[update] card remaining=", card_notes.more(&more_buf));
+        if (cardHasToggle()) {
+            const more_button = updateCardMoreRect(card);
+            debugLog(std.fmt.bufPrint(&log_buf, "[update] more row={d},{d}", .{ @divTrunc(more_button.left + more_button.right, 2), @divTrunc(more_button.top + more_button.bottom, 2) }) catch "[update] more row unavailable");
+        }
+        debugLog(std.fmt.bufPrint(&log_buf, "[update] card view={s} n={d} first={s}", .{ if (card_expanded) "expanded" else "collapsed", shown, if (shown > 0) card_notes.line(0) else "" }) catch "[update] card view unavailable");
+        for (0..shown) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] card note {d}={s}", .{ i, card_notes.line(i) }) catch continue);
+        debugLog2("[update] card remaining=", more_text);
     }
 
     const btn = updateCardButtonRect(card);

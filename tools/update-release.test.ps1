@@ -118,20 +118,21 @@ try {
                 $deadline = [DateTime]::UtcNow.AddSeconds(30)
                 do {
                     $cardLog = if (Test-Path $log) { Get-Content $log -Raw } else { '' }
-                    if ($cardLog -match '\[update\] card remaining=\+2 more') { break }
+                    if ($cardLog -match '\[update\] card remaining=and 1 more') { break }
                     Assert (-not $cardProcess.HasExited) 'Card fixture exited before painting notes'
                     if ([DateTime]::UtcNow -gt $deadline) { throw 'Update card did not paint release notes' }
                     Start-Sleep -Milliseconds 100
                 } while ($true)
-                Assert ($cardLog -match '\[update\] card notes n=5 first=Typing feels faster\.') 'Card did not show five newest notes'
-                $expectedNotes = @('Typing feels faster.', 'Chats keep your place.', 'Tabs open sooner.', 'Middle change.', 'Another middle change.')
+                Assert ($cardLog -match '\[update\] card view=collapsed n=3 first=Typing feels faster\.') 'Card did not show three newest notes'
+                $expectedNotes = @('Typing feels faster.', 'Chats keep your place.', 'Middle change.')
                 $observedNotes = @()
                 for ($i = 0; $i -lt $expectedNotes.Count; $i++) {
                     $note = [regex]::Match($cardLog, '\[update\] card note ' + $i + '=([^\r\n]*)')
                     Assert ($note.Success -and $note.Groups[1].Value -ceq $expectedNotes[$i]) 'Card note order or version range is wrong'
                     $observedNotes += $note.Groups[1].Value
                 }
-                Assert ($cardLog -notmatch '\[update\] card note \d+=.*(IGSH-123|src/main|Not offered yet|Already installed)') 'Card leaked an internal or out-of-range note'
+                Assert ($cardLog -notmatch '\[update\] card note \d+=.*(IGSH-123|src/main|Not offered yet|Already installed|Older change)') 'Card leaked an internal, out-of-range or hidden note'
+                Assert ($cardLog -notmatch 'latest improvements') 'Card showed generic filler text'
                 $cardProcess.Refresh()
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Update card window unavailable'
@@ -142,6 +143,41 @@ try {
                 try { $bitmap.Save((Join-Path $Evidence 'update-card-notes.png')) } finally { $bitmap.Dispose() }
                 $observedNotes | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-notes.json')
                 Passed 'update card shows aggregated plain notes'
+                $moreRows = [regex]::Matches($cardLog, '\[update\] more row=(\d+),(\d+)')
+                Assert ($moreRows.Count -gt 0) 'More row coordinates were not painted'
+                $moreRow = $moreRows[$moreRows.Count - 1]
+                $moreClick = [IntPtr](([int]$moreRow.Groups[2].Value -shl 16) -bor [int]$moreRow.Groups[1].Value)
+                Assert ([UpdateProof]::PostMessage($cardProcess.MainWindowHandle, 0x201, [IntPtr]1, $moreClick)) 'More row press failed'
+                Assert ([UpdateProof]::PostMessage($cardProcess.MainWindowHandle, 0x202, [IntPtr]0, $moreClick)) 'More row release failed'
+                $deadline = [DateTime]::UtcNow.AddSeconds(15)
+                do {
+                    $cardLog = Get-Content $log -Raw
+                    if ($cardLog -match '\[update\] card view=expanded n=4 first=Typing feels faster\.') { break }
+                    Assert (-not $cardProcess.HasExited) 'Card fixture exited before opening the full list'
+                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Update card did not open the full list on click' }
+                    Start-Sleep -Milliseconds 100
+                } while ($true)
+                $expandedLog = $cardLog.Substring($cardLog.IndexOf('card view=expanded'))
+                $expectedAll = @('Typing feels faster.', 'Chats keep your place.', 'Middle change.', 'Older change.')
+                $observedAll = @()
+                for ($i = 0; $i -lt $expectedAll.Count; $i++) {
+                    $note = [regex]::Match($expandedLog, '\[update\] card note ' + $i + '=([^\r\n]*)')
+                    Assert ($note.Success -and $note.Groups[1].Value -ceq $expectedAll[$i]) 'Full list order or skipped versions are wrong'
+                    $observedAll += $note.Groups[1].Value
+                }
+                Assert ($expandedLog -notmatch '\[update\] card note 4=') 'Full list shows more rows than the release has'
+                Assert ($cardLog -notmatch 'latest improvements') 'Full list showed generic filler text'
+                Start-Sleep -Milliseconds 300
+                $cardProcess.Refresh()
+                $rectangle = New-Object UpdateProof+Rect
+                Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Update card window unavailable'
+                $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
+                $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                $dc = $graphics.GetHdc()
+                try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Expanded update card screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+                try { $bitmap.Save((Join-Path $Evidence 'update-card-expanded.png')) } finally { $bitmap.Dispose() }
+                $observedAll | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-expanded.json')
+                Passed 'update card opens the full list on click'
                 $versionMatch = [regex]::Match([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Verifier)), 'MPVERSION=(\d+\.\d+\.\d+);')
                 Assert $versionMatch.Success 'Native verifier version marker missing'
                 $oldVersion = $versionMatch.Groups[1].Value
