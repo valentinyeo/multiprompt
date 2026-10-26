@@ -1143,6 +1143,8 @@ pub fn applyServerLayout(json: []const u8) !void {
     if (was_starred) @import("workspaces.zig").refreshStarredWorkspace();
     updateMainWindowTitle();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+    var applied_buf: [96]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&applied_buf, "account-sync: applied workspaces={d} tabs={d}", .{ desired.workspaces.len, desired.tabs.len }) catch "account-sync: applied");
 }
 fn accountDevices(bytes: []const u8) void {
     var parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, bytes, .{}) catch return;
@@ -1522,7 +1524,7 @@ pub fn accountBootstrap(hwnd: HANDLE) bool {
     app_state.g_account_locked = false;
     app_state.g_account_bootstrapping = false;
     startAccountJob(.{ .kind = .startup });
-    _ = SetTimer(hwnd, TIMER_ACCOUNT, 20000, null);
+    _ = SetTimer(hwnd, TIMER_ACCOUNT, 5000, null);
     return true;
 }
 

@@ -1,0 +1,61 @@
+name: Account layout journey
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/account-journey.yml
+      - tools/account-journey/**
+      - tools/mp-layout.mjs
+      - service/journey/**
+      - service/worker.js
+      - src/account_desktop.zig
+      - src/account_client.zig
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install pinned Windows Zig
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build the real app
+        shell: pwsh
+        run: |
+          zig build -Dtarget=x86_64-windows-gnu --summary all
+          if ($LASTEXITCODE -ne 0) { throw 'App build failed' }
+          New-Item -ItemType Directory -Force bin | Out-Null
+          Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+      - name: Build the test account service
+        working-directory: service
+        shell: pwsh
+        run: |
+          npm ci --no-audit --no-fund --prefer-offline
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+          npx wrangler deploy --dry-run --outdir .build
+          if ($LASTEXITCODE -ne 0) { throw 'Worker build failed' }
+      - name: Drive the real desktop against the account service
+        shell: pwsh
+        run: ./tools/account-journey/drive.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: account-journey-desktop
+          path: evidence
+          if-no-files-found: error
