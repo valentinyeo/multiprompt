@@ -36,6 +36,9 @@ var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const CHAT_OUTBOX_KEY_CAP = 192;
+const ShellDraft = struct { fn onComposerEdit(_: ShellDraft, _: u64) void {} };
+var shell_draft: ShellDraft = .{};
+fn GetTickCount64() u64 { return 0; }
 const TIMER_CHAT_DRAFT = 1;
 const CHAT_DRAFT_SAVE_MS = 300;
 var g_main_hwnd: ?usize = 1;
@@ -246,7 +249,6 @@ var g_closed_count: u32 = 0;
 var g_pending_tmux_host: u8 = 0;
 var g_pending_chat_id: u64 = 0;
 var fail_spawn = false;
-fn GetTickCount64() u64 { return 0; }
 fn closeShellRemember(idx: u32, remember_closed: bool) void {
 ${close.slice(closeStart, closeEnd).replaceAll('@import("chat_composer.zig").', '')}
 ${close.slice(historyStart, historyEnd)}

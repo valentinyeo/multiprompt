@@ -3291,8 +3291,6 @@ pub const LAST_PASTE_FALLBACK_MS: u64 = 60_000;
 pub const DICTATION_SAMPLE_RATE: DWORD = 16000;
 pub const DICTATION_CHUNK_BYTES: usize = 3200;
 pub const DICTATION_BUFFER_COUNT: usize = 4;
-const DICTATION_MAX_SECONDS: usize = 45;
-pub const DICTATION_MAX_BYTES: usize = DICTATION_SAMPLE_RATE * 2 * DICTATION_MAX_SECONDS;
 
 pub const pcmFrameRms = duplex.pcmFrameRms;
 const VadState = duplex.VadState;
