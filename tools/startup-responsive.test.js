@@ -135,7 +135,7 @@ test('ISSUE-543 late console completions bind by stable identity and discard clo
   assert.match(session, /const restored_active_tab = selectedSavedTab\(json, tabs\[0\.\.tab_count\], if \(@import\("launch_cache.zig"\)\.pending\) @import\("launch_cache.zig"\)\.selected_shell_id else 0\)/);
   const selected = body(read('src/session.zig'), 'selectedSavedTab');
   assert.match(selected, /for \(\[_\]u64\{ selected, json_reader\.uint\(json, "active_shell_id"\) \}\)/);
-  assert.match(selected, /if \(tab\.shell_id == id\) return @intCast\(tmux_identity\.restoreWinner\(tabs, i\)\)/);
+  assert.match(selected, /json_reader\.restoredSessionTab\(json, tabs, id\)/);
 });
 
 test('ISSUE-543 cached clicks survive restoration without consuming a new title range on every launch', () => {
@@ -206,7 +206,7 @@ const reviewCases = [
     const restore = body(read('src/session.zig'), 'restoreSession');
     assert.match(restore, /closedDuringStartup\(tabs\[t\]\.shell_id\)/);
     assert.match(restore, /const restored_active_tab = selectedSavedTab\(json, tabs\[0\.\.tab_count\], if \(@import\("launch_cache.zig"\)\.pending\) @import\("launch_cache.zig"\)\.selected_shell_id else 0\)/);
-    assert.match(body(read('src/session.zig'), 'selectedSavedTab'), /if \(tab\.shell_id == id\) return @intCast\(tmux_identity\.restoreWinner\(tabs, i\)\)/);
+    assert.match(body(read('src/session.zig'), 'selectedSavedTab'), /json_reader\.restoredSessionTab\(json, tabs, id\)/);
     assert.match(restore, /restored_shell_ids\[tmux_identity\.restoreWinner\(tabs\[0\.\.tab_count\], t\)\]/);
     assert.match(restore, /findShellById\(restored_active_shell_id\)/);
   }],
@@ -255,7 +255,9 @@ const reviewCases = [
     const tabs = init.slice(init.indexOf('        .tabs =>'), init.indexOf('        .chat =>'));
     assert.ok(tabs.indexOf('listener_status.load(.acquire)') >= 0 && tabs.indexOf('listener_status.load(.acquire)') < tabs.indexOf('launch_cache.deferred()'));
     assert.match(tabs, /\.pending => return false/);
-    assert.match(tabs, /\.failed => \{[^}]*showHeaderNoticeAscii[^}]*return true/);
+    const failed = tabs.slice(tabs.indexOf('.failed => {'), tabs.indexOf('.ready =>'));
+    assert.match(failed, /showHeaderNoticeAscii/);
+    assert.doesNotMatch(failed, /return true/);
     const listener = body(read('src/notifications.zig'), 'notifyListenerThread');
     assert.ok(listener.indexOf('g_notify_bound_port = bound_port') < listener.indexOf('listener_status.store(.ready, .release)'));
   }, '=='],

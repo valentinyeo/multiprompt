@@ -1394,6 +1394,7 @@ const ISpVoiceVtbl = extern struct {
 };
 pub const ISpVoice = extern struct { lpVtbl: *const ISpVoiceVtbl };
 pub extern "kernel32" fn SetHandleInformation(hObject: HANDLE, dwMask: DWORD, dwFlags: DWORD) callconv(WINAPI) BOOL;
+pub extern "kernel32" fn GetHandleInformation(hObject: HANDLE, lpdwFlags: *DWORD) callconv(WINAPI) BOOL;
 
 pub extern "user32" fn keybd_event(u8, u8, DWORD, usize) callconv(WINAPI) void;
 pub extern "comdlg32" fn GetOpenFileNameW(*OPENFILENAMEW) callconv(WINAPI) BOOL;
@@ -1423,7 +1424,12 @@ pub const WSADATA = extern struct { data: [408]u8 };
 
 pub extern "ws2_32" fn WSAStartup(WORD, *WSADATA) callconv(WINAPI) i32;
 pub extern "ws2_32" fn WSAGetLastError() callconv(WINAPI) i32;
-pub extern "ws2_32" fn socket(i32, i32, i32) callconv(WINAPI) SOCKET;
+extern "ws2_32" fn WSASocketW(i32, i32, i32, ?*anyopaque, u32, DWORD) callconv(WINAPI) SOCKET;
+pub fn socket(af: i32, kind: i32, protocol: i32) SOCKET {
+    const WSA_FLAG_OVERLAPPED: DWORD = 0x01;
+    const WSA_FLAG_NO_HANDLE_INHERIT: DWORD = 0x80;
+    return WSASocketW(af, kind, protocol, null, 0, WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+}
 pub extern "ws2_32" fn bind(SOCKET, *const SOCKADDR_IN, i32) callconv(WINAPI) i32;
 pub extern "ws2_32" fn listen(SOCKET, i32) callconv(WINAPI) i32;
 pub extern "ws2_32" fn accept(SOCKET, ?*anyopaque, ?*i32) callconv(WINAPI) SOCKET;

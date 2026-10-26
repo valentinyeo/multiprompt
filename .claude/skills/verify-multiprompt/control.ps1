@@ -3085,6 +3085,67 @@ try {
             Save-Json (Read-Session) 'session-starred-muted.json'
             Snapshot 'starred-muted'
             $result.checks += @{ name = 'favorites-keeps-muted-starred'; starred_group_id = $favoritesGroupId; tab = $tabIndex; muted = $true }
+            $expectedTabs = @((Read-Session).tabs).Count
+            $listeners = @()
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $logStart = ([IO.File]::ReadAllText($log)).Length
+            Doctor
+            Record 'Close only the owned app before occupying notification ports'
+            if (-not $process.CloseMainWindow() -or -not $process.WaitForExit(10000)) { throw 'Favorites app refused normal close' }
+            $stopped = $job.Stop()
+            Save-Json $stopped 'favorites-before-restart-process-tree.json'
+            if ($stopped.ActiveProcesses -ne 0) { throw 'Favorites restart left owned descendants' }
+            $job.Dispose()
+            try {
+                $portSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../src/app_state.zig'))
+                $portList = [regex]::Match($portSource, 'pub const NOTIFY_PORTS = \[_\]u16\{([^}]+)\}')
+                if (-not $portList.Success) { throw 'Notification port list missing' }
+                foreach ($port in $portList.Groups[1].Value.Split(',')) {
+                    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, [int]$port.Trim())
+                    $listener.Start()
+                    $listeners += $listener
+                }
+                Record 'All notification ports occupied by owned fixture sockets'
+                $script:job = New-Object VerifyJob
+                $script:process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'favorites-restart-stdout.log'), (Join-Path $Evidence 'favorites-restart-stderr.log'), '--single-window')
+                $script:window = [IntPtr]::Zero
+                Wait-Until {
+                    $process.Refresh()
+                    $script:window = $process.MainWindowHandle
+                    $state = Read-Inbox
+                    $trace = ([IO.File]::ReadAllText($log)).Substring($logStart)
+                    $script:window -ne [IntPtr]::Zero -and $null -ne $state -and
+                        $state.hwnd -eq $script:window.ToInt64().ToString() -and
+                        $trace -match 'no free notify port' -and $trace -match 'launch step=browser'
+                } 'IGSH-890 sessions finish restoring despite occupied notification ports' 60
+                [void][VerifyNative]::ShowWindow($script:window, 9)
+                [void][VerifyNative]::MoveWindow($script:window, 10, 10, 1000, 650, $true)
+                Wait-Until { [VerifyNative]::BringToForeground($script:window); [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'Favorites restarted owned foreground'
+                Doctor
+                foreach ($round in 1..4) {
+                    Press @(0x12, 0x32) 'Alt+2: home during repeated Favorites refresh'
+                    Wait-Until { $state = Read-Session; $null -ne $state -and -not $state.starred_view -and @($state.tabs).Count -eq $expectedTabs } 'home retains exactly the original sessions'
+                    Press @(0x12, 0x31) 'Alt+1: Favorites during repeated refresh'
+                    Wait-Until {
+                        $state = Read-Session
+                        $null -ne $state -and $state.starred_view -and @($state.tabs).Count -eq $expectedTabs -and
+                            $state.tabs[$state.active_tab].favorite -and $state.tabs[$state.active_tab].starred_group_id -eq $favoritesGroupId
+                    } 'Favorites has one selected original grouped session'
+                    $published = (Get-Item (Join-Path $scratch 'roaming/ZigShell/inbox-default.json')).LastWriteTimeUtc
+                    Wait-Until { (Get-Item (Join-Path $scratch 'roaming/ZigShell/inbox-default.json')).LastWriteTimeUtc -gt $published } 'fresh Inbox refresh does not append sessions'
+                    $state = Read-Session
+                    if (@($state.tabs).Count -ne $expectedTabs -or @($state.tabs | Where-Object { -not $_.PSObject.Properties['pid'] -or $_.pid -eq 0 }).Count -ne 0) { throw 'Favorites refresh retained cached ghosts or duplicated sessions' }
+                    Save-Json $state ("favorites-refresh-$round.json")
+                }
+                Restart-SessionRestore 'favorites-second-restart' $false
+                Press @(0x12, 0x31) 'Alt+1: verify Favorites after another occupied-port relaunch'
+                Wait-Until { $state = Read-Session; $null -ne $state -and $state.starred_view -and @($state.tabs).Count -eq $expectedTabs -and $state.tabs[$state.active_tab].starred_group_id -eq $favoritesGroupId } 'second restart keeps one grouped favorite without growth'
+                Save-Json (Read-Session) 'favorites-no-duplicates.json'
+                Snapshot 'favorites-no-duplicates'
+                $result.checks += @{ name = 'IGSH-890 favorites-refresh-restart'; tabs = $expectedTabs; refreshes = 4; restarts = 2; occupiedPorts = $listeners.Count; starred_group_id = $favoritesGroupId }
+            } finally {
+                foreach ($listener in $listeners) { $listener.Stop() }
+            }
         }
         'session-open' {
             $result.sshBoundary = @{ verified = $false; expected = 'No remote credentials or tmux server are supplied; background tab creation, idempotency and failed connection status are verified'; observed = 'pending'; tabRemoved = $null }
