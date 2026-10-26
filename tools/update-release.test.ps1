@@ -76,7 +76,8 @@ try {
             if ($Evidence) {
                 New-Item -ItemType Directory -Force $Evidence | Out-Null
                 Add-Type -AssemblyName System.Drawing
-                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'                $rectangle = New-Object UpdateProof+Rect
+                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
+                $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
                 $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
                 $graphics = [Drawing.Graphics]::FromImage($bitmap)
