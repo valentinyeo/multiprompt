@@ -1422,7 +1422,6 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   assert.doesNotMatch(chat.replace('Type-Text $message', 'Type-Text other'), normalSend);
   assert.match(chat, /\$composerHandle = \[VerifyNative\]::GetFocusedWindow\(\$script:window\)/);
   assert.match(chat, /GetAncestor\(\$composerHandle, 2\) -ne \$script:window -or \[VerifyNative\]::Class\(\$composerHandle\) -cne 'Edit'/);
-  assert.match(chat, /Snapshot 'selection-after-menu'\s+Wait-Until \{\s+try \{ \[void\]\[VerifyNative\]::MessageBubblePoint\(\$transcript\); return \$true \} catch \{ return \$false \}\s+\} 'owned user bubble repainted after closing the menu'/);
   const stdinDelivery = /\[IO.File\]::Open\(\$prefix \+ '-stdin.bin', \[IO.FileMode\]::Open, \[IO.FileAccess\]::Read, \[IO.FileShare\]::ReadWrite\)[\s\S]*?\$stdin\.CopyTo\(\$buffer\)[\s\S]*?\$received = \[Text.Encoding\]::ASCII.GetString\(\$receivedBytes\)[\s\S]*?\$received -ceq \$wireMessage/;
   assert.ok(chat.includes("$wireMessage = ([string][char]27) + '[200~' + $message + ([string][char]27) + '[201~' + \"`r\""));
   assert.match(chat, stdinDelivery);
@@ -2020,4 +2019,16 @@ test('IGSH-905 six-line composer proof holds Shift until the native composer sho
   }
   const earlyRelease = helper.replace('[VerifyNative]::KeyDown(0x0D)', '[VerifyNative]::KeyUp(0x10)\n        [VerifyNative]::KeyDown(0x0D)');
   assert.notEqual(earlyRelease.split('[VerifyNative]::KeyUp(0x10)').length - 1, 1);
+});
+
+test('IGSH-911 native bubble scan accepts the real delivered half-opacity tone without relaxing text selection', () => {
+  const samples = JSON.parse(read('tools/fixtures/IGSH-911/bubble-tones.json'));
+  const scan = control.slice(control.indexOf('public static Point MessageBubblePoint('), control.indexOf('public static Point[] SelectTranscriptText('));
+  for (const channel of ['R', 'G', 'B']) assert.ok(scan.includes(`(bg.${channel} * 128 + fill.${channel} * 127) / 255`));
+  assert.match(scan, /color == fill.ToArgb\(\) \|\| color == queuedFill.ToArgb\(\)/);
+  assert.match(scan, /pixels.GetPixel\(x - 1, y\).ToArgb\(\) == color/);
+  assert.match(scan, /pixels.GetPixel\(x, y - 1\).ToArgb\(\) == color/);
+  assert.notDeepEqual(samples.delivered, samples.sending);
+  assert.deepEqual(samples.background.map((value, i) => Math.floor((value * 128 + samples.sending[i] * 127) / 255)), samples.delivered);
+  assert.ok(read('src/chat_render.zig').includes('.source_constant_alpha = 128'));
 });

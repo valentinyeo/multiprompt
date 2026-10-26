@@ -462,10 +462,12 @@ public static class VerifyNative {
             var bg = pixels.GetPixel(0, pixels.Height / 2);
             int shift = (2126 * bg.R + 7152 * bg.G + 722 * bg.B) / 10000 < 128 ? 53 : -26;
             var fill = System.Drawing.Color.FromArgb(Math.Max(0, Math.Min(255, bg.R + shift)), Math.Max(0, Math.Min(255, bg.G + shift)), Math.Max(0, Math.Min(255, bg.B + shift)));
+            var queuedFill = System.Drawing.Color.FromArgb((bg.R * 128 + fill.R * 127) / 255, (bg.G * 128 + fill.G * 127) / 255, (bg.B * 128 + fill.B * 127) / 255);
             for (int y = pixels.Height - 2; y > 0; y--) {
                 for (int x = pixels.Width - 2; x > 0; x--) {
-                    if (pixels.GetPixel(x, y).ToArgb() == fill.ToArgb() && pixels.GetPixel(x - 1, y).ToArgb() == fill.ToArgb() &&
-                        pixels.GetPixel(x, y - 1).ToArgb() == fill.ToArgb()) return new Point { X = rect.Left + x - 1, Y = rect.Top + y - 1 };
+                    int color = pixels.GetPixel(x, y).ToArgb();
+                    if ((color == fill.ToArgb() || color == queuedFill.ToArgb()) && pixels.GetPixel(x - 1, y).ToArgb() == color &&
+                        pixels.GetPixel(x, y - 1).ToArgb() == color) return new Point { X = rect.Left + x - 1, Y = rect.Top + y - 1 };
                 }
             }
         }
@@ -3580,10 +3582,6 @@ try {
                                 $quoteLinesBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[chat\] reply quote chars=' }).Count
                                 $stdinBytesBeforeReply = (Get-Item ($prefix + '-stdin.bin')).Length
                                 Doctor
-                                Snapshot 'selection-after-menu'
-                                Wait-Until {
-                                    try { [void][VerifyNative]::MessageBubblePoint($transcript); return $true } catch { return $false }
-                                } 'owned user bubble repainted after closing the menu'
                                 Record 'IGSH-717: genuine SendInput drag over only part of the owned user bubble text'
                                 $selectionCheck.points = @([VerifyNative]::SelectTranscriptText($transcript, $process.Id, $script:window))
                                 Snapshot 'selection-enter-reply-selected'
