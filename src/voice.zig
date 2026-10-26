@@ -25,6 +25,13 @@ const GetWindowTextLengthW = @import("win32.zig").GetWindowTextLengthW;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
 const Sleep = @import("win32.zig").Sleep;
 const CloseHandle = @import("win32.zig").CloseHandle;
+const CreateFileW = @import("win32.zig").CreateFileW;
+const FILE_APPEND_DATA = @import("win32.zig").FILE_APPEND_DATA;
+const FILE_SHARE_READ = @import("win32.zig").FILE_SHARE_READ;
+const FILE_SHARE_WRITE = @import("win32.zig").FILE_SHARE_WRITE;
+const OPEN_ALWAYS = @import("win32.zig").OPEN_ALWAYS;
+const FILE_ATTRIBUTE_NORMAL = @import("win32.zig").FILE_ATTRIBUTE_NORMAL;
+const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
 const RegGetValueW = @import("win32.zig").RegGetValueW;
 const GetEnvironmentVariableA = @import("win32.zig").GetEnvironmentVariableA;
 const AttachConsole = @import("win32.zig").AttachConsole;
@@ -82,10 +89,9 @@ const L = @import("startup.zig").L;
 const PostMessageW = @import("focus.zig").PostMessageW;
 const SetFocus = @import("focus.zig").SetFocus;
 const isCtrlDown = @import("focus.zig").isCtrlDown;
-const win32OpenAppend = @import("file_io.zig").win32OpenAppend;
+const win32WidePath = @import("file_io.zig").win32WidePath;
 const win32WriteAll = @import("file_io.zig").win32WriteAll;
 const debugLog = @import("diagnostics.zig").debugLog;
-const writeAuditU64 = @import("diagnostics.zig").writeAuditU64;
 const S_OK = @import("win32.zig").S_OK;
 const CLSCTX_INPROC_SERVER = @import("win32.zig").CLSCTX_INPROC_SERVER;
 const COINIT_APARTMENTTHREADED = @import("win32.zig").COINIT_APARTMENTTHREADED;
@@ -1477,14 +1483,14 @@ pub fn dictationAudit(stage: []const u8, value: usize) void {
     const start: usize = @intCast(appdata_len);
     if (start + suffix.len >= path_buf.len) return;
     @memcpy(path_buf[start .. start + suffix.len], suffix);
-    const h = win32OpenAppend(path_buf[0 .. start + suffix.len]) orelse return;
+    var wide_buf: [520]u16 = undefined;
+    const path = win32WidePath(&wide_buf, path_buf[0 .. start + suffix.len]) orelse return;
+    var record_buf: [256]u8 = undefined;
+    const record = std.fmt.bufPrint(&record_buf, "{d}\t{s}\t{d}\n", .{ GetTickCount64(), stage, value }) catch return;
+    const h = CreateFileW(path.ptr, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, null, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
+    if (h == INVALID_HANDLE_VALUE_PTR) return;
     defer _ = CloseHandle(h);
-    writeAuditU64(h, GetTickCount64());
-    win32WriteAll(h, "\t");
-    win32WriteAll(h, stage);
-    win32WriteAll(h, "\t");
-    writeAuditU64(h, value);
-    win32WriteAll(h, "\n");
+    win32WriteAll(h, record);
 }
 
 fn dictationSetTranscriptUtf8(text: []const u8) bool {

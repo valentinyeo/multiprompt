@@ -158,8 +158,63 @@ test('IGSH-812 registration is additive and existing contract checks remain on t
   for (const required of ['Check verification contracts', 'Check workspace focus journey contract', 'Check browser recovery journey contract', 'Validate journey and syntax', 'node tools/check-workspace-focus.mjs', 'node tools/check-browser-pane-stuck.mjs', 'Language.Parser]::ParseFile', 'Build branch executable', 'Launch Doctor Drive Evidence Cleanup', 'Upload durable verification evidence']) assert.ok(workflow.includes(required), required);
   const map = read(skill + 'features/chat-dictation.md');
   assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
-  for (const item of ['dictation-enter', 'dictation-ctrl-d', 'dictation-mic-click', '1000 ms', 'f94e5952', 'not yet run']) assert.ok(map.includes(item), item);
+  for (const item of ['dictation-enter', 'dictation-ctrl-d', 'dictation-mic-click', '1000 ms', 'f94e5952', 'Windows runtime proof']) assert.ok(map.includes(item), item);
   assert.ok(read(skill + 'features/README.md').includes('](chat-dictation.md)'));
   assert.ok(read(skill + 'SKILL.md').includes('](features/chat-dictation.md)'));
-  assert.match(read(skill + 'coverage.md'), /\| IGSH-812 \|[^\n]*\| chat-dictation \| journey added, not yet run \|/);
+  assert.match(read(skill + 'coverage.md'), /\| IGSH-812 \|[^\n]*\| chat-dictation \| Windows proof recorded/);
+});
+
+test('IGSH-893 audit evidence serializes plain lines within five seconds on Windows PowerShell', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dictation-audit-'));
+  try {
+    const auditPath = path.join(directory, 'dictation-audit.log');
+    const lines = ['123\tfixture-audio-bytes\t89160', '124\ttarget-chat-composer\t22'];
+    fs.writeFileSync(auditPath, lines.join('\n'));
+    const auditRead = driver.match(/^\s*\$audit = (.+)$/m);
+    assert.ok(auditRead, 'production audit read exists');
+    const helper = driver.slice(driver.indexOf('function Read-DictationAudit('), driver.indexOf('function Get-DictationMic('));
+    const script = `$ErrorActionPreference = 'Stop'; ${helper}; $auditPath = $env:AUDIT_PATH; $held = [IO.File]::Open($auditPath, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite); try { $audit = ${auditRead[1]} } finally { $held.Dispose() }; if ((ConvertTo-Json -InputObject @{} -Compress) -cne '{}') { throw 'JSON serializer precondition failed' }; Write-Host ('AUDIT_READ_READY type=' + $audit[0].GetType().FullName + ' properties=' + ($audit[0].PSObject.Properties.Name -join ',')); $clock = [Diagnostics.Stopwatch]::StartNew(); $json = ConvertTo-Json -InputObject @{ audit = $audit } -Depth 12 -Compress; Write-Host ('SERIALIZATION_MS=' + $clock.ElapsedMilliseconds); Write-Output $json`;
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8', timeout: 30000, env: { ...process.env, AUDIT_PATH: auditPath },
+    });
+    assert.equal(result.error, undefined, JSON.stringify({ error: result.error?.message, stdout: result.stdout, stderr: result.stderr, expression: auditRead[1] }));
+    assert.equal(result.status, 0, result.stderr);
+    console.log(result.stdout);
+    const elapsed = result.stdout.match(/SERIALIZATION_MS=(\d+)/);
+    assert.ok(elapsed, result.stdout);
+    assert.ok(Number(elapsed[1]) < 5000, result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout.split(/SERIALIZATION_MS=\d+\s*/)[1]).audit, lines);
+    const broken = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script.replace(auditRead[1], '@(Get-Content $auditPath)')], {
+      encoding: 'utf8', timeout: 30000, env: { ...process.env, AUDIT_PATH: auditPath },
+    });
+    assert.match(broken.stdout, /AUDIT_READ_READY[^\n]*PSPath/);
+    if (broken.error) {
+      assert.equal(broken.error.code, 'ETIMEDOUT', broken.stderr);
+    } else {
+      assert.equal(broken.status, 0, broken.stderr);
+      const oldElapsed = broken.stdout.match(/SERIALIZATION_MS=(\d+)/);
+      assert.ok(oldElapsed, broken.stdout);
+      const oldAudit = JSON.parse(broken.stdout.split(/SERIALIZATION_MS=\d+\s*/)[1]).audit;
+      assert.ok(Number(oldElapsed[1]) >= 5000 || JSON.stringify(oldAudit) !== JSON.stringify(lines));
+    }
+    console.log('DICTATION_OLD_PROVIDER_METADATA_REJECTED');
+    console.log('DICTATION_AUDIT_SERIALIZATION_OK');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('IGSH-893 a stalled precondition fails within its named timeout', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const start = driver.indexOf('function Wait-Until(');
+  const wait = driver.slice(start, driver.indexOf('\nfunction ', start + 1));
+  const script = `$ErrorActionPreference = 'Stop'; $process = $null; ${wait}
+    try { Wait-Until { $false } 'deliberately stalled recorded PCM capture precondition' -Seconds 1 -PollMilliseconds 20; throw 'Stall unexpectedly passed' }
+    catch { if ($_.Exception.Message -notlike 'Waited 1 s for deliberately stalled recorded PCM capture precondition.*') { throw }; Write-Output 'DICTATION_STALL_TIMEOUT_OK' }`;
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 5000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /DICTATION_STALL_TIMEOUT_OK/);
 });
