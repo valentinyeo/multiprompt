@@ -751,6 +751,8 @@ fn chatAcLayout() void {
     _ = InvalidateRect(app_state.g_chat_ac_hwnd, null, 0);
 }
 
+var chat_ac_window_clears: usize = 0;
+
 fn chatAcPaint(hwnd: HANDLE) void {
     var ps: PAINTSTRUCT = undefined;
     const dc = BeginPaint(hwnd, &ps);
@@ -760,6 +762,7 @@ fn chatAcPaint(hwnd: HANDLE) void {
     _ = GetClientRect(hwnd, &rc);
     const background = CreateSolidBrush(customColorOr("overlay_bg", if (app_state.g_light_theme) RGB(250, 250, 252) else RGB(38, 40, 47)));
     _ = FillRect(dc, &rc, background);
+    if (@import("builtin").is_test and @import("win32.zig").WindowFromDC(dc) == hwnd) chat_ac_window_clears += 1;
     _ = DeleteObject(background);
     _ = SelectObject(dc, ensureChatFont());
     _ = SetBkMode(dc, TRANSPARENT);
@@ -2298,7 +2301,7 @@ test "IGSH-885 a reply arriving while dictating leaves the draft and the recordi
     try testChatDictation(.reply);
 }
 
-test "IGSH-922 slash filtering coalesces layout into one completed popup paint" {
+test "IGSH-922 slash filtering presents one completed popup frame" {
     const w = @import("win32.zig");
     const Spy = struct {
         var paints: usize = 0;
@@ -2346,8 +2349,10 @@ test "IGSH-922 slash filtering coalesces layout into one completed popup paint" 
     _ = w.UpdateWindow(parent);
     var inline_paints: usize = 0;
     var queued_paints: usize = 0;
+    const clears_before = chat_ac_window_clears;
     for ([_][]const u16{ std.mem.span(L("/")), std.mem.span(L("/s")), std.mem.span(L("/sk")), std.mem.span(L("/ski")), std.mem.span(L("/skiz")), std.mem.span(L("/ski")) }, [_]usize{ 4, 3, 2, 2, 0, 2 }) |text, expected_count| {
         Spy.paints = 0;
+        const step_clears = chat_ac_window_clears;
         const token = chat_complete.tokenAtCaret(text, text.len, .claude) orelse return error.TestUnexpectedResult;
         chatAcRank(text, token);
         chatAcRank(text, token);
@@ -2355,7 +2360,7 @@ test "IGSH-922 slash filtering coalesces layout into one completed popup paint" 
         const inline_count = Spy.paints;
         _ = w.UpdateWindow(popup);
         queued_paints += Spy.paints - inline_count;
-        std.debug.print("IGSH-922 chars={d} matches={d} inline_paints={d} queued_paints={d}\n", .{ text.len, app_state.g_chat_ac.count, inline_count, Spy.paints - inline_count });
+        std.debug.print("IGSH-922 chars={d} matches={d} inline_paints={d} queued_paints={d} visible_clears={d}\n", .{ text.len, app_state.g_chat_ac.count, inline_count, Spy.paints - inline_count, chat_ac_window_clears - step_clears });
         try std.testing.expectEqual(expected_count, app_state.g_chat_ac.count);
         try std.testing.expect(IsWindowVisible(popup) != 0);
         if (expected_count > 0) {
@@ -2364,9 +2369,10 @@ test "IGSH-922 slash filtering coalesces layout into one completed popup paint" 
             try std.testing.expectEqual(customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)), w.GetPixel(dc, 2, 2));
         }
     }
-    std.debug.print("IGSH-922 searches=6 inline_paints={d} queued_paints={d}\n", .{ inline_paints, queued_paints });
+    std.debug.print("IGSH-922 searches=6 inline_paints={d} queued_paints={d} visible_clears={d}\n", .{ inline_paints, queued_paints, chat_ac_window_clears - clears_before });
     try std.testing.expectEqual(@as(usize, 0), inline_paints);
     try std.testing.expectEqual(@as(usize, 6), queued_paints);
+    try std.testing.expectEqual(@as(usize, 0), chat_ac_window_clears - clears_before);
 }
 
 test "IGSH-836 skill keyboard survives stationary hover and real movement or click takes over" {
