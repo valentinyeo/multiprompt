@@ -1,7 +1,12 @@
-$bindingName = 'verify-binding'
+$bindingName = 'workspace'
 $bindingCheck = @{ name = 'tmux-binding-five-reopens'; passed = $false; beforeCount = 1; afterCount = 0; launches = @() }
 $result.checks += $bindingCheck
-& $Exe --notify ('SESSION:' + $bindingName + ':a1b2c3d4-0985-4000-8000-000000000985:C:/verify')
+$bindingLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+$bindingPort = [regex]::Match((Read-SharedText $bindingLog), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
+if (-not $bindingPort.Success) { throw 'Owned tunnel-inbound listener missing' }
+$adoption = Invoke-Zsb @('pane-info') ([int]$bindingPort.Groups[1].Value) 'binding-adoption'
+if ($adoption.tab_name -cne $bindingName) { throw 'Public pane-info resolved the wrong remote tab' }
+Press @(0x12, 0x53) 'Alt+S: persist the confirmed remote binding through a real user action'
 Wait-Until {
     $state = Read-Session
     $tabs = @($state.tabs)

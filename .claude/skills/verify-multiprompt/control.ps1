@@ -2632,17 +2632,17 @@ try {
     if ($Feature -eq 'tmux-binding') {
         $bindingState = Join-Path $scratch 'binding-state'
         New-Item -ItemType Directory -Force $bindingState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
-        $bindingDocument = @{ name = 'tmux-binding'; binding = $true; bindingStatus = $true; mode = 'busy'; suggestion = ''; sessions = @('verify-binding') }
+        $bindingDocument = @{ name = 'tmux-binding'; binding = $true; bindingStatus = $true; mode = 'busy'; suggestion = ''; sessions = @('workspace') }
         [IO.File]::WriteAllText((Join-Path $bindingState 'state.json'), ($bindingDocument | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
         $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
         $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
         $env:MP_VERIFY_STATE = $bindingState
         $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
-        $bindingSeed = @{ active_tab = 0; single_window = $true; tabs = @(@{ kind = 'vps2'; name = 'verify-binding'; manual = $true; pid = 0; csid = 'a1b2c3d4-0985-4000-8000-000000000985' }) }
+        $bindingSeed = @{ active_tab = 0; single_window = $true; tabs = @(@{ kind = 'vps2'; name = 'workspace'; manual = $true; pid = 0 }) }
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), ($bindingSeed | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
         Save-Json $bindingSeed 'seed-session.json'
-        $result.seedBoundary = 'One saved bare SSH tab with an already-known agent session ID but no terminal binding. Only SSH is replaced by an owned console showing an existing named terminal session. The real app accepts a normal SESSION hook, adopts, saves and restores its binding; command receipts prove five exact reattachments and no session creation. No live server, credentials or real Claude are used.'
+        $result.seedBoundary = 'One saved bare SSH tab with no terminal binding. Only SSH is replaced by an owned console showing an existing named terminal session. The real app resolves its public pane-info request, adopts, saves and restores its binding; command receipts prove five exact reattachments and no session creation. No live server, credentials or real Claude are used.'
     }
     if ($Feature -eq 'chat-switch-speed') {
         $remoteState = Join-Path $scratch 'remote-state'
