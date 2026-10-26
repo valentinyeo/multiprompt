@@ -1133,7 +1133,7 @@ class HistoryReaderTest(unittest.TestCase):
         self.write(self.event('saved old reply'))
         live = self.path.with_name('live.jsonl')
         live.write_text(json.dumps(self.event('current reply')) + '\n')
-        self.query.update(live=True, cached_sid='sid', inode=self.path.stat().st_ino,
+        self.query.update(follow=True, cached_sid='sid', inode=self.path.stat().st_ino,
                           offset=self.path.stat().st_size)
         with patch.object(reader, 'resolve_tmux_agent', return_value=('live', live)):
             fields, rows = self.read()
@@ -1143,7 +1143,7 @@ class HistoryReaderTest(unittest.TestCase):
 
     def test_live_session_missing_retries_without_reading_saved_sid(self):
         self.write(self.event('saved old reply'))
-        self.query['live'] = True
+        self.query['follow'] = True
         with patch.object(reader, 'resolve_tmux_agent', return_value=None):
             for _ in range(2):
                 wire = reader.response(self.query)
@@ -1154,7 +1154,7 @@ class HistoryReaderTest(unittest.TestCase):
 
     def test_live_cross_user_discovery_ignores_saved_sid(self):
         self.write(self.event('saved old reply'))
-        self.query['live'] = True
+        self.query['follow'] = True
         owner = ('secondary', Path('/home/secondary'))
         expected = '@mp\t7\thistory\tok\tlive\t0\n{"text":"live owner rows"}\n@@MP_END@@\n'
         with patch.object(reader, 'resolve_tmux_agent', return_value=None), \

@@ -656,6 +656,7 @@ fn chatHistoryFetch(key: chat_transcript.Identity, id: u32, history: chat_histor
         .settlement = true,
         .source_offsets = true,
         .live = true,
+        .follow = true,
         .cached_sid = std.mem.sliceTo(&history.sid, 0),
         .inode = history.inode,
         .offset = history.offset,

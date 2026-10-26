@@ -129,6 +129,8 @@ def fake_suggestion_shown(claude):
 
 def fake_screen(claude, escapes):
     lines = ["Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
+    for question, answer in claude.get("turns", []):
+        lines.extend(["❯ " + question, "● " + answer, ""])
     lines += ["  Queued: " + " ".join(text.split()) for text in claude["queue"]]
     rows = claude["box"].split("\n") if claude["box"] else [""]
     first = rows[0]
@@ -263,6 +265,17 @@ def fake_init():
 
 def shell():
     op = ARGS[0] if ARGS else ""
+    if op == "resume" and len(ARGS) == 2:
+        value = state()
+        value["sid"] = ARGS[1]
+        value["transcript"] = str(Path(value["transcript"]).with_name(value["sid"] + ".jsonl"))
+        (ROOT / "state.json").write_text(json.dumps(value), encoding="utf-8")
+        return fake_init()
+    if op == "turn" and len(ARGS) == 2:
+        question, answer = "Remote question " + ARGS[1], "Remote answer " + ARGS[1]
+        fake_event("user", message=dict(role="user", content=question))
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
+        return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append([question, answer]) is None) else 3
     if op == "init":
         return fake_init()
     if op == "messages" and len(ARGS) == 2:
@@ -561,8 +574,11 @@ def ssh():
     if python:
         remote = shlex.split(command[python.start():])
         record("invocations.jsonl", kind="reader", argv=remote)
+        env = os.environ.copy()
+        if state().get("remoteHome"):
+            env.update(HOME=state()["remoteHome"], USERPROFILE=state()["remoteHome"])
         with (ROOT / f"reader-{os.getpid()}.stderr.log").open("ab", buffering=0) as error:
-            return subprocess.call([sys.executable, *remote[1:]], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer, stderr=error, creationflags=subprocess.CREATE_NO_WINDOW)
+            return subprocess.call([sys.executable, *remote[1:]], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer, stderr=error, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
     if "tmux list-clients" in command:
         record("invocations.jsonl", kind="probe", operation="list-clients/list-sessions")
         print("verify-agent\n@@S verify-agent\n@@LS_OK@@\n@@MP_LIVE@@")
