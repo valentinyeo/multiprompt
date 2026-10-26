@@ -244,7 +244,7 @@ print(json.dumps([namespace["console_rows"](case["lines"], case["width"]) for ca
   const long = 'send 12 ' + 'long message about the weekly plan that keeps wrapping '.repeat(3).trim();
   assert.ok(long.length > 150);
   const cases = [
-    { lines: ['Claude Code', '', '❯ ' + long, '─'.repeat(50)], width: 79 },
+    { lines: ['Claude Code', '', '> ' + long, '-'.repeat(50)], width: 79 },
     { lines: ['  Queued: ' + long], width: 79 },
     { lines: ['', 'x'.repeat(79), 'y'.repeat(80)], width: 79 },
     { lines: ['abc'], width: 0 },
@@ -255,7 +255,7 @@ print(json.dumps([namespace["console_rows"](case["lines"], case["width"]) for ca
     assert.ok(rows.every(row => row.length <= width), `case ${index}`);
   }
   assert.equal(result[0].join(''), cases[0].lines.join(''));
-  assert.equal(result[0].length, 2 + Math.ceil(('❯ ' + long).length / 79) + 1);
+  assert.equal(result[0].length, 2 + Math.ceil(('> ' + long).length / 79) + 1);
   assert.deepEqual(result[2], ['', 'x'.repeat(79), 'y'.repeat(79), 'y']);
   assert.deepEqual(result[3], ['a', 'b', 'c']);
   const source = read('tools/verify-chat-delivery/boundary.py');
