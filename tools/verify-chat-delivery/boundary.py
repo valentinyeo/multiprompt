@@ -259,7 +259,7 @@ def fake_init():
     (process / "stat").write_text(pane + " (claude) S 1 " + pane + " " + pane + " 0 -1", encoding="utf-8")
     (process / "cmdline").write_bytes(b"claude\0")
     fake_write(dict(mode=value["mode"], box="", queue=[], suggestion=value["suggestion"]))
-    if os.environ.get("CHAT_REACTIONS_PROOF") == "1":
+    if value.get("name") == "reactions":
         fake_event("user", message=dict(role="user", content="start the reaction session"))
         prefix = "Same first words " + "for this example " * 8
         for identity, suffix in (("msg_first", "FIRST REPLY"), ("msg_second", "SECOND REPLY")):
