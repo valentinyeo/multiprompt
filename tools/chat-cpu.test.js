@@ -16,12 +16,13 @@ function body(text, name) {
     .replaceAll('offset, height, null)', 'offset, height, null, false)')
     .replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary')
     .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
-    .replaceAll('@import("window_layout.zig").chatStopVisible', 'chatStopVisible');
+    .replaceAll('@import("window_layout.zig").chatStopVisible', 'chatStopVisible')
+    .replaceAll('@import("chat_composer.zig").chatAcAgent', 'chatAcAgent');
 }
 function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
   try {
-    copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
+    copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig', 'chat_reaction.zig', 'chat_transcript.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn known(_: []const u16) bool { return false; }\npub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
@@ -164,6 +165,16 @@ test('singleton startup oracle rejects the actual 706 check-then-spawn race', ()
 
 const layout = `
 const std = @import("std");
+const CHAT_OUTBOX_MAX_PER_KEY = 20;
+const chat_transcript = @import("chat_transcript.zig");
+const chat_reaction = @import("chat_reaction.zig");
+var g_reaction_view: chat_reaction.View = .{};
+const HistoryEntry = struct { history: struct { status: chat_transcript.Status = .{} } = .{} };
+fn chatHistoryEntry(_: u32) ?*HistoryEntry { return null; }
+fn chatFileIdentity() u32 { return 0; }
+fn chatAcAgent() enum { claude, codex, other } { return .claude; }
+fn chatShellReactionId(text: []const u16) u64 { return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(text)) | (@as(u64, 1) << 63); }
+
 const chat_echo = @import("chat_echo.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_style = @import("chat_style.zig");
@@ -641,6 +652,34 @@ test "twenty local and remote cached switches retain their unchanged prefix" {
     chatRelayout(400);
     try std.testing.expectEqual(cached_height, g_chat_content_h);
     try std.testing.expectEqualDeep(cached_rects, g_chat_layout_rects[0..1000].*);
+}
+`;
+  const result = run(prelude + body(source, 'chatRelayout') + checks);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test('IGSH-975 a folded reaction keeps its real unread boundary before the next message', () => {
+  const prelude = layout
+    .replace('fn chatReadBoundary() ReadBoundary { return .{}; }', 'fn chatReadBoundary() ReadBoundary { return .{ .index = 1 }; }')
+    .replace("var g_chat_capture: [1]u16 = .{'x'};", 'var g_chat_capture: [256]u16 = @splat(0);');
+  const checks = `
+test "folded user reaction keeps the New divider without a user bubble" {
+    defer g_reaction_view.deinit(std.heap.page_allocator);
+    var formatted: [256]u16 = undefined;
+    const line = chat_reaction.format(.like, 1, &.{'x'}, &formatted).?;
+    g_chat_capture[0] = 'x';
+    @memcpy(g_chat_capture[1..][0..line.len], line);
+    g_chat_last_len = 1 + line.len;
+    blocks[0] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 1, .reaction_reference = 1 };
+    blocks[1] = .{ .start = 1, .len = line.len, .role = .user, .first = true, .message_id = 3 };
+    blocks[2] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 2, .reaction_reference = 2 };
+    g_chat_block_count = 3;
+    chatRelayout(400);
+    try std.testing.expect(g_reaction_view.hides(1));
+    try std.testing.expectEqual(@as(usize, 2), measured);
+    try std.testing.expectEqual(g_chat_layout_rects[0].bottom, g_chat_read_divider_y);
+    try std.testing.expectEqual(g_chat_read_divider_y + 28, g_chat_layout_rects[2].top);
+    try std.testing.expectEqual(g_chat_layout_rects[1].top, g_chat_layout_rects[1].bottom);
 }
 `;
   const result = run(prelude + body(source, 'chatRelayout') + checks);

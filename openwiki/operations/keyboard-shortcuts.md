@@ -221,6 +221,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Double-click empty space | Switch between Chat View and the shell (without selecting text) |
 | Alt+C | Toggle formatted Chat View for this tab; screen copy remains the fallback |
 | + button / Ctrl+V in Chat View | Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File) |
+| Right-click Claude message / Ctrl+K reactions | Send a quoted reaction; show its badge |
 | Right-click message → Reply / Ctrl+K "Chat View: Reply to latest agent message" | Quote a message above your reply; select text and press Enter to quote only the selection; click × or press Esc with an empty composer to cancel |
 | Ctrl+K "Chat View: Open or fold all tool steps" | Open every tool step's details, or fold them all; click one tool line to toggle it |
 | Ctrl+K "Chat View: Toggle todo list" | Show or hide this tab's agent todo list below the title; also click the todo count |

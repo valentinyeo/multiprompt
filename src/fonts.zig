@@ -75,6 +75,10 @@ pub fn chat(height: i32, bold: bool, italic: bool, underline: bool, options: Cha
     return create(height, 0, 0, 0, if (bold) options.bold_weight else options.body_weight, @intFromBool(italic), @intFromBool(underline), 0, 0, 0, 0, options.quality, 0, if (options.body_weight == 500) L(UI_MEDIUM_FACE) else L(UI_FACE));
 }
 
+pub fn emoji(height: i32) w.HANDLE {
+    return create(height, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, L("Segoe UI Emoji"));
+}
+
 pub fn controlFont() w.HANDLE {
     if (control_font == null) control_font = create(-16, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L(UI_FACE));
     return control_font;
@@ -168,6 +172,9 @@ pub const MessageMenuItem = enum(u32) {
     copy_link = 7,
     send_again = 5,
     remove = 6,
+    reaction_like = 8,
+    reaction_dislike = 9,
+    reaction_heart = 10,
 
     pub fn label(self: MessageMenuItem) []const u8 {
         return switch (self) {
@@ -176,6 +183,9 @@ pub const MessageMenuItem = enum(u32) {
             .copy_link => "Copy link",
             .send_again => "Send again",
             .remove => "Remove",
+            .reaction_like => "React 👍",
+            .reaction_dislike => "React 👎",
+            .reaction_heart => "React ❤️",
         };
     }
 
@@ -186,6 +196,9 @@ pub const MessageMenuItem = enum(u32) {
             .copy_link => L("Copy &link"),
             .send_again => L("&Send again"),
             .remove => L("Re&move"),
+            .reaction_like => L("👍 Like"),
+            .reaction_dislike => L("👎 Dislike"),
+            .reaction_heart => L("❤️ Heart"),
         };
     }
 
@@ -196,6 +209,7 @@ pub const MessageMenuItem = enum(u32) {
             .copy_link => 0xE71B,
             .send_again => 0xE724,
             .remove => 0xE74D,
+            .reaction_like, .reaction_dislike, .reaction_heart => ' ',
         };
     }
 };

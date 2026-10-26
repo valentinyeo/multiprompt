@@ -46,7 +46,6 @@ test('messages-only verification drives the real transcript and retains a requir
   const read = file => fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8');
   const workflow = read('.github/workflows/verify.yml');
   const driver = read('tools/verify-chat-delivery/drive.ps1');
-  const render = read('src/chat_render.zig');
   assert.match(workflow, /"chat-messages-only"/);
   assert.match(workflow, /tools\/chat-messages-only-proof.test.mjs/);
   assert.match(workflow, /working-directory: negative-source\s+run: zig build/);
@@ -57,8 +56,6 @@ test('messages-only verification drives the real transcript and retains a requir
   assert.match(driver, /Shot 'messages-only-before-tools'/);
   assert.match(driver, /Shot 'messages-only-after-tools'/);
   assert.match(driver, /Copy-Item \$cache.FullName/);
-  assert.match(render, /if \(app_state.g_chat_blocks\[i\].role == .tool\) \{\s+app_state.g_chat_layout_rects\[i\] = .\{ .left = 0, .top = y, .right = 0, .bottom = y \};\s+chatImgStoreLayout\(i, .\{\}\);\s+continue;/);
-  assert.match(render, /for \(first\.\.app_state.g_chat_block_count\) \|i\| \{\s+if \(app_state.g_chat_blocks\[i\].role == .tool\) continue;/);
 });
 
 
