@@ -165,7 +165,7 @@ jobs:
     if: inputs.feature != 'chat-sync-audit'
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || format('verify ({0})', matrix.feature) }}
-    timeout-minutes: ${{ matrix.feature == 'browser-switch-speed' && 60 || 30 }}
+    timeout-minutes: ${{ matrix.feature == 'pane-layout' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
     strategy:
       fail-fast: false
       max-parallel: 6
