@@ -1453,7 +1453,7 @@ pub fn moveGroupToWorkspace(gidx: u32, workspace_idx: u32) void {
     invalidateSidebar();
 }
 
-pub fn commitPillMove(slot: u8, follow: bool) void {
+fn commitPillMove(slot: u8, follow: bool) void {
     pruneEmptyGroups();
     syncInProcessWorkspacesToRegistry();
     publishInboxState();
