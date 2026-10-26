@@ -7256,7 +7256,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         app_state.clean_chat = saved.clean;
         app_state.g_chat_layout_reuse = 0;
     }
-    const frame_w = 1200;
+    const frame_w = 1000;
     const frame_h = 900;
     const main = w.CreateWindowExW(0, L("STATIC"), L("float proof"), w.WS_POPUP, 0, 0, frame_w, frame_h, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyWindow(main);
