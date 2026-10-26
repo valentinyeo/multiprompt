@@ -4,6 +4,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 
 | Ticket | What the user gets | Journey stem(s) | Coverage | Missing prerequisite or smallest additional journey |
 | --- | --- | --- | --- | --- |
+| IGSH-901 | Tabs named from their console title keep their names and order after three restarts. | tab-names | journey added, not yet run | Run the branch on GitHub Windows and with tag=v0.28.893 as the red control; inspect names-restart-3-after.png. Seeds the saved tabs once; real agent titles and the keyboard path to an automatic name are not exercised. |
 | IGSH-845 | Caption buttons appear once and the caption-facing mask stays app-black when Chrome differs. | title-bar | journey added, not run | Dispatch both local red/green branches after authorized publication; six real Windows DPI/theme jobs, restored/maximized screenshots, live Light → AMOLED refresh and injected duplicate/band controls. No local tests or desktop execution. |
 | IGSH-814 | One saved first-unread boundary on reopen, with an unknown-position fallback when history loses its anchor. | chat-messages-only | native and desktop passed | [Windows run 40201786767](https://github.com/valentinyeo/multiprompt/actions/runs/40201786767), implementation 0377d775: 936 native tests, close/inject/restart/reopen, one correctly placed rule, gap warning, bottom/send clearing, all-read absence and pill coexistence passed; screenshots inspected. Synthetic agent boundary, not live Claude or Codex. |
 | IGSH-807 | Alt+Q retains chat/browser/shell input routing without a pane focus outline in any theme. | pane-layout | journey extended, not run | Paired GitHub Windows runs: pinned pre-fix `9618091700e09f5958a48390449dc5067874d5dd` must fail on margin pixels after input cycles; fixed build must pass with matching reviewed screenshots. No local execution; see GATES.md. |
@@ -119,6 +120,7 @@ These are the supplied real GitHub runs on this branch, not new executions by th
 | browser-pane-locked | 39871210688, v0.28.821 | passed |
 | palette-order | not run in this pass; added afterwards by IGSH-612 with its own GitHub runs | — |
 | remind-me | not run in this pass; added by IGSH-702 | — |
+| tab-names | not run in this pass; added by IGSH-901 with its own GitHub runs | — |
 | group-rail | not run in this pass; added afterwards by IGSH-591 with its own GitHub runs | — |
 | pane-layout | 39871210688, v0.28.821 | passed before IGSH-810 mask assertions; dark/light/amoled mask journey not yet run |
 | chat-view | 39871210688, v0.28.821 | passed; desktop toggle only |
