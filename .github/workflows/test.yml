@@ -111,6 +111,20 @@ jobs:
       - name: Run tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
+      - name: Save native header capacity proof
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: header-capacity-proof
+          path: '*header-capacity.bmp'
+          if-no-files-found: error
+      - name: Upload Chat View header ETA proof
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-header-eta
+          path: chat-header-eta-*.bmp
+          if-no-files-found: error
       - name: Run CLEAN chat pixel tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && !cancelled()
         shell: bash
@@ -157,7 +171,7 @@ jobs:
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Test plain changelog fragments and update card notes
         if: steps.paths.outputs.heavy == 'true'
-        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js
+        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js
       - name: Verify responsive startup ordering and original regression controls
         run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -282,13 +296,26 @@ jobs:
         with:
           name: update-verifier-x64-${{ github.run_id }}
           path: update-verifier
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        with:
+          name: native-update-x64-${{ github.run_id }}
+          path: native-update
       - name: Test safe release updates
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         run: |
           powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }}
+          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multiprompt.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload update restart proof
+        if: steps.paths.outputs.heavy == 'true' && always() && steps.rule.outputs.kind != 'STAMP'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: update-proof-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/update-proof/
+          if-no-files-found: error
 
   test-vps:
     name: test-vps (${{ matrix.group }})
@@ -555,6 +582,18 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           overwrite: true
+
+      - name: Build newer native update fixture
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dversion=9.99.999 --prefix "$RUNNER_TEMP/native-update" --summary all
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        with:
+          name: native-update-x64-${{ github.run_id }}
+          path: ${{ runner.temp }}/native-update/bin/multiprompt.exe
+          if-no-files-found: error
+          retention-days: 1
+
 
   test-result:
     name: test

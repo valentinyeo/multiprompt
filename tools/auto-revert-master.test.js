@@ -544,7 +544,7 @@ test('PR smoke, full master matrix and the release tag trigger stay wired', () =
   assert.match(verify, /pull_request' && fromJSON\('\["appearance"\]'\)/);
   assert.match(verify, /github.event_name == 'push' \|\| inputs.feature == 'all'/);
   const matrices = [...verify.matchAll(/fromJSON\('(\[[^'\n]+\])'\)/g)].map(match => JSON.parse(match[1]));
-  assert.equal(matrices[1].length, 17);
+  assert.equal(matrices[1].length, 18);
   assert.ok(matrices[1].includes('chat-dictation'));
   assert.ok(matrices[1].includes('remind-me'));
   assert.match(verify, /^  push:\n    branches: \[master\]\n    tags: \['v\*'\]/m);

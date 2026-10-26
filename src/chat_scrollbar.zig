@@ -4,6 +4,12 @@ pub const WHEEL_NOTCH: i32 = 120;
 pub const WHEEL_STEP_PX: i32 = 108;
 pub const BROWSER_NOTCH_PX: i32 = 100;
 
+pub const THUMB_HEIGHT_PX: i32 = 75;
+pub const THUMB_WIDTH_PX: i32 = 4;
+pub const THUMB_MARGIN_PX: i32 = 3;
+pub const HOLD_MS: u64 = 900;
+pub const FADE_MS: u64 = 300;
+
 pub const Span = struct { top: i32, height: i32 };
 pub const Box = struct { left: i32, top: i32, right: i32, bottom: i32 };
 
@@ -24,6 +30,35 @@ pub fn thumb(content_h: i32, viewport_h: i32, scroll_y: i32, track_h: i32, min_h
     const at = std.math.clamp(scroll_y, 0, range);
     const top: i32 = @intCast(@divTrunc(free * at, range));
     return .{ .top = top, .height = height };
+}
+
+pub fn fixedThumb(content_h: i32, viewport_h: i32, scroll_y: i32, track_h: i32, thumb_h: i32) ?Span {
+    const range = scrollRange(content_h, viewport_h);
+    if (range == 0 or track_h <= 0 or viewport_h <= 0) return null;
+    const height = @min(thumb_h, track_h);
+    const free: i64 = track_h - height;
+    const at = std.math.clamp(scroll_y, 0, range);
+    return .{ .top = @intCast(@divTrunc(free * at, range)), .height = height };
+}
+
+pub fn opacity(now_ms: u64, last_scroll_ms: ?u64, dragging: bool) u8 {
+    if (dragging) return 255;
+    const last = last_scroll_ms orelse return 0;
+    const idle = if (now_ms > last) now_ms - last else 0;
+    if (idle < HOLD_MS) return 255;
+    const fade = idle - HOLD_MS;
+    if (fade >= FADE_MS) return 0;
+    return @intCast(255 - @divTrunc(255 * fade, FADE_MS));
+}
+
+pub fn blend(bg: u32, fg: u32, alpha: u8) u32 {
+    var out: u32 = 0;
+    inline for ([_]u5{ 0, 8, 16 }) |shift| {
+        const b: u32 = (bg >> shift) & 0xFF;
+        const f: u32 = (fg >> shift) & 0xFF;
+        out |= ((b * (255 - alpha) + f * alpha + 127) / 255) << shift;
+    }
+    return out;
 }
 
 pub fn scrollForThumbTop(content_h: i32, viewport_h: i32, track_h: i32, thumb_h: i32, thumb_top: i32) i32 {
@@ -129,4 +164,34 @@ test "IGSH-869 bottom detection uses the slack" {
     try std.testing.expect(atBottom(2400, 3000, 600, 4));
     try std.testing.expect(atBottom(2397, 3000, 600, 4));
     try std.testing.expect(!atBottom(2300, 3000, 600, 4));
+}
+
+test "IGSH-897 the thumb keeps one small fixed height however long the conversation is" {
+    const short = fixedThumb(1000, 600, 0, 600, 75).?;
+    const long = fixedThumb(900000, 600, 0, 600, 75).?;
+    try std.testing.expectEqual(@as(i32, 75), short.height);
+    try std.testing.expectEqual(@as(i32, 75), long.height);
+    try std.testing.expectEqual(@as(i32, 0), long.top);
+    try std.testing.expectEqual(@as(i32, 525), fixedThumb(3000, 600, 2400, 600, 75).?.top);
+    try std.testing.expectEqual(@as(i32, 262), fixedThumb(3000, 600, 1200, 600, 75).?.top);
+    try std.testing.expect(fixedThumb(500, 600, 0, 600, 75) == null);
+    try std.testing.expectEqual(@as(i32, 40), fixedThumb(3000, 600, 0, 40, 75).?.height);
+}
+
+test "IGSH-897 the thumb is hidden at rest, solid while scrolling, fading after, hidden again" {
+    try std.testing.expectEqual(@as(u8, 0), opacity(5000, null, false));
+    try std.testing.expectEqual(@as(u8, 255), opacity(5000, 5000, false));
+    try std.testing.expectEqual(@as(u8, 255), opacity(5000 + HOLD_MS - 1, 5000, false));
+    const mid = opacity(5000 + HOLD_MS + FADE_MS / 2, 5000, false);
+    try std.testing.expect(mid > 0 and mid < 255);
+    try std.testing.expectEqual(@as(u8, 0), opacity(5000 + HOLD_MS + FADE_MS, 5000, false));
+    try std.testing.expectEqual(@as(u8, 0), opacity(60000, 5000, false));
+    try std.testing.expectEqual(@as(u8, 255), opacity(60000, 5000, true));
+}
+
+test "IGSH-897 blend runs from the background colour to the thumb colour" {
+    try std.testing.expectEqual(@as(u32, 0x181818), blend(0x181818, 0x505050, 0));
+    try std.testing.expectEqual(@as(u32, 0x505050), blend(0x181818, 0x505050, 255));
+    try std.testing.expectEqual(@as(u32, 0x343434), blend(0x181818, 0x505050, 128));
+    try std.testing.expectEqual(@as(u32, 0x30FF10), blend(0x30FF10, 0x30FF10, 77));
 }

@@ -158,12 +158,14 @@ pub fn updateCardHit(x: i32, y: i32) u8 {
 
 var release_ready = false;
 var restart_after_download = false;
+var restart_status: []const u8 = "";
 
 pub fn updateCardPoll() void {
     if (update_release.poll()) |version| {
         if (!release_ready or !std.mem.eql(u8, version, app_state.g_update_ver[0..app_state.g_update_ver_len])) {
             card_notes = update_release.cardNotes(version);
             card_notes_logged = false;
+            restart_status = "";
         }
         release_ready = true;
         @memcpy(app_state.g_update_ver[0..version.len], version);
@@ -177,11 +179,13 @@ pub fn updateCardPoll() void {
     }
     if (restart_after_download and !update_release.checking()) {
         restart_after_download = false;
+        restart_status = "Download failed. Try Restart again.";
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         @import("console.zig").showHeaderNoticeAscii("No verified update available. Please try again later.", 6000, false);
     }
     if (release_ready) {
         release_ready = false;
-        app_state.g_update_ver_len = 0;
+        if (restart_status.len == 0) app_state.g_update_ver_len = 0;
     }
     if (app_state.g_update_path_len == 0) return;
     const stamp = update_check.statFile(&app_state.g_update_path) orelse return;
@@ -218,12 +222,23 @@ pub fn updateCardDismiss() void {
 
 pub fn updateCardRelaunch(hwnd: HANDLE) void {
     if (app_state.g_update_relaunching) return;
-    if (update_release.checking()) {
+    var installed_version: [update_check.MAX_VERSION_LEN]u8 = undefined;
+    const installed_ready = if (update_check.scanFileForVersion(&app_state.g_update_path, &installed_version)) |version| update_check.versionNewer(APP_VERSION, version) and !update_check.versionNewer(app_state.g_update_ver[0..app_state.g_update_ver_len], version) else false;
+    if (!installed_ready and !update_release.hasStaged() and update_release.checking()) {
         restart_after_download = true;
+        restart_status = "Downloading update. Restart will follow.";
+        _ = InvalidateRect(hwnd, null, 0);
         @import("console.zig").showHeaderNoticeAscii("Update still downloading. Will restart when ready.", 6000, false);
         return;
     }
     if (app_state.g_update_ver_len == 0 or app_state.g_update_path_len == 0 or app_state.g_update_relaunching) return;
+    if (!installed_ready and !update_release.hasStaged()) {
+        restart_status = "Update unavailable. Try again later.";
+        _ = InvalidateRect(hwnd, null, 0);
+        return;
+    }
+    restart_after_download = false;
+    restart_status = "";
     rememberOpenWorkspaceForQuit();
     var ctx = ZigShellWindowList{
         .current = hwnd,
@@ -248,8 +263,10 @@ pub fn updateCardRelaunch(hwnd: HANDLE) void {
             np += 1;
         }
     }
-    const launched = if (release_ready or update_release.hasStaged()) update_release.restart(pids[0..np]) else update_check.spawnRelaunchHelper(app_state.g_update_path[0..app_state.g_update_path_len], pids[0..np]);
+    const launched = if (installed_ready) update_check.spawnRelaunchHelper(app_state.g_update_path[0..app_state.g_update_path_len], pids[0..np]) else update_release.restart(pids[0..np]);
     if (!launched) {
+        restart_status = "Could not restart. Try again.";
+        _ = InvalidateRect(hwnd, null, 0);
         debugLog("update-card: could not start relaunch helper");
         @import("console.zig").showHeaderNoticeAscii("Could not start update. Please try again.", 6000, true);
         return;
@@ -273,7 +290,7 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
     const accent: DWORD = customColorOr("selected_bg", if (app_state.g_light_theme) RGB(54, 118, 232) else RGB(63, 120, 190));
     var text_buf: [96]u8 = undefined;
-    const text = std.fmt.bufPrint(&text_buf, "Update ready: restart to get v{s}", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Update is ready";
+    const text = if (restart_status.len > 0) restart_status else std.fmt.bufPrint(&text_buf, "Update ready: restart to get v{s}", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Update is ready";
     _ = SelectObject(hdc, font_title);
     _ = SetTextColor(hdc, bright);
     var text_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(5), .right = card.right - uiScaled(26), .bottom = card.top + uiScaled(46) };
@@ -299,6 +316,8 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     if (!card_notes_logged) {
         card_notes_logged = true;
         var log_buf: [640]u8 = undefined;
+        const restart_button = updateCardButtonRect(card);
+        debugLog(std.fmt.bufPrint(&log_buf, "[update] restart button={d},{d}", .{ @divTrunc(restart_button.left + restart_button.right, 2), @divTrunc(restart_button.top + restart_button.bottom, 2) }) catch "[update] restart button unavailable");
         debugLog(std.fmt.bufPrint(&log_buf, "[update] card notes n={d} first={s}", .{ card_notes.count, if (card_notes.count > 0) card_notes.line(0) else "" }) catch "[update] card notes unavailable");
         for (0..card_notes.count) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] card note {d}={s}", .{ i, card_notes.line(i) }) catch continue);
         var more_buf: [32]u8 = undefined;

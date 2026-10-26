@@ -346,6 +346,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
     .{ .a = "Ctrl+C in Chat View", .b = "Copy the selection (right-click offers Reply and Copy)", .header = false },
     .{ .a = "Ctrl+A in Chat View", .b = "Select all transcript text (transcript focus; composer keeps its own Ctrl+A)", .header = false },
+    .{ .a = "Enter / Ctrl+Enter in Chat View", .b = "Send your message; Shift+Enter adds a new line; Enter inserts an open command suggestion", .header = false },
     .{ .a = "/ in Chat View", .b = "Suggest Claude or Codex commands and skills; Up/Down, Tab or Enter inserts, Esc closes", .header = false },
     .{ .a = "$ in Chat View (Codex)", .b = "Suggest Codex skills", .header = false },
     .{ .a = "Ctrl+/ in Chat View", .b = "Browse commands and skills for this session", .header = false },
@@ -642,6 +643,17 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_focus_authorized_until = 0;
             app_state.g_focus_browser_shell_id = 0;
             app_state.g_focus_user_action_tick = GetTickCount64();
+        }
+
+        if (kb.vkCode == 0x0D and wp == WM_KEYDOWN and isCtrlDown() and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and
+            !isAltDown(kb.flags) and !app_state.g_win_held and chatViewOwnsInput() and
+            app_state.g_chat_composer_hwnd != null and GetFocus() == app_state.g_chat_composer_hwnd and
+            GetForegroundWindow() == app_state.g_main_hwnd)
+        {
+            @import("chat_composer.zig").chatShellDraftNoteSend();
+            _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_SEND, 0, 0);
+            return 1;
         }
 
         if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) {

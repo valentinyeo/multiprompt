@@ -261,7 +261,7 @@ for (const race of [false, true]) test(race ? 'release retries a competing branc
   const bin = path.join(r.dir, 'bin');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}\nimport fs from 'node:fs';\nimport { execFileSync } from 'node:child_process';\nconst args = process.argv.slice(2);\nfs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');\nconst stateFile = process.env.GH_STATE;\nlet state = fs.existsSync(stateFile) ? fs.readFileSync(stateFile, 'utf8') : '';\nconst git = args => execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, ...args]);\nif (args[1] === 'list' && process.env.GH_RACE === '1' && fs.readFileSync(process.env.GH_LOG, 'utf8').split('\\n').filter(line => line.includes('\"list\"')).length > 1 && !state) { state = 'OPEN'; fs.writeFileSync(stateFile, state); }\nif (args[1] === 'list') console.log(JSON.stringify(state === 'OPEN' ? [{ number: 1, url: 'https://example.invalid/pr/1' }] : []));\nelse if (args[1] === 'create') { fs.writeFileSync(stateFile, 'OPEN'); console.log('https://example.invalid/pr/1'); }\nelse if (args[1] === 'view') { if (state === 'OPEN') { git(['update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state = 'MERGED'; fs.writeFileSync(stateFile, state); } console.log(JSON.stringify({ state, statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })); }\nelse if (args[1] !== 'merge') process.exit(1);\n`, { mode: 0o755 });
-  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: path.join(r.dir, 'src'), encoding: 'utf8', timeout: 60000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_REMOTE: remote, GH_RACE: race ? '1' : '0', GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: path.join(r.dir, 'src'), encoding: 'utf8', timeout: 60000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, TEST_REMOTE: remote, VERSION_STAMP_POLL_MS: '50', GH_RACE: race ? '1' : '0', GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /https:\/\/example\.invalid\/pr\/1[\s\S]*NOTHING_TO_STAMP 0\.28\.736/);
@@ -442,4 +442,67 @@ test('IGSH-889 a release lists only fragments added since the previous release',
   assert.match(written.slice(order[0], order[1]), /Latest release change/);
   assert.match(written.slice(order[1], order[2]), /Third release change/);
   assert.match(written.slice(order[2], order[3]), /Second release change/);
+});
+
+const attemptTitles = {
+  closed: 'IGSH-891 release replaces the branch a closed attempt left behind',
+  open: 'IGSH-891 release keeps the branch of an attempt whose PR is still open',
+  moved: 'IGSH-891 release keeps a branch that moved after its PR was closed'
+};
+for (const outcome of Object.keys(attemptTitles)) test(attemptTitles[outcome], { skip: process.platform === 'win32' }, t => {
+  const files = { ...base(), 'changelog.d/DEMO-2-release.md': 'Feature.\n' };
+  const r = repo(t, files);
+  const remote = path.join(r.dir, 'origin.git');
+  r.git('init', '--bare', remote);
+  r.git('remote', 'add', 'origin', remote);
+  r.git('push', 'origin', 'master');
+  if (outcome === 'open') {
+    const stamp = stampTree(files);
+    r.write(stamp.files);
+    for (const file of stamp.removed) fs.unlinkSync(path.join(r.dir, file));
+    r.git('add', '-A', '--', 'src', 'changelog.d');
+    r.git('commit', '-m', 'open attempt');
+  } else {
+    r.git('commit', '--allow-empty', '-m', 'closed attempt');
+  }
+  r.git('push', 'origin', 'HEAD:refs/heads/release/0.28.736');
+  const leftBehind = r.git('rev-parse', 'HEAD');
+  r.git('reset', '--hard', r.initial);
+  fs.writeFileSync(path.join(r.dir, 'gh-state'), outcome === 'open' ? 'OPEN' : '');
+  const bin = path.join(r.dir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
+const stateFile = process.env.GH_STATE;
+let state = fs.readFileSync(stateFile, 'utf8');
+const git = args => execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, ...args]);
+const number = process.env.GH_ATTEMPT === 'open' ? 1 : 2;
+if (args[1] === 'list' && args.includes('--head')) console.log(JSON.stringify(state === 'OPEN' ? [{ number, state: 'OPEN', headRefOid: process.env.GH_HEAD }] : [{ number: 1, state: 'CLOSED', headRefOid: process.env.GH_HEAD }]));
+else if (args[1] === 'list') console.log(JSON.stringify(state === 'OPEN' ? [{ number, url: 'https://example.invalid/pr/' + number }] : []));
+else if (args[1] === 'create') { fs.writeFileSync(stateFile, 'OPEN'); console.log('https://example.invalid/pr/2'); }
+else if (args[1] === 'view') { if (state === 'OPEN') { git(['update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state = 'MERGED'; fs.writeFileSync(stateFile, state); } console.log(JSON.stringify({ state, statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })); }
+else if (args[1] !== 'merge') process.exit(1);
+`, { mode: 0o755 });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const requests = fs.readFileSync(path.join(r.dir, 'gh-log'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  const created = requests.filter(args => args[1] === 'create').length;
+  const remoteBranch = r.git('--git-dir', remote, 'rev-parse', 'refs/heads/release/0.28.736');
+  if (outcome === 'moved') {
+    assert.equal(result.error?.code, 'ETIMEDOUT');
+    assert.equal(created, 0);
+    assert.equal(remoteBranch, leftBehind);
+    assert.ok(requests.filter(args => args[1] === 'list' && args.includes('--head')).length < 100, 'waits between retries instead of hot looping');
+    return;
+  }
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /NOTHING_TO_STAMP 0\.28\.736/);
+  assert.equal(r.git('show', 'origin/master:src/main.zig'), main.replace('735', '736').trim());
+  assert.equal(r.git('ls-tree', '-r', '--name-only', 'origin/master', '--', 'changelog.d'), 'changelog.d/README.md');
+  assert.equal(r.git('worktree', 'list', '--porcelain').match(/^worktree /gm).length, 1);
+  assert.equal(created, outcome === 'closed' ? 1 : 0);
+  if (outcome === 'open') assert.equal(remoteBranch, leftBehind);
 });

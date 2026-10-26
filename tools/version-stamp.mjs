@@ -204,10 +204,20 @@ async function release() {
       try {
         runGit(['push', 'origin', `HEAD:refs/heads/${branch}`], tree);
       } catch (error) {
-        if (/non-fast-forward|fetch first|already exists/.test(String(error.stderr)) && runGit(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]).trim()) {
+        const left = /non-fast-forward|fetch first|already exists|stale info/.test(String(error.stderr)) ? runGit(['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]).trim().split(/\s+/)[0] : '';
+        if (!left) throw error;
+        const attempts = JSON.parse(gh(['pr', 'list', '--state', 'all', '--head', branch, '--json', 'number,state,headRefOid']));
+        if (!attempts.length || !attempts.every(attempt => attempt.state === 'CLOSED') || !attempts.some(attempt => attempt.headRefOid === left)) {
+          await wait();
           continue;
         }
-        throw error;
+        try {
+          runGit(['push', `--force-with-lease=refs/heads/${branch}:${left}`, 'origin', `HEAD:refs/heads/${branch}`], tree);
+        } catch (forceError) {
+          if (!/stale info|rejected|non-fast-forward|fetch first/.test(String(forceError.stderr))) throw forceError;
+          await wait();
+          continue;
+        }
       }
       const url = gh(['pr', 'create', '--base', 'master', '--head', branch, '--title', title, '--body', 'Stamped by tools/version-stamp.mjs from changelog.d.']);
       console.log(url);

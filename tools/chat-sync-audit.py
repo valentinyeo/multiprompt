@@ -88,7 +88,7 @@ def pane_candidates(capture):
             continue
         text = normalize(text)
         if len(text) >= 20:
-            candidates.append(dict(text=text[:80], probe=text[:60], pane_line=line_no))
+            candidates.append(dict(text=text[:80], probe=text[:60], pane_line=line_no, prompt=bool(re.match(r'^[❯›>] ', line))))
     if pending:
         for candidate in candidates:
             if candidate['pane_line'] >= prompt:
@@ -115,10 +115,28 @@ def tool_path(text, inputs, cwd):
     return False
 
 
+def track_queue(queue, event, line_number):
+    if event.get('type') != 'queue-operation':
+        return
+    operation, content = event.get('operation'), event.get('content')
+    content = content if isinstance(content, str) else ''
+    if operation == 'enqueue':
+        queue.append(dict(content=content, line=line_number, timestamp=event.get('timestamp', '')))
+    elif operation == 'dequeue' and queue:
+        queue.pop(0)
+    elif operation == 'popAll':
+        queue.clear()
+    elif operation == 'remove' and content:
+        for index, entry in enumerate(queue):
+            if entry['content'] == content:
+                del queue[index]
+                break
+
+
 def transcript_evidence(reader, path, wire, finding):
     fields = wire.splitlines()[0].split('\t')
     base, end = int(fields[5]), int(fields[6])
-    evidence = []
+    evidence, queue = [], []
     rows = [json.loads(line) for line in wire.splitlines()[1:-1]]
     row = finding.get('row', 0)
     target = rows[row - 1] if 0 < row <= len(rows) else None
@@ -132,6 +150,7 @@ def transcript_evidence(reader, path, wire, finding):
             if finding['kind'] != 'pane_missing' and not base <= at < end:
                 continue
             event = json.loads(line)
+            track_queue(queue, event, line_number)
             messages = [row for row in reader.conversation_rows(event, fields[9], at) if row['role'] in ('user', 'assistant')]
             record = 'conversation'
             if not messages:
@@ -173,6 +192,9 @@ def transcript_evidence(reader, path, wire, finding):
             if matches:
                 evidence.append(dict(line=line_number, timestamp=event.get('timestamp', ''), record=record,
                                      location='before_cold_tail' if at < base else 'after_snapshot' if at >= end else 'in_window'))
+    unnamed = [entry for entry in queue if not entry['content']]
+    if finding['kind'] == 'pane_missing' and finding.get('prompt') and unnamed and not evidence:
+        evidence.append(dict(line=unnamed[-1]['line'], timestamp=unnamed[-1]['timestamp'], record='queued_prompt', location='in_window'))
     return evidence[-8:]
 
 

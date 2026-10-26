@@ -322,6 +322,7 @@ pub const TIMER_SYSTEM_THEME: usize = 25;
 pub const TIMER_BROWSER_ENGINE_SWITCH: usize = 26;
 pub const TIMER_CHAT_REFRESH: usize = 27;
 pub const TIMER_CHAT_WORKING: usize = 43;
+pub const TIMER_CHAT_SCROLLBAR: usize = 44;
 pub const TIMER_POWER_IDLE: usize = 28;
 pub const TIMER_INBOX_PUBLISH: usize = 29;
 pub const TIMER_VOICE_POLL: usize = 30;

@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -128,12 +128,16 @@ public static class VerifyNative {
     [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, UIntPtr count, IntPtr text, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScan(char character);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
     [DllImport("dwmapi.dll")] public static extern int DwmFlush();
     static void Key(ushort key, ushort scan, uint flags) {
         Input input = new Input(); input.type = 1;
         input.data.keyboard = new Keyboard { key = key, scan = scan, flags = flags };
         if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("SendInput failed");
     }
+    public static void KeyDown(int key) { Key((ushort)key, 0, 0); }
+    public static void KeyUp(int key) { Key((ushort)key, 0, 2); }
+    public static bool IsDown(int key) { return (GetAsyncKeyState(key) & 0x8000) != 0; }
     public static void Chord(int[] keys) {
         Input[] inputs = new Input[keys.Length * 2];
         for (int i = 0; i < keys.Length; i++) {
@@ -449,6 +453,11 @@ public static class VerifyNative {
         MouseAt(point.X, point.Y, 8);
         MouseAt(point.X, point.Y, 16);
     }
+    static System.Drawing.Color QueuedColor(System.Drawing.Color bg, System.Drawing.Color fill) {
+        return System.Drawing.Color.FromArgb((bg.R * 128 + 128) / 256 + (fill.R * 127 + 128) / 256,
+            (bg.G * 128 + 128) / 256 + (fill.G * 127 + 128) / 256,
+            (bg.B * 128 + 128) / 256 + (fill.B * 127 + 128) / 256);
+    }
     public static Point MessageBubblePoint(IntPtr hwnd) {
         Rect rect;
         if (!GetWindowRect(hwnd, out rect)) throw new InvalidOperationException("Transcript rectangle unavailable");
@@ -458,10 +467,12 @@ public static class VerifyNative {
             var bg = pixels.GetPixel(0, pixels.Height / 2);
             int shift = (2126 * bg.R + 7152 * bg.G + 722 * bg.B) / 10000 < 128 ? 53 : -26;
             var fill = System.Drawing.Color.FromArgb(Math.Max(0, Math.Min(255, bg.R + shift)), Math.Max(0, Math.Min(255, bg.G + shift)), Math.Max(0, Math.Min(255, bg.B + shift)));
+            var queuedFill = QueuedColor(bg, fill);
             for (int y = pixels.Height - 2; y > 0; y--) {
                 for (int x = pixels.Width - 2; x > 0; x--) {
-                    if (pixels.GetPixel(x, y).ToArgb() == fill.ToArgb() && pixels.GetPixel(x - 1, y).ToArgb() == fill.ToArgb() &&
-                        pixels.GetPixel(x, y - 1).ToArgb() == fill.ToArgb()) return new Point { X = rect.Left + x - 1, Y = rect.Top + y - 1 };
+                    int color = pixels.GetPixel(x, y).ToArgb();
+                    if ((color == fill.ToArgb() || color == queuedFill.ToArgb()) && pixels.GetPixel(x - 1, y).ToArgb() == color &&
+                        pixels.GetPixel(x, y - 1).ToArgb() == color) return new Point { X = rect.Left + x - 1, Y = rect.Top + y - 1 };
                 }
             }
         }
@@ -564,6 +575,16 @@ public static class VerifyNative {
             WindowFromPoint(points[0]) != hwnd || WindowFromPoint(points[1]) != hwnd)
             throw new InvalidOperationException("Selection evidence is not inside the owned transcript");
         int pad = Math.Max(8, (int)GetDpiForWindow(hwnd) / 6);
+        Rect rect;
+        if (!GetWindowRect(hwnd, out rect)) throw new InvalidOperationException("Transcript rectangle unavailable");
+        System.Drawing.Color bg;
+        using (var backdrop = new System.Drawing.Bitmap(1, 1))
+        using (var graphics = System.Drawing.Graphics.FromImage(backdrop)) {
+            graphics.CopyFromScreen(rect.Left, rect.Top + (rect.Bottom - rect.Top) / 2, 0, 0, backdrop.Size);
+            bg = backdrop.GetPixel(0, 0);
+        }
+        var queuedColors = new HashSet<int>();
+        foreach (var fill in new System.Drawing.Color[] { System.Drawing.Color.FromArgb(56, 78, 112), System.Drawing.Color.FromArgb(183, 206, 240), System.Drawing.Color.FromArgb(52, 68, 96) }) queuedColors.Add(QueuedColor(bg, fill).ToArgb());
         using (var pixels = new System.Drawing.Bitmap(points[1].X - points[0].X, pad * 2 + 1))
         using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
             DwmFlush();
@@ -574,6 +595,7 @@ public static class VerifyNative {
                     var c = pixels.GetPixel(x, y);
                     if ((c.R == 56 && c.G == 78 && c.B == 112) || (c.R == 183 && c.G == 206 && c.B == 240) ||
                         (c.R == 52 && c.G == 68 && c.B == 96)) count++;
+                    else if (queuedColors.Contains(c.ToArgb())) count++;
                 }
             }
             return count;
@@ -1224,6 +1246,9 @@ $warmupJob = $null
 $warmup = $null
 $switchNativeRegistry = $null
 $switchExtensionRoot = $null
+$script:pinnedNotifyListeners = @()
+$script:uploadReceiver = $null
+$script:uploadReceiverDir = $null
 $script:window = [IntPtr]::Zero
 $script:actions = New-Object System.Collections.ArrayList
 $script:scratchLinks = @()
@@ -1663,6 +1688,28 @@ function Click-WorkspacePill([int]$Workspace) {
     [VerifyNative]::ClickClient($script:window, (8 + ($Workspace + 1) * 29 + 12), 17)
 }
 
+function Press-ShiftEnter([string]$Label) {
+    Doctor
+    Wait-Foreground
+    Record $Label
+    Assert-Foreground
+    $composer = [VerifyNative]::GetFocusedWindow($script:window)
+    if ([VerifyNative]::GetAncestor($composer, 2) -ne $script:window -or [VerifyNative]::Class($composer) -cne 'Edit') { throw 'Shift+Enter needs the owned focused composer' }
+    $before = @([VerifyNative]::EditText($composer) -split "`r?`n").Count
+    [VerifyNative]::KeyDown(0x10)
+    try {
+        Start-Sleep -Milliseconds 35
+        [VerifyNative]::KeyDown(0x0D)
+        Start-Sleep -Milliseconds 35
+        [VerifyNative]::KeyUp(0x0D)
+        Wait-Until { @([VerifyNative]::EditText($composer) -split "`r?`n").Count -eq ($before + 1) } 'native composer shows the Shift+Enter newline while Shift is held' -Tight
+    } finally {
+        [VerifyNative]::KeyUp(0x10)
+    }
+    Wait-Until { -not [VerifyNative]::IsDown(0x10) } 'Shift is released after Shift+Enter'
+    Record 'Shift released after Shift+Enter'
+}
+
 function Focus-Palette([string]$Query, [int]$Target) {
     $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
     $start = ((Get-Content $log -Raw) -join '').Length
@@ -1708,6 +1755,34 @@ function Wait-ConsoleText([string]$Command) {
         $text = $pattern.DocumentRange.GetText(-1) -replace '[\r\n]', ''
         $text.TrimEnd().EndsWith($Command, [StringComparison]::Ordinal)
     } "console visibly contains staged command: $Command"
+}
+
+function Send-ProfileScreenshot([string]$Step, [string]$Profile, [int]$ExpectedUpload) {
+    $pane = Read-BrowserPane
+    $windowId = [int64]$pane.browser_window_id
+    if ($windowId -le 0) { throw "screenshot ${Step}: pane has no bound browser window" }
+    $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+    $logStart = ([IO.File]::ReadAllText($log)).Length
+    $bridge = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
+    $arguments = ''
+    if ($Profile -ne '') { $arguments += "--profile $Profile " }
+    $arguments += "--window $windowId shoturl --user-initiated"
+    $stdout = Join-Path $Evidence "screenshot-$Step.stdout.txt"
+    $stderr = Join-Path $Evidence "screenshot-$Step.stderr.txt"
+    $shot = Start-Process -FilePath $bridge -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
+    [void]$shot.Handle
+    if (-not $shot.WaitForExit(60000)) { $shot.Kill(); throw "screenshot ${Step}: shoturl did not finish in 60 seconds" }
+    $exitCode = $shot.ExitCode
+    $output = (([string](Get-Content -LiteralPath $stdout -Raw)) + ([string](Get-Content -LiteralPath $stderr -Raw))).Trim()
+    if ($exitCode -ne 0) { throw "screenshot ${Step}: shoturl failed with exit ${exitCode}: $output" }
+    $expectedUrl = "https://example.invalid/shot-$ExpectedUpload.png"
+    Wait-Until {
+        $trace = ([IO.File]::ReadAllText($log)).Substring($logStart)
+        $trace.Contains("notify: payload=SHOTUSER:${windowId}:$expectedUrl") -and $trace -match '\[paste-focus\] queued shell=\d+ user=true' -and $trace -match '\[paste-focus\] (console|composer) paste applied'
+    } "screenshot ${Step}: the app received and pasted the link from window $windowId" 60
+    $uploads = @(Get-Content -LiteralPath (Join-Path $script:uploadReceiverDir 'uploads.jsonl'))
+    if ($uploads.Count -ne $ExpectedUpload) { throw "screenshot ${Step}: expected $ExpectedUpload uploads but the receiver saw $($uploads.Count)" }
+    $result.checks += @{ name = "browser-own-profile screenshot $Step"; windowId = $windowId; url = $expectedUrl; profile = $(if ($Profile -eq '') { 'shared' } else { $Profile }) }
 }
 
 function Palette([string]$Query) {
@@ -1787,7 +1862,7 @@ function Prepare-SessionRestoreGroupOrder([string]$Stage) {
     Save-Json @{ savedIndex = $middle; normalizedIndex = ($middle - 1); selected = 'Restore middle'; wrongAtSavedIndex = 'Restore last'; session = $saved } ($Stage + '-group-order.json')
 }
 
-function Restart-SessionRestore([string]$Stage, [bool]$Crash, [bool]$Updater = $false) {
+function Restart-SessionRestore([string]$Stage, [bool]$Crash, [bool]$Updater = $false, [scriptblock]$BeforeStart = $null) {
     Doctor
     if ($process.MainWindowHandle -ne $script:window) { throw 'Refusing to close a different window' }
     Save-Json (Read-Inbox) ($Stage + '-before.inbox.json')
@@ -1821,6 +1896,7 @@ function Restart-SessionRestore([string]$Stage, [bool]$Crash, [bool]$Updater = $
     $script:process = $null
     $script:job = $null
     $script:window = [IntPtr]::Zero
+    if ($null -ne $BeforeStart) { & $BeforeStart }
     if ($Updater) {
         Wait-Until {
             $state = Read-Inbox
@@ -2145,6 +2221,92 @@ function Assert-ChatTyping([string]$Text, [string]$Step, [scriptblock]$TypingAct
     Save-Json @{ WM_GETTEXT = [VerifyNative]::EditText($handle); handle = $composer.Current.NativeWindowHandle; pid = $composer.Current.ProcessId } ($Step + '.text.json')
 }
 
+function New-RelaunchSeed {
+    $groups = @(@{ id = 1; name = 'Hypertask' }, @{ id = 2; name = 'Software Factory' }, @{ id = 3; name = 'inne' })
+    $tabs = New-Object System.Collections.ArrayList
+    $live = New-Object System.Collections.ArrayList
+    $seedId = 100
+    foreach ($i in 1..14) {
+        $name = 'Relaunch {0:00}' -f $i
+        $group = ($i % 3) + 1
+        $tab = [ordered]@{ kind = 'cmd'; name = $name; shell_id = $seedId; workspace = $(if ($i -le 10) { 0 } else { 1 }); group_id = $group }
+        if ($i -le 12) { $tab.favorite = $true; $tab.starred_group_id = $group }
+        [void]$tabs.Add($tab)
+        [void]$live.Add($name)
+        $seedId++
+    }
+    foreach ($i in 1, 3, 5, 7, 9, 11) {
+        $name = 'Relaunch {0:00}' -f $i
+        $group = ($i % 3) + 1
+        [void]$tabs.Add([ordered]@{ kind = 'tmux'; name = $name; shell_id = $seedId; workspace = $(if ($i -le 10) { 0 } else { 1 }); favorite = $true; starred_group_id = $group })
+        $seedId++
+    }
+    $selected = 'Relaunch 07'
+    $selectedIndex = 0
+    foreach ($index in 0..($tabs.Count - 1)) { if ($tabs[$index].name -ceq $selected -and $tabs[$index].kind -eq 'cmd') { $selectedIndex = $index } }
+    $document = [ordered]@{
+        single_window = $true
+        active_workspace = 0
+        workspace_count = 2
+        workspaces = @(@{ name = 'Main'; wid = 'relaunch-main' }, @{ name = 'Work'; wid = 'relaunch-work' })
+        starred_view = $true
+        active_tab = $selectedIndex
+        active_shell_id = $tabs[$selectedIndex].shell_id
+        groups = $groups
+        tabs = @($tabs.ToArray())
+    }
+    return @{ document = $document; live = @($live.ToArray()); savedTabs = $tabs.Count; ghosts = 6; groups = @($groups | ForEach-Object { $_.name }); selected = $selected }
+}
+
+function Get-NotifyPorts {
+    $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../src/notify_ports.zig'))
+    $first = [regex]::Match($source, 'pub const FIRST_PORT: u16 = (\d+);')
+    $count = [regex]::Match($source, 'pub const PORT_COUNT: usize = (\d+);')
+    if (-not $first.Success -or -not $count.Success) { throw 'Notification port range missing' }
+    return @([int]$first.Groups[1].Value..([int]$first.Groups[1].Value + [int]$count.Groups[1].Value - 1))
+}
+
+function Open-NotifyPortListeners {
+    $opened = New-Object System.Collections.ArrayList
+    foreach ($port in Get-NotifyPorts) {
+        $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $port)
+        $listener.Start()
+        [void]$opened.Add($listener)
+    }
+    return $opened
+}
+
+function Assert-RelaunchSessions([string]$Stage, $Seed) {
+    Wait-Until {
+        $state = Read-Inbox
+        if ($null -eq $state) { return $false }
+        $names = @($state.shells | ForEach-Object { $_.name })
+        @($Seed.live | Where-Object { $_ -cnotin $names }).Count -eq 0
+    } "$Stage every live saved session is published" 60
+    Start-Sleep -Seconds 3
+    $state = Read-Inbox
+    Save-Json $state ($Stage + '.inbox.json')
+    $published = @($state.shells | ForEach-Object { $_.name })
+    $listedTwice = @($published | Group-Object -CaseSensitive | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name + ' x' + $_.Count })
+    if ($listedTwice.Count -gt 0) { throw "$Stage sessions listed twice in the sidebar: $($listedTwice -join ', ')" }
+    $extra = @($published | Where-Object { $_ -cnotin $Seed.live })
+    if ($extra.Count -gt 0) { throw "$Stage sidebar lists sessions that were never saved: $($extra -join ', ')" }
+    Wait-Until {
+        $saved = Read-Session
+        $null -ne $saved -and @($saved.tabs).Count -eq $Seed.live.Count
+    } "$Stage saved file holds exactly the $($Seed.live.Count) live sessions, with no cached copies" 30
+    $saved = Read-Session
+    Save-Json $saved ($Stage + '.session.json')
+    $savedTwice = @(@($saved.tabs | ForEach-Object { $_.name }) | Group-Object -CaseSensitive | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name + ' x' + $_.Count })
+    if ($savedTwice.Count -gt 0) { throw "$Stage saved file lists sessions twice: $($savedTwice -join ', ')" }
+    $savedGroups = @($saved.groups | ForEach-Object { $_.name })
+    $missingGroups = @($Seed.groups | Where-Object { $_ -cnotin $savedGroups })
+    if ($missingGroups.Count -gt 0) { throw "$Stage group headers missing: $($missingGroups -join ', ')" }
+    $selected = @($state.shells | Where-Object { $_.sid -eq $state.active_shell_id })
+    if ($selected.Count -ne 1) { throw "$Stage selected chat is not one published session" }
+    return @{ stage = $Stage; published = $published.Count; saved = @($saved.tabs).Count; groups = $savedGroups.Count; selected = $selected[0].name; starred_view = [bool]$state.starred_view }
+}
+
 try {
     if ($Feature -eq 'title-bar') {
         Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot 'title-bar-native.cs')
@@ -2229,6 +2391,22 @@ try {
         $env:MULTIPROMPT_DICTATION_FIXTURE = $fixture
         $result.dictationBoundary = @{ audio = 'recorded CMUSphinx goforward.pcm'; sha256 = $audioHash; provider = 'offline provider-format response replay, not live Deepgram recognition'; microphoneHardware = $false }
     }
+    if ($Feature -eq 'browser-own-profile') {
+        for ($port = 19548; $port -le 19559; $port++) {
+            $pinned = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $port)
+            $pinned.Start()
+            $script:pinnedNotifyListeners += $pinned
+        }
+        $script:uploadReceiverDir = Join-Path $Evidence 'upload-receiver'
+        New-Item -ItemType Directory -Force $script:uploadReceiverDir | Out-Null
+        $receiverPortFile = Join-Path $script:uploadReceiverDir 'port.txt'
+        $script:uploadReceiver = Start-Process -FilePath node -ArgumentList @((Join-Path $PSScriptRoot '../../../tools/screenshot-upload-receiver.mjs'), $receiverPortFile, $script:uploadReceiverDir, 'verify-only-upload-secret') -PassThru -WindowStyle Hidden
+        Wait-Until { Test-Path -LiteralPath $receiverPortFile -PathType Leaf } 'local upload receiver listening' 30
+        $uploadConfigDir = Join-Path $env:LOCALAPPDATA 'screencast2-go'
+        New-Item -ItemType Directory -Force $uploadConfigDir | Out-Null
+        [IO.File]::WriteAllText((Join-Path $uploadConfigDir 'config.toml'), "api_base_url = `"http://127.0.0.1:$((Get-Content -LiteralPath $receiverPortFile -Raw).Trim())`"`nupload_secret = `"verify-only-upload-secret`"`n")
+        New-Item -ItemType File -Force (Join-Path $script:uploadReceiverDir 'uploads.jsonl') | Out-Null
+    }
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
@@ -2236,6 +2414,12 @@ try {
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'browser-own-profile') {
+        $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
+    } elseif ($Feature -eq 'relaunch-saved-sessions') {
+        $relaunchSeed = New-RelaunchSeed
+        New-Item -ItemType Directory -Force (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), (ConvertTo-Json -InputObject $relaunchSeed.document -Depth 8), (New-Object Text.UTF8Encoding $false))
+        Save-Json $relaunchSeed.document 'seed-session.json'
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } else {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'))
@@ -3124,11 +3308,13 @@ try {
             if ($stopped.ActiveProcesses -ne 0) { throw 'Favorites restart left owned descendants' }
             $job.Dispose()
             try {
-                $portSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../src/app_state.zig'))
-                $portList = [regex]::Match($portSource, 'pub const NOTIFY_PORTS = \[_\]u16\{([^}]+)\}')
-                if (-not $portList.Success) { throw 'Notification port list missing' }
-                foreach ($port in $portList.Groups[1].Value.Split(',')) {
-                    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, [int]$port.Trim())
+                $portSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../../src/notify_ports.zig'))
+                $firstPort = [regex]::Match($portSource, 'pub const FIRST_PORT: u16 = (\d+);')
+                $portCount = [regex]::Match($portSource, 'pub const PORT_COUNT: usize = (\d+);')
+                if (-not $firstPort.Success -or -not $portCount.Success) { throw 'Notification port range missing' }
+                for ($offset = 0; $offset -lt [int]$portCount.Groups[1].Value; $offset++) {
+                    $port = [int]$firstPort.Groups[1].Value + $offset
+                    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $port)
                     $listener.Start()
                     $listeners += $listener
                 }
@@ -3172,6 +3358,47 @@ try {
                 $result.checks += @{ name = 'IGSH-890 favorites-refresh-restart'; tabs = $expectedTabs; refreshes = 4; restarts = 2; occupiedPorts = $listeners.Count; starred_group_id = $favoritesGroupId }
             } finally {
                 foreach ($listener in $listeners) { $listener.Stop() }
+            }
+        }
+        'relaunch-saved-sessions' {
+            $script:relaunchListeners = $null
+            $openPorts = {
+                if ($null -eq $script:relaunchListeners) {
+                    $script:relaunchListeners = Open-NotifyPortListeners
+                    Record "All $(@($script:relaunchListeners).Count) notification ports occupied by owned fixture sockets"
+                }
+            }
+            try {
+                $launches = @()
+                $launchLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+                Wait-Until {
+                    $trace = [IO.File]::ReadAllText($launchLog)
+                    $trace -match 'launch step=browser' -and $trace -match 'installHook: KEYBOARD_LL installed'
+                } 'launch-1 restore finished and keyboard hook installed' 60
+                $first = Assert-RelaunchSessions 'launch-1' $relaunchSeed
+                if ($first.selected -cne $relaunchSeed.selected -or -not $first.starred_view) { throw "launch-1 did not restore the saved selection $($relaunchSeed.selected) in Starred, got $($first.selected)" }
+                $launches += $first
+                Snapshot 'launch-1'
+                foreach ($launch in 2, 3) {
+                    Press @(0x12, 0x32) 'Alt+2: home before quitting'
+                    Wait-Until { $state = Read-Inbox; $null -ne $state -and -not $state.starred_view } 'home view before quitting'
+                    [void](Assert-RelaunchSessions "home-before-launch-$launch" $relaunchSeed)
+                    Press @(0x12, 0x31) 'Alt+1: Starred before quitting'
+                    Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.starred_view } 'Starred view before quitting'
+                    $starred = Assert-RelaunchSessions "starred-before-launch-$launch" $relaunchSeed
+                    Snapshot 'action'
+                    Restart-SessionRestore "relaunch-$launch" $false $false $openPorts
+                    $after = Assert-RelaunchSessions "launch-$launch" $relaunchSeed
+                    if ($after.selected -cne $starred.selected) { throw "launch-$launch selected chat changed from $($starred.selected) to $($after.selected)" }
+                    if (-not $after.starred_view) { throw "launch-$launch lost the Starred view" }
+                    Snapshot "launch-$launch"
+                    $launches += $after
+                }
+                Snapshot 'after'
+                Save-Json $launches 'relaunch-launches.json'
+                $result.checks += @{ name = 'relaunch-saved-sessions'; launches = 3; sessions = $relaunchSeed.live.Count; ghostsSeeded = $relaunchSeed.ghosts; groups = $relaunchSeed.groups.Count; occupiedPorts = @($script:relaunchListeners).Count }
+            } finally {
+                if ($null -ne $script:relaunchListeners) { foreach ($listener in $script:relaunchListeners) { $listener.Stop() } }
             }
         }
         'session-open' {
@@ -3454,7 +3681,7 @@ try {
                 $result.checks += $selectionCheck
                 $result.checks += $menuCheck
                 $typedCheck = @{ name = 'local-route-typed'; passed = $false; entry = 'Chat View Enter'; receivedBytes = $null; queued = $false }
-                $suggestionCheck = @{ name = 'local-route-suggestion'; passed = $false; entry = 'Chat View Enter'; received = '' }
+                $suggestionCheck = @{ name = 'local-route-suggestion'; passed = $false; entry = 'Chat View Ctrl+Enter'; received = '' }
                 $result.checks += $typedCheck
                 $result.checks += $suggestionCheck
                 $outboxPath = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
@@ -3499,7 +3726,24 @@ try {
                         } 'owned local Chat View composer focused'
                         $message = if ($mode -eq 'typed') { $typedMessage } else { 'local route suggestion delivered' }
                         Type-Text $message
-                        Press @(0x0D) 'Enter: send through normal Chat View outbox'
+                        if ($mode -eq 'suggestion') {
+                            Record 'Shift+Enter: insert a newline without sending'
+                            Assert-Foreground
+                            $composerHandle = [VerifyNative]::GetFocusedWindow($script:window)
+                            if ([VerifyNative]::GetAncestor($composerHandle, 2) -ne $script:window -or [VerifyNative]::Class($composerHandle) -cne 'Edit') { throw 'Newline proof lost the owned composer' }
+                            [VerifyNative]::KeyDown(0x10)
+                            try {
+                                [VerifyNative]::Chord(@(0x0D))
+                                Wait-Until { [VerifyNative]::EditText($composerHandle) -ceq ($message + "`r`n") } 'Shift+Enter keeps the complete draft and adds one newline'
+                            } finally { [VerifyNative]::KeyUp(0x10) }
+                            if ((Get-Item ($prefix + '-stdin.bin')).Length -ne 0) { throw 'Shift+Enter sent the draft' }
+                            Snapshot 'ctrl-enter-newline'
+                            Press @(0x08) 'Backspace: remove the newline before sending'
+                            Wait-Until { [VerifyNative]::EditText($composerHandle) -ceq $message } 'original message restored after newline proof'
+                            Press @(0x11, 0x0D) 'Ctrl+Enter: send through normal Chat View outbox'
+                        } else {
+                            Press @(0x0D) 'Enter: send through normal Chat View outbox'
+                        }
                         if ($mode -eq 'typed') {
                             Wait-Until {
                                 if (-not (Test-Path $outboxPath)) { return $false }
@@ -3510,6 +3754,8 @@ try {
                             Snapshot 'local-route-typed'
                         } else {
                             $suggestionCheck.console = $ready
+                            $wireMessage = ([string][char]27) + '[200~' + $message + ([string][char]27) + '[201~' + "`r"
+                            $suggestionCheck.expected = $wireMessage
                             Wait-Until {
                                 $stdin = [IO.File]::Open($prefix + '-stdin.bin', [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
                                 try {
@@ -3521,7 +3767,7 @@ try {
                                 } finally { $stdin.Dispose() }
                                 $received = [Text.Encoding]::ASCII.GetString($receivedBytes)
                                 $suggestionCheck.received = $received
-                                $received.Contains($message) -and $received.Contains("`r")
+                                $received -ceq $wireMessage
                             } 'local suggestion prompt receives the Chat View message and Enter on stdin'
                             $suggestionCheck.passed = $true
                             Snapshot 'local-route-suggestion'
@@ -3679,31 +3925,33 @@ try {
                 if ($empty.size -le 0 -or $stopW -ne $empty.size -or $stopH -ne $empty.size) { throw ('Stop rect is ' + $stopW + 'x' + $stopH + ', expected the ' + $empty.size + ' px send size') }
                 if (-not (& $insideCard $empty.stop $empty.card)) { throw ('Stop rect ' + ($empty.stop -join ',') + ' is outside composer card ' + ($empty.card -join ',')) }
                 if ($null -ne $empty.send) { throw ('Send rect ' + ($empty.send -join ',') + ' is drawn while the composer is empty and the agent is working') }
+                Snapshot 'stop-in-box'
+                Snapshot 'composer-working-empty'
                 Type-Text 'x'
-                Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -ne $typed.stop } 'Send and Stop both drawn after typing while working'
+                Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -eq $typed.stop } 'Send replaces Stop after typing while working'
                 $typed = & $readStopFrame
                 $stopCheck.typed = $typed
-                if (($typed.stop[2] - $typed.stop[0]) -ne $typed.size -or ($typed.stop[3] - $typed.stop[1]) -ne $typed.size) { throw 'Stop changed size after typing' }
-                if ($typed.send[2] -gt $typed.stop[0]) { throw ('Send rect ' + ($typed.send -join ',') + ' is not left of Stop rect ' + ($typed.stop -join ',')) }
-                if (-not (& $insideCard $typed.send $typed.card) -or -not (& $insideCard $typed.stop $typed.card)) { throw 'Send or Stop is outside the composer card after typing' }
-                Snapshot 'stop-in-box'
+                if (($typed.send[2] - $typed.send[0]) -ne $typed.size -or ($typed.send[3] - $typed.send[1]) -ne $typed.size) { throw 'Send changed size after typing' }
+                if (-not (& $insideCard $typed.send $typed.card)) { throw 'Send is outside the composer card after typing' }
+                if (($typed.send -join ',') -ne ($empty.stop -join ',')) { throw ('Send rect ' + ($typed.send -join ',') + ' is not in the slot Stop used: ' + ($empty.stop -join ',')) }
+                Snapshot 'composer-working-text'
                 Snapshot 'grey-buttons'
                 $buttonsCheck = @{ name = 'round-bottom-composer-buttons'; passed = $false; frames = @() }
                 $result.checks += $buttonsCheck
                 foreach ($lines in @(1, 6)) {
                     if ($lines -eq 6) {
                         for ($line = 2; $line -le 6; $line++) {
-                            Press @(0x10, 0x0D) 'Shift+Enter: grow the owned draft without sending'
+                            Press-ShiftEnter 'Shift+Enter: grow the owned draft without sending'
                             Type-Text ('Draft line ' + $line)
                         }
                     }
                     Wait-Until {
                         $frame = & $readStopFrame
-                        $null -ne $frame.mic -and $null -ne $frame.attach -and $null -ne $frame.send -and $null -ne $frame.stop -and
+                        $null -ne $frame.mic -and $null -ne $frame.attach -and $null -ne $frame.send -and $null -eq $frame.stop -and
                         ($lines -eq 1 -or $frame.card[1] -lt $typed.card[1] - 2 * $frame.size)
-                    } 'all four composer buttons painted at the requested draft height'
+                    } 'all three composer buttons painted at the requested draft height'
                     $frame = & $readStopFrame
-                    foreach ($name in @('attach', 'mic', 'send', 'stop')) {
+                    foreach ($name in @('attach', 'mic', 'send')) {
                         $rect = $frame[$name]
                         if ($rect[3] -ne $frame.send[3] -or $rect[1] -ne $frame.send[1] -or
                             ($rect[2] - $rect[0]) -ne $frame.size -or ($rect[3] - $rect[1]) -ne $frame.size) {
@@ -3734,6 +3982,14 @@ try {
                     $stopCheck.receivedBytes = $stopBytes.Length
                     $stopBytes -contains [byte]0x1B
                 } 'Esc reached the working stand-in stdin'
+                $composerHandle = [VerifyNative]::GetFocusedWindow($script:window)
+                if ([VerifyNative]::GetAncestor($composerHandle, 2) -ne $script:window -or [VerifyNative]::Class($composerHandle) -cne 'Edit') { throw 'Send click proof lost the owned composer' }
+                $sendFrame = & $readStopFrame
+                if ($null -eq $sendFrame.send -or $null -ne $sendFrame.stop) { throw 'Send is not the only action button before the click' }
+                if ([VerifyNative]::EditText($composerHandle).Length -eq 0) { throw 'Composer draft is empty before the Send click' }
+                [VerifyNative]::ClickClient($script:window, [int](($sendFrame.send[0] + $sendFrame.send[2]) / 2), [int](($sendFrame.send[1] + $sendFrame.send[3]) / 2))
+                Wait-Until { [VerifyNative]::EditText($composerHandle).Length -eq 0 } 'clicking Send took the draft out of the composer'
+                $stopCheck.sendClicked = $true
                 $stopCheck.passed = $true
                 $stopCheck.reason = ''
             } catch {
@@ -4812,10 +5068,12 @@ try {
             $null = Assert-WorkspaceBrowser 'shared-return' $sharedRoot 0
             Press @(0x12, 0x51) 'Alt+Q: focus the shared-profile browser'
             $null = Assert-WorkspaceBrowser 'shared-altq' $sharedRoot 0
+            Send-ProfileScreenshot 'shared' '' 1
             Press @(0x12, (0x32 + $ownWorkspace)) ("Alt+" + (2 + $ownWorkspace) + ": switch to stored workspace " + $ownWorkspace)
             $null = Assert-WorkspaceBrowser 'own-return' $ownRoot $ownWorkspace
             Press @(0x12, 0x51) 'Alt+Q: focus the own-profile browser'
             $null = Assert-WorkspaceBrowser 'own-altq' $ownRoot $ownWorkspace
+            Send-ProfileScreenshot 'own' $ownToken 2
             Restart-SessionRestore 'own-profile-restart' $false
             Wait-Until {
                 $state = Read-Inbox
@@ -5049,6 +5307,9 @@ try {
                     Remove-Item -LiteralPath $switchExtensionRoot -Recurse -Force
                     $switchExtensionRoot = $null
                 }
+                foreach ($pinned in $script:pinnedNotifyListeners) { $pinned.Stop() }
+                $script:pinnedNotifyListeners = @()
+                if ($null -ne $script:uploadReceiver -and -not $script:uploadReceiver.HasExited) { $script:uploadReceiver.Kill() }
                 if (Test-Path $scratch) {
                     Prepare-ScratchEvidence $scratch
                     $data = Join-Path $Evidence 'data'

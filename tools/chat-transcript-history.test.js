@@ -145,6 +145,7 @@ fn GetTickCount64() u64 { return ticks; }
 fn nowFileTime() u64 { return 116444736000000000 + 500 * 10000; }
 fn GetClientRect(_: HANDLE, out: *RECT) i32 { out.* = .{ .left = 0, .top = 0, .right = 900, .bottom = fake_viewport_h }; return 1; }
 fn InvalidateRect(_: HANDLE, _: ?*const RECT, _: i32) i32 { return 1; }
+fn chatScrollActivity() void {}
 var timer_calls: usize = 0;
 fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?*anyopaque) usize { timer_calls += 1; return 1; }
 fn chatSelectionClear() void {}

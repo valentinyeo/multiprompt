@@ -522,6 +522,19 @@ test "Codex project terminal titles are not conversation renames" {
     try std.testing.expect(!codexDisplayNameIsAutomaticProjectTitle(thread, "C:\\Users\\user\\Documents\\GitHub\\zigshell", "term-123"));
 }
 
+test "IGSH-901 restored tab names survive the folder name of a restart" {
+    const github = std.unicode.utf8ToUtf16LeStringLiteral("C:\\Users\\user\\Documents\\GitHub");
+    const repo = std.unicode.utf8ToUtf16LeStringLiteral("C:\\Users\\user\\Documents\\GitHub\\zigshell");
+    var restart: usize = 0;
+    while (restart < 3) : (restart += 1) {
+        try std.testing.expect(restoredNameStaysForCwd(true, github, ""));
+        try std.testing.expect(restoredNameStaysForCwd(true, github, "c:/users/user/documents/github/"));
+        try std.testing.expect(restoredNameStaysForCwd(true, repo, "C:\\Users\\user\\Documents\\GitHub\\zigshell"));
+    }
+    try std.testing.expect(!restoredNameStaysForCwd(true, repo, "C:\\Users\\user\\Documents\\GitHub"));
+    try std.testing.expect(!restoredNameStaysForCwd(false, github, ""));
+}
+
 fn lastPathSegment(path: []const u16) struct { start: usize, end: usize } {
     var last_sep: ?usize = null;
     for (path, 0..) |c, i| {
@@ -1265,6 +1278,33 @@ fn setSmartShellNameFromU8(shell: *Shell, base: []const u8, agent: AgentName) bo
     return setSmartShellNameFromU16(shell, base_u16[0..len], agent);
 }
 
+fn cwdMatchesCachedU16(live: []const u16, cached: []const u8) bool {
+    var a = live.len;
+    while (a > 0 and (live[a - 1] == '\\' or live[a - 1] == '/')) a -= 1;
+    var b = cached.len;
+    while (b > 0 and (cached[b - 1] == '\\' or cached[b - 1] == '/')) b -= 1;
+    if (a != b) return false;
+    for (live[0..a], cached[0..b]) |w, c| {
+        const wn: u16 = if (w == '/') '\\' else (w & 0xFF);
+        const cn: u16 = if (c == '/') '\\' else c;
+        if (u16AsciiLower(wn) != u16AsciiLower(cn)) return false;
+    }
+    return true;
+}
+
+pub fn restoredNameStaysForCwd(hold: bool, live_cwd: []const u16, cached_cwd: []const u8) bool {
+    if (!hold) return false;
+    return cached_cwd.len == 0 or cwdMatchesCachedU16(live_cwd, cached_cwd);
+}
+
+fn applyCwdSegmentName(shell: *Shell, cwd: []const u16, agent: AgentName) bool {
+    const cached_len: usize = @intCast(shell.cached_cwd_len);
+    if (restoredNameStaysForCwd(shell.restored_name_hold, cwd, shell.cached_cwd[0..cached_len])) return false;
+    shell.restored_name_hold = false;
+    const seg = lastPathSegment(cwd);
+    return setSmartShellNameFromU16(shell, cwd[seg.start..seg.end], agent);
+}
+
 pub fn u16SliceEql(a: []const u16, b: []const u16) bool {
     if (a.len != b.len) return false;
     for (a, b) |x, y| {
@@ -1972,6 +2012,7 @@ pub fn pollShellNames() void {
                 stripTitleTargetPrefixU16(app_state.shells[i].tmux_session[0..@as(usize, @intCast(app_state.shells[i].tmux_session_len))], raw_name)
             else
                 raw_name;
+            app_state.shells[i].restored_name_hold = false;
             if (setSmartShellNameFromU16(&app_state.shells[i], new_name, ai_title.agent)) {
                 changed = true;
             }
@@ -2052,8 +2093,12 @@ pub fn pollShellNames() void {
             if (readVpsPromptCwd(det_pid, &vps_cwd_buf)) |vps_full| {
                 const seg = u16LastPathSegment(vps_full);
                 const name_slice = if (seg.len == 0) vps_full else seg;
-                if (setSmartShellNameFromU16(&app_state.shells[i], name_slice, agent)) {
-                    changed = true;
+                const vps_cached_len: usize = @intCast(app_state.shells[i].cached_cwd_len);
+                if (!restoredNameStaysForCwd(app_state.shells[i].restored_name_hold, vps_full, app_state.shells[i].cached_cwd[0..vps_cached_len])) {
+                    app_state.shells[i].restored_name_hold = false;
+                    if (setSmartShellNameFromU16(&app_state.shells[i], name_slice, agent)) {
+                        changed = true;
+                    }
                 }
                 const cwd_copy = @min(vps_full.len, @as(usize, 511));
                 for (0..cwd_copy) |ci| {
@@ -2069,9 +2114,7 @@ pub fn pollShellNames() void {
             var cwd_buf: [512]u16 = undefined;
             const cwd_pid = claude_child_pid orelse app_state.shells[i].pid;
             if (readProcessCwd(cwd_pid, &cwd_buf)) |cwd| {
-                const seg = lastPathSegment(cwd);
-                const new_name = cwd[seg.start..seg.end];
-                if (setSmartShellNameFromU16(&app_state.shells[i], new_name, agent)) {
+                if (applyCwdSegmentName(&app_state.shells[i], cwd, agent)) {
                     changed = true;
                 }
                 const cwd_len = @min(cwd.len, @as(usize, 511));
@@ -2082,9 +2125,7 @@ pub fn pollShellNames() void {
                 got_cwd = true;
             } else if (claude_child_pid != null) {
                 if (readProcessCwd(app_state.shells[i].pid, &cwd_buf)) |cwd| {
-                    const seg = lastPathSegment(cwd);
-                    const new_name = cwd[seg.start..seg.end];
-                    if (setSmartShellNameFromU16(&app_state.shells[i], new_name, agent)) {
+                    if (applyCwdSegmentName(&app_state.shells[i], cwd, agent)) {
                         changed = true;
                     }
                     const cwd_len = @min(cwd.len, @as(usize, 511));
@@ -2097,7 +2138,7 @@ pub fn pollShellNames() void {
             }
         }
 
-        if (!got_cwd) {
+        if (!got_cwd and !app_state.shells[i].restored_name_hold) {
             if (titleLooksLikePath(title)) {
                 const seg = lastPathSegment(title);
                 const new_name = title[seg.start..seg.end];

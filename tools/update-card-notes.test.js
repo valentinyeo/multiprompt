@@ -106,7 +106,7 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   const suite = read('tools/update-release.test.ps1');
   assert.match(suite, /Copy-Item -LiteralPath \$Verifier -Destination \$cardExe/);
   assert.match(suite, /Save-Update \$cardExe '0.0.0' 'x64'/);
-  assert.match(suite, /Start-Process \$cardExe -ArgumentList "--name Update --update-ready \$cardEventName"/);
+  assert.match(suite, /Start-Process \$cardExe -ArgumentList "--update-ready \$cardEventName"/);
   assert.match(suite, /\$cardMutex.WaitOne\(\)/);
   assert.match(suite, /Update card did not paint release notes/);
   assert.match(suite, /card notes n=5 first=Typing feels faster/);

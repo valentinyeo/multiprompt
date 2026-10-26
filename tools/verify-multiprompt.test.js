@@ -99,7 +99,8 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
   assert.ok(concurrency, 'workflow concurrency block exists');
   const group = concurrency[1].match(/^  group: (.+?)\r?$/m);
   assert.ok(group, 'workflow concurrency group exists');
-  assert.match(concurrency[1], /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \|\| \(github\.event_name == 'push' && github\.ref == 'refs\/heads\/master'\) \}\}\r?$/m);
+  assert.match(concurrency[1], /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}\r?$/m, 'a running master verify finishes; only the pending run is replaced');
+  assert.doesNotMatch(concurrency[1], /refs\/heads\/master/, 'a master push never cancels the master verify already running');
   assert.match(workflow, /^    strategy:\n      fail-fast: false\n      max-parallel: 6\n      matrix:\n/m, 'full journey matrix leaves Windows slots for release and PR checks');
   const context = (event, feature, tag = '', attempt = '1') => ({
     github: { workflow: 'Verify desktop', ref: 'refs/heads/master', event_name: event, run_attempt: attempt, sha: 'abc123' },
@@ -1416,12 +1417,15 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   assert.ok(normalNamePoll, 'normal TIMER_NAME_POLL interval must be present');
   assert.ok(Number(detectionWait[1]) > Number(normalNamePoll[1].replaceAll('_', '')) / 1000, 'local Claude detection timeout must exceed one normal shell-name poll interval');
   assert.match(chat, /FocusedElement.Current.NativeWindowHandle -eq \$composer.Current.NativeWindowHandle/);
-  const normalSend = /Type-Text \$message\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
+  const normalSend = /Type-Text \$message\s+if \(\$mode -eq 'suggestion'\) \{[\s\S]*?Press @\(0x11, 0x0D\) 'Ctrl\+Enter: send through normal Chat View outbox'\s+\} else \{\s+Press @\(0x0D\) 'Enter: send through normal Chat View outbox'/;
   assert.match(chat, normalSend);
   assert.doesNotMatch(chat.replace('Type-Text $message', 'Type-Text other'), normalSend);
-  const stdinDelivery = /\[IO.File\]::Open\(\$prefix \+ '-stdin.bin', \[IO.FileMode\]::Open, \[IO.FileAccess\]::Read, \[IO.FileShare\]::ReadWrite\)[\s\S]*?\$stdin\.CopyTo\(\$buffer\)[\s\S]*?\$received = \[Text.Encoding\]::ASCII.GetString\(\$receivedBytes\)[\s\S]*?\$received.Contains\(\$message\) -and \$received.Contains\("`r"\)/;
+  assert.match(chat, /\$composerHandle = \[VerifyNative\]::GetFocusedWindow\(\$script:window\)/);
+  assert.match(chat, /GetAncestor\(\$composerHandle, 2\) -ne \$script:window -or \[VerifyNative\]::Class\(\$composerHandle\) -cne 'Edit'/);
+  const stdinDelivery = /\[IO.File\]::Open\(\$prefix \+ '-stdin.bin', \[IO.FileMode\]::Open, \[IO.FileAccess\]::Read, \[IO.FileShare\]::ReadWrite\)[\s\S]*?\$stdin\.CopyTo\(\$buffer\)[\s\S]*?\$received = \[Text.Encoding\]::ASCII.GetString\(\$receivedBytes\)[\s\S]*?\$received -ceq \$wireMessage/;
+  assert.ok(chat.includes("$wireMessage = ([string][char]27) + '[200~' + $message + ([string][char]27) + '[201~' + \"`r\""));
   assert.match(chat, stdinDelivery);
-  assert.doesNotMatch(chat.replace('$received.Contains($message)', '$true'), stdinDelivery);
+  assert.doesNotMatch(chat.replace('$received -ceq $wireMessage', '$true'), stdinDelivery);
   assert.doesNotMatch(chat.replace('[IO.FileShare]::ReadWrite', '[IO.FileShare]::Read'), stdinDelivery);
   const draftProtection = /finally \{[\s\S]*?\$typedCheck.receivedBytes = \(Get-Item \(\$typedPrefix \+ '-stdin.bin'\)\).Length[\s\S]*?\$_.t -ceq \$typedMessage -and \$_.s -eq 0 -and \$_.x -eq 0[\s\S]*?\$typedCheck.receivedBytes -eq 0 -and \$typedCheck.queued[\s\S]*?if \(-not \$typedCheck.passed\) \{ throw/;
   assert.match(chat, draftProtection);
@@ -1993,4 +1997,72 @@ test('IGSH-814 theme verification waits for the initialized palette and selected
     assert.doesNotMatch(selection.replace("Focus-Palette 'themes' 4000", replacement), readiness);
   }
   assert.match(selection, /Wait-Until \{ \(Test-Path \$path\) -and \(Get-Content \$path -Raw\)\.Trim\(\) -eq \$SavedTheme \}/);
+});
+
+test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches three times and gates the release', () => {
+  assert.match(control, /ValidateSet\([^\n)]*'relaunch-saved-sessions'/);
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'relaunch-saved-sessions'/);
+  assert.match(workflow, /fromJSON\('\["appearance", "chat-dictation", "relaunch-saved-sessions", [^\n]*\]'\)/);
+  const journey = control.slice(control.indexOf("        'relaunch-saved-sessions' {"), control.indexOf("        'session-open' {"));
+  assert.match(journey, /foreach \(\$launch in 2, 3\)/);
+  assert.match(journey, /Restart-SessionRestore "relaunch-\$launch" \$false \$false \$openPorts/);
+  assert.match(journey, /Open-NotifyPortListeners/);
+  assert.match(journey, /\$after\.selected -cne \$starred\.selected/);
+  const assertion = control.slice(control.indexOf('function Assert-RelaunchSessions('), control.indexOf('try {\n    if ($Feature -eq \'title-bar\')'));
+  assert.match(assertion, /sessions listed twice in the sidebar/);
+  assert.match(assertion, /@\(\$saved\.tabs\)\.Count -eq \$Seed\.live\.Count/);
+  assert.match(assertion, /group headers missing/);
+  assert.doesNotMatch(journey + assertion, /Set-Content|WriteAll|Stop-Process/);
+  const seed = control.slice(control.indexOf('function New-RelaunchSeed {'), control.indexOf('function Get-NotifyPorts {'));
+  assert.match(seed, /foreach \(\$i in 1\.\.14\)/);
+  assert.match(seed, /kind = 'tmux'/);
+  assert.match(seed, /starred_view = \$true/);
+  assert.match(control, /Get-NotifyPorts[\s\S]*notify_ports\.zig/);
+  const map = read(skill + 'features/relaunch-saved-sessions.md');
+  for (const required of ['seeded-state', 'occupied-ports', 'selection-kept', 'IGSH-890', 'auto-release-admit.sh']) assert.ok(map.includes(required), required);
+  assert.match(read(skill + 'features/README.md'), /\[Relaunch saved sessions\]\(relaunch-saved-sessions.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`relaunch-saved-sessions`/);
+  assert.throws(() => assert.match(control.replace("'relaunch-saved-sessions')][string]$Feature", "')][string]$Feature"), /ValidateSet\([^\n)]*'relaunch-saved-sessions'/));
+});
+
+test('IGSH-905 six-line composer proof holds Shift until the native composer shows the newline and always releases it', () => {
+  const start = control.indexOf('function Press-ShiftEnter(');
+  assert.notEqual(start, -1, 'control.ps1 has no Press-ShiftEnter');
+  const helper = control.slice(start, control.indexOf('\nfunction ', start + 1));
+  const order = /\[VerifyNative\]::GetAncestor\(\$composer, 2\) -ne \$script:window -or \[VerifyNative\]::Class\(\$composer\) -cne 'Edit'[\s\S]+?\[VerifyNative\]::KeyDown\(0x10\)\s+try \{[\s\S]+?\[VerifyNative\]::KeyDown\(0x0D\)[\s\S]+?\[VerifyNative\]::KeyUp\(0x0D\)\s+Wait-Until \{ @\(\[VerifyNative\]::EditText\(\$composer\) -split "`r\?`n"\)\.Count -eq \(\$before \+ 1\) \}[^\n]*\s+\} finally \{\s+\[VerifyNative\]::KeyUp\(0x10\)\s+\}\s+Wait-Until \{ -not \[VerifyNative\]::IsDown\(0x10\) \}/;
+  assert.match(helper, order);
+  assert.doesNotMatch(helper, /Chord|\[VerifyNative\]::Text|Press @/);
+  assert.equal(helper.split('[VerifyNative]::KeyUp(0x10)').length - 1, 1);
+  const buttons = control.slice(control.indexOf("$buttonsCheck = @{ name = 'round-bottom-composer-buttons'"), control.indexOf('$buttonsCheck.passed = $true'));
+  assert.match(buttons, /Press-ShiftEnter 'Shift\+Enter: grow the owned draft without sending'\s+Type-Text \('Draft line ' \+ \$line\)/);
+  assert.doesNotMatch(buttons, /Press @\(0x10, 0x0D\)/);
+  assert.match(buttons, /@\(\$draft -split "`r\?`n"\)\.Count -ne \$lines/);
+  for (const broken of [
+    helper.replace(/\} finally \{\s+\[VerifyNative\]::KeyUp\(0x10\)\s+\}/, '}\n    [VerifyNative]::KeyUp(0x10)'),
+    helper.replace('[VerifyNative]::KeyDown(0x10)\n    try {', 'try {\n        [VerifyNative]::KeyDown(0x10)\n        [VerifyNative]::KeyUp(0x10)'),
+  ]) {
+    assert.doesNotMatch(broken, order);
+  }
+  const earlyRelease = helper.replace('[VerifyNative]::KeyDown(0x0D)', '[VerifyNative]::KeyUp(0x10)\n        [VerifyNative]::KeyDown(0x0D)');
+  assert.notEqual(earlyRelease.split('[VerifyNative]::KeyUp(0x10)').length - 1, 1);
+});
+
+test('IGSH-911 native bubble and selection scans recognize exact delivered alpha tones', () => {
+  const samples = JSON.parse(read('tools/fixtures/IGSH-911/bubble-tones.json'));
+  const blend = control.slice(control.indexOf('static System.Drawing.Color QueuedColor('), control.indexOf('public static Point MessageBubblePoint('));
+  for (const channel of ['R', 'G', 'B']) assert.ok(blend.includes(`(bg.${channel} * 128 + 128) / 256 + (fill.${channel} * 127 + 128) / 256`));
+  const scan = control.slice(control.indexOf('public static Point MessageBubblePoint('), control.indexOf('public static Point[] SelectTranscriptText('));
+  assert.ok(scan.includes('var queuedFill = QueuedColor(bg, fill);'));
+  assert.match(scan, /color == fill.ToArgb\(\) \|\| color == queuedFill.ToArgb\(\)/);
+  assert.match(scan, /pixels.GetPixel\(x - 1, y\).ToArgb\(\) == color/);
+  assert.match(scan, /pixels.GetPixel\(x, y - 1\).ToArgb\(\) == color/);
+  const selection = control.slice(control.indexOf('public static int TranscriptSelectionPixels('), control.indexOf('public static int[] DictationMicPixels('));
+  assert.ok(selection.includes('queuedColors.Add(QueuedColor(bg, fill).ToArgb());'));
+  assert.ok(selection.includes('else if (queuedColors.Contains(c.ToArgb())) count++;'));
+  const queued = fill => samples.background.map((value, i) => Math.floor((value * 128 + 128) / 256) + Math.floor((fill[i] * 127 + 128) / 256));
+  assert.deepEqual(queued(samples.sending), samples.delivered);
+  assert.deepEqual(queued(samples.selection), samples.deliveredSelection);
+  assert.notDeepEqual(samples.selection, samples.deliveredSelection);
+  assert.notDeepEqual(samples.background.map((value, i) => Math.floor((value * 128 + samples.selection[i] * 127) / 255)), samples.deliveredSelection);
+  assert.ok(read('src/chat_render.zig').includes('.source_constant_alpha = 128'));
 });
