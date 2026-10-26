@@ -25,6 +25,11 @@ on:
         required: false
         default: false
         type: boolean
+      chat_retention_proof:
+        description: Retain 2000 messages through 200 arrivals and source resets
+        required: false
+        default: false
+        type: boolean
       chat_width_proof:
         description: Capture wide and narrow message geometry with the chat-messages-only journey
         required: false
@@ -183,6 +188,7 @@ jobs:
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
+      CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
