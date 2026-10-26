@@ -105,6 +105,7 @@ var g_chat_read_boundary: chat_history.ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
 fn chatReadMark(_: bool) bool { return false; }
 fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }
+fn foregroundIsOurs() bool { return true; }
 var g_chat_echo_layout_count: usize = 0;
 var request_count: usize = 0;
 var capture_count: usize = 0;
