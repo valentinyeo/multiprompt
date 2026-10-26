@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'src/voice.zig'), 'utf8');
 const start = source.indexOf('pub fn dictationAudit(');
@@ -15,7 +16,7 @@ function recordAudit(body) {
   try {
     fs.mkdirSync(path.join(directory, 'ZigShell'));
     const file = path.join(directory, 'test.zig');
-    for (const name of ['win32.zig', 'file_io.zig']) fs.copyFileSync(path.join(root, 'src', name), path.join(directory, name));
+    copyZig(['win32.zig', 'file_io.zig'], directory);
     fs.writeFileSync(file, `const std = @import("std");
 const win = @import("win32.zig");
 const io = @import("file_io.zig");
