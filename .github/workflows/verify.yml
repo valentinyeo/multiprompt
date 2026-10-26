@@ -453,6 +453,38 @@ jobs:
           Write-Host "focus-negative proofs=$($proofList.Count) withoutRing=$withoutRing"
           if ($proofList.Count -ne 28 -or $withoutRing -ne 0) { throw "Pre-fix rings were not observed in every theme/view/cycle (proofs=$($proofList.Count) withoutRing=$withoutRing)" }
           $global:LASTEXITCODE = 0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: env.FEATURE == 'chat-skills'
+        with:
+          persist-credentials: false
+          ref: d1c9c8b725c8ee63271c98cfeae7ae4cee05dc78
+          path: skill-negative-source
+      - name: Build pre-fix master skill freshness control
+        if: env.FEATURE == 'chat-skills'
+        working-directory: skill-negative-source
+        run: zig build
+      - name: Require pre-fix master to miss the new skill
+        if: env.FEATURE == 'chat-skills'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force evidence/negative | Out-Null
+          Copy-Item verify-bin/ssh.exe, verify-bin/tmux.exe skill-negative-source/zig-out/bin/
+          $source = Get-Content skill-negative-source/src/main.zig -Raw
+          if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Negative control version missing' }
+          $version = $Matches[1]
+          $exe = "$pwd/skill-negative-source/zig-out/bin/multiprompt.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{ revision = 'd1c9c8b725c8ee63271c98cfeae7ae4cee05dc78'; version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/negative/build.json
+          try {
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature chat-skills -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/negative"
+          } catch { Write-Host "Negative control returned: $_" }
+          $observed = Get-Content evidence/negative/fresh-skills/observation.json -Raw | ConvertFrom-Json
+          $clean = Get-Content evidence/negative/cleanup.json -Raw | ConvertFrom-Json
+          $doctor = Get-Content evidence/negative/fresh-skills/doctor.json -Raw | ConvertFrom-Json
+          if ($observed.error -notlike '*newly added skill discovered within five seconds*' -or -not $doctor.chat -or $clean.remaining_owned_processes -ne 0 -or -not $clean.scratch_removed) { throw "Negative control failed for the wrong reason: $($observed.error)" }
+          Write-Host 'OLD_MASTER_SKILL_REFRESH_RED_OK'
+          $global:LASTEXITCODE = 0
       - name: Launch Doctor Drive Evidence Cleanup
         timeout-minutes: ${{ env.FEATURE == 'chat-dictation' && 5 || 30 }}
         if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'browser-own-profile' && env.FEATURE != 'title-bar'

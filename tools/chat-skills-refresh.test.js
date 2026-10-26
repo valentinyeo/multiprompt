@@ -1,3 +1,4 @@
+const { copyZig } = require('./zig-copy');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -14,7 +15,7 @@ test('IGSH-923 reopening refreshes both triggers, errors back off, and failed re
   const slot = state.slice(state.indexOf('const ChatAcSlot = struct'), state.indexOf('\nconst ChatAc = struct'));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-refresh-'));
   try {
-    fs.copyFileSync('src/chat_complete.zig', path.join(dir, 'chat_complete.zig'));
+    copyZig(['chat_complete.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), `const std = @import("std");
 const chat_complete = @import("chat_complete.zig");
 ${slot}
