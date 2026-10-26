@@ -3,7 +3,7 @@ const std = @import("std");
 pub const MIN_PARTIAL: usize = 12;
 const BLOCK_NORM_CAP: usize = 32768;
 
-fn isSpace(c: u16) bool {
+inline fn isSpace(c: u16) bool {
     return c == ' ' or c == '\t' or c == '\r' or c == '\n' or c == 0xA0;
 }
 
@@ -33,7 +33,7 @@ pub fn normalize(text: []const u16, out: []u16) []const u16 {
     var pending_space = false;
     var i: usize = 0;
     while (i < text.len) {
-        const tag = pastedTagLen(text, i);
+        const tag = if (text[i] == '<') pastedTagLen(text, i) else 0;
         if (tag > 0) {
             if (n > 0) pending_space = true;
             i += tag;
@@ -185,7 +185,7 @@ const Normalized = struct {
     fn next(self: *Normalized) ?u16 {
         var space = false;
         while (self.pos < self.text.len) {
-            const tag = pastedTagLen(self.text, self.pos);
+            const tag = if (self.text[self.pos] == '<') pastedTagLen(self.text, self.pos) else 0;
             if (tag > 0 or isSpace(self.text[self.pos])) {
                 self.pos += if (tag > 0) tag else 1;
                 space = self.started;
