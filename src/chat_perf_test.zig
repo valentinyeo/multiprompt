@@ -175,10 +175,10 @@ test "IGSH-991 CPU961 pending echo assignment stays within 50 ms on long histori
                 std.mem.doNotOptimizeAway(picked[0]);
                 try std.testing.expectEqual(if (present) @as(?usize, count) else null, picked[0]);
                 slowest_ms = @max(slowest_ms, elapsed);
-                std.debug.print("CPU961 reconcile blocks={d} block_chars={d} pending_chars={d} trial={d} present={} ms={d}\n", .{ count, chars, pending_len, trial, present, elapsed });
+                std.debug.print("CPU961 reconcile blocks={d} block_chars={d} pending_chars={d} trial={d} present={} ms={d} mode={s}\n", .{ count, chars, pending_len, trial, present, elapsed, @tagName(@import("builtin").mode) });
             };
         }
     };
-    std.debug.print("CPU991 matching slowest_ms={d} budget_ms=50\n", .{slowest_ms});
+    std.debug.print("CPU991 matching slowest_ms={d} budget_ms=50 mode={s}\n", .{ slowest_ms, @tagName(@import("builtin").mode) });
     try std.testing.expect(slowest_ms <= 50);
 }
