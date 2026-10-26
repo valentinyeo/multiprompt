@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { names, queueName, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
+const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
 const os = require('node:os');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -534,6 +534,25 @@ function queueFiles(base) {
   return { files: out, actions };
 }
 
+function sendFiles(base) {
+  const name = sendName;
+  const out = new Map();
+  const put = (file, value) => out.set(path.join(base, file), JSON.stringify(value));
+  const png = Buffer.alloc(15000);
+  Buffer.from('89504e470d0a1a0a', 'hex').copy(png);
+  const event = (type, fields) => ({ type, timestamp: '2026-10-23T10:00:00.000Z', sessionId: 'sid', ...fields });
+  out.set(path.join(base, `${name}/transcript.jsonl`), [event('user', { message: { role: 'user', content: 'start' } }), ...sendTexts.map(text => event('queue-operation', { operation: 'enqueue', content: text }))].map(row => JSON.stringify(row)).join('\n'));
+  put(`${name}/observation.json`, {
+    name, text: 'send stays gone', mode: 'busy', actionMs: 1000, endMs: 3000, error: null,
+    steps: sendSteps.map(step => ({ name: step, ok: true, ms: 1500, waitedMs: 100 })),
+    sends: sendTexts.map((text, i) => ({ n: i + 1, text, reached: true, reappeared: null })),
+  });
+  put(`${name}/cleanup.json`, { remaining_owned_processes: 0, evidence_preserved: true, scratch_removed: true });
+  out.set(path.join(base, `${name}-final.png`), png);
+  const actions = sendTexts.flatMap(text => [{ case: name, ms: 1000, input: 'type composer text', text }, { case: name, ms: 1001, input: 'Enter: send composer' }]);
+  return { files: out, actions };
+}
+
 function mockFiles(t, files) {
   t.mock.method(fs, 'existsSync', file => files.has(String(file)));
   t.mock.method(fs, 'readFileSync', (file, encoding) => {
@@ -581,7 +600,9 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
   }
   const queue = queueFiles(base);
   for (const [file, value] of queue.files) files.set(file, value);
-  const allActions = [...actions, ...queue.actions];
+  const send = sendFiles(base);
+  for (const [file, value] of send.files) files.set(file, value);
+  const allActions = [...actions, ...queue.actions, ...send.actions];
   put('actions.json', allActions);
   files.set(path.join(base, 'before.png'), png);
   files.set(path.join(base, 'after.png'), png);
@@ -810,6 +831,45 @@ test('queue-draft-sync is wired into the journey, the workflow fallback and the 
   for (const step of queueSteps) assert.ok(drive.includes(`'${step}'`), step);
   for (const text of Object.values(queueTexts)) assert.ok(drive.includes(text.replaceAll("\n", "`n")), text);
   assert.match(drive, /CHAT_QUEUE items=/);
-  assert.match(workflow, /@\('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync'\)/);
+  assert.match(workflow, /@\('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync', 'send-stays-gone'\)/);
   assert.match(read(skill + 'features/chat-delivery.md'), /`queue-draft-sync`[\s\S]*CHAT_QUEUE items=/);
+});
+
+test('send-stays-gone is wired into the journey, the workflow fallback and the feature map', () => {
+  assert.ok(drive.includes("name='send-stays-gone'"));
+  for (const step of new Set(sendSteps)) assert.ok(drive.includes(`'${step}'`), step);
+  assert.match(drive, /Select-Object -Last 1\) -ceq \$text/);
+  assert.match(read(skill + 'features/chat-delivery.md'), /`send-stays-gone`[\s\S]*IGSH-960/);
+});
+
+
+test('send-stays-gone evidence fails when a sent message comes back or a send is missing', t => {
+  const files = new Map();
+  const base = path.join(root, 'tools/verify-chat-delivery/in-memory-send-evidence');
+  const built = sendFiles(base);
+  for (const [file, value] of built.files) files.set(file, value);
+  files.set(path.join(base, 'actions.json'), JSON.stringify(built.actions));
+  mockFiles(t, files);
+  const row = () => evaluateEvidence(base).cases.find(entry => entry.name === sendName);
+  assert.equal(row().passed, true, row().detail);
+  assert.deepEqual(row().detail, { sends: 20, watchedSeconds: 10, longMessages: 5 });
+  const observationFile = path.join(base, `${sendName}/observation.json`);
+  const original = files.get(observationFile);
+  const back = JSON.parse(original);
+  back.sends[6].reappeared = { kind: 'composer', text: 'send 7 sho', atMs: 3200 };
+  files.set(observationFile, JSON.stringify(back));
+  assert.match(row().detail, /send 7 came back into the box/);
+  const draft = JSON.parse(original);
+  draft.sends[2].reappeared = { kind: 'draft-file', atMs: 100 };
+  files.set(observationFile, JSON.stringify(draft));
+  assert.match(row().detail, /send 3 came back into the box/);
+  const stale = JSON.parse(original);
+  stale.steps[3].ok = false;
+  files.set(observationFile, JSON.stringify(stale));
+  assert.match(row().detail, /journey steps failed: send-stays-gone/);
+  files.set(observationFile, original);
+  const transcriptFile = path.join(base, `${sendName}/transcript.jsonl`);
+  const transcript = files.get(transcriptFile);
+  files.set(transcriptFile, transcript.split('\n').slice(0, -1).join('\n'));
+  assert.match(row().detail, /Claude queued every sent message once, in order/);
 });
