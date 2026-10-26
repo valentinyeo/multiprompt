@@ -5190,6 +5190,18 @@ try {
                                 $pageKeys++
                                 if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw 'IGSH-724 Alt+Q sent a page key to browser chrome' }
                             }
+                            Record 'IGSH-972: repeated Alt+Q round trips deliver every page key'
+                            foreach ($round in 1..5) {
+                                [VerifyNative]::Chord(@(0x12, 0x51))
+                                if (-not [VerifyNative]::SwitchReady($script:window, $consoles[$tab], ('ZigShell-' + $shellIds[$tab]), $browser, $dock, $composerHandle, $drafts[$tab])) { throw ('IGSH-972 round ' + $round + ' Alt+Q did not restore the session input') }
+                                [VerifyNative]::Chord(@(0x12, 0x51))
+                                foreach ($key in @(0x20, 0x28, 0x4A, 0x4B)) {
+                                    if ([VerifyNative]::GetForegroundWindow() -ne $browser -or [VerifyNative]::GetProp($browser, 'ZigShellPaneOwner') -ne $script:window) { throw ('IGSH-972 round ' + $round + ' refusing page key outside the owned browser') }
+                                    [VerifyNative]::Chord(@($key))
+                                    $pageKeys++
+                                    if (-not [VerifyNative]::Title($browser).StartsWith(($pageTitle + ' keys ' + $pageKeys + ' '), [StringComparison]::Ordinal)) { throw ('IGSH-972 round ' + $round + ' Alt+Q sent a page key to the browser menu') }
+                                }
+                            }
                             Record 'IGSH-724: F6 still reaches browser chrome'
                             [VerifyNative]::Chord(@(0x75))
                             if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.ClassName -ne 'OmniboxViewViews') { throw 'F6 did not reach the browser address bar' }
