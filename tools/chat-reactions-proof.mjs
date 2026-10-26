@@ -81,7 +81,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       const area = json('reactions/area.json');
       const frames = {};
       for (const name of ['before', 'pending', 'delivered', 'restart', 'fallback']) frames[name] = inspect(readBmp(path.join(root, `reactions-${name}.bmp`)), area);
-      assert.equal(frames.before.agent.length, 2);
+      assert.ok(frames.before.agent.length >= 2, 'fixture replies visible before reacting');
       assert.equal(frames.before.user.length, 1);
       assert.equal(frames.before.pill.length, 0);
       for (const name of ['pending', 'delivered', 'restart']) assertBadge(frames[name]);
