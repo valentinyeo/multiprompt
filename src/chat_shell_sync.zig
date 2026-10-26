@@ -18,6 +18,7 @@ pub const Row = struct {
     sender: [64]u16 = @splat(0),
     local: bool = false,
     outbox_id: u64 = 0,
+    in_queue: bool = false,
 
     pub fn slice(self: *const Row) []const u16 {
         return self.text[0..self.len];
@@ -42,7 +43,7 @@ pub fn build(view: *View, status: *const chat_transcript.Status, pending: []cons
         for (status.queue[0..status.queue_len]) |item| {
             if (view.count >= MAX_ROWS) break;
             var row = &view.rows[view.count];
-            row.* = .{ .len = item.len, .sent = item.sent, .injected = item.injected, .sender = item.sender };
+            row.* = .{ .len = item.len, .sent = item.sent, .injected = item.injected, .sender = item.sender, .in_queue = true };
             @memcpy(row.text[0..item.len], item.text[0..item.len]);
             for (pending, 0..) |entry, i| {
                 if (item.injected or i >= MAX_ROWS or used[i]) continue;

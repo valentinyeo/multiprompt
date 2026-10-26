@@ -18,7 +18,7 @@ function menuModel(source) {
   const copy = source.match(/fn chatContextCopyTarget\([^]*?return (.+);\n\}/)[1]
     .replace(/if \((\w+)\) \.(\w+) else /g, '$1 ? "$2" : ')
     .replace(/\.(\w+)$/g, '"$1"');
-  const items = new Function('selected', 'message', 'reply', 'link', 'unsent', `return [${actions}].filter(item => item !== null)`);
+  const items = new Function('selected', 'message', 'reply', 'link', 'unsent', 'waiting', `return [${actions}].filter(item => item !== null)`);
   const target = new Function('selected', 'message', `return ${copy}`);
   return (...input) => ({ items: items(...input), target: target(...input) });
 }
@@ -32,6 +32,7 @@ test('IGSH-718 production pure item expressions preserve ordering and selection 
   assert.deepEqual(menu(false, true, true, true, false).items, ['reply', 'copy', 'copy_link']);
   assert.deepEqual(menu(false, true, true, false, true).items, ['reply', 'copy', 'send_again', 'remove']);
   assert.deepEqual(menu(false, true, true, true, true).items, ['reply', 'copy', 'copy_link', 'send_again', 'remove']);
+  assert.deepEqual(menu(false, true, true, false, false, true).items, ['reply', 'copy', 'cancel_queued']);
   assert.equal(menu(false, false, false, false, false).target, 'nothing');
   assert.throws(() => menuModel(chat.replace('fn chatContextMenuItems(', 'fn removedMenu(')));
 });
@@ -40,7 +41,7 @@ test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons
   const handler = chat.slice(chat.indexOf('fn chatMessageMenu('), chat.indexOf('fn chatNavEligible('));
   assert.doesNotMatch(handler, /Copy Message|Select All|2 => chatSelectAll|3 => chatCopyTextToClipboard/);
   assert.match(chat, /const TrackPopupMenu = @import\("fonts.zig"\).trackMessagePopupMenu/);
-  assert.match(handler, /reply_text != null, link_text != null, unsent_actions/);
+  assert.match(handler, /reply_text != null, link_text != null, unsent_actions, waiting/);
   assert.match(handler, /pendingActions\(app_state.g_chat_outbox.items\[ei\].state\).send_again/);
   assert.match(handler, /items.copy_target == .selection\) selection_text else message_text/);
   assert.match(handler, /debugLog\(menu_log\[0\.\.menu_log_len\]\)/);
@@ -60,7 +61,7 @@ test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons
   assert.match(fonts, /theme.foreground\(\)/);
   assert.match(fonts, /previous_style = message_menu_style[^]*?defer message_menu_style = previous_style/);
   assert.match(fonts, /GetTextFaceW[^]*?Segoe Fluent Icons[^]*?Segoe MDL2 Assets/);
-  for (const [item, glyph] of [['reply', 'E97A'], ['copy', 'E8C8'], ['copy_link', 'E71B'], ['send_again', 'E724'], ['remove', 'E74D']]) {
+  for (const [item, glyph] of [['reply', 'E97A'], ['copy', 'E8C8'], ['copy_link', 'E71B'], ['send_again', 'E724'], ['remove', 'E74D'], ['cancel_queued', 'E711']]) {
     assert.match(fonts, new RegExp(`\\.${item} => 0x${glyph}`));
   }
   assert.match(handler, /4 => if \(reply_text\) \|text\|[^]*?selectChatReply\(text\)/);

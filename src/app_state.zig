@@ -2642,6 +2642,9 @@ pub var g_chat_history_channels: [3]ChatHistoryChannel = @splat(.{});
 pub var g_chat_history_channel_mutex: SpinMutex = .{};
 pub var g_chat_history_channels_closing: std.atomic.Value(bool) = .init(false);
 pub var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
+pub var g_chat_cancel_busy = std.atomic.Value(bool).init(false);
+pub var g_chat_cancel_id = std.atomic.Value(u64).init(0);
+pub var g_chat_cancel_result = std.atomic.Value(u8).init(0);
 
 pub var g_chat_switch_loading: bool = false;
 pub var g_chat_prepend_pending = false;

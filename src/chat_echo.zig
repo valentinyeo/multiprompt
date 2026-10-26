@@ -212,6 +212,17 @@ pub fn mayType(state: OutboxState, write_started: bool, busy: bool, link_down: b
     return state == .queued and !write_started and !busy and !link_down;
 }
 
+pub fn cancellable(state: OutboxState, removed_ms: i64) bool {
+    return state == .delivered and removed_ms == 0;
+}
+
+test "IGSH-1010 only a message waiting in Claude's queue can be cancelled" {
+    for (std.enums.values(OutboxState)) |state| {
+        try std.testing.expectEqual(state == .delivered, cancellable(state, 0));
+        try std.testing.expect(!cancellable(state, 1200));
+    }
+}
+
 pub const PendingActions = struct { send_again: bool, remove: bool };
 
 pub fn pendingActions(state: OutboxState) PendingActions {

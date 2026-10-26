@@ -2137,6 +2137,70 @@ class SharedQueueDraftTest(unittest.TestCase):
         self.assertIn('query.get("op") == "draft"', source)
         self.assertIn('"send_queued", "edit_queued"', source)
 
+    def fake_claude(self, queue, recall=''):
+        state = dict(queue=list(queue), box='', submitted=[], keys=[])
+
+        def run(argv, **kwargs):
+            shown = ''
+            if 'capture-pane' in argv:
+                shown = '❯ ' + state['box'].replace('\n', '\n  ') + '\n' + '─' * 20 + '\n'
+            elif 'send-keys' in argv:
+                key = argv[-1]
+                if '-l' in argv:
+                    state['box'] += key
+                elif key == 'Up':
+                    state['keys'].append('Up')
+                    state['box'] = '\n'.join(state['queue']) if state['queue'] else recall
+                    state['queue'] = []
+                elif key == 'C-u':
+                    state['box'] = state['box'].rsplit('\n', 1)[0] if '\n' in state['box'] else ''
+                elif key == 'Enter' and state['box']:
+                    state['queue'].append(state['box'])
+                    state['submitted'].append(state['box'])
+                    state['box'] = ''
+            return subprocess.CompletedProcess(argv, 0, shown, '')
+        return state, run
+
+    def test_IGSH_1010_cancel_queued_removes_only_the_cancelled_message(self):
+        state, run = self.fake_claude(['first', 'second', 'third'])
+        with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.cancel_queued_response(dict(op='cancel_queued', id=9, tmux='term-1', text='second', keep=['first', 'third']))
+        self.assertTrue(wire.startswith('@mp\t9\tcancel_queued\tok\t-\t0\n'))
+        self.assertEqual(state['queue'], ['first', 'third'])
+        self.assertEqual(state['submitted'], ['first', 'third'])
+        self.assertEqual(state['box'], '')
+
+    def test_IGSH_1010_cancel_queued_keeps_a_composer_draft(self):
+        state, run = self.fake_claude(['only'])
+        state['box'] = 'half typed'
+        with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.cancel_queued_response(dict(op='cancel_queued', id=9, tmux='term-1', text='only', keep=[]))
+        self.assertIn('\tcancel_queued\tok\t-\t0\n', wire)
+        self.assertEqual(state['queue'], [])
+        self.assertEqual(state['box'], 'half typed')
+        self.assertEqual(state['submitted'], [])
+
+    def test_IGSH_1010_cancel_queued_refuses_when_claude_already_took_the_message(self):
+        state, run = self.fake_claude([], recall='an older prompt from history')
+        with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.cancel_queued_response(dict(op='cancel_queued', id=9, tmux='term-1', text='taken', keep=['other']))
+        self.assertIn('\tcancel_queued\terror\tnot_queued\t0\n', wire)
+        self.assertEqual(state['box'], '')
+        self.assertEqual(state['submitted'], [])
+
+    def test_IGSH_1010_cancel_queued_retypes_survivors_when_the_cancelled_message_was_taken_first(self):
+        state, run = self.fake_claude(['survivor'])
+        with patch.object(reader.time, 'sleep'), patch.object(reader.subprocess, 'run', side_effect=run):
+            wire = reader.cancel_queued_response(dict(op='cancel_queued', id=9, tmux='term-1', text='taken', keep=['survivor']))
+        self.assertIn('\tcancel_queued\terror\tnot_queued\t0\n', wire)
+        self.assertEqual(state['queue'], ['survivor'])
+
+    def test_IGSH_1010_cancel_queued_rejects_bad_requests_and_is_routed(self):
+        for query in (dict(tmux='bad name', text='x', keep=[]), dict(tmux='term-1', text='', keep=[]), dict(tmux='term-1', text='x', keep='y'), dict(tmux='term-1', text='x', keep=['a\x00'])):
+            self.assertIn('\tcancel_queued\terror\t', reader.cancel_queued_response(dict(query, id=1)))
+        source = (ROOT / 'src/chat_history_reader.py').read_text(encoding='utf-8')
+        self.assertIn('query.get("op") == "cancel_queued"', source)
+
 
 if __name__ == '__main__':
     unittest.main()

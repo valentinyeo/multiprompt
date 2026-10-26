@@ -1404,6 +1404,10 @@ pub fn chatEchoSendAgain(id: u64) void {
 pub fn chatEchoRemove(id: u64) void {
     const ei = chatOutboxIndexById(id) orelse return;
     if (!chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).remove) return;
+    chatEchoRemoveEntry(ei, id);
+}
+
+fn chatEchoRemoveEntry(ei: usize, id: u64) void {
     const entry = app_state.g_chat_outbox.orderedRemove(ei);
     if (!saveChatOutbox()) {
         app_state.g_chat_outbox.insertAssumeCapacity(ei, entry);
@@ -1687,6 +1691,7 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
 }
 
 pub fn chatOutboxTick() void {
+    chatCancelFinish();
     chatTmuxSendFinish();
     if (ISSUE_349_FULL_SETTLE) chatFullSettleFinish();
     chatTmuxSettle();
@@ -2692,6 +2697,114 @@ fn chatStopTmuxThread(key: @import("chat_transcript.zig").Identity, digit: u8) v
     }
     var log: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log, "[chat] {s} sent shell={d} via=tmux", .{ op, key.shell_id }) catch "");
+}
+
+const CANCEL_PENDING: u8 = 0;
+const CANCEL_DONE: u8 = 1;
+const CANCEL_TAKEN: u8 = 2;
+const CANCEL_FAILED: u8 = 3;
+
+pub fn chatCancelQueued(shell_index: u32, outbox_id: u64, text: []const u16, keep: []const []const u16) bool {
+    if (shell_index >= app_state.shell_count) return false;
+    const shell = &app_state.shells[shell_index];
+    if (@import("chat_working.zig").stopTransportFor(shell.kind, shell.tmux_session_len > 0) != .tmux) return false;
+    const key = @import("chat_transcript.zig").Identity.initTmux(shell.shell_id, shell.tmux_host, false, shell.tmux_session[0..shell.tmux_session_len], "");
+    if (key.tmux[0] == 0 or key.host >= app_state.g_chat_history_channels.len) return false;
+    if (app_state.g_chat_cancel_busy.cmpxchgStrong(false, true, .acq_rel, .acquire) != null) return false;
+    const a = std.heap.page_allocator;
+    const spawned = chatCancelSpawn(a, key, outbox_id, text, keep);
+    if (!spawned) app_state.g_chat_cancel_busy.store(false, .release);
+    return spawned;
+}
+
+fn chatCancelUtf8(a: std.mem.Allocator, text: []const u16) ?[]u8 {
+    const utf8 = std.unicode.utf16LeToUtf8Alloc(a, text) catch return null;
+    defer a.free(utf8);
+    var out: std.ArrayList(u8) = .empty;
+    for (utf8) |c| {
+        if (c == '\r') continue;
+        out.append(a, c) catch {
+            out.deinit(a);
+            return null;
+        };
+    }
+    return out.toOwnedSlice(a) catch null;
+}
+
+fn chatCancelSpawn(a: std.mem.Allocator, key: @import("chat_transcript.zig").Identity, outbox_id: u64, text: []const u16, keep: []const []const u16) bool {
+    const text_utf8 = chatCancelUtf8(a, text) orelse return false;
+    const keep_utf8 = a.alloc([]const u8, keep.len) catch {
+        a.free(text_utf8);
+        return false;
+    };
+    var made: usize = 0;
+    for (keep) |item| {
+        keep_utf8[made] = chatCancelUtf8(a, item) orelse {
+            for (keep_utf8[0..made]) |done| a.free(done);
+            a.free(keep_utf8);
+            a.free(text_utf8);
+            return false;
+        };
+        made += 1;
+    }
+    const thread = std.Thread.spawn(.{}, chatCancelThread, .{ key, outbox_id, text_utf8, keep_utf8 }) catch {
+        for (keep_utf8) |done| a.free(done);
+        a.free(keep_utf8);
+        a.free(text_utf8);
+        return false;
+    };
+    thread.detach();
+    return true;
+}
+
+fn chatCancelThread(key: @import("chat_transcript.zig").Identity, outbox_id: u64, text: []u8, keep: [][]const u8) void {
+    const a = std.heap.page_allocator;
+    defer {
+        for (keep) |item| a.free(item);
+        a.free(keep);
+        a.free(text);
+        app_state.g_chat_cancel_busy.store(false, .release);
+    }
+    var result: u8 = CANCEL_FAILED;
+    defer {
+        app_state.g_chat_cancel_id.store(outbox_id, .release);
+        app_state.g_chat_cancel_result.store(result, .release);
+    }
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = "cancel_queued", .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0), .text = text, .keep = keep }, .{}) catch return;
+    defer a.free(query);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null)) {
+        debugLog("[chat] cancel_queued failed via=tmux");
+        return;
+    }
+    result = chatCancelResult(wire.items);
+    var log: [96]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat] cancel_queued shell={d} result={d}", .{ key.shell_id, result }) catch "");
+}
+
+fn chatCancelResult(wire: []const u8) u8 {
+    if (std.mem.indexOf(u8, wire, "\tcancel_queued\tok\t") != null) return CANCEL_DONE;
+    if (std.mem.indexOf(u8, wire, "\tcancel_queued\terror\tnot_queued\t") != null) return CANCEL_TAKEN;
+    return CANCEL_FAILED;
+}
+
+test "IGSH-1010 cancel replies map to done, already taken and failed" {
+    try std.testing.expectEqual(CANCEL_DONE, chatCancelResult("@mp\t4\tcancel_queued\tok\t-\t0\n"));
+    try std.testing.expectEqual(CANCEL_TAKEN, chatCancelResult("@mp\t4\tcancel_queued\terror\tnot_queued\t0\n"));
+    try std.testing.expectEqual(CANCEL_FAILED, chatCancelResult("@mp\t4\tcancel_queued\terror\tbox_not_clear\t0\n"));
+    try std.testing.expectEqual(CANCEL_FAILED, chatCancelResult(""));
+}
+
+fn chatCancelFinish() void {
+    const result = app_state.g_chat_cancel_result.swap(CANCEL_PENDING, .acq_rel);
+    if (result == CANCEL_PENDING) return;
+    const id = app_state.g_chat_cancel_id.load(.acquire);
+    switch (result) {
+        CANCEL_DONE => if (chatOutboxIndexById(id)) |ei| chatEchoRemoveEntry(ei, id),
+        CANCEL_TAKEN => showHeaderNoticeAscii("Claude already took this message, so it cannot be cancelled", 4000, true),
+        else => showHeaderNoticeAscii("Could not cancel the message; try again", 3500, true),
+    }
 }
 
 pub fn chatShellEditQueued() bool {
