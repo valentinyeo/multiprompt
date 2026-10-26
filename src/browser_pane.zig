@@ -4703,7 +4703,6 @@ pub fn hideBrowserEdgeMasks() void {
         app_state.g_browser_edge_mask_shown[i] = false;
         const hw = app_state.g_browser_edge_mask_hwnds[i];
         if (hw != null and IsWindow(hw) != 0) {
-            _ = ShowWindow(hw, SW_HIDE);
             _ = SetWindowPos(hw, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
@@ -4728,7 +4727,7 @@ pub fn raiseBrowserEdgeMasksZOrderOnly() void {
         if (!app_state.g_browser_edge_mask_shown[i]) continue;
         const hw = app_state.g_browser_edge_mask_hwnds[i];
         if (hw == null or IsWindow(hw) == 0) continue;
-        _ = SetWindowPos(hw, null, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW | SWP_SHOWWINDOW);
+        _ = SetWindowPos(hw, null, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
     }
 }
 
