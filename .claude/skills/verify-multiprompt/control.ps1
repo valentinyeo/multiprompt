@@ -129,7 +129,7 @@ public static class VerifyNative {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScan(char character);
     [DllImport("dwmapi.dll")] public static extern int DwmFlush();
-    static void Key(ushort key, ushort scan, uint flags) {
+    public static void Key(ushort key, ushort scan, uint flags) {
         Input input = new Input(); input.type = 1;
         input.data.keyboard = new Keyboard { key = key, scan = scan, flags = flags };
         if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("SendInput failed");
@@ -3600,7 +3600,16 @@ try {
                 foreach ($lines in @(1, 6)) {
                     if ($lines -eq 6) {
                         for ($line = 2; $line -le 6; $line++) {
-                            Press @(0x10, 0x0D) 'Shift+Enter: grow the owned draft without sending'
+                            $draftHandle = [VerifyNative]::GetFocusedWindow($script:window)
+                            $beforeLine = [VerifyNative]::EditText($draftHandle)
+                            Doctor
+                            Assert-Foreground
+                            Record 'Hold Shift while Enter inserts a real draft line'
+                            [VerifyNative]::Key(0x10, 0, 0)
+                            try {
+                                [VerifyNative]::Text("`r")
+                                Wait-Until { [VerifyNative]::EditText($draftHandle) -ceq ($beforeLine + "`r`n") } 'held Shift+Enter inserted a native draft line'
+                            } finally { [VerifyNative]::Key(0x10, 0, 2) }
                             Type-Text ('Draft line ' + $line)
                         }
                     }
