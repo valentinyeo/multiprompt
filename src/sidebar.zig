@@ -1624,6 +1624,13 @@ pub fn tabRowY(shell_idx: u32) ?i32 {
     return null;
 }
 
+fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]const u16, len: i32) void {
+    _ = SelectObject(hdc, uiFontSubtitle());
+    _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(98, 102, 109)));
+    var rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.right - uiScaled(8), .bottom = y + height };
+    _ = DrawTextW(hdc, text, len, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
 pub fn paintSidebar(hdc: HANDLE) void {
     var canvas = @import("smooth.zig").Canvas.init(hdc);
     defer canvas.deinit();
@@ -1729,19 +1736,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
             const y: i32 = row.y - app_state.g_sidebar_scroll;
 
             if (row.kind == .section) {
-                _ = SelectObject(hdc, font_subtitle);
-                _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(98, 102, 109)));
-                _ = SetTextCharacterExtra(hdc, uiScaled(1));
-                const collapsed = sidebarSectionCollapsed(row.section_tier);
-                var chev_rc = RECT{ .left = 10, .top = y + 2, .right = 25, .bottom = y + SECTION_HEADER_H };
-                _ = DrawTextW(hdc, if (collapsed) L("\u{25B8}") else L("\u{25BE}"), -1, &chev_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                var section_rc = RECT{ .left = 27, .top = y + 2, .right = SIDEBAR_W() - 10, .bottom = y + SECTION_HEADER_H };
                 const section_label: LPCWSTR = switch (row.section_tier) {
-                    .pinned => L("PINNED"),
-                    .recent => L("RECENTS"),
+                    .pinned => L("Pinned"),
+                    .recent => L("Recents"),
                 };
-                _ = DrawTextW(hdc, section_label, -1, &section_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                _ = SetTextCharacterExtra(hdc, 0);
+                drawSidebarLabel(hdc, column, y, SECTION_HEADER_H, section_label, -1);
                 _ = SelectObject(hdc, font_title);
                 continue;
             }
@@ -1757,13 +1756,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     var chev_rc = RECT{ .left = 0, .top = y, .right = SIDEBAR_W(), .bottom = y + GROUP_HEADER_H };
                     _ = DrawTextW(hdc, chev, -1, &chev_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
                 } else {
-                    _ = SelectObject(hdc, font_subtitle);
-                    _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(98, 102, 109)));
-                    var name_rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.right - uiScaled(8), .bottom = y + GROUP_HEADER_H };
                     if (app_state.groups[gidx].name_len > 0) {
-                        _ = DrawTextW(hdc, @ptrCast(&app_state.groups[gidx].name), @intCast(app_state.groups[gidx].name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        drawSidebarLabel(hdc, column, y, GROUP_HEADER_H, @ptrCast(&app_state.groups[gidx].name), @intCast(app_state.groups[gidx].name_len));
                     } else {
-                        _ = DrawTextW(hdc, L("(unnamed group)"), -1, &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        drawSidebarLabel(hdc, column, y, GROUP_HEADER_H, L("(unnamed group)"), -1);
                     }
                 }
                 continue;
@@ -2099,13 +2095,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
         if (!app_state.g_hide_sidebar) {
             _ = SelectObject(hdc, font_subtitle);
             _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(80, 80, 80) else RGB(180, 180, 180)));
-            var btn_rc = RECT{ .left = 12, .top = btns_y, .right = SIDEBAR_W() - 60, .bottom = btns_y + BTN_H };
-            _ = DrawTextW(hdc, L("+ New tab"), -1, &btn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-            if (!(app_state.g_unread_only and !app_state.g_sidebar_collapsed)) {
-                _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 140, 140) else RGB(100, 100, 100)));
-                var hint_rc = RECT{ .left = SIDEBAR_W() - 60, .top = btns_y, .right = SIDEBAR_W() - 8, .bottom = btns_y + BTN_H };
-                _ = DrawTextW(hdc, L("Alt+T"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-            }
+            var btn_rc = RECT{ .left = column.left + uiScaled(12), .top = btns_y, .right = column.right - uiScaled(8), .bottom = btns_y + BTN_H };
+            _ = DrawTextW(hdc, L("+"), -1, &btn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
             _ = SelectObject(hdc, font_title);
 
             if (app_state.g_unread_only and !app_state.g_sidebar_collapsed) {

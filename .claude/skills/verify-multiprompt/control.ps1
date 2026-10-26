@@ -784,6 +784,69 @@ public static class GroupRailProof {
         }
         return proof;
     }
+    public static Dictionary<string, object> Labels(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, int sectionTop, int headlineX, int rowHeight) {
+        var proof = new Dictionary<string, object>();
+        using (var image = new System.Drawing.Bitmap(path)) {
+            int clientLeft = origin.X - frame.Left;
+            int right = clientLeft + S(220, dpi, scale) - S(8, dpi, scale);
+            int sectionHeight = 24, buttonHeight = 32;
+            var muted = System.Drawing.Color.FromArgb(98, 102, 109);
+            var sectionBackground = image.GetPixel(right, sectionTop + sectionHeight / 2);
+            int firstInk = -1, inkPixels = 0, mutedPixels = 0, topInk = int.MaxValue, inkColumns = 0;
+            var columnTops = new List<int>();
+            for (int x = clientLeft + S(4, dpi, scale); x < right - S(8, dpi, scale); x++) {
+                int columnTop = -1;
+                for (int y = sectionTop + 1; y < sectionTop + sectionHeight - 1; y++) {
+                    var pixel = image.GetPixel(x, y);
+                    if (Distance(pixel, sectionBackground) <= 30) continue;
+                    inkPixels++;
+                    if (Distance(pixel, muted) <= 16) mutedPixels++;
+                    if (columnTop < 0) columnTop = y;
+                }
+                if (columnTop >= 0) {
+                    if (firstInk < 0) firstInk = x;
+                    inkColumns++;
+                    columnTops.Add(columnTop);
+                    topInk = Math.Min(topInk, columnTop);
+                }
+            }
+            int capColumns = 0;
+            foreach (int columnTop in columnTops) if (columnTop <= topInk + 1) capColumns++;
+            double capRatio = inkColumns == 0 ? 1.0 : (double)capColumns / inkColumns;
+            bool present = inkPixels >= 15;
+            bool noArrow = present && Math.Abs(firstInk - headlineX) <= Math.Max(3, S(3, dpi, scale));
+            bool mixedCase = present && capRatio < 0.6;
+            bool mutedInk = mutedPixels >= 8;
+            int buttonTop = sectionTop + sectionHeight + 2 * rowHeight + 4;
+            var buttonBackground = image.GetPixel(right, buttonTop + buttonHeight / 2);
+            int minX = int.MaxValue, maxX = -1, minY = int.MaxValue, maxY = -1, buttonInk = 0;
+            for (int y = buttonTop; y < buttonTop + buttonHeight; y++) {
+                for (int x = clientLeft + S(2, dpi, scale); x < clientLeft + S(220, dpi, scale) - S(2, dpi, scale); x++) {
+                    if (Distance(image.GetPixel(x, y), buttonBackground) <= 30) continue;
+                    buttonInk++;
+                    minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
+                    minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+                }
+            }
+            bool plusOnly = buttonInk >= 4 && maxX - minX + 1 <= S(24, dpi, scale) && maxY - minY + 1 <= S(24, dpi, scale);
+            proof["labelPresent"] = present;
+            proof["noArrow"] = noArrow;
+            proof["mixedCase"] = mixedCase;
+            proof["mutedInk"] = mutedInk;
+            proof["sameStyle"] = present && mixedCase && mutedInk && noArrow;
+            proof["plusOnly"] = plusOnly;
+            proof["labelFirstInkX"] = firstInk;
+            proof["headlineX"] = headlineX;
+            proof["capRatio"] = capRatio;
+            proof["labelInkPixels"] = inkPixels;
+            proof["labelMutedPixels"] = mutedPixels;
+            proof["labelRect"] = new int[] { clientLeft, sectionTop, right, sectionTop + sectionHeight };
+            proof["buttonRect"] = new int[] { clientLeft, buttonTop, clientLeft + S(220, dpi, scale), buttonTop + buttonHeight };
+            proof["buttonInkBox"] = buttonInk == 0 ? new int[0] : new int[] { minX, minY, maxX, maxY };
+            proof["buttonInkPixels"] = buttonInk;
+        }
+        return proof;
+    }
     static bool SameRow(System.Drawing.Bitmap baseline, System.Drawing.Bitmap image, int x, int firstY, int secondY, int width, int height) {
         int ink = 0, changed = 0;
         for (int dx = 0; dx < width; dx++) {
@@ -4358,6 +4421,15 @@ try {
             if ($noFill) { Write-Host 'sidebar-headline no-fill PASS' } else { Write-Host 'sidebar-headline no-fill FAIL' }
             if ($noRail) { Write-Host 'sidebar-headline no-rail PASS' } else { Write-Host 'sidebar-headline no-rail FAIL' }
             if ($flushLeft) { Write-Host 'sidebar-headline flush-left PASS' } else { Write-Host 'sidebar-headline flush-left FAIL' }
+            $labels = [GroupRailProof]::Labels((Join-Path $Evidence 'group-rail-selected-1.png'), $frame, $origin, $dpi, $scale, [int]$proof['sidebarRect'][3], [int]$proof['nameX'][0], [int]$proof['rowHeight'])
+            Save-Json @{ labels = $labels; pixels = $proof; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; tag = $env:RELEASE_TAG; version = $ExpectedVersion } 'group-rail-labels.json'
+            $result.checks += @{ name = 'sidebar-label-parity'; pixels = $labels }
+            $sameStyle = [bool]$labels['sameStyle']
+            $noArrow = [bool]$labels['noArrow']
+            $plusOnly = [bool]$labels['plusOnly']
+            if ($sameStyle) { Write-Host 'sidebar-label same-style PASS' } else { Write-Host 'sidebar-label same-style FAIL' }
+            if ($noArrow) { Write-Host 'sidebar-label no-arrow PASS' } else { Write-Host 'sidebar-label no-arrow FAIL' }
+            if ($plusOnly) { Write-Host 'sidebar-newtab plus-only PASS' } else { Write-Host 'sidebar-newtab plus-only FAIL' }
             $clickToggle = $false
             try {
                 $beforeToggle = Read-Session
@@ -4401,7 +4473,7 @@ try {
             }
             Snapshot 'after'
             if ($clickToggle) { Write-Host 'sidebar-headline click-toggle PASS' } else { Write-Host 'sidebar-headline click-toggle FAIL' }
-            if (-not $noFill -or -not $noRail -or -not $flushLeft -or -not $clickToggle) { throw 'sidebar-headline assertions failed' }
+            if (-not $noFill -or -not $noRail -or -not $flushLeft -or -not $clickToggle -or -not $sameStyle -or -not $noArrow -or -not $plusOnly) { throw 'sidebar-headline assertions failed' }
         }
         'pane-layout' {
             Select-Theme 'dark' 'pane-layout-dark'
