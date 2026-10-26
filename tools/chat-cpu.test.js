@@ -609,3 +609,32 @@ test "disabled switch keeps old text and no new timer or per-session tracking" {
   assert.notEqual(compileControl.status, 0);
   assert.match(compileControl.stderr, /working bar compile control/);
 });
+
+test('IGSH-954 switching read dividers remeasures only the affected suffix, not the loaded history', () => {
+  const prelude = layout.replace('fn chatReadBoundary() ReadBoundary { return .{}; }', 'var current_boundary: ReadBoundary = .{};\nfn chatReadBoundary() ReadBoundary { return current_boundary; }');
+  const checks = `
+test "twenty local and remote cached switches retain their unchanged prefix" {
+    for (&blocks) |*b| b.* = .{ .start = 0, .len = 1, .role = .prose };
+    current_boundary = .{ .index = 995 };
+    chatRelayout(400);
+    const unread_height = g_chat_content_h;
+    for (0..20) |i| {
+        const before = measured;
+        current_boundary = if (i % 2 == 0) .{} else .{ .index = 995 };
+        chatRelayout(400);
+        try std.testing.expect(measured - before <= 5);
+        try std.testing.expectEqual(unread_height - (if (i % 2 == 0) @as(i32, 28) else 0), g_chat_content_h);
+    }
+    current_boundary = .{ .index = 990 };
+    const before = measured;
+    chatRelayout(400);
+    try std.testing.expectEqual(@as(usize, 10), measured - before);
+    current_boundary = .{ .index = 990, .unknown = true };
+    const unchanged = measured;
+    chatRelayout(400);
+    try std.testing.expect(measured - unchanged <= 10);
+}
+`;
+  const result = run(prelude + body(source, 'chatRelayout') + checks);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
