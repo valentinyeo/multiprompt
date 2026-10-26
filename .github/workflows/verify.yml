@@ -412,7 +412,6 @@ jobs:
           $exe = "$pwd/negative-focus-source/zig-out/bin/multiprompt.exe"
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $build = @{ revision = $revision; version = $version; sha256 = $hash } | ConvertTo-Json
-          $expectedRed = 'IGSH-807 focus ring pixels differ from the unfocused surface'
           $red = $null
           for ($attempt = 1; $attempt -le 3; $attempt++) {
             if ($attempt -gt 1) {
@@ -426,10 +425,10 @@ jobs:
               Write-Host "Focus negative control returned: $_"
             }
             $red = Get-Content evidence/focus-negative/result.json -Raw | ConvertFrom-Json
-            if ($red.status -eq 'failed' -and $red.error -eq $expectedRed) { break }
+            if ($red.status -eq 'failed' -and $red.error -eq 'IGSH-807 focus ring pixels differ from the unfocused surface') { break }
             Write-Host "Focus negative control attempt $attempt ended on: $($red.error)"
           }
-          if ($red.status -ne 'failed' -or $red.error -ne $expectedRed) { throw 'Pre-fix control did not fail specifically on focus-ring pixels after input cycling' }
+          if ($red.status -ne 'failed' -or $red.error -ne 'IGSH-807 focus ring pixels differ from the unfocused surface') { throw 'Pre-fix control did not fail specifically on focus-ring pixels after input cycling' }
           if (-not $red.scratchRemoved -or $red.cleanup -ne 'owned process tree stopped; scratch copied to evidence/data then removed') { throw 'Focus control cleanup failed' }
           $tree = Get-Content evidence/focus-negative/process-tree.json -Raw | ConvertFrom-Json
           if ($tree.activeAfterStop -ne 0) { throw 'Focus control left owned processes' }
