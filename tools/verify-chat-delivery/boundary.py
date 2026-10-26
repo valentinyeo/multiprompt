@@ -283,6 +283,33 @@ def shell():
         for i in range(int(ARGS[1])):
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="New message " + str(i) + "\n" + "Readable transcript paragraph with enough text to paint a full message row.\n\n" * 32)]))
         return 0
+    if op in ("retention-init", "retention-burst"):
+        count = 1998 if op == "retention-init" else int(ARGS[1])
+        counter = ROOT / "retention-count"
+        start = int(counter.read_text()) if counter.exists() else 0
+        for i in range(start, start + count):
+            fake_event("assistant", message=dict(role="assistant", id=f"retention-{i}", content=[dict(type="text", text=f"IGSH934 message {i:05d}")]))
+        counter.write_text(str(start + count))
+        transcript = Path(state()["transcript"])
+        with (ROOT / "retention-expected.jsonl").open("ab") as output:
+            rows = transcript.read_bytes().splitlines(keepends=True)
+            output.write(b"".join(rows if op == "retention-init" else rows[-count:]))
+        return 0
+    if op == "retention-reset":
+        transcript = Path(state()["transcript"])
+        tail = b"".join(transcript.read_bytes().splitlines(keepends=True)[-20:])
+        replacement = transcript.with_suffix(".replacement")
+        replacement.write_bytes(tail)
+        os.replace(replacement, transcript)
+        return 0
+    if op == "retention-empty":
+        transcript = Path(state()["transcript"])
+        (ROOT / "retention-source-backup").write_bytes(transcript.read_bytes())
+        transcript.write_bytes(b"")
+        return 0
+    if op == "retention-restore":
+        Path(state()["transcript"]).write_bytes((ROOT / "retention-source-backup").read_bytes())
+        return 0
     if op == "history":
         for i in range(24):
             fake_event("user", message=dict(role="user", content=f"IGSH815 user {i:02d}"))

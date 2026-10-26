@@ -20,7 +20,7 @@ test('IGSH-814 anchors on stable message identity and never guesses from offsets
   assert.throws(() => anchorContract(boundary.replace('if (marker == 0 or blocks.len == 0) return .{};', '')));
   assert.throws(() => anchorContract(boundary.replace('block.message_id == marker', 'block.source_offset == marker')));
   assert.throws(() => anchorContract(boundary.replace('.unknown = true', '.unknown = false')));
-  assert.match(history, /const message_id = if \(id.len == 0\) 0 else std.hash.Wyhash.hash\(std.hash.Wyhash.hash\(0, &self.sid\), id\)/);
+  assert.match(history, /const message_id = if \(id.len == 0\) 0 else std.hash.Wyhash.hash\(std.hash.Wyhash.hash\(0, if \(self.read_sid\[0\] != 0\) &self.read_sid else &self.sid\), id\)/);
   const reader = read('src/chat_history_reader.py');
   assert.match(reader, /text\["read_id"\] = f"\{stable_id\}:text:\{start\}" if stable_id else ""/);
   assert.doesNotMatch(reader, /text\["read_id"\] = f.*\{offset\}/);

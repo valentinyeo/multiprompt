@@ -315,6 +315,94 @@ function Assert-FullHistory([string]$Stage) {
     Doctor $true
     Save @{stage=$Stage; blocks=74; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
+function Retention-Copy([string]$Stage, [int]$Count) {
+    $offset = (Read-Shared "$settings/debug.log").Length
+    $complete = Step "IGSH-934 $Stage keeps $Count messages" {
+        Press @(0x11, 0x30) 'Ctrl+0: measure retained conversation'
+        $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
+        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq $Count
+    }
+    if (-not $complete) { Shot "retention-$Stage-failed"; throw "IGSH-934 history lost at $Stage expected=$Count" }
+    $script:retentionPosition = Divider-State
+    if (Get-Variable retentionAnchor -Scope Script -ErrorAction SilentlyContinue) {
+        if (-not $retentionPosition -or $retentionPosition.unknown -ne 0 -or $retentionPosition.scroll -ne $retentionAnchor.scroll) { throw "IGSH-934 reading position moved at $Stage" }
+    }
+    Press @(0x11, 0x4B) 'Ctrl+K: select retained conversation'
+    $query = 'chat view select all'
+    foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For 'retained select-all palette command ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+    Press @(0x0D) 'Enter: select retained conversation'
+    Press @(0x11, 0x43) 'Ctrl+C: copy retained conversation'
+    $copied = [Windows.Forms.Clipboard]::GetText()
+    [IO.File]::WriteAllText("$caseDir/$Stage-copied.txt", $copied)
+    $actual = @([regex]::Matches($copied, 'IGSH934 message \d{5}') | ForEach-Object { $_.Value })
+    $expected = @(0..($Count - 3) | ForEach-Object { 'IGSH934 message {0:00000}' -f $_ })
+    if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-934 retained copy missing or reordered at $Stage" }
+    Press @(0x1B) 'Esc: clear retained selection'
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chat\] unread divider count=\d marker=\d+ index=\d+ unknown=(\d)')
+    if (@($frames | Where-Object { $_.Groups[1].Value -eq '1' }).Count -gt 0) { throw 'IGSH-934 retained read position became unknown' }
+    if (Get-Variable retentionAnchor -Scope Script -ErrorAction SilentlyContinue) { Retention-Top }
+}
+function Retention-Top {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+    $rows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
+    if ($rows.Count -ne 1) { throw 'Retained transcript ownership missing' }
+    [void](Wait-For 'restore first message after the proof copy moved selection to the bottom' {
+        $position = Divider-State
+        if ($position -and $position.scroll -eq 0) { return $true }
+        [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, [IntPtr]$rows[0].Current.NativeWindowHandle, 30000)
+        $false
+    })
+}
+function Assert-Retention {
+    Retention-Copy 'open' 2000
+    Press @(0x11, 0x4B) 'Ctrl+K: open second tab for retained visit proof'
+    foreach ($letter in 'new cmd'.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For 'new cmd palette ready' { (Read-Shared "$settings/debug.log") -match '\[palette\] ready chars=7 count=\d+ target=\d+' })
+    Press @(0x0D) 'Enter: create second tab'
+    $script:expectedShells = 2
+    [void](Wait-For 'second tab published' { @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count -eq 2 })
+    Press @(0x11, 0x31) 'Ctrl+1: revisit known conversation'
+    Bind-Transcript
+    $marker = [string](Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs[0].last_read_message_id
+    if (-not $marker -or $marker -eq '0') { throw 'Retained journey has no known read marker' }
+    Retention-Top
+    Shot 'retention-before'
+    $script:retentionAnchor = Divider-State
+    if (-not $retentionAnchor -or $retentionAnchor.marker -eq '0' -or $retentionAnchor.scroll -ne 0) { throw 'Retained reading anchor was not observed' }
+    $arrivalStart = (Read-Shared "$settings/debug.log").Length
+    $anchors = @()
+    for ($burst = 1; $burst -le 10; $burst++) {
+        if ($burst -eq 4) { Shell-Run @('retention-reset') }
+        if ($burst -eq 7) {
+            $offset = (Read-Shared "$settings/debug.log").Length
+            Shell-Run @('retention-empty')
+            [void](Wait-For 'empty refresh fails without losing retained messages' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[chat\] transcript load shell=\d+ fail' })
+            Retention-Copy 'empty' (2000 + ($burst - 1) * 20)
+            Shell-Run @('retention-restore')
+        }
+        Shell-Run @('retention-burst', '20')
+        Retention-Copy "burst-$burst" (2000 + $burst * 20)
+        $anchors += $retentionPosition
+        Shot "retention-burst-$burst"
+    }
+    Shot 'retention-after'
+    Save $anchors "$caseDir/retention-anchors.json"
+    [IO.File]::WriteAllText("$caseDir/retention-arrival.log", (Read-Shared "$settings/debug.log").Substring($arrivalStart))
+    Copy-Item "$state/retention-expected.jsonl" "$caseDir/retention-expected.jsonl"
+    Remove-Variable retentionAnchor -Scope Script
+    $offset = (Read-Shared "$settings/debug.log").Length
+    for ($round = 0; $round -lt 5; $round++) {
+        Press @(0x11, 0x31) 'Ctrl+1: return to retained chat'
+        Press @(0x11, 0x32) 'Ctrl+2: switch away from retained chat'
+    }
+    Press @(0x11, 0x31) 'Ctrl+1: restore retained chat'
+    [IO.File]::WriteAllText("$caseDir/retention-switch.log", (Read-Shared "$settings/debug.log").Substring($offset))
+    Retention-Copy 'final' 2200
+    Doctor $true
+}
 foreach ($plan in $plans) {
     $expectedShells = 1
     $caseDir = "$Evidence/$($plan.name)"
@@ -381,7 +469,7 @@ foreach ($plan in $plans) {
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-yak/SKILL.md", "---`nname: verify-yak`ndescription: Cached selection fixture`n---`nFixture")
         }
         if ($hasTranscript) { Shell-Run @('init') }
-        if ($isHistory) { Shell-Run @('history') }
+        if ($isHistory) { Shell-Run @($(if ($env:CHAT_RETENTION_PROOF -eq '1') { 'retention-init' } else { 'history' })) }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
@@ -483,6 +571,8 @@ foreach ($plan in $plans) {
                 Press @(0x12, 0x43) 'Alt+C: return to remote Chat View'
                 Bind-Transcript
             }
+        } elseif ($isHistory -and $env:CHAT_RETENTION_PROOF -eq '1') {
+            Assert-Retention
         } elseif ($isHistory) {
             Assert-FullHistory 'open'
             Copy-Item "$settings/chatcache" "$caseDir/cache-before-restart" -Recurse -Force
@@ -698,9 +788,9 @@ foreach ($plan in $plans) {
             Shot 'unread-divider-reopened'
             $gapLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'forget-message' $readId
-            $dividerProof.gap = Require-Divider 1 1 'missing anchor renders an unknown-position line' $gapLogStart
+            $dividerProof.gap = Require-Divider 1 0 'known anchor survives source removal' $gapLogStart
             if ($dividerProof.gap.marker -cne $savedMarker) { throw 'History gap overwrote the saved anchor' }
-            [void](Wait-For 'resynced cache no longer contains the saved source message' { $bytes = Read-Shared $cache.FullName; $bytes.Contains($firstUnreadId) -and -not $bytes.Contains($readId) })
+            [void](Wait-For 'resynced cache retains the saved source message' { $bytes = Read-Shared $cache.FullName; $bytes.Contains($firstUnreadId) -and $bytes.Contains($readId) })
             Copy-Item $cache.FullName "$caseDir/app-cache-gap.jsonl"
             Shot 'unread-divider-gap'
             $bottomLogStart = (Read-Shared "$settings/debug.log").Length
@@ -710,7 +800,7 @@ foreach ($plan in $plans) {
                 [void](Scroll-Transcript -30000)
                 $false
             })
-            $dividerProof.bottom = Require-Divider 1 1 'bottom retains the visit divider' $bottomLogStart
+            $dividerProof.bottom = Require-Divider 1 0 'bottom retains the visit divider' $bottomLogStart
             [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
             Press @(0x11, 0x4B) 'Ctrl+K: open a second tab for visit proof' $true
             foreach ($letter in 'new cmd'.ToCharArray()) { Press @([int][char]::ToUpperInvariant($letter)) 'Filter New CMD Shell' }
@@ -741,7 +831,7 @@ foreach ($plan in $plans) {
             $dividerProof.allRead = Require-Divider 0 0 'all-read reopen has no divider' $allReadLogStart
             Shot 'unread-divider-all-read'
             Save $dividerProof "$caseDir/unread-divider.json"
-            $observation.unreadDivider = @{passed=$true; transitions=@('leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-unknown', 'bottom-retain', 'send-retain', 'all-read-absent')}
+            $observation.unreadDivider = @{passed=$true; transitions=@('leave-save', 'closed-arrivals', 'restart-anchor', 'reopen-first-unread', 'gap-retained', 'bottom-retain', 'send-retain', 'all-read-absent')}
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isQueue) {
             $t = $queueTexts
@@ -879,6 +969,8 @@ if ($env:CHAT_WIDTH_PROOF -eq '1') {
 }
 if ($env:CHAT_SKILLS_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-skills-proof.mjs" $Evidence
+} elseif ($env:CHAT_RETENTION_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-history-retention-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-full-history') {
     & node "$PSScriptRoot/../chat-full-history-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-messages-only') {
