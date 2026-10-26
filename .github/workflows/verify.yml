@@ -362,6 +362,12 @@ jobs:
             $image = [Drawing.Bitmap]::FromFile("$pwd/$source")
             try { $image.Save("$pwd/evidence/chat-scrollbar-$name.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
           }
+          foreach ($name in @('middle', 'top', 'bottom')) {
+            $source = "chat-scroll-behind-$name.bmp"
+            if (-not (Test-Path $source)) { throw "Missing scroll-behind proof: $source" }
+            $image = [Drawing.Bitmap]::FromFile("$pwd/$source")
+            try { $image.Save("$pwd/evidence/chat-scroll-behind-$name.png", [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
+          }
           node tools/chat-render-reference.mjs evidence
           if ($LASTEXITCODE -ne 0) { throw 'Chrome reference or repaint evidence failed' }
           foreach ($file in @('chat-markdown-render.png', 'chat-markdown-render-gdi.png', 'chrome-reference.png', 'repaint-ms.json')) {

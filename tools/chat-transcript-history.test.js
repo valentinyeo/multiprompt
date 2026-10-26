@@ -93,6 +93,7 @@ var g_chat_screen_status_len: usize = 0;
 var g_chat_load_tries: u8 = 0; // old-defer positive control only
 var g_chat_content_h: i32 = 0;
 var g_chat_scroll_y: i32 = 0;
+var g_chat_top_pad: i32 = 0;
 var g_chat_scrolled_up = false;
 var g_chat_new_messages: chat_history.NewMessages = .{};
 var g_chat_scroll_bottom_pending = false;
@@ -147,6 +148,7 @@ fn GetTickCount64() u64 { return ticks; }
 fn nowFileTime() u64 { return 116444736000000000 + 500 * 10000; }
 fn GetClientRect(_: HANDLE, out: *RECT) i32 { out.* = .{ .left = 0, .top = 0, .right = 900, .bottom = fake_viewport_h }; return 1; }
 fn InvalidateRect(_: HANDLE, _: ?*const RECT, _: i32) i32 { return 1; }
+fn chatViewClientRect(rc: *RECT) void { _ = GetClientRect(null, rc); }
 fn chatScrollActivity() void {}
 var timer_calls: usize = 0;
 fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?*anyopaque) usize { timer_calls += 1; return 1; }
@@ -421,7 +423,7 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow'));
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -525,7 +527,7 @@ test('background retries, local cache, complete dynamic layout and diagnostics a
   assert.match(fn('chatHistoryPersistent'), /60_000/);
   assert.match(fn('chatHistoryFetchOnce'), /60_000/);
   assert.doesNotMatch(fn('chatHistoryFetch'), /fetchAcPersistent|mp_complete/);
-  assert.match(fn('chatTranscriptWndProc'), /Could not load the conversation, retrying/);
+  assert.match(fn('chatPaintTranscriptContent'), /Could not load the conversation, retrying/);
   assert.match(fn('chatImageReady'), /chatRelayoutPreservingScroll/);
   assert.match(fn('chatViewLayout'), /activePaneContentRect\(rc\)/);
   assert.match(fn('activePaneRects'), /browserSlotReserved/);

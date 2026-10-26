@@ -1188,7 +1188,7 @@ pub fn chatRefreshAfterFontChange() void {
     app_state.g_chat_layout_reuse = 0;
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null) return;
     var client_rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client_rc);
+    @import("chat_render.zig").chatViewClientRect(&client_rc);
     const viewport_h = client_rc.bottom - client_rc.top;
     chatRelayoutPreservingScroll(client_rc.right - client_rc.left, viewport_h);
     if (app_state.g_chat_block_count == 0) {
@@ -1222,7 +1222,7 @@ pub fn chatReadMark(bottom: bool) bool {
     if (!bottom) {
         if (app_state.g_chat_transcript_hwnd == null) return false;
         var client: RECT = std.mem.zeroes(RECT);
-        _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
+        @import("chat_render.zig").chatViewClientRect(&client);
         edge = app_state.g_chat_scroll_y + client.bottom;
     }
     var candidate: ?usize = null;
@@ -1411,7 +1411,7 @@ pub fn refreshChatTranscript(force: bool) void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var client_rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client_rc);
+    @import("chat_render.zig").chatViewClientRect(&client_rc);
     const viewport_h = client_rc.bottom - client_rc.top;
     const old_scroll_y = app_state.g_chat_scroll_y;
     const old_content_h = app_state.g_chat_content_h;
@@ -1433,7 +1433,7 @@ pub fn refreshChatTranscript(force: bool) void {
         app_state.g_chat_read_open_pending = false;
         const boundary = chatReadBoundary();
         app_state.g_chat_scroll_y = if (boundary.index != null)
-            std.math.clamp(app_state.g_chat_read_divider_y, @min(0, app_state.g_chat_content_h - viewport_h), @max(0, app_state.g_chat_content_h - viewport_h))
+            std.math.clamp(app_state.g_chat_read_divider_y - app_state.g_chat_top_pad, @min(0, app_state.g_chat_content_h - viewport_h), @max(0, app_state.g_chat_content_h - viewport_h))
         else
             app_state.g_chat_content_h - viewport_h;
     }

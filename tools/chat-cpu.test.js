@@ -184,6 +184,8 @@ const CHAT_FIND_TOP_H: i32 = 52;
 var g_chat_layout_width: i32 = 0;
 var g_chat_layout_scale: i32 = 0;
 var g_chat_layout_font_pt: i32 = 0;
+var g_chat_layout_top_pad: i32 = 0;
+var g_chat_top_pad: i32 = 0;
 var fake_ui_scale: i32 = 100;
 var g_chat_layout_reuse: usize = 0;
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -291,7 +293,7 @@ test('UI completion never parses; polling/paint use revisions, cached tables and
   assert.match(body(source, 'chatFileFetchThread'), /history\.suffix\(a\)/);
   assert.match(body(source, 'chatFileFetchThread'), /CACHE_WRITE_MS/);
   assert.match(body(source, 'chatTableLayout'), /g_chat_tables\.layout/);
-  assert.match(body(source, 'chatTranscriptWndProc'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
+  assert.match(body(source, 'chatPaintTranscriptContent'), /scrollAnchor[^]*for \(first\.\.g_chat_block_count\)/);
   assert.match(body(source, 'chatFileRequestForDelivery'), /GetLastInputInfo[^]*< 5000\) return/);
   assert.match(body(source, 'chatImgFirstBlock'), /g_chat_blocks_from_file[^]*block\.image_count/);
 });

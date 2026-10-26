@@ -1559,6 +1559,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const _perf_start = GetTickCount64();
             defer logSlowMs("WM_PAINT", _perf_start);
             var ps: PAINTSTRUCT = std.mem.zeroes(PAINTSTRUCT);
+            @import("chat_float.zig").syncChatRegion();
             const hdc = BeginPaint(hwnd, &ps);
             const paint_rc = ps.rcPaint;
             const pw = paint_rc.right - paint_rc.left;
@@ -1989,7 +1990,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = ScreenToClient(hwnd, &pt);
             if (chatViewOwnsInput()) {
                 const layout = chatViewLayout();
-                if (pointInRect(layout.transcript, pt.x, pt.y)) {
+                var wheel_area = layout.transcript;
+                wheel_area.top = layout.transcript_window.top;
+                if (pointInRect(wheel_area, pt.x, pt.y)) {
                     if (@import("chat_render.zig").chatTableWheel(app_state.g_chat_transcript_hwnd, msg, wp, lp)) return 0;
                     if (msg == WM_MOUSEHWHEEL) return DefWindowProcW(hwnd, msg, wp, lp);
                     @import("chat_render.zig").chatWheelScroll(wp);

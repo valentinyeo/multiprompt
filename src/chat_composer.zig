@@ -313,6 +313,12 @@ pub fn chatViewLayout() ChatViewLayout {
             .right = right,
             .bottom = transcript_bottom,
         },
+        .transcript_window = .{
+            .left = left,
+            .top = slot.top,
+            .right = right,
+            .bottom = composer_card.bottom,
+        },
         .composer_card = composer_card,
         .composer = .{
             .left = attach_btn.right + uiScaled(10),
@@ -728,23 +734,31 @@ pub fn layoutChatControls() void {
         _ = ShowWindow(app_state.g_chat_status_hwnd, if (status_h > 0 and !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active) SW_SHOW else SW_HIDE);
         _ = InvalidateRect(app_state.g_chat_status_hwnd, null, 0);
     }
-    layout.transcript.top += status_h;
+    const win = layout.transcript_window;
+    const new_pad = @import("chat_render.zig").chatTopPad() + status_h;
+    const new_inset = win.bottom - layout.transcript.bottom;
+    if (new_pad != app_state.g_chat_top_pad) @import("chat_render.zig").chatSetTopPad(new_pad);
+    if (new_inset != app_state.g_chat_bottom_inset) {
+        app_state.g_chat_bottom_inset = new_inset;
+        app_state.g_chat_layout_dirty = true;
+    }
     var batch = BeginDeferWindowPos(2);
     if (batch != null and app_state.g_chat_transcript_hwnd != null)
-        batch = DeferWindowPos(batch, app_state.g_chat_transcript_hwnd, null, layout.transcript.left, layout.transcript.top, layout.transcript.right - layout.transcript.left, layout.transcript.bottom - layout.transcript.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        batch = DeferWindowPos(batch, app_state.g_chat_transcript_hwnd, null, win.left, win.top, win.right - win.left, win.bottom - win.top, SWP_NOZORDER | SWP_NOACTIVATE);
     if (batch != null)
         batch = DeferWindowPos(batch, app_state.g_chat_composer_hwnd, null, layout.composer.left, layout.composer.top, layout.composer.right - layout.composer.left, layout.composer.bottom - layout.composer.top, SWP_NOZORDER | SWP_NOACTIVATE);
     if (batch == null or EndDeferWindowPos(batch) == 0) {
         if (app_state.g_chat_transcript_hwnd != null)
-            _ = MoveWindow(app_state.g_chat_transcript_hwnd, layout.transcript.left, layout.transcript.top, layout.transcript.right - layout.transcript.left, layout.transcript.bottom - layout.transcript.top, 0);
+            _ = MoveWindow(app_state.g_chat_transcript_hwnd, win.left, win.top, win.right - win.left, win.bottom - win.top, 0);
         _ = MoveWindow(app_state.g_chat_composer_hwnd, layout.composer.left, layout.composer.top, layout.composer.right - layout.composer.left, layout.composer.bottom - layout.composer.top, 0);
     }
     logChatFrame(layout);
     if (app_state.g_chat_layout_dirty and app_state.g_chat_transcript_hwnd != null) {
         var rc: RECT = std.mem.zeroes(RECT);
-        _ = GetClientRect(app_state.g_chat_transcript_hwnd, &rc);
+        @import("chat_render.zig").chatViewClientRect(&rc);
         chatRelayoutPreservingScroll(rc.right - rc.left, rc.bottom - rc.top);
     }
+    @import("chat_float.zig").syncChatRegion();
     chatComposerSetScrollBar(content_h > chatComposerMaxEditH());
     _ = SendMessageW(app_state.g_chat_composer_hwnd, EM_SCROLLCARET, 0, 0);
     chatAcLayout();

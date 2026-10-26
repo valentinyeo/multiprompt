@@ -498,6 +498,9 @@ pub fn invalidateSpinnerRects() void {
             .right = title_left + 56,
             .bottom = threadTitleTop() + threadTitleHeight(),
         };
+        if (app_state.g_chat_active) {
+            if (@import("drawing.zig").chatTitleLayout()) |title| title_rc = title.pill;
+        }
         _ = InvalidateRect(app_state.g_main_hwnd, &title_rc, 0);
     }
 }
