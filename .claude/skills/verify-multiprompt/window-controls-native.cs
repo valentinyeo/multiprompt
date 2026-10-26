@@ -89,6 +89,9 @@ public static class WindowControlsProof {
             image.Save(target);
         }
     }
+    static int Delta(Color a, Color b) {
+        return Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B)));
+    }
     public static Dictionary<string, object> Pixels(string path, int[] geometry, int sidebar, int buttonWidth, int buttonHeight, bool light) {
         var output = new Dictionary<string, object>();
         int topGap = geometry[5] - geometry[1];
@@ -111,6 +114,28 @@ public static class WindowControlsProof {
                 Color neighbor = image.GetPixel(leftGap + sidebar - 3, y);
                 if (Math.Abs(p.R - neighbor.R) + Math.Abs(p.G - neighbor.G) + Math.Abs(p.B - neighbor.B) >= 12) separator++;
             }
+            int dpi = geometry[8];
+            int start = leftGap + 240 * dpi / 96, end = leftGap + geometry[6] - 140 * dpi / 96;
+            Color backdrop = image.GetPixel(start, topGap + 4 * dpi / 96);
+            int minX = end, minY = image.Height, maxX = 0, maxY = 0;
+            for (int y = topGap + 8 * dpi / 96; y < topGap + 55 * dpi / 96; y++) {
+                for (int x = start; x < end; x++) {
+                    if (Delta(image.GetPixel(x, y), backdrop) <= 2) continue;
+                    minX = Math.Min(minX, x); maxX = Math.Max(maxX, x + 1);
+                    minY = Math.Min(minY, y); maxY = Math.Max(maxY, y + 1);
+                }
+            }
+            int titleInk = 0;
+            if (maxX > minX && maxY > minY) {
+                Color fill = image.GetPixel(minX + 8 * dpi / 96, (minY + maxY) / 2);
+                for (int y = minY + 3 * dpi / 96; y < maxY - 3 * dpi / 96; y++) {
+                    for (int x = minX + 16 * dpi / 96; x < maxX - 16 * dpi / 96; x++) {
+                        if (Delta(image.GetPixel(x, y), fill) > 80) titleInk++;
+                    }
+                }
+            }
+            output["titleBounds"] = new int[] { minX, minY, maxX, maxY };
+            output["titleInkPixels"] = titleInk;
         }
         output["topInset"] = topGap;
         output["captionInset"] = geometry[5] - (geometry[14] == 1 ? geometry[11] : geometry[1]);

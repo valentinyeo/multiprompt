@@ -49,3 +49,12 @@ test('IGSH-1000 window hit areas follow monitor DPI, not smaller chat content se
   assert.doesNotMatch(geometry, /g_ui_scale|drawing.zig/);
   assert.match(frame, /window control hit areas do not shrink with the app content scale/);
 });
+
+test('IGSH-1000 the header reads the current theme before drawing its existing title', () => {
+  const drawing = read('src/drawing.zig');
+  const title = drawing.slice(drawing.indexOf('fn paintChatTitlePill('), drawing.indexOf('pub fn paintThreadTitle('));
+  assert.ok(title.indexOf('refreshChatBrushes();') >= 0);
+  assert.ok(title.indexOf('refreshChatBrushes();') < title.indexOf('const fill = app_state.g_chat_input_color;'));
+  assert.match(journey, /titleInkPixels -lt 8/);
+  assert.match(native, /Delta\(image.GetPixel\(x, y\), fill\) > 80/);
+});

@@ -685,6 +685,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
     const layout = chatTitleLayout() orelse return;
     const shell = &app_state.shells[app_state.active_shell];
     const window_layout = @import("window_layout.zig");
+    @import("chat_composer.zig").refreshChatBrushes();
     const fill = app_state.g_chat_input_color;
     const border = window_layout.chatSurfaceBorderColor();
     const edge = window_layout.chatSurfaceBorderW();
