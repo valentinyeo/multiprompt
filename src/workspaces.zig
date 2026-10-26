@@ -1877,7 +1877,7 @@ pub fn detachTabToNewWindow(idx: u32) void {
     const exe_len = GetModuleFileNameW(null, &exe_buf, 512);
     if (exe_len == 0 or exe_len >= 512) return;
 
-    var cmd_buf: [1024]u16 = undefined;
+    var cmd_buf: [2048]u16 = undefined;
     var pos: usize = 0;
 
     cmd_buf[pos] = '"';
@@ -1929,7 +1929,7 @@ pub fn detachTabToNewWindow(idx: u32) void {
     }
 
     const writeNum = struct {
-        fn f(buf: *[1024]u16, p: *usize, val: usize) void {
+        fn f(buf: *[2048]u16, p: *usize, val: usize) void {
             var digs: [20]u8 = undefined;
             var dl: usize = 0;
             var v = val;
