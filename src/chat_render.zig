@@ -371,7 +371,7 @@ fn chatLineIndentPx(hdc: HANDLE, text: []const u16, pos: usize) i32 {
     return chatTextWidth(hdc, text[pos .. pos + marker]);
 }
 
-fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32, source_map: ?[]const usize, skill_pills: bool) ?link_detect.Range {
+fn chatFlowText(hdc: HANDLE, text: []const u16, area: RECT, code: bool, paint: bool, hit: ?ChatHit, offset: usize, height: ?*i32, source_map: ?[]const usize, comptime skill_pills: bool) ?link_detect.Range {
     const base = if (code) ensureChatCodeFont() else ensureChatFont();
     const old_font = SelectObject(hdc, base);
     defer _ = SelectObject(hdc, old_font);
@@ -831,7 +831,8 @@ fn chatFlowBlock(hdc: HANDLE, text: []const u16, block: ChatBlock, area: RECT, p
         return null;
     }
     if (block.kind == .table) return chatFlowTable(hdc, text, area, paint, hit, offset, height);
-    if (!block.markdown or block.role == .code or block.role == .user) return chatFlowText(hdc, text, area, block.role == .code, paint, hit, offset, height, null, block.role == .user);
+    if (block.role == .user) return chatFlowText(hdc, text, area, false, paint, hit, offset, height, null, true);
+    if (!block.markdown or block.role == .code) return chatFlowText(hdc, text, area, block.role == .code, paint, hit, offset, height, null, false);
     if (block.kind == .list) {
         var body = area;
         const indent = @as(i32, block.level) * uiScaled(22);

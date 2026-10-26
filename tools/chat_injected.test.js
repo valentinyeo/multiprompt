@@ -104,7 +104,7 @@ fn chatFlowBlock(_: HANDLE, text: []const u16, _: ChatBlock, area: RECT, paint: 
     if (paint) { drawn_len = text.len; @memcpy(drawn[0..drawn_len], text); }
     return null;
 }
-fn chatFlowText(dc: HANDLE, text: []const u16, area: RECT, _: bool, paint: bool, _: ?usize, offset: usize, height: ?*i32, _: ?[]const usize) ?usize {
+fn chatFlowText(dc: HANDLE, text: []const u16, area: RECT, _: bool, paint: bool, _: ?usize, offset: usize, height: ?*i32, _: ?[]const usize, comptime _: bool) ?usize {
     return chatFlowBlock(dc, text, .{ .start = offset, .len = text.len, .role = .code }, area, paint, null, offset, height);
 }
 fn fillRoundRectAA(_: HANDLE, rc: RECT, r: i32, color: DWORD) void { fill = color; filled = rc; radius = r; }

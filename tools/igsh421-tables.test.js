@@ -122,7 +122,7 @@ fn chatCodePanelColor() u32 { return 0; }
 fn chatPaintSelectionRun(_: HANDLE, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { selection_at = at; }
 fn pointInRect(r: RECT, x: i32, y: i32) bool { return x >= r.left and x < r.right and y >= r.top and y < r.bottom; }
 fn chatCharAtX(_: HANDLE, _: []const u16, x: i32) usize { return @intCast(@max(0, @divTrunc(x, 8))); }
-fn chatFlowText(_: HANDLE, _: []const u16, _: RECT, _: bool, _: bool, _: ?ChatHit, _: usize, _: ?*i32, _: ?[]const usize) ?link_detect.Range { return null; }
+fn chatFlowText(_: HANDLE, _: []const u16, _: RECT, _: bool, _: bool, _: ?ChatHit, _: usize, _: ?*i32, _: ?[]const usize, comptime _: bool) ?link_detect.Range { return null; }
 fn GET_X(lp: LPARAM) i32 { return @as(i16, @bitCast(@as(u16, @truncate(@as(usize, @bitCast(lp)))))); }
 fn GET_Y(lp: LPARAM) i32 { return @as(i16, @bitCast(@as(u16, @truncate(@as(usize, @bitCast(lp)) >> 16)))); }
 fn ScreenToClient(_: HANDLE, _: *POINT) i32 { return 1; }
