@@ -2243,7 +2243,8 @@ function Measure-StatusCard([string]$Name) {
     $scale = $dpi / 96.0
     $offsetX = $origin.X - $frame.Left
     $offsetY = $origin.Y - $frame.Top
-    $x = $offsetX + [int][Math]::Round(14 * $scale)
+    $pill = $Name -eq 'status-card-3'
+    $x = $offsetX + [int][Math]::Round($(if ($pill) { 60 } else { 14 }) * $scale)
     $limit = $offsetY
     $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($Name + '.png')))
     try {
@@ -2259,7 +2260,9 @@ function Measure-StatusCard([string]$Name) {
         $y = $bottom - 1
         while ($y -gt $limit) {
             $pixel = $image.GetPixel($x, $y)
-            if ([Math]::Max([Math]::Abs($pixel.R - $fill.R), [Math]::Max([Math]::Abs($pixel.G - $fill.G), [Math]::Abs($pixel.B - $fill.B))) -gt 8) { break }
+            if ($pill) {
+                if ([Math]::Max([Math]::Abs($pixel.R - $background.R), [Math]::Max([Math]::Abs($pixel.G - $background.G), [Math]::Abs($pixel.B - $background.B))) -le 8) { $y++; break }
+            } elseif ([Math]::Max([Math]::Abs($pixel.R - $fill.R), [Math]::Max([Math]::Abs($pixel.G - $fill.G), [Math]::Abs($pixel.B - $fill.B))) -gt 8) { break }
             $y--
         }
         $top = $y
