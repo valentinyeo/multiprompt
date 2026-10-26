@@ -944,7 +944,7 @@ pub fn unlockBrowserForeground() void {
 }
 
 pub fn focusActiveBrowserPane() void {
-    unlockBrowserForeground();
+    if (!activeBrowserHasForegroundFocus()) unlockBrowserForeground();
     focusActiveBrowserPaneUnlocked();
 }
 
@@ -1060,6 +1060,7 @@ pub fn requestNativeBrowserFocus() void {
     app_state.g_native_browser_focus_retries = 500;
     app_state.g_native_browser_focus_attempts = 12;
     app_state.g_native_browser_alt_unlocked = false;
+    if (foregroundIsOurs() and !activeBrowserHasForegroundFocus()) unlockBrowserForeground();
     _ = KillTimer(app_state.g_main_hwnd, TIMER_NATIVE_BROWSER_FOCUS);
     _ = SetTimer(app_state.g_main_hwnd, TIMER_NATIVE_BROWSER_FOCUS, 30, null);
     altqLog("request_native armed sid={} retries={} attempts={} chat={}", .{ app_state.g_native_browser_focus_pending_shell_id, app_state.g_native_browser_focus_retries, app_state.g_native_browser_focus_attempts, app_state.g_chat_active });

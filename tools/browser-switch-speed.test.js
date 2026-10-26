@@ -656,7 +656,7 @@ function assertsPageFocus(focus, main, pane, driver) {
   assert.equal((handoff.match(/keybd_event\(|SendInput\(/g) ?? []).length, 0);
   assert.match(read('src/shortcuts.zig'), /kb\.vkCode != 0xFF and kb\.vkCode != 0xE8 and\n\s+foregroundIsOurs\(\)\)/);
   const timer = main.slice(main.indexOf('if (wp == TIMER_NATIVE_BROWSER_FOCUS)'), main.indexOf('if (wp == TIMER_WEBVIEW2_FOCUS)'));
-  const unlockTick = timer.indexOf('if (!app_state.g_native_browser_alt_unlocked) {\n                    unlockBrowserForeground();\n                    return 0;\n                }');
+  const unlockTick = timer.indexOf('if (!app_state.g_native_browser_alt_unlocked and !activeBrowserHasForegroundFocus()) {\n                    unlockBrowserForeground();');
   const activation = timer.indexOf('focusActiveBrowserPaneUnlocked();');
   assert.ok(unlockTick >= 0 && unlockTick < activation && activation < timer.indexOf('if (activeBrowserHasForegroundFocus())'));
   assert.match(pane, /if \(idx == app_state.active_shell\) @import\("focus.zig"\)\.requestNativeBrowserFocus\(\);/);

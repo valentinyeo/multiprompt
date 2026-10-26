@@ -7220,11 +7220,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
 
-                if (!app_state.g_native_browser_alt_unlocked) {
+                if (!app_state.g_native_browser_alt_unlocked and !activeBrowserHasForegroundFocus()) {
                     unlockBrowserForeground();
+                    if (app_state.g_native_browser_alt_unlocked) _ = SetTimer(hwnd, TIMER_NATIVE_BROWSER_FOCUS, 10, null);
                     return 0;
                 }
                 focusActiveBrowserPaneUnlocked();
+                _ = SetTimer(hwnd, TIMER_NATIVE_BROWSER_FOCUS, 30, null);
                 if (activeBrowserHasForegroundFocus()) {
                     cancelPendingNativeBrowserFocus();
                     app_state.g_browser_focus_mode = true;
