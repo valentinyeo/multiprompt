@@ -405,7 +405,8 @@ foreach ($plan in $plans) {
             [void](Wait-For 'initial skill fetch applied' { (Read-Shared "$settings/debug.log") -match 'chat-ac: fetched host=0 bytes=[1-9]' } 20)
             Press @(0x09) 'Tab: accept existing skill' $true
             [void](Wait-For 'existing skill accepted' { [ChatDeliveryDesktop]::Text($composer) -ceq '/verify-zebra ' } 5)
-            Clear-Composer
+            Press @(0x11, 0x41) 'Ctrl+A: select whole skill draft' $true
+            Press @(0x08) 'Backspace: clear whole skill draft' $true
             New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-alpha" | Out-Null
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-alpha/SKILL.md", "---`nname: verify-alpha`ndescription: Added after warming cache`n---`nFixture")
             Copy-Item "$profile/home/.claude/skills" "$caseDir/skills" -Recurse
@@ -419,17 +420,21 @@ foreach ($plan in $plans) {
             Press @(0x09) 'Tab: keep selected cached skill after refresh' $true
             $selected = [ChatDeliveryDesktop]::Text($composer)
             if ($selected -cne '/verify-zebra ') { throw "Selected row moved during refresh: $selected" }
-            Clear-Composer
+            Press @(0x11, 0x41) 'Ctrl+A: select whole skill draft' $true
+            Press @(0x08) 'Backspace: clear whole skill draft' $true
             Type-Composer '/verify-alpha'
             Press @(0x09) 'Tab: accept newly discovered skill' $true
             $accepted = [ChatDeliveryDesktop]::Text($composer)
             if ($accepted -cne '/verify-alpha ') { throw "New skill unavailable: $accepted" }
             $elapsed = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $started
             if ($elapsed -gt 5000) { throw "New skill took $elapsed ms, longer than five seconds" }
-            Clear-Composer
+            Press @(0x11, 0x41) 'Ctrl+A: select whole skill draft' $true
+            Press @(0x08) 'Backspace: clear whole skill draft' $true
+            $beforeReload = [regex]::Matches((Read-Shared "$settings/debug.log"), 'chat-ac: fetched host=0 bytes=[1-9]').Count
+            Type-Composer '/reload-plugins'
+            [void](Wait-For 'reload command opening fetch applied before adding beta' { [regex]::Matches((Read-Shared "$settings/debug.log"), 'chat-ac: fetched host=0 bytes=[1-9]').Count -gt $beforeReload } 5)
             New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-beta" | Out-Null
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-beta/SKILL.md", "---`nname: verify-beta`ndescription: Reload fixture`n---`nFixture")
-            Type-Composer '/reload-plugins'
             Press @(0x0D) 'Enter: send reload plugins' $true
             [void](Wait-For 'reload refresh without reopening list' { (Read-Shared "$state/completion.jsonl").Contains('verify-beta') } 5)
             $observation.skills = @{newSkillMs=$elapsed; selected=$selected; accepted=$accepted; reload=$true}
