@@ -76,7 +76,32 @@ try {
             if ($Evidence) {
                 New-Item -ItemType Directory -Force $Evidence | Out-Null
                 Add-Type -AssemblyName System.Drawing
-                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
+                Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Runtime.InteropServices;
+public class UpdateProof {
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; }
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    public static byte[] PatchVersion(string path, string oldVersion, string newVersion) {
+        byte[] bytes = File.ReadAllBytes(path), oldBytes = Encoding.ASCII.GetBytes(oldVersion), newBytes = Encoding.ASCII.GetBytes(newVersion);
+        int count = 0;
+        for (int offset = 0; offset <= bytes.Length - oldBytes.Length; offset++) {
+            if (bytes[offset] != oldBytes[0]) continue;
+            int i = 1;
+            while (i < oldBytes.Length && bytes[offset + i] == oldBytes[i]) i++;
+            if (i != oldBytes.Length) continue;
+            Array.Copy(newBytes, 0, bytes, offset, newBytes.Length);
+            count++;
+        }
+        if (count == 0) throw new InvalidOperationException("Native fixture version missing");
+        return bytes;
+    }
+}
+'@
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
                 $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
@@ -145,17 +170,7 @@ try {
                 $oldVersion = $versionMatch.Groups[1].Value
                 $newVersion = '9.99.' + ('9' * ($oldVersion.Length - 5))
                 Assert ($newVersion.Length -eq $oldVersion.Length) 'Native update fixture version length differs'
-                $native = [IO.File]::ReadAllBytes($Verifier)
-                $needle = [Text.Encoding]::ASCII.GetBytes($oldVersion)
-                $replacement = [Text.Encoding]::ASCII.GetBytes($newVersion)
-                $replacements = 0
-                for ($offset = 0; $offset -le $native.Length - $needle.Length; $offset++) {
-                    if ($native[$offset] -ne $needle[0]) { continue }
-                    $same = $true
-                    for ($j = 1; $j -lt $needle.Length; $j++) { if ($native[$offset + $j] -ne $needle[$j]) { $same = $false; break } }
-                    if ($same) { [Array]::Copy($replacement, 0, $native, $offset, $replacement.Length); $replacements++ }
-                }
-                Assert ($replacements -gt 0) 'Native update fixture version was not changed'
+                $native = [UpdateProof]::PatchVersion($Verifier, $oldVersion, $newVersion)
                 Remove-Item -LiteralPath "$cardExe.update/ready.txt" -Force
                 Move-Item -LiteralPath $cardExe -Destination "$Root/card.running.exe"
                 [IO.File]::WriteAllBytes($cardExe, $native)
@@ -191,6 +206,7 @@ try {
                     if ([DateTime]::UtcNow -gt $deadline) { throw 'Restart did not reopen the new native app with its session restored' }
                     Start-Sleep -Milliseconds 100
                 } while ($true)
+                Assert ($restartTimer.Elapsed.TotalSeconds -lt 10) 'Restart took longer than ten seconds'
                 $saved = Get-Content $sessionPath -Raw | ConvertFrom-Json
                 Assert (@($saved.tabs | Where-Object { $_.name -ceq 'Restart proof' }).Count -eq 1) 'Restart lost or duplicated the saved session'
                 Assert ([UpdateProof]::GetWindowRect($restored[0].MainWindowHandle, [ref]$rectangle)) 'Restored window unavailable'
