@@ -4,6 +4,70 @@ pub fn same(host_a: u8, session_a: []const u8, host_b: u8, session_b: []const u8
     return session_a.len > 0 and host_a == host_b and std.ascii.eqlIgnoreCase(session_a, session_b);
 }
 
+fn validIdentity(value: []const u8) bool {
+    if (value.len == 0 or value.len > 63) return false;
+    var parts = std.mem.splitScalar(u8, value, ':');
+    const started = std.fmt.parseInt(u64, parts.next() orelse return false, 10) catch return false;
+    const pid = std.fmt.parseInt(u32, parts.next() orelse return false, 10) catch return false;
+    const session = parts.next() orelse return false;
+    if (started == 0 or pid == 0 or session.len < 2 or session[0] != '$' or parts.next() != null) return false;
+    _ = std.fmt.parseInt(u32, session[1..], 10) catch return false;
+    for (value) |c| if (!std.ascii.isDigit(c) and c != ':' and c != '$') return false;
+    return true;
+}
+
+pub fn fromProbe(output: []const u8, session: []const u8) ?[]const u8 {
+    var found: ?[]const u8 = null;
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, "\r");
+        if (!std.mem.startsWith(u8, line, "@@I ")) continue;
+        const split = std.mem.indexOfScalar(u8, line[4..], '|') orelse continue;
+        if (!std.mem.eql(u8, line[4 .. 4 + split], session)) continue;
+        const value = line[5 + split ..];
+        if (!validIdentity(value)) return null;
+        if (found) |previous| if (!std.mem.eql(u8, previous, value)) return null;
+        found = value;
+    }
+    return found;
+}
+
+fn quote(writer: *std.Io.Writer, value: []const u8) !void {
+    try writer.writeByte('\'');
+    for (value) |c| {
+        if (c == '\'') try writer.writeAll("'\\''") else try writer.writeByte(c);
+    }
+    try writer.writeByte('\'');
+}
+
+pub fn attachCommand(buf: []u8, session: []const u8, identity: []const u8, create: bool) ![]const u8 {
+    var writer = std.Io.Writer.fixed(buf);
+    if (identity.len == 0) {
+        try writer.writeAll(if (create) "tmux new-session -A -s " else "tmux attach -t ");
+        var target: [66]u8 = undefined;
+        try quote(&writer, if (create) session else try std.fmt.bufPrint(&target, "={s}", .{session}));
+    } else {
+        if (!validIdentity(identity)) return error.InvalidIdentity;
+        var target: [66]u8 = undefined;
+        var condition: [128]u8 = undefined;
+        var check = std.Io.Writer.fixed(&condition);
+        try check.writeAll("#{==:#{start_time}:#{pid}:#{session_id},");
+        try check.writeAll(identity);
+        try check.writeByte('}');
+        try writer.writeAll("tmux if-shell -F -t ");
+        try quote(&writer, try std.fmt.bufPrint(&target, "={s}", .{session}));
+        try writer.writeByte(' ');
+        try quote(&writer, check.buffered());
+        try writer.writeByte(' ');
+        const session_id = identity[(std.mem.lastIndexOfScalar(u8, identity, ':') orelse unreachable) + 1 ..];
+        var attach: [96]u8 = undefined;
+        try quote(&writer, try std.fmt.bufPrint(&attach, "attach-session -t '{s}'", .{session_id}));
+        try writer.writeByte(' ');
+        try quote(&writer, "display-message -p 'Saved terminal session changed; refusing to attach.'");
+    }
+    return writer.buffered();
+}
+
 pub const Pane = struct {
     active: bool = false,
     visible: bool = false,
@@ -70,4 +134,29 @@ test "open and adoption identity excludes empty sessions and other hosts" {
     try std.testing.expect(!same(0, "remote-3", 1, "remote-3"));
     try std.testing.expect(!same(0, "remote-3", 0, "remote-3-2"));
     try std.testing.expect(!same(0, "", 0, ""));
+}
+
+test "IGSH-985 generation probe is exact, validated and not overwritten by a prefix" {
+    const wire = "@@I remote-long|1700:123:$2\n@@I remote|1700:123:$7\n";
+    try std.testing.expectEqualStrings("1700:123:$7", fromProbe(wire, "remote").?);
+    try std.testing.expect(fromProbe(wire, "missing") == null);
+    try std.testing.expect(fromProbe("@@I remote|bad;command\n", "remote") == null);
+    try std.testing.expect(fromProbe("@@I remote|1700:123:$7\n@@I remote|1700:123:$8\n", "remote") == null);
+}
+
+test "IGSH-985 guarded attach checks generation and addresses immutable session ID in one server command" {
+    var buf: [2048]u8 = undefined;
+    const command = try attachCommand(&buf, "remote", "1700:123:$7", true);
+    try std.testing.expect(std.mem.startsWith(u8, command, "tmux if-shell -F -t '=remote' "));
+    try std.testing.expect(std.mem.indexOf(u8, command, "#{==:#{start_time}:#{pid}:#{session_id},1700:123:$7}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, command, "attach-session -t ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, command, "new-session") == null);
+    try std.testing.expect(std.mem.indexOf(u8, command, "refusing to attach") != null);
+    try std.testing.expectError(error.InvalidIdentity, attachCommand(&buf, "remote", "bad", false));
+}
+
+test "IGSH-985 first attach is exact and shell metacharacters remain quoted" {
+    var buf: [2048]u8 = undefined;
+    try std.testing.expectEqualStrings("tmux attach -t '=remote'", try attachCommand(&buf, "remote", "", false));
+    try std.testing.expectEqualStrings("tmux attach -t '=a'\\''b'", try attachCommand(&buf, "a'b", "", false));
 }

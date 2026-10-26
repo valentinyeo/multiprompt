@@ -2262,6 +2262,9 @@ pub fn reopenLastClosedShell() void {
     defer app_state.g_pending_tmux_host = 0;
     app_state.g_pending_chat_id = entry.chat_id;
     defer app_state.g_pending_chat_id = 0;
+    const previous_identity = app_state.g_pending_tmux_identity;
+    app_state.g_pending_tmux_identity = entry.tmux_identity[0..entry.tmux_identity_len];
+    defer app_state.g_pending_tmux_identity = previous_identity;
     if (spawnShellWithSession(entry.kind, ts, cwd, null)) {
         app_state.shells[app_state.shell_count - 1].favorite = entry.favorite;
         if (entry.group) |saved| app_state.shells[app_state.shell_count - 1].group_id = restoreSessionGroup(saved, app_state.shells[app_state.shell_count - 1].workspace, false);
@@ -3680,6 +3683,16 @@ fn exportSlotSessionFile(slot: u8) bool {
             pos += th.len;
             pos += writeUintTo(json_buf[pos..], app_state.shells[i].tmux_host);
         }
+        if (app_state.shells[i].tmux_identity_len > 0) {
+            const identity_prefix = ",\"tmux_identity\":\"";
+            @memcpy(json_buf[pos .. pos + identity_prefix.len], identity_prefix);
+            pos += identity_prefix.len;
+            const identity = app_state.shells[i].tmux_identity[0..app_state.shells[i].tmux_identity_len];
+            @memcpy(json_buf[pos .. pos + identity.len], identity);
+            pos += identity.len;
+            json_buf[pos] = '"';
+            pos += 1;
+        }
         if (app_state.shells[i].kind == .cmd or app_state.shells[i].kind == .pwsh or app_state.shells[i].kind == .bash) {
             if (app_state.shells[i].cached_cwd_len > 0) {
                 const cwd_pre = ",\"cwd\":\"";
@@ -4270,6 +4283,9 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             }
         }
 
+        const previous_identity = app_state.g_pending_tmux_identity;
+        app_state.g_pending_tmux_identity = tabs[t].tmux_identity[0..tabs[t].tmux_identity_len];
+        defer app_state.g_pending_tmux_identity = previous_identity;
         app_state.g_pending_tmux_host = tabs[t].tmux_host;
         defer app_state.g_pending_tmux_host = 0;
         const ok = if (reclaimed)

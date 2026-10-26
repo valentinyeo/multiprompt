@@ -712,14 +712,27 @@ def ssh():
     if "tmux list-clients" in command:
         record("invocations.jsonl", kind="probe", operation="list-clients/list-sessions")
         names = session_names()
-        print("\n".join(names) + "\n" + "".join(f"@@S {name}\n" for name in names) + "@@LS_OK@@\n@@MP_LIVE@@")
+        identity = "".join(f"@@I {name}|{state().get('generation', '1700:123:$7')}\n" for name in names) if state().get("binding") else ""
+        print("\n".join(names) + "\n" + identity + "".join(f"@@S {name}\n" for name in names) + "@@LS_OK@@\n@@MP_LIVE@@")
         return 0
     if "tmux list-sessions" in command:
         record("invocations.jsonl", kind="list", operation="list-sessions")
         for name in session_names():
             print(name + "\t1\t1")
         return 0
-    match = re.search(r"tmux attach -t ['\"]?([A-Za-z0-9._:-]+)", command)
+    if state().get("binding") and "tmux if-shell -F -t " in command:
+        expected = re.search(r"#\{==:#\{start_time\}:#\{pid\}:#\{session_id\},([0-9:$]+)\}", command)
+        current = state().get("generation", "1700:123:$7")
+        if not expected:
+            raise RuntimeError("Guarded attach omitted the expected generation")
+        if expected[1] != current:
+            record("invocations.jsonl", kind="refused", expected=expected[1], actual=current, command=command)
+            print("Saved terminal session changed; refusing to attach.")
+            return 0
+        record("invocations.jsonl", kind="attach", session="workspace", identity=current, command=command)
+        attach("workspace")
+        return 0
+    match = re.search(r"tmux attach -t ['\"]?=?([A-Za-z0-9._:-]+)", command)
     if match and match[1] in session_names():
         record("invocations.jsonl", kind="attach", session=match[1])
         (attach_fake if state().get("fake") else attach)(match[1])

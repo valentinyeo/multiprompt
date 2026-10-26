@@ -239,6 +239,16 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             pos += 1;
         }
 
+        if (app_state.shells[i].tmux_identity_len > 0) {
+            const identity_prefix = ",\"tmux_identity\":\"";
+            @memcpy(json_buf[pos .. pos + identity_prefix.len], identity_prefix);
+            pos += identity_prefix.len;
+            const identity = app_state.shells[i].tmux_identity[0..app_state.shells[i].tmux_identity_len];
+            @memcpy(json_buf[pos .. pos + identity.len], identity);
+            pos += identity.len;
+            json_buf[pos] = '"';
+            pos += 1;
+        }
         if (app_state.shells[i].kind == .cmd or app_state.shells[i].kind == .pwsh or app_state.shells[i].kind == .bash) {
             if (app_state.shells[i].cached_cwd_len > 0) {
                 const cwd = app_state.shells[i].cached_cwd[0..app_state.shells[i].cached_cwd_len];
@@ -1328,6 +1338,9 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
         }
     }
 
+    const previous_identity = app_state.g_pending_tmux_identity;
+    app_state.g_pending_tmux_identity = tabs[t].tmux_identity[0..tabs[t].tmux_identity_len];
+    defer app_state.g_pending_tmux_identity = previous_identity;
     app_state.g_pending_tmux_host = tabs[t].tmux_host;
     defer app_state.g_pending_tmux_host = 0;
     const ok = if (reclaimed)

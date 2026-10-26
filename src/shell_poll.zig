@@ -1824,32 +1824,6 @@ pub fn pollShellNames() void {
             }
         }
 
-        if (app_state.shells[i].kind == .tmux and app_state.shells[i].tmux_adopted and det_pid != 0) {
-            var still_sess: [64]u8 = undefined;
-            var still_len: u32 = 0;
-            if (!extractTmuxSessionFromStatus(det_pid, &still_sess, &still_len)) {
-                app_state.shells[i].revert_streak += 1;
-                if (app_state.shells[i].revert_streak >= 3) {
-                    var old_ts_buf: [64]u8 = std.mem.zeroes([64]u8);
-                    const old_ts_len: usize = @intCast(app_state.shells[i].tmux_session_len);
-                    if (old_ts_len > 0) @memcpy(old_ts_buf[0..old_ts_len], app_state.shells[i].tmux_session[0..old_ts_len]);
-                    app_state.shells[i].kind = if (app_state.shells[i].tmux_host == 1) ShellKind.vps2 else ShellKind.vps;
-                    app_state.shells[i].tmux_session = std.mem.zeroes([64]u8);
-                    app_state.shells[i].tmux_session_len = 0;
-                    app_state.shells[i].tmux_adopted = false;
-                    app_state.shells[i].revert_streak = 0;
-                    app_state.shells[i].adopt_streak = 0;
-                    debugLog("pollShellNames: tmux adoption reverted, back to VPS tab");
-                    rebindPaneSessionFileForShell(@intCast(i), old_ts_buf[0..old_ts_len]);
-                    publishInboxState();
-                    saveSession();
-                    changed = true;
-                }
-            } else {
-                app_state.shells[i].revert_streak = 0;
-            }
-        }
-
         var title_buf: [256]u16 = std.mem.zeroes([256]u16);
         const title_len_i = GetWindowTextW(app_state.shells[i].hwnd, &title_buf, 256);
         if (title_len_i <= 0) continue;

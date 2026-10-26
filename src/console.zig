@@ -1627,6 +1627,10 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
             debugLog(diag);
         }
         if (!appendSshPrefix(buf, &pos, app_state.g_pending_tmux_host, app_state.g_mobile_mode)) return null;
+        if ((app_state.g_pending_tmux_identity orelse "").len > 0) {
+            app_state.g_pending_resurrect_len = 0;
+            app_state.g_pending_tmux_cmd_len = 0;
+        }
         if (app_state.g_pending_resurrect_len > 0) {
             const rl = app_state.g_pending_resurrect_len;
             app_state.g_pending_resurrect_len = 0;
@@ -1640,8 +1644,17 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
             if (!appendWideAscii(buf, &pos, "\"")) return null;
         } else {
             if (!appendRemoteZsbCommandStart(buf, &pos, zsb_shell_id)) return null;
-            if (!appendWideAscii(buf, &pos, if (new_session) "tmux new-session -A -s " else "tmux attach -t ")) return null;
-            if (!appendWideRemoteShellSingleQuoted(buf, &pos, tmux_session.?)) return null;
+            var attach_buf: [1536]u8 = undefined;
+            const attach = @import("tmux_identity.zig").attachCommand(&attach_buf, tmux_session.?, app_state.g_pending_tmux_identity orelse "", new_session) catch return null;
+            for (attach) |c| {
+                if (c == '"') {
+                    if (!appendWideAscii(buf, &pos, "\\\"")) return null;
+                } else {
+                    if (pos >= buf.len - 1) return null;
+                    buf[pos] = c;
+                    pos += 1;
+                }
+            }
             if (!appendWideAscii(buf, &pos, "\"")) return null;
         }
     } else if (startup_cmd) |cmd| {
@@ -1988,6 +2001,10 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
             app_state.shells[idx].tmux_session_len = session_len;
         }
     }
+    if (app_state.g_pending_tmux_identity) |identity| {
+        @memcpy(app_state.shells[idx].tmux_identity[0..identity.len], identity);
+        app_state.shells[idx].tmux_identity_len = @intCast(identity.len);
+    }
     setDefaultName(&app_state.shells[idx], kind, shell_id);
     if (background_workspace) |workspace| {
         app_state.shells[idx].workspace = workspace;
@@ -2040,6 +2057,8 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_cwd_len = app_state.shells[idx].cached_cwd_len;
     const saved_tmux = app_state.shells[idx].tmux_session;
     const saved_tmux_len = app_state.shells[idx].tmux_session_len;
+    const saved_tmux_identity = app_state.shells[idx].tmux_identity;
+    const saved_tmux_identity_len = app_state.shells[idx].tmux_identity_len;
     const saved_group_id = app_state.shells[idx].group_id;
     const saved_starred_group_id = app_state.shells[idx].starred_group_id;
     const saved_tmux_host = app_state.shells[idx].tmux_host;
@@ -2095,6 +2114,9 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
 
     var cmd_buf: [2048]u16 = undefined;
     const tmux_slice: ?[]const u8 = if (saved_tmux_len > 0) saved_tmux[0..saved_tmux_len] else null;
+    const previous_identity = app_state.g_pending_tmux_identity;
+    app_state.g_pending_tmux_identity = saved_tmux_identity[0..saved_tmux_identity_len];
+    defer app_state.g_pending_tmux_identity = previous_identity;
     app_state.g_pending_tmux_host = saved_tmux_host;
     defer app_state.g_pending_tmux_host = 0;
     _ = makeCmdLine(kind, &cmd_buf, tmux_slice, null, shell_id, saved_ssh_reconnect.create_session) orelse return false;
@@ -2157,6 +2179,8 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .last_title_len = 0,
         .tmux_session = saved_tmux,
         .tmux_session_len = saved_tmux_len,
+        .tmux_identity = saved_tmux_identity,
+        .tmux_identity_len = saved_tmux_identity_len,
         .muted = saved_muted,
         .inbox_excluded = saved_inbox_excluded,
         .keep_alive = false,
@@ -2432,6 +2456,8 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         entry.name = app_state.shells[idx].name;
         entry.name_len = app_state.shells[idx].name_len;
         entry.tmux_session = app_state.shells[idx].tmux_session;
+        entry.tmux_identity = app_state.shells[idx].tmux_identity;
+        entry.tmux_identity_len = app_state.shells[idx].tmux_identity_len;
         entry.tmux_session_len = app_state.shells[idx].tmux_session_len;
         entry.cached_cwd = app_state.shells[idx].cached_cwd;
         entry.cached_cwd_len = app_state.shells[idx].cached_cwd_len;

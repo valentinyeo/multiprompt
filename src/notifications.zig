@@ -406,9 +406,7 @@ pub fn adoptRemoteTmuxSessionForShell(idx: u32, token: []const u8, log_prefix: [
     app_state.shells[idx].tmux_session_len = copy_len;
     app_state.shells[idx].tmux_host = if (old_kind == .vps2) @as(u8, 1) else @as(u8, 0);
     app_state.shells[idx].kind = .tmux;
-    app_state.shells[idx].tmux_adopted = true;
     app_state.shells[idx].adopt_streak = 0;
-    app_state.shells[idx].revert_streak = 0;
     rebindPaneSessionFileForShell(idx, null);
     debugLog2(log_prefix, t);
     return true;

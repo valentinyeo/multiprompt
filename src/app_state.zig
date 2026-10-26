@@ -254,6 +254,8 @@ pub const Shell = struct {
     last_title_len: i32,
     tmux_session: [64]u8,
     tmux_session_len: u32,
+    tmux_identity: [64]u8 = @splat(0),
+    tmux_identity_len: u32 = 0,
     muted: bool,
     sync_owned: bool = false,
     synced_input: u64 = 0,
@@ -299,9 +301,7 @@ pub const Shell = struct {
     preview: [96]u8 = std.mem.zeroes([96]u8),
     preview_len: u32 = 0,
     ai_agent: u8 = 0,
-    tmux_adopted: bool = false,
     adopt_streak: u8 = 0,
-    revert_streak: u8 = 0,
     external_name_sync: ExternalNameSyncState = .{},
     console_font_logged: bool = false,
     base_font_h: i16 = 0,
@@ -709,6 +709,8 @@ pub const ClosedShell = struct {
     name_len: u32,
     tmux_session: [64]u8,
     tmux_session_len: u32,
+    tmux_identity: [64]u8 = @splat(0),
+    tmux_identity_len: u32 = 0,
     cached_cwd: [512]u8,
     cached_cwd_len: u32,
     was_manual: bool,
@@ -1444,6 +1446,7 @@ pub var g_nudge_repaint: bool = false;
 pub var g_pending_new_tab_group: u32 = 0;
 
 pub var g_pending_tmux_host: u8 = 0;
+pub var g_pending_tmux_identity: ?[]const u8 = null;
 pub var g_pending_chat_id: u64 = 0;
 pub var g_pending_background_workspace: ?u8 = null;
 
@@ -2011,6 +2014,8 @@ pub const SavedTab = struct {
     sem: bool,
     tmux_session: [64]u8,
     tmux_session_len: u32,
+    tmux_identity: [64]u8 = @splat(0),
+    tmux_identity_len: u32 = 0,
     cwd: [512]u8,
     cwd_len: u32,
     claude_session: bool,
@@ -2142,6 +2147,8 @@ pub const ArchivedEntry = struct {
     name_len: u32 = 0,
     tmux_session: [64]u8 = std.mem.zeroes([64]u8),
     tmux_session_len: u32 = 0,
+    tmux_identity: [64]u8 = @splat(0),
+    tmux_identity_len: u32 = 0,
     tmux_host: u8 = 0,
     claude_sid: [40]u8 = std.mem.zeroes([40]u8),
     claude_sid_len: u32 = 0,
@@ -2173,6 +2180,8 @@ pub const ReminderEntry = struct {
     name_len: u32 = 0,
     tmux_session: [64]u8 = std.mem.zeroes([64]u8),
     tmux_session_len: u32 = 0,
+    tmux_identity: [64]u8 = @splat(0),
+    tmux_identity_len: u32 = 0,
     tmux_host: u8 = 0,
     claude_sid: [40]u8 = std.mem.zeroes([40]u8),
     claude_sid_len: u32 = 0,

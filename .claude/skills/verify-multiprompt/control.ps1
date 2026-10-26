@@ -2632,7 +2632,7 @@ try {
     if ($Feature -eq 'tmux-binding') {
         $bindingState = Join-Path $scratch 'binding-state'
         New-Item -ItemType Directory -Force $bindingState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
-        $bindingDocument = @{ name = 'tmux-binding'; binding = $true; bindingStatus = $true; mode = 'busy'; suggestion = ''; sessions = @('workspace') }
+        $bindingDocument = @{ name = 'tmux-binding'; binding = $true; bindingStatus = $true; generation = '1700:123:$7'; mode = 'busy'; suggestion = ''; sessions = @('workspace') }
         [IO.File]::WriteAllText((Join-Path $bindingState 'state.json'), ($bindingDocument | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
         $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
         $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
