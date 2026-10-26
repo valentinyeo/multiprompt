@@ -171,6 +171,7 @@ const win32WriteAll = @import("file_io.zig").win32WriteAll;
 const readFileAllocWin32 = @import("file_io.zig").readFileAllocWin32;
 const win32MakeDir = @import("file_io.zig").win32MakeDir;
 const debugLog = @import("diagnostics.zig").debugLog;
+const send_latency = @import("send_latency.zig");
 const verboseLoggingEnabled = @import("diagnostics.zig").verboseLoggingEnabled;
 const altqPtr = @import("diagnostics.zig").altqPtr;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
@@ -4375,6 +4376,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             const ei = chatOutboxIndexById(app_state.g_chat_echo_layout_ids[i]) orelse continue;
             const display = chatSelectionDisplay(app_state.g_chat_block_count + i) orelse continue;
             chatPaintEcho(mem_dc, app_state.g_chat_outbox.items[ei], rc, display.start);
+            send_latency.noteDrawn(app_state.g_chat_outbox.items[ei].id);
         }
         for (0..g_shell_rect_count) |i| {
             var rc = g_shell_rect[i];
@@ -4445,6 +4447,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             defer _ = SelectObject(mem_dc, old_bmp);
             chatPaintTranscriptContent(mem_dc, w, h, ps.rcPaint);
             painted = BitBlt(hdc, 0, 0, w, h, mem_dc, 0, 0, GDI_SRCCOPY) != 0;
+            if (painted) send_latency.markPainted();
             return 0;
         },
         WM_MOUSEMOVE => {
