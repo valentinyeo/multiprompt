@@ -6909,7 +6909,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (wp == 0) {
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
                 @import("chat_session.zig").chatReadDeactivate();
-                hideBrowserEdgeMasks();
+                if (!foregroundIsOurs()) hideBrowserEdgeMasks();
             } else {
                 focusGuardNoteActivation();
                 updateCardPoll();
@@ -6949,7 +6949,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
             } else {
                 updateBrowserVisibility();
-                hideBrowserEdgeMasks();
+                if (!foregroundIsOurs()) hideBrowserEdgeMasks();
                 if (systemAltTabSuppressionActive() or GetTickCount64() >= app_state.g_ws_switch_focus_grace) {
                     cancelShellRefocus(hwnd);
                     _ = SetTimer(hwnd, TIMER_HOOK_UNINSTALL, 150, null);
