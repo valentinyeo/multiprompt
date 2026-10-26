@@ -2320,6 +2320,7 @@ test "IGSH-922 slash filtering presents one completed popup frame" {
     const w = @import("win32.zig");
     const Spy = struct {
         var paints: usize = 0;
+        extern "gdi32" fn GdiFlush() callconv(WINAPI) BOOL;
         fn snapshot(hwnd: HANDLE, step: usize) !void {
             var rc: RECT = undefined;
             try std.testing.expect(GetClientRect(hwnd, &rc) != 0);
@@ -2334,6 +2335,7 @@ test "IGSH-922 slash filtering presents one completed popup frame" {
             const old = SelectObject(memory, bitmap);
             defer _ = SelectObject(memory, old);
             try std.testing.expect(w.BitBlt(memory, 0, 0, rc.right, rc.bottom, source, 0, 0, w.GDI_SRCCOPY) != 0);
+            try std.testing.expect(GdiFlush() != 0);
             const size: usize = @intCast(rc.right * rc.bottom * 4);
             const bmp = try std.testing.allocator.alloc(u8, 54 + size);
             defer std.testing.allocator.free(bmp);
