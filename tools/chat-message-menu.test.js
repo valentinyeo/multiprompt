@@ -51,7 +51,7 @@ test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons
   assert.match(read('src/main.zig'), /bindMenuTheme\(\.\{\s*\.background = &@import\("themes.zig"\).themeConsoleBg,\s*\.foreground = &@import\("themes.zig"\).themeConsoleFg,\s*\.fill_round_rect = &@import\("smooth.zig"\).fillRoundRect/);
   assert.match(fonts, /DWMWCP_ROUND/);
   assert.match(fonts, /mask: u32 = 2/);
-  assert.match(fonts, /SetMenuInfo\(menu, &info\)/);
+  assert.match(fonts, /SetMenuInfo\(menu, &info\)[^]*?defer _ = SetMenuInfo\(menu, &MenuInfo\{ \.background = null \}\)/);
   assert.match(fonts, /theme.foreground\(\)/);
   assert.match(fonts, /previous_style = message_menu_style[^]*?defer message_menu_style = previous_style/);
   assert.match(fonts, /GetTextFaceW[^]*?Segoe Fluent Icons[^]*?Segoe MDL2 Assets/);

@@ -297,10 +297,13 @@ fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved:
     const look = chat_style.menuLook(if (bound) |theme| theme.background() else unboundBackground());
     const background = w.CreateSolidBrush(look.fill);
     defer _ = w.DeleteObject(background);
-    const icons = messageMenuIconFont();
-    defer _ = w.DeleteObject(icons);
+    const icons = if (show_icons) messageMenuIconFont() else w.GetStockObject(13);
+    defer if (show_icons) {
+        _ = w.DeleteObject(icons);
+    };
     const info = MenuInfo{ .background = background };
     _ = SetMenuInfo(menu, &info);
+    defer _ = SetMenuInfo(menu, &MenuInfo{ .background = null });
     const ink = if (bound) |theme| theme.foreground() else unboundForeground();
     smooth_fill_round_rect = if (bound) |theme| theme.fill_round_rect else null;
     const previous_hook = menu_window_hook;
