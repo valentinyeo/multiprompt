@@ -1772,15 +1772,19 @@ fn chatPaintWorking(hdc: HANDLE, now: u64) void {
     chatPaintWorkingDots(hdc, rc, now);
 }
 
+const WORKING_DOT_SIZE = 4;
+const WORKING_DOT_STEP = 7;
+const WORKING_DOT_ALPHA: u8 = 102;
+
 fn chatPaintWorkingDots(hdc: HANDLE, rc: RECT, now: u64) void {
-    fillRoundRectAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor());
-    const size = uiScaled(6);
-    const step = uiScaled(11);
+    const size = uiScaled(WORKING_DOT_SIZE);
+    const step = uiScaled(WORKING_DOT_STEP);
     const active = (now / 250) % 3;
+    const color = @import("chat_scrollbar.zig").blend(themeConsoleBg(), customColorOr("text", themeConsoleFg()), WORKING_DOT_ALPHA);
     for (0..3) |i| {
         const x = rc.left + uiScaled(CHAT_AGENT_PAD_X) + @as(i32, @intCast(i)) * step;
-        const y = rc.top + @divTrunc(rc.bottom - rc.top - size, 2) - (if (i == active) uiScaled(3) else @as(i32, 0));
-        @import("smooth.zig").fillEllipse(hdc, .{ .left = x, .top = y, .right = x + size, .bottom = y + size }, customColorOr("text", themeConsoleFg()));
+        const y = rc.top + @divTrunc(rc.bottom - rc.top - size, 2) - (if (i == active) uiScaled(2) else @as(i32, 0));
+        @import("smooth.zig").fillEllipse(hdc, .{ .left = x, .top = y, .right = x + size, .bottom = y + size }, color);
     }
 }
 
@@ -6170,8 +6174,8 @@ test "IGSH-959 working dots have no bubble and are small and dim" {
     }
     const full = channelDistance(fg_rgb, bg_rgb);
     try std.testing.expect(painted > 0);
-    try std.testing.expect(painted <= 3 * @as(usize, @intCast(uiScaled(4) * uiScaled(4))));
-    try std.testing.expect(max_x - min_x < 3 * uiScaled(7));
+    try std.testing.expect(painted <= 3 * @as(usize, @intCast(uiScaled(WORKING_DOT_SIZE) * uiScaled(WORKING_DOT_SIZE))));
+    try std.testing.expect(max_x - min_x < 3 * uiScaled(WORKING_DOT_STEP));
     try std.testing.expect(brightest * 100 <= full * 50);
 }
 
