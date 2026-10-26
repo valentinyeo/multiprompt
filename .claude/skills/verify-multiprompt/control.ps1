@@ -470,8 +470,8 @@ public static class VerifyNative {
             var fill = System.Drawing.Color.FromArgb(Math.Max(0, Math.Min(255, bg.R + shift)), Math.Max(0, Math.Min(255, bg.G + shift)), Math.Max(0, Math.Min(255, bg.B + shift)));
             var queuedFill = QueuedColor(bg, fill);
             var fills = new Dictionary<int, int>();
-            for (int y = 1; y < pixels.Height - 1; y++) for (int x = 1; x < pixels.Width - 1; x++) {
-                var color = pixels.GetPixel(x, y);
+            for (int x = pixels.Width / 2 - 16; x <= pixels.Width / 2 + 16; x++) {
+                var color = pixels.GetPixel(x, pixels.Height - 20);
                 int delta = Math.Max(Math.Abs(color.R - bg.R), Math.Max(Math.Abs(color.G - bg.G), Math.Abs(color.B - bg.B)));
                 if (delta < 16 || delta > 100 || Math.Abs(color.R - color.G) > 2 || Math.Abs(color.G - color.B) > 2) continue;
                 int key = color.ToArgb(), count;
