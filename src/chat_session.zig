@@ -1720,6 +1720,8 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     };
     app_state.g_chat_histories = .empty;
     defer {
+        app_state.g_chat_read_visit_marker = 0;
+        app_state.g_chat_read_boundary = .{};
         for (0..5) |i| chatHistoryForget(@intCast(87400 + i));
         app_state.g_chat_histories.deinit(a);
         app_state.g_chat_histories = saved.histories;
@@ -1819,6 +1821,4 @@ test "IGSH-874 revisiting a tab with a large history reuses its saved layout and
     app_state.g_chat_layout_reuse = 0;
     chatRelayout(800);
     try std.testing.expectEqual(divider_h, app_state.g_chat_content_h);
-    app_state.g_chat_read_visit_marker = 0;
-    app_state.g_chat_read_boundary = .{};
 }
