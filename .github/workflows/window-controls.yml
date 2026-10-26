@@ -31,6 +31,51 @@ concurrency:
 
 jobs:
   controls:
-    uses: ./.github/workflows/verify.yml
-    with:
-      feature: window-controls
+    name: window-controls (${{ matrix.dpi }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        dpi: [96, 120, 144]
+    env:
+      CAPTION_DPI: ${{ matrix.dpi }}
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Check window journey contracts
+        run: node --test tools/window-controls.test.js tools/title-bar.test.js
+      - name: Build real app
+        run: zig build
+      - name: Verify real window controls
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path zig-out/bin/multiprompt.exe).Path
+          $source = Get-Content src/main.zig -Raw
+          if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Version not found' }
+          $version = $Matches[1]
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          @{ revision = (git rev-parse HEAD).Trim(); version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/build.json
+          & .claude/skills/verify-multiprompt/control.ps1 -Feature window-controls -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence"
+          if ($LASTEXITCODE -ne 0) { throw 'Window control journey failed' }
+      - name: Upload window proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: window-controls-${{ matrix.dpi }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
