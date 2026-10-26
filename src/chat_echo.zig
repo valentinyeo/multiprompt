@@ -64,6 +64,18 @@ fn stripTrailingEllipsis(s: []const u16) []const u16 {
     return s[0..end];
 }
 
+fn indexOfText(text: []const u16, needle: []const u16) ?usize {
+    if (needle.len == 0) return 0;
+    if (needle.len > text.len) return null;
+    const candidates = text[0 .. text.len - needle.len + 1];
+    var start: usize = 0;
+    while (std.mem.indexOfScalarPos(u16, candidates, start, needle[0])) |i| {
+        if (std.mem.eql(u16, text[i..][0..needle.len], needle)) return i;
+        start = i + 1;
+    }
+    return null;
+}
+
 pub fn blockMatches(block_text: []const u16, prefix: []const u16) bool {
     if (prefix.len == 0) return false;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
@@ -74,7 +86,7 @@ pub fn blockMatches(block_text: []const u16, prefix: []const u16) bool {
         const cut = stripTrailingEllipsis(norm);
         return cut.len >= MIN_PARTIAL and std.mem.eql(u16, prefix[0..cut.len], cut);
     }
-    if (prefix.len >= MIN_PARTIAL) return std.mem.indexOf(u16, norm, prefix) != null;
+    if (prefix.len >= MIN_PARTIAL) return indexOfText(norm, prefix) != null;
     if (norm.len > prefix.len and norm[norm.len - prefix.len - 1] == ' ') {
         return std.mem.eql(u16, norm[norm.len - prefix.len ..], prefix);
     }
@@ -351,7 +363,7 @@ fn messageMatches(block: []const u16, p: Pending, norm: []const u16) bool {
     if (norm.len == 0 or body.len <= norm.len) return false;
     if (norm.len < MIN_PARTIAL) return body[body.len - norm.len - 1] == ' ' and std.mem.endsWith(u16, body, norm);
     if (std.mem.endsWith(u16, body, norm)) return true;
-    const at = std.mem.indexOf(u16, body, norm) orelse return false;
+    const at = indexOfText(body, norm) orelse return false;
     return (at == 0 or body[at - 1] == ' ') and (at + norm.len == body.len or body[at + norm.len] == ' ');
 }
 
@@ -367,7 +379,7 @@ pub fn isNewBlock(anchor: Anchor, stamp_ms: i64, ordinal: usize, window_full: bo
 const PASTE_PLACEHOLDER = [_]u16{ '[', 'P', 'a', 's', 't', 'e', 'd', ' ', 't', 'e', 'x', 't' };
 
 fn pastePlaceholderMatches(norm: []const u16, prefix: []const u16) bool {
-    const at = std.mem.indexOf(u16, norm, &PASTE_PLACEHOLDER) orelse return false;
+    const at = indexOfText(norm, &PASTE_PLACEHOLDER) orelse return false;
     var end = at;
     while (end > 0 and norm[end - 1] == ' ') end -= 1;
     const before = norm[0..end];
@@ -944,4 +956,16 @@ test "ISSUE-460 all pending states have a hard deadline independent of busy and 
     }
     try std.testing.expect(!pendingExpired(.not_sent, 1000, 901000));
     try std.testing.expectEqual(@as(u8, 2), @intFromEnum(OutboxState.not_sent));
+}
+
+
+test "IGSH-991 text search preserves first matches and UTF16 alignment" {
+    try std.testing.expectEqual(@as(?usize, 0), indexOfText(&w("abc"), &.{}));
+    try std.testing.expectEqual(@as(?usize, null), indexOfText(&w("abc"), &w("abcd")));
+    try std.testing.expectEqual(@as(?usize, 0), indexOfText(&w("abcabc"), &w("abc")));
+    try std.testing.expectEqual(@as(?usize, 1), indexOfText(&w("aaaaabaaaaab"), &w("aaaab")));
+    try std.testing.expectEqual(@as(?usize, 3), indexOfText(&w("xyzabc"), &w("abc")));
+    try std.testing.expectEqual(@as(?usize, null), indexOfText(&w("xyzabc"), &w("abd")));
+    try std.testing.expectEqual(@as(?usize, 5), indexOfText(std.unicode.utf8ToUtf16LeStringLiteral("left 😀 right"), std.unicode.utf8ToUtf16LeStringLiteral("😀")));
+    try std.testing.expectEqual(@as(?usize, null), indexOfText(&.{ 0x00aa, 0xbb00, 0x00cc }, &.{ 0xaa00, 0x00bb }));
 }
