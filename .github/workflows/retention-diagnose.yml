@@ -22,10 +22,17 @@ jobs:
           from pathlib import Path
           import re
           lines = Path('failed.log').read_text().splitlines()
-          for i, line in enumerate(lines):
-              if re.search(r'not ok |error:|\.\.\.FAIL|TestExpectedEqual|TestUnexpectedResult|expected.*found', line, re.I):
-                  context = '\n'.join(lines[i:i + 18])[:7000]
-                  print('::error::' + context.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
+          jobs = {}
+          for line in lines:
+              jobs.setdefault(line.split('\t', 1)[0], []).append(line)
+          for job, entries in jobs.items():
+              blocks = []
+              for i, line in enumerate(entries):
+                  if re.search(r'not ok |\.\.\.FAIL|error: expected|error:.*has no member', line, re.I):
+                      blocks.extend(entries[i:i + 18])
+              blocks.extend(entries[-75:])
+              context = ('JOB ' + job + '\n' + '\n'.join(blocks))[:50000]
+              print('::error::' + context.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'))
           PY
       - name: Expose retention outcomes
         env:
