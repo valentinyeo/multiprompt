@@ -174,13 +174,17 @@ test('IGSH-893 audit evidence serializes plain lines within five seconds on Wind
     fs.writeFileSync(auditPath, lines.join('\n'));
     const auditRead = driver.match(/^\s*\$audit = (.+)$/m);
     assert.ok(auditRead, 'production audit read exists');
-    const script = `$ErrorActionPreference = 'Stop'; $auditPath = $env:AUDIT_PATH; $audit = ${auditRead[1]}; Write-Host 'AUDIT_READ_READY'; $clock = [Diagnostics.Stopwatch]::StartNew(); ConvertTo-Json -InputObject @{ audit = $audit } -Depth 12 -Compress`;
+    const script = `$ErrorActionPreference = 'Stop'; $auditPath = $env:AUDIT_PATH; $audit = ${auditRead[1]}; Write-Host ('AUDIT_READ_READY type=' + $audit[0].GetType().FullName + ' properties=' + ($audit[0].PSObject.Properties.Name -join ',')); $clock = [Diagnostics.Stopwatch]::StartNew(); $json = ConvertTo-Json -InputObject @{ audit = $audit } -Depth 12 -Compress; Write-Host ('SERIALIZATION_MS=' + $clock.ElapsedMilliseconds); Write-Output $json`;
     const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-      encoding: 'utf8', timeout: 5000, env: { ...process.env, AUDIT_PATH: auditPath },
+      encoding: 'utf8', timeout: 30000, env: { ...process.env, AUDIT_PATH: auditPath },
     });
     assert.equal(result.error, undefined, JSON.stringify({ error: result.error?.message, stdout: result.stdout, stderr: result.stderr, expression: auditRead[1] }));
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout.split('AUDIT_READ_READY')[1]).audit, lines);
+    console.log(result.stdout);
+    const elapsed = result.stdout.match(/SERIALIZATION_MS=(\d+)/);
+    assert.ok(elapsed, result.stdout);
+    assert.ok(Number(elapsed[1]) < 5000, result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout.split(/SERIALIZATION_MS=\d+\s*/)[1]).audit, lines);
     console.log('DICTATION_AUDIT_SERIALIZATION_OK');
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
