@@ -6,9 +6,16 @@
 int main(int argc, char **argv) {
     if (argc != 3) return 1;
     BOOL suggestion = strcmp(argv[1], "suggestion") == 0;
-    BOOL working = strcmp(argv[1], "working") == 0;
+    BOOL inline_working = strcmp(argv[1], "inline") == 0;
+    BOOL working = inline_working || strcmp(argv[1], "working") == 0;
     if (!suggestion && !working && strcmp(argv[1], "typed") != 0) return 1;
     char path[MAX_PATH];
+    HANDLE reply_event = NULL;
+    if (inline_working) {
+        if (snprintf(path, sizeof(path), "Local\\MultipromptInlineReply-%lu", GetCurrentProcessId()) >= (int)sizeof(path)) return 2;
+        reply_event = CreateEventA(NULL, TRUE, FALSE, path);
+        if (!reply_event) return 2;
+    }
     if (snprintf(path, sizeof(path), "%s-stdin.bin", argv[2]) >= (int)sizeof(path)) return 2;
     FILE *received = fopen(path, "wb");
     if (!received) return 2;
@@ -24,6 +31,11 @@ int main(int argc, char **argv) {
     CONSOLE_SCREEN_BUFFER_INFO info;
     if (!GetConsoleScreenBufferInfo(output, &info)) return 4;
     COORD origin = {0, info.srWindow.Bottom};
+    if (inline_working) {
+        COORD user = {0, (SHORT)(info.srWindow.Bottom - 4)};
+        const WCHAR *question = L"\x276f Please respond.";
+        if (!SetConsoleCursorPosition(output, user) || !WriteConsoleW(output, question, (DWORD)wcslen(question), &written, NULL)) return 4;
+    }
     if (working) {
         COORD status = {0, (SHORT)(info.srWindow.Bottom - 2)};
         const WCHAR *thinking = L"\x273b Thinking\x2026 (esc to interrupt)";
@@ -51,6 +63,26 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 32; i++) fprintf(ready, "%s%u", i ? "," : "", attributes[i]);
     fputs("]}", ready);
     fclose(ready);
+    if (inline_working) {
+        if (WaitForSingleObject(reply_event, INFINITE) != WAIT_OBJECT_0) return 2;
+        CloseHandle(reply_event);
+        CONSOLE_SCREEN_BUFFER_INFO finished;
+        if (!GetConsoleScreenBufferInfo(output, &finished)) return 4;
+        COORD zero = {0, 0};
+        if (!FillConsoleOutputCharacterW(output, L' ', (DWORD)finished.dwSize.X * (DWORD)finished.dwSize.Y, zero, &written)) return 4;
+        COORD user = {0, (SHORT)(finished.srWindow.Bottom - 4)};
+        const WCHAR *reply = L"\x276f Please respond.\r\n\r\n\x25cf Ready.\r\n\x276f ";
+        if (!SetConsoleCursorPosition(output, user) || !WriteConsoleW(output, reply, (DWORD)wcslen(reply), &written, NULL)) return 4;
+        if (snprintf(path, sizeof(path), "%s-replied", argv[2]) >= (int)sizeof(path)) return 2;
+        FILE *replied = fopen(path, "w");
+        if (!replied) return 2;
+        WCHAR readback[256];
+        DWORD count;
+        if (!GetConsoleScreenBufferInfo(output, &finished) || !ReadConsoleOutputCharacterW(output, readback, 256, user, &count)) return 4;
+        fprintf(replied, "row=%d cursor=%d bottom=%d width=%d chars=", user.Y, finished.dwCursorPosition.Y, finished.srWindow.Bottom, finished.dwSize.X);
+        for (DWORD i = 0; i < count; i++) fprintf(replied, "%u,", readback[i]);
+        fclose(replied);
+    }
     for (;;) {
         INPUT_RECORD record;
         DWORD read;

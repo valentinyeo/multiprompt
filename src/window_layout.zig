@@ -330,13 +330,14 @@ pub fn chatWorkingIndicatorInvalidate() void {
 }
 
 pub fn chatWorkingIndicatorSync() void {
+    @import("chat_render.zig").chatWorkingSync();
     var formatted: [128]u16 = undefined;
     const visible = chatWorkingBarVisible();
     if (app_state.ISSUE_265_WORKING_BAR) {
         const running = visible and app_state.g_main_hwnd != null;
         if (running != app_state.g_chat_working_timer_running) {
             if (running) {
-                app_state.g_chat_working_timer_running = @import("win32.zig").SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_CHAT_WORKING, 1000, null) != 0;
+                app_state.g_chat_working_timer_running = @import("win32.zig").SetTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_CHAT_WORKING, 250, null) != 0;
                 if (app_state.g_chat_working_timer_running) debugLog("[chat] working timer started");
             } else {
                 _ = @import("win32.zig").KillTimer(app_state.g_main_hwnd, @import("win32.zig").TIMER_CHAT_WORKING);

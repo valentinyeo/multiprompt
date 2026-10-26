@@ -1731,7 +1731,42 @@ fn chatShellRowsLayout(hdc: HANDLE, width: i32, start_y: i32) i32 {
     return y;
 }
 
+var g_working_rect: ?RECT = null;
+
+pub fn chatWorkingSync() void {
+    if (app_state.g_chat_transcript_hwnd == null) return;
+    if ((g_working_rect != null) != @import("window_layout.zig").chatStopVisible()) {
+        var rc: RECT = std.mem.zeroes(RECT);
+        _ = GetClientRect(app_state.g_chat_transcript_hwnd, &rc);
+        chatRelayoutPreservingScroll(rc.right, rc.bottom);
+        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    } else if (g_working_rect) |source| {
+        var rc = source;
+        rc.top -= app_state.g_chat_scroll_y;
+        rc.bottom -= app_state.g_chat_scroll_y;
+        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, &rc, 0);
+    }
+}
+
+fn chatPaintWorking(hdc: HANDLE, now: u64) void {
+    const source = g_working_rect orelse return;
+    if (!@import("window_layout.zig").chatStopVisible()) return;
+    var rc = source;
+    rc.top -= app_state.g_chat_scroll_y;
+    rc.bottom -= app_state.g_chat_scroll_y;
+    fillRoundRectAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor());
+    const size = uiScaled(6);
+    const step = uiScaled(11);
+    const active = (now / 250) % 3;
+    for (0..3) |i| {
+        const x = rc.left + uiScaled(CHAT_AGENT_PAD_X) + @as(i32, @intCast(i)) * step;
+        const y = rc.top + @divTrunc(rc.bottom - rc.top - size, 2) - (if (i == active) uiScaled(3) else @as(i32, 0));
+        @import("smooth.zig").fillEllipse(hdc, .{ .left = x, .top = y, .right = x + size, .bottom = y + size }, customColorOr("text", themeConsoleFg()));
+    }
+}
+
 pub fn chatRelayout(client_width: i32) void {
+    g_working_rect = null;
     app_state.g_chat_layout_dirty = false;
     if (app_state.g_chat_layout_width != client_width or app_state.g_chat_layout_scale != uiScaled(1024) or app_state.g_chat_layout_font_pt != app_state.g_chat_font_pt or app_state.g_chat_find_layout_open != app_state.g_chat_find_open) app_state.g_chat_layout_reuse = 0;
     app_state.g_chat_layout_width = client_width;
@@ -1826,6 +1861,15 @@ pub fn chatRelayout(client_width: i32) void {
     if (@max(app_state.g_chat_sel_anchor, app_state.g_chat_sel_caret) >= chat_hit.pending_selection_base and
         (old_echo_count != app_state.g_chat_echo_layout_count or
             !std.mem.eql(u64, old_echo_ids[0..old_echo_count], app_state.g_chat_echo_layout_ids[0..app_state.g_chat_echo_layout_count]))) chatSelectionClear();
+    if (@import("window_layout.zig").chatStopVisible()) {
+        y += chatBlockGapBefore(has_previous or app_state.g_chat_echo_layout_count > 0 or g_shell_rect_count > 0, .prose, true, .single);
+        const sample = std.unicode.utf8ToUtf16LeStringLiteral("Ready.");
+        var rc = chatMeasureBlockRect(hdc, sample, .{ .start = 0, .len = sample.len, .role = .prose, .first = true }, .single, width, y, null);
+        rc.left += content.left;
+        rc.right += content.left;
+        g_working_rect = rc;
+        y = rc.bottom;
+    }
     app_state.g_chat_content_h = y;
 }
 
@@ -4344,7 +4388,8 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     if (rc.bottom <= ps.rcPaint.top or rc.top >= ps.rcPaint.bottom or rc.right <= ps.rcPaint.left or rc.left >= ps.rcPaint.right) continue;
                     chatPaintShellRow(mem_dc, &g_shell_view.rows[g_shell_rect_row[i]], rc);
                 }
-                if (app_state.g_chat_block_count == 0) {
+                chatPaintWorking(mem_dc, GetTickCount64());
+                if (app_state.g_chat_block_count == 0 and g_working_rect == null) {
                     const entry = chatHistoryEntry(chatFileIdentity());
                     const message = if (entry) |e|
                         (if (e.missing_message[0] != 0) @as(LPCWSTR, @ptrCast(&e.missing_message)) else if (e.failures > 0) L("Could not load the conversation, retrying") else if (e.pending or app_state.g_chat_switch_loading) L("Loading conversation...") else L("No conversation yet"))
@@ -5838,4 +5883,76 @@ test "IGSH-897 scrollbar draws no track, only a narrow fixed thumb while scrolli
             if (state == .faded) try scrollProofSave(L("scrollbar-faded.bmp"), bytes, info.header);
         }
     }
+}
+
+test "IGSH-924 working dots reserve the next reply rectangle and disappear for idle or input" {
+    const w = @import("win32.zig");
+    const hwnd = w.CreateWindowExW(0, L("STATIC"), L("inline working"), 0, 0, 0, 800, 600, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(hwnd);
+    const old_hwnd = app_state.g_chat_transcript_hwnd;
+    const old_count = app_state.shell_count;
+    const old_active = app_state.active_shell;
+    const old_chat = app_state.g_chat_active;
+    const old_activity = app_state.shells[0].activity;
+    const old_screen = app_state.g_chat_screen_working;
+    const old_status = app_state.g_chat_screen_status_len;
+    const old_permission = app_state.g_chat_permission;
+    const old_sid = app_state.g_chat_permission_sid;
+    const old_answered = app_state.shells[0].permission_answered;
+    defer {
+        app_state.g_chat_transcript_hwnd = old_hwnd;
+        app_state.shell_count = old_count;
+        app_state.active_shell = old_active;
+        app_state.g_chat_active = old_chat;
+        app_state.shells[0].activity = old_activity;
+        app_state.g_chat_screen_working = old_screen;
+        app_state.g_chat_screen_status_len = old_status;
+        app_state.g_chat_permission = old_permission;
+        app_state.g_chat_permission_sid = old_sid;
+        app_state.shells[0].permission_answered = old_answered;
+        app_state.g_chat_block_count = 0;
+        app_state.g_chat_last_len = 0;
+        app_state.g_chat_layout_reuse = 0;
+        g_working_rect = null;
+    }
+    app_state.g_chat_transcript_hwnd = hwnd;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = true;
+    app_state.shells[0].activity = .idle;
+    app_state.g_chat_screen_working = true;
+    app_state.g_chat_screen_status_len = 0;
+    app_state.g_chat_permission.count = 0;
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("QuestionReady.");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_block_count = 1;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = 8, .role = .user, .first = true };
+    app_state.g_chat_layout_reuse = 0;
+    chatRelayout(800);
+    const placeholder = g_working_rect orelse return error.TestUnexpectedResult;
+    const question = app_state.g_chat_layout_rects[0];
+    const busy_height = app_state.g_chat_content_h;
+    try std.testing.expectEqual(question.bottom + uiScaled(24), placeholder.top);
+    try std.testing.expectEqual(app_state.g_chat_content_left, placeholder.left);
+    app_state.g_chat_screen_working = false;
+    app_state.g_chat_blocks[1] = .{ .start = 8, .len = 6, .role = .prose, .first = true };
+    app_state.g_chat_block_count = 2;
+    chatRelayout(800);
+    const reply = app_state.g_chat_layout_rects[1];
+    try std.testing.expect(g_working_rect == null);
+    try std.testing.expectEqual(placeholder.top, reply.top);
+    try std.testing.expectEqual(placeholder.bottom, reply.bottom);
+    try std.testing.expectEqual(placeholder.left, reply.left + app_state.g_chat_content_left);
+    try std.testing.expectEqual(busy_height, app_state.g_chat_content_h);
+    app_state.g_chat_screen_working = true;
+    app_state.g_chat_permission_sid = app_state.shells[0].shell_id;
+    app_state.g_chat_permission.count = 1;
+    app_state.shells[0].permission_answered = false;
+    chatRelayout(800);
+    try std.testing.expect(g_working_rect == null);
+    app_state.g_chat_permission.count = 0;
+    app_state.g_chat_active = false;
+    chatRelayout(800);
+    try std.testing.expect(g_working_rect == null);
 }
