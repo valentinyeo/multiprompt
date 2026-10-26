@@ -51,14 +51,16 @@ shell key and send timestamp to avoid applying an old result to a later retry.
 `tools/chat-full-settle.test.js` executes the production worker and completion
 with a real background thread and a stubbed reader channel.
 
-## Missing conversation fallback (ISSUE-301, v0.28.734)
+## Missing conversation note (IGSH-973)
 
-A keyed session with a missing or failing conversation and no loaded messages
-shows its visible terminal rows as one monospace block. Capture preserves leading
-spaces, blank interior rows and terminal glyphs without agent-screen filtering or
-prose reflow. Wide rows wrap inside the reader. Keyless tabs retain the existing
-agent-screen capture path. The real btop fixture regression lives in
-`src/chat_history.zig`.
+A keyed session (tmux or remote) never shows terminal rows as chat. When its
+conversation is missing or cannot be read and no messages are loaded, Chat View
+paints the plain note `Chat not available for this session, use the shell view`
+below the working dots and retries once a minute. The reader's reason goes to the
+debug log as `[chat] transcript not reachable: <reason>`. Keyless tabs retain the
+agent-screen capture path. The launch snapshot no longer restores chat blocks for tmux
+tabs, so an older terminal block cannot return after an update. This replaces the
+terminal-block fallback of ISSUE-301 (v0.28.734).
 
 ## Model, context and todo header
 

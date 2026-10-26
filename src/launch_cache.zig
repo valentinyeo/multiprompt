@@ -126,11 +126,13 @@ pub fn restore() void {
     state.g_chat_font_pt = s.font;
     state.clean_chat = s.clean_chat;
     if (s.chat) {
-        state.g_chat_last_len = s.text.len;
-        @memcpy(state.g_chat_capture[0..s.text.len], s.text);
-        state.g_chat_block_count = s.blocks.len;
-        @memcpy(state.g_chat_blocks[0..s.blocks.len], s.blocks);
-        state.g_chat_cache_shell_id = s.active;
+        if (state.shells[state.active_shell].kind != .tmux) {
+            state.g_chat_last_len = s.text.len;
+            @memcpy(state.g_chat_capture[0..s.text.len], s.text);
+            state.g_chat_block_count = s.blocks.len;
+            @memcpy(state.g_chat_blocks[0..s.blocks.len], s.blocks);
+            state.g_chat_cache_shell_id = s.active;
+        }
         state.g_chat_layout_dirty = true;
         @import("chat_composer.zig").openChatView();
         @import("chat_composer.zig").layoutChatControls();

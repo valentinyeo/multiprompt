@@ -163,7 +163,6 @@ fn chatHistoryEntry(key: chat_transcript.Identity) ?*ChatHistoryEntry {
     for (g_chat_histories.items) |e| if (chat_history.sameSession(key, e.key)) return e;
     return null;
 }
-fn captureScreenText(_: u32, _: []u16) ?usize { capture_count += 1; return capture_result; }
 fn captureChatTranscript(_: usize, _: []u16, _: bool) ?usize { capture_count += 1; return capture_result; }
 fn chatClassifyBlocks(_: []const u16, _: []ChatBlock) usize { return 0; }
 fn chatApplyDisplayGlyphs(_: []u16, _: []const ChatBlock) void {}
