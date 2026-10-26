@@ -19,8 +19,9 @@ Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Fresh skills proof requires chat-delivery' }
-if ($env:CHAT_WIDTH_PROOF -eq '1') {
-    if ($Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
+if ($env:CHAT_REACTIONS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reactions proof requires chat-delivery' }
+if ($env:CHAT_WIDTH_PROOF -eq '1' -and $Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
+if ($env:CHAT_WIDTH_PROOF -eq '1' -or $env:CHAT_REACTIONS_PROOF -eq '1') {
     Add-Type -Path "$PSScriptRoot/layout-capture.cs"
     [LayoutCapture]::Display()
 }
@@ -40,6 +41,7 @@ if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
 if ($env:CHAT_SWITCH_PROOF -eq '1') { $plans = @(@{name='remote-switch'; mode='idle'; text='long remote conversation switching'}) }
 if ($env:CHAT_REMOTE_PROOF -eq '1') { $plans = @(@{name='remote-sync'; mode='idle'; text='remote session follows live process'}) }
 if ($env:CHAT_MISSING_PROOF -eq '1') { $plans = @(@{name='missing-transcript'; mode='idle'; text='no transcript behind this tab'}) }
+if ($env:CHAT_REACTIONS_PROOF -eq '1') { $plans = @(@{name='reactions'; mode='busy'; text='draft stays here'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
@@ -79,7 +81,7 @@ function Shot([string]$Name) {
     }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name.StartsWith('accepted-') -or $Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name.StartsWith('accepted-') -or $Name.StartsWith('reactions-') -or $Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -418,6 +420,7 @@ foreach ($plan in $plans) {
     $job = $null
     $main = [IntPtr]::Zero
     $composer = [IntPtr]::Zero
+    $isReaction = $plan.name -eq 'reactions'
     $isAccepted = $plan.name -eq 'accepted-message'
     $isSwitch = $plan.name -eq 'remote-switch'
     $isRemote = $plan.name -eq 'remote-sync' -or $isSwitch
@@ -427,7 +430,7 @@ foreach ($plan in $plans) {
     $isActivity = $plan.name -eq 'messages-only'
     $isHistory = $plan.name -eq 'full-history'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
-    $hasTranscript = $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote
+    $hasTranscript = $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -543,6 +546,8 @@ foreach ($plan in $plans) {
             Press @(0x0D) 'Enter: send reload plugins' $true
             [void](Wait-For 'reload refresh without reopening list' { (Read-Shared "$state/completion.jsonl").Contains('verify-beta') } 5)
             $observation.skills = @{newSkillMs=$elapsed; selected=$selected; accepted=$accepted; reload=$true}
+        } elseif ($isReaction) {
+            . "$PSScriptRoot/reactions.ps1"
         } elseif ($isSwitch) {
             . "$PSScriptRoot/remote-switch.ps1"
         } elseif ($isRemote) {
@@ -1067,6 +1072,10 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_REACTIONS_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-accepted-proof.mjs" $Evidence
     exit $LASTEXITCODE

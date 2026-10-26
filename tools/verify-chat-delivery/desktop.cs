@@ -126,6 +126,17 @@ public static class ChatDeliveryDesktop {
         inputs[1].Data.Mouse.Flags = 4;
         if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Transcript click input failed");
     }
+    public static void RightClickOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
+        if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
+            Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||
+            !IsWindowVisible(transcript)) throw new InvalidOperationException("Transcript right-click ownership mismatch");
+        var point = new Point { X = x, Y = y };
+        if (WindowFromPoint(point) != transcript || !SetCursorPos(x, y)) throw new InvalidOperationException("Right-click target is not the owned transcript");
+        var inputs = new Input[2];
+        inputs[0].Data.Mouse.Flags = 8;
+        inputs[1].Data.Mouse.Flags = 16;
+        if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Transcript right-click input failed");
+    }
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScan(char character);
     public static void Character(char character) {
         short mapped = VkKeyScan(character);
