@@ -1863,14 +1863,14 @@ pub fn chatRelayout(client_width: i32) void {
         }
     }
     for (reuse..app_state.g_chat_block_count) |i| {
+        if (boundary.index == i) {
+            app_state.g_chat_read_divider_y = y;
+            y += uiScaled(28);
+        }
         if (app_state.g_chat_blocks[i].role == .tool or g_reaction_view.hides(i)) {
             app_state.g_chat_layout_rects[i] = .{ .left = 0, .top = y, .right = 0, .bottom = y };
             chatImgStoreLayout(i, .{});
             continue;
-        }
-        if (boundary.index == i) {
-            app_state.g_chat_read_divider_y = y;
-            y += uiScaled(28);
         }
         y += chatBlockGapBefore(has_previous, app_state.g_chat_blocks[i].role, app_state.g_chat_blocks[i].first, app_state.g_chat_bubble_pos[i]);
         has_previous = true;

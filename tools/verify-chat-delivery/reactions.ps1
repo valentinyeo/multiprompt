@@ -22,15 +22,11 @@ $down = [char]::ConvertFromUtf32(0x1f44e)
 $heart = [string][char]0x2764 + [char]0xfe0f
 if ($menu -cne "React $up,React $down,React $heart,Reply,Copy") { throw "IGSH975_REACTIONS_MISSING: $menu" }
 $popup = Wait-For 'owned native reaction popup visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } } 5
-$popupRoot = [System.Windows.Automation.AutomationElement]::FromHandle($popup)
-$itemCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)
-$popupItems = @($popupRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $itemCondition))
-if ($popupItems.Count -ne 5) { throw 'Expected five owned reaction menu items' }
-$firstItem = $popupItems[0].Current.BoundingRectangle
-$popupBounds = $popupRoot.Current.BoundingRectangle
 Shot 'reactions-menu'
+$firstItem = [ChatDeliveryDesktop]::FirstMenuItem($popup, $app.Id, 5)
+Save @{count=5; left=$firstItem.Left; top=$firstItem.Top; right=$firstItem.Right; bottom=$firstItem.Bottom} "$caseDir/menu-item.json"
 $actions.Add(@{case=$plan.name; input='real mouse click first native reaction menu item'})
-[ChatDeliveryDesktop]::PressOwnedMenu($main, $app.Id, $popup, [int](($firstItem.Left + $firstItem.Right) / 2 - $popupBounds.Left), [int](($firstItem.Top + $firstItem.Bottom) / 2 - $popupBounds.Top))
+[ChatDeliveryDesktop]::PressOwnedMenu($main, $app.Id, $popup, 5)
 [void](Wait-For 'one reaction reached the real send queue' { @((Fake-State).queue).Count -eq 1 })
 $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
 if ($observation.composerText -cne $plan.text) { throw 'Reaction cleared the composer draft' }

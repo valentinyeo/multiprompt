@@ -657,3 +657,31 @@ test "twenty local and remote cached switches retain their unchanged prefix" {
   const result = run(prelude + body(source, 'chatRelayout') + checks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
+
+test('IGSH-975 a folded reaction keeps its real unread boundary before the next message', () => {
+  const prelude = layout
+    .replace('fn chatReadBoundary() ReadBoundary { return .{}; }', 'fn chatReadBoundary() ReadBoundary { return .{ .index = 1 }; }')
+    .replace("var g_chat_capture: [1]u16 = .{'x'};", 'var g_chat_capture: [256]u16 = @splat(0);');
+  const checks = `
+test "folded user reaction keeps the New divider without a user bubble" {
+    defer g_reaction_view.deinit(std.heap.page_allocator);
+    var formatted: [256]u16 = undefined;
+    const line = chat_reaction.format(.like, 1, &.{'x'}, &formatted).?;
+    g_chat_capture[0] = 'x';
+    @memcpy(g_chat_capture[1..][0..line.len], line);
+    g_chat_last_len = 1 + line.len;
+    blocks[0] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 1, .reaction_reference = 1 };
+    blocks[1] = .{ .start = 1, .len = line.len, .role = .user, .first = true, .message_id = 3 };
+    blocks[2] = .{ .start = 0, .len = 1, .role = .prose, .first = true, .message_id = 2, .reaction_reference = 2 };
+    g_chat_block_count = 3;
+    chatRelayout(400);
+    try std.testing.expect(g_reaction_view.hides(1));
+    try std.testing.expectEqual(@as(usize, 2), measured);
+    try std.testing.expectEqual(g_chat_layout_rects[0].bottom, g_chat_read_divider_y);
+    try std.testing.expectEqual(g_chat_read_divider_y + 28, g_chat_layout_rects[2].top);
+    try std.testing.expectEqual(g_chat_layout_rects[1].top, g_chat_layout_rects[1].bottom);
+}
+`;
+  const result = run(prelude + body(source, 'chatRelayout') + checks);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});

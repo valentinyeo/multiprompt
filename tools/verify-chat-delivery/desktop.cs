@@ -37,10 +37,23 @@ public static class ChatDeliveryDesktop {
     public static string Class(IntPtr hwnd) { var text = new StringBuilder(256); GetClassName(hwnd, text, text.Capacity); return text.ToString(); }
     public static IntPtr Window(uint pid) { IntPtr found = IntPtr.Zero; EnumWindows((h,p) => { if (Owner(h) == pid && IsWindowVisible(h) && Class(h) == "ZigShell") { found = h; return false; } return true; }, IntPtr.Zero); return found; }
     public static IntPtr Menu(uint pid) { IntPtr found = IntPtr.Zero; EnumWindows((h,p) => { if (Owner(h) == pid && IsWindowVisible(h) && Class(h) == "#32768") { found = h; return false; } return true; }, IntPtr.Zero); return found; }
-    public static void PressOwnedMenu(IntPtr main, uint pid, IntPtr menu, int x, int y) {
-        if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
-            Owner(menu) != pid || Class(menu) != "#32768" || !IsWindowVisible(menu)) throw new InvalidOperationException("Menu click ownership mismatch");
-        PressClient(menu, pid, x, y);
+    [StructLayout(LayoutKind.Sequential)] struct MenuBar { public uint Size; public Rect Rect; public IntPtr Menu, Window; public uint Focus; }
+    [DllImport("user32.dll")] static extern bool GetMenuBarInfo(IntPtr hwnd, int obj, int item, ref MenuBar info);
+    [DllImport("user32.dll")] static extern int GetMenuItemCount(IntPtr menu);
+    [DllImport("user32.dll")] static extern bool GetMenuItemRect(IntPtr window, IntPtr menu, uint item, out Rect rect);
+    public static Rect FirstMenuItem(IntPtr menu, uint pid, int count) {
+        if (Owner(menu) != pid || Class(menu) != "#32768" || !IsWindowVisible(menu)) throw new InvalidOperationException("Menu item ownership mismatch");
+        var bar = new MenuBar { Size = (uint)Marshal.SizeOf(typeof(MenuBar)) };
+        Rect rect;
+        if (!GetMenuBarInfo(menu, -4, 0, ref bar) || GetMenuItemCount(bar.Menu) != count ||
+            !GetMenuItemRect(IntPtr.Zero, bar.Menu, 0, out rect) || rect.Right <= rect.Left || rect.Bottom <= rect.Top) throw new InvalidOperationException("Native reaction menu geometry unavailable");
+        return rect;
+    }
+    public static void PressOwnedMenu(IntPtr main, uint pid, IntPtr menu, int count) {
+        if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main) throw new InvalidOperationException("Menu click foreground ownership mismatch");
+        var rect = FirstMenuItem(menu, pid, count);
+        var origin = ScreenPoint(menu, 0, 0);
+        PressClient(menu, pid, (rect.Left + rect.Right) / 2 - origin.X, (rect.Top + rect.Bottom) / 2 - origin.Y);
     }
     public static IntPtr Composer(IntPtr main) { IntPtr found = IntPtr.Zero; EnumChildWindows(main, (h,p) => { if (Class(h) == "Edit" && IsWindowVisible(h)) { found = h; return false; } return true; }, IntPtr.Zero); return found; }
     public static long[] Focus(IntPtr main) { uint pid; uint thread = GetWindowThreadProcessId(main, out pid); var info = new Gui(); info.Size = (uint)Marshal.SizeOf(typeof(Gui)); if (!GetGUIThreadInfo(thread, ref info)) throw new InvalidOperationException("GetGUIThreadInfo failed"); return new[] { GetForegroundWindow().ToInt64(), info.Focus.ToInt64() }; }
