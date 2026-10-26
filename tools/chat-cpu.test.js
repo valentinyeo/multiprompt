@@ -22,6 +22,7 @@ function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn known(_: []const u16) bool { return false; }\npub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn paintRun(_: anytype, _: []const u16, _: usize, _: i32, _: i32, _: i32) void {}\n');
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, ('const chat_hit = @import("chat_hit.zig");\nvar g_chat_find_open = false;\n' + lineHeightPolicy + '\n' + code).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
@@ -334,6 +335,7 @@ fn customColorOr(_: []const u8, value: u32) u32 { return value; }
 fn RGB(_: u8, _: u8, _: u8) u32 { return 0; }
 fn chatLinkFont(_: bool) HANDLE { return 1; }
 fn chatCodeTokenColor(_: chat_code.Kind) u32 { return 0; }
+fn chatUserBubbleColor() u32 { return 0; }
 fn chatPaintSelectionRun(_: HANDLE, _: []const u16, _: usize, _: i32, _: i32, _: i32) void { selection_runs += 1; }
 `;
 const flowChecks = `
