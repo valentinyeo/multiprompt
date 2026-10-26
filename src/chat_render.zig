@@ -5930,7 +5930,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     }
     const frame_w = 1200;
     const frame_h = 900;
-    const main = w.CreateWindowExW(0, L("STATIC"), L("float proof"), 0, 0, 0, frame_w, frame_h, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    const main = w.CreateWindowExW(0, L("STATIC"), L("float proof"), w.WS_POPUP, 0, 0, frame_w, frame_h, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyWindow(main);
     app_state.g_main_hwnd = main;
     app_state.g_chat_active = true;
@@ -5959,7 +5959,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     const win_w = window.right - window.left;
     const win_h = window.bottom - window.top;
     try std.testing.expectEqual(layout.composer_card.bottom, window.bottom);
-    const transcript = w.CreateWindowExW(0, L("STATIC"), L("float proof transcript"), 0, window.left, window.top, win_w, win_h, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
+    const transcript = w.CreateWindowExW(0, L("STATIC"), L("float proof transcript"), w.WS_POPUP, window.left, window.top, win_w, win_h, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyWindow(transcript);
     app_state.g_chat_transcript_hwnd = transcript;
     floatProofPrepare(layout);
@@ -6022,6 +6022,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     defer _ = SelectObject(layer_dc, old_layer);
 
     const bg = themeConsoleBg();
+    @import("chat_composer.zig").refreshChatBrushes();
     const fill = app_state.g_chat_input_color;
     const Position = enum { middle, top, bottom };
     const straddle = app_state.g_chat_layout_rects[block_count / 2];
