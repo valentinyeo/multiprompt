@@ -130,5 +130,16 @@ public static class ChatDeliveryDesktop {
         inputs[1].Data.Mouse.Flags = 4;
         if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Transcript click input failed");
     }
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScan(char character);
+    public static void Character(char character) {
+        short mapped = VkKeyScan(character);
+        if (mapped == -1) throw new InvalidOperationException("Character has no keyboard mapping");
+        var keys = new System.Collections.Generic.List<int>();
+        if ((mapped & 0x100) != 0) keys.Add(0x10);
+        if ((mapped & 0x200) != 0) keys.Add(0x11);
+        if ((mapped & 0x400) != 0) keys.Add(0x12);
+        keys.Add(mapped & 0xff);
+        Chord(keys.ToArray());
+    }
     public static void Type(ushort key) { Chord(new[] { (int)key }); }
 }

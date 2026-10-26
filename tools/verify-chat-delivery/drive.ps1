@@ -227,7 +227,7 @@ function Type-Composer([string]$Text) {
     $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='type composer text'; text=$Text})
     foreach ($letter in $Text.ToCharArray()) {
         Doctor $true
-        [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter))
+        [ChatDeliveryDesktop]::Character($letter)
         Start-Sleep -Milliseconds 30
     }
 }
@@ -404,6 +404,7 @@ foreach ($plan in $plans) {
         Doctor $true
         if ($Feature -eq 'chat-skills') {
             Type-Composer '/verify-'
+            if ([ChatDeliveryDesktop]::Text($composer) -cne '/verify-') { throw 'Skill fixture did not type the slash and hyphen' }
             [void](Wait-For 'initial skill fetch applied' { (Read-Shared "$settings/debug.log") -match 'chat-ac: fetched host=0 bytes=[1-9]' } 20)
             Press @(0x09) 'Tab: accept existing skill' $true
             [void](Wait-For 'existing skill accepted' { [ChatDeliveryDesktop]::Text($composer) -ceq '/verify-zebra ' } 5)
