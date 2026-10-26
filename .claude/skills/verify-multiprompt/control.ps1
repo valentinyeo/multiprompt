@@ -2600,6 +2600,31 @@ try {
     $env:IGSH_246 = '0'
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
+    if ($Feature -eq 'chat-switch-speed') {
+        $remoteState = Join-Path $scratch 'remote-state'
+        New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
+        $remoteNames = @(1..5 | ForEach-Object { "verify-agent-$_" })
+        $remotePanes = [ordered]@{}
+        $remoteSids = [ordered]@{}
+        for ($i = 0; $i -lt $remoteNames.Count; $i++) {
+            $remotePanes[$remoteNames[$i]] = 4300 + $i
+            $remoteSids[$remoteNames[$i]] = ('a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $i)
+        }
+        $remoteDocument = [ordered]@{ name = 'chat-switch-speed'; fake = $true; mode = 'idle'; suggestion = 'Try asking about the next step'; sessions = $remoteNames; panes = $remotePanes; sids = $remoteSids; home = (Join-Path $scratch 'profile'); procRoot = ([IO.Path]::GetPathRoot($scratch) + 'proc') }
+        [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
+        $env:MP_VERIFY_BOUNDARY = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/boundary.py')).Path
+        $env:MP_VERIFY_STATE = $remoteState
+        $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
+        & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 400
+        if ($LASTEXITCODE -ne 0) { throw 'Remote transcript seeding failed' }
+        $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
+        $remoteSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = $remoteTabs } -Depth 6
+        [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
+        Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
+        $result.seedBoundary = 'The harness writes the saved-tab file once before the first launch: five tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.'
+    }
     if ($Feature -eq 'tab-names') {
         $seedFolder = Join-Path $scratch 'GitHub'
         New-Item -ItemType Directory -Force -Path $seedFolder, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -5713,9 +5738,7 @@ try {
             $shellIds = @()
             $probeStarted = $false
             try {
-                Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -eq 'cmd' } 'one initial CMD for chat switch timing'
-                $workspace = (Read-Session).active_workspace
-                Wait-WorkspaceSurface $workspace 0 $false
+                Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq $sessionCount -and @($state.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -eq $sessionCount } 'five seeded remote sessions restored'
                 $gapCase.phase = 'idle-close-fixture'
                 Focus-Palette 'browser auto suspend' 6240
                 Press @(0x0D) 'Enter: disable timed browser closing while measuring'
@@ -5732,23 +5755,13 @@ try {
                 } 'manual tab order saved before creating sessions'
                 for ($tab = 0; $tab -lt $sessionCount; $tab++) {
                     $gapCase.phase = "session-setup-$tab"
-                    if ($tab -gt 0) {
-                        Palette 'new cmd'
-                        Press @(0x0D) "Enter: create CMD session $tab"
-                        Wait-Until { $state = Read-Session; @($state.tabs).Count -eq ($tab + 1) -and $state.active_tab -eq $tab -and $state.tabs[$tab].kind -eq 'cmd' } "CMD session $tab saved and selected"
-                        if (Test-TabChat (Read-Session).tabs[$tab]) {
-                            Press @(0x12, 0x43) "Alt+C: show the shell of session $tab before filling it"
-                            Wait-Until { -not (Test-TabChat (Read-Session).tabs[$tab]) } "session $tab in shell view"
-                        }
-                    }
-                    Wait-WorkspaceSurface $workspace $tab $false
-                    $marker = Join-Path $scratch "fill-$tab.txt"
-                    Type-Text ('cmd /c "for /L %i in (1,1,3000) do @echo session-' + $tab + ' history line %i with enough words to wrap across the chat width like a real long assistant answer does" && echo done>"' + $marker + '"')
-                    Press @(0x0D) "Enter: print 3000 history lines in session $tab"
-                    Wait-Until { Test-Path $marker } "session $tab console output complete"
+                    Press @(0x11, (0x31 + $tab)) "Ctrl+$($tab + 1): select remote session $tab"
+                    Wait-Until { $state = Read-Session; $state.active_tab -eq $tab } "remote session $tab selected" 30
                     Press @(0x12, 0x43) "Alt+C: open Chat View for session $tab"
-                    Wait-Until { Test-TabChat (Read-Session).tabs[$tab] } "Chat View saved for session $tab"
-                    $shellIds += (Read-Session).tabs[$tab].shell_id
+                    Wait-Until { Test-TabChat (Read-Session).tabs[$tab] } "Chat View saved for session $tab" 30
+                    $shownId = (Read-Session).tabs[$tab].shell_id
+                    Wait-Until { ((Get-Content $log -Raw) -join '') -match ('\[switch\] chat content shown shell=' + $shownId + ' blocks=[1-9]') } "seeded transcript shown for session $tab" 60
+                    $shellIds += $shownId
                 }
                 $state = Read-Session
                 if (@($state.tabs).Count -ne $sessionCount -or @($state.tabs | Where-Object { -not (Test-TabChat $_) }).Count -ne 0) { throw 'Not every session is in Chat View' }

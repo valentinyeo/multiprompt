@@ -264,6 +264,51 @@ def fake_init():
     return 0
 
 
+def session_names():
+    return state().get("sessions") or ["verify-agent"]
+
+
+def seed_event(handle, sid, kind, **fields):
+    row = dict(type=kind, timestamp=fake_stamp(), sessionId=sid, uuid=str(uuid.uuid4()), isSidechain=False)
+    row.update(fields)
+    handle.write((json.dumps(row, ensure_ascii=True) + "\n").encode("utf-8"))
+
+
+SEED_PARAGRAPH = "This paragraph stands in for a long assistant answer with enough words to wrap across several lines of the chat column, so every message needs real text layout work when the transcript is shown. "
+
+
+def fake_seed_many(rounds):
+    value = state()
+    home = Path(value["home"])
+    for index, name in enumerate(value["sessions"]):
+        pid = value["panes"][name]
+        sid = value["sids"][name]
+        cwd = f"C:/verify/work{index}"
+        transcript = home / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", cwd) / f"{sid}.jsonl"
+        meta = home / ".claude" / "sessions" / f"{pid}.json"
+        process = Path(value["procRoot"]) / str(pid)
+        for target in (transcript, meta):
+            target.parent.mkdir(parents=True, exist_ok=True)
+        meta.write_text(json.dumps(dict(sessionId=sid, cwd=cwd, pid=pid)), encoding="utf-8")
+        process.mkdir(parents=True, exist_ok=True)
+        (process / "stat").write_text(f"{pid} (claude) S 1 {pid} {pid} 0 -1", encoding="utf-8")
+        (process / "cmdline").write_bytes(b"claude\0")
+        with open(transcript, "wb") as output:
+            for r in range(rounds):
+                seed_event(output, sid, "user", message=dict(role="user", content=f"Session {index} question {r}: please explain the next step in detail and show the checks to run."))
+                body = f"Session {index} answer {r}\n\n" + (SEED_PARAGRAPH * 3 + "\n\n") * 3
+                body += "- first point with some explanatory words\n- second point with some explanatory words\n- third point with some explanatory words\n\n"
+                body += "```python\n" + "".join(f"value_{k} = compute({k}, {r})\n" for k in range(8)) + "```\n"
+                if r % 10 == 0:
+                    body += "\n| name | value |\n| --- | --- |\n" + "".join(f"| row {k} | {k * r} |\n" for k in range(5))
+                seed_event(output, sid, "assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=body)]))
+                identity = f"seed-{index}-{r}"
+                seed_event(output, sid, "assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo seeded"))]))
+                seed_event(output, sid, "user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="seeded tool output " * 100, is_error=False)]))
+    fake_write(dict(mode="idle", box="", queue=[], suggestion=value["suggestion"]))
+    return 0
+
+
 def shell():
     op = ARGS[0] if ARGS else ""
     if op == "resume" and len(ARGS) == 2:
@@ -279,6 +324,8 @@ def shell():
         return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append([question, answer]) is None) else 3
     if op == "init":
         return fake_init()
+    if op == "seed-many" and len(ARGS) == 2:
+        return fake_seed_many(int(ARGS[1]))
     if op == "messages" and len(ARGS) == 2:
         for i in range(int(ARGS[1])):
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="New message " + str(i) + "\n" + "Readable transcript paragraph with enough text to paint a full message row.\n\n" * 32)]))
@@ -536,7 +583,13 @@ def tmux():
         return 0
     if ARGS[:1] == ["list-panes"]:
         if fake:
-            sys.stdout.write(str(state()["panePid"]) + "\n")
+            panes = state().get("panes")
+            if panes:
+                target = ARGS[ARGS.index("-t") + 1].lstrip("=") if "-t" in ARGS else ""
+                if target in panes:
+                    sys.stdout.write(str(panes[target]) + "\n")
+            else:
+                sys.stdout.write(str(state()["panePid"]) + "\n")
         return 0
     record("unsupported.jsonl", argv=ARGS)
     return 95
@@ -637,14 +690,16 @@ def ssh():
             return subprocess.call([sys.executable, *remote[1:]], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer, stderr=error, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
     if "tmux list-clients" in command:
         record("invocations.jsonl", kind="probe", operation="list-clients/list-sessions")
-        print("verify-agent\n@@S verify-agent\n@@LS_OK@@\n@@MP_LIVE@@")
+        names = session_names()
+        print("\n".join(names) + "\n" + "".join(f"@@S {name}\n" for name in names) + "@@LS_OK@@\n@@MP_LIVE@@")
         return 0
     if "tmux list-sessions" in command:
         record("invocations.jsonl", kind="list", operation="list-sessions")
-        print("verify-agent\t1\t1")
+        for name in session_names():
+            print(name + "\t1\t1")
         return 0
     match = re.search(r"tmux attach -t ['\"]?([A-Za-z0-9._:-]+)", command)
-    if match and match[1] == "verify-agent":
+    if match and match[1] in session_names():
         record("invocations.jsonl", kind="attach", session=match[1])
         (attach_fake if state().get("fake") else attach)(match[1])
         return 0
