@@ -123,7 +123,7 @@ test("sidebar VPS card explains pressure as percentages with explicit Critical b
   assert.match(carousel, /paintSidebarAiPaceCard/);
 
   const paint = functionBody("paintSidebar", "clampSearchSelectionAndScroll");
-  const newTab = paint.indexOf('L("+ New tab")');
+  const newTab = paint.indexOf('L("+"), -1, &btn_rc');
   const sticky = paint.indexOf("paintSidebarStickyStatusCard");
   assert.ok(newTab >= 0 && sticky > newTab, "sticky card must cover scrolling New Tab content");
 
