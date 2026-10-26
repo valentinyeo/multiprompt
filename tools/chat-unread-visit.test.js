@@ -47,9 +47,9 @@ const app_state = struct {
   var g_chat_layout_reuse: usize = 0;
   var g_chat_layout_dirty = false;
   var g_chat_new_messages: chat_history.NewMessages = .{};
-  var g_chat_blocks = [_]Block{.{ .message_id = 11 }, .{ .message_id = 22 }, .{ .message_id = 22, .first = false }, .{ .message_id = 33 }};
+  var g_chat_blocks = [_]Block{.{ .message_id = 11 }, .{ .message_id = 22 }, .{ .message_id = 22, .first = false }, .{ .message_id = 33 }, .{ .message_id = 44 }};
   var g_chat_block_count: usize = 4;
-  var g_chat_layout_rects = [_]RECT{ .{}, .{}, .{}, .{} };
+  var g_chat_layout_rects = [_]RECT{ .{}, .{}, .{}, .{}, .{} };
 };
 ${between(session, 'pub fn chatReadBoundary()', 'pub fn chatDeferTranscriptLoad()')}
 fn openTab() void {
@@ -78,6 +78,23 @@ test "divider stays at first unread after reading and clears on all-read revisit
   leaveTab();
   openTab();
   try std.testing.expectEqual(@as(?usize, null), chatReadBoundary().index);
+  app_state.g_chat_block_count = 5;
+  try std.testing.expectEqual(@as(?usize, null), chatReadBoundary().index);
+}
+test "background visit retains unread arrivals until a complete foreground read" {
+  app_state.shells[0].last_read_message_id = 33;
+  app_state.g_chat_read_visit_marker = 0;
+  app_state.g_chat_block_count = 4;
+  app_state.g_chat_read_open_ready = true;
+  app_state.g_chat_read_hold = false;
+  chatReadDeactivate();
+  try std.testing.expectEqual(@as(u64, 33), app_state.g_chat_read_visit_marker);
+  try std.testing.expect(!app_state.g_chat_read_open_ready);
+  app_state.g_chat_block_count = 5;
+  try std.testing.expect(!chatReadMark(true));
+  try std.testing.expectEqual(@as(u64, 33), app_state.shells[0].last_read_message_id);
+  app_state.g_chat_read_open_ready = true;
+  try std.testing.expectEqual(@as(?usize, 4), chatReadBoundary().index);
 }
 test "count tracks arrivals above bottom, not repaint or reaching bottom" {
   var count: chat_history.NewMessages = .{};
