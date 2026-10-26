@@ -7,6 +7,7 @@
 - `steer-chord`: Ctrl+X then Ctrl+S submits the composer text, then the channel sends the native `C-x C-s` after the text and Enter.
 - `wrapped-leftover`: the remote prompt box already holds an earlier long single-line message that wraps into three screen rows plus a trailing line break (its Enter became a newline). Sending a new message must submit exactly the typed text once, never the first leftover row glued in front of it (IGSH-608).
 - `queue-draft-sync` (IGSH-682): with a busy fake Claude, one message queued from the shell and one from Chat View must appear in both views in order, survive an edit, and be marked sent in both once Claude takes them; a draft typed in Chat View must appear in the shell input box, while text that lands in the shell input box from another agent (IGSH-930) must never fill the Chat View composer, empty or holding a human draft. This case is expected to fail until the feature exists.
+- `send-stays-gone` (IGSH-960): with a busy fake Claude, the driver types 20 messages into the real Chat View composer, every fourth one long enough to wrap across several rows, waits a different time after the last key (0 to 1.5 seconds) so the composer-to-shell draft push can still be in flight, and presses Enter. After each send it watches the composer and every file in the profile `drafts` folder for 10 seconds (a file with text in it is what shows the sidebar DRAFT badge). The case passes only if the composer stays empty, no draft file holds text, and no sent text is dropped (each one reached Claude's queue or is still pending in the Chat View outbox).
 
 ## How to get to it (user POV)
 
@@ -52,6 +53,10 @@ Ordered steps, all recorded in `observation.json` and re-derived by `check-evide
 Expected result on current master: `chat-view-read-transcript`, the shell steps and the clean-up steps pass; `chat-lists-shell-queued`, `chat-lists-both-in-order`, `chat-lists-edited-in-order`, `chat-marks-both-sent`, `composer-ignores-agent-paste` and `shell-box-shows-chat-draft` fail. `node --test tools/verify-chat-delivery.test.js` runs the stand-in as a real Linux process, checks the evidence oracle on a green tree and on a master-like tree, and never starts the app.
 
 For long second-host session and workspace timing, run the [remote switch performance journey](../diagnostics/remote-switch-speed.md). It uses this SSH boundary with an alternate remote home and copies all 2,000 messages before measuring.
+
+### send-stays-gone (IGSH-960)
+
+It reuses the stand-in and transcript set-up of `queue-draft-sync`. Per message the driver types, presses Enter, then runs the gating step `send-stays-gone` (10 seconds of 250 ms samples of the composer text and the draft files). It also records as data, not as a gate, whether the fake Claude queue ended with the sent text (`reached`) and, after every fourth message, whether the fake took the queue (`tookQueue`); the fake then goes busy again so the Chat View queue list never exceeds its 16 rows. At the end the step `outbox-snapshot` saves the Chat View outbox. `check-evidence.js` re-derives the 20 texts and 20 real Enter presses from the raw files and fails if any text is neither an `enqueue` event of the fake Claude nor still pending in the saved outbox, so a build that silently throws text away cannot pass. Delivery speed and order are not judged here (IGSH-969). To prove the case can fail, run it against a build from before IGSH-930, where shell text pulled back into the box on every poll.
 
 ## Gotchas
 

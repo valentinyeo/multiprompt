@@ -29,7 +29,8 @@ $plans = @(
     @{name='idle-suggestion'; mode='idle'; text='idle delivery beta'},
     @{name='steer-chord'; mode='busy'; text='steer delivery gamma'},
     @{name='wrapped-leftover'; mode='busy'; text='wrapped delivery delta'; leftover='earlier long message about the weekly plan that keeps wrapping across rows'}
-    @{name='queue-draft-sync'; mode='busy'; text='chat queued beta'}
+    @{name='queue-draft-sync'; mode='busy'; text='chat queued beta'},
+    @{name='send-stays-gone'; mode='busy'; text='send stays gone'}
 )
 if ($Feature -eq 'chat-messages-only') { $plans = @(@{name='messages-only'; mode='idle'; text='composer stays usable'}) }
 if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='busy'; text='all session messages'}) }
@@ -420,10 +421,11 @@ foreach ($plan in $plans) {
     $isSwitch = $plan.name -eq 'remote-switch'
     $isRemote = $plan.name -eq 'remote-sync' -or $isSwitch
     $isQueue = $plan.name -eq 'queue-draft-sync'
+    $isSendStays = $plan.name -eq 'send-stays-gone'
     $isActivity = $plan.name -eq 'messages-only'
     $isHistory = $plan.name -eq 'full-history'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
-    $hasTranscript = $isAccepted -or $isQueue -or $isActivity -or $isHistory -or $isSending -or $isRemote
+    $hasTranscript = $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -871,6 +873,57 @@ foreach ($plan in $plans) {
             }
             $observation.frames = $frames.ToArray()
             $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
+            $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        } elseif ($isSendStays) {
+            [void](Step 'chat-view-read-transcript' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)
+            $observation.sends = [Collections.Generic.List[object]]::new()
+            $draftsBlank = {
+                $left = @(Get-ChildItem "$settings/drafts" -Filter '*.txt' -ErrorAction SilentlyContinue | Where-Object { (Read-Shared $_.FullName).Trim().Length -gt 0 })
+                $left.Count -eq 0
+            }
+            [void](Step 'drafts-blank-before-sends' { (([ChatDeliveryDesktop]::Text($composer)) -ceq '') -and (& $draftsBlank) } 10)
+            $gaps = @(0, 300, 500, 600, 900, 1500)
+            foreach ($n in 1..20) {
+                $text = if ($n % 4 -eq 0) { "send $n long message about the weekly plan that keeps wrapping across several rows of the composer box until the whole text needs more than one line" } else { "send $n short note" }
+                Type-Composer $text
+                Start-Sleep -Milliseconds $gaps[($n - 1) % $gaps.Count]
+                if ($n -eq 1) { Shot "$($plan.name)-action"; $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
+                Press @(0x0D) 'Enter: send composer' $true
+                $reached = $false
+                $deliveryWatch = [Diagnostics.Stopwatch]::StartNew()
+                while (-not $reached -and $deliveryWatch.Elapsed.TotalSeconds -lt 10) {
+                    $reached = ((@((Fake-State).queue) | Select-Object -Last 1) -ceq $text)
+                    if (-not $reached) { Start-Sleep -Milliseconds 200 }
+                }
+                $back = $null
+                $watch = [Diagnostics.Stopwatch]::StartNew()
+                while ($watch.Elapsed.TotalSeconds -lt 10) {
+                    $now = [ChatDeliveryDesktop]::Text($composer)
+                    if ($now -cne '') { $back = @{kind='composer'; text=$now; atMs=[int]$watch.ElapsedMilliseconds}; break }
+                    if (-not (& $draftsBlank)) { $back = @{kind='draft-file'; atMs=[int]$watch.ElapsedMilliseconds}; break }
+                    Start-Sleep -Milliseconds 250
+                }
+                [void](Step 'send-stays-gone' { $null -eq $back } 1)
+                $sendRecord = @{n=$n; text=$text; reached=$reached; reappeared=$back; tookQueue=$null}
+                $observation.sends.Add($sendRecord)
+                if ($n % 4 -eq 0) {
+                    Shell-Input 'idle'
+                    $tookWatch = [Diagnostics.Stopwatch]::StartNew()
+                    $took = $false
+                    while (-not $took -and $tookWatch.Elapsed.TotalSeconds -lt 5) {
+                        $f = Fake-State
+                        $took = (@($f.queue).Count -eq 0) -and ($f.box -ceq '')
+                        if (-not $took) { Start-Sleep -Milliseconds 200 }
+                    }
+                    $sendRecord.tookQueue = $took
+                    Shell-Input 'busy'
+                }
+            }
+            [void](Step 'outbox-snapshot' {
+                if (Test-Path "$settings/chat-outbox.json") { Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-final.json" -Force } else { Set-Content -LiteralPath "$caseDir/outbox-final.json" -Value '{"queues":[]}' }
+                Test-Path "$caseDir/outbox-final.json"
+            } 5)
+            Shot "$($plan.name)-done"
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isQueue) {
             $t = $queueTexts

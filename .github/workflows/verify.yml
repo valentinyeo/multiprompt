@@ -560,7 +560,7 @@ jobs:
             $failure = @{ feature = $env:FEATURE; status = 'failed'; error = 'Workflow failed before the harness produced a result; inspect the job log'; cleanup = 'Harness result unavailable; disposable runner teardown is the final cleanup boundary' }
             if ($env:FEATURE -eq 'chat-delivery') {
               $failure.agentBoundary = 'stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server'
-              $failure.cases = @('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync') | ForEach-Object { @{name=$_; passed=$false; detail='Workflow failed before journey launch'} }
+              $failure.cases = @('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync', 'send-stays-gone') | ForEach-Object { @{name=$_; passed=$false; detail='Workflow failed before journey launch'} }
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
