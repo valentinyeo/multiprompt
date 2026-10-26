@@ -185,6 +185,20 @@ test('IGSH-893 audit evidence serializes plain lines within five seconds on Wind
     assert.ok(elapsed, result.stdout);
     assert.ok(Number(elapsed[1]) < 5000, result.stdout);
     assert.deepEqual(JSON.parse(result.stdout.split(/SERIALIZATION_MS=\d+\s*/)[1]).audit, lines);
+    const broken = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script.replace(auditRead[1], '@(Get-Content $auditPath)')], {
+      encoding: 'utf8', timeout: 30000, env: { ...process.env, AUDIT_PATH: auditPath },
+    });
+    assert.match(broken.stdout, /AUDIT_READ_READY[^\n]*PSPath/);
+    if (broken.error) {
+      assert.equal(broken.error.code, 'ETIMEDOUT', broken.stderr);
+    } else {
+      assert.equal(broken.status, 0, broken.stderr);
+      const oldElapsed = broken.stdout.match(/SERIALIZATION_MS=(\d+)/);
+      assert.ok(oldElapsed, broken.stdout);
+      const oldAudit = JSON.parse(broken.stdout.split(/SERIALIZATION_MS=\d+\s*/)[1]).audit;
+      assert.ok(Number(oldElapsed[1]) >= 5000 || JSON.stringify(oldAudit) !== JSON.stringify(lines));
+    }
+    console.log('DICTATION_OLD_PROVIDER_METADATA_REJECTED');
     console.log('DICTATION_AUDIT_SERIALIZATION_OK');
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
