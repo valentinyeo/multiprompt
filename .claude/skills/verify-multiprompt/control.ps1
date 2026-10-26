@@ -794,6 +794,7 @@ public static class GroupRailProof {
             var sectionBackground = image.GetPixel(right, sectionTop + sectionHeight / 2);
             int firstInk = -1, inkPixels = 0, mutedPixels = 0, topInk = int.MaxValue, inkColumns = 0;
             var columnTops = new List<int>();
+            var columnXs = new List<int>();
             for (int x = clientLeft + S(4, dpi, scale); x < right - S(8, dpi, scale); x++) {
                 int columnTop = -1;
                 for (int y = sectionTop + 1; y < sectionTop + sectionHeight - 1; y++) {
@@ -807,15 +808,22 @@ public static class GroupRailProof {
                     if (firstInk < 0) firstInk = x;
                     inkColumns++;
                     columnTops.Add(columnTop);
-                    topInk = Math.Min(topInk, columnTop);
+                    columnXs.Add(x);
                 }
             }
             int capColumns = 0;
-            foreach (int columnTop in columnTops) if (columnTop <= topInk + 1) capColumns++;
-            double capRatio = inkColumns == 0 ? 1.0 : (double)capColumns / inkColumns;
+            int textColumns = 0;
+            for (int i = 0; i < columnTops.Count; i++)
+                if (columnXs[i] >= headlineX - 3) topInk = Math.Min(topInk, columnTops[i]);
+            for (int i = 0; i < columnTops.Count; i++) {
+                if (columnXs[i] < headlineX - 3) continue;
+                textColumns++;
+                if (columnTops[i] <= topInk + 1) capColumns++;
+            }
+            double capRatio = textColumns == 0 ? 1.0 : (double)capColumns / textColumns;
             bool present = inkPixels >= 15;
             bool noArrow = present && Math.Abs(firstInk - headlineX) <= Math.Max(3, S(3, dpi, scale));
-            bool mixedCase = present && capRatio < 0.6;
+            bool mixedCase = present && capRatio < 0.5;
             bool mutedInk = mutedPixels >= 8;
             int buttonTop = sectionTop + sectionHeight + 2 * rowHeight + 4;
             var buttonBackground = image.GetPixel(right, buttonTop + buttonHeight / 2);

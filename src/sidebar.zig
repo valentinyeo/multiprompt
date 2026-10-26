@@ -2096,7 +2096,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             _ = SelectObject(hdc, font_subtitle);
             _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(80, 80, 80) else RGB(180, 180, 180)));
             var btn_rc = RECT{ .left = column.left + uiScaled(12), .top = btns_y, .right = column.right - uiScaled(8), .bottom = btns_y + BTN_H };
-            _ = DrawTextW(hdc, L("+"), -1, &btn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            _ = DrawTextW(hdc, L("+"), -1, &btn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | (if (app_state.g_sidebar_collapsed) DT_CENTER else 0));
             _ = SelectObject(hdc, font_title);
 
             if (app_state.g_unread_only and !app_state.g_sidebar_collapsed) {
