@@ -4697,12 +4697,15 @@ fn ensureBrowserEdgeMaskWindows() void {
 }
 
 pub fn hideBrowserEdgeMasks() void {
+    browserTraceN("mask hide entered, foreground ours=", @intFromBool(foregroundIsOurs()));
     app_state.g_browser_edge_mask_raise_ticks = 0;
     if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_BROWSER_EDGE_MASK_RAISE);
     for (0..BROWSER_EDGE_MASK_COUNT) |i| {
+        browserTraceN("mask hide index=", @intCast(i));
         app_state.g_browser_edge_mask_shown[i] = false;
         const hw = app_state.g_browser_edge_mask_hwnds[i];
         if (hw != null and IsWindow(hw) != 0) {
+            _ = ShowWindow(hw, SW_HIDE);
             _ = SetWindowPos(hw, null, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
@@ -4724,9 +4727,13 @@ pub fn raiseBrowserEdgeMasksZOrderOnly() void {
         return;
     }
     for (0..BROWSER_EDGE_MASK_COUNT) |i| {
-        if (!app_state.g_browser_edge_mask_shown[i]) continue;
+        if (!app_state.g_browser_edge_mask_shown[i]) {
+            browserTraceN("mask raise cached hidden index=", @intCast(i));
+            continue;
+        }
         const hw = app_state.g_browser_edge_mask_hwnds[i];
         if (hw == null or IsWindow(hw) == 0) continue;
+        if (IsWindowVisible(hw) == 0) browserTraceN("mask raise actual hidden index=", @intCast(i));
         _ = SetWindowPos(hw, null, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOREDRAW);
     }
 }
@@ -4777,6 +4784,8 @@ fn moveBrowserEdgeMask(side: BrowserEdgeMaskSide, x: i32, y: i32, w: i32, h: i32
     const idx: usize = @intFromEnum(side);
     const hw = app_state.g_browser_edge_mask_hwnds[idx];
     if (hw == null or IsWindow(hw) == 0) return;
+    if (IsWindowVisible(hw) == 0) browserTraceN("mask move actual hidden index=", @intCast(idx));
+    if (!app_state.g_browser_edge_mask_shown[idx]) browserTraceN("mask move cached hidden index=", @intCast(idx));
     const prev = app_state.g_browser_edge_mask_rects[idx];
     const same_rect = prev.left == x and prev.top == y and prev.right == w and prev.bottom == h;
     if (browserMaskCorner(side)) |corner| {
