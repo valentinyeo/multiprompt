@@ -60,7 +60,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 60)
 function Shot([string]$Name) {
     if ($Name -eq 'new-messages-visible') {
         [void](Wait-For 'unread badge reaches the screen' {
-            $bounds = [ChatDeliveryDesktop]::TranscriptBounds($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+            $bounds = (Get-TranscriptBounds)
             $probe = [Drawing.Bitmap]::new(60, 100)
             $draw = [Drawing.Graphics]::FromImage($probe)
             try {
@@ -124,6 +124,17 @@ function Read-Shared([string]$Path) {
         $reader = [IO.StreamReader]::new($stream)
         try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
     } finally { $stream.Dispose() }
+}
+function Get-TranscriptBounds {
+    $nativeRect = [ChatDeliveryDesktop]::TranscriptBounds($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+    $frames = [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] frame transcript (-?\d+),(-?\d+),(-?\d+),(-?\d+) edit')
+    if ($frames.Count -eq 0) { throw 'Owned transcript viewport frame is missing' }
+    $g = $frames[$frames.Count - 1].Groups
+    $leftEdge = [ChatDeliveryDesktop]::ScreenPoint($main, [int]$g[1].Value, [int]$g[4].Value)
+    $rightEdge = [ChatDeliveryDesktop]::ScreenPoint($main, [int]$g[3].Value, [int]$g[4].Value)
+    if ($leftEdge.X -ne $nativeRect.Left -or $rightEdge.X -ne $nativeRect.Right -or $leftEdge.Y -le $nativeRect.Top -or $leftEdge.Y -gt $nativeRect.Bottom) { throw 'Owned transcript viewport does not fit its HWND' }
+    $nativeRect.Bottom = $leftEdge.Y
+    return $nativeRect
 }
 function Step([string]$Name, [scriptblock]$Check, [int]$Seconds = 20) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
@@ -209,7 +220,7 @@ function Restart-OwnedApp {
 }
 function Scroll-Transcript([int]$Delta) {
     Doctor
-    $bounds = [ChatDeliveryDesktop]::TranscriptBounds($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+    $bounds = (Get-TranscriptBounds)
     $view = [IntPtr]$views[0].Current.NativeWindowHandle
     $x = [int](($bounds.Left + $bounds.Right) / 2)
     $y = [int](($bounds.Top + $bounds.Bottom) / 2)
@@ -623,7 +634,7 @@ foreach ($plan in $plans) {
             })
             $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
             if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
-            $bounds = [ChatDeliveryDesktop]::TranscriptBounds($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+            $bounds = (Get-TranscriptBounds)
             $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
             Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript' $true
             Copy-Item $cache.FullName "$caseDir/app-cache-before.jsonl"
@@ -646,7 +657,7 @@ foreach ($plan in $plans) {
                         $r = [System.Windows.Automation.AutomationElement]::FromHandle($pair.handle).Current.BoundingRectangle
                         $frame[$pair.key] = @{left=[int]$r.Left; top=[int]$r.Top; width=[int]$r.Width; height=[int]$r.Height}
                     }
-                    $r = [ChatDeliveryDesktop]::TranscriptBounds($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+                    $r = (Get-TranscriptBounds)
                     $frame.transcript = @{left=[int]$r.Left; top=[int]$r.Top; width=[int]$r.Width; height=[int]$r.Height}
                     Shot "layout-$($size.name)"
                     $frames += $frame
@@ -706,7 +717,7 @@ foreach ($plan in $plans) {
             if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
             } else {
                 Bind-Transcript
-                $bounds = [ChatDeliveryDesktop]::TranscriptBounds($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+                $bounds = (Get-TranscriptBounds)
                 $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
             }
             Shell-Input 'busy'
@@ -725,14 +736,14 @@ foreach ($plan in $plans) {
                 $log = Read-Shared "$settings/debug.log"
                 if ($log.Length -le $layoutLogStart) { return $false }
                 $layouts = [regex]::Matches($log.Substring($layoutLogStart), '\[chatfont\] pt=\d+ blocks=\d+ content_h=(\d+)')
-                $layouts.Count -gt 0 -and [int]$layouts[$layouts.Count - 1].Groups[1].Value -gt ([ChatDeliveryDesktop]::TranscriptBounds($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)).Height
+                $layouts.Count -gt 0 -and [int]$layouts[$layouts.Count - 1].Groups[1].Value -gt (Get-TranscriptBounds).Height
             })
             $scrollLogStart = Scroll-Transcript 2400
             [void](Require-NewMessages 0 0 1 'loaded messages do not count' $scrollLogStart)
             $arrivalLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'messages' '2'
             $pill = Require-NewMessages 2 1 1 'two new arrivals while reading' $arrivalLogStart
-            $bounds = [ChatDeliveryDesktop]::TranscriptBounds($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+            $bounds = (Get-TranscriptBounds)
             $pillOrigin = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.left, $pill.top)
             $pillEnd = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.right, $pill.bottom)
             if ($pill.bottom -le $pill.top -or $pill.left -ge $pill.right -or $pillOrigin.Y -lt $bounds.Bottom -or [math]::Abs(($pillOrigin.X + $pillEnd.X) / 2 - ($bounds.Left + $bounds.Right) / 2) -gt 2) { throw 'New-message pill overlaps the transcript or is not centered' }
@@ -788,7 +799,7 @@ foreach ($plan in $plans) {
             [void](Wait-For 'resynced app cache contains first unread source ID' { (Read-Shared $cache.FullName).Contains($firstUnreadId) })
             Copy-Item $cache.FullName "$caseDir/app-cache-reopened.jsonl"
             Copy-Item "$settings/session.json" "$caseDir/session-reopened.json"
-            $bounds = [ChatDeliveryDesktop]::TranscriptBounds($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+            $bounds = (Get-TranscriptBounds)
             $dividerProof = @{marker=$savedMarker; readId=$readId; firstUnreadId=$firstUnreadId; unreadOffset=$unreadOffset; reopened=$divider; transcript=@{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}}
             Shot 'reopened-newest'
             $pinLogStart = (Read-Shared "$settings/debug.log").Length
@@ -1028,7 +1039,7 @@ foreach ($plan in $plans) {
                 $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
                 $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
                 if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
-                $bounds = [ChatDeliveryDesktop]::TranscriptBounds($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle)
+                $bounds = (Get-TranscriptBounds)
                 $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
                 Start-Sleep -Milliseconds 200
                 Shot 'sending-immediate'
