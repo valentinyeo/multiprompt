@@ -223,7 +223,7 @@ pub fn updateCardDismiss() void {
 pub fn updateCardRelaunch(hwnd: HANDLE) void {
     if (app_state.g_update_relaunching) return;
     var installed_version: [update_check.MAX_VERSION_LEN]u8 = undefined;
-    const installed_ready = if (update_check.scanFileForVersion(&app_state.g_update_path, &installed_version)) |version| update_check.versionNewer(APP_VERSION, version) else false;
+    const installed_ready = if (update_check.scanFileForVersion(&app_state.g_update_path, &installed_version)) |version| update_check.versionNewer(APP_VERSION, version) and !update_check.versionNewer(app_state.g_update_ver[0..app_state.g_update_ver_len], version) else false;
     if (!installed_ready and !update_release.hasStaged() and update_release.checking()) {
         restart_after_download = true;
         restart_status = "Downloading update. Restart will follow.";

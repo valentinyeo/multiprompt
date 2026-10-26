@@ -10,6 +10,7 @@ function verify(text) {
   const action = text.slice(start, text.indexOf('\nfn lightenColor', start));
   assert.match(action, /const installed_ready =/);
   assert.match(action, /versionNewer\(APP_VERSION, version\)/);
+  assert.match(action, /!update_check\.versionNewer\(app_state\.g_update_ver\[0\.\.app_state\.g_update_ver_len\], version\)/);
   assert.match(action, /!installed_ready and !update_release\.hasStaged\(\) and update_release\.checking\(\)/);
   assert.match(action, /if \(installed_ready\) update_check\.spawnRelaunchHelper/);
   assert.match(action, /restart_status = "Downloading update\. Restart will follow\."/);
