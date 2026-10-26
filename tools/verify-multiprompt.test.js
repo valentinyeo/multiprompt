@@ -94,6 +94,13 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
   assert.throws(() => evaluate("'a' 'b'"), assert.AssertionError);
 });
 
+test('release tags reuse master verification instead of starting another full Windows matrix', () => {
+  const push = workflow.match(/^  push:\r?\n((?:    [^\n]*\r?\n)+)/m);
+  assert.ok(push, 'master pushes still trigger full verification');
+  assert.match(push[1], /^    branches: \[master\]\r?$/m);
+  assert.doesNotMatch(push[1], /^    tags(?:-ignore)?:/m, 'release tags must not duplicate the tested master matrix');
+});
+
 test('concurrency isolates dispatch features and tags while preserving pull_request and push groups', () => {
   const concurrency = workflow.match(/^concurrency:\r?\n((?:[ \t]+[^\n]*\r?\n)+)/m);
   assert.ok(concurrency, 'workflow concurrency block exists');
