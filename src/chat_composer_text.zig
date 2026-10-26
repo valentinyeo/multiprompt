@@ -81,6 +81,19 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE, foreground: u32, background: u32) boo
         }
         if (origin.y + metric.cy > clip.top and @max(right, origin.x) > clip.left and @min(origin.x, right) < clip.right) {
             if (i > begin and !dwrite.drawPositioned(dc, text[begin..i], advances[begin..i], origin.x, origin.y, clip, foreground)) return false;
+            var cursor: usize = 0;
+            while (@import("chat_skill.zig").next(text[0..n], cursor)) |skill| {
+                cursor = skill.end;
+                const lo = @max(begin, skill.start);
+                const hi = @min(i, skill.end);
+                if (hi <= lo) continue;
+                const left = position(hwnd, lo) orelse continue;
+                const after = position(hwnd, hi);
+                const edge = if (after != null and after.?.y == origin.y) after.?.x else right;
+                const rect = w.RECT{ .left = left.x, .top = origin.y, .right = edge, .bottom = origin.y + metric.cy };
+                const accent = @import("chat_skill.zig").paint(dc, rect, background);
+                if (!dwrite.drawPositioned(dc, text[lo..hi], advances[lo..hi], left.x, origin.y, clip, accent)) return false;
+            }
             if (selected and end > begin and start < i + @as(usize, @intFromBool(i < n and text[i] == '\t'))) {
                 const selected_start: usize = @max(start, begin);
                 const selected_end: usize = @min(end, i + @as(usize, @intFromBool(i < n and text[i] == '\t')));

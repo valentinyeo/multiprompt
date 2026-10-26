@@ -12,6 +12,24 @@ fn space(c: u16) bool {
     return c == ' ' or c == '\t' or c == '\r' or c == '\n';
 }
 
+pub fn commandMatches(token: []const u16, name: []const u8, prefix: u16) bool {
+    if (token.len < 2 or token[0] != prefix) return false;
+    var wide: [256]u16 = undefined;
+    const n = std.unicode.utf8ToUtf16Le(&wide, name) catch return false;
+    return std.mem.eql(u16, token[1..], wide[0..n]);
+}
+
+test "IGSH-928 only complete known command names match with their trigger" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    try std.testing.expect(commandMatches(w("/overnight-update"), "overnight-update", '/'));
+    try std.testing.expect(commandMatches(w("/plugin:review"), "plugin:review", '/'));
+    try std.testing.expect(commandMatches(w("$review"), "review", '$'));
+    try std.testing.expect(commandMatches(w("/résumé"), "résumé", '/'));
+    for ([_][]const u16{ w("/overnight"), w("/overnight-update/path"), w("/overnight-update!"), w("overnight-update"), w("$overnight-update"), w("/overnight-update more") }) |text| {
+        try std.testing.expect(!commandMatches(text, "overnight-update", '/'));
+    }
+}
+
 pub fn tokenAtCaret(text: []const u16, caret: usize, agent: Agent) ?Token {
     if (agent == .other or caret > text.len) return null;
     var start = caret;
