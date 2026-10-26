@@ -325,6 +325,7 @@ test "IGSH-549 Chat View content stays inside the pane content inset" {
                     try std.testing.expect(!intersects(c.mic_btn, c.stop_btn) or !c.stop_shown);
                     try std.testing.expect(!intersects(c.composer, c.stop_btn) or !c.stop_shown);
                     try std.testing.expect(!intersects(c.composer, c.send_btn) or !c.send_shown);
+                    try std.testing.expect(!(c.send_shown and c.stop_shown));
                 }
             }
         }

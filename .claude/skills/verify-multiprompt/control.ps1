@@ -3675,14 +3675,16 @@ try {
                 if ($empty.size -le 0 -or $stopW -ne $empty.size -or $stopH -ne $empty.size) { throw ('Stop rect is ' + $stopW + 'x' + $stopH + ', expected the ' + $empty.size + ' px send size') }
                 if (-not (& $insideCard $empty.stop $empty.card)) { throw ('Stop rect ' + ($empty.stop -join ',') + ' is outside composer card ' + ($empty.card -join ',')) }
                 if ($null -ne $empty.send) { throw ('Send rect ' + ($empty.send -join ',') + ' is drawn while the composer is empty and the agent is working') }
+                Snapshot 'stop-in-box'
+                Snapshot 'composer-working-empty'
                 Type-Text 'x'
-                Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -ne $typed.stop } 'Send and Stop both drawn after typing while working'
+                Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -eq $typed.stop } 'Send replaces Stop after typing while working'
                 $typed = & $readStopFrame
                 $stopCheck.typed = $typed
-                if (($typed.stop[2] - $typed.stop[0]) -ne $typed.size -or ($typed.stop[3] - $typed.stop[1]) -ne $typed.size) { throw 'Stop changed size after typing' }
-                if ($typed.send[2] -gt $typed.stop[0]) { throw ('Send rect ' + ($typed.send -join ',') + ' is not left of Stop rect ' + ($typed.stop -join ',')) }
-                if (-not (& $insideCard $typed.send $typed.card) -or -not (& $insideCard $typed.stop $typed.card)) { throw 'Send or Stop is outside the composer card after typing' }
-                Snapshot 'stop-in-box'
+                if (($typed.send[2] - $typed.send[0]) -ne $typed.size -or ($typed.send[3] - $typed.send[1]) -ne $typed.size) { throw 'Send changed size after typing' }
+                if (-not (& $insideCard $typed.send $typed.card)) { throw 'Send is outside the composer card after typing' }
+                if (($typed.send -join ',') -ne ($empty.stop -join ',')) { throw ('Send rect ' + ($typed.send -join ',') + ' is not in the slot Stop used: ' + ($empty.stop -join ',')) }
+                Snapshot 'composer-working-text'
                 Snapshot 'grey-buttons'
                 $buttonsCheck = @{ name = 'round-bottom-composer-buttons'; passed = $false; frames = @() }
                 $result.checks += $buttonsCheck
@@ -3695,11 +3697,11 @@ try {
                     }
                     Wait-Until {
                         $frame = & $readStopFrame
-                        $null -ne $frame.mic -and $null -ne $frame.attach -and $null -ne $frame.send -and $null -ne $frame.stop -and
+                        $null -ne $frame.mic -and $null -ne $frame.attach -and $null -ne $frame.send -and $null -eq $frame.stop -and
                         ($lines -eq 1 -or $frame.card[1] -lt $typed.card[1] - 2 * $frame.size)
-                    } 'all four composer buttons painted at the requested draft height'
+                    } 'all three composer buttons painted at the requested draft height'
                     $frame = & $readStopFrame
-                    foreach ($name in @('attach', 'mic', 'send', 'stop')) {
+                    foreach ($name in @('attach', 'mic', 'send')) {
                         $rect = $frame[$name]
                         if ($rect[3] -ne $frame.send[3] -or $rect[1] -ne $frame.send[1] -or
                             ($rect[2] - $rect[0]) -ne $frame.size -or ($rect[3] - $rect[1]) -ne $frame.size) {
@@ -3730,6 +3732,13 @@ try {
                     $stopCheck.receivedBytes = $stopBytes.Length
                     $stopBytes -contains [byte]0x1B
                 } 'Esc reached the working stand-in stdin'
+                $composerHandle = [VerifyNative]::GetFocusedWindow($script:window)
+                $sendFrame = & $readStopFrame
+                if ($null -eq $sendFrame.send -or $null -ne $sendFrame.stop) { throw 'Send is not the only action button before the click' }
+                if ([VerifyNative]::EditText($composerHandle).Length -eq 0) { throw 'Composer draft is empty before the Send click' }
+                [VerifyNative]::ClickClient($script:window, [int](($sendFrame.send[0] + $sendFrame.send[2]) / 2), [int](($sendFrame.send[1] + $sendFrame.send[3]) / 2))
+                Wait-Until { [VerifyNative]::EditText($composerHandle).Length -eq 0 } 'clicking Send took the draft out of the composer'
+                $stopCheck.sendClicked = $true
                 $stopCheck.passed = $true
                 $stopCheck.reason = ''
             } catch {
