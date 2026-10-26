@@ -158,10 +158,10 @@ test('IGSH-812 registration is additive and existing contract checks remain on t
   for (const required of ['Check verification contracts', 'Check workspace focus journey contract', 'Check browser recovery journey contract', 'Validate journey and syntax', 'node tools/check-workspace-focus.mjs', 'node tools/check-browser-pane-stuck.mjs', 'Language.Parser]::ParseFile', 'Build branch executable', 'Launch Doctor Drive Evidence Cleanup', 'Upload durable verification evidence']) assert.ok(workflow.includes(required), required);
   const map = read(skill + 'features/chat-dictation.md');
   assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);
-  for (const item of ['dictation-enter', 'dictation-ctrl-d', 'dictation-mic-click', '1000 ms', 'f94e5952', 'not yet run']) assert.ok(map.includes(item), item);
+  for (const item of ['dictation-enter', 'dictation-ctrl-d', 'dictation-mic-click', '1000 ms', 'f94e5952', 'Windows runtime proof']) assert.ok(map.includes(item), item);
   assert.ok(read(skill + 'features/README.md').includes('](chat-dictation.md)'));
   assert.ok(read(skill + 'SKILL.md').includes('](features/chat-dictation.md)'));
-  assert.match(read(skill + 'coverage.md'), /\| IGSH-812 \|[^\n]*\| chat-dictation \| journey added, not yet run \|/);
+  assert.match(read(skill + 'coverage.md'), /\| IGSH-812 \|[^\n]*\| chat-dictation \| Windows proof recorded/);
 });
 
 test('IGSH-893 audit evidence serializes plain lines within five seconds on Windows PowerShell', { skip: process.platform !== 'win32' }, () => {

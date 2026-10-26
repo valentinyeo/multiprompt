@@ -13,13 +13,19 @@ Open Chat View with Alt+C. Focus the message box and press Ctrl+D. Type while li
 
 ## Driving it with control.ps1
 
-After the owner publishes this patch, run just this journey on GitHub Windows:
+Run this journey on GitHub Windows:
 
 ```sh
-gh workflow run verify.yml --ref ceo/IGSH-812 -f feature=chat-dictation
+gh workflow run verify.yml -f feature=chat-dictation
 ```
 
-Leave `tag` empty: this journey needs the branch's offline boundary and the real branch executable. It is also additive to the PR matrix. Status: **not yet run**; there is no Windows runtime or screenshot proof from this editing session.
+Leave `tag` empty for the offline fixture boundary. Windows runtime proof now exists. Two first-attempt journeys passed on `d7437dd7`: [40263673090](https://github.com/valentinyeo/multiprompt/actions/runs/40263673090) and [40264332073](https://github.com/valentinyeo/multiprompt/actions/runs/40264332073). The ten-run streak remains in progress.
+
+The five-minute step cap leaves time for uploads. Each wait logs its condition and timeout. Launch, Doctor, Drive, Evidence, and Cleanup print progress. Failure uploads retain screenshots and logs.
+
+[Deliberate capture stall](https://github.com/valentinyeo/multiprompt/actions/runs/40262943273) fails after one second. Its message names the missing capture precondition. Screenshots and logs survive; owned processes reach zero.
+
+[Native audit regression](https://github.com/valentinyeo/multiprompt/actions/runs/40262947063) retains 401 complete records under concurrent writers. The original exclusive append fails that same oracle. Records now append atomically without writer exclusion. The reader permits writers and returns plain strings. Deep JSON no longer expands provider metadata.
 
 The normal control.ps1 Launch / Doctor / Drive / Evidence / Cleanup contract applies, including hash/version/PID/HWND checks, SendInput, an isolated profile, disabled updates, offline login, and zero active owned processes after cleanup. The harness chooses Dark through the real palette, opens Chat View, verifies the owned native Edit and transcript HWNDs, and derives the rightmost microphone rectangle from their actual geometry and the window DPI at default UI scale. It never reads private app memory or posts app messages.
 
@@ -39,6 +45,6 @@ The existing `chat_dictation_engine_toggle` unit-test seam replaces the engine a
 
 The checked-in, checksum-pinned CMUSphinx recording is 16 kHz mono signed 16-bit PCM saying “go forward ten meters.” See `tools/fixtures/IGSH-812/README.md`, source revision and bundled license. Capture reads those actual bytes and stays listening until the real user stop changes the production recording flag. The provider boundary requires byte-for-byte matching audio before replaying a hand-authored provider-format response. It feeds the real `parseDeepgramTranscript`, UTF-8 conversion, worker completion message, stable draft-owner routing and native Edit update. Missing/mismatched fixtures fail closed; there is no fallback to live STT, API key, local server, network dependency or secret. This proves app transcription-response handling and delivery, **not acoustic recognition quality, microphone hardware or Deepgram availability**.
 
-Red-run reasoning: pre-feature commit `f94e5952` has neither the Ctrl+D composer route nor the microphone; an identical driver with the fixture boundary supplied would fail start/active-pixel assertions. That commit also predates the boundary, so an unmodified build would fail capture readiness first, not constitute an isolated feature red run. No red run is claimed. Removing Enter/second-Ctrl+D/click stop routing leaves the exact-text deadline unmet; deferred insertion or dropped/misrouted text fails exact WM_GETTEXT within 1000 ms; blocking typing fails the listening-time marker assertion; a stuck/unchanged mic fails the independent pixel checks. `tools/chat-dictation.test.js` includes source-contract mutation controls and fixture integrity checks, executed by GitHub's existing Check verification contracts step, not on the VPS.
+Red-run reasoning: pre-feature commit `f94e5952` has neither the Ctrl+D composer route nor the microphone; an identical driver with the fixture boundary supplied would fail start/active-pixel assertions. That commit also predates the boundary, so an unmodified build would fail capture readiness first, not constitute an isolated feature red run. That pre-feature control remains unclaimed. The audit regressions above use real pre-fix readers and writers. Removing Enter/second-Ctrl+D/click stop routing leaves the exact-text deadline unmet; deferred insertion or dropped/misrouted text fails exact WM_GETTEXT within 1000 ms; blocking typing fails the listening-time marker assertion; a stuck/unchanged mic fails the independent pixel checks. `tools/chat-dictation.test.js` includes source-contract mutation controls and fixture integrity checks, executed by GitHub's existing Check verification contracts step, not on the VPS.
 
 The existing Check workspace focus journey contract remains unchanged. Check browser recovery journey contract enforces exact feature-map / ValidateSet equality and an implementation for every map, including this one. Validate journey and syntax accepts this stem, rejects release tags and parses the complete driver. Existing journeys and contract assertions are not removed or weakened.
