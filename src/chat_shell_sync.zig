@@ -186,7 +186,7 @@ pub const Draft = struct {
 
     pub fn onShell(self: *Draft, shell_id: u32, shell: []const u16, composer: []const u16, focused: bool, now: u64) Pull {
         var pull = self.decide(shell_id, shell, composer, focused, now);
-        if (pull == .apply and now >= self.pull_until_ms) pull = .none;
+        if (pull == .apply and !isBlankDraft(shell) and now >= self.pull_until_ms) pull = .none;
         const hash = draftHash(shell);
         self.foreign = pull == .none and !isBlankDraft(shell) and hash != self.synced_hash and hash != draftHash(composer);
         return pull;
@@ -435,6 +435,15 @@ test "IGSH-930 the shell draft is pulled only after Edit Queued Messages arms it
     try std.testing.expectEqual(Pull.apply, draft.onShell(1, w("queued one"), w(""), false, 2500));
     draft.applied(w("queued one"));
     try std.testing.expectEqual(Pull.none, draft.onShell(1, w("agent paste"), w("queued one"), false, 2000 + PULL_ARM_MS));
+}
+
+test "a cleared shell box clears the composer even after the Edit Queued window is over" {
+    var draft: Draft = .{};
+    _ = draft.onShell(1, w(""), w(""), false, 1000);
+    draft.armPull(2000);
+    try std.testing.expectEqual(Pull.apply, draft.onShell(1, w("queued one"), w(""), false, 2500));
+    draft.applied(w("queued one"));
+    try std.testing.expectEqual(Pull.apply, draft.onShell(1, w(""), w("queued one"), false, 2000 + PULL_ARM_MS + 5000));
 }
 
 test "a shell draft fills an empty unfocused composer and a cleared shell box clears it" {
