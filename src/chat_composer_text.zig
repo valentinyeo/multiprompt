@@ -81,8 +81,11 @@ pub fn paint(hwnd: w.HANDLE, dc: w.HANDLE, foreground: u32, background: u32) boo
         }
         if (origin.y + metric.cy > clip.top and @max(right, origin.x) > clip.left and @min(origin.x, right) < clip.right) {
             if (i > begin and !dwrite.drawPositioned(dc, text[begin..i], advances[begin..i], origin.x, origin.y, clip, foreground)) return false;
-            var cursor: usize = 0;
-            while (@import("chat_skill.zig").next(text[0..n], cursor)) |skill| {
+            var cursor = begin;
+            while (cursor > 0 and !std.ascii.isWhitespace(@intCast(@min(text[cursor - 1], 127)))) : (cursor -= 1) {}
+            var limit = i;
+            while (limit < n and !std.ascii.isWhitespace(@intCast(@min(text[limit], 127)))) : (limit += 1) {}
+            while (@import("chat_skill.zig").next(text[0..limit], cursor)) |skill| {
                 cursor = skill.end;
                 const lo = @max(begin, skill.start);
                 const hi = @min(i, skill.end);
