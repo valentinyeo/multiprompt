@@ -32,3 +32,9 @@ test('delivered queued bubble is measured at its existing half opacity', () => {
   assert.equal(measureStatus(image, rect, true).statusInk, 0);
   assert.throws(() => measureStatus(image, rect), /outgoing bubble/);
 });
+
+test('bottom-pinned bubble can end at the viewport edge', () => {
+  const image = frame();
+  image.pixels.copy(image.pixels, 30 * image.width * 4, 0, 210 * image.width * 4);
+  assert.equal(measureStatus(image, { ...rect, height: 120 }).statusInk, 0);
+});

@@ -29,14 +29,14 @@ export function measureStatus(image, rect, dimmed = false) {
       }
     }
   }
-  assert.ok(ink > 500 && bottom > 20 && bottom + 26 < height, 'outgoing bubble must be visibly painted');
+  assert.ok(ink > 500 && bottom > 20, 'outgoing bubble must be visibly painted');
   let bodyInk = 0;
   for (let y = Math.max(0, bottom - 35); y < bottom - 5; y++) for (let x = lo + 12; x < right - 12; x++) {
     if (!fills.includes(pixel(x, y)) && pixel(x, y) !== background) bodyInk++;
   }
   assert.ok(bodyInk > 20, 'outgoing bubble contains message text');
   let statusInk = 0;
-  for (let y = bottom + 3; y <= bottom + 24; y++) for (let x = Math.max(0, lo - 320); x < right; x++) {
+  for (let y = bottom + 3; y < Math.min(height, bottom + 25); y++) for (let x = Math.max(0, lo - 320); x < right; x++) {
     if (pixel(x, y) !== background) statusInk++;
   }
   assert.equal(statusInk, 0, 'IGSH-931 ordinary message status is still painted below the bubble');
