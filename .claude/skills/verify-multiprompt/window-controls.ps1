@@ -24,8 +24,9 @@ Wait-Until {
 } 'real chat transcript visible under the custom frame'
 $geometry = [WindowControlsProof]::Geometry($script:window)
 $chatTop = $script:frameTranscript.Current.BoundingRectangle.Top - $geometry[1]
-if ($chatTop -gt [Math]::Floor(8 * $dpi / 96) + 1) { throw 'Window controls introduced a replacement full-width chat header' }
-Save-Json @{ geometry = $geometry; chatTop = $chatTop; recoveredTopPixels = $geometry[9] - ($geometry[5] - $geometry[1]) } 'window-controls-chat-height.json'
+$existingChatInset = [Math]::Floor(8 * $dpi / 96) + [Math]::Floor(6 * $dpi / 96) + [Math]::Floor(4 * $dpi / 96)
+if ($chatTop -gt $existingChatInset + 1) { throw 'Window controls introduced a replacement full-width chat header' }
+Save-Json @{ geometry = $geometry; chatTop = $chatTop; existingChatInset = $existingChatInset; recoveredTopPixels = $geometry[9] - ($geometry[5] - $geometry[1]) } 'window-controls-chat-height.json'
 Snapshot 'action'
 foreach ($mode in @('restored', 'maximized')) {
     if ($mode -eq 'maximized') {

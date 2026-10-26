@@ -10,7 +10,8 @@ const native = read(base + 'window-controls-native.cs');
 test('IGSH-1000 records the native-caption red control before rejecting it', () => {
   assert.ok(journey.indexOf("'window-controls-baseline.json'") < journey.indexOf("throw 'IGSH-1000 native title bar"));
   assert.match(native, /AdjustWindowRectExForDpi\(ref native, 0x00CF0000/);
-  assert.match(journey, /chatTop -gt \[Math\]::Floor\(8 \* \$dpi \/ 96\) \+ 1/);
+  assert.match(journey, /chatTop -gt \$existingChatInset \+ 1/);
+  assert.match(journey, /existingChatInset = \[Math\]::Floor\(8 \* \$dpi \/ 96\) \+ \[Math\]::Floor\(6 \* \$dpi \/ 96\) \+ \[Math\]::Floor\(4 \* \$dpi \/ 96\)/);
 });
 
 test('IGSH-1000 input remains in the owned foreground frame and uses real mouse movement', () => {

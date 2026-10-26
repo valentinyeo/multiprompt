@@ -12,7 +12,7 @@ Open Multiprompt. Use the three top-right window buttons. Drag the empty top str
 
 Dispatch `verify.yml` with `feature=window-controls`, optionally with a published `tag`. The identical driver must reject v0.28.932 specifically with `native title bar still consumes chat height`, not a setup or compilation error.
 
-The workflow uses actual monitor DPI 96, 120 and 144. It restores display resolution and scaling after each isolated Windows run. It records the frame, client origin, native caption inset and real transcript rectangle. Chat must start within the existing eight-pixel scaled pane margin; no full-width replacement header is allowed.
+The workflow uses actual monitor DPI 96, 120 and 144. It restores display resolution and scaling after each isolated Windows run. It records the frame, client origin, native caption inset and real transcript rectangle. Chat must start within the existing eight-pixel pane margin plus six-pixel focus pad and four-pixel content gap; no full-width replacement header is allowed.
 
 For restored and maximized windows, select Dark, Light and AMOLED through the palette. Save six screenshots and measure all three grey glyphs, all three native hit codes and the separator's first six pixels. Drive maximize and restore through the same button, then use actual mouse dragging, double-clicking, Win+Left, resize-edge dragging, minimize and close. A real docked browser must leave every control pixel unchanged; a changed-pixel negative control must fail the same comparison. Maximize and restore must also work while that browser has focus. Closing must exit the owned process normally. Doctor runs before close, never after the deliberately closed app.
 
