@@ -64,7 +64,7 @@ Expected result on current master: `chat-view-read-transcript`, the shell steps 
 ### Remote session changes (IGSH-950)
 
 ```sh
-gh workflow run verify.yml --ref ceo/IGSH-950 -f feature=chat-delivery -f remote_sync_proof=true
+gh workflow run verify.yml --ref ceo/IGSH-950-poll -f feature=chat-delivery -f remote_sync_proof=true
 ```
 
 This opt-in journey uses host index 2 and a separate remote home. Two question/answer turns arrive on one session, then a third arrives after the pane metadata changes to a new session. The old transcript remains readable. Each pair must reach the app cache within two seconds and appear in copied rendered text. The journey saves a terminal screenshot and a Chat View screenshot per turn. `chat-remote-sync-proof.mjs` independently checks the copied text, terminal frames, session change, delivery time and cleanup.

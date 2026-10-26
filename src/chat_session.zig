@@ -527,8 +527,7 @@ fn chatFileFailed(entry: *ChatHistoryEntry) void {
 }
 
 fn chatFilePollInterval() u64 {
-    const working = (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].activity == .active) or app_state.g_chat_screen_working;
-    return if (working) 2000 else 8000;
+    return 1000;
 }
 
 fn chatHistoryChannelClose(ch: *ChatHistoryChannel) void {
