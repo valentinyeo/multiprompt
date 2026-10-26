@@ -552,6 +552,7 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   const matrices = [...verify.matchAll(/fromJSON\('(\[[^'\n]+\])'\)/g)].map(match => JSON.parse(match[1]));
   assert.equal(matrices[1].length, 20);
   assert.ok(matrices[1].includes('chat-dictation'));
+  assert.ok(matrices[1].includes('tmux-binding'));
   assert.ok(matrices[1].includes('remind-me'));
   assert.ok(matrices[1].includes('chat-first-paint'));
   assert.match(verify, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
