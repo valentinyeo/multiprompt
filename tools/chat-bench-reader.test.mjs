@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { defaults, generate, records } from './chat-bench/lib.mjs';
+const repo = fileURLToPath(new URL('..', import.meta.url));
 
 test('IGSH-993 production live requests read fixed benchmark histories and appended messages without live agents', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-bench-reader-'));
@@ -15,7 +17,7 @@ test('IGSH-993 production live requests read fixed benchmark histories and appen
       const query = { id: tab.index + 1, codex: tab.provider === 'codex', sid: tab.sid, tmux: tab.sid, cwd: '/bench/project', settlement: true, source_offsets: true, live: true, follow: true, cached_sid: '', inode: 0, offset: 0, start: 0, before: 0, mtime: 0, probe: '' };
       const service = spawnSync('python3', ['tools/chat-bench/reader-service.py', 'src/chat_history_reader.py'], {
         input: JSON.stringify({ job: query.id, protocol: 'history', request: JSON.stringify(query) }) + '\n',
-        env: { ...process.env, HOME: fixtures.home }, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 10000,
+        cwd: repo, env: { ...process.env, HOME: fixtures.home }, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 10000,
       });
       assert.equal(service.status, 0, service.stderr);
       const response = JSON.parse(service.stdout);
@@ -30,7 +32,7 @@ test('IGSH-993 production live requests read fixed benchmark histories and appen
     const missing = { ...JSON.parse(jobs[0].request), id: 999, sid: 'missing-bench-fixture', tmux: 'missing-bench-fixture' };
     jobs.push({ job: missing.id, protocol: 'history', request: JSON.stringify(missing) });
     const appended = spawnSync('python3', ['tools/chat-bench/reader-service.py', 'src/chat_history_reader.py'], {
-      input: jobs.map(job => JSON.stringify(job) + '\n').join(''), env: { ...process.env, HOME: fixtures.home }, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 10000,
+      input: jobs.map(job => JSON.stringify(job) + '\n').join(''), cwd: repo, env: { ...process.env, HOME: fixtures.home }, encoding: 'utf8', maxBuffer: 2 * 1024 * 1024, timeout: 10000,
     });
     assert.equal(appended.status, 0, appended.stderr);
     const responses = appended.stdout.trim().split('\n').map(JSON.parse);

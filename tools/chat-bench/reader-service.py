@@ -11,12 +11,7 @@ for line in sys.stdin:
     try:
         job = json.loads(line)
         query = job["request"]
-        if job["protocol"] == "history":
-            query = json.loads(query)
-            query["follow"] = False
-            wire = reader.response(query)
-        else:
-            wire = reader.request(query)
+        wire = reader.response(json.loads(query)) if job["protocol"] == "history" else reader.request(query)
         print(json.dumps({"job": job["job"], "wire": wire}), flush=True)
     except Exception as error:
         print(json.dumps({"job": job.get("job"), "error": str(error)}), flush=True)
