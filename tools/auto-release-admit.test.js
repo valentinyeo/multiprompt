@@ -263,6 +263,6 @@ test('the admit script names the journey the verify workflow runs on every maste
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   const autoRelease = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
   assert.match(admit, /RELEASE_JOURNEY=relaunch-saved-sessions/);
-  assert.match(workflow, /fromJSON\('\["relaunch-saved-sessions", "appearance", [^\n]*\]'\)/);
+  assert.match(workflow, /fromJSON\('\["appearance", "chat-dictation", "relaunch-saved-sessions", [^\n]*\]'\)/);
   assert.match(autoRelease, /workflows: \[Tests, Verify desktop\]/);
 });

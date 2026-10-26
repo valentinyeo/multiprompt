@@ -1991,7 +1991,7 @@ test('IGSH-814 theme verification waits for the initialized palette and selected
 test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches three times and gates the release', () => {
   assert.match(control, /ValidateSet\([^\n)]*'relaunch-saved-sessions'/);
   assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'relaunch-saved-sessions'/);
-  assert.match(workflow, /fromJSON\('\["relaunch-saved-sessions", [^\n]*\]'\)/);
+  assert.match(workflow, /fromJSON\('\["appearance", "chat-dictation", "relaunch-saved-sessions", [^\n]*\]'\)/);
   const journey = control.slice(control.indexOf("        'relaunch-saved-sessions' {"), control.indexOf("        'session-open' {"));
   assert.match(journey, /foreach \(\$launch in 2, 3\)/);
   assert.match(journey, /Restart-SessionRestore "relaunch-\$launch" \$false \$false \$openPorts/);

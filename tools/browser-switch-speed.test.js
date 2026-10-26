@@ -315,7 +315,7 @@ function assertsDispatchOnly(source) {
 }
 
 test('PR journeys are appearance-only while master pushes and release tags retain the full matrix', () => {
-  const full = ['appearance', 'chat-dictation', 'session-restore', 'workspace-focus', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me'];
+  const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me'];
   function contract(source) {
     assert.match(source, /^  push:\n    branches: \[master\]\n    tags: \['v\*'\]/m);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), ['appearance']);
