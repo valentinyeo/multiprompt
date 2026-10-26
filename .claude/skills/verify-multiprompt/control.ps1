@@ -3895,6 +3895,13 @@ try {
                 if ($null -ne $empty.send) { throw ('Send rect ' + ($empty.send -join ',') + ' is drawn while the composer is empty and the agent is working') }
                 Snapshot 'stop-in-box'
                 Snapshot 'composer-working-empty'
+                foreach ($shot in @('stop-in-box', 'composer-working-empty')) {
+                    try {
+                        $stopCheck[$shot] = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence ($shot + '.png')), $script:window, $empty.card, $empty.stop, $null)
+                    } catch {
+                        throw ($shot + ' screenshot does not paint the grey Stop disc in the logged Stop slot: ' + $_.Exception.Message)
+                    }
+                }
                 Type-Text 'x'
                 Wait-Until { $typed = & $readStopFrame; $null -ne $typed.card -and $null -ne $typed.send -and $null -eq $typed.stop } 'Send replaces Stop after typing while working'
                 $typed = & $readStopFrame
