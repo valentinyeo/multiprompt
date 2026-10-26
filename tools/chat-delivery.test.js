@@ -1410,7 +1410,7 @@ test('IGSH-564 steer hook leaves Ctrl+X native and dispatches only the completed
   assert.ok(hook.indexOf('chatSteerChord(') < hook.indexOf('chatComposerOwnsKey('));
   assert.match(body('chatComposerOwnsKey'), /0x58/);
   assert.match(body('chatSteerPrompt'), /sendChatPrompt\(\)/);
-  assert.match(source, /WM_APP_CHAT_SEND => \{\s*if \(wp == 1\) @import\("chat_send.zig"\)\.chatSteerPrompt\(\) else sendChatPrompt\(\)/);
+  assert.match(source, /WM_APP_CHAT_SEND => \{\s*if \(wp == 1\) @import\("chat_send.zig"\)\.chatSteerPrompt\(\) else @import\("chat_composer.zig"\)\.chatSendOrFinishDictation\(\)/);
   assert.doesNotMatch(body('chatSteerChord'), /GetTickCount|Timer|Sleep/);
 });
 

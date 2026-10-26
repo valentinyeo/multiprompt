@@ -421,7 +421,7 @@ pub fn paintChatView(hdc: HANDLE) void {
         var cancel = @import("chat_composer.zig").chatReplyCancelRect();
         _ = DrawTextW(hdc, L("×"), -1, &cancel, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
-    const has_text = app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0;
+    const has_text = (app_state.g_chat_composer_hwnd != null and GetWindowTextLengthW(app_state.g_chat_composer_hwnd) > 0) or @import("chat_composer.zig").chat_dictation_state != .idle;
     if (layout.send_shown) paintChatButton(hdc, layout.send_btn, has_text, .send);
     if (layout.stop_shown) paintChatButton(hdc, layout.stop_btn, true, .stop);
     paintChatAttachButton(hdc, layout.attach_btn);

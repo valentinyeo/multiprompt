@@ -230,6 +230,28 @@ pub fn chatDictationToggle() void {
     chatDictationSync();
 }
 
+pub fn chatSendOrFinishDictation() void {
+    const dictated = app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len];
+    const dictating = dictated.len > 0 and app_state.g_dictation_running.load(.acquire) and
+        std.mem.eql(u8, dictated, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]);
+    if (!dictating) {
+        @import("chat_send.zig").sendChatPrompt();
+        return;
+    }
+    if (app_state.g_dictation_recording.load(.acquire)) {
+        chatDictationToggle();
+        if (app_state.g_dictation_recording.load(.acquire)) return;
+    }
+    app_state.g_dictation_send_queued.store(true, .release);
+}
+
+pub fn chatDictationSendFlush(queued: bool) void {
+    if (!queued) return;
+    const dictated = app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len];
+    if (!std.mem.eql(u8, dictated, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) return;
+    @import("chat_send.zig").sendChatPrompt();
+}
+
 fn chatDictationKey(msg: UINT, wp: WPARAM, lp: LPARAM, ctrl: bool, shift: bool, alt: bool) bool {
     if (msg == WM_KEYDOWN and wp == 0x44 and ctrl and !shift and !alt) {
         if ((lp & 0x40000000) == 0) chatDictationToggle();
@@ -268,16 +290,14 @@ pub fn chatViewLayout() ChatViewLayout {
     };
     const send_size = uiScaled(32);
     const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
-    const mic_btn = RECT{
-        .left = composer_card.right - send_margin - send_size,
-        .top = composer_card.bottom - send_margin - send_size,
-        .right = composer_card.right - send_margin,
-        .bottom = composer_card.bottom - send_margin,
-    };
-    var action_card = composer_card;
-    action_card.right = mic_btn.left - uiScaled(6) + send_margin;
-    const slots = chatSendSlots(action_card, send_size, send_margin, @import("window_layout.zig").chatStopVisible(), chatComposerHasText());
+    const slots = chatSendSlots(composer_card, send_size, send_margin, @import("window_layout.zig").chatStopVisible(), chatComposerHasText() or chat_dictation_state != .idle);
     const send_btn = slots.send;
+    const mic_btn = RECT{
+        .left = slots.left - uiScaled(6) - send_size,
+        .top = send_btn.top,
+        .right = slots.left - uiScaled(6),
+        .bottom = send_btn.bottom,
+    };
     const attach_btn = RECT{
         .left = composer_card.left + send_margin,
         .top = send_btn.top,
@@ -297,7 +317,7 @@ pub fn chatViewLayout() ChatViewLayout {
         .composer = .{
             .left = attach_btn.right + uiScaled(10),
             .top = composer_card.top + chatReplyBarH() + uiScaled(12),
-            .right = slots.left - uiScaled(12),
+            .right = mic_btn.left - uiScaled(12),
             .bottom = composer_card.bottom - uiScaled(10),
         },
         .send_btn = send_btn,
@@ -380,6 +400,67 @@ test "IGSH-909 send and stop share one slot so the composer never shows more tha
     for ([_]RECT{ idle.send, empty.stop, typed.send }) |rc| {
         try std.testing.expect(rc.left >= card.left and rc.top >= card.top and rc.right <= card.right and rc.bottom <= card.bottom);
     }
+}
+
+test "IGSH-965 send while dictating stops the recording and queues one send" {
+    const Engine = struct {
+        var toggles: u32 = 0;
+        fn toggle() void {
+            toggles += 1;
+            app_state.g_dictation_recording.store(false, .release);
+        }
+    };
+    const saved = .{
+        .owner_len = app_state.g_dictation_draft_owner_len,
+        .owner = app_state.g_dictation_draft_owner,
+        .chat_owner_len = app_state.g_chat_draft_owner_len,
+        .chat_owner = app_state.g_chat_draft_owner,
+        .running = app_state.g_dictation_running.load(.acquire),
+        .recording = app_state.g_dictation_recording.load(.acquire),
+        .queued = app_state.g_dictation_send_queued.load(.acquire),
+        .toggle = chat_dictation_engine_toggle,
+        .state = chat_dictation_state,
+        .chat = app_state.g_chat_active,
+    };
+    defer {
+        app_state.g_dictation_draft_owner_len = saved.owner_len;
+        app_state.g_dictation_draft_owner = saved.owner;
+        app_state.g_chat_draft_owner_len = saved.chat_owner_len;
+        app_state.g_chat_draft_owner = saved.chat_owner;
+        app_state.g_dictation_running.store(saved.running, .release);
+        app_state.g_dictation_recording.store(saved.recording, .release);
+        app_state.g_dictation_send_queued.store(saved.queued, .release);
+        chat_dictation_engine_toggle = saved.toggle;
+        chat_dictation_state = saved.state;
+        app_state.g_chat_active = saved.chat;
+    }
+    app_state.g_chat_active = false;
+    chat_dictation_engine_toggle = Engine.toggle;
+    Engine.toggles = 0;
+    app_state.g_dictation_send_queued.store(false, .release);
+    app_state.g_dictation_draft_owner[0] = 'a';
+    app_state.g_dictation_draft_owner_len = 1;
+    app_state.g_chat_draft_owner[0] = 'b';
+    app_state.g_chat_draft_owner_len = 1;
+    app_state.g_dictation_running.store(true, .release);
+    app_state.g_dictation_recording.store(true, .release);
+    chatSendOrFinishDictation();
+    try std.testing.expectEqual(@as(u32, 0), Engine.toggles);
+    try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
+    try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
+    app_state.g_chat_draft_owner[0] = 'a';
+    chatSendOrFinishDictation();
+    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
+    try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
+    try std.testing.expect(app_state.g_dictation_send_queued.load(.acquire));
+    chatSendOrFinishDictation();
+    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
+    try std.testing.expect(app_state.g_dictation_send_queued.load(.acquire));
+    app_state.g_dictation_send_queued.store(false, .release);
+    app_state.g_dictation_running.store(false, .release);
+    chatSendOrFinishDictation();
+    try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
+    try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
 }
 
 pub fn chatComposerHasText() bool {
@@ -2269,7 +2350,9 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
     try std.testing.expect(!chatDictationKey(0x0102, 0x0D, 0, false, false, false));
     if (action == .mic_start or action == .mic_stop) {
         const layout = chatViewLayout();
-        try std.testing.expect(layout.mic_btn.left > layout.send_btn.right);
+        try std.testing.expect(layout.send_btn.left > layout.mic_btn.right);
+        try std.testing.expect(layout.send_btn.right < layout.composer_card.right);
+        try std.testing.expect(layout.send_shown and !layout.stop_shown);
         try std.testing.expect(layout.mic_btn.left > layout.composer.right);
         try std.testing.expect(!chatDictationClick(layout.mic_btn.right, layout.mic_btn.top));
         try std.testing.expect(chatDictationClick(layout.mic_btn.left, layout.mic_btn.top));
