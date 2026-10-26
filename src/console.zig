@@ -1627,7 +1627,8 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
             debugLog(diag);
         }
         if (!appendSshPrefix(buf, &pos, app_state.g_pending_tmux_host, app_state.g_mobile_mode)) return null;
-        if ((app_state.g_pending_tmux_identity orelse "").len > 0) {
+        const tmux_identity: []const u8 = app_state.g_pending_tmux_identity orelse "";
+        if (tmux_identity.len > 0) {
             app_state.g_pending_resurrect_len = 0;
             app_state.g_pending_tmux_cmd_len = 0;
         }
@@ -1645,7 +1646,7 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
         } else {
             if (!appendRemoteZsbCommandStart(buf, &pos, zsb_shell_id)) return null;
             var attach_buf: [1536]u8 = undefined;
-            const attach = @import("tmux_identity.zig").attachCommand(&attach_buf, tmux_session.?, app_state.g_pending_tmux_identity orelse "", new_session) catch return null;
+            const attach = @import("tmux_identity.zig").attachCommand(&attach_buf, tmux_session.?, tmux_identity, new_session) catch return null;
             for (attach) |c| {
                 if (c == '"') {
                     if (!appendWideAscii(buf, &pos, "\\\"")) return null;
