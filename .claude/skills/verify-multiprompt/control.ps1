@@ -1725,6 +1725,7 @@ function Send-ProfileScreenshot([string]$Step, [string]$Profile, [int]$ExpectedU
     $stdout = Join-Path $Evidence "screenshot-$Step.stdout.txt"
     $stderr = Join-Path $Evidence "screenshot-$Step.stderr.txt"
     $shot = Start-Process -FilePath $bridge -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -WindowStyle Hidden
+    [void]$shot.Handle
     if (-not $shot.WaitForExit(60000)) { $shot.Kill(); throw "screenshot ${Step}: shoturl did not finish in 60 seconds" }
     $exitCode = $shot.ExitCode
     $output = (([string](Get-Content -LiteralPath $stdout -Raw)) + ([string](Get-Content -LiteralPath $stderr -Raw))).Trim()
