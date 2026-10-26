@@ -6117,7 +6117,7 @@ try {
         'status-card' {
             $paceProof = $null
             if ($env:VERIFY_USAGE_PACE_FILE) {
-                Wait-Until { Test-Path (Join-Path $scratch 'usage-ssh-read.log') } 'Token Ladder status fetched through the normal SSH boundary'
+                Wait-Until { Test-Path (Join-Path $scratch 'usage-ssh-read.log') } 'Token Ladder status fetched through the normal SSH boundary' 240
             }
             $client = New-Object VerifyNative+Rect
             if (-not [VerifyNative]::GetClientRect($script:window, [ref]$client)) { throw 'status-card client rectangle unavailable' }

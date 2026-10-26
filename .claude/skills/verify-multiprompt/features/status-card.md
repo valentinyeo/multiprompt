@@ -30,6 +30,8 @@ Optional `usage_pace_status` accepts base64 sanitized status JSON.
 The job replays sample, above and below snapshots.
 Each uses the normal `ssh-path.txt` boundary.
 The external SSH stand-in only answers status reads.
+Startup may await the normal three-minute refresh.
+Reader setup waits up to four minutes.
 Fixture snapshots live under `tools/fixtures/IGSH-997/`.
 Closed pill and panel must show expected colors.
 Screenshots and source JSON remain in `pace-*` folders.
