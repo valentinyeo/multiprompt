@@ -781,7 +781,8 @@ fn browserSlotReservedPure(has_active_shell: bool, browser_enabled: bool, webvie
 pub fn browserSlotReserved() bool {
     return browserSlotReservedPure(
         app_state.active_shell < app_state.shell_count,
-        app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled,
+        app_state.active_shell < app_state.shell_count and (app_state.shells[app_state.active_shell].browser_enabled or
+            @import("launch_cache.zig").reservesBrowser(app_state.shells[app_state.active_shell].shell_id)),
         webView2OwnsActiveShell(),
     );
 }
