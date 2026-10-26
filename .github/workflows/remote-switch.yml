@@ -79,6 +79,19 @@ jobs:
         run: |
           & harness/tools/verify-chat-delivery/drive.ps1 -Feature chat-messages-only -Exe "$pwd/app/zig-out/bin/multiprompt.exe" -Ssh "$pwd/app/zig-out/bin/ssh.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           $status = $LASTEXITCODE
+          if (Test-Path evidence/remote-switch/error.txt) {
+            $problem = (Get-Content evidence/remote-switch/error.txt -Raw).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error::$problem"
+          }
+          if (Test-Path evidence/remote-switch/observation.json) {
+            $sampled = Get-Content evidence/remote-switch/observation.json -Raw | ConvertFrom-Json
+            if ($sampled.switches) {
+              $worstSwitch = ($sampled.switches | Measure-Object switchMs -Maximum).Maximum
+              $worstGap = ($sampled.switches | ForEach-Object { $_.frames } | Measure-Object gapMs -Maximum).Maximum
+              $worstCpu = ($sampled.switches | ForEach-Object { 100 * $_.cpuMs / $_.elapsedMs } | Measure-Object -Maximum).Maximum
+              Write-Host "::notice::switches=$(@($sampled.switches).Count) max_switch_ms=$worstSwitch max_frame_gap_ms=$worstGap max_one_core_cpu_percent=$worstCpu"
+            }
+          }
           if ('${{ matrix.side }}' -eq 'candidate') {
             if ($status -ne 0) { throw 'Candidate remote-switch performance proof failed' }
           } else {
