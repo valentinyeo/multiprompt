@@ -396,7 +396,7 @@ pub const History = struct {
         defer parsed.deinit();
         const m = parsed.value;
         const id = m.read_id orelse m.id;
-        return std.json.Stringify.valueAlloc(a, .{ m.role, id, m.segment, if (id.len == 0) m.timestamp else "", if (id.len == 0) m.text else "", if (id.len == 0) m.settlement else null }, .{});
+        return std.json.Stringify.valueAlloc(a, .{ m.role, id, m.segment, m.timestamp, if (id.len == 0) m.text else "", if (id.len == 0) m.settlement else null }, .{});
     }
 
     pub fn encode(self: History, a: std.mem.Allocator, key: transcript.Identity) ![]u8 {
@@ -1804,4 +1804,18 @@ test "IGSH-934 a reset with a wider window inserts unseen older messages before 
         "{\"role\":\"user\",\"id\":\"two\",\"text\":\"second\",\"offset\":100,\"end\":200}\n" ++
         "{\"role\":\"assistant\",\"id\":\"three\",\"text\":\"third\",\"offset\":200,\"end\":300}\n@@MP_END@@\n", 2, key);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstsecondthird"), h.text.items);
+}
+
+test "IGSH-934 a partial tail retains earlier streamed fragments of the same message" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(934, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t200\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n" ++
+        "{\"role\":\"assistant\",\"id\":\"stream\",\"timestamp\":\"2026-10-26T10:00:00Z\",\"text\":\"first part\",\"offset\":0,\"end\":100}\n" ++
+        "{\"role\":\"assistant\",\"id\":\"stream\",\"timestamp\":\"2026-10-26T10:00:01Z\",\"text\":\"second part\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t0\t\ttail\t100\n" ++
+        "{\"role\":\"assistant\",\"id\":\"stream\",\"timestamp\":\"2026-10-26T10:00:01Z\",\"text\":\"second part\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 2, key);
+    try std.testing.expect(std.mem.indexOf(u16, h.text.items, std.unicode.utf8ToUtf16LeStringLiteral("first part")) != null);
+    try std.testing.expect(std.mem.indexOf(u16, h.text.items, std.unicode.utf8ToUtf16LeStringLiteral("second part")) != null);
 }
