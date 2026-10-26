@@ -79,7 +79,16 @@ $browser = [VerifyNative]::PaneWindow($script:window)
 if ($browser -eq [IntPtr]::Zero) { throw 'No owned browser pane for corner journey' }
 Focus-LockedBrowser $browser
 Press @(0x11, 0x4C) 'Ctrl+L: open synthetic white corner control page'
-Type-Text 'data:text/html,<title>Corner control</title><body style="margin:0;background:white;height:100vh"></body>'
+$browserRoot = [System.Windows.Automation.AutomationElement]::FromHandle($browser)
+$omniboxCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'OmniboxViewViews')
+Wait-Until {
+    $omnibox = $browserRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $omniboxCondition)
+    $null -ne $omnibox -and $omnibox.Current.HasKeyboardFocus -and
+        [System.Windows.Automation.Automation]::Compare($omnibox, [System.Windows.Automation.AutomationElement]::FocusedElement) -and
+        [VerifyNative]::GetForegroundWindow() -eq $browser
+} 'owned browser address bar has keyboard focus'
+$html = '<title>Corner control</title><body style="margin:0;background:white;height:100vh"></body>'
+Type-Text ('data:text/html,' + [Uri]::EscapeDataString($html))
 Press @(0x0D) 'Enter: render white corner control page'
 Wait-Until { [VerifyNative]::Title($browser) -match 'Corner control' } 'synthetic white page loaded' 20
 Focus-Palette 'new cmd' 2000
