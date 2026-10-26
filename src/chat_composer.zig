@@ -616,6 +616,17 @@ fn chatComposerSetScrollBar(show: bool) void {
     app_state.g_chat_composer_scroll_shown = show;
     _ = ShowScrollBar(app_state.g_chat_composer_hwnd, SB_VERT, if (show) 1 else 0);
 }
+var chat_frame_logged: [12]i32 = @splat(std.math.minInt(i32));
+
+fn logChatFrame(layout: ChatViewLayout) void {
+    if (!verboseLoggingEnabled()) return;
+    const now = [_]i32{ layout.transcript.left, layout.transcript.top, layout.transcript.right, layout.transcript.bottom, layout.composer.left, layout.composer.top, layout.composer.right, layout.composer.bottom, layout.composer_card.left, layout.composer_card.top, layout.composer_card.right, layout.composer_card.bottom };
+    if (std.mem.eql(i32, &now, &chat_frame_logged)) return;
+    chat_frame_logged = now;
+    var log: [192]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat] frame transcript {d},{d},{d},{d} edit {d},{d},{d},{d} card {d},{d},{d},{d}", .{ now[0], now[1], now[2], now[3], now[4], now[5], now[6], now[7], now[8], now[9], now[10], now[11] }) catch "");
+}
+
 pub fn layoutChatControls() void {
     if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null) return;
     app_state.g_chat_layout_browser_reserved = browserSlotReserved();
@@ -647,6 +658,7 @@ pub fn layoutChatControls() void {
             _ = MoveWindow(app_state.g_chat_transcript_hwnd, layout.transcript.left, layout.transcript.top, layout.transcript.right - layout.transcript.left, layout.transcript.bottom - layout.transcript.top, 0);
         _ = MoveWindow(app_state.g_chat_composer_hwnd, layout.composer.left, layout.composer.top, layout.composer.right - layout.composer.left, layout.composer.bottom - layout.composer.top, 0);
     }
+    logChatFrame(layout);
     if (app_state.g_chat_layout_dirty and app_state.g_chat_transcript_hwnd != null) {
         var rc: RECT = std.mem.zeroes(RECT);
         _ = GetClientRect(app_state.g_chat_transcript_hwnd, &rc);

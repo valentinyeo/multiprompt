@@ -2065,6 +2065,26 @@ test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches 
   assert.throws(() => assert.match(control.replace("'relaunch-saved-sessions')][string]$Feature", "')][string]$Feature"), /ValidateSet\([^\n)]*'relaunch-saved-sessions'/));
 });
 
+test('IGSH-925 chat-first-paint journey relaunches a saved chat with a docked browser and rejects any moved chat rectangle', () => {
+  assert.match(control, /ValidateSet\([^\n)]*'chat-first-paint'/);
+  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'chat-first-paint'/);
+  assert.match(workflow, /fromJSON\('\["appearance", "chat-dictation", "relaunch-saved-sessions", [^\n]*"chat-first-paint"\]'\)/);
+  const journey = control.slice(control.indexOf("        'chat-first-paint' {"), control.indexOf("        'browser-switch-speed' {"));
+  assert.ok(journey.length > 200, 'chat-first-paint journey missing');
+  assert.match(journey, /Open-BrowserPane/);
+  assert.match(journey, /launch first-paint ms=/);
+  assert.match(journey, /Capture-Window 'first-paint'/);
+  assert.match(journey, /Capture-Window 'settled'/);
+  assert.match(journey, /chat layout moved after first paint/);
+  assert.match(journey, /chat-first-paint seed invalid/);
+  assert.doesNotMatch(journey, /Set-Content|WriteAll|Stop-Process/);
+  const map = read(skill + 'features/chat-first-paint.md');
+  for (const required of ['first-paint-layout', 'docked-browser-pane', 'fast-reopen', 'IGSH-568', 'chat layout moved after first paint']) assert.ok(map.includes(required), required);
+  assert.match(read(skill + 'features/README.md'), /\[Chat first paint\]\(chat-first-paint.md\)/);
+  assert.match(read(skill + 'SKILL.md'), /`chat-first-paint`/);
+  assert.throws(() => assert.match(control.replace("'chat-first-paint')][string]$Feature", "')][string]$Feature"), /ValidateSet\([^\n)]*'chat-first-paint'/));
+});
+
 test('IGSH-905 six-line composer proof holds Shift until the native composer shows the newline and always releases it', () => {
   const start = control.indexOf('function Press-ShiftEnter(');
   assert.notEqual(start, -1, 'control.ps1 has no Press-ShiftEnter');
