@@ -120,11 +120,6 @@ const VoiceTtsBuffer = @import("app_state.zig").VoiceTtsBuffer;
 const TtsChunkRange = @import("app_state.zig").TtsChunkRange;
 const comRelease = @import("workspaces.zig").comRelease;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
-
-fn showDictationStatus(msg: []const u8, ms: u64) void {
-    if (app_state.g_chat_active) return;
-    showHeaderNoticeAscii(msg, ms, false);
-}
 const keybd_event = @import("win32.zig").keybd_event;
 const focusActiveBrowserPane = @import("focus.zig").focusActiveBrowserPane;
 const activeBrowserHwndLive = @import("browser_pane.zig").activeBrowserHwndLive;
@@ -2022,6 +2017,11 @@ pub fn handleDictationReady() void {
         synthesizeCtrlVIntoForeground();
         showDictationStatus("Dictation pasted", 2200);
     }
+}
+
+fn showDictationStatus(msg: []const u8, ms: u64) void {
+    if (app_state.g_chat_active) return;
+    showHeaderNoticeAscii(msg, ms, false);
 }
 
 pub fn toggleDictation() void {
