@@ -723,7 +723,7 @@ test "ISSUE-608 a message with leftover box text glued in front still confirms" 
     try std.testing.expect(out[0] == null);
     const short = w("yes");
     try std.testing.expect(short.len < MIN_PARTIAL);
-    try std.testing.expect(!messageMatches(&w("leftoveryes"), .{ .prefix = &short, .text = &short, .anchor = .{ .after_ms = 100 } }));
+    try std.testing.expect(!messageMatches(&w("leftoveryes"), .{ .prefix = &short, .text = &short, .anchor = .{ .after_ms = 100 } }, &short));
 }
 
 test "delivery: busy then idle and restart reserve one text write" {
