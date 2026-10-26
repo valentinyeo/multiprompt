@@ -59,6 +59,9 @@ pub const CHANGELOG = blk: {
 };
 
 const SOURCE_CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.883", .items = &.{
+        .{ .text = "Right-click menus now have rounded corners, no thin border and a soft rounded highlight, matching the chat.", .ticket = "IGSH-892" },
+    } },
     .{ .ver = "0.28.882", .items = &.{
         .{ .text = "Dictation checks finish reliably and retain pictures when blocked.", .ticket = "IGSH-893" },
         .{ .text = "Updates are checked on saved sessions for every new version, so a release no longer waits for the long full check to reach it.", .ticket = "IGSH-900" },
