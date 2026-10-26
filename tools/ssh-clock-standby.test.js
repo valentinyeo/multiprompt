@@ -77,7 +77,6 @@ var kills: usize = 0;
 var timers: usize = 0;
 const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
 fn chatBenchEnabled() bool { return false; }
-fn chatCancelFinish() void {}
 fn GetClientRect(_: ?*anyopaque, rc: *RECT) u32 { rc.* = .{ .left = 0, .top = 0, .right = 1920, .bottom = 1032 }; return 1; }
 fn reconnectTabVisible(_: u32) bool { return true; }
 fn threadTitleTop() i32 { return 10; }
@@ -316,6 +315,7 @@ const shells = [_]struct { activity: enum { idle, active } = .idle }{.{}};
 fn GetTickCount64() u64 { return fake_tick; }
 fn nowFileTime() u64 { return @as(u64, @intCast(fake_wall)) * 10000 + 116444736000000000; }
 fn chatTmuxSendFinish() void {}
+fn chatCancelFinish() void {}
 fn chatFullSettleFinish() void {}
 fn chatTmuxSettle() void {}
 fn saveChatOutbox() bool { return true; }
