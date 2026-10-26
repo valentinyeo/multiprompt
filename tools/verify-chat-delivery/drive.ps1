@@ -313,6 +313,71 @@ function Assert-FullHistory([string]$Stage) {
     Doctor $true
     Save @{stage=$Stage; blocks=74; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
+function Retention-Copy([string]$Stage, [int]$Count) {
+    $offset = (Read-Shared "$settings/debug.log").Length
+    $complete = Step "IGSH-934 $Stage keeps $Count messages" {
+        Press @(0x11, 0x30) 'Ctrl+0: measure retained conversation'
+        $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
+        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq $Count
+    }
+    if (-not $complete) { Shot "retention-$Stage-failed"; throw "IGSH-934 history lost at $Stage expected=$Count" }
+    Press @(0x11, 0x4B) 'Ctrl+K: select retained conversation'
+    $query = 'chat view select all'
+    foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For 'retained select-all palette command ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+    Press @(0x0D) 'Enter: select retained conversation'
+    Press @(0x11, 0x43) 'Ctrl+C: copy retained conversation'
+    $copied = [Windows.Forms.Clipboard]::GetText()
+    [IO.File]::WriteAllText("$caseDir/$Stage-copied.txt", $copied)
+    $actual = @([regex]::Matches($copied, 'IGSH934 message \d{5}') | ForEach-Object { $_.Value })
+    $expected = @(0..($Count - 3) | ForEach-Object { 'IGSH934 message {0:00000}' -f $_ })
+    if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-934 retained copy missing or reordered at $Stage" }
+    Press @(0x1B) 'Esc: clear retained selection'
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chat\] divider marker=\d+ count=\d+ unknown=(\d)')
+    if (@($frames | Where-Object { $_.Groups[1].Value -eq '1' }).Count -gt 0) { throw 'IGSH-934 retained read position became unknown' }
+}
+function Assert-Retention {
+    Retention-Copy 'open' 2000
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+    $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
+    if ($views.Count -ne 1) { throw 'Retained transcript ownership missing' }
+    $view = [IntPtr]$views[0].Current.NativeWindowHandle
+    [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $view, 20000000)
+    Shot 'retention-before'
+    for ($burst = 1; $burst -le 10; $burst++) {
+        if ($burst -eq 4) { Shell-Run @('retention-reset') }
+        if ($burst -eq 7) {
+            $offset = (Read-Shared "$settings/debug.log").Length
+            Shell-Run @('retention-empty')
+            [void](Wait-For 'empty refresh fails without losing retained messages' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[chat\] transcript load shell=\d+ fail' })
+            Retention-Copy 'empty' (2000 + ($burst - 1) * 20)
+            Shell-Run @('retention-restore')
+        }
+        Shell-Run @('retention-burst', '20')
+        Retention-Copy "burst-$burst" (2000 + $burst * 20)
+        [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, $view, 20000000)
+        Shot "retention-burst-$burst"
+    }
+    Shot 'retention-after'
+    Copy-Item "$state/retention-expected.jsonl" "$caseDir/retention-expected.jsonl"
+    Press @(0x11, 0x4B) 'Ctrl+K: open second tab for retained switch proof'
+    foreach ($letter in 'new cmd'.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+    [void](Wait-For 'new cmd palette ready' { (Read-Shared "$settings/debug.log") -match '\[palette\] ready chars=7 count=\d+ target=\d+' })
+    Press @(0x0D) 'Enter: create second tab'
+    $script:expectedShells = 2
+    [void](Wait-For 'second tab published' { @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count -eq 2 })
+    $offset = (Read-Shared "$settings/debug.log").Length
+    for ($round = 0; $round -lt 5; $round++) {
+        Press @(0x11, 0x31) 'Ctrl+1: return to retained chat'
+        Press @(0x11, 0x32) 'Ctrl+2: switch away from retained chat'
+    }
+    Press @(0x11, 0x31) 'Ctrl+1: restore retained chat'
+    [IO.File]::WriteAllText("$caseDir/retention-switch.log", (Read-Shared "$settings/debug.log").Substring($offset))
+    Retention-Copy 'final' 2200
+    Doctor $true
+}
 foreach ($plan in $plans) {
     $expectedShells = 1
     $caseDir = "$Evidence/$($plan.name)"
@@ -373,7 +438,7 @@ foreach ($plan in $plans) {
         }
         Save $standIn "$state/state.json"
         if ($hasTranscript) { Shell-Run @('init') }
-        if ($isHistory) { Shell-Run @('history') }
+        if ($isHistory) { Shell-Run @($(if ($env:CHAT_RETENTION_PROOF -eq '1') { 'retention-init' } else { 'history' })) }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         Save @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})} "$settings/session.json"
         if ($isRemote) {
@@ -433,6 +498,8 @@ foreach ($plan in $plans) {
                 Press @(0x12, 0x43) 'Alt+C: return to remote Chat View'
                 Bind-Transcript
             }
+        } elseif ($isHistory -and $env:CHAT_RETENTION_PROOF -eq '1') {
+            Assert-Retention
         } elseif ($isHistory) {
             Assert-FullHistory 'open'
             Copy-Item "$settings/chatcache" "$caseDir/cache-before-restart" -Recurse -Force
@@ -822,7 +889,9 @@ if ($env:CHAT_WIDTH_PROOF -eq '1') {
     if ($LASTEXITCODE -ne 0) { throw 'IGSH-898 message width pixel proof failed' }
     exit 0
 }
-if ($Feature -eq 'chat-full-history') {
+if ($env:CHAT_RETENTION_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-history-retention-proof.mjs" $Evidence
+} elseif ($Feature -eq 'chat-full-history') {
     & node "$PSScriptRoot/../chat-full-history-proof.mjs" $Evidence
 } elseif ($Feature -eq 'chat-messages-only') {
     & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --complete
