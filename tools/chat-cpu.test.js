@@ -13,7 +13,8 @@ function body(text, name) {
   assert.ok(start >= 0, name);
   return text.slice(start, text.indexOf('\n}', start) + 2)
     .replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary')
-    .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark');
+    .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
+    .replaceAll('@import("window_layout.zig").chatStopVisible', 'chatStopVisible');
 }
 function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
@@ -192,6 +193,9 @@ var g_chat_font_pt: i32 = 13;
 var clean_chat: bool = false;
 var g_chat_transcript_hwnd: HANDLE = @ptrFromInt(1);
 var g_chat_content_h: i32 = 0;
+var g_working_rect: ?RECT = null;
+const g_shell_rect_count: usize = 0;
+fn chatStopVisible() bool { return false; }
 var g_chat_echo_layout_count: usize = 0;
 var g_chat_sel_anchor: usize = 0;
 var g_chat_sel_caret: usize = 0;
