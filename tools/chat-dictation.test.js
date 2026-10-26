@@ -163,3 +163,26 @@ test('IGSH-812 registration is additive and existing contract checks remain on t
   assert.ok(read(skill + 'SKILL.md').includes('](features/chat-dictation.md)'));
   assert.match(read(skill + 'coverage.md'), /\| IGSH-812 \|[^\n]*\| chat-dictation \| journey added, not yet run \|/);
 });
+
+test('IGSH-893 audit evidence serializes plain lines within five seconds on Windows PowerShell', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dictation-audit-'));
+  try {
+    const auditPath = path.join(directory, 'dictation-audit.log');
+    const lines = ['123\tfixture-audio-bytes\t89160', '124\ttarget-chat-composer\t22'];
+    fs.writeFileSync(auditPath, lines.join('\n'));
+    const auditRead = driver.match(/^\s*\$audit = (.+)$/m);
+    assert.ok(auditRead, 'production audit read exists');
+    const script = `$ErrorActionPreference = 'Stop'; $auditPath = $env:AUDIT_PATH; $audit = ${auditRead[1]}; ConvertTo-Json -InputObject @{ audit = $audit } -Depth 12 -Compress`;
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8', timeout: 5000, env: { ...process.env, AUDIT_PATH: auditPath },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).audit, lines);
+    console.log('DICTATION_AUDIT_SERIALIZATION_OK');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
