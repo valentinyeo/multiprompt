@@ -48,7 +48,7 @@ const app_state = struct {
 var agent: chat_complete.Agent = .claude;
 fn chatAcAgent() chat_complete.Agent { return agent; }
 fn isRemoteShellKind(kind: @TypeOf(app_state.shells[0].kind)) bool { return kind != .local; }
-var clock: u64 = 100000;
+var clock: u64 = 1000000;
 var requests: usize = 0;
 var ranked: usize = 0;
 const TIMER_CHAT_AC_DEBOUNCE = 1;
@@ -116,6 +116,10 @@ test "open triggers refresh; typing does not; errors retain sixty-second retry" 
         item.refresh_pending = false;
         item.pending = 0;
     }
+    requests = 0;
+    item.fetched = clock - 600001;
+    refresh(false);
+    try std.testing.expectEqual(@as(usize, 1), requests);
     requests = 0;
     item.status = .@"error";
     item.fetched = clock - 59999;

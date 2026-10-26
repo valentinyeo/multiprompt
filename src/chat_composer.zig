@@ -1101,7 +1101,7 @@ fn chatAcOnComposerChanged() void {
     chatAcRank(text[0..@intCast(n)], token);
     if (opening and slot.pending != 0) slot.refresh_pending = true;
     const elapsed = GetTickCount64() -| slot.fetched;
-    if (slot.pending == 0 and (slot.fetched == 0 or (if (slot.status == .@"error") elapsed >= 60_000 else opening or (slot.status == .loading and elapsed >= 4_000)))) chatAcRequest(index);
+    if (slot.pending == 0 and (slot.fetched == 0 or (if (slot.status == .@"error") elapsed >= 60_000 else opening or elapsed >= (if (slot.status == .loading) @as(u64, 4_000) else 600_000)))) chatAcRequest(index);
 }
 
 pub fn chatAcAfterSend(text: []const u16) void {
