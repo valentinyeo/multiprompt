@@ -1811,7 +1811,7 @@ pub fn chatRelayout(client_width: i32) void {
                 if (app_state.g_chat_echo_layout_count >= app_state.g_chat_echo_layout.len) break;
                 if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
-                var rc = chatMeasureEchoRect(hdc, e.text, width, y, e.state != .delivered);
+                var rc = chatMeasureEchoRect(hdc, e.text, width, y, e.state == .not_sent);
                 if (!app_state.clean_chat and chat_echo.pendingActions(e.state).send_again) rc.bottom += uiScaled(26);
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;
@@ -3105,7 +3105,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
 fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void {
     _ = SetBkMode(hdc, TRANSPARENT);
     const actions = chat_echo.pendingActions(e.state);
-    const status_h = if (app_state.clean_chat or e.state == .delivered) @as(i32, 0) else uiScaled(CHAT_STATUS_H);
+    const status_h = if (!app_state.clean_chat and e.state == .not_sent) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
     const actions_h = if (!app_state.clean_chat and actions.send_again) uiScaled(26) else @as(i32, 0);
     const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h - actions_h };
     fillRoundRectAA(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor());
@@ -3137,27 +3137,11 @@ fn chatStatusRowRect(bubble: RECT) RECT {
 }
 
 fn chatPaintEchoStatus(hdc: HANDLE, e: ChatOutboxEntry, area: RECT) void {
-    if (app_state.clean_chat or e.state == .delivered) return;
+    if (app_state.clean_chat or e.state != .not_sent) return;
     const old = SelectObject(hdc, chatMetadataFont());
     defer _ = SelectObject(hdc, old);
-    const color: DWORD = switch (e.state) {
-        .not_sent => customColorOr("danger", if (app_state.g_light_theme) RGB(180, 40, 40) else RGB(240, 120, 120)),
-        else => customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(167, 180, 198)),
-    };
-    _ = SetTextColor(hdc, color);
-    const phase: chat_echo.Phase = switch (e.state) {
-        .queued => .offline_queue,
-        .sending => .sending,
-        .delivered => .delivered,
-        .not_sent => .not_sent,
-    };
-    const link_down = app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].disconnected or app_state.shells[app_state.active_shell].pid == 0;
-    const label: [*:0]const u16 = switch (chat_echo.pendingLabel(phase, link_down)) {
-        .sending => L("\u{25F7} Sending\u{2026}"),
-        .queued_in_claude => return,
-        .waiting_connection => L("\u{25F7} Waiting for connection"),
-        .not_sent => if (e.write_started) L("Delivery unconfirmed") else L("Not sent"),
-    };
+    _ = SetTextColor(hdc, customColorOr("danger", if (app_state.g_light_theme) RGB(180, 40, 40) else RGB(240, 120, 120)));
+    const label: [*:0]const u16 = if (e.write_started) L("Delivery unconfirmed") else L("Not sent");
     var rc = area;
     _ = chatDrawText(hdc, label, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
@@ -5357,7 +5341,7 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             chatPaintEchoStatus(dc, entry, .{ .left = 0, .top = 0, .right = width, .bottom = 24 });
         },
         .confirmed_bubble, .queued_bubble, .sending_bubble, .shell_bubble => {
-            const rc = chatMeasureEchoRect(dc, text, width, 0, scene == .sending_bubble);
+            const rc = chatMeasureEchoRect(dc, text, width, 0, false);
             if (scene == .confirmed_bubble) {
                 chatPaintBlock(dc, text, block, .single, rc);
             } else if (scene == .shell_bubble) {
@@ -5368,7 +5352,7 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
                 entry.state = if (scene == .queued_bubble) .delivered else .sending;
                 chatPaintEcho(dc, entry, rc, 0);
             }
-            crop.bottom = rc.bottom - (if (!clean and scene == .sending_bubble) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
+            crop.bottom = rc.bottom;
         },
         .retry, .remove => {
             const rc = chatMeasureEchoRect(dc, text, width, 0, true);
@@ -5485,8 +5469,16 @@ fn expectCleanChatRowHidden(scene: CleanChatScene) !void {
     try std.testing.expectEqualSlices(u32, blank, on);
 }
 
-test "IGSH-816 CLEAN hides Sending status pixels" {
-    try expectCleanChatRowHidden(.sending);
+test "IGSH-931 normal outbox states never paint per-message status with CLEAN on or off" {
+    const blank = try cleanChatPixels(.blank, true);
+    defer std.testing.allocator.free(blank);
+    for ([_]bool{ false, true }) |clean| {
+        for ([_]CleanChatScene{ .sending, .waiting, .queued }) |scene| {
+            const pixels = try cleanChatPixels(scene, clean);
+            defer std.testing.allocator.free(pixels);
+            try std.testing.expectEqualSlices(u32, blank, pixels);
+        }
+    }
 }
 
 test "IGSH-872 queued bubbles are half opacity and shell queues use the same rendering" {
@@ -5495,11 +5487,9 @@ test "IGSH-872 queued bubbles are half opacity and shell queues use the same ren
     for ([_]bool{ false, true }) |clean| {
         const full = try cleanChatPixels(.sending_bubble, clean);
         defer std.testing.allocator.free(full);
-        if (clean) {
-            const confirmed = try cleanChatPixels(.confirmed_bubble, clean);
-            defer std.testing.allocator.free(confirmed);
-            try std.testing.expectEqualSlices(u32, full, confirmed);
-        }
+        const confirmed = try cleanChatPixels(.confirmed_bubble, clean);
+        defer std.testing.allocator.free(confirmed);
+        try std.testing.expectEqualSlices(u32, full, confirmed);
         const queued = try cleanChatPixels(.queued_bubble, clean);
         defer std.testing.allocator.free(queued);
         const shell = try cleanChatPixels(.shell_bubble, clean);
@@ -5528,10 +5518,6 @@ test "IGSH-872 queued caption is absent with CLEAN on and off" {
             try std.testing.expectEqualSlices(u32, blank, queued);
         }
     }
-}
-
-test "IGSH-816 CLEAN hides Waiting for connection status pixels" {
-    try expectCleanChatRowHidden(.waiting);
 }
 
 test "IGSH-816 CLEAN hides Not sent status pixels" {
