@@ -30,7 +30,7 @@ $probe = {
     Snapshot $name
     $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($name + '.png')))
     try { $image.Save((Join-Path $Evidence ($name + '.bmp')), [Drawing.Imaging.ImageFormat]::Bmp) } finally { $image.Dispose() }
-    & node (Join-Path $PSScriptRoot '../../../tools/chat-working-proof.mjs') (Join-Path $Evidence ($name + '.bmp')) (Join-Path $Evidence 'working-area.json') (Join-Path $Evidence ($name + '.json')) $state
+    & node (Join-Path $PSScriptRoot '../../../tools/chat-working-proof.mjs') (Join-Path $Evidence ($name + '.bmp')) (Join-Path $Evidence 'working-area.json') (Join-Path $Evidence ($name + '.json')) $state (Join-Path $Evidence 'working-0.json')
     $LASTEXITCODE -eq 0
 }
 Wait-Until { & $probe 'working-0' 'busy' } 'IGSH-924 inline dots painted' -Seconds 20
@@ -44,6 +44,29 @@ Wait-Until {
 $check.frames += (Get-Content (Join-Path $Evidence 'working-1.json') -Raw | ConvertFrom-Json)
 [IO.File]::WriteAllText(($prefix + '-reply'), 'reply now')
 Wait-Until { & $probe 'after' 'idle' } 'IGSH-924 dots gone after reply' -Seconds 45
-Press @(0x11, 0x41) 'Ctrl+A: select real transcript text'
 $check.passed = $true
 Save-Json $check 'working-proof.json'
+$referencePath = Join-Path $env:TEMP 'inline-working-reference.png'
+Invoke-WebRequest 'https://screencast2.com/h9mN1.png' -OutFile $referencePath -UseBasicParsing
+$reference = [Drawing.Bitmap]::FromFile($referencePath)
+$working = [Drawing.Bitmap]::FromFile((Join-Path $Evidence 'working-0.png'))
+$comparison = New-Object Drawing.Bitmap(($working.Width + 400), ($working.Height + 40))
+$graphics = [Drawing.Graphics]::FromImage($comparison)
+$font = New-Object Drawing.Font('Arial', 14)
+try {
+    $graphics.Clear([Drawing.Color]::FromArgb(20, 20, 20))
+    $graphics.DrawString('Multiprompt: working', $font, [Drawing.Brushes]::White, 10, 8)
+    $graphics.DrawImage($working, 0, 40, $working.Width, $working.Height)
+    $graphics.DrawString('Grok reference', $font, [Drawing.Brushes]::White, ($working.Width + 10), 8)
+    $target = New-Object Drawing.Rectangle(($working.Width + 10), 60, 370, 61)
+    $source = New-Object Drawing.Rectangle(447, 918, 303, 50)
+    $graphics.DrawImage($reference, $target, $source, [Drawing.GraphicsUnit]::Pixel)
+    $comparison.Save((Join-Path $Evidence 'working-comparison.png'), [Drawing.Imaging.ImageFormat]::Png)
+} finally {
+    $font.Dispose()
+    $graphics.Dispose()
+    $comparison.Dispose()
+    $working.Dispose()
+    $reference.Dispose()
+    Remove-Item $referencePath
+}
