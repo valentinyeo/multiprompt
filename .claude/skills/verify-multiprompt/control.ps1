@@ -238,6 +238,60 @@ public static class VerifyNative {
         if (count > 1) throw new InvalidOperationException("Multiple visible owned browser panes");
         return pane;
     }
+    static Thread probeThread;
+    static volatile bool probeRun;
+    static double probeMax;
+    static readonly object probeLock = new object();
+    public static void StartHangProbe(IntPtr owner) {
+        probeRun = true;
+        probeThread = new Thread(() => {
+            var timer = new System.Diagnostics.Stopwatch();
+            while (probeRun) {
+                UIntPtr result;
+                timer.Restart();
+                SendMessageTimeout(owner, 0, UIntPtr.Zero, IntPtr.Zero, 2, 5000, out result);
+                double elapsed = timer.Elapsed.TotalMilliseconds;
+                lock (probeLock) { if (elapsed > probeMax) probeMax = elapsed; }
+                Thread.Sleep(2);
+            }
+        });
+        probeThread.IsBackground = true;
+        probeThread.Start();
+    }
+    public static void ResetHangProbe() { lock (probeLock) { probeMax = 0; } }
+    public static double HangProbeMax() { lock (probeLock) { return probeMax; } }
+    public static void StopHangProbe() { probeRun = false; if (probeThread != null) probeThread.Join(6000); }
+    public static double[] SwitchToSession(int digit, string log, long offset, string needle, int settleMs) {
+        Input[] inputs = new Input[4];
+        for (int i = 0; i < inputs.Length; i++) inputs[i].type = 1;
+        inputs[0].data.keyboard = new Keyboard { key = 0x11 };
+        inputs[1].data.keyboard = new Keyboard { key = (ushort)(0x31 + digit) };
+        inputs[2].data.keyboard = new Keyboard { key = (ushort)(0x31 + digit), flags = 2 };
+        inputs[3].data.keyboard = new Keyboard { key = 0x11, flags = 2 };
+        ResetHangProbe();
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length) throw new InvalidOperationException("SendInput Ctrl+digit failed");
+        double shown = -1;
+        long position = offset;
+        string carry = "";
+        while (timer.ElapsedMilliseconds < settleMs) {
+            if (shown < 0) {
+                using (var stream = new System.IO.FileStream(log, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete)) {
+                    if (stream.Length > position) {
+                        stream.Seek(position, System.IO.SeekOrigin.Begin);
+                        var bytes = new byte[stream.Length - position];
+                        int read = stream.Read(bytes, 0, bytes.Length);
+                        position += read;
+                        carry += Encoding.UTF8.GetString(bytes, 0, read);
+                        if (carry.Contains(needle)) shown = timer.Elapsed.TotalMilliseconds;
+                        if (carry.Length > 4096) carry = carry.Substring(carry.Length - 4096);
+                    }
+                }
+            }
+            Thread.Sleep(1);
+        }
+        return new double[] { shown, HangProbeMax() };
+    }
     public static IntPtr DockedPaneWindow(IntPtr owner) {
         Rect frame;
         if (!GetWindowRect(owner, out frame)) throw new InvalidOperationException("Missing owned frame rectangle");
@@ -333,60 +387,6 @@ public static class VerifyNative {
         var timer = System.Diagnostics.Stopwatch.StartNew();
         if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length) throw new InvalidOperationException("SendInput Ctrl+Tab failed");
         return timer;
-    }
-    static Thread probeThread;
-    static volatile bool probeRun;
-    static double probeMax;
-    static readonly object probeLock = new object();
-    public static void StartHangProbe(IntPtr owner) {
-        probeRun = true;
-        probeThread = new Thread(() => {
-            var timer = new System.Diagnostics.Stopwatch();
-            while (probeRun) {
-                UIntPtr result;
-                timer.Restart();
-                SendMessageTimeout(owner, 0, UIntPtr.Zero, IntPtr.Zero, 2, 5000, out result);
-                double elapsed = timer.Elapsed.TotalMilliseconds;
-                lock (probeLock) { if (elapsed > probeMax) probeMax = elapsed; }
-                Thread.Sleep(2);
-            }
-        });
-        probeThread.IsBackground = true;
-        probeThread.Start();
-    }
-    public static void ResetHangProbe() { lock (probeLock) { probeMax = 0; } }
-    public static double HangProbeMax() { lock (probeLock) { return probeMax; } }
-    public static void StopHangProbe() { probeRun = false; if (probeThread != null) probeThread.Join(6000); }
-    public static double[] SwitchToSession(int digit, string log, long offset, string needle, int settleMs) {
-        Input[] inputs = new Input[4];
-        for (int i = 0; i < inputs.Length; i++) inputs[i].type = 1;
-        inputs[0].data.keyboard = new Keyboard { key = 0x11 };
-        inputs[1].data.keyboard = new Keyboard { key = (ushort)(0x31 + digit) };
-        inputs[2].data.keyboard = new Keyboard { key = (ushort)(0x31 + digit), flags = 2 };
-        inputs[3].data.keyboard = new Keyboard { key = 0x11, flags = 2 };
-        ResetHangProbe();
-        var timer = System.Diagnostics.Stopwatch.StartNew();
-        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length) throw new InvalidOperationException("SendInput Ctrl+digit failed");
-        double shown = -1;
-        long position = offset;
-        string carry = "";
-        while (timer.ElapsedMilliseconds < settleMs) {
-            if (shown < 0) {
-                using (var stream = new System.IO.FileStream(log, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete)) {
-                    if (stream.Length > position) {
-                        stream.Seek(position, System.IO.SeekOrigin.Begin);
-                        var bytes = new byte[stream.Length - position];
-                        int read = stream.Read(bytes, 0, bytes.Length);
-                        position += read;
-                        carry += Encoding.UTF8.GetString(bytes, 0, read);
-                        if (carry.Contains(needle)) shown = timer.Elapsed.TotalMilliseconds;
-                        if (carry.Length > 4096) carry = carry.Substring(carry.Length - 4096);
-                    }
-                }
-            }
-            Thread.Sleep(1);
-        }
-        return new double[] { shown, HangProbeMax() };
     }
     public static bool SwitchReady(IntPtr owner, IntPtr console, string suffix, IntPtr browser, Rect dock, IntPtr composer, string draft) {
         if (composer != IntPtr.Zero) {
@@ -5295,132 +5295,6 @@ try {
                 $traceLines | Set-Content -Encoding UTF8 (Join-Path $Evidence 'switch-timing-debug.log')
             }
         }
-        'chat-switch-speed' {
-            $sessionCount = 5
-            $switchCount = 20
-            $chatLimitMs = 150
-            $hangLimitMs = 100
-            $settleMs = 1200
-            $modes = @('browser_closed', 'browser_open')
-            $timings = [ordered]@{ session_count = $sessionCount; switches_per_mode = $switchCount; click_to_chat_limit_ms = $chatLimitMs; hang_limit_ms = $hangLimitMs }
-            foreach ($mode in $modes) { $timings[$mode] = @{ samples_ms = @(); app_ms = @(); hang_ms = @(); missing = 0; median_ms = $null; max_ms = $null; max_hang_ms = $null } }
-            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-            $gapCase = @{ name = 'chat-switch-speed'; status = 'failed'; detail = 'Chat switch measurement did not complete'; phase = 'initial-console' }
-            $result.checks += $gapCase
-            $shellIds = @()
-            $probeStarted = $false
-            try {
-                Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -eq 'cmd' } 'one initial CMD for chat switch timing'
-                $workspace = (Read-Session).active_workspace
-                Wait-WorkspaceSurface $workspace 0 $false
-                $gapCase.phase = 'idle-close-fixture'
-                Focus-Palette 'browser auto suspend' 6240
-                Press @(0x0D) 'Enter: disable timed browser closing while measuring'
-                Wait-Until { $state = Read-Session; $state.PSObject.Properties['browser_suspend_min'] -and $state.browser_suspend_min -eq 0 } 'app saved idle browser closing disabled'
-                for ($tab = 0; $tab -lt $sessionCount; $tab++) {
-                    $gapCase.phase = "session-setup-$tab"
-                    if ($tab -gt 0) {
-                        Palette 'new cmd'
-                        Press @(0x0D) "Enter: create CMD session $tab"
-                        Wait-Until { $state = Read-Session; @($state.tabs).Count -eq ($tab + 1) -and $state.active_tab -eq $tab -and $state.tabs[$tab].kind -eq 'cmd' } "CMD session $tab saved and selected"
-                        if ((Read-Session).tabs[$tab].cv) {
-                            Press @(0x12, 0x43) "Alt+C: show the shell of session $tab before filling it"
-                            Wait-Until { -not (Read-Session).tabs[$tab].cv } "session $tab in shell view"
-                        }
-                    }
-                    Wait-WorkspaceSurface $workspace $tab $false
-                    $marker = Join-Path $scratch "fill-$tab.txt"
-                    Type-Text ('cmd /c "for /L %i in (1,1,80) do @echo session-' + $tab + ' history line %i" && echo done>"' + $marker + '"')
-                    Press @(0x0D) "Enter: print 80 history lines in session $tab"
-                    Wait-Until { Test-Path $marker } "session $tab console output complete"
-                    Press @(0x12, 0x43) "Alt+C: open Chat View for session $tab"
-                    Wait-Until { (Read-Session).tabs[$tab].cv } "Chat View saved for session $tab"
-                    $shellIds += (Read-Session).tabs[$tab].shell_id
-                }
-                $state = Read-Session
-                if (@($state.tabs).Count -ne $sessionCount -or @($state.tabs | Where-Object { -not $_.cv }).Count -ne 0) { throw 'Not every session is in Chat View' }
-                Save-Json @{ shellIds = $shellIds; tabs = @($state.tabs) } 'chat-switch-sessions.json'
-                if ($null -ne $warmupJob) {
-                    $warmupStopped = $warmupJob.Stop()
-                    Save-Json @{ activeAfterStop = $warmupStopped.ActiveProcesses } 'browser-setup-process-tree.json'
-                    $warmupJob.Dispose()
-                    $warmupJob = $null
-                }
-                Snapshot 'before'
-                [VerifyNative]::StartHangProbe($script:window)
-                $probeStarted = $true
-                foreach ($mode in $modes) {
-                    $open = $mode -eq 'browser_open'
-                    if ($open) {
-                        for ($tab = 0; $tab -lt $sessionCount; $tab++) {
-                            $gapCase.phase = "$mode-setup-$tab"
-                            Press @(0x11, (0x31 + $tab)) "Ctrl+$($tab + 1): select session to open its browser"
-                            Wait-Until { (Read-Session).active_tab -eq $tab } "session $tab selected"
-                            $script:browserShellId = $shellIds[$tab]
-                            $null = Open-BrowserPane ("$mode-$tab")
-                            Wait-SwitchNativeHost
-                            Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_state -eq 'connected' -and $pane.browser_window_id -gt 0 -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero } "session $tab browser connected and docked" 30
-                        }
-                    }
-                    $gapCase.phase = "$mode-start"
-                    Press @(0x11, 0x31) 'Ctrl+1: start timing from the first session'
-                    Wait-Until { (Read-Session).active_tab -eq 0 } 'first session selected'
-                    Start-Sleep -Milliseconds 1500
-                    foreach ($warm in 1..($sessionCount - 1)) {
-                        Press @(0x11, (0x31 + $warm)) "Ctrl+$($warm + 1): first visit warm-up"
-                        Wait-Until { (Read-Session).active_tab -eq $warm } "warm-up session $warm selected"
-                        Start-Sleep -Milliseconds 800
-                    }
-                    Press @(0x11, 0x31) 'Ctrl+1: return to the first session after warm-up'
-                    Wait-Until { (Read-Session).active_tab -eq 0 } 'first session selected after warm-up'
-                    Start-Sleep -Milliseconds 1500
-                    $current = 0
-                    for ($sample = 0; $sample -lt $switchCount; $sample++) {
-                        $gapCase.phase = "$mode-sample-$sample"
-                        $target = ($current + 1) % $sessionCount
-                        Doctor
-                        Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before the switch' 10
-                        $offset = (Get-Item -LiteralPath $log).Length
-                        $needle = '[switch] chat content shown shell=' + $shellIds[$target] + ' '
-                        Record "Ctrl+$($target + 1): switch to Chat View session $target ($mode sample $sample)"
-                        $measured = [VerifyNative]::SwitchToSession($target, $log, $offset, $needle, $settleMs)
-                        if ((Read-Session).active_tab -ne $target) { throw "Switch $sample did not select session $target" }
-                        $text = [IO.File]::ReadAllText($log)
-                        $range = if ($offset -le $text.Length) { $text.Substring($offset) } else { '' }
-                        $appMs = $null
-                        $found = [regex]::Match($range, [regex]::Escape($needle) + 'blocks=\d+ ms=(\d+)')
-                        if ($found.Success) { $appMs = [int]$found.Groups[1].Value }
-                        if ($open -and -not [VerifyNative]::PaneVisible($script:window)) { throw "Browser pane not visible after switch $sample" }
-                        if ($measured[0] -lt 0) { $timings[$mode].missing++ }
-                        $timings[$mode].samples_ms += $(if ($measured[0] -lt 0) { $settleMs } else { [Math]::Round($measured[0], 1) })
-                        $timings[$mode].app_ms += $appMs
-                        $timings[$mode].hang_ms += [Math]::Round($measured[1], 1)
-                        $range | Set-Content -Encoding UTF8 (Join-Path $Evidence ("{0}-{1}-debug.log" -f $mode, $sample))
-                        $current = $target
-                    }
-                    $timings[$mode].median_ms = Get-SwitchMedian $timings[$mode].samples_ms
-                    $timings[$mode].max_ms = ($timings[$mode].samples_ms | Measure-Object -Maximum).Maximum
-                    $timings[$mode].max_hang_ms = ($timings[$mode].hang_ms | Measure-Object -Maximum).Maximum
-                    if (-not $open) { Snapshot 'action' }
-                }
-                $gapCase.phase = 'verdict'
-                $summary = foreach ($mode in $modes) { "$mode median $($timings[$mode].median_ms) ms (limit $chatLimitMs), worst $($timings[$mode].max_ms) ms, worst window hang $($timings[$mode].max_hang_ms) ms (limit $hangLimitMs), switches without chat shown: $($timings[$mode].missing)" }
-                $gapCase.detail = $summary -join '; '
-                foreach ($mode in $modes) {
-                    if ($timings[$mode].missing -gt 0 -or $timings[$mode].median_ms -gt $chatLimitMs -or $timings[$mode].max_hang_ms -gt $hangLimitMs) { throw $gapCase.detail }
-                }
-                Snapshot 'after'
-                $gapCase.status = 'passed'
-            } catch {
-                $gapCase.detail = $gapCase.phase + ': ' + $_.Exception.Message
-                throw
-            } finally {
-                if ($probeStarted) { [VerifyNative]::StopHangProbe() }
-                Save-Json $timings 'switch-timings.json'
-                Save-Json (Read-Session) 'switch-final-session.json'
-                if (Test-Path -LiteralPath $log) { Copy-Item -LiteralPath $log (Join-Path $Evidence 'chat-switch-debug.log') -ErrorAction SilentlyContinue }
-            }
-        }
         'browser-pane-locked' {
             Write-Host "browser-pane-locked verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
             $script:browserShellId = (Read-Inbox).shells[0].sid
@@ -5822,6 +5696,132 @@ try {
             Doctor
             Snapshot 'update-idle'
             $result.checks += @{ name = 'update-command-without-ready-keeps-session'; pid = $process.Id; scale = 100; selectedTextPixels = $selectedTextPixels }
+        }
+        'chat-switch-speed' {
+            $sessionCount = 5
+            $switchCount = 20
+            $chatLimitMs = 150
+            $hangLimitMs = 100
+            $settleMs = 1200
+            $modes = @('browser_closed', 'browser_open')
+            $timings = [ordered]@{ session_count = $sessionCount; switches_per_mode = $switchCount; click_to_chat_limit_ms = $chatLimitMs; hang_limit_ms = $hangLimitMs }
+            foreach ($mode in $modes) { $timings[$mode] = @{ samples_ms = @(); app_ms = @(); hang_ms = @(); missing = 0; median_ms = $null; max_ms = $null; max_hang_ms = $null } }
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $gapCase = @{ name = 'chat-switch-speed'; status = 'failed'; detail = 'Chat switch measurement did not complete'; phase = 'initial-console' }
+            $result.checks += $gapCase
+            $shellIds = @()
+            $probeStarted = $false
+            try {
+                Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -eq 'cmd' } 'one initial CMD for chat switch timing'
+                $workspace = (Read-Session).active_workspace
+                Wait-WorkspaceSurface $workspace 0 $false
+                $gapCase.phase = 'idle-close-fixture'
+                Focus-Palette 'browser auto suspend' 6240
+                Press @(0x0D) 'Enter: disable timed browser closing while measuring'
+                Wait-Until { $state = Read-Session; $state.PSObject.Properties['browser_suspend_min'] -and $state.browser_suspend_min -eq 0 } 'app saved idle browser closing disabled'
+                for ($tab = 0; $tab -lt $sessionCount; $tab++) {
+                    $gapCase.phase = "session-setup-$tab"
+                    if ($tab -gt 0) {
+                        Palette 'new cmd'
+                        Press @(0x0D) "Enter: create CMD session $tab"
+                        Wait-Until { $state = Read-Session; @($state.tabs).Count -eq ($tab + 1) -and $state.active_tab -eq $tab -and $state.tabs[$tab].kind -eq 'cmd' } "CMD session $tab saved and selected"
+                        if ((Read-Session).tabs[$tab].cv) {
+                            Press @(0x12, 0x43) "Alt+C: show the shell of session $tab before filling it"
+                            Wait-Until { -not (Read-Session).tabs[$tab].cv } "session $tab in shell view"
+                        }
+                    }
+                    Wait-WorkspaceSurface $workspace $tab $false
+                    $marker = Join-Path $scratch "fill-$tab.txt"
+                    Type-Text ('cmd /c "for /L %i in (1,1,80) do @echo session-' + $tab + ' history line %i" && echo done>"' + $marker + '"')
+                    Press @(0x0D) "Enter: print 80 history lines in session $tab"
+                    Wait-Until { Test-Path $marker } "session $tab console output complete"
+                    Press @(0x12, 0x43) "Alt+C: open Chat View for session $tab"
+                    Wait-Until { (Read-Session).tabs[$tab].cv } "Chat View saved for session $tab"
+                    $shellIds += (Read-Session).tabs[$tab].shell_id
+                }
+                $state = Read-Session
+                if (@($state.tabs).Count -ne $sessionCount -or @($state.tabs | Where-Object { -not $_.cv }).Count -ne 0) { throw 'Not every session is in Chat View' }
+                Save-Json @{ shellIds = $shellIds; tabs = @($state.tabs) } 'chat-switch-sessions.json'
+                if ($null -ne $warmupJob) {
+                    $warmupStopped = $warmupJob.Stop()
+                    Save-Json @{ activeAfterStop = $warmupStopped.ActiveProcesses } 'browser-setup-process-tree.json'
+                    $warmupJob.Dispose()
+                    $warmupJob = $null
+                }
+                Snapshot 'before'
+                [VerifyNative]::StartHangProbe($script:window)
+                $probeStarted = $true
+                foreach ($mode in $modes) {
+                    $open = $mode -eq 'browser_open'
+                    if ($open) {
+                        for ($tab = 0; $tab -lt $sessionCount; $tab++) {
+                            $gapCase.phase = "$mode-setup-$tab"
+                            Press @(0x11, (0x31 + $tab)) "Ctrl+$($tab + 1): select session to open its browser"
+                            Wait-Until { (Read-Session).active_tab -eq $tab } "session $tab selected"
+                            $script:browserShellId = $shellIds[$tab]
+                            $null = Open-BrowserPane ("$mode-$tab")
+                            Wait-SwitchNativeHost
+                            Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_state -eq 'connected' -and $pane.browser_window_id -gt 0 -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero } "session $tab browser connected and docked" 30
+                        }
+                    }
+                    $gapCase.phase = "$mode-start"
+                    Press @(0x11, 0x31) 'Ctrl+1: start timing from the first session'
+                    Wait-Until { (Read-Session).active_tab -eq 0 } 'first session selected'
+                    Start-Sleep -Milliseconds 1500
+                    foreach ($warm in 1..($sessionCount - 1)) {
+                        Press @(0x11, (0x31 + $warm)) "Ctrl+$($warm + 1): first visit warm-up"
+                        Wait-Until { (Read-Session).active_tab -eq $warm } "warm-up session $warm selected"
+                        Start-Sleep -Milliseconds 800
+                    }
+                    Press @(0x11, 0x31) 'Ctrl+1: return to the first session after warm-up'
+                    Wait-Until { (Read-Session).active_tab -eq 0 } 'first session selected after warm-up'
+                    Start-Sleep -Milliseconds 1500
+                    $current = 0
+                    for ($sample = 0; $sample -lt $switchCount; $sample++) {
+                        $gapCase.phase = "$mode-sample-$sample"
+                        $target = ($current + 1) % $sessionCount
+                        Doctor
+                        Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before the switch' 10
+                        $offset = (Get-Item -LiteralPath $log).Length
+                        $needle = '[switch] chat content shown shell=' + $shellIds[$target] + ' '
+                        Record "Ctrl+$($target + 1): switch to Chat View session $target ($mode sample $sample)"
+                        $measured = [VerifyNative]::SwitchToSession($target, $log, $offset, $needle, $settleMs)
+                        if ((Read-Session).active_tab -ne $target) { throw "Switch $sample did not select session $target" }
+                        $text = [IO.File]::ReadAllText($log)
+                        $range = if ($offset -le $text.Length) { $text.Substring($offset) } else { '' }
+                        $appMs = $null
+                        $found = [regex]::Match($range, [regex]::Escape($needle) + 'blocks=\d+ ms=(\d+)')
+                        if ($found.Success) { $appMs = [int]$found.Groups[1].Value }
+                        if ($open -and -not [VerifyNative]::PaneVisible($script:window)) { throw "Browser pane not visible after switch $sample" }
+                        if ($measured[0] -lt 0) { $timings[$mode].missing++ }
+                        $timings[$mode].samples_ms += $(if ($measured[0] -lt 0) { $settleMs } else { [Math]::Round($measured[0], 1) })
+                        $timings[$mode].app_ms += $appMs
+                        $timings[$mode].hang_ms += [Math]::Round($measured[1], 1)
+                        $range | Set-Content -Encoding UTF8 (Join-Path $Evidence ("{0}-{1}-debug.log" -f $mode, $sample))
+                        $current = $target
+                    }
+                    $timings[$mode].median_ms = Get-SwitchMedian $timings[$mode].samples_ms
+                    $timings[$mode].max_ms = ($timings[$mode].samples_ms | Measure-Object -Maximum).Maximum
+                    $timings[$mode].max_hang_ms = ($timings[$mode].hang_ms | Measure-Object -Maximum).Maximum
+                    if (-not $open) { Snapshot 'action' }
+                }
+                $gapCase.phase = 'verdict'
+                $summary = foreach ($mode in $modes) { "$mode median $($timings[$mode].median_ms) ms (limit $chatLimitMs), worst $($timings[$mode].max_ms) ms, worst window hang $($timings[$mode].max_hang_ms) ms (limit $hangLimitMs), switches without chat shown: $($timings[$mode].missing)" }
+                $gapCase.detail = $summary -join '; '
+                foreach ($mode in $modes) {
+                    if ($timings[$mode].missing -gt 0 -or $timings[$mode].median_ms -gt $chatLimitMs -or $timings[$mode].max_hang_ms -gt $hangLimitMs) { throw $gapCase.detail }
+                }
+                Snapshot 'after'
+                $gapCase.status = 'passed'
+            } catch {
+                $gapCase.detail = $gapCase.phase + ': ' + $_.Exception.Message
+                throw
+            } finally {
+                if ($probeStarted) { [VerifyNative]::StopHangProbe() }
+                Save-Json $timings 'switch-timings.json'
+                Save-Json (Read-Session) 'switch-final-session.json'
+                if (Test-Path -LiteralPath $log) { Copy-Item -LiteralPath $log (Join-Path $Evidence 'chat-switch-debug.log') -ErrorAction SilentlyContinue }
+            }
         }
     }
     Doctor

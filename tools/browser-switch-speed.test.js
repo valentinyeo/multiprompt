@@ -351,7 +351,7 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
   assert.match(workflow, /node --test tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
   assert.match(workflow, /paths:[\s\S]*?- tools\/browser-switch-speed.test.js/);
-  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-first-paint'\)\)/);
+  assert.match(control, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint'\)\)/);
   const map = read(base + 'features/browser-switch-speed.md');
   assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']);
   assert.match(map, /on demand only/);
@@ -422,7 +422,7 @@ function assertsFrozen(source, driver, app, yaml) {
   assert.match(app, /win32WriteAll\(h, "1\\n"\)/);
   assert.match(app, /if \(job.confirmed\) \{\s+setBrowserFrozenMarkerForShell\(idx, job.frozen\)/);
   assert.match(app, /browser_frozen != job.frozen\) return;/);
-  const timeout = yaml.match(/timeout-minutes: \$\{\{ (?:matrix.feature == 'pane-layout' && \d+ \|\| )?matrix.feature == 'browser-switch-speed' && (\d+) \|\| (\d+) \}\}/);
+  const timeout = yaml.match(/timeout-minutes: \$\{\{ (?:matrix.feature == '(?:pane-layout|chat-switch-speed)' && \d+ \|\| )*matrix.feature == 'browser-switch-speed' && (\d+) \|\| (\d+) \}\}/);
   assert.ok(timeout);
   const sets = source.match(/\$modes = @\(([^\n]+)\)/)[1].match(/'[^']+'/g).filter(mode => mode.includes('frozen_')).length;
   const samples = Number(source.match(/Contains\('frozen_'\)\) \{ (\d+) \}/)[1]);
@@ -452,7 +452,7 @@ test('frozen returns require five fresh app-published freezes per view, native c
 });
 
 function assertsSwitchExtension(driver) {
-  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
+  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'",
     "Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse",
@@ -463,7 +463,7 @@ function assertsSwitchExtension(driver) {
     "if (Test-Path $registry) { throw 'Switch timing requires an unregistered disposable native host' }",
     '$switchNativeRegistry = $registry', 'New-Item -Path $registry -Force', 'Set-Item -Path $registry -Value $nativeManifest',
   ]) assert.ok(setup.includes(step), step);
-  assert.match(driver, /if \(\$Feature -ne 'browser-switch-speed' -and \$pane.browser_window_id -ne 0\)/);
+  assert.match(driver, /if \(\$Feature -notin @\('browser-switch-speed', 'chat-switch-speed'\) -and \$pane.browser_window_id -ne 0\)/);
   assert.match(driver, /finally \{\s+if \(\$null -ne \$switchNativeRegistry\) \{\s+Remove-Item -LiteralPath \$switchNativeRegistry -Recurse -Force/);
   const key = Buffer.from(setup.match(/\$publicKey = '([^']+)'/)[1], 'base64');
   const crypto = require('node:crypto');
@@ -491,7 +491,7 @@ test('new measurement code adds no removable code comments', async () => {
 
 function assertsRealBridge(driver, yaml) {
   yaml = yaml.slice(yaml.indexOf('\n  verify:\n'));
-  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
+  const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $PSScriptRoot 'browser-switch-chrome.mjs'",
     "Join-Path $config 'chrome-exe.txt'", "Join-Path $config 'browser-engine.txt'",
