@@ -672,7 +672,7 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
 
     var capacity_buf: [48]u16 = undefined;
     var capacity_state: CapacityState = .unknown;
-    const capacity_len = if (!cap_msg and !voice_status and show_meta) activeCapacityStatus(&capacity_buf, &capacity_state) else 0;
+    const capacity_len = if (!app_state.g_chat_active and !cap_msg and !voice_status and show_meta) activeCapacityStatus(&capacity_buf, &capacity_state) else 0;
     if (capacity_len > 0) {
         _ = SelectObject(hdc, uiFontSubtitle());
         const capacity_col: DWORD = switch (capacity_state) {
@@ -686,7 +686,7 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
         _ = DrawTextW(hdc, @ptrCast(&capacity_buf), @intCast(capacity_len), &capacity_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
     }
 
-    if (!cap_msg and !voice_status and show_meta) {
+    if (!app_state.g_chat_active and !cap_msg and !voice_status and show_meta) {
         if (capacity_len == 0) {
             var time_buf: [24]u16 = undefined;
             const time_len = inboxRelTime(app_state.shells[app_state.active_shell].last_active, &time_buf);
