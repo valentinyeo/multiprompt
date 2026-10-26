@@ -3895,17 +3895,17 @@ try {
                 if ($null -ne $empty.send) { throw ('Send rect ' + ($empty.send -join ',') + ' is drawn while the composer is empty and the agent is working') }
                 $stopClock = [Diagnostics.Stopwatch]::StartNew()
                 $stopCheck.paintAttempts = 0
-                while ($true) {
+                Wait-Until {
                     $stopCheck.paintAttempts++
                     Snapshot 'stop-in-box'
                     try {
                         $stopCheck.stopPixels = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'stop-in-box.png'), $script:window, $empty.card, $empty.stop, $null)
-                        break
+                        $true
                     } catch {
-                        if ($stopClock.Elapsed.TotalSeconds -gt 8) { throw ('stop-in-box screenshot never paints the grey Stop disc in the logged Stop slot: ' + $_.Exception.Message) }
-                        Start-Sleep -Milliseconds 300
+                        $stopCheck.stopPixelsReason = $_.Exception.Message
+                        $false
                     }
-                }
+                } 'stop-in-box screenshot paints the grey Stop disc in the logged Stop slot' -Seconds 10
                 $stopCheck.paintedAfterMs = [int]$stopClock.ElapsedMilliseconds
                 Snapshot 'composer-working-empty'
                 $stopCheck.workingEmptyPixels = [VerifyNative]::GreyButtonPixels((Join-Path $Evidence 'composer-working-empty.png'), $script:window, $empty.card, $empty.stop, $null)
