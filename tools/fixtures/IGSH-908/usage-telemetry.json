@@ -1,0 +1,70 @@
+{
+  "accounts": [
+    {
+      "id": "claude-primary",
+      "provider": "claude",
+      "label": "Primary",
+      "status": "ok",
+      "guidance": {
+        "quotaId": "seven_day",
+        "usedPercent": 13,
+        "deadlineAt": "2027-08-03T19:30:00Z"
+      },
+      "quotas": [
+        {
+          "id": "five_hour",
+          "usedPercent": 20,
+          "windowMinutes": 300,
+          "resetsAt": "2027-08-01T19:30:00Z"
+        }
+      ],
+      "dailyGoal": {
+        "progressPercent": 50
+      }
+    },
+    {
+      "id": "codex",
+      "provider": "codex",
+      "label": "Codex",
+      "status": "ok",
+      "guidance": {
+        "quotaId": "seven_day",
+        "usedPercent": 32,
+        "deadlineAt": "2027-08-03T19:30:00Z"
+      },
+      "quotas": [
+        {
+          "id": "five_hour",
+          "usedPercent": 20,
+          "windowMinutes": 300,
+          "resetsAt": "2027-08-01T19:30:00Z"
+        }
+      ],
+      "dailyGoal": {
+        "progressPercent": 50
+      }
+    },
+    {
+      "id": "claude-secondary",
+      "provider": "claude",
+      "label": "Secondary",
+      "status": "ok",
+      "guidance": {
+        "quotaId": "seven_day",
+        "usedPercent": 56,
+        "deadlineAt": "2027-08-03T19:30:00Z"
+      },
+      "quotas": [
+        {
+          "id": "five_hour",
+          "usedPercent": 20,
+          "windowMinutes": 300,
+          "resetsAt": "2027-08-01T19:30:00Z"
+        }
+      ],
+      "dailyGoal": {
+        "progressPercent": 50
+      }
+    }
+  ]
+}

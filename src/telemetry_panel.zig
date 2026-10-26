@@ -918,25 +918,18 @@ fn aiPaceStaleCount() u8 {
     return count;
 }
 
-fn paintAiPaceBar(hdc: HANDLE, left: i32, top: i32, right: i32, goal: AiPaceGoal, slot: usize) void {
-    if (right <= left) return;
-    const track_color: DWORD = customColorOr("overlay_divider", if (app_state.g_light_theme) RGB(215, 219, 225) else RGB(52, 58, 67));
-    var track = RECT{ .left = left, .top = top, .right = right, .bottom = top + uiScaled(4) };
-    const track_brush = CreateSolidBrush(track_color);
-    _ = FillRect(hdc, &track, track_brush);
-    _ = DeleteObject(track_brush);
-
-    if (!goal.has_daily_goal) return;
-    const width = right - left;
-    const visible_progress = @min(goal.progress_tenths, 1000);
-    const fill_width = @divTrunc(width * @as(i32, @intCast(visible_progress)), 1000);
-    if (fill_width > 0) {
-        var fill = track;
-        fill.right = left + fill_width;
-        const fill_brush = CreateSolidBrush(aiPaceProviderColor(goal, slot));
-        _ = FillRect(hdc, &fill, fill_brush);
-        _ = DeleteObject(fill_brush);
+fn aiPoolShortLabel(buf: []u8, snapshot: *const AiPaceSnapshot, slot: usize) []const u8 {
+    const goals = snapshot.goals[0..@min(snapshot.goal_count, snapshot.goals.len)];
+    const provider = goals[slot].provider;
+    var ordinal: usize = 0;
+    var count: usize = 0;
+    for (goals, 0..) |goal, index| {
+        if (goal.provider == provider) {
+            count += 1;
+            if (index <= slot) ordinal += 1;
+        }
     }
+    return status_line.poolShortLabel(buf, @tagName(provider), ordinal, count);
 }
 
 fn paintAiPaceWeekRuns(hdc: HANDLE, start_x: i32, rect: RECT, limit: i32, dim: DWORD, mono: ?DWORD) i32 {
@@ -948,7 +941,8 @@ fn paintAiPaceWeekRuns(hdc: HANDLE, start_x: i32, rect: RECT, limit: i32, dim: D
             x = drawAsciiRun(hdc, " | ", x, rect.top, rect.bottom, limit);
         }
         var segment_buf: [24]u8 = undefined;
-        const segment = status_line.formatWeekSegment(&segment_buf, status_line.providerShortLabel(@tagName(goal.provider)), goal.available and goal.has_total_used, goal.total_used_tenths);
+        var label_buf: [16]u8 = undefined;
+        const segment = status_line.formatWeekSegment(&segment_buf, aiPoolShortLabel(&label_buf, &app_state.g_ai_pace, slot), goal.available and goal.has_total_used, goal.total_used_tenths);
         _ = SetTextColor(hdc, mono orelse if (goal.available) aiPaceProviderColor(goal, slot) else dim);
         x = drawAsciiRun(hdc, segment, x, rect.top, rect.bottom, limit);
     }
@@ -960,6 +954,12 @@ fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void {
     const bg_brush = CreateSolidBrush(themeSidebarBg());
     _ = FillRect(hdc, &bg_rc, bg_brush);
     _ = DeleteObject(bg_brush);
+    const look = @import("chat_style.zig").menuLook(@import("themes.zig").themeConsoleBg());
+    const radius = @divTrunc(rect.bottom - rect.top, 2);
+    const edge = @max(1, uiScaled(1));
+    const fill = @import("smooth.zig").fillRoundRect;
+    fill(hdc, rect, radius, look.hover);
+    fill(hdc, .{ .left = rect.left + edge, .top = rect.top + edge, .right = rect.right - edge, .bottom = rect.bottom - edge }, @max(0, radius - edge), look.fill);
     const text: DWORD = if (app_state.g_light_theme) customColorOr("text_active", RGB(25, 25, 25)) else RGB(255, 255, 255);
     const inner_left = rect.left + uiScaled(10);
     const inner_right = rect.right - uiScaled(10);
@@ -982,169 +982,105 @@ fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void {
     _ = paintAiPaceWeekRuns(hdc, x, rect, limit, text, text);
 }
 
-fn paintSidebarAiPaceDetail(hdc: HANDLE, rect: RECT, font_title: HANDLE, font_subtitle: HANDLE) void {
-    paintSidebarCardFrame(hdc, rect);
-    const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
-    const bright: DWORD = customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(235, 238, 244));
-    const border: DWORD = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(210, 214, 220) else RGB(55, 61, 70));
-    const inner_left = rect.left + uiScaled(10);
-    const inner_right = rect.right - uiScaled(10);
-
-    _ = SelectObject(hdc, font_title);
-    _ = SetTextColor(hdc, bright);
-    var header_rc = RECT{ .left = inner_left, .top = rect.top + uiScaled(5), .right = inner_right, .bottom = rect.top + uiScaled(25) };
-    if (!app_state.g_ai_pace.from_ladder) {
-        drawAscii(hdc, "TODAY'S AI | 3/3", &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-    }
-
-    const content_top = rect.top + uiScaled(29);
-    const content_bottom = rect.bottom - uiScaled(5);
-    const goal_count = @min(app_state.g_ai_pace.goal_count, app_state.g_ai_pace.goals.len);
-    if (goal_count == 0) return;
-    const header_h = uiScaled(12);
-    var header_count: i32 = 0;
-    if (app_state.g_ai_pace.from_ladder) {
-        var h: usize = 0;
-        while (h < goal_count) : (h += 1) {
-            const cl = app_state.g_ai_pace.goals[h].clusterSlice();
-            if (cl.len > 0 and (h == 0 or !std.mem.eql(u8, cl, app_state.g_ai_pace.goals[h - 1].clusterSlice()))) header_count += 1;
-        }
-    }
-    const row_h = @divTrunc(content_bottom - content_top - header_count * header_h, @as(i32, @intCast(goal_count)));
-    var slot: usize = 0;
-    var y_cursor: i32 = content_top;
-    while (slot < goal_count) : (slot += 1) {
-        const goal = app_state.g_ai_pace.goals[slot];
-        if (app_state.g_ai_pace.from_ladder) {
-            const cl = goal.clusterSlice();
-            if (cl.len > 0 and (slot == 0 or !std.mem.eql(u8, cl, app_state.g_ai_pace.goals[slot - 1].clusterSlice()))) {
-                _ = SelectObject(hdc, font_subtitle);
-                _ = SetTextColor(hdc, dim);
-                var cluster_rc = RECT{ .left = inner_left, .top = y_cursor, .right = inner_right, .bottom = y_cursor + header_h };
-                drawAscii(hdc, cl, &cluster_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                y_cursor += header_h;
-            }
-        }
-        const row_top = y_cursor;
-        const row_bottom = if (slot + 1 == goal_count) content_bottom else row_top + row_h;
-        y_cursor = row_bottom;
-
-        var accent = RECT{
-            .left = inner_left,
-            .top = row_top + uiScaled(3),
-            .right = inner_left + uiScaled(2),
-            .bottom = row_bottom - uiScaled(4),
-        };
-        const accent_brush = CreateSolidBrush(if (goal.available and goal.in_ladder) aiPaceProviderColor(goal, slot) else border);
-        _ = FillRect(hdc, &accent, accent_brush);
-        _ = DeleteObject(accent_brush);
-
-        _ = SelectObject(hdc, font_subtitle);
-        _ = SetTextColor(hdc, if (goal.available and goal.in_ladder) bright else dim);
-        var label_rc = RECT{
-            .left = inner_left + uiScaled(7),
-            .top = row_top + uiScaled(1),
-            .right = inner_right,
-            .bottom = row_top + uiScaled(14),
-        };
-        drawAscii(hdc, aiPaceProviderLabel(&goal), &label_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        _ = SelectObject(hdc, font_subtitle);
-        _ = SetTextColor(hdc, dim);
-        var today_rc = RECT{
-            .left = inner_left + uiScaled(7),
-            .top = row_top + uiScaled(13),
-            .right = inner_right - uiScaled(48),
-            .bottom = row_top + uiScaled(25),
-        };
-        var today_buf: [32]u8 = undefined;
-        const today_text = if (app_state.g_ai_pace.from_ladder)
-            std.fmt.bufPrint(&today_buf, "WEEK USED | {s}", .{aiPaceWord(goal.pace)}) catch "WEEK USED"
-        else
-            "TODAY";
-        drawAscii(hdc, today_text, &today_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-
-        var progress_buf: [20]u8 = undefined;
-        const progress_text: []const u8 = if (goal.retrying)
-            "RETRY"
-        else switch (goal.status) {
-            .stale => "STALE",
-            .to_go, .done => formatAiPacePercent(&progress_buf, goal.progress_tenths),
-            .unavailable => "-",
-        };
-        _ = SetTextColor(hdc, aiPaceStatusColor(goal.status, dim));
-        var progress_rc = RECT{
-            .left = inner_right - uiScaled(48),
-            .top = row_top + uiScaled(13),
-            .right = inner_right,
-            .bottom = row_top + uiScaled(25),
-        };
-        drawAscii(hdc, progress_text, &progress_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
-
-        paintAiPaceBar(hdc, inner_left + uiScaled(7), row_top + uiScaled(26), inner_right, goal, slot);
-        var weekly_detail_buf: [96]u8 = undefined;
-        var secondary_detail_buf: [96]u8 = undefined;
-        var weekly_buf: [20]u8 = undefined;
-        var five_hour_buf: [20]u8 = undefined;
+fn createAiUsageMenu(snapshot: AiPaceSnapshot) HANDLE {
+    const w = @import("win32.zig");
+    const menu = w.CreatePopupMenu() orelse return null;
+    const count = @min(snapshot.goal_count, snapshot.goals.len);
+    if (count == 0) _ = w.AppendMenuW(menu, w.MF_STRING, 1, L("Usage is loading"));
+    for (snapshot.goals[0..count], 0..) |goal, slot| {
+        if (slot > 0) _ = w.AppendMenuW(menu, 0x0800, 0, null);
+        var short_buf: [16]u8 = undefined;
+        var percent_buf: [24]u8 = undefined;
+        var title_buf: [160]u8 = undefined;
+        var reset_buf: [32]u8 = undefined;
+        var reset_detail_buf: [96]u8 = undefined;
+        var five_buf: [20]u8 = undefined;
+        var five_reset_buf: [32]u8 = undefined;
         var fable_buf: [20]u8 = undefined;
-        var weekly_reset_buf: [32]u8 = undefined;
-        var five_hour_reset_buf: [32]u8 = undefined;
-        const weekly: []const u8 = if (goal.has_total_used) formatAiPacePercent(&weekly_buf, goal.total_used_tenths) else "-";
-        const five_hour: []const u8 = if (goal.has_five_hour_used) formatAiPacePercent(&five_hour_buf, goal.five_hour_used_tenths) else "-";
-        const fable: []const u8 = if (goal.has_fable_used) formatAiPacePercent(&fable_buf, goal.fable_used_tenths) else "-";
-        const weekly_reset = formatAiPaceWeeklyReset(&weekly_reset_buf, goal);
-        const five_hour_reset = formatAiPaceFiveHourReset(&five_hour_reset_buf, goal);
-        const weekly_local = if (goal.has_weekly_reset) aiPaceLocalTime(goal.weekly_reset_filetime) else null;
-        const weekly_detail = if (weekly_local) |local|
-            formatAiPaceResetDetail(&weekly_detail_buf, local, weekly_reset)
-        else
-            std.fmt.bufPrint(&weekly_detail_buf, "WEEK {s}", .{weekly}) catch "WEEK -";
+        var secondary_buf: [160]u8 = undefined;
+        var today_buf: [64]u8 = undefined;
+        var progress_buf: [20]u8 = undefined;
         var bonus_buf: [20]u8 = undefined;
-        const bonus_local = if (goal.has_bonus_reset and goal.bonus_reset_filetime > nowFileTime()) aiPaceLocalTime(goal.bonus_reset_filetime) else null;
-        const bonus = if (bonus_local) |local| formatAiPaceBonusReset(&bonus_buf, local) else "";
-        const secondary_detail = if (goal.has_fable_used and five_hour_reset.len > 0)
-            std.fmt.bufPrint(&secondary_detail_buf, "5H {s} | R {s} | FABLE {s}{s}", .{ five_hour, five_hour_reset, fable, bonus }) catch "5H - | FABLE -"
-        else if (goal.has_fable_used)
-            std.fmt.bufPrint(&secondary_detail_buf, "5H {s} | FABLE {s}{s}", .{ five_hour, fable, bonus }) catch "5H - | FABLE -"
-        else if (five_hour_reset.len > 0)
-            std.fmt.bufPrint(&secondary_detail_buf, "5H {s} | RESET {s}{s}", .{ five_hour, five_hour_reset, bonus }) catch "5H -"
+        const used = if (goal.has_total_used) formatAiPacePercent(&percent_buf, goal.total_used_tenths) else "unknown";
+        const title = std.fmt.bufPrint(&title_buf, "{s} {s}: {s} week used{s}{s}{s}", .{ aiPoolShortLabel(&short_buf, &snapshot, slot), aiPaceProviderLabel(&goal), used, if (snapshot.from_ladder) " | " else "", if (snapshot.from_ladder) aiPaceWord(goal.pace) else "", if (goal.retrying) " (retrying)" else "" }) catch continue;
+        const reset = formatAiPaceWeeklyReset(&reset_buf, goal);
+        const reset_detail = if (goal.has_weekly_reset) detail: {
+            const local = aiPaceLocalTime(goal.weekly_reset_filetime) orelse break :detail "Reset unknown";
+            break :detail formatAiPaceResetDetail(&reset_detail_buf, local, reset);
+        } else "Reset unknown";
+        const five = if (goal.has_five_hour_used) formatAiPacePercent(&five_buf, goal.five_hour_used_tenths) else "unknown";
+        const five_reset = formatAiPaceFiveHourReset(&five_reset_buf, goal);
+        const fable = if (goal.has_fable_used) formatAiPacePercent(&fable_buf, goal.fable_used_tenths) else "";
+        const secondary = if (goal.has_fable_used)
+            std.fmt.bufPrint(&secondary_buf, "5H {s} | reset {s} | Fable {s}", .{ five, if (five_reset.len > 0) five_reset else "unknown", fable }) catch continue
         else
-            std.fmt.bufPrint(&secondary_detail_buf, "5H {s}{s}", .{ five_hour, bonus }) catch "5H -";
-        _ = SetTextColor(hdc, dim);
-        const roomy_detail = row_h >= uiScaled(58);
-        var compact_detail_buf: [96]u8 = undefined;
-        const compact_detail = if (weekly_reset.len > 0)
-            std.fmt.bufPrint(&compact_detail_buf, "5H {s} | WK {s} | R {s}", .{ five_hour, weekly, weekly_reset }) catch weekly_detail
+            std.fmt.bufPrint(&secondary_buf, "5H {s} | reset {s}", .{ five, if (five_reset.len > 0) five_reset else "unknown" }) catch continue;
+        const today = if (!snapshot.from_ladder and goal.has_daily_goal)
+            std.fmt.bufPrint(&today_buf, "Today: {s} of daily goal", .{formatAiPacePercent(&progress_buf, goal.progress_tenths)}) catch ""
         else
-            std.fmt.bufPrint(&compact_detail_buf, "5H {s} | WK {s}", .{ five_hour, weekly }) catch weekly_detail;
-        var weekly_detail_rc = RECT{
-            .left = inner_left + uiScaled(7),
-            .top = row_top + uiScaled(31),
-            .right = inner_right,
-            .bottom = if (roomy_detail) row_top + uiScaled(45) else row_bottom - uiScaled(2),
-        };
-        drawAscii(hdc, if (roomy_detail) weekly_detail else compact_detail, &weekly_detail_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        if (roomy_detail) {
-            var secondary_detail_rc = RECT{
-                .left = inner_left + uiScaled(7),
-                .top = row_top + uiScaled(44),
-                .right = inner_right,
-                .bottom = row_bottom - uiScaled(2),
-            };
-            drawAscii(hdc, secondary_detail, &secondary_detail_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        }
-
-        if (slot + 1 < goal_count) {
-            var separator = RECT{
-                .left = inner_left + uiScaled(7),
-                .top = row_bottom - 1,
-                .right = inner_right,
-                .bottom = row_bottom,
-            };
-            const separator_brush = CreateSolidBrush(border);
-            _ = FillRect(hdc, &separator, separator_brush);
-            _ = DeleteObject(separator_brush);
+            "";
+        const bonus = if (goal.has_bonus_reset and goal.bonus_reset_filetime > nowFileTime()) detail: {
+            const local = aiPaceLocalTime(goal.bonus_reset_filetime) orelse break :detail "";
+            const text = formatAiPaceBonusReset(&bonus_buf, local);
+            break :detail if (text.len > 3) text[3..] else "";
+        } else "";
+        const lines = [_][]const u8{ title, reset_detail, secondary, today, bonus };
+        for (lines, 0..) |line, index| {
+            if (line.len == 0) continue;
+            var wide: [257]u16 = @splat(0);
+            const length = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], line) catch continue;
+            wide[length] = 0;
+            _ = w.AppendMenuW(menu, w.MF_STRING, 1 + slot * lines.len + index, wide[0..length :0].ptr);
         }
     }
+    return menu;
+}
+
+pub fn showSidebarAiUsageMenu() void {
+    const w = @import("win32.zig");
+    const menu = createAiUsageMenu(app_state.g_ai_pace) orelse return;
+    defer _ = w.DestroyMenu(menu);
+    const card = sidebarStickyCardRect();
+    var point = w.POINT{ .x = card.left, .y = card.top - @import("window_layout.zig").paneGap() };
+    _ = w.ClientToScreen(app_state.g_main_hwnd, &point);
+    _ = @import("fonts.zig").trackPopupMenu(menu, w.TPM_RETURNCMD | 0x0020, point.x, point.y, 0, app_state.g_main_hwnd, null);
+}
+
+test "IGSH-908 native usage menu retains distinct pools, quota data and reset rows" {
+    const w = @import("win32.zig");
+    var snapshot = AiPaceSnapshot{ .available = true, .goal_count = 3 };
+    const labels = [_][]const u8{ "Primary", "Codex", "Secondary" };
+    const used = [_]u16{ 130, 320, 560 };
+    for (snapshot.goals[0..3], 0..) |*goal, slot| {
+        goal.setLabel(labels[slot]);
+        goal.provider = if (slot == 1) .codex else .claude;
+        goal.available = true;
+        goal.has_total_used = true;
+        goal.total_used_tenths = used[slot];
+        goal.has_five_hour_used = true;
+        goal.five_hour_used_tenths = 200;
+    }
+    snapshot.goals[0].has_fable_used = true;
+    snapshot.goals[0].fable_used_tenths = 180;
+    const menu = createAiUsageMenu(snapshot) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyMenu(menu);
+    try std.testing.expectEqual(@as(i32, 11), w.GetMenuItemCount(menu));
+    const expected = [_][]const u8{ "CL1 Primary: 13% week used", "CX Codex: 32% week used", "CL2 Secondary: 56% week used", "5H 20% | reset unknown | Fable 18%" };
+    var found = [_]usize{0} ** expected.len;
+    var reset_rows: usize = 0;
+    for (0..11) |index| {
+        var wide: [257]u16 = @splat(0);
+        const length = w.GetMenuStringW(menu, @intCast(index), &wide, wide.len, 0x0400);
+        var buffer: [1024]u8 = undefined;
+        const text_length = try std.unicode.utf16LeToUtf8(&buffer, wide[0..@intCast(length)]);
+        const text = buffer[0..text_length];
+        for (expected, 0..) |want, item| {
+            if (std.mem.eql(u8, text, want)) found[item] += 1;
+        }
+        if (std.mem.eql(u8, text, "Reset unknown")) reset_rows += 1;
+    }
+    for (found) |count| try std.testing.expectEqual(@as(usize, 1), count);
+    try std.testing.expectEqual(@as(usize, 3), reset_rows);
 }
 
 const SidebarOverviewStatus = struct { label: []const u8, color: DWORD };
@@ -1367,7 +1303,7 @@ pub fn sidebarStatusPopupRect() RECT {
 }
 
 pub fn paintSidebarStatusCardPopup(hdc: HANDLE, font_title: HANDLE, font_subtitle: HANDLE) void {
-    if (!app_state.g_status_card_hover or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed) return;
+    if (!app_state.g_status_card_hover or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed or app_state.g_sidebar_status_card == 2) return;
     const rect = sidebarStatusPopupRect();
     if (rect.bottom <= rect.top or rect.right <= rect.left) return;
     switch (app_state.g_sidebar_status_card) {
@@ -1379,6 +1315,6 @@ pub fn paintSidebarStatusCardPopup(hdc: HANDLE, font_title: HANDLE, font_subtitl
                 paintSidebarCombinedDetail(hdc, rect, font_title, font_subtitle);
             }
         },
-        else => paintSidebarAiPaceDetail(hdc, rect, font_title, font_subtitle),
+        else => {},
     }
 }
