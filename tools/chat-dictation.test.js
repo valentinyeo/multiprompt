@@ -152,6 +152,7 @@ test('IGSH-965 send sits at the far right and the queued send is armed and consu
   assert.match(ready, /const send_queued = app_state\.g_dictation_send_queued\.swap\(false, \.acq_rel\);/);
   assert.equal((ready.match(/chatDictationSendFlush\(send_queued\)/g) || []).length, 2);
   assert.match(voice, /pub fn cancelDictation\(\) void \{[^}]*g_dictation_send_queued\.store\(false, \.release\);/);
+  assert.match(composer, /const dictating = dictated\.len > 0 and app_state\.g_dictation_running\.load\(\.acquire\) and\s*std\.mem\.eql\(u8, dictated, app_state\.g_chat_draft_owner\[0\.\.app_state\.g_chat_draft_owner_len\]\);/);
   const keys = composer.slice(composer.indexOf('fn chatDictationKey('), composer.indexOf('pub fn chatDictationClick('));
   assert.doesNotMatch(keys, /g_dictation_send_queued/);
 });

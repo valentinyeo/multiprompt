@@ -231,7 +231,9 @@ pub fn chatDictationToggle() void {
 }
 
 pub fn chatSendOrFinishDictation() void {
-    const dictating = app_state.g_dictation_draft_owner_len > 0 and app_state.g_dictation_running.load(.acquire);
+    const dictated = app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len];
+    const dictating = dictated.len > 0 and app_state.g_dictation_running.load(.acquire) and
+        std.mem.eql(u8, dictated, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]);
     if (!dictating) {
         @import("chat_send.zig").sendChatPrompt();
         return;
@@ -410,6 +412,9 @@ test "IGSH-965 send while dictating stops the recording and queues one send" {
     };
     const saved = .{
         .owner_len = app_state.g_dictation_draft_owner_len,
+        .owner = app_state.g_dictation_draft_owner,
+        .chat_owner_len = app_state.g_chat_draft_owner_len,
+        .chat_owner = app_state.g_chat_draft_owner,
         .running = app_state.g_dictation_running.load(.acquire),
         .recording = app_state.g_dictation_recording.load(.acquire),
         .queued = app_state.g_dictation_send_queued.load(.acquire),
@@ -419,6 +424,9 @@ test "IGSH-965 send while dictating stops the recording and queues one send" {
     };
     defer {
         app_state.g_dictation_draft_owner_len = saved.owner_len;
+        app_state.g_dictation_draft_owner = saved.owner;
+        app_state.g_chat_draft_owner_len = saved.chat_owner_len;
+        app_state.g_chat_draft_owner = saved.chat_owner;
         app_state.g_dictation_running.store(saved.running, .release);
         app_state.g_dictation_recording.store(saved.recording, .release);
         app_state.g_dictation_send_queued.store(saved.queued, .release);
@@ -430,9 +438,17 @@ test "IGSH-965 send while dictating stops the recording and queues one send" {
     chat_dictation_engine_toggle = Engine.toggle;
     Engine.toggles = 0;
     app_state.g_dictation_send_queued.store(false, .release);
+    app_state.g_dictation_draft_owner[0] = 'a';
     app_state.g_dictation_draft_owner_len = 1;
+    app_state.g_chat_draft_owner[0] = 'b';
+    app_state.g_chat_draft_owner_len = 1;
     app_state.g_dictation_running.store(true, .release);
     app_state.g_dictation_recording.store(true, .release);
+    chatSendOrFinishDictation();
+    try std.testing.expectEqual(@as(u32, 0), Engine.toggles);
+    try std.testing.expect(!app_state.g_dictation_send_queued.load(.acquire));
+    try std.testing.expect(app_state.g_dictation_recording.load(.acquire));
+    app_state.g_chat_draft_owner[0] = 'a';
     chatSendOrFinishDictation();
     try std.testing.expectEqual(@as(u32, 1), Engine.toggles);
     try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
