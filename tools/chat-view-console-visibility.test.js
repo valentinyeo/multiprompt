@@ -369,8 +369,8 @@ test('IGSH-955 production chat handoff transfers cross-thread foreground before 
   try {
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, chatHandoffHarness(source));
-    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 120000 });
-    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, JSON.stringify({ signal: result.signal, error: result.error, stdout: result.stdout, stderr: result.stderr }));
     assert.match(result.stderr, /All 3 tests passed/);
     console.log(result.stderr.trim());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
