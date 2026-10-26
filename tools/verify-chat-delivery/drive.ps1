@@ -846,7 +846,22 @@ foreach ($plan in $plans) {
             Shot 'unread-divider-all-read'
             if ($env:CHAT_UNREAD_PROOF -eq '1') {
                 $focusedLogStart = (Read-Shared "$settings/debug.log").Length
-                Shell-Input 'messages' '1'
+                $focusedText = 'IGSH871 focused revisit arrival.'
+                Shell-Input 'unread-arrival' $focusedText
+                [void](Wait-For 'exact focused reply entered the app-written cache' { (Read-Shared $cache.FullName).Contains($focusedText) })
+                $copyLogStart = (Read-Shared "$settings/debug.log").Length
+                Press @(0x11, 0x4B) 'Ctrl+K: select all transcript text for focused proof' $true
+                $query = 'chat view select all'
+                foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+                [void](Wait-For 'focused proof select-all command selected' { (Read-Shared "$settings/debug.log").Substring($copyLogStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+                Press @(0x0D) 'Enter: select the actual rendered focused reply'
+                Press @(0x11, 0x43) 'Ctrl+C: copy the actual rendered focused reply'
+                $observation.focusedReplyText = [Windows.Forms.Clipboard]::GetText()
+                [IO.File]::WriteAllText("$Evidence/focused-copy.txt", $observation.focusedReplyText)
+                if (-not $observation.focusedReplyText.Contains($focusedText)) { throw 'The actual focused reply was not rendered; stale no-divider state is insufficient' }
+                Press @(0x1B) 'Esc: clear focused reply selection' $true
+                $focusedLogStart = (Read-Shared "$settings/debug.log").Length
+                Press @(0x11, 0x30) 'Ctrl+0: measure the actual focused reply' $true
                 [void](Require-NewMessages 0 0 0 'focused arrival after all-read revisit stays at bottom' $focusedLogStart)
                 $observation.revisitActiveDivider = Require-Divider 0 0 'focused arrival after all-read revisit has no New line' $focusedLogStart
                 Shot 'unread-active-revisit'
