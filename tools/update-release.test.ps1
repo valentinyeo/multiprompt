@@ -104,6 +104,8 @@ try {
             $cardEventName = 'Local\MultipromptCard-' + [guid]::NewGuid().ToString('N')
             $cardEvent = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::ManualReset, $cardEventName)
             $cardProcess = $null
+            $env:APPDATA = Join-Path $Root 'card-roaming'
+            New-Item -ItemType Directory -Force (Join-Path $env:APPDATA 'ZigShell') | Out-Null
             $log = Join-Path $env:APPDATA 'ZigShell/debug.log'
             Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
             $env:MULTIPROMPT_NO_LOGIN = '1'
@@ -205,6 +207,7 @@ try {
                 $cardMutex.Dispose()
                 $env:MULTIPROMPT_NO_LOGIN = ''
                 $env:ZIGSHELL_DEBUG = ''
+                $env:APPDATA = Join-Path $Root 'roaming'
             }
         }
 
