@@ -129,6 +129,7 @@ pub fn updateCardToggleNotes() void {
     if (!cardHasToggle()) return;
     card_expanded = !card_expanded;
     card_notes_logged = false;
+    if (app_state.g_main_hwnd != null) clampSidebarScroll();
 }
 
 pub fn updateCardSpan() i32 {
