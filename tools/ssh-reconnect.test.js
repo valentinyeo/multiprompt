@@ -16,7 +16,7 @@ function body(name, text = source) {
 async function zig(code, filter, state = true, expected = 0, failure = /FAIL \(|expected 15000, found 1000/) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue501-'));
   try {
-    if (state && modern) copyZig(['ssh_reconnect.zig'], dir);
+    if (state && modern) copyZig(['ssh_reconnect.zig', 'tmux_identity.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = await new Promise((resolve, reject) => {
       const child = spawn(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', filter], { timeout: 120000 });
@@ -49,6 +49,7 @@ const Shell = struct {
     hwnd: ?*anyopaque = null, pid: u32 = 7, activity: enum { idle, active } = .idle,
     needs_attention: bool = false, locked: bool = false, pinned_top: bool = false,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 1,
+    tmux_identity: [64]u8 = @splat(0), tmux_identity_len: u32 = 0,
     spawn_tick: u64 = 1, shell_id: u32 = 42, tmux_host: u8 = 0,
     ssh_reconnect: State = .{ .healthy_attach = true }, ssh_reconnect_attempts: u8 = 0, ssh_reconnect_next_tick: u64 = 0,
 };
@@ -552,7 +553,7 @@ const probeVps = struct {
         std.debug.assert(std.mem.indexOf(u8, cmd, "-o ConnectTimeout=5") != null);
         std.debug.assert(timeout == 10000);
         capture_count += 1;
-        const result = if (!capture_ok) "Permission denied" else if (listing_ok) "session\\n@@S session\\n@@LS_OK@@\\n@@MP_LIVE@@\\n" else "@@MP_LIVE@@\\n";
+        const result = if (!capture_ok) "Permission denied" else if (listing_ok) "session\\n@@I session|1700:123:$7\\n@@S session\\n@@LS_OK@@\\n@@MP_LIVE@@\\n" else "@@MP_LIVE@@\\n";
         @memcpy(output[0..result.len], result);
         return .{ .len = result.len, .success = capture_ok, .exit_code = if (capture_ok) 0 else 255 };
     }
@@ -580,6 +581,7 @@ test "ISSUE-501 worker hosts and failure" {
     try std.testing.expect(!good.healthy[0]);
     try std.testing.expect(good.items[0].attached);
     sshProbeFinish();
+    try std.testing.expectEqualStrings("1700:123:$7", shells[0].tmux_identity[0..shells[0].tmux_identity_len]);
     try std.testing.expect(!shells[0].disconnected);
     capture_ok = false;
     const bad = try workerJob();
