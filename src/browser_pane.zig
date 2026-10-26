@@ -4645,6 +4645,8 @@ fn browserEdgeMaskWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callc
 
 fn ensureBrowserEdgeMaskWindows() void {
     if (!BROWSER_EDGE_MASKS or app_state.g_main_hwnd == null) return;
+    const owner = activeBrowserHwndLive() orelse return;
+    const owner_value: LONG_PTR = @bitCast(@intFromPtr(owner));
     if (!app_state.g_browser_edge_mask_class_registered) {
         const hInst = GetModuleHandleW(null);
         const wc = WNDCLASSEXW{
@@ -4667,7 +4669,13 @@ fn ensureBrowserEdgeMaskWindows() void {
 
     const hInst = GetModuleHandleW(null);
     for (0..BROWSER_EDGE_MASK_COUNT) |i| {
-        if (app_state.g_browser_edge_mask_hwnds[i] != null and IsWindow(app_state.g_browser_edge_mask_hwnds[i]) != 0) continue;
+        if (app_state.g_browser_edge_mask_hwnds[i]) |hw| {
+            if (IsWindow(hw) != 0) {
+                if (GetWindowLongPtrW(hw, GWLP_HWNDPARENT) != owner_value)
+                    _ = SetWindowLongPtrW(hw, GWLP_HWNDPARENT, owner_value);
+                continue;
+            }
+        }
         app_state.g_browser_edge_mask_hwnds[i] = null;
         const side: BrowserEdgeMaskSide = @enumFromInt(i);
         var ex_style: DWORD = WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
@@ -4681,7 +4689,7 @@ fn ensureBrowserEdgeMaskWindows() void {
             0,
             1,
             1,
-            app_state.g_main_hwnd,
+            owner,
             null,
             hInst,
             null,
@@ -4690,7 +4698,7 @@ fn ensureBrowserEdgeMaskWindows() void {
         app_state.g_browser_edge_mask_hwnds[i] = hw;
         if (browserMaskCorner(side) != null) browser_corner_paints[i - 6] = null;
         if (side == .control_hit) _ = SetLayeredWindowAttributes(hw, 0, 1, LWA_ALPHA);
-        _ = SetWindowLongPtrW(hw, GWLP_HWNDPARENT, @as(LONG_PTR, @bitCast(@intFromPtr(app_state.g_main_hwnd))));
+        _ = SetWindowLongPtrW(hw, GWLP_HWNDPARENT, owner_value);
         _ = SetWindowPos(hw, null, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         _ = ShowWindow(hw, SW_HIDE);
     }
