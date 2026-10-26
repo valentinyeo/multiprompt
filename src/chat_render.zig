@@ -1803,6 +1803,7 @@ var g_choice_card_w: i32 = 0;
 var g_choice_pick_key: u64 = 0;
 var g_choice_pick_index: usize = 0;
 var g_choice_pick_set = false;
+var g_choice_pick_sid: u32 = 0;
 
 fn chatChoiceCardCount() usize {
     return g_choice.group.count + @as(usize, if (g_choice.prompt) 1 else 0);
@@ -1900,7 +1901,8 @@ fn chatChoicesRefresh(buf: []const u16) void {
         if (g_choice_pick_set and g_choice_pick_key == chatChoiceKey(&next.group, true, 0)) next.chosen = g_choice_pick_index;
         next.live = next.chosen == null;
     } else _ = chatChoicesFind(buf, &next);
-    if (!next.present) g_choice_pick_set = false;
+    const active_sid: u32 = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+    if (!next.present and g_choice_pick_sid == active_sid) g_choice_pick_set = false;
     g_choice = next;
 }
 
@@ -1963,6 +1965,7 @@ fn chatChoiceClick(index: usize) void {
     g_choice_pick_key = key;
     g_choice_pick_index = index;
     g_choice_pick_set = true;
+    g_choice_pick_sid = app_state.shells[app_state.active_shell].shell_id;
     chatImageReady();
 }
 
@@ -1995,7 +1998,7 @@ var g_choice_logged: u64 = 0;
 fn chatChoicesLog() void {
     var hash: u64 = @as(u64, @intFromBool(g_choice.live)) + 2 * @as(u64, @intFromBool(g_choice.prompt));
     hash = hash *% 31 +% (if (g_choice.chosen) |c| @as(u64, c) + 1 else 0);
-    for (g_choice_rects[0..g_choice_rect_count]) |rc| hash = (hash *% 31 +% @as(u64, @bitCast(@as(i64, rc.top - app_state.g_chat_scroll_y)))) *% 31 +% @as(u64, @bitCast(@as(i64, rc.left)));
+    for (g_choice_rects[0..g_choice_rect_count]) |rc| hash = (hash *% 31 +% @as(u64, @bitCast(@as(i64, rc.top)))) *% 31 +% @as(u64, @bitCast(@as(i64, rc.left)));
     if (hash == g_choice_logged) return;
     g_choice_logged = hash;
     var log: [512]u8 = undefined;
@@ -2126,6 +2129,7 @@ pub fn chatRelayout(client_width: i32) void {
     chatChoicesRefresh(buf);
     g_choice_sig = chatChoicesSig();
     reuse = chatChoicesReuseFor(g_choice_sig, old_choice_sig, reuse);
+    if (g_choice.present and !g_choice.prompt) reuse = @min(reuse, g_choice.anchor);
     app_state.g_chat_img_pass +%= 1;
     const first_img_block = chatImgFirstBlock(buf);
     if (first_img_block != app_state.g_chat_img_first_block) reuse = @min(reuse, @min(first_img_block, app_state.g_chat_img_first_block));

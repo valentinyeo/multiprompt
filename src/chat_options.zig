@@ -1,7 +1,7 @@
 const std = @import("std");
 
-pub const MAX_OPTIONS = 8;
-pub const TITLE_MAX = 120;
+pub const MAX_OPTIONS = 26;
+pub const TITLE_MAX = 240;
 pub const DETAIL_MAX = 200;
 pub const HEADER_MAX = 48;
 pub const QUESTION_MAX = 240;
