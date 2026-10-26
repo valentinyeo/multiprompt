@@ -17,7 +17,7 @@ The release gate for one failure class: a bug that only shows when the app start
 
 ## Driving it with control.ps1
 
-Dispatch `gh workflow run verify.yml -f feature=relaunch-saved-sessions` (or `--ref <branch>`). It also runs in the full matrix on every master push, and `tools/auto-release-admit.sh` tags a commit only when `verify (relaunch-saved-sessions)` of that exact commit's push run succeeded.
+Dispatch `gh workflow run verify.yml -f feature=relaunch-saved-sessions` (or `--ref <branch>`). It also runs in the full matrix on every master push. Every master push additionally starts the `Release gate` workflow (`.github/workflows/release-gate.yml`), which calls `verify.yml` with only this journey in a run keyed to the commit, so a newer push never cancels or replaces it behind the 40 minute full matrix. `tools/auto-release-admit.sh` tags a commit only when the journey job of that exact commit's `Release gate` run succeeded; a commit that has no `Release gate` run falls back to the journey job of its full Verify push run.
 
 1. The driver writes `seed-session.json` into the private `roaming/ZigShell/session.json` before the first launch. This is the only journey that seeds the saved file (Valentin, 2026-10-26, IGSH-900: "ok run it", approving a release gate that seeds a realistic saved state). Sessions are CMD tabs named `Relaunch 01` to `Relaunch 14` plus six `tmux` records named like live sessions with no `tmux_session`, the shape IGSH-890 left behind.
 2. Launch with `--single-window` and the restore path on. Wait for all 14 names in the published Inbox, then require no name twice, no unsaved name, and the saved file at exactly 14 tabs with all three group names.
@@ -30,4 +30,4 @@ Dispatch `gh workflow run verify.yml -f feature=relaunch-saved-sessions` (or `--
 - Red control: `origin/master` before the IGSH-890 fix publishes the cached copies, so step 2 fails with `sessions listed twice in the sidebar` or the relaunch never finishes restoring. The red and green run links are on the IGSH-900 ticket.
 - The journey adds no app startup limit, timeout or blocking state; its waits live in the GitHub script only.
 - Remote tmux reconnection, account sync and browser panes stay outside it. A missing, cancelled or red result for this job blocks the release; other journeys keep their own auto-revert path.
-- Cancelled runs count as missing: a newer master push cancels the older commit's Verify run, so only commits whose run finished can be tagged.
+- Cancelled runs count as missing. The full Verify push run on master queues one commit at a time and drops the pending run when a newer push lands (IGSH-900 follow-up: 683fba27, de919353, e41afa82 and eca0df7f had no journey result for that reason), which is why the gate has its own per-commit run.

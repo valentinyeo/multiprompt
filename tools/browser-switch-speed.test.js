@@ -345,7 +345,7 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
     assert.notEqual(broken, workflow, before);
     assert.throws(() => assertsDispatchOnly(broken), assert.AssertionError);
   }
-  assert.throws(() => assertsDispatchOnly(workflow.replace('inputs.feature))', 'inputs.other))')));
+  assert.throws(() => assertsDispatchOnly(workflow.replace(/inputs\.feature\)\) \}\}/, 'inputs.other)) }}')));
   assert.match(workflow, /FEATURE -notin @\([^\n]*'browser-switch-speed'/);
   assert.match(control, /ValidateSet\([^\n]*'browser-switch-speed'/);
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);

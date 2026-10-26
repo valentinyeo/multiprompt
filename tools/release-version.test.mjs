@@ -50,6 +50,10 @@ if (args[0] === 'run' && args[1] === 'view') {
   console.log(JSON.stringify({ jobs: [{ name: 'verify (relaunch-saved-sessions)', conclusion: process.env.VERIFY_CONCLUSION || 'success' }] }));
   process.exit(0);
 }
+if (args[0] === 'run' && args.includes('release-gate.yml')) {
+  console.log('[]');
+  process.exit(0);
+}
 if (args[0] === 'run' && args.includes('verify.yml')) {
   const sha = args[args.indexOf('--commit') + 1];
   console.log(JSON.stringify(sha === process.env.TESTED_SHA ? [{ databaseId: 700, event: 'push', status: 'completed', conclusion: 'success' }] : []));
@@ -199,7 +203,7 @@ test('lightweight workflows cancel superseded PRs, a running master verify is ne
   }
   const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   assert.match(verify, /^  pull_request:/m);
-  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\$\{\{ github\.run_attempt != '1' && format\('-rerun-\{0\}', github\.sha\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m);
+  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\$\{\{ inputs\.feature && github\.event_name == 'push' && format\('-gate-\{0\}', github\.sha\) \|\| '' \}\}\$\{\{ github\.run_attempt != '1' && format\('-rerun-\{0\}', github\.sha\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m);
   const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
   assert.match(scan, /^  push:\n    branches: \[master\]\n  pull_request:/m);
   assert.match(scan, /^  schedule:/m);
@@ -305,7 +309,7 @@ test('automatic admission fixtures reject unsafe heads', { skip: process.platfor
 
 test('automatic release only tags a tested master and reuses signed release jobs', () => {
   const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
-  assert.match(auto, /workflows: \[Tests, Verify desktop\]/);
+  assert.match(auto, /workflows: \[Tests, Verify desktop, Release gate\]/);
   assert.match(auto, /branches: \[master\]/);
   assert.match(auto, /github.event.workflow_run.conclusion == 'success'/);
   assert.match(auto, /github.event.workflow_run.head_repository.full_name == github.repository/);
@@ -375,6 +379,7 @@ test('auto-release pushes only a tag on the tested commit under a branch-rejecti
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v1.2.9'), tested);
   assert.deepEqual(f.calls(), [
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'test.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
+    ['run', 'list', '-R', 'example/multiprompt', '-w', 'release-gate.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'verify.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
     ['run', 'view', '700', '-R', 'example/multiprompt', '--json', 'jobs'],
   ]);
