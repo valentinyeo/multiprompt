@@ -883,6 +883,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     for (0..tab.name_len) |j| shell.name[j] = @intCast(tab.name[j]);
     shell.name_len = tab.name_len;
     shell.name_source = if (tab.manual) .manual else if (tab.sem) .semantic else .default;
+    shell.restored_name_hold = shell.name_source == .default and tab.name_len > 0;
     if (tab.tmux_session_len > 0) {
         @memcpy(shell.tmux_session[0..tab.tmux_session_len], tab.tmux_session[0..tab.tmux_session_len]);
         shell.tmux_session_len = tab.tmux_session_len;
@@ -1344,6 +1345,7 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     app_state.shells[idx].name[tabs[t].name_len] = 0;
     app_state.shells[idx].name_len = tabs[t].name_len;
     app_state.shells[idx].name_source = if (tabs[t].manual) .manual else if (tabs[t].sem) .semantic else .default;
+    app_state.shells[idx].restored_name_hold = app_state.shells[idx].name_source == .default and tabs[t].name_len > 0;
     if ((tabs[t].kind == .vps or tabs[t].kind == .vps2) and tabs[t].tmux_session_len == 0 and app_state.shells[idx].name_source == .semantic) {
         app_state.shells[idx].name_source = .default;
     }
