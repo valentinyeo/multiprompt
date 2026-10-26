@@ -2984,6 +2984,10 @@ try {
             $deliveries = @((Read-DictationAudit $auditPath) | Where-Object { $_ -match '\ttarget-chat-composer\t22$' }).Count
             foreach ($way in @('send-click', 'ctrl-enter')) {
                 $marker = Join-Path $scratch ($way + '.txt')
+                [VerifyNative]::BringToForeground($script:window)
+                Record 'Click the owned composer to recover typing focus from the hidden console'
+                [VerifyNative]::ClickClient($handle, 8, 8)
+                Wait-ChatFocus 'Edit' ($way + '-composer')
                 Press @(0x11, 0x44) 'Ctrl+D: start composer dictation for the send case'
                 $iteration++
                 Wait-Until {
