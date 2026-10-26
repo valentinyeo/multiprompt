@@ -2380,17 +2380,18 @@ pub fn killProcessTree(root_pid: DWORD) void {
     }
 }
 
-pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
-    closeShellImpl(idx, remember_closed, false);
-}
+var closing_in_background = false;
 
 pub fn closeBackgroundShell(idx: u32) void {
     if (idx >= app_state.shell_count or idx == app_state.active_shell) return;
-    closeShellImpl(idx, true, true);
+    closing_in_background = true;
+    defer closing_in_background = false;
+    closeShellRemember(idx, true);
 }
 
-fn closeShellImpl(idx: u32, remember_closed: bool, background: bool) void {
+pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     if (idx >= app_state.shell_count) return;
+    const background = closing_in_background;
     @import("chat_composer.zig").chatDraftCloseForShell(idx);
     accountRecordClose(idx);
     chatOutboxDropForShell(idx);
