@@ -65,3 +65,8 @@ CREATE TABLE IF NOT EXISTS device_keys (
  status TEXT NOT NULL CHECK(status IN ('pending','approved','denied','revoked')),
  requested INTEGER NOT NULL, decided INTEGER, decided_by TEXT
 );
+CREATE TABLE IF NOT EXISTS service_keys (
+ hash TEXT PRIMARY KEY, account TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('admin','workspace')),
+ workspace TEXT, label TEXT NOT NULL, created INTEGER NOT NULL, last_used INTEGER,
+ revoked INTEGER NOT NULL DEFAULT 0, CHECK ((kind='workspace') = (workspace IS NOT NULL))
+);

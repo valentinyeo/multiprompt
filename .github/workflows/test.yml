@@ -501,7 +501,7 @@ jobs:
         run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build
       - name: Run account Worker tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: node --test service/test/infra.test.js service/test/worker.test.js
+        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js
 
   build-windows:
     name: build-windows (${{ matrix.arch }})
