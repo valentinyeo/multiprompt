@@ -100,11 +100,62 @@ test('production corner geometry and alpha rasterizer execute at both scales', (
 });
 
 
-test('IGSH-953 native deactivation retains masks for owned browser focus', () => {
+test('IGSH-1057 activation never uncovers a visible browser frame', () => {
   const main = source('main.zig');
   const start = main.indexOf('        WM_ACTIVATEAPP => {');
   const end = main.indexOf('        WM_SETFOCUS => {', start);
-  const handoff = main.slice(start, end);
-  assert.equal((handoff.match(/if \(!foregroundIsOurs\(\)\) hideBrowserEdgeMasks\(\);/g) || []).length, 2);
-  assert.doesNotMatch(handoff.replaceAll('if (!foregroundIsOurs()) hideBrowserEdgeMasks();', ''), /hideBrowserEdgeMasks\(/);
+  assert.doesNotMatch(main.slice(start, end), /hideBrowserEdgeMasks\(/);
+  const foreground = body(source('focus.zig'), 'foregroundWinEventProc');
+  assert.doesNotMatch(foreground, /hideBrowserEdgeMasks\(/);
+});
+
+test('IGSH-1057 background masks stay visible without raising above another app', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-background-'));
+  try {
+    const production = body(source('browser_pane.zig'), 'raiseBrowserEdgeMasksZOrderOnly').replace(/^fn /, 'pub fn ');
+    fs.writeFileSync(path.join(dir, 'test.zig'), `
+const std = @import("std");
+const HANDLE = ?*anyopaque;
+const BROWSER_EDGE_MASKS = true;
+const BROWSER_EDGE_MASK_COUNT = 10;
+const SWP_NOMOVE = 2;
+const SWP_NOSIZE = 1;
+const SWP_NOACTIVATE = 16;
+const SWP_NOREDRAW = 8;
+const app_state = struct {
+    var g_main_hwnd: HANDLE = @ptrFromInt(1);
+    var g_browser_edge_mask_shown = [_]bool{true} ** 10;
+    var g_browser_edge_mask_hwnds = [_]HANDLE{@ptrFromInt(2)} ** 10;
+};
+var foreground = false;
+var minimized = false;
+var raised: usize = 0;
+fn activeBrowserTransientPopupHasForegroundFocus() bool { return false; }
+fn activeBrowserEdgeMasksAllowed() bool { return true; }
+fn browserChromeCanStayVisible() bool { return !minimized; }
+fn foregroundIsOurs() bool { return foreground; }
+fn IsIconic(_: HANDLE) i32 { return if (minimized) 1 else 0; }
+fn IsWindow(_: HANDLE) i32 { return 1; }
+fn suspendBrowserEdgeMaskRaiseForPopup() void {}
+fn hideBrowserEdgeMasks() void { app_state.g_browser_edge_mask_shown = [_]bool{false} ** 10; }
+fn SetWindowPos(_: HANDLE, _: HANDLE, _: i32, _: i32, _: i32, _: i32, _: u32) i32 { raised += 1; return 1; }
+${production}
+test "background browser keeps every mask without covering foreign foreground" {
+    raiseBrowserEdgeMasksZOrderOnly();
+    for (app_state.g_browser_edge_mask_shown) |shown| try std.testing.expect(shown);
+    try std.testing.expectEqual(@as(usize, 0), raised);
+    foreground = true;
+    raiseBrowserEdgeMasksZOrderOnly();
+    try std.testing.expectEqual(@as(usize, 10), raised);
+    minimized = true;
+    raiseBrowserEdgeMasksZOrderOnly();
+    for (app_state.g_browser_edge_mask_shown) |shown| try std.testing.expect(!shown);
+}
+`);
+    const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /All 1 tests passed/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
