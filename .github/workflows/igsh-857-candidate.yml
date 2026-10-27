@@ -1,0 +1,15 @@
+name: IGSH-857 candidate proof
+on:
+  push:
+    branches: [ceo/IGSH-857-runner9]
+permissions:
+  contents: read
+jobs:
+  chat:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-messages-only
+  browser:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: browser-pane-stuck

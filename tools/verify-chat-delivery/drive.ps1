@@ -62,6 +62,16 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 60)
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 100 } while ($timer.Elapsed.TotalSeconds -lt $Seconds)
     throw "Timed out: $Description"
 }
+function Transcript-Viewport {
+    $windowBounds = $views[0].Current.BoundingRectangle
+    $frames = [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] frame transcript (-?\d+),(-?\d+),(-?\d+),(-?\d+) edit ')
+    if ($frames.Count -eq 0) { return $windowBounds }
+    $frame = $frames[$frames.Count - 1]
+    $topLeft = [ChatDeliveryDesktop]::ScreenPoint($main, [int]$frame.Groups[1].Value, [int]$frame.Groups[2].Value)
+    $bottomRight = [ChatDeliveryDesktop]::ScreenPoint($main, [int]$frame.Groups[3].Value, [int]$frame.Groups[4].Value)
+    if ($topLeft.X -ne $windowBounds.Left -or $bottomRight.X -ne $windowBounds.Right -or $topLeft.Y -lt $windowBounds.Top -or $bottomRight.Y -gt $windowBounds.Bottom -or $bottomRight.Y -le $topLeft.Y) { throw 'Logged content viewport is outside the owned transcript window' }
+    [Drawing.Rectangle]::FromLTRB($topLeft.X, $topLeft.Y, $bottomRight.X, $bottomRight.Y)
+}
 function Shot([string]$Name) {
     if ($Name -eq 'new-messages-visible') {
         [void](Wait-For 'unread badge reaches the screen' {
@@ -706,18 +716,21 @@ foreach ($plan in $plans) {
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
             $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
             $todoStatus = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Static')
-            [void](Wait-For 'owned status row above the transcript once the todo is read' {
+            $todoRow = Wait-For 'owned status row above the transcript once the todo is read' {
                 $viewRows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
                 if ($viewRows.Count -ne 1) { return $false }
                 $viewBounds = $viewRows[0].Current.BoundingRectangle
-                @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $todoStatus) | Where-Object {
+                $rows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $todoStatus) | Where-Object {
                     $r = $_.Current.BoundingRectangle
-                    -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $viewBounds.Left -and $r.Width -eq $viewBounds.Width -and $r.Bottom -eq $viewBounds.Top -and $r.Height -gt 0
-                }).Count -eq 1
-            })
+                    -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $viewBounds.Left -and $r.Width -eq $viewBounds.Width -and ($r.Bottom -eq $viewBounds.Top -or ($r.Top -ge $viewBounds.Top -and $r.Bottom -lt $viewBounds.Bottom)) -and $r.Height -gt 0
+                })
+                if ($rows.Count -eq 1) { return $rows[0] }
+            }
             $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
             if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
-            $bounds = $views[0].Current.BoundingRectangle
+            $bounds = Transcript-Viewport
+            $todoBounds = $todoRow.Current.BoundingRectangle
+            $bounds = [Drawing.Rectangle]::FromLTRB($bounds.Left, $todoBounds.Bottom, $bounds.Right, $bounds.Bottom)
             $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
             Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript' $true
             Copy-Item $cache.FullName "$caseDir/app-cache-before.jsonl"
@@ -817,7 +830,7 @@ foreach ($plan in $plans) {
             $arrivalLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'messages' '2'
             $pill = Require-NewMessages 2 1 1 'two new arrivals while reading' $arrivalLogStart
-            $bounds = $views[0].Current.BoundingRectangle
+            $bounds = Transcript-Viewport
             $pillOrigin = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.left, $pill.top)
             $pillEnd = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.right, $pill.bottom)
             if ($pill.bottom -le $pill.top -or $pill.left -ge $pill.right -or $pillOrigin.Y -lt $bounds.Bottom -or [math]::Abs(($pillOrigin.X + $pillEnd.X) / 2 - ($bounds.Left + $bounds.Right) / 2) -gt 2) { throw 'New-message pill overlaps the transcript or is not centered' }

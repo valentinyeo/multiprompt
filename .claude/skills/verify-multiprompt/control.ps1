@@ -2070,6 +2070,7 @@ function Send-ProfileScreenshot([string]$Step, [string]$Profile, [int]$ExpectedU
 
 function Palette([string]$Query) {
     Press @(0x11, 0x4B) 'Ctrl+K: open command palette'
+    Wait-Foreground
     Type-Text $Query
 }
 
