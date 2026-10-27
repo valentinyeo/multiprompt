@@ -103,3 +103,12 @@ test("keyboard-selected sessions scroll below the fixed workspace name", () => {
   assert.match(ensureVisible, /top - app_state\.g_sidebar_scroll < visible_top/);
   assert.match(ensureVisible, /app_state\.g_sidebar_scroll = @max\(0, top - visible_top\)/);
 });
+
+
+test("workspace card dismissal uses real owner input and its named native window", () => {
+  const driver = fs.readFileSync(path.join(__dirname, "../.claude/skills/verify-multiprompt/workspace-switcher.ps1"), "utf8");
+  assert.match(driver, /'MultiPromptWorkspaceSwitcher', 'Workspaces'/);
+  const main = fs.readFileSync(path.join(__dirname, "../src/main.zig"), "utf8");
+  const composer = fs.readFileSync(path.join(__dirname, "../src/chat_composer.zig"), "utf8");
+  for (const input of [main, composer]) assert.match(input, /@import\("workspace_switcher.zig"\).key\(wp\)/);
+});

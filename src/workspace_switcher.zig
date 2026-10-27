@@ -21,7 +21,6 @@ var first: usize = 0;
 var visible: usize = 0;
 var width: i32 = 0;
 var height: i32 = 0;
-var prior_focus: w.HANDLE = null;
 var header_font: w.HANDLE = null;
 var header_font_height: i32 = 0;
 
@@ -184,11 +183,9 @@ fn paint(dc: w.HANDLE) void {
 
 pub fn close() void {
     if (!opened) return;
-    const restore = w.GetFocus() == hwnd;
     opened = false;
     _ = w.ReleaseCapture();
     _ = focus.ShowWindow(hwnd, w.SW_HIDE);
-    if (restore and prior_focus != null and w.IsWindow(prior_focus) != 0) _ = focus.SetFocus(prior_focus);
     _ = w.InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
@@ -237,13 +234,11 @@ pub fn headerClick(x: i32, y: i32) bool {
         _ = w.RegisterClassExW(&wc);
         registered = true;
     }
-    if (hwnd == null) hwnd = w.CreateWindowExW(0, L("MultiPromptWorkspaceSwitcher"), L("Workspaces"), w.WS_CHILD | w.WS_CLIPSIBLINGS, anchor.left, top, width, height, app_state.g_main_hwnd, null, null, null);
+    if (hwnd == null) hwnd = w.CreateWindowExW(0x00000004, L("MultiPromptWorkspaceSwitcher"), L("Workspaces"), w.WS_CHILD | w.WS_CLIPSIBLINGS, anchor.left, top, width, height, app_state.g_main_hwnd, null, null, null);
     if (hwnd == null) return true;
-    prior_focus = w.GetFocus();
     opened = true;
     _ = w.MoveWindow(hwnd, anchor.left, top, width, height, 0);
     _ = focus.SetWindowPos(hwnd, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
-    _ = focus.SetFocus(hwnd);
     _ = w.SetCapture(hwnd);
     _ = w.InvalidateRect(hwnd, null, 0);
     return true;
@@ -254,6 +249,25 @@ fn step(direction: i32) void {
     if (selected < first) first = selected;
     if (selected >= first + visible) first = selected - visible + 1;
     if (hwnd != null) _ = w.InvalidateRect(hwnd, null, 0);
+}
+
+pub fn key(vk: usize) bool {
+    if (!opened) return false;
+    switch (vk) {
+        0x1B => {
+            close();
+            focus.focusActiveShell();
+        },
+        0x26 => step(-1),
+        0x28 => step(1),
+        0x0D, 0x20 => activate(selected),
+        0x10, 0x11, 0x12 => return false,
+        else => {
+            close();
+            return false;
+        },
+    }
+    return true;
 }
 
 fn wndProc(window: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
@@ -288,13 +302,7 @@ fn wndProc(window: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w
             return 0;
         },
         w.WM_KEYDOWN => {
-            switch (wp) {
-                0x1B => close(),
-                0x26 => step(-1),
-                0x28 => step(1),
-                0x0D, 0x20 => activate(selected),
-                else => close(),
-            }
+            _ = key(wp);
             return 0;
         },
         w.WM_KILLFOCUS, 0x0215, w.WM_RBUTTONDOWN => {

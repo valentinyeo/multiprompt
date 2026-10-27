@@ -8,7 +8,7 @@ public static class WorkspaceSwitcherProof {
 '@
 
 function Get-WorkspaceCard {
-    $card = [WorkspaceSwitcherProof]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptWorkspaceSwitcher', $null)
+    $card = [WorkspaceSwitcherProof]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptWorkspaceSwitcher', 'Workspaces')
     if ($card -ne [IntPtr]::Zero -and [VerifyNative]::IsWindowVisible($card)) { return $card }
     return [IntPtr]::Zero
 }

@@ -3655,6 +3655,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_KEYDOWN => {
+            if (@import("workspace_switcher.zig").key(wp)) return 0;
             if (app_state.g_search_active) list_input.palette.keyboard();
             if (app_state.g_url_picker_active) {
                 if (wp == 0x26) {
