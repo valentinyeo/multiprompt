@@ -660,7 +660,8 @@ fn panelProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callco
         },
         w.WM_COMMAND => {
             const id: u16 = @truncate(wp);
-            if (id == 1 or id == 2 or id == @intFromEnum(Control.close)) close();
+            const notification: u16 = @truncate(wp >> 16);
+            if (notification == 0 and (id == 1 or id == 2 or id == @intFromEnum(Control.close))) close();
             return 0;
         },
         state.WM_CLOSE => {
@@ -753,6 +754,7 @@ fn release() void {
 
 pub fn close() void {
     if (window == null) return;
+    @import("diagnostics.zig").debugLog("[settings] close");
     if (key_window != null) closeKey();
     const target = owner;
     const focus = previous_focus;

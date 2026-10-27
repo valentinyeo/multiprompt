@@ -100,6 +100,15 @@ try {
         $null = Settings-Control $name
     }
     $result.checks += @{ name = 'settings-accessible-controls'; passed = $true; keyRows = 2; ownerPid = $process.Id }
+    foreach ($name in @('Theme', 'Small', 'Normal', 'Large', 'Terminal details', 'Dictation key', 'Screencast2 upload key', 'Release notes', 'Close Settings')) {
+        Press @(0x09) ('Tab: focus ' + $name)
+        Wait-Until { (Settings-Control $name).Current.HasKeyboardFocus } ('native tab focus: ' + $name)
+    }
+    Press @(0x10, 0x09) 'Shift+Tab: previous Settings control'
+    Wait-Until { (Settings-Control 'Release notes').Current.HasKeyboardFocus } 'native reverse tab focus'
+    Press @(0x09) 'Tab: return to round close control'
+    $result.checks += @{ name = 'settings-native-focus-order'; passed = $true; tabControls = 9; reverseTab = $true }
+
     if ((Get-ItemPropertyValue -LiteralPath $environmentPath -Name DEEPGRAM_API_KEY) -cne 'settings-dictation-before' -or
         (Get-Content -LiteralPath $uploadConfig -Raw) -notmatch 'upload_secret = "settings-upload-before"') { throw 'Opening Settings changed existing keys' }
     $result.checks += @{ name = 'settings-opening-keeps-keys'; passed = $true }

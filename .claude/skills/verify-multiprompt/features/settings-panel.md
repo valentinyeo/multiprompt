@@ -22,7 +22,7 @@ The journey captures the chat before opening and the actual panel afterward. Pix
 
 Both separate key dialogs must use password controls. Cancelling must preserve both stores. Harmless fixture values exercise the real registry/TOML stores; unrelated upload configuration must survive. Reopening and appending to each masked field proves saved values were reloaded without exporting password contents through a UI readback API. The original CI registry value is restored in `finally`. No paid provider or upload request occurs.
 
-The round close and Escape must dismiss Settings and restore the chat composer. The palette entry must reopen it. Release notes must close Settings and invoke the existing notes view. `settings-panel-proof.json`, `settings-panel-pixels.json`, the saved profile, screenshots and the common cleanup result record the proof. The full master/manual matrix retains this journey; ordinary PRs keep their existing appearance-only matrix.
+All nine native controls must accept Tab focus in order; Shift+Tab must move backward. The round close and Escape must dismiss Settings and restore the chat composer. The palette entry must reopen it. Release notes must close Settings and invoke the existing notes view. `settings-panel-proof.json`, `settings-panel-pixels.json`, the saved profile, screenshots and the common cleanup result record the proof. The full master/manual matrix retains this journey; ordinary PRs keep their existing appearance-only matrix.
 
 The final side-by-side reference is approved Figma frame49-596: https://www.figma.com/design/8Yzu3N21UlCL7lA3YXm45D?node-id=49-596 . The whole-file thumbnail is not a substitute for that frame.
 
