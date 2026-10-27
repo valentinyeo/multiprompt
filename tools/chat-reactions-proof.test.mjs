@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { inspect, assertBadge } from './chat-reactions-proof.mjs';
+import * as proof from './chat-reactions-proof.mjs';
 
 const area = { left: 0, top: 0, right: 300, bottom: 300 };
 function fixture() {
@@ -104,4 +105,16 @@ test('floating title is not the first reply after the setup prompt', () => {
   assert.equal(frame.agent.length, 2);
   assert.equal(frame.agent[0].top, 60);
   assertBadge(frame);
+});
+
+test('native three-dot more glyph is visible; a missing glyph still fails', () => {
+  assert.equal(typeof proof.assertHoverActions, 'function');
+  const image = { width: 400, height: 200, pixels: Buffer.alloc(400 * 200 * 4) };
+  const ink = (x, y) => image.pixels.writeUIntLE(0x8a8a8a, (y * image.width + x) * 4, 3);
+  for (const x of [262, 290]) for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 4; dy++) ink(x + dx, 130 + dy);
+  for (const x of [320, 323, 326]) { ink(x, 136); ink(x, 137); }
+  const first = { left: 20, right: 250, bottom: 150 };
+  assert.equal(proof.assertHoverActions(image, first).moreX, 326);
+  for (const x of [320, 323, 326]) for (const y of [136, 137]) image.pixels.writeUIntLE(0, (y * image.width + x) * 4, 3);
+  assert.throws(() => proof.assertHoverActions(image, first), /hover action 2 is painted/);
 });
