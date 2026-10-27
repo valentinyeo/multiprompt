@@ -68,7 +68,7 @@ test('red regression job installs the Zig compiler before running changed suites
   assert.match(red.slice(install, execute), /zig-x86_64-linux-0\.16\.0.*GITHUB_PATH/);
 });
 
-test('branch reaction proof uses the shared journey without changing production triggers', () => {
+test('branch reaction proof uses the shared journey without changing production triggers', async () => {
   const adapterFile = new URL('../.github/workflows/reaction-journey.yml', import.meta.url);
   assert.ok(fs.existsSync(adapterFile), 'reaction workflow adapter exists');
   const adapter = fs.readFileSync(adapterFile, 'utf8');
@@ -78,7 +78,10 @@ test('branch reaction proof uses the shared journey without changing production 
   assert.match(adapter, /chat_reactions_proof: true/);
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
   assert.match(verify, /workflow_call:\n    inputs:\n      chat_reactions_proof:/);
-  assert.match(verify, /branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083\]/);
+  const checker = new URL('./verify-workflow-branches.mjs', import.meta.url);
+  assert.ok(fs.existsSync(checker), 'shared workflow branch checker exists');
+  const { verifyPushBranches } = await import(checker);
+  verifyPushBranches(verify);
 });
 
 test('build graph changes receive the required native appearance check', () => {
@@ -86,4 +89,23 @@ test('build graph changes receive the required native appearance check', () => {
   const paths = verify.match(/^  pull_request:\n    paths:\n((?:      - [^\n]+\n)+)/m);
   assert.ok(paths);
   for (const file of ['build.zig', 'build.zig.zon']) assert.ok(paths[1].split('\n').includes('      - ' + file), file);
+});
+
+test('push verification accepts another ticket branch and rejects losing master or unrelated branches', async () => {
+  const checker = new URL('./verify-workflow-branches.mjs', import.meta.url);
+  assert.ok(fs.existsSync(checker), 'shared workflow branch checker exists');
+  const { verifyPushBranches } = await import(checker);
+  const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
+  verifyPushBranches(verify);
+  const extra = verify.replace('branches: [master,', 'branches: [master, ceo/IGSH-9999,');
+  assert.notEqual(extra, verify);
+  verifyPushBranches(extra);
+  for (const replacement of ['', 'main, ', 'unrelated, ', "'ceo/OTHER-123', "]) {
+    const invalid = verify.replace('branches: [master, ', 'branches: [' + replacement);
+    assert.notEqual(invalid, verify);
+    assert.throws(() => verifyPushBranches(invalid), assert.AssertionError);
+  }
+  const unrelated = verify.replace('branches: [master,', 'branches: [master, unrelated,');
+  assert.notEqual(unrelated, verify);
+  assert.throws(() => verifyPushBranches(unrelated), assert.AssertionError);
 });
