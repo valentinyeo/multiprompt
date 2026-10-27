@@ -1540,15 +1540,23 @@ def stop_response(q):
     name = q.get("tmux")
     op = q.get("op", "stop")
     digit = q.get("digit")
-    key = chr(digit) if op in ("permission", "question") and type(digit) is int and 49 <= digit <= 57 else "Enter" if op == "question" and type(digit) is int and digit == 13 else "Tab" if op == "question" and type(digit) is int and digit == 9 else "Escape"
+    key = chr(digit) if op == "permission" and type(digit) is int and 49 <= digit <= 57 else "Escape"
+    keys = None
     reason = None
-    if op in ("permission", "question") and key == "Escape":
-        reason = "invalid_" + op + "_digit"
-    elif not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
+    if op == "question":
+        values = q.get("keys")
+        if not isinstance(values, list) or not values or any(type(value) is not int or value not in (9, 13) and not 49 <= value <= 57 for value in values):
+            reason = "invalid_question_keys"
+        else:
+            keys = [key for value in values for key in (["Up", "Tab"] if value == 9 else ["Enter"] if value == 13 else [chr(value)])]
+    elif op == "permission" and key == "Escape":
+        reason = "invalid_permission_digit"
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
         reason = "invalid_tmux_name"
-    else:
+    if reason is None:
         try:
-            keys = ["C-x", "C-s"] if op == "send_queued" else ["Up"] if op == "edit_queued" else ["Up", "Tab"] if op == "question" and digit == 9 else [key]
+            if keys is None:
+                keys = ["C-x", "C-s"] if op == "send_queued" else ["Up"] if op == "edit_queued" else [key]
             subprocess.run(["tmux", "send-keys", "-t", "=" + name + ":", *keys], check=True, capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             reason = "tmux_stop_failed"

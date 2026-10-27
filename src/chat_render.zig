@@ -1955,13 +1955,16 @@ fn chatChoiceClick(index: usize) void {
     const shell = &app_state.shells[app_state.active_shell];
     const submit = group.multi_select and index == group.count + 1;
     const digit: u8 = if (submit) 0x0D else if (index < group.count) group.options[index].digit else group.other;
-    if (!@import("chat_send.zig").chatQuestionAnswer(app_state.active_shell, digit, group.hash())) return;
+    if (group.multi_select and index < group.count) {
+        shell.chat_question_selected ^= @as(u32, 1) << @intCast(index);
+        if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+        return;
+    }
+    if (!@import("chat_send.zig").chatQuestionAnswer(app_state.active_shell, digit, shell.chat_question_selected, group.hash())) return;
     if (index == group.count) {
         shell.chat_question_other = true;
         g_choice.live = false;
         if (app_state.g_chat_composer_hwnd != null) _ = SetFocus(app_state.g_chat_composer_hwnd);
-    } else if (group.multi_select and !submit) {
-        shell.chat_question_selected ^= @as(u32, 1) << @intCast(index);
     } else {
         shell.chat_question_index += 1;
         shell.chat_question_selected = 0;

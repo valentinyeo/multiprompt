@@ -93,21 +93,20 @@ class HistoryReaderTest(unittest.TestCase):
                    dict(self.tool_call("AskUserQuestion", dict(questions=[question])), isSidechain=True))
         self.assertFalse(any(row.get("question") for row in self.read()[1]))
 
-    def test_igsh1063_question_keys_keep_enter_separate_from_permission_keys(self):
-        for digit, key in ((49, "1"), (50, "2"), (13, "Enter")):
+    def test_igsh1063_question_keys_keep_order_and_permission_boundaries(self):
+        for keys, expected in (([49], ["1"]), ([50], ["2"]), ([49, 50, 13], ["1", "2", "Enter"]), ([9], ["Up", "Tab"])):
             with patch.object(reader.subprocess, "run") as run:
-                wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", digit=digit))
+                wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", keys=keys))
             self.assertIn("\tquestion\tok\t", wire)
-            self.assertEqual(run.call_args.args[0], ["tmux", "send-keys", "-t", "=term-1:", key])
-        with patch.object(reader.subprocess, "run") as run:
-            wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", digit=9))
-        self.assertIn("\tquestion\tok\t", wire)
-        self.assertEqual(run.call_args.args[0], ["tmux", "send-keys", "-t", "=term-1:", "Up", "Tab"])
-        for op, digit in (("question", 27), ("question", 10), ("question", True), ("permission", 13)):
+            self.assertEqual(run.call_args.args[0], ["tmux", "send-keys", "-t", "=term-1:", *expected])
+        for keys in ([], [27], [10], [True], [49, 50, "Enter"], None):
             with patch.object(reader.subprocess, "run") as run:
-                wire = reader.stop_response(dict(op=op, id=7, tmux="term-1", digit=digit))
-            self.assertIn("\t" + op + "\terror\t", wire)
+                wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", keys=keys))
+            self.assertIn("\tquestion\terror\t", wire)
             run.assert_not_called()
+        with patch.object(reader.subprocess, "run") as run:
+            self.assertIn("\tpermission\terror\t", reader.stop_response(dict(op="permission", id=7, tmux="term-1", digit=13)))
+        run.assert_not_called()
 
     def test_claude_status_header(self):
         todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]

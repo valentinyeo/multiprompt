@@ -55,6 +55,20 @@ pub const Group = struct {
         return self.question[0..self.question_len];
     }
 
+    pub fn answerKeys(self: *const Group, digit: u8, selected: u32, out: *[MAX_OPTIONS + 1]u8) ?[]const u8 {
+        if (digit != self.other and !(digit == 13 and self.multi_select) and (digit < '1' or digit >= '1' + self.count)) return null;
+        var count: usize = 0;
+        if (self.multi_select) {
+            for (0..self.count) |i| {
+                if (selected & (@as(u32, 1) << @intCast(i)) == 0) continue;
+                out[count] = @intCast('1' + i);
+                count += 1;
+            }
+        }
+        out[count] = if (self.codex and digit == self.other) 9 else digit;
+        return out[0 .. count + 1];
+    }
+
     pub fn hash(self: *const Group) u64 {
         return self.identity;
     }
@@ -161,4 +175,16 @@ test "IGSH-1063 malformed question payload never creates cards" {
     const options = [_]WireOption{.{ .label = "" }};
     const questions = [_]WireQuestion{.{ .question = "Which?", .options = &options }};
     try std.testing.expectEqual(@as(usize, 0), Prompt.fromWire(.{ .id = "q", .questions = &questions }).count);
+}
+
+test "IGSH-1063 one ordered answer sends every selected label before Submit" {
+    var group: Group = .{ .count = 2, .other = '3', .multi_select = true };
+    var keys: [MAX_OPTIONS + 1]u8 = undefined;
+    try std.testing.expectEqualSlices(u8, &.{ '1', '2', 13 }, group.answerKeys(13, 3, &keys).?);
+    try std.testing.expectEqualSlices(u8, &.{ '2', '3' }, group.answerKeys('3', 2, &keys).?);
+    group.multi_select = false;
+    try std.testing.expectEqualSlices(u8, "2", group.answerKeys('2', 0, &keys).?);
+    group.codex = true;
+    try std.testing.expectEqualSlices(u8, &.{9}, group.answerKeys('3', 0, &keys).?);
+    try std.testing.expect(group.answerKeys(27, 0, &keys) == null);
 }

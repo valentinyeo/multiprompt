@@ -1335,7 +1335,7 @@ pub fn chatEchoPushQueuedNow() void {
 fn chatEchoPushQueuedForShell(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     const sent = if (chatTmuxSendEligible(idx))
-        chatAgentKey(idx, 0x18, false)
+        chatAgentKey(idx, 0x18)
     else
         chatShouldUseDirectInput(idx) and sendClaudeSendQueuedNowToShell(idx);
     if (!sent) {
@@ -2616,7 +2616,7 @@ fn chatFullSettleFinish() void {
 
 pub fn chatStopAgent(shell_index: u32) bool {
     if (!app_state.ISSUE_265_WORKING_BAR or shell_index >= app_state.shell_count) return false;
-    return chatAgentKey(shell_index, 0x1B, false);
+    return chatAgentKey(shell_index, 0x1B);
 }
 
 pub fn chatPermissionAnswer(shell_index: u32, action: @import("chat_permission.zig").Action) bool {
@@ -2626,13 +2626,13 @@ pub fn chatPermissionAnswer(shell_index: u32, action: @import("chat_permission.z
     const shell = &app_state.shells[shell_index];
     if (shell.permission_answered) return false;
     const digit = app_state.g_chat_permission.digit(action) orelse return false;
-    if (!chatAgentKey(shell_index, digit, false)) return false;
+    if (!chatAgentKey(shell_index, digit)) return false;
     shell.permission_answered = true;
     @import("window_layout.zig").chatWorkingIndicatorInvalidate();
     return true;
 }
 
-pub fn chatQuestionAnswer(shell_index: u32, digit: u8, question_hash: u64) bool {
+pub fn chatQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_hash: u64) bool {
     if (!app_state.g_chat_active or shell_index != app_state.active_shell or shell_index >= app_state.shell_count) return false;
     var scratch: [2]u16 = undefined;
     if (@import("chat_capture.zig").captureChatTranscript(shell_index, &scratch, true) == null) return false;
@@ -2642,15 +2642,35 @@ pub fn chatQuestionAnswer(shell_index: u32, digit: u8, question_hash: u64) bool 
     const prompt = &entry.history.status.question;
     if (shell.chat_question_index >= prompt.count or prompt.groups[shell.chat_question_index].hash() != question_hash) return false;
     const group = &prompt.groups[shell.chat_question_index];
-    return chatAgentKey(shell_index, if (group.codex and digit == group.other) 0x09 else digit, true);
+    var keys: [@import("chat_options.zig").MAX_OPTIONS + 1]u8 = undefined;
+    const sequence = group.answerKeys(digit, selected, &keys) orelse return false;
+    const key = session.chatFileIdentity();
+    if (key.tmux[0] == 0) return false;
+    const thread = std.Thread.spawn(.{}, chatQuestionTmuxThread, .{ key, keys, sequence.len }) catch return false;
+    thread.detach();
+    return true;
 }
 
-fn chatAgentKey(shell_index: u32, digit: u8, question: bool) bool {
+fn chatQuestionTmuxThread(key: @import("chat_transcript.zig").Identity, keys: [@import("chat_options.zig").MAX_OPTIONS + 1]u8, count: usize) void {
+    const a = std.heap.page_allocator;
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = "question", .keys = keys[0..count], .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0) }, .{}) catch return;
+    defer a.free(query);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, "\tquestion\tok\t") == null) {
+        app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
+        debugLog("[chat] question failed via=tmux");
+        return;
+    }
+    debugLog("[chat] question sent via=tmux");
+}
+
+fn chatAgentKey(shell_index: u32, digit: u8) bool {
     const shell = &app_state.shells[shell_index];
     if (@import("chat_working.zig").stopTransportFor(shell.kind, shell.tmux_session_len > 0) == .tmux) {
         const key = @import("chat_transcript.zig").Identity.initTmux(shell.shell_id, shell.tmux_host, false, shell.tmux_session[0..shell.tmux_session_len], "");
         if (key.tmux[0] == 0 or key.host >= app_state.g_chat_history_channels.len) return false;
-        const thread = std.Thread.spawn(.{}, chatStopTmuxThread, .{ key, digit, question }) catch return false;
+        const thread = std.Thread.spawn(.{}, chatStopTmuxThread, .{ key, digit }) catch return false;
         thread.detach();
         return true;
     }
@@ -2678,9 +2698,9 @@ fn chatAgentKey(shell_index: u32, digit: u8, question: bool) bool {
     return true;
 }
 
-fn chatStopTmuxThread(key: @import("chat_transcript.zig").Identity, digit: u8, question: bool) void {
+fn chatStopTmuxThread(key: @import("chat_transcript.zig").Identity, digit: u8) void {
     const a = std.heap.page_allocator;
-    const op: []const u8 = if (question) "question" else if (digit == 0x1B) "stop" else if (digit == 0x18) "send_queued" else "permission";
+    const op: []const u8 = if (digit == 0x1B) "stop" else if (digit == 0x18) "send_queued" else "permission";
     const permission = digit != 0x1B and digit != 0x18;
     const query = std.json.Stringify.valueAlloc(a, .{ .op = op, .digit = digit, .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0) }, .{}) catch {
         if (permission) app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
@@ -2689,7 +2709,7 @@ fn chatStopTmuxThread(key: @import("chat_transcript.zig").Identity, digit: u8, q
     defer a.free(query);
     var wire: std.ArrayList(u8) = .empty;
     defer wire.deinit(a);
-    if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, if (digit == 0x1B) "\tstop\tok\t" else if (digit == 0x18) "\tsend_queued\tok\t" else if (question) "\tquestion\tok\t" else "\tpermission\tok\t") == null) {
+    if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, if (digit == 0x1B) "\tstop\tok\t" else if (digit == 0x18) "\tsend_queued\tok\t" else "\tpermission\tok\t") == null) {
         if (permission) app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
         debugLog(if (digit == 0x1B) "[chat] stop failed via=tmux" else if (digit == 0x18) "[chat] send queued failed via=tmux" else "[chat] permission failed via=tmux");
         return;
