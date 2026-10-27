@@ -15,7 +15,7 @@ function Get-WorkspaceCard {
 
 function Open-WorkspaceCard([string]$Shot) {
     $state = Read-Session
-    if ($state.hide_sidebar -or $state.sidebar_collapsed) { throw 'Workspace header must be expanded and visible' }
+    if (($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -or ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed)) { throw 'Workspace header must be expanded and visible' }
     $top = if ($state.hide_pills) { 0 } else { 34 }
     Record 'Click workspace name above the sessions'
     [VerifyNative]::ClickClient($script:window, 80, ($top + 26))

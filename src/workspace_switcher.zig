@@ -22,6 +22,8 @@ var visible: usize = 0;
 var width: i32 = 0;
 var height: i32 = 0;
 var prior_focus: w.HANDLE = null;
+var header_font: w.HANDLE = null;
+var header_font_height: i32 = 0;
 
 pub fn headerHeight() i32 {
     return if (app_state.g_hide_sidebar or app_state.g_sidebar_collapsed) 0 else scale(52);
@@ -67,7 +69,13 @@ pub fn paintHeader(dc: w.HANDLE) void {
     _ = w.DeleteObject(bg);
     fillRoundRect(dc, rc, scale(18), outlineColor());
     fillRoundRect(dc, inset(rc, scale(1)), scale(17), if (app_state.g_light_theme) RGB(245, 245, 247) else RGB(31, 31, 31));
-    const font = w.SelectObject(dc, drawing.uiFontTitle());
+    const font_height = -scale(14);
+    if (header_font == null or header_font_height != font_height) {
+        if (header_font != null) _ = w.DeleteObject(header_font);
+        header_font = @import("fonts.zig").create(font_height, 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 5, 0, L(@import("fonts.zig").UI_SEMIBOLD_FACE));
+        header_font_height = font_height;
+    }
+    const font = w.SelectObject(dc, header_font orelse drawing.uiFontTitle());
     defer _ = w.SelectObject(dc, font);
     _ = w.SetBkMode(dc, w.TRANSPARENT);
     _ = w.SetTextColor(dc, textColor());
@@ -245,7 +253,7 @@ fn step(direction: i32) void {
     selected = @intCast(@mod(@as(i32, @intCast(selected)) + direction, @as(i32, @intCast(rowCount()))));
     if (selected < first) first = selected;
     if (selected >= first + visible) first = selected - visible + 1;
-    _ = w.InvalidateRect(hwnd, null, 0);
+    if (hwnd != null) _ = w.InvalidateRect(hwnd, null, 0);
 }
 
 fn wndProc(window: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
