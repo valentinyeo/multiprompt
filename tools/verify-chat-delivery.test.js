@@ -1019,16 +1019,26 @@ print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
 });
 
 
-test('retained-history recovery verifies focus before native Home input and records the path', () => {
+test('retained-history recovery delivers wheel input to the verified focused HWND', () => {
   const start = drive.indexOf('function Retention-Top {');
   const end = drive.indexOf('\nfunction Assert-Retention', start);
   const recovery = drive.slice(start, end);
   assert.ok(start >= 0 && end > start);
   assert.match(recovery, /Wait-For 'retained transcript keyboard focus'/);
-  assert.match(recovery, /FocusOwnedWindow\(\$main, \$app.Id, \$transcript\)/);
   assert.match(recovery, /::Focus\(\$main\)\[1\] -eq \$transcript.ToInt64\(\)/);
-  assert.match(recovery, /Press @\(0x24\) 'Home: restore first retained message'/);
-  assert.ok(recovery.indexOf('retained transcript keyboard focus') < recovery.indexOf('Press @(0x24)'));
+  assert.match(recovery, /input='focused transcript HWND wheel'/);
+  assert.match(recovery, /::WheelFocusedTranscript\(\$main, \$app.Id, \$transcript, 30000\)/);
   assert.match(recovery, /\$position\.scroll -eq 0/);
-  assert.doesNotMatch(recovery, /WheelOwnedTranscript/);
+  const desktop = read('tools/verify-chat-delivery/desktop.cs');
+  const first = desktop.indexOf('    public static void WheelFocusedTranscript(');
+  const last = desktop.indexOf('    public static void PressOwnedTranscript(', first);
+  const wheel = desktop.slice(first, last);
+  assert.ok(first >= 0 && last > first);
+  for (const guard of ['Owner(main) != pid', 'GetForegroundWindow() != main', 'Owner(transcript) != pid', '!IsChild(main, transcript)', 'Class(transcript) != "ZigShellChatTranscript"', '!IsWindowVisible(transcript)', 'Focus(main)[1] != transcript.ToInt64()']) assert.ok(wheel.includes(guard), guard);
+  assert.match(wheel, /SendWheelMessage\(transcript, 0x020A,/);
+  assert.match(wheel, /delta < short.MinValue/);
+  assert.match(wheel, /delta > short.MaxValue/);
+  assert.match(wheel, /delta % 120 != 0/);
+  assert.match(wheel, /== IntPtr.Zero\) throw/);
+  assert.doesNotMatch(wheel, /SendInput/);
 });
