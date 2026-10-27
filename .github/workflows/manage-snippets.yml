@@ -1,0 +1,15 @@
+name: Manage snippets keyboard proof
+
+on:
+  push:
+    branches: [ceo/IGSH-1065]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snippets:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: command-palette
