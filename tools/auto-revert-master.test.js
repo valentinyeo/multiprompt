@@ -625,3 +625,40 @@ test('permission errors fail immediately without retrying or touching master', (
   assert.equal(result.waits.length, 0);
   assert.ok(result.calls.every(call => !call.includes('push') && !call.includes('POST')));
 });
+
+test('auto-revert PRs pass the changelog and red-run admission rules that a revert cannot satisfy', t => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const { execFileSync, spawnSync } = require('node:child_process');
+  assert.match(fs.readFileSync(`${__dirname}/auto-revert-master.js`, 'utf8'), /const branch = `auto-revert\/\$\{runId\}`;/);
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-revert-admission-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git('init', '-q', '-b', 'master');
+  git('config', 'user.email', 'test@example.invalid');
+  git('config', 'user.name', 'Test');
+  git('config', 'commit.gpgsign', 'false');
+  fs.mkdirSync(path.join(repo, 'src'));
+  fs.mkdirSync(path.join(repo, 'changelog.d'));
+  fs.mkdirSync(path.join(repo, 'tools'));
+  fs.writeFileSync(path.join(repo, 'src/feature.txt'), 'on');
+  fs.writeFileSync(path.join(repo, 'changelog.d/DEMO-1-feature.md'), 'A feature works.\n');
+  fs.writeFileSync(path.join(repo, 'tools/feature.test.cjs'), "require('node:test')('on', () => {});\n");
+  git('add', '.');
+  git('commit', '-qm', 'feature');
+  const base = git('rev-parse', 'HEAD');
+  git('revert', '--no-edit', 'HEAD');
+  const head = git('rev-parse', 'HEAD');
+  const env = { ...process.env };
+  delete env.GITHUB_HEAD_REF;
+  delete env.GITHUB_REF_NAME;
+  delete env.GITHUB_OUTPUT;
+  delete env.NODE_TEST_CONTEXT;
+  const admit = (tool, args, branch) => spawnSync(process.execPath, [path.join(__dirname, tool), ...args], { cwd: repo, encoding: 'utf8', env: { ...env, GITHUB_HEAD_REF: branch } });
+  for (const [tool, args] of [['version-stamp.mjs', ['check', base, head]], ['check-red-run.mjs', [base, head]]]) {
+    const revert = admit(tool, args, 'auto-revert/40533455263');
+    assert.equal(revert.status, 0, `${tool}: ${revert.stdout}${revert.stderr}`);
+    const normal = admit(tool, args, 'ceo/DEMO-1');
+    assert.equal(normal.status, 1, `${tool}: ${normal.stdout}${normal.stderr}`);
+  }
+});
