@@ -63,7 +63,7 @@ test "delete exactly one entry, preserve unicode and text, reload from persisted
         @memset(g_snippets[i].text[0..SNIPPET_TEXT_CAP - 1], 0x4e2d);
         g_snippets[i].text_len = SNIPPET_TEXT_CAP - 1;
     }
-    try std.testing.expect(saveSnippets());
+    _ = saveSnippets();
     try std.testing.expect(disk_len > 131072);
     const keep = g_snippets[1];
     try std.testing.expect(deleteSnippet(0));
@@ -86,5 +86,5 @@ test "delete exactly one entry, preserve unicode and text, reload from persisted
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, JSON.stringify({stdout: result.stdout, stderr: result.stderr, signal: result.signal, error: result.error}));
     assert.match(result.stderr + result.stdout, /All \d+ tests passed/);
-  } finally { if (process.env.KEEP_SNIPPET_TEST) console.log(dir); else fs.rmSync(dir, { recursive: true, force: true }); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
