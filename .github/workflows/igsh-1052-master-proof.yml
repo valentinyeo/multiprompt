@@ -1,0 +1,12 @@
+name: IGSH-1052 master retention replay
+on:
+  push:
+    branches: [ceo/IGSH-1052-master-proof]
+permissions:
+  contents: read
+jobs:
+  retention:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-full-history
+      chat_retention_proof: true
