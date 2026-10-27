@@ -1437,6 +1437,7 @@ pub fn refreshChatTranscript(force: bool) void {
             app_state.g_chat_content_h - viewport_h;
     }
     chatScrollStateChanged(viewport_h);
+    @import("chat_render.zig").chatReplyResolve();
     _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
 

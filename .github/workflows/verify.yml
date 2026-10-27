@@ -65,6 +65,11 @@ on:
         required: false
         default: false
         type: boolean
+      chat_reply_proof:
+        description: Compact quoted replies and a native jump to the highlighted source
+        required: false
+        default: false
+        type: boolean
       chat_width_proof:
         description: Capture wide and narrow message geometry with the chat-messages-only journey
         required: false
@@ -234,6 +239,7 @@ jobs:
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_REACTIONS_PROOF: ${{ inputs.chat_reactions_proof && '1' || '' }}
       CHAT_NOTES_PROOF: ${{ inputs.chat_notes_proof && '1' || '' }}
+      CHAT_REPLY_PROOF: ${{ inputs.chat_reply_proof && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       CHAT_SWITCH_PROOF: ${{ inputs.remote_switch_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}

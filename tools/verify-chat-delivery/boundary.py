@@ -336,6 +336,16 @@ def shell():
         return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append([question, answer]) is None) else 3
     if op == "init":
         return fake_init()
+    if op == "reply-reference":
+        original = "The original message starts here.\nSecond original line for context.\nThird original line stays on the wire.\nFourth original line ends the quote."
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=original)]))
+        for i in range(20):
+            fake_event("user", message=dict(role="user", content=f"Intervening question {i}"))
+            fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=f"Intervening answer {i}")]))
+        quoted = "\n".join("> " + line for line in original.split("\n"))
+        fake_event("user", message=dict(role="user", content=quoted + "\n\nMy compact answer"))
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text="Reply received.")]))
+        return 0
     if op == "session-notes":
         senders = ["Hax Runner 10", "Chief Of Staff", "Poteto", "hax-runner-6", "hax-runner-2"]
         for sender in senders:
