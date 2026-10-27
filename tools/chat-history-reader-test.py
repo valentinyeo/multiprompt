@@ -1852,6 +1852,7 @@ class HistoryReaderTest(unittest.TestCase):
             self.assertLessEqual(sum(reads), 320, reads)
 
     def test_watch_times_reader_work_with_high_resolution_counter(self):
+        self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
         self.query.update(tmux='', live=False, follow=True)
         self.write(self.event('measured pushed reply'))
         resolved = reader.resolve_response_path(self.query, reader.READER_SOURCE, False)
