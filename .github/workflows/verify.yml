@@ -332,14 +332,14 @@ jobs:
         shell: pwsh
         run: |
           $revision = (git rev-parse HEAD).Trim()
-          $source = Get-Content src/main.zig -Raw
-          if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Version not found' }
+          $tag = (git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Reachable release version not found' }
           $version = $Matches[1]
-          if ($env:FEATURE -eq 'chat-dictation') { $version += '-verify.' + $revision.Substring(0, 12) }
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Build branch executable
         if: env.RELEASE_TAG == ''
-        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}"
+        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
       - name: Resolve real executable
         shell: pwsh
         env:
@@ -348,6 +348,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force verify-bin, evidence | Out-Null
           $revision = (git rev-parse HEAD).Trim()
+          $embeddedRevision = ''
           if ($env:RELEASE_TAG) {
             gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir verify-bin --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern SHA256SUMS.txt
             if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
@@ -363,9 +364,13 @@ jobs:
             Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
             Copy-Item zig-out/bin/zigshell-bridge.exe verify-bin/zigshell-bridge.exe
             $version = $env:VERIFY_VERSION
+            $embeddedRevision = $env:VERIFY_REVISION
           }
+          $binary = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$pwd/verify-bin/multiprompt.exe"))
+          if (-not $env:RELEASE_TAG -and ($embeddedRevision -cne $revision -or -not $binary.Contains("MPREVISION=$revision;"))) { throw 'Executable source revision mismatch' }
+          if (-not $binary.Contains("MPVERSION=$version;")) { throw 'Executable version mismatch' }
           $hash = (Get-FileHash verify-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          @{ revision = $revision; tag = $env:RELEASE_TAG; version = $version; sha256 = $hash; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
+          @{ revision = $revision; embeddedRevision = $embeddedRevision; tag = $env:RELEASE_TAG; version = $version; sha256 = $hash; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
