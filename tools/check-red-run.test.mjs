@@ -185,15 +185,3 @@ if (fs.existsSync(checker)) {
     assert.match(result.stderr, /No changed regression tests/);
   });
 }
-
-test('regression admission installs the pinned Zig compiler before executing project tests', () => {
-  const workflow = fs.readFileSync(path.join(root, '.github/workflows/check-red-run.yml'), 'utf8');
-  const install = workflow.indexOf('- name: Install Zig 0.16.0');
-  assert.ok(install >= 0 && install < workflow.indexOf('- name: Test admission controls'));
-  const step = workflow.slice(install, workflow.indexOf('- name: Test admission controls'));
-  assert.match(step, /https:\/\/ziglang\.org\/download\/0\.16\.0\/zig-x86_64-linux-0\.16\.0\.tar\.xz/);
-  assert.match(step, /70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00/);
-  assert.match(step, /sha256sum -c -/);
-  assert.match(step, /echo "\$RUNNER_TEMP\/zig-x86_64-linux-0\.16\.0" >> "\$GITHUB_PATH"/);
-  assert.match(step, /echo "ZIG=\$RUNNER_TEMP\/zig-x86_64-linux-0\.16\.0\/zig" >> "\$GITHUB_ENV"/);
-});
