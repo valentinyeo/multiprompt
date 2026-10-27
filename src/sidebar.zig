@@ -250,6 +250,7 @@ const SEARCH_VOICE_REPLAY_OFFSET = @import("app_state.zig").SEARCH_VOICE_REPLAY_
 const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
 const SEARCH_SNIPPETS_MENU_OFFSET = @import("app_state.zig").SEARCH_SNIPPETS_MENU_OFFSET;
+const SEARCH_SNIPPET_MANAGE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_MANAGE_OFFSET;
 const SEARCH_SNIPPET_CREATE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_CREATE_OFFSET;
 const SEARCH_SNIPPET_BACK_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_BACK_OFFSET;
 const SEARCH_SNIPPET_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_OFFSET;
@@ -2234,7 +2235,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             else if (app_state.g_search_tabctx_mode)
                 L("Tab actions...")
             else if (app_state.g_search_snippet_mode)
-                L("Search snippets...")
+                if (app_state.g_search_snippet_manage_mode) L("Manage Snippets: choose one to delete") else L("Search snippets...")
             else if (app_state.g_search_theme_mode)
                 L("Search themes...")
             else if (app_state.g_search_workspace_delete_mode)
@@ -2430,7 +2431,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_ws_snoozed_row = result_idx >= SEARCH_WS_SNOOZED_ROW_OFFSET and result_idx < SEARCH_WS_SNOOZED_ROW_OFFSET + MAX_REMINDERS;
                     const is_remind_preset = result_idx >= SEARCH_REMIND_PRESET_OFFSET and result_idx < SEARCH_REMIND_PRESET_OFFSET + REMIND_PRESET_COUNT;
                     const is_codex_tmux = result_idx == SEARCH_CODEX_TMUX_OFFSET;
-                    const is_snippets_menu = result_idx == SEARCH_SNIPPETS_MENU_OFFSET;
+                    const is_snippet_manage = result_idx == SEARCH_SNIPPET_MANAGE_OFFSET;
+                    const is_snippets_menu = result_idx == SEARCH_SNIPPETS_MENU_OFFSET or is_snippet_manage;
                     const is_snippet_create = result_idx == SEARCH_SNIPPET_CREATE_OFFSET;
                     const is_snippet_back = result_idx == SEARCH_SNIPPET_BACK_OFFSET;
                     const is_snippet = result_idx >= SEARCH_SNIPPET_OFFSET and result_idx < SEARCH_SNIPPET_OFFSET + MAX_SNIPPETS;
@@ -2517,11 +2519,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var snm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Use Snippets..."), -1, &snm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (is_snippet_manage) L("Manage Snippets") else L("Use Snippets..."), -1, &snm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, font_subtitle);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var snm_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+;"), -1, &snm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (is_snippet_manage) L("delete") else L("Alt+;"), -1, &snm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_snippet_back) {
                         _ = SelectObject(hdc, font_title);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
@@ -2552,7 +2554,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SelectObject(hdc, font_subtitle);
                             _ = SetTextColor(hdc, if (confirming_delete) RGB(255, 180, 180) else if (ri == app_state.g_search_sel) RGB(170, 210, 170) else RGB(90, 150, 90));
                             var sn_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            const sn_hint = if (confirming_delete) L("Del again") else if (ri == app_state.g_search_sel) L("Del delete") else L("paste");
+                            const sn_hint = if (confirming_delete) (if (app_state.g_search_snippet_manage_mode) L("Confirm delete") else L("Del again")) else if (app_state.g_search_snippet_manage_mode) L("delete") else if (ri == app_state.g_search_sel) L("Del delete") else L("paste");
                             _ = DrawTextW(hdc, sn_hint, -1, &sn_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (is_addfavicon) {
