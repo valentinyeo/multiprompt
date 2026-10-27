@@ -94,3 +94,12 @@ test("workspace identity remains visible when numbered pills are hidden", () => 
   assert.match(switcher, /WORKSPACES/);
   assert.match(switcher, /New workspace/);
 });
+
+
+test("keyboard-selected sessions scroll below the fixed workspace name", () => {
+  const consoleSource = fs.readFileSync(path.join(__dirname, "../src/console.zig"), "utf8");
+  const ensureVisible = consoleSource.slice(consoleSource.indexOf("pub fn ensureActiveVisible()"), consoleSource.indexOf("pub fn paneGuardKeepUser("));
+  assert.match(ensureVisible, /const visible_top = .*headerHeight\(\)/);
+  assert.match(ensureVisible, /top - app_state\.g_sidebar_scroll < visible_top/);
+  assert.match(ensureVisible, /app_state\.g_sidebar_scroll = @max\(0, top - visible_top\)/);
+});

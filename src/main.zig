@@ -2287,6 +2287,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (ady < 6) return 0;
                     const now = GetTickCount64();
                     if (app_state.drag_last_swap_tick != 0 and now - app_state.drag_last_swap_tick < 120) return 0;
+                    if (my < wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
                     if (sidebarStickyCardHitTest(my)) return 0;
 
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
@@ -2513,6 +2514,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
+                if (my < wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
                 if (sidebarStickyCardHitTest(my)) return 0;
                 const logical_my = my + app_state.g_sidebar_scroll;
                 const ht = hitTestSidebar(logical_my);
