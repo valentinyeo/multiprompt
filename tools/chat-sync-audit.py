@@ -182,8 +182,6 @@ def transcript_evidence(reader, path, wire, finding):
                             value, record = part.get('thinking', ''), 'thinking'
                         elif part.get('type') == 'tool_use':
                             value, record = (part.get('input') or {}).get('description', ''), 'tool_activity'
-                            if part.get('name') == 'SendUserFile':
-                                value = (part.get('input') or {}).get('caption', '')
                             if tool_path(finding['text'], part.get('input') or {}, event.get('cwd')):
                                 matches = True
                                 break
