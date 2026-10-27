@@ -1653,9 +1653,9 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(int(fields[5]), offset)
         self.assertEqual([row['text'] for row in rows], ['new row'])
 
-    def start_server(self):
+    def start_server(self, mode="--serve"):
         bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"
-        server = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, '--serve'],
+        server = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, mode],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                   env=dict(os.environ, HOME=str(self.home)))
         def cleanup():
@@ -1682,6 +1682,51 @@ class HistoryReaderTest(unittest.TestCase):
         reply = json.loads(server.stdout.readline())
         self.assertTrue(reply['wire'].endswith(reader.END + '\n'))
         return reply
+
+    def test_watch_pushes_appends_without_requests_and_stays_idle(self):
+        self.query.update(tmux='', live=False, follow=True)
+        self.write(self.event('first pushed reply'))
+        server = self.start_server('--watch')
+        first = self.server_request(server, self.query)
+        self.assertIn('first pushed reply', first['wire'])
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertFalse(selector.select(timeout=0.1), 'idle watch reloaded transcript')
+            with self.path.open('a') as output:
+                output.write(json.dumps(self.event('second pushed reply')) + '\n')
+            self.assertTrue(selector.select(timeout=5), 'append did not push a reply')
+        second = json.loads(server.stdout.readline())
+        self.assertEqual(second['id'], self.query['id'])
+        self.assertIn('second pushed reply', second['wire'])
+        self.assertNotIn('first pushed reply', second['wire'])
+        with self.path.open('a') as output:
+            output.write(json.dumps(self.event('third pushed reply')) + '\n')
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertTrue(selector.select(timeout=5), 'second append did not push')
+        third = json.loads(server.stdout.readline())
+        self.assertIn('third pushed reply', third['wire'])
+        self.assertNotIn('second pushed reply', third['wire'])
+        server.stdin.close()
+        self.assertEqual(server.wait(timeout=5), 0)
+        self.assertEqual(server.stderr.read(), b'')
+
+    def test_watch_follows_replaced_transcript_and_ignores_other_files(self):
+        self.query.update(tmux='', live=False)
+        self.write(self.event('old content'))
+        server = self.start_server('--watch')
+        self.server_request(server, self.query)
+        (self.path.parent / 'unrelated.jsonl').write_text('ignored\n')
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertFalse(selector.select(timeout=0.1), 'unrelated file woke transcript')
+            replacement = self.path.with_suffix('.tmp')
+            replacement.write_text(json.dumps(self.event('replacement content')) + '\n')
+            replacement.replace(self.path)
+            self.assertTrue(selector.select(timeout=5), 'replacement did not push')
+        reply = json.loads(server.stdout.readline())
+        self.assertIn('replacement content', reply['wire'])
+        self.assertNotIn('old content', reply['wire'])
 
     def test_serve_multiple_requests_observe_appends_and_eof_in_one_process(self):
         self.write(self.event('first reply'))
