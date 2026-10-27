@@ -14,6 +14,7 @@ test('IGSH-1061: palette paints the approved neutral card, not blue selection or
   assert.match(paint, /RECENT SESSIONS/);
   assert.match(paint, /Search sessions and commands/);
   assert.match(paint, /fillRoundRect\(hdc, sel_rc, uiScaled\(10\)/);
+  assert.match(paint, /fillRoundRect\(hdc, input_bg_rc, uiScaled\(20\)/);
   assert.doesNotMatch(paint, /(?:shells\[shell_idx\]|sess)\.ram_mb/);
   assert.match(paint, /workspaceDisplayName\(app_state\.shells\[shell_idx\]\.workspace/);
 });
@@ -37,7 +38,7 @@ test('IGSH-1061: native messages share the custom dialog and preserve confirmati
   assert.doesNotMatch(dialog, /w\.MessageBoxW/);
   assert.match(dialog, /0x181818/);
   assert.match(dialog, /state\.px\(440\)/);
-  assert.match(dialog, /state\.px\(40\)/);
+  assert.match(dialog, /fillRoundRect\(dc, cell, state\.px\(20\),/);
   assert.match(dialog, /0x828bf2/);
   assert.match(dialog, /pixel\.\* >> 1/);
   assert.match(dialog, /if \(enabled\) _ = EnableWindow\(owner, 0\)/);

@@ -142,13 +142,13 @@ fn paint(dc: w.HANDLE, state: *State, bounds: w.RECT) void {
         state.cells[i] = cell;
         const primary = i == state.buttons.len - 1;
         const fill: u32 = if (button.destructive) (if (light) 0x2a30c6 else 0x828bf2) else if (primary) text else panel;
-        smooth.fillRoundRect(dc, cell, state.px(40), if (i == state.selected) hint else outline);
+        smooth.fillRoundRect(dc, cell, state.px(20), if (i == state.selected) hint else outline);
         var face = cell;
         face.left += state.px(1);
         face.top += state.px(1);
         face.right -= state.px(1);
         face.bottom -= state.px(1);
-        smooth.fillRoundRect(dc, face, state.px(40), fill);
+        smooth.fillRoundRect(dc, face, state.px(20) - state.px(1), fill);
         _ = w.SetTextColor(dc, if (primary or button.destructive) panel else text);
         var label = cell;
         _ = w.DrawTextW(dc, button.label, -1, &label, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_NOPREFIX);
@@ -299,6 +299,7 @@ test "IGSH-1061 dialog uses native approved pixels and keeps click and keyboard 
         state.title = L("Remove server 2?");
         paint(dc, &state, .{ .left = 0, .top = 0, .right = width, .bottom = height });
         const remove = state.cells[1];
+        try std.testing.expectEqual(@as(u32, if (light) 0x2a30c6 else 0x828bf2), w.GetPixel(dc, remove.left + 10, remove.top + 5) & 0xffffff);
         try std.testing.expectEqual(@as(u32, if (light) 0x2a30c6 else 0x828bf2), w.GetPixel(dc, remove.left + 24, remove.top + 8) & 0xffffff);
         try std.testing.expect((w.GetPixel(dc, state.card.left, state.card.top) & 0xffffff) != (w.GetPixel(dc, center, state.card.top + 8) & 0xffffff));
         const bytes = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];

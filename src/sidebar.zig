@@ -2210,12 +2210,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
         _ = DeleteObject(bg_pen);
 
         var input_bg_rc = RECT{ .left = ox + uiScaled(16), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(16), .bottom = oy + uiScaled(56) };
-        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(40), if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
+        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(20), if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
         input_bg_rc.left += 1;
         input_bg_rc.top += 1;
         input_bg_rc.right -= 1;
         input_bg_rc.bottom -= 1;
-        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(40), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
+        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(20), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
 
         _ = SelectObject(hdc, palette_font);
         var input_text_rc = RECT{ .left = ox + uiScaled(32), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(64), .bottom = oy + uiScaled(56) };
