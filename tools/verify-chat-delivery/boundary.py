@@ -626,18 +626,22 @@ def attach_fake(session):
         time.sleep(0.05)
 
 
+def capture_screen(escapes):
+    value = state()
+    if value.get("fake"):
+        return fake_locked(lambda: fake_screen(fake_read(), escapes))
+    shown = screen(value, box_buffer() if stateful(value) else None)
+    if escapes and value["mode"] == "idle":
+        suggestion = value["suggestion"]
+        shown = shown.replace("\u276f " + suggestion, "\u276f " + SGR_DIM + suggestion + SGR_RESET, 1)
+    return shown
+
+
 def tmux():
     fake = state().get("fake")
     if ARGS[:1] == ["capture-pane"]:
-        if fake:
-            shown = fake_locked(lambda: fake_screen(fake_read(), "-e" in ARGS))
-        else:
-            value = state()
-            shown = screen(value, box_buffer() if stateful(value) else None)
+        shown = capture_screen("-e" in ARGS)
         record("capture.jsonl", argv=ARGS, screen=shown)
-        if not fake and "-e" in ARGS and state()["mode"] == "idle":
-            suggestion = state()["suggestion"]
-            shown = shown.replace("\u276f " + suggestion, "\u276f " + SGR_DIM + suggestion + SGR_RESET, 1)
         sys.stdout.reconfigure(newline="\n")
         sys.stdout.write(shown)
         return 0
@@ -770,7 +774,13 @@ def watch_reader():
                     except FileNotFoundError:
                         result.append(None)
                 return result
+            def refresh_screen():
+                started = time.monotonic_ns()
+                q["watch_screen"] = capture_screen(True)
+                q["watch_capture_us"] = (time.monotonic_ns() - started) // 1000
+
             previous = fingerprint()
+            refresh_screen()
             yield resolved
             while True:
                 if kernel.WaitForSingleObject(notification, 0xFFFFFFFF) != 0:
@@ -779,6 +789,8 @@ def watch_reader():
                     raise ctypes.WinError(ctypes.get_last_error())
                 current = fingerprint()
                 if current != previous:
+                    if current[1:] != previous[1:]:
+                        refresh_screen()
                     previous = current
                     yield resolved
         finally:

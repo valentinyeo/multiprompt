@@ -1471,6 +1471,8 @@ def response(q, source=None, as_owner=False, resolved=None):
             rows = rows[row_start:]
         if jumped and not rows:
             return response(dict(q, no_jump=True), source, as_owner, resolved)
+        if mode == "delta":
+            captured.append((base, data))
         status = status_header(source, info.st_size, agent, captured)
         if q.get("live") is True and agent == "claude" and tmux and mode != "older":
             status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux, q.get("watch_screen")))
@@ -1755,6 +1757,7 @@ def watch_changes(q, resolved, source, as_owner):
             yield resolved
             while True:
                 changed = False
+                screen_changed = False
                 if b"\n" in control_buffer:
                     lines = control_buffer.split(b"\n")
                     control_buffer = lines.pop()
@@ -1774,7 +1777,8 @@ def watch_changes(q, resolved, source, as_owner):
                         control_buffer += output
                         lines = control_buffer.split(b"\n")
                         control_buffer = lines.pop()
-                        changed = changed or any(line.startswith((b"%output ", b"%extended-output ")) for line in lines)
+                        screen_changed = screen_changed or any(line.startswith((b"%output ", b"%extended-output ")) for line in lines)
+                        changed = changed or screen_changed
                     else:
                         events = os.read(fd, 65536)
                         at = 0
@@ -1796,7 +1800,8 @@ def watch_changes(q, resolved, source, as_owner):
                                         raise OSError(ctypes.get_errno(), "inotify_add_watch")
                                     changed = True
                 if changed:
-                    refresh_screen()
+                    if screen_changed:
+                        refresh_screen()
                     yield resolved
     finally:
         os.close(fd)

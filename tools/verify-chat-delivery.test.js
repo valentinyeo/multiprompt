@@ -960,7 +960,7 @@ test('native frame sampling stays scheduled while retaining every measured gap a
 test('Windows notification stand-in keeps the supplied reader push algorithm and emits appended data', () => {
   assert.match(read('tools/verify-chat-delivery/boundary.py'), /def watch_reader\(\):/);
   const script = String.raw`
-import ast,base64,ctypes,ctypes.wintypes,io,json,os,re,sys,tempfile
+import ast,base64,ctypes,ctypes.wintypes,io,json,os,re,sys,tempfile,time,subprocess
 from pathlib import Path
 from unittest.mock import patch
 root = Path(sys.argv[1])
@@ -989,18 +989,25 @@ with tempfile.TemporaryDirectory() as temp:
     kernel.FindCloseChangeNotification = Call(lambda *args: calls.append('closed'))
     kernel.WaitForSingleObject = Call(wait)
     source = (root / 'src/chat_history_reader.py').read_bytes()
-    q = dict(id=7,codex=False,sid='sid',tmux='',cwd=cwd,cached_sid='',inode=0,offset=0,live=False)
+    q = dict(id=7,codex=False,sid='sid',tmux='term-1',cwd=cwd,cached_sid='',inode=0,offset=0,live=True)
     stream = io.TextIOWrapper(io.BytesIO(base64.b64encode(source) + b'\n' + json.dumps(q).encode() + b'\n'))
     output = io.StringIO()
     state = home / "state"
     state.mkdir()
-    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys,os=os)
+    captures = []
+    def capture_screen(escapes):
+        assert escapes
+        captures.append(True)
+        return 'Ready\n❯ typed draft\n' + '─' * 50 + '\n'
+    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys,os=os,time=time,capture_screen=capture_screen)
     exec(compile(ast.Module(body=[function],type_ignores=[]), '<boundary-watch>', 'exec'), scope)
-    with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True):
+    with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True), patch.object(subprocess,'run',side_effect=AssertionError('stream spawned a capture process')):
         try: scope['watch_reader']()
         except RuntimeError as error: assert str(error) == 'fixture finished'
     frames = [json.loads(line) for line in output.getvalue().splitlines()]
     assert len(frames) == 2,frames
+    assert captures == [True],captures
+    assert all('typed draft' in frame['wire'] for frame in frames)
     assert 'original boundary row' in frames[0]['wire']
     assert 'appended boundary row' in frames[1]['wire']
     assert 'original boundary row' not in frames[1]['wire']
