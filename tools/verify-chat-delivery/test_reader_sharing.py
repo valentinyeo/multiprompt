@@ -8,7 +8,8 @@ import unittest
 
 
 SCRIPT = """
-import json, pathlib, sys
+import io, json, pathlib, sys
+print(json.dumps(dict(open_module=io.open.__module__, isolated=sys.flags.isolated, ignore_environment=sys.flags.ignore_environment, site=getattr(sys.modules.get("sitecustomize"), "__file__", None))), flush=True)
 path = pathlib.Path(sys.argv[1])
 with path.open("rb") as source:
     print("OPENED", flush=True)
@@ -34,6 +35,9 @@ class ReaderSharing(unittest.TestCase):
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      text=True, env=environment)
             try:
+                diagnostic = json.loads(child.stdout.readline())
+                if patched:
+                    self.assertEqual(diagnostic["open_module"], "sitecustomize", diagnostic)
                 self.assertEqual(child.stdout.readline().strip(), "OPENED")
                 if patched and suffix == ".jsonl":
                     os.replace(replacement, target)
