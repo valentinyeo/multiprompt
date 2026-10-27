@@ -19,9 +19,10 @@ Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Fresh skills proof requires chat-delivery' }
+if ($env:CHAT_NOTES_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Session notes proof requires chat-delivery' }
 if ($env:CHAT_REACTIONS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reactions proof requires chat-delivery' }
 if ($env:CHAT_WIDTH_PROOF -eq '1' -and $Feature -ne 'chat-messages-only') { throw 'Width proof requires chat-messages-only' }
-if ($env:CHAT_WIDTH_PROOF -eq '1' -or $env:CHAT_REACTIONS_PROOF -eq '1') {
+if ($env:CHAT_WIDTH_PROOF -eq '1' -or $env:CHAT_REACTIONS_PROOF -eq '1' -or $env:CHAT_NOTES_PROOF -eq '1') {
     Add-Type -Path "$PSScriptRoot/layout-capture.cs"
     [LayoutCapture]::Display()
 }
@@ -41,6 +42,7 @@ if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
 if ($env:CHAT_SWITCH_PROOF -eq '1') { $plans = @(@{name='remote-switch'; mode='idle'; text='long remote conversation switching'}) }
 if ($env:CHAT_REMOTE_PROOF -eq '1') { $plans = @(@{name='remote-sync'; mode='idle'; text='remote session follows live process'}) }
 if ($env:CHAT_MISSING_PROOF -eq '1') { $plans = @(@{name='missing-transcript'; mode='idle'; text='no transcript behind this tab'}) }
+if ($env:CHAT_NOTES_PROOF -eq '1') { $plans = @(@{name='session-notes'; mode='idle'; text='runner note disclosure'}) }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') { $plans = @(@{name='reactions'; mode='busy'; text='draft stays here'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
@@ -81,7 +83,7 @@ function Shot([string]$Name) {
     }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name.StartsWith('accepted-') -or $Name.StartsWith('reactions-') -or $Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
+    try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/$Name.png", [Drawing.Imaging.ImageFormat]::Png); if ($Name.StartsWith('accepted-') -or $Name.StartsWith('reactions-') -or $Name.StartsWith('notes-') -or $Name -in @('sending-immediate', 'sending-delivered', 'messages-only-before-tools', 'messages-only-after-tools', 'clean-chat-on', 'clean-chat-off', 'unread-divider-reopened', 'unread-divider-gap', 'unread-divider-all-read', 'layout-wide', 'layout-narrow')) { $bitmap.Save("$Evidence/$Name.bmp", [Drawing.Imaging.ImageFormat]::Bmp) } }
     finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Doctor([bool]$Chat = $false) {
@@ -431,8 +433,9 @@ foreach ($plan in $plans) {
     $isMissing = $plan.name -eq 'missing-transcript'
     $isActivity = $plan.name -eq 'messages-only'
     $isHistory = $plan.name -eq 'full-history'
+    $isNotes = $plan.name -eq 'session-notes'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
-    $hasTranscript = $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote
+    $hasTranscript = $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -482,11 +485,13 @@ foreach ($plan in $plans) {
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-yak/SKILL.md", "---`nname: verify-yak`ndescription: Cached selection fixture`n---`nFixture")
         }
         if ($hasTranscript) { Shell-Run @('init') }
+        if ($isNotes) { Shell-Run @('session-notes') }
         if ($isHistory) { Shell-Run @($(if ($env:CHAT_RETENTION_PROOF -eq '1') { 'retention-init' } else { 'history' })) }
         if ($isSwitch) { Shell-Run @('switch-history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
+        if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
         Save $savedSession "$settings/session.json"
         if ($isRemote) {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
@@ -631,6 +636,64 @@ foreach ($plan in $plans) {
                 if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $h)) { $h }
             }
             Assert-FullHistory 'restart'
+        } elseif ($isNotes) {
+            [void][LayoutCapture]::MoveWindow($main, 50, 20, 1820, 1000, $true)
+            [void](Wait-For 'owned note window resized' { [int]([System.Windows.Automation.AutomationElement]::FromHandle($main).Current.BoundingRectangle.Width) -eq 1820 })
+            Bind-Transcript
+            $cache = Wait-For 'five source runner notes in the app cache' {
+                @(Get-ChildItem "$settings/chatcache/*.jsonl" -ErrorAction SilentlyContinue | Where-Object { (Read-Shared $_.FullName).Contains('[from hax-runner-2]') }) | Select-Object -First 1
+            }
+            Copy-Item $cache.FullName "$caseDir/app-cache.jsonl"
+            $rows = (Read-Shared $cache.FullName) -split "`n" | Select-Object -Skip 1 | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }
+            $observation.sourceNotes = @($rows | Where-Object { $_.role -eq 'user' -and $_.text -like '[[]from *' }).Count
+            $observation.normalUser = @($rows | Where-Object { $_.role -eq 'user' -and $_.text -eq 'start the fake session' }).Count -eq 1
+            $observation.normalReply = @($rows | Where-Object { $_.role -eq 'assistant' -and $_.text -eq 'The fake session is ready.' }).Count -eq 1
+            function Note-Frame([string]$Stage) {
+                Doctor
+                $bounds = $views[0].Current.BoundingRectangle
+                $frame = @{theme=(Read-Shared "$settings/theme-mode.txt").Trim(); scale=([LayoutCapture]::GetDpiForWindow($main) / 96.0); transcript=@{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}}
+                Save $frame "$caseDir/frame-$Stage.json"
+                Wait-For 'IGSH-1030 expected five compact runner rows or a retained expanded body' {
+                    Shot "notes-$Stage"
+                    & node "$PSScriptRoot/../chat-notes-proof.mjs" probe $Evidence $Stage
+                    if ($LASTEXITCODE -eq 0) { Get-Content "$caseDir/probe-$Stage.json" -Raw | ConvertFrom-Json }
+                } 10
+            }
+            function Click-Note($Frame, [string]$Action) {
+                $bounds = $views[0].Current.BoundingRectangle
+                $row = @($Frame.rows)[0]
+                $x = [int]($row.left - $bounds.Left + 5)
+                $y = [int](($row.top + $row.bottom) / 2 - $bounds.Top)
+                $actions.Add(@{case=$plan.name; input="click runner note $Action"; x=$x; y=$y})
+                [ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $x, $y)
+            }
+            foreach ($theme in @('dark', 'light')) {
+                Press @(0x11, 0x4B) 'Ctrl+K: choose the existing theme'
+                foreach ($letter in 'themes'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+                Press @(0x0D) 'Enter: Themes'
+                foreach ($letter in $theme.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+                Press @(0x0D) "Enter: choose $theme"
+                [void](Wait-For 'app saved the selected theme' { (Read-Shared "$settings/theme-mode.txt").Trim() -eq $theme })
+                Press @(0x1B) 'Esc: close Themes'
+                [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+                Press @(0x11, 0x30) 'Ctrl+0: measure runner rows' $true
+                $collapsed = Note-Frame "$theme-collapsed"
+                Click-Note $collapsed 'expand'
+                $expanded = Note-Frame "$theme-expanded"
+                $pollLogStart = (Read-Shared "$settings/debug.log").Length
+                Shell-Run @('turn', "notes-$theme")
+                [void](Wait-For 'new source turn passed through the ordinary transcript poll' { (Read-Shared $cache.FullName).Contains("Remote answer notes-$theme") })
+                $expectedBlocks = if ($theme -eq 'dark') { 9 } else { 11 }
+                [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+                [void](Wait-For 'app rendered the new source turn' {
+                    Press @(0x11, 0x30) 'Ctrl+0: inspect synced note layout' $true
+                    (Read-Shared "$settings/debug.log").Substring($pollLogStart) -match ("\[chatfont\] pt=\d+ blocks=" + $expectedBlocks + ' content_h=')
+                })
+                $polled = Note-Frame "$theme-polled"
+                Click-Note $polled 'collapse'
+                [void](Note-Frame "$theme-folded")
+                [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+            }
         } elseif ($isActivity) {
             if (-not (Step 'initial-transcript-loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)) { throw 'Initial transcript was not read' }
             $cache = Wait-For 'app-written message cache' {
@@ -1074,6 +1137,10 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_NOTES_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-notes-proof.mjs" verify $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_REACTIONS_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence
     exit $LASTEXITCODE

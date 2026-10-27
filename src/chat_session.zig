@@ -1081,9 +1081,12 @@ fn refreshChatBlockCache(force: bool) bool {
     const count = if (from_file) entry.?.history.blocks.items.len else CHAT_MAX_BLOCKS;
     var open_tools = std.AutoHashMap(u64, void).init(std.heap.page_allocator);
     defer open_tools.deinit();
+    var open_notes = std.AutoHashMap(u64, void).init(std.heap.page_allocator);
+    defer open_notes.deinit();
     if (from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id) {
         for (app_state.g_chat_blocks[0..app_state.g_chat_block_count]) |block| {
             if (block.role == .tool and block.tool_open) open_tools.put(block.tool_id, {}) catch {};
+            if (block.role == .injected and block.note_open) open_notes.put(@import("chat_transcript.zig").noteKey(block, app_state.g_chat_capture[0..app_state.g_chat_last_len]), {}) catch {};
         }
     }
     if (!chatEnsureTranscriptCapacity(len, count)) return false;
@@ -1128,6 +1131,7 @@ fn refreshChatBlockCache(force: bool) bool {
         @memcpy(app_state.g_chat_blocks[0..count], entry.?.history.blocks.items);
         for (app_state.g_chat_blocks[0..count]) |*block| {
             if (block.role == .tool) block.tool_open = open_tools.contains(block.tool_id);
+            if (block.role == .injected) block.note_open = open_notes.contains(@import("chat_transcript.zig").noteKey(block.*, source));
         }
         app_state.g_chat_switch_loading = false;
         app_state.g_chat_window_full = false;

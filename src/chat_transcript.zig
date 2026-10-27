@@ -196,7 +196,19 @@ pub const Parsed = struct {
 
 pub const MAX_MESSAGES: usize = 96;
 
-pub const InjectedMessage = struct { sender: []const u16, body: []const u16 };
+pub const InjectedMessage = struct {
+    sender: []const u16,
+    body: []const u16,
+    xml_encoded: bool = true,
+
+    fn decode(self: InjectedMessage, text: []const u16, out: []u16, strip_tags: bool) usize {
+        if (self.xml_encoded) return decodeXml(text, out, strip_tags);
+        var n = @min(text.len, out.len);
+        if (n > 0 and n < text.len and text[n - 1] >= 0xD800 and text[n - 1] <= 0xDBFF and text[n] >= 0xDC00 and text[n] <= 0xDFFF) n -= 1;
+        std.mem.copyForwards(u16, out[0..n], text[0..n]);
+        return n;
+    }
+};
 const XML_SPACE = &[_]u16{ ' ', '\t', '\r', '\n' };
 
 fn xmlTagEnd(text: []const u16) ?usize {
@@ -212,7 +224,51 @@ fn xmlTagEnd(text: []const u16) ?usize {
 }
 
 pub fn injectedMessage(raw: []const u16) ?InjectedMessage {
+    const text = std.mem.trim(u16, raw, XML_SPACE);
+    const prefix = std.unicode.utf8ToUtf16LeStringLiteral("[from ");
+    if (std.mem.startsWith(u16, text, prefix)) {
+        const end = std.mem.indexOfScalar(u16, text, ']') orelse return null;
+        if (end <= prefix.len or end - prefix.len > 80 or std.mem.indexOfScalar(u16, text[prefix.len..end], '\n') != null) return null;
+        const sender = std.mem.trim(u16, text[prefix.len..end], XML_SPACE);
+        const body = std.mem.trim(u16, text[end + 1 ..], XML_SPACE);
+        if (sender.len == 0 or body.len == 0) return null;
+        return .{ .sender = sender, .body = body, .xml_encoded = false };
+    }
     return injectedEnvelope(raw, false);
+}
+
+pub fn noteKey(block: md.Block, text: []const u16) u64 {
+    if (block.message_id != 0) return block.message_id;
+    const sender = std.hash.Wyhash.hash(block.source_offset ^ block.segment, std.mem.sliceAsBytes(std.mem.sliceTo(&block.sender, 0)));
+    return std.hash.Wyhash.hash(sender, std.mem.sliceAsBytes(text[block.start..][0..block.len]));
+}
+
+pub fn noteLabel(out: []u16, sender: []const u16, recipient: []const u16, body: []const u16) usize {
+    var ticket: []const u16 = &.{};
+    for (body, 0..) |c, start| {
+        if (c < 'A' or c > 'Z' or (start > 0 and wordChar(body[start - 1]))) continue;
+        var pos = start + 1;
+        while (pos < body.len and pos - start < 8 and ((body[pos] >= 'A' and body[pos] <= 'Z') or std.ascii.isDigit(@intCast(@min(body[pos], 255))))) : (pos += 1) {}
+        if (pos - start < 2 or pos >= body.len or body[pos] != '-') continue;
+        pos += 1;
+        const digits = pos;
+        while (pos < body.len and pos - digits < 6 and body[pos] >= '0' and body[pos] <= '9') : (pos += 1) {}
+        if (pos == digits or (pos < body.len and wordChar(body[pos]))) continue;
+        ticket = body[start..pos];
+        break;
+    }
+    var len: usize = 0;
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    for ([_][]const u16{ sender, if (recipient.len > 0) w(" to ") else &.{}, recipient, if (ticket.len > 0) w(" · ") else &.{}, ticket }) |part| {
+        const n = @min(part.len, out.len - len);
+        @memcpy(out[len..][0..n], part[0..n]);
+        len += n;
+    }
+    return len;
+}
+
+fn wordChar(c: u16) bool {
+    return (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_';
 }
 
 fn injectedEnvelope(raw: []const u16, allow_truncated: bool) ?InjectedMessage {
@@ -322,11 +378,11 @@ pub fn messageBlocks(bytes: []const u8, wide: []u16, offset: usize, role: md.Rol
     var sender: [64]u16 = @splat(0);
     if (role == .user) {
         if (injectedMessage(wide[0..len])) |injected| {
-            const sender_len = decodeXml(injected.sender, sender[0 .. sender.len - 1], false);
+            const sender_len = injected.decode(injected.sender, sender[0 .. sender.len - 1], false);
             for (sender[0..sender_len]) |*c| if (c.* < 32) {
                 c.* = ' ';
             };
-            len = decodeXml(injected.body, wide, true);
+            len = injected.decode(injected.body, wide, true);
             if (len == 0) {
                 wide[0] = ' ';
                 len = 1;
@@ -700,4 +756,44 @@ test "status row caps todo arrays and keeps truncated Unicode valid" {
         defer a.free(text);
         try std.testing.expectEqualStrings("😀" ** 100, text);
     }
+}
+
+test "IGSH-1030 bracket session notes match Android without decoding literal entities" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    var text: [512]u16 = undefined;
+    var blocks: [8]md.Block = undefined;
+    const source = "  [from Hax Runner 10] IGSH-975 scope &amp; tests\nSee https://example.com/run";
+    const parsed = try messageBlocks(source, &text, 0, .user, &blocks);
+    try std.testing.expectEqual(md.Role.injected, blocks[0].role);
+    try std.testing.expectEqualSlices(u16, w("Hax Runner 10"), std.mem.sliceTo(&blocks[0].sender, 0));
+    try std.testing.expectEqualSlices(u16, w("IGSH-975 scope &amp; tests\nSee https://example.com/run"), text[0..parsed.len]);
+    _ = try messageBlocks(source, &text, 0, .prose, &blocks);
+    try std.testing.expectEqual(md.Role.prose, blocks[0].role);
+    for ([_][]const u8{ "My own question", "I wrote [from Hax Runner 10] in the middle", "[from Hax Runner 10]", "[from ] empty sender", "[from first\nsecond] body" }) |ordinary| {
+        _ = try messageBlocks(ordinary, &text, 0, .user, &blocks);
+        try std.testing.expectEqual(md.Role.user, blocks[0].role);
+    }
+}
+
+test "IGSH-1030 labels match Android and disclosure identity ignores buffer moves" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    var out: [256]u16 = undefined;
+    var n = noteLabel(&out, w("Hax Runner 10"), w("Mini Boss CEO"), w("IGSH-975 native journey is now fully green."));
+    try std.testing.expectEqualSlices(u16, w("Hax Runner 10 to Mini Boss CEO · IGSH-975"), out[0..n]);
+    n = noteLabel(&out, w("Chief Of Staff"), w("Mini Boss CEO"), w("ping"));
+    try std.testing.expectEqualSlices(u16, w("Chief Of Staff to Mini Boss CEO"), out[0..n]);
+    n = noteLabel(&out, w("Hax Runner 10"), &.{}, w("IGSH-975 done"));
+    try std.testing.expectEqualSlices(u16, w("Hax Runner 10 · IGSH-975"), out[0..n]);
+    n = noteLabel(&out, w("Task"), &.{}, w("xIGSH-975 not a ticket"));
+    try std.testing.expectEqualSlices(u16, w("Task"), out[0..n]);
+    var before = md.Block{ .start = 0, .len = 4, .role = .injected, .message_id = 17 };
+    var after = before;
+    after.start = 2;
+    try std.testing.expectEqual(noteKey(before, w("body")), noteKey(after, w("xxbody")));
+    before.message_id = 0;
+    after.message_id = 0;
+    try std.testing.expectEqual(noteKey(before, w("body")), noteKey(after, w("xxbody")));
+    after.source_offset = 1;
+    try std.testing.expect(noteKey(before, w("body")) != noteKey(after, w("xxbody")));
+    try std.testing.expect(!before.note_open);
 }

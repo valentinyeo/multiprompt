@@ -329,12 +329,12 @@ test('QPC tracing is debug-gated, thread-local and emits exactly one aggregate l
   assert.match(timing, /field.name \+\+ "_us=\{d\}"/);
 });
 
-function journeyMatrix(source, event, feature = '', ref = 'refs/heads/master') {
+function journeyMatrix(source, event, feature = '', ref = 'refs/heads/master', flags = {}) {
   const expression = source.match(/^        feature: \$\{\{ (.+) \}\}$/m);
   assert.ok(expression, 'journey matrix expression exists');
   return runInNewContext(expression[1], {
     github: { event_name: event, ref },
-    inputs: { feature },
+    inputs: { feature, ...flags },
     fromJSON: JSON.parse,
     format: (pattern, value) => pattern.replace('{0}', value),
   }, { timeout: 1000 });
@@ -372,6 +372,11 @@ test('PR journeys are appearance-only while master and manual runs retain the fu
     assert.notEqual(broken, workflow, before);
     assert.throws(() => contract(broken), assert.AssertionError, before);
   }
+});
+
+test('explicit runner-note proof selects its native journey without expanding ordinary PR checks', () => {
+  assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'chat-delivery', 'refs/pull/577/merge', { chat_notes_proof: true }), ['chat-delivery']);
+  assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'all'), ['appearance']);
 });
 
 test('switch timing is dispatch-only while allowlists and artifact contracts retain it', () => {
