@@ -1,0 +1,15 @@
+name: Reaction reply journey
+
+on:
+  push:
+    branches: [ceo/IGSH-1012]
+
+permissions:
+  contents: read
+
+jobs:
+  reactions:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_reactions_proof: true

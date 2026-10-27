@@ -72,6 +72,10 @@ on:
         type: boolean
   workflow_call:
     inputs:
+      chat_reactions_proof:
+        required: false
+        default: false
+        type: boolean
       chat_notes_proof:
         required: false
         default: false
