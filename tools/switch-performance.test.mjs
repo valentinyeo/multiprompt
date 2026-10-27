@@ -77,7 +77,9 @@ print(json.dumps(results))
 });
 
 test('switching targets the real composer that Chat View restores on activation', () => {
-  const driver = fs.readFileSync(new URL('./switch-performance.ps1', import.meta.url), 'utf8');
+  const file = new URL('./switch-performance.ps1', import.meta.url);
+  assert.ok(fs.existsSync(file), 'The real-window performance driver must ship');
+  const driver = fs.readFileSync(file, 'utf8');
   const focus = driver.split("Wait-For 'owned window foreground'")[1].split('$offset =')[0];
   assert.match(focus, /\$composer = \[ChatDeliveryDesktop\]::Composer\(\$main\)/);
   assert.match(focus, /\$composer -ne \[IntPtr\]::Zero -and \[ChatDeliveryDesktop\]::FocusOwnedWindow\(\$main, \$app\.Id, \$composer\)/);
