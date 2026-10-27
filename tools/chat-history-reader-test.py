@@ -1679,7 +1679,9 @@ class HistoryReaderTest(unittest.TestCase):
         with selectors.DefaultSelector() as selector:
             selector.register(server.stdout, selectors.EVENT_READ)
             self.assertTrue(selector.select(timeout=5), 'reader reply timed out')
-        reply = json.loads(server.stdout.readline())
+        line = server.stdout.readline()
+        self.assertTrue(line.startswith(b'{'), 'reader must keep a framed connection: ' + repr(line))
+        reply = json.loads(line)
         self.assertTrue(reply['wire'].endswith(reader.END + '\n'))
         return reply
 
