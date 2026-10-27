@@ -2,7 +2,7 @@ name: check-red-run
 
 on:
   push:
-    branches: [ceo/IGSH-1012]
+    branches: [ceo/IGSH-1012, ceo/IGSH-1057]
   workflow_call:
     inputs:
       base:
@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ inputs.head }}
+          ref: ${{ inputs.head || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
