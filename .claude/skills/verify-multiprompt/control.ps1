@@ -3758,20 +3758,7 @@ try {
             if ($result.checks.Count -ne $requiredChecks.Count) { throw 'All selection and workspace-view restore checks are required' }
             Snapshot 'after'
         }
-        'workspaces' {
-            $before = (Read-Session).workspace_count
-            Snapshot 'action'
-            Press @(0x11, 0x4E) 'Ctrl+N: create workspace'
-            Wait-Until { (Read-Session).workspace_count -eq $before + 1 } 'workspace and CMD tab persisted'
-            Snapshot 'created'
-            $created = (Read-Session).active_workspace
-            Press @(0x12, 0x32) 'Alt+2: return to first stored workspace'
-            Wait-Until { (Read-Session).active_workspace -eq 0 } 'first workspace active'
-            Press @(0x12, 0x27) 'Alt+Right: cycle to new workspace'
-            Wait-Until { (Read-Session).active_workspace -eq $created } 'new workspace active again'
-            $result.checks += @{ name = 'create-switch-return'; workspacesBefore = $before; workspacesAfter = (Read-Session).workspace_count; activeWorkspace = $created; title = [VerifyNative]::Title($script:window) }
-            Snapshot 'after'
-        }
+        'workspaces' { . (Join-Path $PSScriptRoot 'workspace-switcher.ps1') }
         'tab-names' {
             Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match 'launch step=browser' } 'seeded restore finished' 60
             $expected = @($seedNames)
