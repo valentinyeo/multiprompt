@@ -99,6 +99,7 @@ on:
         default: false
         type: boolean
   pull_request:
+    types: [opened, synchronize, reopened]
     paths:
       - .claude/skills/verify-multiprompt/**
       - .github/workflows/verify.yml
@@ -138,9 +139,13 @@ on:
       - tools/browser-own-profile.test.js
       - tools/screenshot-upload-receiver.mjs
       - tools/screenshot-upload-receiver.test.js
+  pull_request_review:
+    types: [submitted]
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}
@@ -156,22 +161,36 @@ jobs:
       appearance: ${{ steps.sel.outputs.appearance }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         with:
           persist-credentials: false
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Select changed feature journeys
         id: sel
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          REVIEW: ${{ github.event.review.state }}
+          DRAFT: ${{ github.event.pull_request.draft }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+          MERGE: ${{ (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' && github.event.pull_request.draft == false) || (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'automerge') }}
         run: |
-          if [ "$EVENT" != pull_request ]; then
+          if [ "$EVENT" != pull_request ] && [ "$EVENT" != pull_request_review ]; then
             echo 'features=[]' >> "$GITHUB_OUTPUT"
             echo 'appearance=true' >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          if [ "$EVENT" = pull_request ] && [ "$MERGE" != true ] && [ -n "${PR:-}" ] && [ -n "${GH_TOKEN:-}" ]; then
+            if GH_TOKEN="$GH_TOKEN" gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json labels -q '.labels[].name' 2>/dev/null | grep -qx automerge; then
+              export MERGE=true
+            fi
           fi
           node tools/classify-verify-features.mjs
   reopen-board-contract:
@@ -250,7 +269,7 @@ jobs:
           if-no-files-found: error
   verify:
     needs: features
-    if: needs.features.result == 'success' && inputs.feature != 'chat-sync-audit' && (github.event_name != 'pull_request' || needs.features.outputs.features != '[]' || inputs.chat_notes_proof || inputs.chat_retention_proof || inputs.feature)
+    if: needs.features.result == 'success' && inputs.feature != 'chat-sync-audit' && (github.event_name != 'pull_request' && github.event_name != 'pull_request_review' || needs.features.outputs.features != '[]' || inputs.chat_notes_proof || inputs.chat_retention_proof || inputs.feature)
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
     timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
@@ -258,7 +277,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && needs.features.outputs.features != '[]' && fromJSON(needs.features.outputs.features) || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && needs.features.outputs.features != '[]' && fromJSON(needs.features.outputs.features) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request_review' && needs.features.outputs.features != '[]' && fromJSON(needs.features.outputs.features) || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
@@ -668,9 +687,9 @@ jobs:
           path: evidence/
           if-no-files-found: error
   verify-appearance:
-    name: ${{ github.event_name == 'pull_request' && needs.features.outputs.appearance != 'true' && 'verify (appearance)' || 'verify-appearance-hold' }}
+    name: ${{ (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') && needs.features.outputs.appearance != 'true' && 'verify (appearance)' || 'verify-appearance-hold' }}
     needs: [features, verify]
-    if: always() && github.event_name == 'pull_request' && needs.features.outputs.appearance != 'true' && !cancelled()
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') && needs.features.outputs.appearance != 'true' && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

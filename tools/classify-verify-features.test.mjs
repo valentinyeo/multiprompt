@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { featuresForPaths, selection } from './classify-verify-features.mjs';
+import { countPrior, featuresForPaths, journeyPlan, selection } from './classify-verify-features.mjs';
 
 test('shared files select no desktop journey', () => {
   assert.deepEqual(featuresForPaths([
@@ -23,4 +23,24 @@ test('a changed feature file selects only that journey, once, in path order', ()
     'src/chat_history.zig', 'src/window_frame.zig', 'src/browser_corners.zig',
   ]), []);
   assert.deepEqual(featuresForPaths([]), []);
+});
+
+test('a pull request head schedules at most two journeys and never more than it already ran', () => {
+  const features = ['chat-view', 'appearance', 'pane-layout', 'chat-focus'];
+  assert.deepEqual(journeyPlan(features, { prior: 0 }), ['chat-view']);
+  assert.deepEqual(journeyPlan(features, { prior: 1 }), ['appearance']);
+  assert.deepEqual(journeyPlan(features, { prior: 2 }), []);
+  assert.deepEqual(journeyPlan(features, { prior: 4, merge: true }), ['pane-layout', 'chat-focus']);
+  assert.deepEqual(journeyPlan(features, { prior: 1, merge: true }), []);
+  assert.deepEqual(journeyPlan(['appearance'], { prior: 0 }), ['appearance']);
+  assert.deepEqual(journeyPlan(['appearance'], { prior: 6 }), []);
+  assert.deepEqual(journeyPlan(['appearance'], { prior: 6, merge: true }), []);
+  assert.deepEqual(journeyPlan([], { prior: 3 }), []);
+  const runs = [
+    { conclusion: 'success', createdAt: '2026-10-27T00:00:00Z' },
+    { conclusion: 'skipped', createdAt: '2026-10-27T01:00:00Z' },
+    { conclusion: 'success', createdAt: '2026-10-26T00:00:00Z' },
+  ];
+  assert.equal(countPrior(runs, '2026-10-26T12:00:00Z'), 1);
+  assert.equal(countPrior(runs, 'not-a-date'), 2);
 });

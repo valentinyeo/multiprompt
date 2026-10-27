@@ -19,13 +19,14 @@ function verifyRouting(text) {
   assert.match(pathSteps[pathCheckout], /fetch-depth: 0/);
   assert.match(pathSteps[pathCheckout + 1], /id: paths\n        shell: bash\n/);
   assert.match(jobs.test, /^    needs: paths\n    if: needs\.paths\.outputs\.heavy == 'true'\n/m);
-  assert.match(jobs['test-windows-update'], /^    needs: \[paths, build-windows\]\n    if: needs\.paths\.outputs\.heavy == 'true' && needs\.build-windows\.result == 'success'\n/m);
+  assert.match(jobs['test-windows-update'], /^    needs: \[paths, build-windows\]\n    if: needs\.paths\.outputs\.full == 'true' && needs\.paths\.outputs\.heavy == 'true' && needs\.build-windows\.result == 'success'\n/m);
   const result = jobs['test-result'];
   assert.match(result, /name: test\n/);
   assert.match(result, /if: always\(\)/);
   assert.match(result, /HEAVY: \$\{\{ needs\.paths\.outputs\.heavy \}\}/);
   assert.match(result, /accept windows "\$WINDOWS"/);
-  assert.match(result, /accept windows "\$UPDATE"/);
+  assert.match(result, /accept update "\$UPDATE"/);
+  assert.match(jobs.test, /group: \$\{\{ fromJSON\(needs\.paths\.outputs\.groups\) \}\}/);
   assert.match(result, /accept always "\$PATHS"/);
   for (const name of names) {
     const job = jobs[name];

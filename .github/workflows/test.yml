@@ -3,11 +3,16 @@ name: Tests
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted]
+  merge_group:
   push:
     branches: [master]
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +25,8 @@ jobs:
     timeout-minutes: 2
     outputs:
       heavy: ${{ steps.paths.outputs.heavy }}
+      full: ${{ steps.paths.outputs.full }}
+      groups: ${{ steps.paths.outputs.groups }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -29,8 +36,14 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          REVIEW: ${{ github.event.review.state }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
 
   test:
@@ -42,7 +55,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4, 5]
+        group: ${{ fromJSON(needs.paths.outputs.groups) }}
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -201,7 +214,7 @@ jobs:
         if: steps.paths.outputs.heavy == 'true'
         run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js
       - name: Verify responsive startup ordering and original regression controls
-        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js tools/classify-verify-features.test.mjs tools/same-ref-guard.test.mjs tools/windows-runner-load.test.mjs
+        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js tools/classify-verify-features.test.mjs tools/classify-test-paths.test.mjs tools/pr-windows-gate.test.mjs tools/same-ref-guard.test.mjs tools/windows-runner-load.test.mjs
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         if: steps.paths.outputs.heavy == 'true'
         with:
@@ -281,7 +294,7 @@ jobs:
 
   test-windows-update:
     needs: [paths, build-windows]
-    if: needs.paths.outputs.heavy == 'true' && needs.build-windows.result == 'success'
+    if: needs.paths.outputs.full == 'true' && needs.paths.outputs.heavy == 'true' && needs.build-windows.result == 'success'
     runs-on: windows-latest
     timeout-minutes: 10
     strategy:
@@ -641,6 +654,7 @@ jobs:
         env:
           PATHS: ${{ needs.paths.result }}
           HEAVY: ${{ needs.paths.outputs.heavy }}
+          FULL: ${{ needs.paths.outputs.full }}
           WINDOWS: ${{ needs.test.result }}
           VPS: ${{ needs.test-vps.result }}
           BUILD: ${{ needs.build-windows.result }}
@@ -658,7 +672,10 @@ jobs:
             kind="$1"
             result="$2"
             if [ "$result" = success ]; then return 0; fi
-            if [ "$kind" = windows ] && [ "$HEAVY" = false ] && [ "$PATHS" = success ] && [ "$result" = skipped ]; then return 0; fi
+            if [ "$PATHS" = success ] && [ "$result" = skipped ]; then
+              if [ "$kind" = windows ] && [ "$HEAVY" = false ]; then return 0; fi
+              if [ "$kind" = update ] && { [ "$HEAVY" = false ] || [ "$FULL" = false ]; }; then return 0; fi
+            fi
             return 1
           }
           require_jobs success success success success success success success
@@ -675,7 +692,7 @@ jobs:
           accept windows "$WINDOWS" || exit 1
           accept always "$VPS" || exit 1
           accept always "$BUILD" || exit 1
-          accept windows "$UPDATE" || exit 1
+          accept update "$UPDATE" || exit 1
           accept always "$WORKER" || exit 1
           accept always "$UPDATE_SOURCE" || exit 1
           accept always "$RED_RUN" || exit 1

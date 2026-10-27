@@ -3,6 +3,7 @@ run-name: Browser corners ${{ github.head_ref || github.ref_name }} ${{ github.s
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - src/browser_pane.zig
       - src/main.zig
@@ -12,6 +13,16 @@ on:
       - .github/workflows/check-red-run.yml
   push:
     branches: [master, ceo/IGSH-1057]
+    paths:
+      - src/browser_pane.zig
+      - src/main.zig
+      - .claude/skills/verify-multiprompt/browser-corners.ps1
+      - .claude/skills/verify-multiprompt/control.ps1
+      - .github/workflows/browser-corners.yml
+      - .github/workflows/check-red-run.yml
+  pull_request_review:
+    types: [submitted]
+  merge_group:
     paths:
       - src/browser_pane.zig
       - src/main.zig
@@ -29,7 +40,37 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Decide whether this head runs Windows
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          REVIEW: ${{ github.event.review.state }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          PATTERNS: |
+            src/browser_pane.zig
+            src/main.zig
+            .claude/skills/verify-multiprompt/browser-corners.ps1
+            .claude/skills/verify-multiprompt/control.ps1
+            .github/workflows/browser-corners.yml
+            .github/workflows/check-red-run.yml
+        run: node tools/pr-windows-gate.mjs
   browser-corners:
+    needs: scope
+    if: needs.scope.outputs.run == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:

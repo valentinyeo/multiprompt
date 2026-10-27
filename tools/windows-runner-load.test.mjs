@@ -44,7 +44,26 @@ test('a pull request reports verify appearance without starting that journey whe
   const verify = read('.github/workflows/verify.yml');
   assert.match(verify, /features: \$\{\{ steps\.sel\.outputs\.features \}\}/);
   assert.match(verify, /node tools\/classify-verify-features\.mjs/);
-  assert.match(verify, /name: \$\{\{ github\.event_name == 'pull_request' && needs\.features\.outputs\.appearance != 'true' && 'verify \(appearance\)' \|\| 'verify-appearance-hold' \}\}/);
+  assert.match(verify, /name: \$\{\{ \(github\.event_name == 'pull_request' \|\| github\.event_name == 'pull_request_review'\) && needs\.features\.outputs\.appearance != 'true' && 'verify \(appearance\)' \|\| 'verify-appearance-hold' \}\}/);
+  assert.match(verify, /journeyPlan|classify-verify-features\.mjs/);
+  assert.match(read('.github/workflows/test.yml'), /fromJSON\(needs\.paths\.outputs\.groups\)/);
+  assert.match(read('.github/workflows/test.yml'), /needs\.paths\.outputs\.full == 'true'/);
+  for (const file of [
+    '.github/workflows/window-controls.yml',
+    '.github/workflows/remote-switch.yml',
+    '.github/workflows/freeze-recorder.yml',
+    '.github/workflows/browser-corners.yml',
+    '.github/workflows/chat-history-retention.yml',
+    '.github/workflows/session-notes.yml',
+    '.github/workflows/verify-reconnect.yml',
+    '.github/workflows/verify-close-unattached.yml',
+    '.github/workflows/account-journey.yml',
+  ]) {
+    const text = read(file);
+    assert.match(text, /node tools\/pr-windows-gate\.mjs/, file);
+    assert.match(text, /if: needs\.scope\.outputs\.run == 'true'/, file);
+    assert.match(text, /pull_request_review:\n    types: \[submitted\]/, file);
+  }
   assert.match(verify, /Appearance files did not change/);
   assert.match(read('.github/workflows/release-gate.yml'), /feature: relaunch-saved-sessions/);
   assert.match(read('.github/workflows/gitleaks.yml'), concurrency);

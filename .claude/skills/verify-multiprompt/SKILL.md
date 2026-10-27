@@ -28,7 +28,7 @@ Use `appearance` for the first journey. Other names are `browser-corners`, `sess
 gh workflow run verify.yml --ref ceo/IGSH-525 -f feature=appearance
 ```
 
-If GitHub refuses because the workflow is not on the default branch yet, open or update the branch's PR. Its path-filtered `pull_request` trigger runs only the feature journeys selected from the files that changed, and still reports the required `verify (appearance)` check when appearance files did not change; identify that event and head SHA with `gh run list`, then use the same watch and download commands. Never substitute a default-branch run for the proposed change.
+If GitHub refuses because the workflow is not on the default branch yet, open or update the branch's PR. Its path-filtered `pull_request` trigger runs at most one changed-feature journey on each push and at most two for that pull request, still reports the required `verify (appearance)` check when that journey is not appearance, and leaves any further changed journeys until the pull request is approved; identify that event and head SHA with `gh run list`, then use the same watch and download commands. Never substitute a default-branch run for the proposed change.
 
 To exercise a published executable instead of compiling the branch:
 

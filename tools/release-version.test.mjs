@@ -155,7 +155,8 @@ test('aggregate routing requires every test job and rejects every unsuccessful d
   assert.match(aggregate, /for result in "\$@"; do\n              \[ "\$result" = success \] \|\| return 1/);
   assert.match(aggregate, /for result in failure cancelled skipped; do/);
   assert.match(aggregate, /accept windows "\$WINDOWS"/);
-  assert.match(aggregate, /accept windows "\$UPDATE"/);
+  assert.match(aggregate, /accept update "\$UPDATE"/);
+  assert.match(aggregate, /FULL: \$\{\{ needs\.paths\.outputs\.full \}\}/);
   assert.match(aggregate, /accept always "\$PATHS"/);
   assert.doesNotMatch(aggregate, /CHANGES|needs\.changes/);
   const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
@@ -171,15 +172,21 @@ test('aggregate routing requires every test job and rejects every unsuccessful d
   assert.equal(run({ WINDOWS: 'skipped', UPDATE: 'skipped', HEAVY: 'true' }).status, 1);
   assert.equal(run({ WINDOWS: 'failure', HEAVY: 'false' }).status, 1);
   assert.equal(run({ PATHS: 'failure', WINDOWS: 'skipped', UPDATE: 'skipped', HEAVY: 'false' }).status, 1);
+  assert.equal(run({ WINDOWS: 'success', UPDATE: 'skipped', HEAVY: 'true', FULL: 'false' }).status, 0);
+  assert.equal(run({ WINDOWS: 'skipped', UPDATE: 'skipped', HEAVY: 'true', FULL: 'false' }).status, 1);
+  assert.equal(run({ WINDOWS: 'success', UPDATE: 'skipped', HEAVY: 'true', FULL: 'true' }).status, 1);
+  assert.equal(run({ WINDOWS: 'success', UPDATE: 'failure', HEAVY: 'true', FULL: 'false' }).status, 1);
 });
 
 test('five Windows and three VPS jobs retain the upstream test graph with independent Worker checks', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   const matrices = [...tests.matchAll(/^        group: \[([^\]]+)\]$/gm)].map(match => match[1].split(',').map(value => Number(value.trim())));
-  assert.deepEqual(matrices, [[1, 2, 3, 4, 5], [1, 2, 3]]);
-  assert.deepEqual([...build.matchAll(/b.step\("test-group-(\d+)"/g)].map(match => Number(match[1])), matrices[0]);
-  assert.deepEqual([...build.matchAll(/b.step\("test-vps-group-(\d+)"/g)].map(match => Number(match[1])), matrices[1]);
+  assert.deepEqual(matrices, [[1, 2, 3]]);
+  assert.match(tests, /group: \$\{\{ fromJSON\(needs\.paths\.outputs\.groups\) \}\}/);
+  assert.match(fs.readFileSync(path.join(root, 'tools/classify-test-paths.mjs'), 'utf8'), /export const fullGroups = \[1, 2, 3, 4, 5\]/);
+  assert.deepEqual([...build.matchAll(/b.step\("test-group-(\d+)"/g)].map(match => Number(match[1])), [1, 2, 3, 4, 5]);
+  assert.deepEqual([...build.matchAll(/b.step\("test-vps-group-(\d+)"/g)].map(match => Number(match[1])), matrices[0]);
   for (const [option, count, array] of [['test-group', 5, 'test_groups'], ['test-vps-group', 3, 'vps_groups']]) {
     assert.ok(build.includes(`"Run one ${array === 'test_groups' ? 'desktop' : 'server'} test group (1-${count})"`));
     assert.ok(build.includes(`if (group < 1 or group > ${array}.len) @panic("${option} must be between 1 and ${count}")`));

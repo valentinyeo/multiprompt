@@ -68,6 +68,36 @@ export function selection(paths) {
   return { features, appearance: features.includes('appearance') };
 }
 
+export function journeyPlan(features, { prior = 0, merge = false } = {}) {
+  const relevant = features.slice();
+  const started = Math.min(Math.max(0, prior), 2, relevant.length);
+  if (merge) {
+    const budget = Math.max(0, prior - started);
+    return relevant.slice(started, started + budget);
+  }
+  if (prior >= 2 || prior >= relevant.length) return [];
+  return [relevant[prior]];
+}
+
+export function countPrior(runs, openedAt) {
+  const opened = Date.parse(openedAt);
+  if (Number.isNaN(opened)) return 2;
+  return runs.filter(run => run.conclusion !== 'skipped' && Date.parse(run.createdAt) >= opened).length;
+}
+
+function priorCount() {
+  if (process.env.PRIOR != null && process.env.PRIOR !== '') return Number(process.env.PRIOR);
+  if (!process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) return 2;
+  try {
+    const env = { ...process.env, GH_TOKEN: process.env.GH_TOKEN || process.env.GITHUB_TOKEN };
+    const runs = JSON.parse(execFileSync('gh', ['run', 'list', '-R', process.env.GITHUB_REPOSITORY, '-w', 'verify.yml', '-b', process.env.BRANCH, '--event', 'pull_request', '--json', 'databaseId,conclusion,createdAt', '-L', '100'], { encoding: 'utf8', env }));
+    const opened = execFileSync('gh', ['pr', 'view', String(process.env.PR), '-R', process.env.GITHUB_REPOSITORY, '--json', 'createdAt', '-q', '.createdAt'], { encoding: 'utf8', env }).trim();
+    return countPrior(runs, opened);
+  } catch {
+    return 2;
+  }
+}
+
 function changedPaths() {
   let base = process.env.BASE;
   const head = process.env.HEAD;
@@ -76,8 +106,8 @@ function changedPaths() {
 }
 
 function main() {
-  const chosen = selection(changedPaths());
-  const body = `features=${JSON.stringify(chosen.features)}\nappearance=${chosen.appearance}\n`;
+  const chosen = journeyPlan(featuresForPaths(changedPaths()), { prior: priorCount(), merge: process.env.MERGE === 'true' });
+  const body = `features=${JSON.stringify(chosen)}\nappearance=${chosen.includes('appearance')}\n`;
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, body);
   else process.stdout.write(body);
 }
