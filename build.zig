@@ -232,7 +232,7 @@ pub fn build(b: *std.Build) void {
     if (b.graph.host.result.os.tag != .windows) b.step("test", "Run Linux server tests").dependOn(vps_test_step);
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/portable-paths.test.js" }).step);
     const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs", "tools/release-version.test.mjs" });
-    const automerge_admit_tests = b.addSystemCommand(&.{ "bash", "tools/automerge-admit.test.sh" });
+    const automerge_admit_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ci-admission.test.js" });
     test_step.dependOn(&automerge_admit_tests.step);
     vps_test_step.dependOn(&automerge_admit_tests.step);
     test_step.dependOn(&version_stamp_tests.step);
