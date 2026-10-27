@@ -180,7 +180,7 @@ jobs:
         if: steps.paths.outputs.heavy == 'true'
         run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js
       - name: Verify responsive startup ordering and original regression controls
-        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js
+        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         if: steps.paths.outputs.heavy == 'true'
         with:
@@ -632,12 +632,12 @@ jobs:
           }
           require_jobs success success success success success success success
           for result in failure cancelled skipped; do
-            if require_jobs "$result" success success success success success; then exit 1; fi
-            if require_jobs success "$result" success success success success; then exit 1; fi
-            if require_jobs success success "$result" success success success; then exit 1; fi
-            if require_jobs success success success "$result" success success; then exit 1; fi
-            if require_jobs success success success success "$result" success; then exit 1; fi
-            if require_jobs success success success success success "$result"; then exit 1; fi
+            if require_jobs "$result" success success success success success success; then exit 1; fi
+            if require_jobs success "$result" success success success success success; then exit 1; fi
+            if require_jobs success success "$result" success success success success; then exit 1; fi
+            if require_jobs success success success "$result" success success success; then exit 1; fi
+            if require_jobs success success success success "$result" success success; then exit 1; fi
+            if require_jobs success success success success success "$result" success; then exit 1; fi
             if require_jobs success success success success success success "$result"; then exit 1; fi
           done
           echo 'Aggregate routing controls passed'
