@@ -1,6 +1,8 @@
 name: check-red-run
 
 on:
+  push:
+    branches: [ceo/IGSH-1012]
   workflow_call:
     inputs:
       base:
@@ -41,12 +43,13 @@ jobs:
       - name: Install Zig 0.16.0
         run: |
           curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Test admission controls
         run: node --test tools/check-red-run.test.mjs
       - name: Require changed tests to fail on merge-base source
         env:
-          BASE: ${{ inputs.base }}
-          HEAD: ${{ inputs.head }}
+          BASE: ${{ inputs.base || 'origin/master' }}
+          HEAD: ${{ inputs.head || github.sha }}
         run: node tools/check-red-run.mjs "$BASE" "$HEAD"
