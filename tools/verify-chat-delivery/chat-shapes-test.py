@@ -46,6 +46,16 @@ class ChatShapesTest(unittest.TestCase):
         self.assertEqual(result['sha256'], hashlib.sha256(self.path.read_bytes()).hexdigest())
         self.assertEqual(rows[-1]['message']['content'][0]['text'], result['last_marker'])
 
+    def test_recent_tail_is_not_buried_under_ignored_source_padding(self):
+        value = profile()
+        value['source_bytes'] = 2 * 1024 * 1024
+        result, rows = self.generate(value)
+        recent = self.path.read_bytes()[-512 * 1024:]
+        self.assertIn(b'IGSH1040_TURN_', recent)
+        self.assertIn(result['last_marker'].encode(), recent)
+        self.assertEqual(rows[-2]['type'], 'user')
+        self.assertEqual(sum(r.get('type') == 'system' for r in rows[-4:]), 0)
+
     def test_complete_source_preserves_record_density_plus_two_markers(self):
         result, rows = self.generate()
         self.assertEqual(len(rows), 12)

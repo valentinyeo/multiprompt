@@ -1,4 +1,4 @@
-from collections import Counter
+from collections import Counter, deque
 import hashlib
 import json
 from pathlib import Path
@@ -94,6 +94,18 @@ def generate(profile, path, sid, seed):
             written += len(raw)
             records += raw.count(b'\n')
 
+        pending = deque()
+        pending_bytes = 0
+
+        def defer(raw):
+            nonlocal pending_bytes
+            pending.append(raw)
+            pending_bytes += len(raw)
+            if len(pending) > 64:
+                oldest = pending.popleft()
+                pending_bytes -= len(oldest)
+                write(oldest)
+
         write(encoded(conversation('user', first, sid, 0)))
         tool_index = 0
         for index, (role, size) in enumerate(messages, 1):
@@ -106,18 +118,18 @@ def generate(profile, path, sid, seed):
                 raise ValueError('Conversation length changed')
             marked += body.startswith('IGSH1040_TURN_')
             generated_lengths[role][size] = generated_lengths[role].get(size, 0) + 1
-            write(encoded(conversation(role, body, sid, index)))
+            defer(encoded(conversation(role, body, sid, index)))
             due = len(tools) * index // max(1, len(messages))
             while tool_index < due:
                 size = tools[tool_index]
                 raw, minimum = tool_record(size, tool_index)
                 minimum_expansions += size < minimum
-                write(raw)
+                defer(raw)
                 tool_index += 1
                 tool_count += 1
         source_padding = 0
         if profile['source_completeness'] == 'complete-host-log':
-            remaining = profile['source_bytes'] - written - len(last_raw)
+            remaining = profile['source_bytes'] - written - pending_bytes - len(last_raw)
             padding_records = profile['source_records'] - len(messages) - len(tools)
             minimum = len(encoded(dict(type='system', fixture_padding='')))
             if padding_records < 0 or remaining < padding_records * minimum:
@@ -131,6 +143,8 @@ def generate(profile, path, sid, seed):
             if remaining:
                 write(b' ' * remaining)
                 source_padding += remaining
+        for raw in pending:
+            write(raw)
         write(last_raw)
     expected = {role: sorted((int(k), v) for k, v in values.items()) for role, values in generated_lengths.items()}
     for role in ('user', 'assistant'):

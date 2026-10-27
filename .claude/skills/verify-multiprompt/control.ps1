@@ -6247,7 +6247,11 @@ try {
                 $copied = [Windows.Forms.Clipboard]::GetText()
                 $latest = [regex]::Match($copied, [regex]::Escape($Expected))
                 $last = [regex]::Match($copied, [regex]::Escape($Marker))
-                if (-not $latest.Success -or -not $last.Success) { throw 'Copied target transcript does not contain the generated latest message and endpoint' }
+                if (-not $latest.Success -or -not $last.Success) {
+                    Save-Json @{ expected = $Expected; marker = $Marker; latest_found = $latest.Success; marker_found = $last.Success; copied_characters = $copied.Length; session = (Read-Session) } 'receipt-failure.json'
+                    [IO.File]::WriteAllText((Join-Path $Evidence 'receipt-failure.txt'), $copied, (New-Object Text.UTF8Encoding($false)))
+                    throw 'Copied target transcript does not contain the generated latest message and endpoint'
+                }
                 [IO.File]::WriteAllText((Join-Path $Evidence $Name), ($latest.Value + "`n" + $last.Value), (New-Object Text.UTF8Encoding($false)))
                 Press @(0x1B) 'Esc: clear the copied transcript selection'
             }
