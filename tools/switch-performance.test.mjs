@@ -48,6 +48,8 @@ test('production idle poll has real high-resolution timing', () => {
 
 test('speed check runs on every PR and blocks the aggregate', () => {
   const flow = fs.readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
+  const speed = flow.split('\n  switch-performance:\n')[1].split('\n  test-result:\n')[0];
+  assert.ok(speed.includes('ref: $' + '{{ github.event.pull_request.head.sha || github.sha }}'), 'Speed proof must build the exact PR head, not a synthetic merge');
   assert.match(flow, /check-red-run, switch-performance\]/);
   assert.match(flow, /SPEED: \$\{\{ needs\.switch-performance\.result \}\}/);
   assert.ok(flow.includes('elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then'));
@@ -86,6 +88,8 @@ test('switching targets the real composer that Chat View restores on activation'
   assert.match(focus, /\$composer = \[ChatDeliveryDesktop\]::Composer\(\$main\)/);
   assert.match(focus, /\$composer -ne \[IntPtr\]::Zero -and \[ChatDeliveryDesktop\]::FocusOwnedWindow\(\$main, \$app\.Id, \$composer\)/);
   assert.doesNotMatch(focus, /FocusOwnedWindow\(\$main, \$app\.Id, \$main\)/);
+  const paint = driver.split("Wait-For 'switch dispatch and nonempty target painted'")[1].split('if ($i -ge 10)')[0];
+  assert.match(paint, /FocusOwnedWindow\(\$main, \$app\.Id, \$composer\)/, 'Newly attached fixture consoles must not steal paint ownership');
 });
 
 test('branch push proof classifies against master after a rebase removes the old head', () => {

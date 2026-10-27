@@ -70,6 +70,8 @@ try {
         [void](Wait-For 'different target selected' { (Session).active_tab -eq $target })
         $targetShellId = (Session).tabs[$target].shell_id
         [void](Wait-For 'switch dispatch and nonempty target painted' {
+            $composer = [ChatDeliveryDesktop]::Composer($main)
+            if ($composer -eq [IntPtr]::Zero -or -not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)) { return $false }
             $range = (Read-Log).Substring($offset)
             $range -match ('switch-timing: to=' + $target + ' total_us=\d+') -and $range -match ('\[switch\] chat content shown shell=' + $targetShellId + ' blocks=[1-9]')
         })
@@ -100,10 +102,11 @@ try {
     $result.idleUs = @([regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)') | ForEach-Object { [long]$_.Groups[1].Value })
     $app.Refresh()
     $result.cpuMs = $app.TotalProcessorTime.TotalMilliseconds
+} finally {
+    if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$Evidence/session.json" }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/screen.png") } finally { $graphics.Dispose(); $bitmap.Dispose() }
-} finally {
     $result | ConvertTo-Json -Depth 6 | Set-Content "$Evidence/samples.json"
     if ($null -ne $job) { $job.Dispose() }
     if (Test-Path $log) { Copy-Item $log "$Evidence/debug.log" }
