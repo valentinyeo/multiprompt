@@ -127,5 +127,19 @@ Doctor
 $observation.idleAfter = Measure-CPU {} 2000
 Press @(0x12, 0x25) 'Alt+Left: capture the proved remote conversation'
 Bind-Transcript
+Switch-Palette 'new cmd'
+$expectedShells = 3
+[void](Wait-For 'three sessions published for idle proof' { @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count -eq 3 })
+Switch-Palette 'Verify agent'
+[void](Wait-For 'long remote chat selected with two background sessions' {
+    $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+    $selected = $saved.tabs[$saved.active_tab]
+    $selected.kind -eq 'tmux' -and $selected.tmux_host -eq 2
+})
+Bind-Transcript
+$observation.idleThree = Measure-CPU {} 2000
+$observation.idleThree.sessions = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count
+$saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+$observation.idleThree.shell = $saved.tabs[$saved.active_tab].shell_id
 Shot 'remote-switch-complete'
 Save $observation "$caseDir/observation.json"
