@@ -1,4 +1,11 @@
 [void](Wait-For 'reaction transcript loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
+Press @(0x11, 0x4B) 'Ctrl+K: open theme picker'
+foreach ($letter in 'themes'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+Press @(0x0D) 'Enter: Themes'
+foreach ($letter in 'amoled'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+Press @(0x0D) 'Enter: AMOLED'
+[void](Wait-For 'app saved AMOLED theme' { (Read-Shared "$settings/theme-mode.txt").Trim() -eq 'amoled' })
+Press @(0x1B) 'Esc: close Themes'
 Bind-Transcript
 Type-Composer $plan.text
 $bounds = $views[0].Current.BoundingRectangle

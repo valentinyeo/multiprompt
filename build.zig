@@ -5,6 +5,7 @@ const MAIN_STACK_SIZE: u64 = 64 * 1024 * 1024;
 fn linkColorEmoji(b: *std.Build, module: *std.Build.Module) void {
     module.addCSourceFile(.{ .file = b.path("src/color_emoji.cpp"), .flags = &.{ "-std=c++17", "-fno-exceptions", "-fno-rtti" } });
     module.link_libcpp = true;
+    module.linkSystemLibrary("gdi32", .{});
     module.linkSystemLibrary("d2d1", .{});
     module.linkSystemLibrary("dwrite", .{});
 }
@@ -22,6 +23,7 @@ pub fn build(b: *std.Build) void {
         std.base64.standard.Decoder.decode(&key, encoded) catch @panic("Invalid release signing public key: expected base64 raw 32-byte key");
         if (std.mem.allEqual(u8, &key, 0)) @panic("Release signing public key is still the all-zero placeholder; configure it before publishing");
     }
+
 
     const mod = b.addModule("multiprompt", .{
         .root_source_file = b.path("src/root.zig"),
@@ -722,18 +724,19 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&idle_front_tests.step);
     vps_test_step.dependOn(&idle_front_tests.step);
     const server_tool_tests = b.addSystemCommand(&.{
-        "node",                                   "--test",                                   "--test-concurrency=4",
-        "tools/app-source.test.js",               "tools/browser-fixed-layout.test.js",       "tools/browser-overlay.test.js",
-        "tools/browser-pane-hibernation.test.js", "tools/chat-cache-bound.test.js",           "tools/chat-correctness.test.js",
-        "tools/chat-history-reader.test.js",      "tools/chat-reset.test.js",                 "tools/chat-tables.test.js",
-        "tools/chat-transcript-history.test.js",  "tools/chat_injected.test.js",              "tools/crash-report.test.js",
-        "tools/debug-log.test.js",                "tools/favorites.test.js",                  "tools/focus-guard.test.js",
-        "tools/idle-cpu.test.js",                 "tools/inbox-eta.test.js",                  "tools/inbox-exclude.test.js",
-        "tools/power-saver.test.js",              "tools/sidebar-custom-groups.test.js",      "tools/token-ladder-panel.test.js",
-        "tools/unarchive-semantics.test.js",      "tools/update-card.test.js",                "tools/zsb-active-tab.test.js",
-        "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",           "extension/focus-guard.test.js",
-        "tools/chat-queued-notes.test.js",        "tools/chat-unconfirmed-duplicate.test.js", "tools/auto-release-admit.test.js",
-        "tools/automerge-admit.test.mjs",         "tools/chat-unread-visit.test.js",
+        "node",                                   "--test",                              "--test-concurrency=4",
+        "tools/app-source.test.js",               "tools/browser-fixed-layout.test.js",  "tools/browser-overlay.test.js",
+        "tools/browser-pane-hibernation.test.js", "tools/chat-cache-bound.test.js",      "tools/chat-correctness.test.js",
+        "tools/chat-history-reader.test.js",      "tools/chat-reset.test.js",            "tools/chat-tables.test.js",
+        "tools/chat-transcript-history.test.js",  "tools/chat_injected.test.js",         "tools/crash-report.test.js",
+        "tools/debug-log.test.js",                "tools/favorites.test.js",             "tools/focus-guard.test.js",
+        "tools/idle-cpu.test.js",                 "tools/inbox-eta.test.js",             "tools/inbox-exclude.test.js",
+        "tools/power-saver.test.js",              "tools/sidebar-custom-groups.test.js", "tools/token-ladder-panel.test.js",
+        "tools/unarchive-semantics.test.js",      "tools/update-card.test.js",           "tools/zsb-active-tab.test.js",
+        "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",      "extension/focus-guard.test.js",
+        "tools/chat-queued-notes.test.js",         "tools/chat-unconfirmed-duplicate.test.js",
+        "tools/auto-release-admit.test.js",       "tools/automerge-admit.test.mjs",
+        "tools/chat-unread-visit.test.js",
     });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);

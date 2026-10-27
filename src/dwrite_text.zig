@@ -616,7 +616,7 @@ test "IGSH-1089 color emoji preserve source and GDI advances with chromatic pixe
     try std.testing.expect(fonts.register());
     defer fonts.unregister();
     const width = 600;
-    const height = 320;
+    const height = 400;
     const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
     defer _ = w.DeleteDC(dc);
     const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
@@ -633,7 +633,7 @@ test "IGSH-1089 color emoji preserve source and GDI advances with chromatic pixe
     _ = w.SetBkMode(dc, w.TRANSPARENT);
     _ = w.SetTextColor(dc, 0xffffff);
     const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
-    const samples = [_][]const u16{ L("✓"), L("⚠"), L("👍"), L("✗"), L("👍🏽"), L("👨‍👩‍👧"), L("❤️"), L("⚠️") };
+    const samples = [_][]const u16{ L("✓"), L("⚠"), L("👍"), L("✗"), L("👍🏽"), L("👨‍👩‍👧"), L("❤️"), L("⚠️"), L("1️⃣"), L("🇬🇧") };
     for ([_]bool{ false, true }) |color| {
         @memset(pixels, 0);
         for (samples, 0..) |sample, row| {
@@ -663,7 +663,7 @@ test "IGSH-1089 color emoji preserve source and GDI advances with chromatic pixe
                 }
             }
             std.debug.print("IGSH-1089 color={} row={d} chromatic={d}\n", .{ color, row, chromatic });
-            if (color) try std.testing.expect(chromatic > 5);
+            if (color and row != samples.len - 1) try std.testing.expect(chromatic > 5);
         }
         var bmp: [54 + width * height * 4]u8 = undefined;
         @memset(bmp[0..54], 0);

@@ -13,14 +13,23 @@ static unsigned scalar(const wchar_t *text, unsigned length, unsigned &at) {
 
 static bool emoji(unsigned cp) {
     return (cp >= 0x1f000 && cp <= 0x1faff) || (cp >= 0x2600 && cp <= 0x27bf) ||
-        cp == 0x231a || cp == 0x231b || cp == 0x23f0 || cp == 0x23f3 ||
+        cp == 0xa9 || cp == 0xae || cp == 0x203c || cp == 0x2049 || cp == 0x2122 || cp == 0x2139 ||
+        (cp >= 0x2194 && cp <= 0x2199) || cp == 0x21a9 || cp == 0x21aa ||
+        cp == 0x231a || cp == 0x231b || cp == 0x2328 || cp == 0x23cf ||
+        (cp >= 0x23e9 && cp <= 0x23f3) || (cp >= 0x23f8 && cp <= 0x23fa) ||
+        cp == 0x24c2 || cp == 0x25aa || cp == 0x25ab || cp == 0x25b6 || cp == 0x25c0 || (cp >= 0x25fb && cp <= 0x25fe) ||
+        cp == 0x2934 || cp == 0x2935 || (cp >= 0x2b05 && cp <= 0x2b07) || cp == 0x2b1b || cp == 0x2b1c ||
         cp == 0x2b50 || cp == 0x2b55 || cp == 0x3030 || cp == 0x303d || cp == 0x3297 || cp == 0x3299;
 }
 
 static unsigned clusterEnd(const wchar_t *text, unsigned length, unsigned begin) {
     unsigned at = begin;
     const unsigned first = scalar(text, length, at);
-    if (!emoji(first)) return begin;
+    if (!emoji(first)) {
+        if (!(first == '#' || first == '*' || (first >= '0' && first <= '9'))) return begin;
+        if (at < length && text[at] == 0xfe0f) ++at;
+        return at < length && text[at] == 0x20e3 ? at + 1 : begin;
+    }
     bool regional = first >= 0x1f1e6 && first <= 0x1f1ff;
     while (at < length) {
         unsigned next = at;
@@ -72,19 +81,25 @@ struct Painter {
     }
     bool draw(HDC dc, const wchar_t *text, unsigned length, RECT bounds, float em) {
         if (!ready(em) || FAILED(target->BindDC(dc, &bounds))) return false;
-        wchar_t symbol[2];
+        wchar_t symbol[3];
         if (length == 1 && (text[0] == 0x2713 || text[0] == 0x2717)) {
             symbol[0] = text[0] == 0x2713 ? 0x2705 : 0x274c;
             symbol[1] = 0xfe0f; text = symbol; length = 2;
-        } else if (length == 1 && text[0] >= 0x2600 && text[0] <= 0x27bf) {
-            symbol[0] = text[0]; symbol[1] = 0xfe0f; text = symbol; length = 2;
+        } else if (length <= 2) {
+            unsigned at = 0;
+            if (emoji(scalar(text, length, at)) && at == length) {
+                CopyMemory(symbol, text, length * sizeof(wchar_t));
+                symbol[length++] = 0xfe0f; text = symbol;
+            }
         }
         IDWriteTextLayout *layout = nullptr;
         if (FAILED(write->CreateTextLayout(text, length, format, float(bounds.right - bounds.left), float(bounds.bottom - bounds.top), &layout))) return false;
         DWRITE_TEXT_METRICS metrics;
         if (SUCCEEDED(layout->GetMetrics(&metrics)) && metrics.widthIncludingTrailingWhitespace > bounds.right - bounds.left)
             layout->SetFontSize(em * (bounds.right - bounds.left) / metrics.widthIncludingTrailingWhitespace, {0, length});
+        const auto background = GetPixel(dc, bounds.left, bounds.top);
         target->BeginDraw();
+        target->Clear(D2D1::ColorF(GetRValue(background) / 255.0f, GetGValue(background) / 255.0f, GetBValue(background) / 255.0f));
         const auto color = GetTextColor(dc);
         brush->SetColor(D2D1::ColorF(GetRValue(color) / 255.0f, GetGValue(color) / 255.0f, GetBValue(color) / 255.0f));
         target->DrawTextLayout(D2D1::Point2F(), layout, brush,
@@ -100,7 +115,10 @@ extern "C" int mp_draw_color_text(HDC dc, const wchar_t *input, unsigned length,
     const unsigned supported = DT_SINGLELINE | DT_NOPREFIX | DT_VCENTER | DT_CENTER | DT_RIGHT | DT_END_ELLIPSIS;
     if ((flags & ~supported) || !(flags & DT_SINGLELINE) || !(flags & DT_NOPREFIX) || GetMapMode(dc) != MM_TEXT) return 0;
     bool found = false;
-    for (unsigned at = 0; at < length;) { if (emoji(scalar(input, length, at))) { found = true; break; } }
+    for (unsigned at = 0; at < length;) {
+        if (clusterEnd(input, length, at) != at) { found = true; break; }
+        scalar(input, length, at);
+    }
     if (!found) return 0;
     TEXTMETRICW metrics;
     if (!GetTextMetricsW(dc, &metrics)) return 0;

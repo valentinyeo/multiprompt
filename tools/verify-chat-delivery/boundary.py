@@ -269,7 +269,7 @@ def fake_init():
         fake_event("user", message=dict(role="user", content="start the reaction session"))
         prefix = "Same first words " + "for this example " * 8
         for identity, suffix in (("msg_first", "FIRST REPLY"), ("msg_second", "SECOND REPLY")):
-            fake_event("assistant", message=dict(role="assistant", id=identity, content=[dict(type="text", text=prefix + "\n" + suffix)]))
+            fake_event("assistant", message=dict(role="assistant", id=identity, content=[dict(type="text", text=prefix + "\n" + suffix + " ✓ ⚠ 👍 👍🏽 👨‍👩‍👧 ❤️")]))
         return 0
     fake_event("user", message=dict(role="user", content=("Please outline the next steps for this sample project. We need clear details and readable messages that wrap naturally within the centered chat column. Please include the implementation order, the checks to run, and how to confirm the result in both wide and narrow views. Width sample: " + "M" * 100 if os.environ.get("CHAT_WIDTH_PROOF") == "1" else "start the fake session")))
     fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=("The fake session is ready. Here is a sample reply with enough detail to wrap across several lines. Both sides should stay comfortably inside the chat column as the window becomes narrower. Width sample: " + "M" * 100 if os.environ.get("CHAT_WIDTH_PROOF") == "1" else "The fake session is ready."))]))

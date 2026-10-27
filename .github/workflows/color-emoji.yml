@@ -1,8 +1,6 @@
 name: Color emoji
 
 on:
-  push:
-    branches: [ceo/IGSH-1089]
   pull_request:
     paths:
       - src/color_emoji.cpp
@@ -11,6 +9,11 @@ on:
       - tools/color-emoji.test.js
       - .github/workflows/color-emoji.yml
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag for the live journey, empty builds this branch
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -44,3 +47,11 @@ jobs:
           path: emoji-*.bmp
           if-no-files-found: error
           retention-days: 14
+
+  live:
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_reactions_proof: true
+      tag: ${{ inputs.tag }}
