@@ -942,3 +942,17 @@ test('Windows remote reader preserves POSIX atomic replacement while its old des
   assert.match(boundary, /if os.name == "nt":\s+env\["PYTHONPATH"\] = str\(Path\(__file__\).resolve\(\).parent\)/);
   assert.match(boundary, /subprocess.call\(\[sys.executable, \*remote\[1:\]\], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer/);
 });
+
+test('retention copy observes restored composer focus without injecting another Alt activation', () => {
+  const copy = drive.slice(drive.indexOf('function Retention-Copy'), drive.indexOf('function Retention-Top'));
+  assert.match(copy, /Press @\(0x1B\) 'Esc: clear retained selection'\s+\[void\]\(Wait-For 'retained selection returns typing focus'/);
+  assert.match(copy, /\$f\[0\] -eq \$main\.ToInt64\(\) -and \$f\[1\] -eq \$composer\.ToInt64\(\)/);
+  assert.doesNotMatch(copy, /FocusOwnedWindow/);
+});
+
+test('native frame sampling stays scheduled while retaining every measured gap and paint', () => {
+  const sampler = read('tools/verify-chat-delivery/remote-switch.cs');
+  assert.match(sampler, /new Thread\(Run\) \{ IsBackground = true, Priority = ThreadPriority\.AboveNormal \}/);
+  assert.match(sampler, /gapMs = completed - last, paintMs = completed - start, painted = painted/);
+  assert.match(sampler, /double remaining = start \+ 16 - clock\.Elapsed\.TotalMilliseconds/);
+});
