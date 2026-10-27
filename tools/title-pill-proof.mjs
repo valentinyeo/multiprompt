@@ -28,7 +28,8 @@ export function evaluateTitle(frame, underlay, metadata) {
   for (let y = p.top; y < p.bottom; y++) {
     for (let x = w.left; x < w.right; x++) {
       const color = rgb(frame, x, y);
-      if (delta(color, bg) <= 80) continue;
+      const transcript = rgb(underlay, x - w.left, y - w.top);
+      if (delta(color, bg) <= 80 || delta(color, transcript) > 2) continue;
       if (x < p.left - 8) leftInk++;
       if (x >= p.right + 8) rightInk++;
     }

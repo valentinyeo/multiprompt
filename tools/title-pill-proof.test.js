@@ -35,6 +35,15 @@ test('title pixel oracle rejects the real six-pixel clearing pattern', async () 
   assert.ok(evaluateTitle(s.frame, s.underlay, s.metadata).changed > 20);
 });
 
+test('other controls cannot stand in for visible chat text', async () => {
+  const { evaluateTitle } = await import('./title-pill-proof.mjs');
+  const s = scene();
+  s.underlay.pixels.fill(16);
+  const result = evaluateTitle(s.frame, s.underlay, s.metadata);
+  assert.equal(result.leftInk, 0);
+  assert.equal(result.rightInk, 0);
+});
+
 test('title pixel oracle rejects unreadable text and invalid geometry', async () => {
   const { evaluateTitle } = await import('./title-pill-proof.mjs');
   const s = scene();
