@@ -75,8 +75,8 @@ function audit(source) {
   assert.match(source, /if \(hosts_ready and job\.kind != \.remove_host\) try accountApplyHostAddresses/);
   const action = source.slice(source.indexOf('pub fn accountRemoveServer('), source.indexOf('fn accountDeletePending('));
   assert.match(action, /host\.name, host\.hostname/);
-  assert.match(action, /@import\("dialog\.zig"\)\.show\([^;]+!= 6\) return;/);
-  assert.ok(action.indexOf('@import("dialog.zig").show(') < action.indexOf('startAccountJob('));
+  assert.match(action, /MessageBoxW\([^;]+!= 6\) return;/);
+  assert.ok(action.indexOf('MessageBoxW(') < action.indexOf('startAccountJob('));
   assert.match(action, /startAccountJob\(\.\{ \.kind = \.remove_host, \.slot = slot, \.base = base, \.edited = edited \}\)/);
 }
 
@@ -89,7 +89,7 @@ test('IGSH-600 desktop filters all publish paths and confirms before queuing rem
     'const publish_hosts = if (hosts_ready) synced_hosts else server.value.hosts;',
     'try account_hosts.withoutRemoved(alloc, publish_hosts orelse &.{}, removed)',
     'if (hosts_ready and job.kind != .remove_host) try accountApplyHostAddresses',
-    '}, 0) != 6) return;',
+    'if (MessageBoxW(app_state.g_main_hwnd, wide.ptr, L("Account: Remove server"), 4 | 0x20 | 0x100) != 6) return;',
   ]) {
     assert.ok(desktop.includes(before));
     assert.throws(() => audit(desktop.replaceAll(before, '')));

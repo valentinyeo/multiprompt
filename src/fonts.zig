@@ -105,7 +105,13 @@ fn dialogFontHook(code: i32, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LR
 }
 
 pub fn messageBox(hwnd: w.HANDLE, text: w.LPCWSTR, caption: w.LPCWSTR, flags: w.UINT) i32 {
-    return @import("dialog.zig").messageBox(hwnd, text, caption, flags);
+    const previous = dialog_hook;
+    dialog_hook = w.SetWindowsHookExW(5, &dialogFontHook, null, w.GetCurrentThreadId());
+    defer {
+        if (dialog_hook != null) _ = w.UnhookWindowsHookEx(dialog_hook);
+        dialog_hook = previous;
+    }
+    return w.MessageBoxW(hwnd, text, caption, flags);
 }
 
 pub fn promptForCredentials(info: ?*const w.CREDUI_INFOW, target: w.LPCWSTR, reserved: ?*anyopaque, error_code: w.DWORD, username: [*]u16, username_len: u32, password: [*]u16, password_len: u32, save: ?*w.BOOL, flags: w.DWORD) w.DWORD {

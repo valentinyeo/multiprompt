@@ -28,6 +28,7 @@ const TzSpecificLocalTimeToSystemTime = @import("win32.zig").TzSpecificLocalTime
 const SystemTimeToFileTime = @import("win32.zig").SystemTimeToFileTime;
 const FileTimeToSystemTime = @import("win32.zig").FileTimeToSystemTime;
 const SystemTimeToTzSpecificLocalTime = @import("win32.zig").SystemTimeToTzSpecificLocalTime;
+const MessageBoxW = @import("fonts.zig").messageBox;
 const SESSION_JSON_CAPACITY = @import("app_state.zig").SESSION_JSON_CAPACITY;
 const L = @import("startup.zig").L;
 const getInstanceName = @import("startup.zig").getInstanceName;
@@ -964,10 +965,7 @@ pub fn snoozeWorkspaceUntil(hwnd: HANDLE, ws: u8, due_at: u64) bool {
         var prompt_buf: [128]u16 = undefined;
         for (prompt, 0..) |c, i| prompt_buf[i] = c;
         prompt_buf[prompt.len] = 0;
-        if (@import("dialog.zig").show(hwnd, @ptrCast(&prompt_buf), L("Snooze workspace?"), &.{
-            .{ .label = L("Cancel"), .result = 2 },
-            .{ .label = L("Snooze"), .result = 1 },
-        }, 1) != 1) return false;
+        if (MessageBoxW(hwnd, @ptrCast(&prompt_buf), L("Snooze workspace"), 0x00000031) != 1) return false;
     }
     ensureWorkspaceSlotId(ws);
     var snapshot_path_buf: [512]u8 = undefined;
