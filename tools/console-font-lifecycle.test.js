@@ -94,6 +94,7 @@ function harness() {
     fn(workspace, 'pickWorkspaceTarget').replace(/\bshells\b/g, 'candidates') + '\n' +
     handler('WM_APP_TOGGLE_FULLWIDTH', 'WM_APP_RECONNECT', 'toggleFullWidth(hwnd: HANDLE) i32') + '\n' +
     handler('WM_DPICHANGED', 'WM_MOVE', 'dpiChanged(hwnd: HANDLE, wp: usize, lp: isize) i32') + '\n' +
+    fn(main, 'setChatFontPoint') + '\n' +
     handler('WM_APP_FONT_BIGGER', 'WM_APP_FONT_SMALLER', 'zoomBigger(hwnd: HANDLE) i32') + '\n' +
     handler('WM_APP_FONT_SMALLER', 'WM_APP_FONT_RESET', 'zoomSmaller(hwnd: HANDLE) i32') + '\n' +
     handler('WM_APP_FONT_RESET', 'WM_APP_NEW_TAB_DEFAULT', 'zoomReset(hwnd: HANDLE) i32') + `
@@ -240,7 +241,7 @@ var g_voice_mode_active = false;
 var g_chat_status_hwnd: HANDLE = null;
 var g_chat_transcript_hwnd: HANDLE = null;
 var g_chat_composer_hwnd: HANDLE = null;
-var g_chat_font_pt: u32 = 16;
+var g_chat_font_pt: i32 = 16;
 var g_chat_browser_swap: struct { shell_id: u32 = 0, fn cancel(_: *@This()) void {} } = .{};
 var g_browser_focus_mode = false;
 var g_single_window = true;

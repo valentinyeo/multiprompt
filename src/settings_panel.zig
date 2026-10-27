@@ -207,9 +207,11 @@ fn loadKey(control: Control) void {
     var key: [512:0]u16 = @splat(0);
     defer @memset(&key, 0);
     if (control == .dictation) {
-        var bytes: w.DWORD = @sizeOf(@TypeOf(key));
-        if (w.RegGetValueW(w.HKEY_CURRENT_USER, L("Environment"), L("DEEPGRAM_API_KEY"), 2, null, &key, &bytes) == 0) {
-            key[key.len - 1] = 0;
+        var bytes: [512]u8 = undefined;
+        defer @memset(&bytes, 0);
+        if (@import("voice.zig").readDeepgramApiKey(&bytes)) |value| {
+            const len = std.unicode.utf8ToUtf16Le(&key, value) catch return;
+            key[len] = 0;
             _ = w.SetWindowTextW(key_edit, &key);
         }
         return;
@@ -240,13 +242,7 @@ fn saveKey(control: Control) bool {
     }
     _ = w.GetWindowTextW(edit, text.ptr, @intCast(text.len + 1));
     if (control == .dictation) {
-        var current: w.HANDLE = null;
-        if (w.RegOpenCurrentUser(0x20006, &current) != 0) return false;
-        defer _ = w.RegCloseKey(current);
-        var environment: w.HANDLE = null;
-        if (w.RegCreateKeyExW(current, L("Environment"), 0, null, 0, 0x20006, null, &environment, null) != 0) return false;
-        defer _ = w.RegCloseKey(environment);
-        if (w.RegSetValueExW(environment, L("DEEPGRAM_API_KEY"), 0, 1, text.ptr, @intCast((text.len + 1) * 2)) != 0) return false;
+        if (!@import("voice.zig").saveDeepgramApiKey(text)) return false;
     } else {
         const utf8 = std.unicode.utf16LeToUtf8Alloc(a, text) catch return false;
         defer {

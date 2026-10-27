@@ -120,6 +120,7 @@ try {
 
     foreach ($theme in @(@{ name = 'Light'; value = 'light'; index = 3 }, @{ name = 'Mid'; value = 'mid'; index = 2 }, @{ name = 'AMOLED'; value = 'amoled'; index = 4 }, @{ name = 'Edge gray'; value = 'edgegray'; index = 5 }, @{ name = 'Multiprompt'; value = 'multiprompt'; index = 6 }, @{ name = 'System'; value = 'system'; index = 0 }, @{ name = 'Dark'; value = 'dark'; index = 1 })) {
         Click-Setting 'Theme'
+        Press @(0x28) 'Down: enter the native theme list'
         Press @(0x24) 'Home: first existing theme'
         for ($step = 0; $step -lt $theme.index; $step++) { Press @(0x28) 'Down: existing theme choice' }
         Press @(0x0D) ('Enter: select ' + $theme.name)

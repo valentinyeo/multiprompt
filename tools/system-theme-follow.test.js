@@ -24,7 +24,9 @@ test("theme palette offers System independently of fixed themes", () => {
   assert.match(app, /const theme_ids = \[_\]usize\{ SEARCH_THEME_SYSTEM_OFFSET,/);
   assert.match(app, /SEARCH_THEME_SYSTEM_OFFSET => L\("System"\)/);
   assert.match(app, /if \(g_system_theme\) \(if \(g_light_theme\) L\("System Light"\) else L\("System Dark"\)\)/);
-  assert.match(app, /g_system_theme = target == SEARCH_THEME_SYSTEM_OFFSET;[\s\S]{0,180}?resolveSystemThemeFlags\(\);/);
+  assert.match(app, /SEARCH_THEME_SYSTEM_OFFSET => \.system,/);
+  assert.match(fs.readFileSync(path.join(root, "src/main.zig"), "utf8"), /if \(theme_choice\) \|choice\| \{\s+@import\("themes.zig"\)\.choose\(choice\);/);
+  assert.match(app, /g_system_theme = choice == \.system;[\s\S]{0,180}?resolveSystemThemeFlags\(\);/);
 });
 
 test("Windows theme notifications reskin the full app and isolated Edge", () => {
