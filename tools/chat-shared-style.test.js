@@ -44,3 +44,12 @@ test('received messages use one below-message panel with real request IDs', () =
   assert.match(menu, /ReaderRaised/);
   assert.match(menu, /anchor.bottom \+ scaled\(6\)/);
 });
+
+test('pull requests run reaction proof instead of the appearance shortcut', () => {
+  const workflow = fs.readFileSync('.github/workflows/verify.yml', 'utf8');
+  const matrix = workflow.match(/^        feature: (.+)$/m)[1];
+  assert.match(matrix, /!inputs\.chat_reactions_proof && github\.event_name == 'pull_request'/);
+  const entry = fs.readFileSync('.github/workflows/chat-style.yml', 'utf8');
+  assert.match(entry, /feature: chat-delivery/);
+  assert.match(entry, /chat_reactions_proof: true/);
+});
