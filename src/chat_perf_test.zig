@@ -145,15 +145,16 @@ test "ISSUE-421 layout cache invalidates same-length text font and scale and kee
     try std.testing.expectEqual(@as(usize, 5), cache.builds);
 }
 
-test "IGSH-961 reconcile cost grows with blocks, block length and pending message length" {
+test "IGSH-991 CPU961 pending echo assignment stays within 50 ms on long histories" {
     const a = std.heap.page_allocator;
     const block_counts = [_]usize{ 1200, 2800, 12200 };
     const block_chars = [_]usize{ 60, 600 };
     const pending_chars = [_]usize{ 40, 2000, 12000 };
+    var slowest_ms: i64 = 0;
     for (block_counts) |count| for (block_chars) |chars| {
         const storage = try a.alloc(u16, count * chars);
         defer a.free(storage);
-        const users = try a.alloc(echo.UserBlock, count);
+        const users = try a.alloc(echo.UserBlock, count + 1);
         defer a.free(users);
         for (0..count) |i| {
             const slice = storage[i * chars ..][0..chars];
@@ -164,13 +165,20 @@ test "IGSH-961 reconcile cost grows with blocks, block length and pending messag
             const text = try a.alloc(u16, pending_len);
             defer a.free(text);
             for (text, 0..) |*c, k| c.* = if (k % 9 == 8) ' ' else @intCast('A' + k % 26);
-            var pending: [1]echo.Pending = .{.{ .prefix = text[0..@min(text.len, 40)], .text = text, .anchor = .{ .counted = true } }};
-            var picked: [1]?usize = undefined;
-            const start = now();
-            echo.assign(&pending, users, false, &.{}, &picked);
-            const elapsed = ms(start);
-            std.mem.doNotOptimizeAway(picked[0]);
-            std.debug.print("CPU961 reconcile blocks={d} block_chars={d} pending_chars={d} ms={d}\n", .{ count, chars, pending_len, elapsed });
+            users[count] = .{ .text = text };
+            for (0..5) |trial| for ([_]bool{ false, true }) |present| {
+                var pending: [1]echo.Pending = .{.{ .prefix = text[0..@min(text.len, 40)], .text = text, .anchor = .{ .counted = true } }};
+                var picked: [1]?usize = undefined;
+                const start = now();
+                echo.assign(&pending, users[0 .. count + @intFromBool(present)], false, &.{}, &picked);
+                const elapsed = ms(start);
+                std.mem.doNotOptimizeAway(picked[0]);
+                try std.testing.expectEqual(if (present) @as(?usize, count) else null, picked[0]);
+                slowest_ms = @max(slowest_ms, elapsed);
+                std.debug.print("CPU961 reconcile blocks={d} block_chars={d} pending_chars={d} trial={d} present={} ms={d} mode={s}\n", .{ count, chars, pending_len, trial, present, elapsed, @tagName(@import("builtin").mode) });
+            };
         }
     };
+    std.debug.print("CPU991 matching slowest_ms={d} budget_ms=50 mode={s}\n", .{ slowest_ms, @tagName(@import("builtin").mode) });
+    try std.testing.expect(slowest_ms <= 50);
 }
