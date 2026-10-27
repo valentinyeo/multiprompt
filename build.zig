@@ -263,7 +263,10 @@ pub fn build(b: *std.Build) void {
         }),
         .filters = &.{"IGSH-991"},
     });
-    const run_chat_echo_budget_tests = b.addRunArtifact(chat_echo_budget_tests);
+    const run_chat_echo_budget_tests = std.Build.Step.Run.create(b, "run chat echo CPU budgets");
+    run_chat_echo_budget_tests.addArtifactArg(chat_echo_budget_tests);
+    run_chat_echo_budget_tests.expectExitCode(0);
+    run_chat_echo_budget_tests.has_side_effects = true;
     const chat_perf_step = b.step("test-chat-perf", "Run native Chat View CPU and 50 MB history regressions");
     chat_perf_step.dependOn(&run_chat_perf_tests.step);
     chat_perf_step.dependOn(&run_chat_echo_budget_tests.step);
