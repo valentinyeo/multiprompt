@@ -70,3 +70,32 @@ test('one merge yields to master and periodic recovery does not run for every co
   assert.match(text, /--match-head-commit "\$head_oid"/);
   assert.match(text, /tools\/automerge-admit\.sh/);
 });
+
+test('a behind green pull request is updated through the API and not by pushing', () => {
+  const text = workflow('automerge.yml');
+  assert.match(text, /AUTOMERGE_TOKEN: \$\{\{ secrets\.AUTOMERGE_TOKEN \}\}/);
+  assert.doesNotMatch(text, /git (?:push|rebase|merge)/);
+  const run = text.split('        run: |\n')[1].split('\n').map(line => line.replace(/^          /, '')).join('\n');
+  const block = run.match(/if \[ "\$verdict" = update \]; then[\s\S]*?\n {2}fi\n/)[0];
+  assert.match(block, /\n {4}continue\n {2}fi\n$/);
+  assert.doesNotMatch(block, /gh pr merge/);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-admission-update-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'gh'), '#!/bin/sh\nprintf "token=%s\\n" "$GH_TOKEN" >> "$CALLS"\nprintf "%s\\n" "$*" >> "$CALLS"\nexit 0\n', { mode: 0o755 });
+    const head = 'a'.repeat(40);
+    const env = { ...process.env, PATH: dir + path.delimiter + process.env.PATH, CALLS: path.join(dir, 'calls'), REPO: 'owner/repo', GH_TOKEN: 'workflow-token', AUTOMERGE_TOKEN: 'app-token' };
+    const script = `verdict=update\npr=605\nhead_oid=${head}\nfor once in once; do\n${block}\ndone`;
+    const result = spawnSync('bash', ['-c', script], { encoding: 'utf8', env });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /#605: updated with master/);
+    const calls = fs.readFileSync(env.CALLS, 'utf8');
+    assert.match(calls, /token=app-token/);
+    assert.match(calls, new RegExp(`api --method PUT repos/owner/repo/pulls/605/update-branch -f expected_head_sha=${head}`));
+    fs.rmSync(env.CALLS);
+    const workflowToken = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...env, AUTOMERGE_TOKEN: '' } });
+    assert.equal(workflowToken.status, 0, workflowToken.stderr);
+    assert.match(fs.readFileSync(env.CALLS, 'utf8'), /token=workflow-token/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

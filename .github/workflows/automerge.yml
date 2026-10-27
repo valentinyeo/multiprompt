@@ -39,6 +39,7 @@ jobs:
           RUN_EVENT: ${{ github.event.workflow_run.event }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          AUTOMERGE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = workflow_run ]; then
@@ -62,6 +63,14 @@ jobs:
             printf '%s' "$files" > "$RUNNER_TEMP/pr-files.json"
             verdict=$(bash tools/automerge-admit.sh "$RUNNER_TEMP/pr-info.json" "$RUNNER_TEMP/pr-files.json" "$behind_by" "$REPO_OWNER") || verdict='skip (admission script failed)'
             echo "#$pr: $verdict"
+            if [ "$verdict" = update ]; then
+              if GH_TOKEN="${AUTOMERGE_TOKEN:-$GH_TOKEN}" gh api --method PUT "repos/$REPO/pulls/$pr/update-branch" -f expected_head_sha="$head_oid" >/dev/null; then
+                echo "#$pr: updated with master"
+              else
+                echo "#$pr: update branch failed"
+              fi
+              continue
+            fi
             if [ "$verdict" != merge ]; then continue; fi
             if gh pr merge "$pr" -R "$REPO" --squash --delete-branch --match-head-commit "$head_oid"; then
               for workflow in test.yml no-comments.yml gitleaks.yml; do

@@ -173,6 +173,30 @@ if (fs.existsSync(checker)) {
     assert.match(result.stdout, /RED PROVEN tools\/value.test.py/);
   });
 
+  test('UI, infra, and workflow changes warn instead of failing closed', t => {
+    const f = fixture(t);
+    f.write('.github/workflows/example.yml', 'name: example\n');
+    f.write('tools/example-helper.mjs', 'export const ready = true;\n');
+    f.write('extension/popup.html', '<p>Popup</p>\n');
+    f.write('build.zig', 'const std = @import("std");\n');
+    f.commit();
+    const result = f.run();
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /RED_RUN_ADVISORY UI, infra, or workflow changes only/);
+    assert.match(result.stdout, /::warning::check-red-run is advisory for UI, infra, and workflow changes/);
+  });
+
+  test('logic changes still fail closed without a regression', t => {
+    const f = fixture(t);
+    f.write('.github/workflows/example.yml', 'name: example\n');
+    f.write('src/value.txt', 'fixed');
+    f.commit();
+    const result = f.run();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /No changed regression tests/);
+    assert.doesNotMatch(result.stdout, /RED_RUN_ADVISORY/);
+  });
+
   test('deleted tests do not count as new regression evidence', t => {
     const f = fixture(t);
     f.write('tools/value.test.cjs', f.regression);

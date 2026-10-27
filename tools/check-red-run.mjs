@@ -19,6 +19,8 @@ const present = git('diff', '--name-only', '-z', '--diff-filter=ACMRT', base, he
 const testFile = file => /(?:\.test\.[cm]?js|(?:\.test|-test)\.py)$/.test(file);
 const tests = present.filter(testFile);
 const docs = /^(?:docs\/|openwiki\/|docs-site\/|changelog\.d\/|[^/]+\.md$)/;
+const logic = /^(?:src\/|service\/)/;
+const advisory = /^(?:\.github\/|\.claude\/|assets\/|docs\/|openwiki\/|docs-site\/|changelog\.d\/|extension\/|tools\/|build\.zig(?:\.zon)?$|[^/]+\.md$)/;
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'check-red-run-'));
 const green = path.join(scratch, 'head');
 const red = path.join(scratch, 'base');
@@ -47,6 +49,9 @@ try {
   console.log(`merge-base=${base} head=${head}`);
   if (changed.length && changed.every(file => docs.test(file))) {
     console.log('RED_RUN_NOT_REQUIRED documentation only');
+  } else if (changed.length && !changed.some(file => logic.test(file)) && changed.every(file => advisory.test(file))) {
+    console.log('RED_RUN_ADVISORY UI, infra, or workflow changes only');
+    console.log('::warning::check-red-run is advisory for UI, infra, and workflow changes');
   } else {
     for (const [dir, ref] of [[green, head], [red, base]]) {
       git('worktree', 'add', '--quiet', '--detach', dir, ref);

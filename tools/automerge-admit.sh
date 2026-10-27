@@ -37,24 +37,29 @@ if [ -n "$protected" ]; then
     exit 0
 fi
 if ! [[ "$behind_by" =~ ^[0-9]+$ ]]; then echo 'skip (could not compare with master)'; exit 0; fi
-if [[ "$behind_by" =~ [1-9] ]]; then
-    echo "skip (behind master by $behind_by; rebase and push)"
-    exit 0
-fi
 blocked=$(jq -r --argjson required "$required" --argjson files "$files" '
+  def blocks_required:
+    if .__typename == "StatusContext" then .state != "SUCCESS"
+    else .status != "COMPLETED" or .conclusion != "SUCCESS" end;
+  def blocks_optional:
+    if .__typename == "StatusContext" then .state != "SUCCESS"
+    else .status != "COMPLETED" or (.conclusion != "SUCCESS" and .conclusion != "SKIPPED") end;
   if (.statusCheckRollup | type) != "array" or (.statusCheckRollup | length) == 0 then "no checks reported"
   else
     (any($files[]; test("^(src/|\\.claude/skills/verify-multiprompt/|tools/(verify-multiprompt\\.test\\.js|chat-sync-audit(\\.test)?\\.py|chat-focus\\.test\\.js|chat-view-everywhere(-policy)?\\.test\\.js|verify-chat-delivery(\\.test\\.js|/)|chat-local-agent\\.c|chat-messages-only-proof(\\.test)?\\.mjs|chat-code-font-proof\\.(mjs|test\\.js)|chat-composer-text-proof\\.(mjs|test\\.js)|start-maximized\\.test\\.js|verify-scratch\\.test\\.ps1|favorites-groups\\.test\\.js|check-browser-pane-stuck\\.mjs|check-browser-pane-locked\\.test\\.js|check-workspace-focus\\.mjs|pane-spacing\\.test\\.js|browser-switch-speed\\.test\\.js|frozen-wake\\.test\\.js|browser-own-profile\\.test\\.js))"))) as $verify
     | (any($files[]; . == "tools/chat-sync-audit.py" or . == "tools/chat-sync-audit.test.py")) as $audit
-    | ($required + if $verify then ["chat-sync-audit-changes", "verify (appearance)", "verify (session-restore)", "verify (workspace-focus)", "verify (favorites-groups)", "verify (browser-pane-stuck)", "verify (browser-pane-locked)", "verify (group-rail)", "verify (pane-layout)", "verify (chat-view)", "verify (chat-messages-only)", "verify (chat-view-everywhere)", "verify (chat-focus)", "verify (browser-own-profile)", "verify (status-card)", "verify (palette-order)", "verify (remind-me)"] else [] end + if $audit then ["chat-sync-audit"] else [] end) as $req
+    | ($required + if $verify then ["chat-sync-audit-changes", "verify (appearance)"] else [] end + if $audit then ["chat-sync-audit"] else [] end) as $req
     | [.statusCheckRollup[] | select((.name == "chat-sync-audit" and .status == "COMPLETED" and .conclusion == "SKIPPED" and ($audit | not)) | not)] as $roll
     | ($req + [$roll[] | .name // .context] | unique) as $names
     | [$names[] as $name
        | [$roll[] | select((.name // .context) == $name)] as $checks
-       | select(($checks | length) == 0 or any($checks[];
-           if .__typename == "StatusContext" then .state != "SUCCESS"
-           else .status != "COMPLETED" or .conclusion != "SUCCESS" end))
+       | select(if ($req | index($name)) != null then
+           ($checks | length) == 0 or any($checks[]; blocks_required)
+         else
+           any($checks[]; blocks_optional)
+         end)
        | $name] | join(",")
   end' <<< "$info") || blocked='could not evaluate head checks'
 if [ -n "$blocked" ]; then echo "skip (required checks not green: $blocked)"; exit 0; fi
+if [[ "$behind_by" =~ [1-9] ]]; then echo update; exit 0; fi
 echo merge

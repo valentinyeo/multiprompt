@@ -22,7 +22,9 @@ check green merge .
 check runner-bot merge '.author.login = "app/software-factory-runners"'
 check draft 'skip (draft)' '.isDraft = true'
 check failing 'skip (required checks not green: test)' '.statusCheckRollup[0].conclusion = "FAILURE"'
-check behind 'skip (behind master by 1; rebase and push)' . 1
+check behind update . 1
+check behind-red 'skip (required checks not green: test)' '.statusCheckRollup[0].conclusion = "FAILURE"' 1
+check skipped-optional merge '.statusCheckRollup += [{name: "tmux-identity-semantics", status: "COMPLETED", conclusion: "SKIPPED"}]'
 check workflow 'skip (edits release or admission machinery: .github/workflows/test.yml; needs manual review)' . 0 '[".github/workflows/test.yml"]'
 check empty 'skip (required checks not green: no checks reported)' '.statusCheckRollup = []'
 check hold 'skip (hold label)' '.labels = [{name: "hold"}]'
@@ -48,6 +50,10 @@ done
 verify='["appearance", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me"]'
 verify_filter=".statusCheckRollup += (($verify | map({name: (\"verify (\" + . + \")\"), status: \"COMPLETED\", conclusion: \"SUCCESS\"})) + [{name: \"chat-sync-audit-changes\", status: \"COMPLETED\", conclusion: \"SUCCESS\"}, {name: \"chat-sync-audit\", status: \"COMPLETED\", conclusion: \"SKIPPED\"}])"
 check visible-green merge "$verify_filter" 0 '["src/chat.zig"]'
+short='.statusCheckRollup += ([{name: "chat-sync-audit-changes", status: "COMPLETED", conclusion: "SUCCESS"}, {name: "verify (appearance)", status: "COMPLETED", conclusion: "SUCCESS"}, {name: "tmux-identity-semantics", status: "COMPLETED", conclusion: "SKIPPED"}, {name: "chat-sync-audit", status: "COMPLETED", conclusion: "SKIPPED"}])'
+check desktop-current merge "$short" 0 '["src/chat.zig"]'
+check desktop-behind update "$short" 4 '["src/chat.zig"]'
+check readme-no-journeys update . 2 '["README.md"]'
 check verify-failure 'skip (required checks not green: verify (appearance))' "$verify_filter | (.statusCheckRollup[] | select(.name == \"verify (appearance)\")).conclusion = \"FAILURE\"" 0 '["src/chat.zig"]'
 check missing-verify 'skip (required checks not green: verify (appearance))' "$verify_filter | .statusCheckRollup |= map(select(.name != \"verify (appearance)\"))" 0 '["src/chat.zig"]'
 check audit-required 'skip (required checks not green: chat-sync-audit)' "$verify_filter" 0 '["tools/chat-sync-audit.py"]'
