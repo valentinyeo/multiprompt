@@ -92,7 +92,6 @@ on:
         type: boolean
   pull_request:
     paths:
-      - '**'
       - .claude/skills/verify-multiprompt/**
       - .github/workflows/verify.yml
       - .github/workflows/auto-revert-master.yml

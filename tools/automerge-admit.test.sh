@@ -19,6 +19,7 @@ check() {
     printf '%s: %s\n' "$name" "$actual"
 }
 check green merge .
+check runner-bot merge '.author.login = "app/software-factory-runners"'
 check draft 'skip (draft)' '.isDraft = true'
 check failing 'skip (required checks not green: test)' '.statusCheckRollup[0].conclusion = "FAILURE"'
 check behind 'skip (behind master by 1; rebase and push)' . 1
@@ -27,6 +28,7 @@ check empty 'skip (required checks not green: no checks reported)' '.statusCheck
 check hold 'skip (hold label)' '.labels = [{name: "hold"}]'
 check fork 'skip (not a same-repo PR by the owner)' '.isCrossRepository = true'
 check author 'skip (not a same-repo PR by the owner)' '.author.login = "other"'
+check other-bot 'skip (not a same-repo PR by the owner)' '.author.login = "app/other-bot"'
 check base 'skip (base is not master)' '.baseRefName = "other"'
 check unknown-merge 'skip (not mergeable (UNKNOWN))' '.mergeable = "UNKNOWN"'
 check missing 'skip (required checks not green: test)' '.statusCheckRollup |= map(select(.name != "test"))'

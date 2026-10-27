@@ -232,6 +232,9 @@ pub fn build(b: *std.Build) void {
     if (b.graph.host.result.os.tag != .windows) b.step("test", "Run Linux server tests").dependOn(vps_test_step);
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/portable-paths.test.js" }).step);
     const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs", "tools/release-version.test.mjs" });
+    const ci_admission_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ci-admission.test.js" });
+    test_step.dependOn(&ci_admission_tests.step);
+    vps_test_step.dependOn(&ci_admission_tests.step);
     const automerge_admit_tests = b.addSystemCommand(&.{ "bash", "tools/automerge-admit.test.sh" });
     test_step.dependOn(&automerge_admit_tests.step);
     vps_test_step.dependOn(&automerge_admit_tests.step);
@@ -708,7 +711,7 @@ pub fn build(b: *std.Build) void {
         "tools/unarchive-semantics.test.js",      "tools/update-card.test.js",           "tools/zsb-active-tab.test.js",
         "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",      "extension/focus-guard.test.js",
         "tools/chat-queued-notes.test.js",         "tools/chat-unconfirmed-duplicate.test.js",
-        "tools/auto-release-admit.test.js",
+        "tools/auto-release-admit.test.js",       "tools/automerge-admit.test.mjs",
         "tools/chat-unread-visit.test.js",
     });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
