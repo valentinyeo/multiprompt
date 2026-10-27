@@ -2123,12 +2123,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         0x02A3 => {
-            if (app_state.g_sidebar_hover != null) {
-                app_state.g_sidebar_hover = null;
-                _ = InvalidateRect(hwnd, null, 0);
-            }
             if (app_state.g_status_card_hover) {
                 app_state.g_status_card_hover = false;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (app_state.g_sidebar_hover != null) {
+                app_state.g_sidebar_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
             }
             if (app_state.g_workspace_hover != null) {
