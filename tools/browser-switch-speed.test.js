@@ -350,13 +350,15 @@ function assertsDispatchOnly(source) {
   assert.match(source, /FEATURE -notin @\([^\n]*'browser-switch-speed'/);
 }
 
-test('PR journeys are appearance-only while master and manual runs retain the full matrix', () => {
+test('IGSH-1033 PR and master smoke stay small; candidate runs retain the full matrix', () => {
   const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
   function contract(source) {
     assert.match(source, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), ['appearance']);
-    assert.deepEqual(journeyMatrix(source, 'push'), full);
+    assert.deepEqual(journeyMatrix(source, 'push'), ['appearance']);
+    assert.deepEqual(journeyMatrix(source, 'push', 'all'), full);
+    assert.deepEqual(journeyMatrix(source, 'push', 'relaunch-saved-sessions'), ['relaunch-saved-sessions']);
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837'), full);
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
   }
@@ -364,7 +366,7 @@ test('PR journeys are appearance-only while master and manual runs retain the fu
   for (const [before, after] of [
     ["fromJSON('[\"appearance\"]')", `fromJSON('${JSON.stringify(full).replaceAll(',', ', ')}')`],
     [`fromJSON('${JSON.stringify(full).replaceAll(',', ', ')}')`, "fromJSON('[\"appearance\"]')"],
-    ["(github.event_name == 'push' ||", "(github.event_name == 'pull_request' ||"],
+    ["inputs.feature != 'all' &&", "inputs.feature == 'all' &&"],
     ["inputs.feature == 'all'", "inputs.feature == 'appearance'"],
     ['"appearance", "chat-dictation",', '"appearance",'],
   ]) {
@@ -386,7 +388,7 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
     assert.notEqual(broken, workflow, before);
     assert.throws(() => assertsDispatchOnly(broken), assert.AssertionError);
   }
-  assert.throws(() => assertsDispatchOnly(workflow.replace(/inputs\.feature\)\) \}\}/, 'inputs.other)) }}')));
+  assert.throws(() => assertsDispatchOnly(workflow.replaceAll("inputs.feature || 'appearance'", "inputs.other || 'appearance'")));
   assert.match(workflow, /FEATURE -notin @\([^\n]*'browser-switch-speed'/);
   assert.match(control, /ValidateSet\([^\n]*'browser-switch-speed'/);
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
