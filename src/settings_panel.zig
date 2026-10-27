@@ -37,6 +37,7 @@ var edit_brush: w.HANDLE = null;
 var children: [controls_count]w.HANDLE = @splat(null);
 var key_window: w.HANDLE = null;
 var key_edit: w.HANDLE = null;
+var key_edit_proc: isize = 0;
 var key_control: Control = .dictation;
 var fonts: [3]w.HANDLE = @splat(null);
 var scroll: i32 = 0;
@@ -291,6 +292,15 @@ fn closeKey() void {
     _ = @import("focus.zig").SetFocus(children[index(key_control)]);
 }
 
+fn keyEditProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
+    if (message == w.WM_KEYDOWN and wp == 0x41 and GetKeyState(0x11) < 0 and GetKeyState(0x12) >= 0) {
+        _ = w.SendMessageW(hwnd, 0x00b1, 0, -1);
+        return 0;
+    }
+    if (message == 0x0102 and wp == 1) return 0;
+    return w.CallWindowProcW(key_edit_proc, hwnd, message, wp, lp);
+}
+
 fn keyProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
     const prior_action = state.g_focus_user_action_tick;
     defer state.g_focus_user_action_tick = prior_action;
@@ -348,6 +358,7 @@ fn openKey(control: Control) void {
     key_window = w.CreateWindowExW(0x10000 | 0x80, L("MultipromptSettingsKey"), label(control), 0x80000000 | 0x02000000, origin.x, origin.y, width, height, window, null, instance, null);
     if (key_window == null) return;
     key_edit = w.CreateWindowExW(0, L("EDIT"), L(""), 0x40000000 | 0x10000000 | 0x00010000 | 0x20 | 0x80, s(24), s(76), width - s(48), s(32), key_window, @ptrFromInt(10), instance, null);
+    key_edit_proc = w.SetWindowLongPtrW(key_edit, -4, @bitCast(@intFromPtr(&keyEditProc)));
     const cancel = w.CreateWindowExW(0, L("BUTTON"), L("Cancel"), 0x40000000 | 0x10000000 | 0x00010000, width - s(208), s(140), s(84), s(36), key_window, @ptrFromInt(2), instance, null);
     const save = w.CreateWindowExW(0, L("BUTTON"), L("Save"), 0x40000000 | 0x10000000 | 0x00010000 | 1, width - s(108), s(140), s(84), s(36), key_window, @ptrFromInt(1), instance, null);
     for ([_]w.HANDLE{ key_edit, cancel, save }) |child| _ = w.SendMessageW(child, 0x30, @intFromPtr(fonts[0]), 1);
