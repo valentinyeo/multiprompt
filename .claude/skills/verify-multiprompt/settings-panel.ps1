@@ -87,6 +87,7 @@ try {
     Snapshot 'settings-backdrop'
     Open-Settings
     Snapshot 'settings-panel'
+    Snapshot 'action'
     Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot 'settings-panel-native.cs')
     $frame = New-Object VerifyNative+Rect
     $client = New-Object VerifyNative+Rect
