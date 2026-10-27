@@ -8,6 +8,13 @@ public static class BrowserCornerProof {
     [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateWindowExW(uint ex, string cls, string title, uint style, int x, int y, int w, int h, IntPtr owner, IntPtr menu, IntPtr instance, IntPtr param);
+    [DllImport("user32.dll")] public static extern bool DestroyWindow(IntPtr hwnd);
+    public static IntPtr BackgroundControl(int x, int y) {
+        IntPtr hwnd = CreateWindowExW(0x80, "STATIC", "Other app", 0x90000000, x, y, 80, 40, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        if (hwnd == IntPtr.Zero) throw new InvalidOperationException("External focus control creation failed");
+        return hwnd;
+    }
     static int Z(IntPtr hwnd) {
         int index = 0;
         for (IntPtr current = GetWindow(hwnd, 0); current != IntPtr.Zero; current = GetWindow(current, 2)) {
@@ -78,6 +85,7 @@ $pane = Open-BrowserPane 'corners-open'
 $browser = [VerifyNative]::PaneWindow($script:window)
 if ($browser -eq [IntPtr]::Zero) { throw 'No owned browser pane for corner journey' }
 Focus-LockedBrowser $browser
+[VerifyNative]::ClickBrowserContent($browser, $script:window)
 Press @(0x11, 0x4C) 'Ctrl+L: open synthetic white corner control page'
 $browserRoot = [System.Windows.Automation.AutomationElement]::FromHandle($browser)
 $omniboxCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'OmniboxViewViews')
@@ -98,8 +106,10 @@ Press @(0x11, 0x09) 'Ctrl+Tab: return to browser-owning session'
 Wait-Until { [VerifyNative]::PaneWindow($script:window) -eq $browser } 'original browser visible'
 Snapshot 'action'
 $proofs = @()
+$other = [IntPtr]::Zero
+try {
 for ($cycle = 0; $cycle -lt 20; $cycle++) {
-    switch ($cycle % 4) {
+    switch ($cycle % 5) {
         0 {
             Focus-LockedBrowser $browser
             Record "Corner cycle $cycle`: click browser content"
@@ -132,7 +142,20 @@ for ($cycle = 0; $cycle -lt 20; $cycle++) {
             if (-not [VerifyNative]::MoveWindow($script:window, ($info.Work.Left + 20), ($info.Work.Top + 20), $width, $height, $true)) { throw 'Owned resize failed' }
         }
     }
-    Wait-Until { [VerifyNative]::PaneWindow($script:window) -eq $browser -and [PaneLayoutProof]::Masks([uint32]$process.Id).Count -eq 10 } 'ten visible browser masks after activation' 10
+    if ($cycle % 5 -eq 4) {
+        $frame = New-Object VerifyNative+Rect
+        if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame)) { throw 'Main rectangle unavailable' }
+        if ($other -eq [IntPtr]::Zero) { $other = [BrowserCornerProof]::BackgroundControl(($frame.Left + 10), ($frame.Top + 60)) }
+        [VerifyNative]::BringToForeground($other)
+        Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $other } 'unrelated native window owns foreground'
+        Start-Sleep -Milliseconds 800
+    }
+    try {
+        Wait-Until { [VerifyNative]::PaneWindow($script:window) -eq $browser -and [PaneLayoutProof]::Masks([uint32]$process.Id).Count -eq 10 } 'ten visible browser masks after activation' 10
+    } catch {
+        Snapshot ('corners-cycle-' + $cycle + '-failed')
+        throw
+    }
     Start-Sleep -Milliseconds 600
     $name = 'corners-cycle-' + $cycle
     Snapshot $name
@@ -151,11 +174,15 @@ for ($cycle = 0; $cycle -lt 20; $cycle++) {
     $unit = [double]$dpi * $scale / 9600
     $masks = [PaneLayoutProof]::Masks([uint32]$process.Id)
     $proof = [BrowserCornerProof]::Check((Join-Path $Evidence ($name + '.png')), (Join-Path $Evidence $name), @($frame.Left, $frame.Top), $browser, $masks.ToArray(), [int][Math]::Truncate(20 * $unit), [int][Math]::Truncate(8 * $unit), [int][Math]::Truncate(3 * $unit), [int][Math]::Truncate(8 * $unit))
-    $proofs += @{ cycle = $cycle; action = $cycle % 4; pixels = $proof; masks = $masks; dpi = $dpi; scale = $scale }
+    $proofs += @{ cycle = $cycle; action = $cycle % 5; foreground = [VerifyNative]::GetForegroundWindow().ToInt64(); pixels = $proof; masks = $masks; dpi = $dpi; scale = $scale }
     Save-Json $proofs 'browser-corners.json'
     if (-not $proof['passed']) { throw "browser-corners cycle $cycle FAIL: lost rounded corner or stacking order" }
     $result.checks += @{ name = "browser-corners cycle $cycle"; passed = $true }
     Write-Host "browser-corners cycle $cycle PASS"
 }
+} finally {
+    if ($other -ne [IntPtr]::Zero) { [void][BrowserCornerProof]::DestroyWindow($other) }
+}
+Activate-OwnedFrame
 Snapshot 'after'
 Write-Host 'BROWSER_CORNERS_20_OK'

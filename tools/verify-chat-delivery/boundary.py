@@ -334,6 +334,9 @@ def shell():
         fake_event("user", message=dict(role="user", content=question))
         fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
         return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append([question, answer]) is None) else 3
+    if op == "detach-console":
+        (ROOT / "console-detached").touch()
+        return 0
     if op == "init":
         return fake_init()
     if op == "session-notes":
@@ -365,7 +368,35 @@ def shell():
         tail = b"".join(transcript.read_bytes().splitlines(keepends=True)[-20:])
         replacement = transcript.with_suffix(".replacement")
         replacement.write_bytes(tail)
-        os.replace(replacement, transcript)
+        if os.name == "nt":
+            class RenameInfo(ctypes.Structure):
+                _fields_ = [("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE),
+                            ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * 1)]
+
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                          wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+            kernel.CreateFileW.restype = wintypes.HANDLE
+            kernel.SetFileInformationByHandle.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+            kernel.SetFileInformationByHandle.restype = wintypes.BOOL
+            kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+            kernel.CloseHandle.restype = wintypes.BOOL
+            handle = kernel.CreateFileW(str(replacement), 0x10000, 7, None, 3, 0x80, None)
+            if handle == wintypes.HANDLE(-1).value:
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                filename = str(transcript.resolve()).encode("utf-16-le")
+                buffer = ctypes.create_string_buffer(RenameInfo.FileName.offset + len(filename))
+                info = ctypes.cast(buffer, ctypes.POINTER(RenameInfo)).contents
+                info.Flags = 1 | 2
+                info.FileNameLength = len(filename)
+                ctypes.memmove(ctypes.addressof(buffer) + RenameInfo.FileName.offset, filename, len(filename))
+                if not kernel.SetFileInformationByHandle(handle, 22, buffer, len(buffer)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            finally:
+                kernel.CloseHandle(handle)
+        else:
+            os.replace(replacement, transcript)
         return 0
     if op == "retention-empty":
         transcript = Path(state()["transcript"])
@@ -386,7 +417,7 @@ def shell():
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=f"IGSH815 assistant {i:02d}")]))
             identity = "history-" + str(i)
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo history"))]))
-            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * 12000, is_error=False)]))
+            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * (40000 if state().get("longChatProof") else 12000), is_error=False)]))
         return 0
     if op == "forget-message" and len(ARGS) == 2:
         transcript = Path(state()["transcript"])
@@ -545,11 +576,15 @@ def console_rows(lines, width):
 
 
 def attach_fake(session):
+    if (ROOT / "console-detached").exists():
+        return
     kernel = console_kernel()
     handle = kernel.GetStdHandle(-11)
     previous = None
     (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
     while True:
+        if (ROOT / "console-detached").exists():
+            return
         claude = fake_locked(fake_read)
         info = INFO()
         count = wintypes.DWORD()
@@ -728,6 +763,8 @@ def ssh():
             return completion(remote)
         record("invocations.jsonl", kind="reader", argv=remote)
         env = os.environ.copy()
+        if os.name == "nt":
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         if state().get("remoteHome"):
             env.update(HOME=state()["remoteHome"], USERPROFILE=state()["remoteHome"])
         with (ROOT / f"reader-{os.getpid()}.stderr.log").open("ab", buffering=0) as error:
