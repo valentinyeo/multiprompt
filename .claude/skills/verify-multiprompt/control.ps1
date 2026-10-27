@@ -657,6 +657,33 @@ public static class VerifyNative {
             }
         } finally { DeleteObject(region); }
     }
+    public static Dictionary<string, object> UsageBars(IntPtr menu, string image) {
+        Rect rect, client;
+        if (!GetWindowRect(menu, out rect) || !GetClientRect(menu, out client)) throw new InvalidOperationException("Usage panel bounds unavailable");
+        int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
+        int side = Math.Max(0, (width - (client.Right - client.Left)) / 2);
+        int left = side + 28, right = width - side - 20;
+        var bars = new List<Dictionary<string, object>>();
+        using (var pixels = new System.Drawing.Bitmap(width, height)) {
+            using (var graphics = System.Drawing.Graphics.FromImage(pixels)) graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, pixels.Size);
+            pixels.Save(image);
+            for (int y = 0; y < height; y++) {
+                var fill = pixels.GetPixel(left, y);
+                var track = pixels.GetPixel(right - 1, y);
+                if (Math.Abs(fill.R - track.R) + Math.Abs(fill.G - track.G) + Math.Abs(fill.B - track.B) < 60) continue;
+                int split = left;
+                while (split < right && pixels.GetPixel(split, y).ToArgb() == fill.ToArgb()) split++;
+                if (split - left < 12 || right - split < 12) continue;
+                bool solid = true;
+                for (int x = split; x < right; x++) if (pixels.GetPixel(x, y).ToArgb() != track.ToArgb()) { solid = false; break; }
+                if (!solid) continue;
+                if (bars.Count > 0 && (int)bars[bars.Count - 1]["top"] + (int)bars[bars.Count - 1]["height"] == y) {
+                    bars[bars.Count - 1]["height"] = (int)bars[bars.Count - 1]["height"] + 1;
+                } else bars.Add(new Dictionary<string, object> { { "top", y }, { "height", 1 }, { "left", left }, { "right", right }, { "split", split }, { "fill", fill.ToArgb() & 0xFFFFFF }, { "track", track.ToArgb() & 0xFFFFFF } });
+            }
+        }
+        return new Dictionary<string, object> { { "width", width }, { "height", height }, { "bars", bars } };
+    }
     public static Point[] SelectTranscriptText(IntPtr hwnd, uint pid, IntPtr owner) {
         Point bubble = MessageBubblePoint(hwnd);
         Rect rect;
@@ -6126,6 +6153,18 @@ try {
             if ($look.cornerShown -or $look.leftEdge -ne $look.fill -or $look.rightEdge -ne $look.fill) { throw 'IGSH-908: expanded usage panel differs from the existing rounded menu style' }
             Snapshot 'pill-open'
             Snapshot 'action'
+            if ($env:USAGE_PANEL_PROOF -eq '1') {
+                $bars = [VerifyNative]::UsageBars([IntPtr]::new([int64]$menu.handle), (Join-Path $Evidence 'usage-bars.png'))
+                Save-Json $bars 'usage-bars.json'
+                if ($bars.bars.Count -ne 3) { throw ('IGSH-1041: usage panel requires three quota bars; found ' + $bars.bars.Count) }
+                $expectedUsed = @(13, 32, 56)
+                for ($i = 0; $i -lt 3; $i++) {
+                    $bar = $bars.bars[$i]
+                    $actualUsed = 100.0 * ($bar.split - $bar.left) / ($bar.right - $bar.left)
+                    if ($bar.height -ne 4 -or [Math]::Abs($actualUsed - $expectedUsed[$i]) -gt 1) { throw ('IGSH-1041: quota bar differs from weekly used percentage at pool ' + $i) }
+                }
+                $result.usageBars = $bars
+            }
             Record 'Real second click: close AI usage pill'
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
             Wait-Until { @([VerifyNative]::DesktopWindows() | Where-Object { $_.pid -eq $process.Id -and $_.class -eq '#32768' -and $_.visible }).Count -eq 0 } 'usage panel closes on second click'

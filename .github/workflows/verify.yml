@@ -11,6 +11,11 @@ on:
         required: true
         default: appearance
         type: string
+      usage_panel_proof:
+        description: Check restored per-pool quota bars in the existing usage panel
+        required: false
+        default: false
+        type: boolean
       dictation_stall:
         description: Deliberately stall the dictation capture precondition to prove failure evidence
         required: false
@@ -219,6 +224,7 @@ jobs:
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
+      USAGE_PANEL_PROOF: ${{ inputs.usage_panel_proof && '1' || '' }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_ACCEPTED_PROOF: ${{ inputs.chat_accepted_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}

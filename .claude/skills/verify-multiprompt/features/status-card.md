@@ -30,3 +30,12 @@ Capture `pill-closed.png`, click with SendInput, require the app-owned `#32768` 
 - Releases before IGSH-673, such as `v0.28.839`, draw a 222 px card and still fail the compact-height check.
 - Fixture numbers prove rendering only. Live Token Ladder pace arrives separately under IGSH-997.
 - Everything runs on GitHub Windows. Never drive a user's desktop or build locally.
+
+### Quota bars regression
+
+Dispatch `usage_panel_proof=true` with this feature.
+The unchanged native-collector fixture supplies three distinct pools.
+The actual popup screenshot must contain three four-pixel bars.
+Their widths must represent 13%, 32% and 56% weekly usage.
+`usage-bars.png` and `usage-bars.json` retain independent pixel evidence.
+The published barless release must fail the identical check.
