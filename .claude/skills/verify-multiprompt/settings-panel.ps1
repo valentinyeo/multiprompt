@@ -182,6 +182,7 @@ try {
     Wait-Until { -not [VerifyNative]::IsWindowVisible($script:settingsWindow) } 'existing release notes action leaves Settings'
     Snapshot 'settings-release-notes'
     Press @(0x1B) 'Escape: close existing release notes'
+    Snapshot 'after'
     $result.checks += @{ name = 'settings-release-notes'; passed = $true }
     Save-Json @{ status = 'passed'; checks = @($result.checks | Where-Object { $_.name -like 'settings-*' }); screenshot = 'settings-panel.png' } 'settings-panel-proof.json'
 } finally {
