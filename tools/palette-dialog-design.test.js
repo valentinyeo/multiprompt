@@ -83,3 +83,16 @@ test('IGSH-1061: dialog measures body against full content width and uses approv
   assert.match(dialog, /fillRoundRect\(dc, state\.card, state\.px\(20\), outline\)/);
   assert.match(dialog, /fillRoundRect\(dc, inner, state\.px\(20\) - 1, panel\)/);
 });
+
+test('IGSH-1061: palette typing waits for owned foreground after asynchronous browser cancellation', () => {
+  const control = read('.claude/skills/verify-multiprompt/control.ps1');
+  const body = control.match(/function Palette\(\[string\]\$Query\) \{([^]*?)\n\}/)?.[1];
+  assert.ok(body, 'production palette journey exists');
+  assert.match(body, /Press @\(0x11, 0x4B\) 'Ctrl\+K: open command palette'\s+Wait-Foreground\s+Type-Text \$Query/,
+    'the cancelled browser can take foreground after Ctrl+K; settle ownership before typing');
+  assert.match(read('.github/workflows/palette-dialog-design.yml'), /node tools\/check-red-run\.mjs \"\$base\" HEAD \| tee palette-red\.log/,
+    'native proof checks the changed regression instead of assuming the original first test fails');
+  const typing = control.match(/function Type-Text\([^]*?\n\}/)?.[0];
+  assert.match(typing, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/,
+    'typing must still refuse input when foreground is foreign');
+});

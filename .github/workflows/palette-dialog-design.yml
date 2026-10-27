@@ -6,14 +6,16 @@ on:
       - src/sidebar.zig
       - src/dialog.zig
       - src/palette_text.zig
+      - tools/palette-dialog-design.test.js
       - .claude/skills/verify-multiprompt/control.ps1
       - .github/workflows/palette-dialog-design.yml
   push:
-    branches: [master, ceo/IGSH-1061]
+    branches: [master, ceo/IGSH-1061, ceo/IGSH-1061-recovery]
     paths:
       - src/sidebar.zig
       - src/dialog.zig
       - src/palette_text.zig
+      - tools/palette-dialog-design.test.js
       - .claude/skills/verify-multiprompt/control.ps1
       - .github/workflows/palette-dialog-design.yml
   workflow_dispatch:
@@ -49,15 +51,8 @@ jobs:
         shell: bash
         run: |
           base=$(git merge-base origin/master HEAD)
-          mkdir ../palette-red
-          git archive "$base" | tar -x -C ../palette-red
-          cp tools/palette-dialog-design.test.js ../palette-red/tools/
-          if (cd ../palette-red && node --test tools/palette-dialog-design.test.js) > palette-red.log 2>&1; then
-            echo 'Old palette unexpectedly passed'
-            exit 1
-          fi
-          cat palette-red.log
-          node -e 'const s=require("fs").readFileSync("palette-red.log","utf8"); if (!s.includes("ERR_ASSERTION") || !s.includes("not ok 1 - IGSH-1061: palette paints")) process.exit(1); console.log("RED_DESIGN_REJECTED");'
+          set -o pipefail
+          node tools/check-red-run.mjs "$base" HEAD | tee palette-red.log
       - name: Require current design contracts
         run: node --test tools/palette-dialog-design.test.js
       - name: Build real app
