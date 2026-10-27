@@ -97,7 +97,7 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
 test('release tags reuse master verification instead of starting another full Windows matrix', () => {
   const push = workflow.match(/^  push:\r?\n((?:    [^\n]*\r?\n)+)/m);
   assert.ok(push, 'master pushes still trigger full verification');
-  assert.match(push[1], /^    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery\]\r?$/m);
+  assert.match(push[1], /^    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083\]\r?$/m);
   assert.ok(workflow.includes(`github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck'))`), 'recovery branch runs only its failing browser journey');
   assert.doesNotMatch(push[1], /^    tags(?:-ignore)?:/m, 'release tags must not duplicate the tested master matrix');
 });

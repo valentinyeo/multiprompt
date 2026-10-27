@@ -78,5 +78,12 @@ test('branch reaction proof uses the shared journey without changing production 
   assert.match(adapter, /chat_reactions_proof: true/);
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
   assert.match(verify, /workflow_call:\n    inputs:\n      chat_reactions_proof:/);
-  assert.match(verify, /branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery\]/);
+  assert.match(verify, /branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083\]/);
+});
+
+test('build graph changes receive the required native appearance check', () => {
+  const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
+  const paths = verify.match(/^  pull_request:\n    paths:\n((?:      - [^\n]+\n)+)/m);
+  assert.ok(paths);
+  for (const file of ['build.zig', 'build.zig.zon']) assert.ok(paths[1].split('\n').includes('      - ' + file), file);
 });
