@@ -63,7 +63,7 @@ test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
     const reconcile_ms = ms(reconcile_start);
     const reconcile_wall_ms = reconcile_wall_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds();
     try std.testing.expect(reconcile_ms < 1000);
-    std.debug.print("CPU707 benchmark bytes={d} messages={d} parse_ms={d} delta_ms={d} reconcile_ms={d} clock=cpu_thread parse_wall_ms={d} delta_wall_ms={d} reconcile_wall_ms={d}\n", .{ wire.items.len, messages, parse_ms, delta_ms, reconcile_ms, parse_wall_ms, delta_wall_ms, reconcile_wall_ms });
+    std.debug.print("CPU707 benchmark bytes={d} messages={d} parse_ms={d} delta_ms={d} reconcile_ms={d} clock=awake parse_cpu_ms={d} delta_cpu_ms={d} reconcile_cpu_ms={d} cpu_clock=cpu_thread\n", .{ wire.items.len, messages, parse_wall_ms, delta_wall_ms, reconcile_wall_ms, parse_ms, delta_ms, reconcile_ms });
 }
 
 test "CPU707 bounded cache and tail/older paging preserve complete accessible history" {
