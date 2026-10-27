@@ -11,6 +11,10 @@ const changelogStart = /(?:pub const CHANGELOG|const SOURCE_CHANGELOG) = \[_\]Ch
 export const behindTheScenes = 'Behind the scenes fixes.';
 export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the version is stamped after merge (node tools/version-stamp.mjs release)';
 
+export function autoRevertBranch(env = process.env) {
+  return (env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || '').startsWith('auto-revert/');
+}
+
 export function plainChange(line) {
   return !!line.trim() && !(/[A-Z]+-\d+|[\/\\`]|#\d+|\b(?:PR|pull request)\s*#?\s*\d+|\b[\w-]+\.[a-zA-Z][\w.-]*|[\x00-\x1f\x7f]/i.test(line));
 }
@@ -140,7 +144,8 @@ function check(baseRev, headRev) {
     console.error(diff.split(/\r?\n/).filter(line => /^[+-](?![+-])/.test(line) && (/\bAPP_VERSION\s*=/.test(line) || /\.ver = /.test(line))).join('\n'));
     console.error(fixHint);
   }
-  if (kind === 'CODE') checkFragments(base, head, changed);
+  if (kind === 'CODE' && autoRevertBranch()) console.error('Changelog note not required on an auto-revert/ branch');
+  else if (kind === 'CODE') checkFragments(base, head, changed);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `kind=${kind}\n`);
   console.log(kind);
   return kind === 'HAND_EDIT' ? 1 : 0;
