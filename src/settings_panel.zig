@@ -404,7 +404,12 @@ fn paintContent(hdc: w.HANDLE) void {
     presets.right = controlRect(.font_large).right + s(3);
     presets.top -= scroll + s(3);
     presets.bottom += s(3) - scroll;
-    smooth.fillRoundRect(hdc, presets, s(19), tokens.ReaderPanel);
+    smooth.fillRoundRect(hdc, presets, s(19), tokens.ReaderOutline);
+    presets.left += s(1);
+    presets.right -= s(1);
+    presets.top += s(1);
+    presets.bottom -= s(1);
+    smooth.fillRoundRect(hdc, presets, s(18), tokens.ReaderPanel);
     paintText(hdc, "KEYS", lineRect(g.keys.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
     card(hdc, g.keys);
     paintText(hdc, "ABOUT", lineRect(g.about.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
@@ -455,6 +460,26 @@ fn drawControl(item: *const DrawItem) void {
     const background = w.CreateSolidBrush(if (control == .close or preset) tokens.ReaderPanel else tokens.ReaderControl);
     defer _ = w.DeleteObject(background);
     _ = w.FillRect(item.hdc, &rc, background);
+    if (control == .close) {
+        smooth.fillRoundRect(item.hdc, rc, s(16), tokens.ReaderOutline);
+        var inner = rc;
+        inner.left += s(1);
+        inner.right -= s(1);
+        inner.top += s(1);
+        inner.bottom -= s(1);
+        smooth.fillRoundRect(item.hdc, inner, s(15), if ((item.state & 0x11) != 0) tokens.ReaderRaised else tokens.ReaderControl);
+        const pen = w.CreatePen(0, @max(1, s(1)), tokens.ReaderHint);
+        const old = w.SelectObject(item.hdc, pen);
+        const x = @divTrunc(rc.left + rc.right, 2);
+        const y = @divTrunc(rc.top + rc.bottom, 2);
+        _ = w.MoveToEx(item.hdc, x - s(5), y - s(5), null);
+        _ = w.LineTo(item.hdc, x + s(5), y + s(5));
+        _ = w.MoveToEx(item.hdc, x + s(5), y - s(5), null);
+        _ = w.LineTo(item.hdc, x - s(5), y + s(5));
+        _ = w.SelectObject(item.hdc, old);
+        _ = w.DeleteObject(pen);
+        return;
+    }
     if (control == .terminal) {
         const on = !state.g_chat_active;
         smooth.fillRoundRect(item.hdc, rc, s(11), if (on) tokens.ReaderForeground else tokens.ReaderRaised);

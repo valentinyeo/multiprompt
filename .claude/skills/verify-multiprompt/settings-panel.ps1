@@ -1,3 +1,7 @@
+Add-Type -AssemblyName UIAutomationClientsideProviders
+$nativeProviders = [AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -eq 'UIAutomationClientsideProviders' } | Select-Object -First 1
+[System.Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly($nativeProviders.GetName())
+
 function Settings-Window {
     $candidate = [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2)
     if ([VerifyNative]::Class($candidate) -ne 'MultipromptSettings') { return [IntPtr]::Zero }
