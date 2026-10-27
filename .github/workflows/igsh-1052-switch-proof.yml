@@ -1,0 +1,99 @@
+name: IGSH-1052 unchanged switching replay
+
+on:
+  push:
+    branches: [ceo/IGSH-1052-switch-proof]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remote-switch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: remote-switch (${{ matrix.side }})
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [candidate, master]
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 8f98adf9727bf2006374bfaacb781732b245b8ff
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.side == 'candidate' && 'bbe757f4e3401efb13b1c921a93328f2fd0bf79e' || '8f98adf9727bf2006374bfaacb781732b245b8ff' }}
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Check the independent performance oracle
+        run: node --test harness/tools/remote-switch-proof.test.mjs
+      - name: Build the actual Windows application
+        working-directory: app
+        run: zig build
+      - name: Build the SSH boundary and record executable identity
+        shell: pwsh
+        run: |
+          zig cc -target x86_64-windows-gnu -municode -O2 harness/tools/verify-chat-delivery/launcher.c -o app/zig-out/bin/ssh.exe
+          if ($LASTEXITCODE -ne 0) { throw 'SSH boundary compile failed' }
+          zig cc -target x86_64-windows-gnu -municode -mwindows -O2 harness/tools/verify-chat-delivery/launcher.c -o app/zig-out/bin/tmux.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Tmux boundary compile failed' }
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          $source = Get-Content app/src/main.zig -Raw
+          if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Application version missing' }
+          $version = $Matches[1]
+          $hash = (Get-FileHash app/zig-out/bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{revision=(git -C app rev-parse HEAD).Trim(); version=$version; sha256=$hash; side='${{ matrix.side }}'; harness=(git -C harness rev-parse HEAD).Trim()} | ConvertTo-Json | Set-Content evidence/build.json
+          "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Measure real session and workspace switches
+        shell: powershell
+        env:
+          CHAT_SWITCH_PROOF: '1'
+        run: |
+          & harness/tools/verify-chat-delivery/drive.ps1 -Feature chat-messages-only -Exe "$pwd/app/zig-out/bin/multiprompt.exe" -Ssh "$pwd/app/zig-out/bin/ssh.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          $status = $LASTEXITCODE
+          if (Test-Path evidence/remote-switch/error.txt) {
+            $problem = (Get-Content evidence/remote-switch/error.txt -Raw).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error::$problem"
+          }
+          if (Test-Path evidence/remote-switch/observation.json) {
+            $sampled = Get-Content evidence/remote-switch/observation.json -Raw | ConvertFrom-Json
+            if ($sampled.switches) {
+              $worstSwitch = ($sampled.switches | Measure-Object switchMs -Maximum).Maximum
+              $worstGap = ($sampled.switches | ForEach-Object { $_.probe.frames } | Measure-Object gapMs -Maximum).Maximum
+              $worstCpu = ($sampled.switches | ForEach-Object { 100 * $_.cpuMs / $_.elapsedMs } | Measure-Object -Maximum).Maximum
+              Write-Host "::notice::switches=$(@($sampled.switches).Count) max_switch_ms=$worstSwitch max_frame_gap_ms=$worstGap max_one_core_cpu_percent=$worstCpu"
+            }
+          }
+          if ($status -ne 0) { throw 'Unchanged switching budget failed' }
+          $global:LASTEXITCODE = 0
+      - name: Preserve frame records and visible proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: remote-switch-${{ matrix.side }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 30
