@@ -2,6 +2,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -15,6 +16,11 @@ SPEC.loader.exec_module(audit)
 
 
 class ChatSyncAuditTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if not (ROOT / 'zig-out/bin/chat-audit').is_file():
+            subprocess.run([os.environ.get('ZIG', 'zig'), 'build', 'chat-audit', '-j1'], cwd=ROOT, check=True)
+
     def wire(self, rows):
         return '@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\t-\n' + ''.join(json.dumps(row) + '\n' for row in rows) + '@@MP_END@@\n'
 
