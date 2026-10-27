@@ -26,7 +26,7 @@ export function queuedBubble(image, area) {
 
 export function normalBubble(image, bubble) {
   const { left, right, top, bottom, bg } = bubble;
-  const full = bg === 0x101010 ? 0x3A3A3A : [0, 8, 16].reduce((n, shift) => n | Math.min(255, ((bg >> shift) & 255) + 53) << shift, 0);
+  const full = [0, 8, 16].reduce((n, shift) => n | Math.min(255, ((bg >> shift) & 255) + 53) << shift, 0);
   let fill = 0, ink = 0;
   for (let y = top + 4; y < bottom - 4; y++) for (let x = left + 8; x < right - 8; x++) {
     const color = image.pixels.readUIntLE((y * image.width + x) * 4, 3);

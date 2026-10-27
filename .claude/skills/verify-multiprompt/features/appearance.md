@@ -29,7 +29,6 @@ Preconditions:
 - **Light selection.** Repeat Ctrl+K, `themes`, Enter, then type `light`. `action.png` shows Light selected before Enter. Enter changes the theme; `action-selected.png` shows Light marked current. Esc closes the overlay.
 - **Result.** `after.png` shows the normal light workspace with the same app/version identity. The saved `data/roaming/ZigShell/theme-mode.txt` contains `light`.
 - **Selected session.** In the normal workspace screenshots, the selected session row has a visible neutral gray background, not a blue tint. Unread dots and status icons retain their colors. The production-color regression in `tools/pane-spacing.test.js` also checks AMOLED, Dark, Edge Gray, Mid and Light.
-- **Reader colours.** The dominant sidebar colour in `before.png` must be within 4 shades of the Android reader background `#101010`, reported as `IGSH-1016-reader-sidebar` in `result.json`. The desktop colour values live in `src/design_tokens.zig` under the same names as the Android `Theme.kt` tokens.
 - **Proof.** The helper reads that file, checks sidebar luminance increases by at least 60 on the 0–255 channel scale, and reports both readings in `result.json`. Inspect the screenshots as well; pixel brightness alone is not proof of the right UI.
 
 ## Gotchas

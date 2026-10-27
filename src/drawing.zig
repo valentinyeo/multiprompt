@@ -1,7 +1,6 @@
 const smooth = @import("smooth.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
-const tokens = @import("design_tokens.zig");
 const DWORD = @import("win32.zig").DWORD;
 const HANDLE = @import("win32.zig").HANDLE;
 const DT_SINGLELINE = @import("win32.zig").DT_SINGLELINE;
@@ -661,7 +660,7 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
         right_limit = layout.meta_pill.left - margin;
     }
     const center = @divTrunc(column.left + column.right, 2);
-    const icon_w: i32 = if (!@import("themes.zig").themeReaderDark() and (shell.ai_agent != 0 or shell.needs_attention)) uiScaled(30) else 0;
+    const icon_w: i32 = if (shell.ai_agent != 0 or shell.needs_attention) uiScaled(30) else 0;
     const name = shell.name[0..shell.name_len];
     const text_w = measureTitleText(uiFontThreadTitle(), name);
     const max_w = @min(column.right - column.left - margin * 2, 2 * (right_limit - center));
@@ -704,7 +703,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
     }
     if (shell.name_len > 0) {
         _ = SelectObject(hdc, uiFontThreadTitle());
-        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(20, 20, 20) else if (@import("themes.zig").themeReaderDark()) tokens.ReaderForeground else RGB(255, 255, 255));
+        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(20, 20, 20) else RGB(255, 255, 255));
         var text = layout.text;
         _ = DrawTextW(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
