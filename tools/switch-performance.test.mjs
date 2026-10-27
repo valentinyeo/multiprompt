@@ -156,10 +156,11 @@ test('idle measurements identify an already visited conversation', async () => {
 });
 
 
-test('performance cleanup stops its owned process tree before deleting locked state', () => {
+test('performance cleanup stops its owned process tree without racing disposable runner storage', () => {
   const file = new URL('./switch-performance.ps1', import.meta.url);
   assert.ok(fs.existsSync(file), 'The real-window performance driver must ship');
   const driver = fs.readFileSync(file, 'utf8');
   const cleanup = driver.slice(driver.lastIndexOf('} finally {'));
-  assert.match(cleanup, /\$job\.Stop\(\)[\s\S]*\$job\.Dispose\(\)[\s\S]*Remove-Item -LiteralPath \$profile/);
+  assert.match(cleanup, /\$job\.Stop\(\)[\s\S]*\$job\.Dispose\(\)/);
+  assert.doesNotMatch(cleanup, /Remove-Item -LiteralPath \$profile/, 'The disposable Windows runner owns final profile removal');
 });

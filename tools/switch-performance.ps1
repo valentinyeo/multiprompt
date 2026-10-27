@@ -112,5 +112,4 @@ try {
     if (Test-Path $log) { Copy-Item $log "$Evidence/debug.log" }
     if (Test-Path "$profile/state/invocations.jsonl") { Copy-Item "$profile/state/invocations.jsonl" "$Evidence/invocations.jsonl" }
     Get-ChildItem "$profile/state" -Filter '*.stderr.log' -ErrorAction SilentlyContinue | Copy-Item -Destination $Evidence
-    if (Test-Path $profile) { Remove-Item -LiteralPath $profile -Recurse -Force }
 }
