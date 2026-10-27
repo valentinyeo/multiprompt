@@ -58,3 +58,9 @@ int main() {
     assert.equal(run.status, 0, run.stdout + run.stderr);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('Native pixel regression is discovered directly and required by the full test graph', () => {
+  const graph = read('build.zig');
+  assert.match(graph, /root_source_file = b.path\("src\/dwrite_text.zig"\)/);
+  assert.match(graph, /test_step.dependOn\(&run_emoji_tests.step\)/);
+});

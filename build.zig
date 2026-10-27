@@ -184,7 +184,17 @@ pub fn build(b: *std.Build) void {
     run_clean_chat_tests.has_side_effects = true;
     b.step("test-clean-chat", "Run every CLEAN chat pixel test with visible results").dependOn(&run_clean_chat_tests.step);
 
-    const emoji_tests = b.addTest(.{ .root_module = exe.root_module, .filters = &.{"IGSH-1089"} });
+    const emoji_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/dwrite_text.zig"),
+            .target = target,
+            .optimize = stable_optimize,
+            .link_libc = true,
+        }),
+        .filters = &.{"IGSH-1089"},
+    });
+    emoji_tests.stack_size = MAIN_STACK_SIZE;
+    linkColorEmoji(b, emoji_tests.root_module);
     const run_emoji_tests = b.addRunArtifact(emoji_tests);
     run_emoji_tests.has_side_effects = true;
     b.step("test-emoji", "Run native color emoji pixel regressions").dependOn(&run_emoji_tests.step);
@@ -208,6 +218,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step(if (b.graph.host.result.os.tag == .windows) "test" else "test-desktop", "Run desktop tests");
     const emoji_source_tests = b.addSystemCommand(&.{ "node", "--test", "tools/color-emoji.test.js" });
     test_step.dependOn(&emoji_source_tests.step);
+    test_step.dependOn(&run_emoji_tests.step);
     const font_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/fonts.zig"),
         .target = target,
