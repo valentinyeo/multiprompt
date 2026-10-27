@@ -274,7 +274,7 @@ test "native runner completion control" {
     assert.match(green.stderr, /CPU961 completion row=179/);
     assert.doesNotMatch(green.stderr, /(?:^|\n)[^\n]*[\\/]test(?:\.exe)?[ \t]+[^\n]*--listen=-/, 'native completion must not depend on the failed listen protocol');
     const red = run(true);
-    assert.notEqual(red.status, 0, 'a failing native assertion must still fail the build');
+    assert.equal(red.status, 1, `${red.error || red.signal || ''}\n${red.stdout}${red.stderr}`);
     assert.match(red.stderr, /TestUnexpectedResult/);
     console.log('NATIVE_COMPLETION_CONTROLS_OK pass=0 failure=nonzero rows=180');
   } finally {
