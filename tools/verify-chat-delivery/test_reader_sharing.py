@@ -8,10 +8,40 @@ import unittest
 
 
 SCRIPT = """
-import io, json, pathlib, sys
-print(json.dumps(dict(open_module=io.open.__module__, isolated=sys.flags.isolated, ignore_environment=sys.flags.ignore_environment, site=getattr(sys.modules.get("sitecustomize"), "__file__", None))), flush=True)
+import contextlib, ctypes, io, json, pathlib, sys
+from ctypes import wintypes
+print(json.dumps(dict(open_module=io.open.__module__, version=sys.version, isolated=sys.flags.isolated, ignore_environment=sys.flags.ignore_environment, site=getattr(sys.modules.get("sitecustomize"), "__file__", None))), flush=True)
 path = pathlib.Path(sys.argv[1])
-with path.open("rb") as source:
+backend = sys.argv[2]
+if backend == "raw":
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = kernel.CreateFileW(str(path), 0x80000000, 7, None, 3, 0x80, None)
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    class RawReader:
+        def read(self):
+            data = ctypes.create_string_buffer(64)
+            count = wintypes.DWORD()
+            kernel.ReadFile.argtypes = (wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID)
+            if not kernel.ReadFile(handle, data, 64, ctypes.byref(count), None):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return data.raw[:count.value]
+        def close(self):
+            kernel.CloseHandle(handle)
+    opened = contextlib.closing(RawReader())
+elif backend == "crt":
+    opened = io.open(path, "rb")
+else:
+    original = io.open
+    def trace(*args, **kwargs):
+        print(json.dumps(dict(args=[str(arg) for arg in args], kwargs={key: str(value) for key, value in kwargs.items()})), file=sys.stderr, flush=True)
+        return original(*args, **kwargs)
+    io.open = trace
+    opened = path.open("rb")
+with opened as source:
     print("OPENED", flush=True)
     sys.stdin.readline()
     held = source.read().decode("utf-8")
@@ -21,7 +51,7 @@ print(json.dumps(dict(held=held, current=path.read_text(encoding="utf-8"))))
 
 @unittest.skipUnless(os.name == "nt", "Windows remote-reader boundary")
 class ReaderSharing(unittest.TestCase):
-    def replace_while_open(self, patched, suffix=".jsonl"):
+    def replace_while_open(self, patched, suffix=".jsonl", backend="path"):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / ("session" + suffix)
             replacement = Path(directory) / "replacement"
@@ -31,11 +61,12 @@ class ReaderSharing(unittest.TestCase):
             environment.pop("PYTHONPATH", None)
             if patched:
                 environment["PYTHONPATH"] = str(Path(__file__).resolve().parent)
-            child = subprocess.Popen([sys.executable, "-u", "-c", SCRIPT, str(target)],
+            child = subprocess.Popen([sys.executable, "-u", "-c", SCRIPT, str(target), backend],
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      text=True, env=environment)
             try:
                 diagnostic = json.loads(child.stdout.readline())
+                print(json.dumps(dict(backend=backend, patched=patched, diagnostic=diagnostic)), file=sys.stderr, flush=True)
                 if patched:
                     self.assertEqual(diagnostic["open_module"], "sitecustomize", diagnostic)
                 self.assertEqual(child.stdout.readline().strip(), "OPENED")
@@ -52,7 +83,14 @@ class ReaderSharing(unittest.TestCase):
             finally:
                 if child.poll() is None:
                     child.kill()
-                    child.communicate()
+                    _, error = child.communicate()
+                    print(error, file=sys.stderr, flush=True)
+
+    def test_raw_share_delete_allows_replacement(self):
+        self.replace_while_open(True, backend="raw")
+
+    def test_crt_wrapped_handle_allows_replacement(self):
+        self.replace_while_open(True, backend="crt")
 
     def test_original_reader_rejects_atomic_replacement(self):
         self.replace_while_open(False)
