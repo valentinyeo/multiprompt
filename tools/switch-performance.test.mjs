@@ -46,5 +46,7 @@ test('speed check runs on every PR and blocks the aggregate', () => {
   const flow = fs.readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
   assert.match(flow, /check-red-run, switch-performance\]/);
   assert.match(flow, /SPEED: \$\{\{ needs\.switch-performance\.result \}\}/);
+  assert.ok(flow.includes('elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then'));
+  assert.match(flow, /run: \.\/tools\/check-powershell-host-names\.ps1/);
   assert.match(flow, /require_jobs "\$WINDOWS"[^\n]*"\$SPEED"/);
 });

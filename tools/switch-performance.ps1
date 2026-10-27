@@ -63,15 +63,15 @@ try {
         [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
         $target = ($previous + 1) % 10
         [void](Wait-For 'different target selected' { (Session).active_tab -eq $target })
-        $shellId = (Session).tabs[$target].shell_id
+        $targetShellId = (Session).tabs[$target].shell_id
         [void](Wait-For 'switch dispatch and nonempty target painted' {
             $range = (Read-Log).Substring($offset)
-            $range -match ('switch-timing: to=' + $target + ' total_us=\d+') -and $range -match ('\[switch\] chat content shown shell=' + $shellId + ' blocks=[1-9]')
+            $range -match ('switch-timing: to=' + $target + ' total_us=\d+') -and $range -match ('\[switch\] chat content shown shell=' + $targetShellId + ' blocks=[1-9]')
         })
         if ($i -ge 10) {
             $range = (Read-Log).Substring($offset)
             $timing = [regex]::Matches($range, 'switch-timing: to=(\d+) total_us=(\d+)')
-            $paint = [regex]::Match($range, ('\[switch\] chat content shown shell=' + $shellId + ' blocks=(\d+)'))
+            $paint = [regex]::Match($range, ('\[switch\] chat content shown shell=' + $targetShellId + ' blocks=(\d+)'))
             if ($timing.Count -ne 1 -or [int]$timing[0].Groups[1].Value -ne $target) { throw 'Missing or ambiguous switch timing' }
             $result.switches += @{ shell=$target; us=[long]$timing[0].Groups[2].Value; blocks=[int]$paint.Groups[1].Value }
         }
