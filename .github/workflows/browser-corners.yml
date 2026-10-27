@@ -9,7 +9,7 @@ on:
       - .claude/skills/verify-multiprompt/control.ps1
       - .github/workflows/browser-corners.yml
   push:
-    branches: [master]
+    branches: [master, ceo/IGSH-1057]
     paths:
       - src/browser_pane.zig
       - src/main.zig
@@ -43,6 +43,37 @@ jobs:
           if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
           Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: github.ref == 'refs/heads/ceo/IGSH-1057' || github.head_ref == 'ceo/IGSH-1057'
+        with:
+          repository: ${{ github.repository }}
+          ref: 4a0a7f1d
+          persist-credentials: false
+          path: negative-source
+      - name: Build original browser framing control
+        if: github.ref == 'refs/heads/ceo/IGSH-1057' || github.head_ref == 'ceo/IGSH-1057'
+        working-directory: negative-source
+        run: zig build
+      - name: Require original framing to fail after unrelated activation
+        if: github.ref == 'refs/heads/ceo/IGSH-1057' || github.head_ref == 'ceo/IGSH-1057'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path negative-source/zig-out/bin/multiprompt.exe).Path
+          $source = Get-Content negative-source/src/main.zig -Raw
+          if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Version not found' }
+          $version = $Matches[1]
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          New-Item -ItemType Directory -Force evidence/negative | Out-Null
+          @{ revision = (git -C negative-source rev-parse HEAD).Trim(); version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/negative/build.json
+          try {
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature browser-corners -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/negative"
+          } catch { Write-Host "Original framing returned: $_" }
+          $red = Get-Content evidence/negative/result.json -Raw | ConvertFrom-Json
+          $cleanup = Get-Content evidence/negative/cleanup.json -Raw | ConvertFrom-Json
+          if ($red.status -ne 'failed' -or $red.error -notmatch 'ten visible browser masks after activation' -or -not (Test-Path evidence/negative/corners-cycle-4-failed.png)) { throw 'Original framing did not fail at unrelated activation' }
+          if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Original framing cleanup failed' }
+          Write-Host 'BROWSER_BACKGROUND_RED_PROVEN'
       - name: Build real app
         run: zig build
       - name: Verify twenty mixed corner activations
