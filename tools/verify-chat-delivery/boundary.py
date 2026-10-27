@@ -741,6 +741,53 @@ def completion(remote):
     return 95
 
 
+def watch_reader():
+    import base64
+
+    source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
+    namespace = dict(__name__="verified_remote_reader")
+    exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
+
+    def changes(q, resolved, supplied_source, as_owner):
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.FindFirstChangeNotificationW.argtypes = [wintypes.LPCWSTR, wintypes.BOOL, wintypes.DWORD]
+        kernel.FindFirstChangeNotificationW.restype = wintypes.HANDLE
+        kernel.FindNextChangeNotification.argtypes = [wintypes.HANDLE]
+        kernel.FindCloseChangeNotification.argtypes = [wintypes.HANDLE]
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        notification = kernel.FindFirstChangeNotificationW(str(ROOT), True, 0x13)
+        if notification == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            paths = [resolved[2], ROOT / "claude.json", ROOT / "box.json", ROOT / "state.json"]
+            def fingerprint():
+                result = []
+                for path in paths:
+                    try:
+                        info = path.stat()
+                        result.append((info.st_ino, info.st_size, info.st_mtime_ns))
+                    except FileNotFoundError:
+                        result.append(None)
+                return result
+            previous = fingerprint()
+            yield resolved
+            while True:
+                if kernel.WaitForSingleObject(notification, 0xFFFFFFFF) != 0:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if not kernel.FindNextChangeNotification(notification):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                current = fingerprint()
+                if current != previous:
+                    previous = current
+                    yield resolved
+        finally:
+            kernel.FindCloseChangeNotification(notification)
+
+    namespace["watch_changes"] = changes
+    namespace["watch"](namespace["READER_SOURCE"])
+    return 0
+
+
 def ssh():
     if ARGS == ["-V"]:
         print("OpenSSH_verification")
@@ -762,6 +809,11 @@ def ssh():
         if remote[1].endswith("/mp_complete.py"):
             return completion(remote)
         record("invocations.jsonl", kind="reader", argv=remote)
+        if remote[-1:] == ["--watch"]:
+            value = state()
+            if value.get("remoteHome"):
+                os.environ.update(HOME=value["remoteHome"], USERPROFILE=value["remoteHome"])
+            return watch_reader()
         env = os.environ.copy()
         if os.name == "nt":
             env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
