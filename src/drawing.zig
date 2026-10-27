@@ -263,13 +263,22 @@ pub fn uiUnscaled(px: i32) i32 {
 }
 
 pub fn searchRowH() i32 {
-    return uiScaled(32);
+    return uiScaled(40);
 }
 pub fn searchInputH() i32 {
-    return uiScaled(36);
+    const recent = app_state.g_search_len == 0 and app_state.g_search_result_count > 0 and app_state.g_search_results[0] < app_state.MAX_SHELLS;
+    return uiScaled(if (recent) @as(i32, 96) else 72);
 }
 pub fn searchOverlayW() i32 {
-    return uiScaled(430);
+    return uiScaled(560);
+}
+
+pub fn searchFooterH() i32 {
+    return uiScaled(44);
+}
+
+pub fn searchOverlayOy(win_h: i32, overlay_h: i32) i32 {
+    return @max(uiScaled(8), @min(uiScaled(120), win_h - overlay_h - uiScaled(8)));
 }
 
 pub fn searchOverlayOx(win_w: i32, overlay_w: i32) i32 {
@@ -296,11 +305,11 @@ pub fn searchResultRowAtClientPoint(mx: i32, my: i32) ?u32 {
     const input_h = searchInputH();
     const visible_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
     const visible_rows: u32 = @min(app_state.g_search_result_count -| app_state.g_search_scroll, visible_capacity);
-    const overlay_h = input_h + @as(i32, @intCast(visible_capacity)) * row_h;
+    const overlay_h = input_h + @as(i32, @intCast(visible_capacity)) * row_h + searchFooterH();
     const ox = searchOverlayOx(win_w, overlay_w);
-    const oy = @divFloor(win_h - overlay_h, 3);
+    const oy = searchOverlayOy(win_h, overlay_h);
 
-    if (mx < ox or mx >= ox + overlay_w or my < oy + input_h or my >= oy + overlay_h) return null;
+    if (mx < ox or mx >= ox + overlay_w or my < oy + input_h or my >= oy + overlay_h - searchFooterH()) return null;
     const visual_row: u32 = @intCast(@divFloor(my - (oy + input_h), row_h));
     if (visual_row >= visible_rows) return null;
     return app_state.g_search_scroll + visual_row;

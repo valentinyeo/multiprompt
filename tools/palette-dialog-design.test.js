@@ -40,7 +40,7 @@ test('IGSH-1061: native messages share the custom dialog and preserve confirmati
   assert.match(dialog, /pixel\.\* >> 1/);
   assert.match(dialog, /if \(enabled\) _ = EnableWindow\(owner, 0\)/);
   assert.match(dialog, /EnableWindow\(owner, 1\)/);
-  assert.match(dialog, /0x1b => state\.result = closeResult/);
+  assert.match(dialog, /0x1b => self\.result = closeResult/);
   assert.match(dialog, /button\.result == 2/);
   const account = read('src/account_desktop.zig');
   for (const label of ['Later', 'Use recovery key', 'Enter passphrase', 'Remove']) assert.ok(account.includes(`L("${label}")`), label);
@@ -50,7 +50,7 @@ test('IGSH-1061: native messages share the custom dialog and preserve confirmati
 
 test('IGSH-1061: static labels and shortcut hints use the formatter, not user session names', () => {
   const paint = palette();
-  assert.match(paint, /palette_text.zig/);
+  assert.match(paint, /paletteDrawText/);
   assert.match(paint, /DrawTextW\(hdc, @ptrCast\(&app_state\.shells\[shell_idx\]\.name\)/);
   const formatter = read('src/palette_text.zig');
   assert.match(formatter, /pub fn sentence/);

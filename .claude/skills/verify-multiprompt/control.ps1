@@ -6166,7 +6166,7 @@ try {
                 $bottom = 0
                 for ($y = [int]($image.Height * 0.2); $y -lt [int]($image.Height * 0.8); $y++) {
                     $pixel = $image.GetPixel([int]($image.Width / 2), $y)
-                    if ($pixel.R -lt 50 -and $pixel.G -gt 70 -and $pixel.G -lt 160 -and $pixel.B -gt 150) {
+                    if ($pixel.R -eq 53 -and $pixel.G -eq 53 -and $pixel.B -eq 53) {
                         $top = [Math]::Min($top, $y)
                         $bottom = [Math]::Max($bottom, $y)
                     }
