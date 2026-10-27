@@ -62,7 +62,7 @@ fn drawName(dc: w.HANDLE, name: []const u8, rect: *w.RECT, flags: u32) void {
 pub fn paintHeader(dc: w.HANDLE) void {
     if (headerHeight() == 0) return;
     const rc = headerRect();
-    var band = w.RECT{ .left = 0, .top = browser.wsStripHeight(), .right = browser.SIDEBAR_W(), .bottom = browser.wsStripHeight() + headerHeight() };
+    var band = w.RECT{ .left = 0, .top = browser.wsStripHeight(), .right = browser.SIDEBAR_W() - 1, .bottom = browser.wsStripHeight() + headerHeight() };
     const bg = w.CreateSolidBrush(@import("themes.zig").themeSidebarBg());
     _ = w.FillRect(dc, &band, bg);
     _ = w.DeleteObject(bg);
