@@ -931,6 +931,8 @@ test('send-stays-gone evidence fails when a sent message comes back or a send is
 
 
 test('Windows remote reader preserves POSIX atomic replacement while its old descriptor stays readable', () => {
+  assert.ok(fs.existsSync(path.join(root, 'tools/verify-chat-delivery/sitecustomize.py')), 'Windows reader needs POSIX delete sharing');
+  assert.ok(fs.existsSync(path.join(root, 'tools/verify-chat-delivery/test_reader_sharing.py')), 'Windows overlap controls must ship with the fixture');
   const output = execFileSync('python3', ['-I', path.join(root, 'tools/verify-chat-delivery/test_reader_sharing.py')], { encoding: 'utf8', timeout: 60000 });
   if (process.platform === 'win32') {
     assert.match(output, /ORIGINAL_WINDOWS_READER_REJECTED/);
