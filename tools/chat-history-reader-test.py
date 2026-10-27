@@ -1161,6 +1161,16 @@ class HistoryReaderTest(unittest.TestCase):
                 patch.object(reader, 'owner_response', return_value=expected):
             self.assertEqual(reader.response(self.query, reader.READER_SOURCE), expected)
 
+    def test_IGSH_1064_stale_owner_cwd_still_discovers_exact_live_process(self):
+        self.write(self.event('current live reply'))
+        self.query.update(follow=True, cwd='/home/secondary/old-project')
+        with patch.object(reader, 'conversation_owner', return_value=('secondary', Path('/home/secondary'))), \
+                patch.object(reader, 'owner_response', side_effect=lambda q, *_: reader.missing_response(q, 'session transcript not found')), \
+                patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)):
+            wire = reader.response(self.query, reader.READER_SOURCE)
+        self.assertIn('current live reply', wire)
+        self.assertNotIn('history\tmissing', wire)
+
     def test_IGSH_1064_owner_namespace_never_recurses_or_uses_saved_history(self):
         self.write(self.event('saved stale reply'))
         self.query.update(follow=True, cwd='/home/secondary/project')

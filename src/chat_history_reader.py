@@ -1134,7 +1134,9 @@ def resolve_response_path(q, source=None, as_owner=False):
         path, denied = None, True
     owner = conversation_owner(cwd) if agent == "claude" else None
     if follow and owner and owner[1] != HOME and source is not None and not as_owner:
-        return agent, sid, None, owner_response(dict(q, sid=""), owner, source)
+        delegated = owner_response(dict(q, sid=""), owner, source)
+        if delegated != missing_response(q, "session transcript not found"):
+            return agent, sid, None, delegated
     if path is None and sid and not follow and owner and owner[1] != HOME:
         try:
             path = conversation_path(agent, sid, cwd, owner[1])
