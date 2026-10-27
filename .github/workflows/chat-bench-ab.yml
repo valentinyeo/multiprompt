@@ -17,12 +17,6 @@ on:
         required: true
         default: '3'
         type: string
-  pull_request:
-    paths:
-      - .github/workflows/chat-bench-ab.yml
-      - .gitattributes
-      - tools/chat-bench/**
-
 permissions:
   contents: read
 

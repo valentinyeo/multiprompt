@@ -4533,7 +4533,7 @@ pub fn browserChromeForegroundAllowed() bool {
 }
 
 pub fn browserChromeCanStayVisible() bool {
-    return app_state.g_main_hwnd != null and IsIconic(app_state.g_main_hwnd) == 0;
+    return !app_state.g_monitor_transition.active and app_state.g_main_hwnd != null and IsIconic(app_state.g_main_hwnd) == 0 and !browserChromeHiddenForOverlay();
 }
 
 pub fn activeBrowserEdgeMasksAllowed() bool {
@@ -4565,7 +4565,7 @@ fn browserEdgeMaskWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callc
     defer app_state.g_focus_user_action_tick = prior_focus_action;
     switch (msg) {
         WM_NCHITTEST => {
-            if (!browserChromeForegroundAllowed() or !activeBrowserEdgeMasksAllowed()) {
+            if (!browserChromeCanStayVisible() or !activeBrowserEdgeMasksAllowed()) {
                 hideBrowserEdgeMasks();
                 return @intCast(HTTRANSPARENT);
             }
@@ -4736,8 +4736,12 @@ pub fn raiseBrowserEdgeMasksZOrderOnly() void {
         suspendBrowserEdgeMaskRaiseForPopup();
         return;
     }
-    if (!activeBrowserEdgeMasksAllowed() or IsIconic(app_state.g_main_hwnd) != 0 or !foregroundIsOurs()) {
+    if (!activeBrowserEdgeMasksAllowed() or !browserChromeCanStayVisible()) {
         hideBrowserEdgeMasks();
+        return;
+    }
+    if (!foregroundIsOurs()) {
+        suspendBrowserEdgeMaskRaiseForPopup();
         return;
     }
     for (0..BROWSER_EDGE_MASK_COUNT) |i| {
@@ -4753,10 +4757,11 @@ pub fn refreshBrowserEdgeMasks() void {
         suspendBrowserEdgeMaskRaiseForPopup();
         return;
     }
-    if (!activeBrowserEdgeMasksAllowed() or !browserChromeForegroundAllowed()) {
+    if (!activeBrowserEdgeMasksAllowed() or !browserChromeCanStayVisible()) {
         hideBrowserEdgeMasks();
         return;
     }
+    if (!foregroundIsOurs()) return;
     const layout = calcBrowserLayout() orelse {
         hideBrowserEdgeMasks();
         return;
@@ -4775,12 +4780,16 @@ pub fn armBrowserEdgeMaskRaise() void {
         suspendBrowserEdgeMaskRaiseForPopup();
         return;
     }
-    if (!activeBrowserEdgeMasksAllowed() or !browserChromeForegroundAllowed()) {
+    if (!activeBrowserEdgeMasksAllowed() or !browserChromeCanStayVisible()) {
         hideBrowserEdgeMasks();
         return;
     }
     if (browserChromeHiddenForOverlay()) {
         hideBrowserEdgeMasks();
+        return;
+    }
+    if (!foregroundIsOurs()) {
+        suspendBrowserEdgeMaskRaiseForPopup();
         return;
     }
     if (app_state.g_browser_edge_mask_raise_ticks > 0) return;
@@ -4849,10 +4858,7 @@ fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
         hideBrowserEdgeMasks();
         return;
     }
-    if (!browserChromeForegroundAllowed()) {
-        hideBrowserEdgeMasks();
-        return;
-    }
+    if (!browserChromeForegroundAllowed()) return;
     refreshBrowserControlMaskColor(layout);
     ensureBrowserEdgeMaskWindows();
 

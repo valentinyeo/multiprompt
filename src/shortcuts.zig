@@ -265,6 +265,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+G", .b = "Collapse / expand tab group", .header = false },
     .{ .a = "Alt+; / Ctrl+;", .b = "Use snippets", .header = false },
     .{ .a = "Ctrl+K -> Create Snippet", .b = "Save a named paste block", .header = false },
+    .{ .a = "Ctrl+K -> Manage Snippets", .b = "Delete saved snippets; Esc cancels", .header = false },
     .{ .a = "Delete twice in snippets", .b = "Delete the selected saved snippet", .header = false },
     .{ .a = "F2 / double-click", .b = "Rename tab or selected Inbox session", .header = false },
     .{ .a = "Workspaces (single-window)", .b = "", .header = true },

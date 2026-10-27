@@ -57,3 +57,26 @@ test('routing checks reject the removed dependency, missing history, classifier 
     assert.throws(() => verifyRouting(workflow.replace(before, after)), assert.AssertionError);
   }
 });
+
+test('red regression job installs the Zig compiler before running changed suites', () => {
+  const red = fs.readFileSync(new URL('../.github/workflows/check-red-run.yml', import.meta.url), 'utf8');
+  const install = red.indexOf('      - name: Install Zig 0.16.0');
+  const execute = red.indexOf('      - name: Require changed tests to fail on merge-base source');
+  assert.ok(install >= 0 && execute > install);
+  assert.match(red.slice(install, execute), /curl -fsSL https:\/\/ziglang\.org\/download\/0\.16\.0\/zig-x86_64-linux-0\.16\.0\.tar\.xz/);
+  assert.match(red.slice(install, execute), /tar -xf/);
+  assert.match(red.slice(install, execute), /zig-x86_64-linux-0\.16\.0.*GITHUB_PATH/);
+});
+
+test('branch reaction proof uses the shared journey without changing production triggers', () => {
+  const adapterFile = new URL('../.github/workflows/reaction-journey.yml', import.meta.url);
+  assert.ok(fs.existsSync(adapterFile), 'reaction workflow adapter exists');
+  const adapter = fs.readFileSync(adapterFile, 'utf8');
+  assert.match(adapter, /branches: \[ceo\/IGSH-1012\]/);
+  assert.match(adapter, /uses: \.\/\.github\/workflows\/verify\.yml/);
+  assert.match(adapter, /feature: chat-delivery/);
+  assert.match(adapter, /chat_reactions_proof: true/);
+  const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
+  assert.match(verify, /workflow_call:\n    inputs:\n      chat_reactions_proof:/);
+  assert.match(verify, /branches: \[master, 'ceo\/IGSH-1072\*'\]/);
+});

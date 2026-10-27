@@ -10,6 +10,8 @@ Find real actions in Ctrl+K, execute an app-size change and reset it while check
 - `palette-reset`: navigate to UI Size: Reset and restore 100%.
 - `palette-keyboard-priority`: with the pointer parked over a row, Up and Down still move the selection and Enter runs the keyboard's row; a real move of three pixels or more hands the selection to the pointer, and a click selects the row under the pointer (IGSH-836).
 
+- `manage-snippets`: prepare two saved snippets, cancel named deletion with Esc, delete only the selected snippet, then restart and verify the retained entry in Use Snippets (IGSH-1065).
+
 ## How to get to it (user POV)
 
 - Press Ctrl+K from the workspace, console or Chat View to open the palette. It initially offers recent sessions.
@@ -31,6 +33,8 @@ Preconditions:
 - **Reset.** Reopen Ctrl+K and type `interface`; Down twice reaches `UI Size: Reset`, then Enter. Capture `reset.png`. The saved scale must be default 100 (the default may be omitted from the file).
 - **Update entry.** Search `restart to update`, capture `update-command.png`, reject a blank selected row by checking its screenshot text pixels, then Enter with no staged update. Doctor must still identify the original live PID, executable hash, HWND and initial shell; capture `update-idle.png`. The updater switch is OFF in this isolated harness to prevent a release from replacing the branch being verified. This proves the palette entry and no-ready behavior, not the ready notice or an actual release install; Windows update regression tests separately exercise download validation and rollback.
 - **Proof.** Compare `before.png`, `action.png`, `after.png` and `reset.png`. `actions.json` records both selections; `result.json` records the checked 110 and 100 values. The final `data/roaming/ZigShell/session.json` confirms the reset state.
+
+- **Manage Snippets.** The same command-palette dispatch seeds Remove Me and Keep Me in the existing version-one storage format, captures `manage-snippets-command.png` and `snippet-delete-confirmation.png`, checks Escape leaves the file byte-identical, confirms deletion with Delete then Enter, and verifies only Keep Me survives a restart. `snippet-deleted.png` and `snippet-kept-after-restart.png` show the existing picker.
 
 ## Gotchas
 

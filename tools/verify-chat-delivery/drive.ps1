@@ -453,6 +453,7 @@ foreach ($plan in $plans) {
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
         if ($isSending) { $seed.sendingProof = $true }
         $standIn = $seed
+        if ($env:CHAT_LONG_PROOF -eq '1') { $standIn.longChatProof = $true }
         if ($hasTranscript) {
             $sid = 'a1b2c3d4-0682-4000-8000-000000000682'
             $cwd = 'C:/verify/work'
@@ -636,6 +637,7 @@ foreach ($plan in $plans) {
                 if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $h)) { $h }
             }
             Assert-FullHistory 'restart'
+            if ($env:CHAT_LONG_PROOF -eq '1') { . "$PSScriptRoot/long-chat.ps1" }
         } elseif ($isNotes) {
             [void][LayoutCapture]::MoveWindow($main, 50, 20, 1820, 1000, $true)
             [void](Wait-For 'owned note window resized' { [int]([System.Windows.Automation.AutomationElement]::FromHandle($main).Current.BoundingRectangle.Width) -eq 1820 })
