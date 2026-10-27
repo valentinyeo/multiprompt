@@ -347,7 +347,7 @@ function Retention-Copy([string]$Stage, [int]$Count) {
     $expected = @(0..($Count - 3) | ForEach-Object { 'IGSH934 message {0:00000}' -f $_ })
     if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-934 retained copy missing or reordered at $Stage" }
     Press @(0x1B) 'Esc: clear retained selection'
-    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    [void](Wait-For 'retained selection returns typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
     $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chat\] unread divider count=\d marker=\d+ index=\d+ unknown=(\d)')
     if (@($frames | Where-Object { $_.Groups[1].Value -eq '1' }).Count -gt 0) { throw 'IGSH-934 retained read position became unknown' }
     if (Get-Variable retentionAnchor -Scope Script -ErrorAction SilentlyContinue) { Retention-Top }
@@ -453,6 +453,7 @@ foreach ($plan in $plans) {
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
         if ($isSending) { $seed.sendingProof = $true }
         $standIn = $seed
+        if ($env:CHAT_LONG_PROOF -eq '1') { $standIn.longChatProof = $true }
         if ($hasTranscript) {
             $sid = 'a1b2c3d4-0682-4000-8000-000000000682'
             $cwd = 'C:/verify/work'
@@ -636,6 +637,7 @@ foreach ($plan in $plans) {
                 if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $h)) { $h }
             }
             Assert-FullHistory 'restart'
+            if ($env:CHAT_LONG_PROOF -eq '1') { . "$PSScriptRoot/long-chat.ps1" }
         } elseif ($isNotes) {
             [void][LayoutCapture]::MoveWindow($main, 50, 20, 1820, 1000, $true)
             [void](Wait-For 'owned note window resized' { [int]([System.Windows.Automation.AutomationElement]::FromHandle($main).Current.BoundingRectangle.Width) -eq 1820 })

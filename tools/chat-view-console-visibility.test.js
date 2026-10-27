@@ -78,7 +78,7 @@ test('every console reveal is guarded; a new HWND alias bypass are rejected', ()
 });
 
 function harness(text) {
-  const production = ['shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx'].map(name => fn(text, name)).join('\n\n');
+  const production = ['shellConsoleVisibilityAllowed', 'shellConsoleShouldBeVisible', 'showShellConsole', 'closeUrlPickerInternal', 'sendLocalChatPromptEx', 'showActiveShellAfterOverlay'].map(name => fn(text, name)).join('\n\n');
   const pureTests = text.slice(text.indexOf('test "console visibility rejects'), text.indexOf('\nfn openChatView()', text.indexOf('test "console visibility rejects')));
   return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -94,11 +94,21 @@ const SW_SHOW = 5;
 const SW_SHOWNOACTIVATE = 4;
 const KEYEVENTF_KEYUP = 2;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
-const Shell = struct { disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, pinned_top: bool = false };
+const Shell = struct { workspace: u32 = 0, disconnected: bool = false, hwnd: HANDLE = null, shell_id: u32 = 0, chat_view_on: bool = false, pinned_top: bool = false };
 var shells = [_]Shell{ .{ .hwnd = 1, .shell_id = 42 }, .{ .hwnd = 2, .shell_id = 43 } };
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
 var g_chat_active = false;
+var g_search_from_inbox = false;
+var g_search_spawn_ws: u32 = 0;
+var g_single_window = false;
+var g_active_workspace: u32 = 0;
+const g_chat_transcript_hwnd: HANDLE = 101;
+const g_chat_composer_hwnd: HANDLE = 102;
+var refreshes: usize = 0;
+fn closeInbox(_: HANDLE) void { g_inbox_active = false; }
+fn refreshChatTranscript(_: bool) void { refreshes += 1; }
+fn SetFocus(_: HANDLE) HANDLE { return null; }
 var g_restoring = false;
 var g_startup_progress = false;
 var g_search_active = false;
@@ -138,6 +148,16 @@ fn Sleep(_: u32) void {}
 fn keybd_event(_: u32, _: u32, _: u32, _: u32) void {}
 ${production}
 ${pureTests}
+test "IGSH-1059 overlay close restores chat without a live console" {
+    g_chat_active = true;
+    shells[0].hwnd = null;
+    defer { shells[0].hwnd = 1; g_chat_active = false; }
+    visible = false;
+    const before = refreshes;
+    showActiveShellAfterOverlay();
+    try std.testing.expect(visible);
+    try std.testing.expectEqual(before + 1, refreshes);
+}
 test "all pure decision combinations" {
     for ([_]bool{ false, true }) |active| {
         for ([_]bool{ false, true }) |chat| {

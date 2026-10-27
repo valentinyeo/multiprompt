@@ -2163,7 +2163,10 @@ pub fn chatRelayout(client_width: i32) void {
     };
     if (reactions_changed) app_state.g_chat_layout_reuse = 0;
     chat_style.bubblePositions(app_state.g_chat_blocks[0..app_state.g_chat_block_count], app_state.g_chat_bubble_pos[0..app_state.g_chat_block_count]);
-    const boundary = @import("chat_session.zig").chatReadBoundary();
+    var boundary = @import("chat_session.zig").chatReadBoundary();
+    if (boundary.index) |start| {
+        if (!g_reaction_view.visibleFrom(app_state.g_chat_blocks[0..app_state.g_chat_block_count], start)) boundary = .{};
+    }
     if (!std.meta.eql(boundary, app_state.g_chat_read_boundary)) {
         const count = app_state.g_chat_block_count;
         app_state.g_chat_layout_reuse = @min(app_state.g_chat_layout_reuse, boundary.index orelse count, app_state.g_chat_read_boundary.index orelse count);

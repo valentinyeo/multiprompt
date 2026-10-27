@@ -23,7 +23,7 @@ if ! jq -e 'type == "array" and length > 0 and all(.[]; type == "string")' <<< "
     exit 0
 fi
 reason=$(jq -r --arg owner "$owner" '
-  if .isCrossRepository != false or .author.login != $owner then "not a same-repo PR by the owner"
+  if .isCrossRepository != false or (.author.login != $owner and .author.login != "app/software-factory-runners") then "not a same-repo PR by the owner"
   elif .baseRefName != "master" then "base is not master"
   elif .isDraft != false then "draft"
   elif (.labels | type) != "array" then "could not read labels"

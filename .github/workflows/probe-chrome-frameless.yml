@@ -2,13 +2,6 @@ name: Probe Chrome frameless
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - ceo/IGSH-811
-    paths:
-      - .github/workflows/probe-chrome-frameless.yml
-      - tools/probe-chrome-frameless.ps1
-
 permissions:
   contents: read
 

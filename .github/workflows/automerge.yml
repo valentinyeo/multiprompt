@@ -2,7 +2,7 @@ name: automerge
 
 on:
   workflow_run:
-    workflows: [Tests, Verify desktop, PR checks, Gitleaks, Ledger guard, check-red-run, Chat table bench, Chat bench A/B, docs-site, Verify SSH reconnect]
+    workflows: [Tests]
     types: [completed]
   schedule:
     - cron: '*/15 * * * *'
@@ -34,11 +34,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           REPO_OWNER: ${{ github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          for pr in $(gh pr list -R "$REPO" --base master --state open --limit 1000 --json number -q '.[].number'); do
+          if [ "$EVENT_NAME" = workflow_run ]; then
+            if [ "$RUN_CONCLUSION" != success ] || [ "$RUN_EVENT" != pull_request ]; then exit 0; fi
+            candidates=$(gh pr list -R "$REPO" --base master --state open --head "$HEAD_BRANCH" --limit 1000 --json number,headRefOid | jq -r --arg sha "$HEAD_SHA" '.[] | select(.headRefOid == $sha) | .number')
+          else
+            candidates=$(gh pr list -R "$REPO" --base master --state open --search 'status:success' --limit 1000 --json number | jq -r '.[].number')
+          fi
+          for pr in $candidates; do
             info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,mergeable,statusCheckRollup,headRefOid,isCrossRepository,author,baseRefName,changedFiles) || { echo "#$pr: could not read PR"; continue; }
             head_oid=$(jq -er '.headRefOid | select(test("^[0-9a-f]{40}$"))' <<< "$info") || { echo "#$pr: invalid head"; continue; }
+            if [ "$EVENT_NAME" = workflow_run ] && [ "$head_oid" != "$HEAD_SHA" ]; then continue; fi
             behind_by=$(gh api "repos/$REPO/compare/master...$head_oid" --jq .behind_by) || behind_by=''
             file_info=$(gh api "repos/$REPO/pulls/$pr/files?per_page=100" --paginate --slurp) || { echo "#$pr: could not list files"; continue; }
             if ! jq -e --argjson count "$(jq '.changedFiles' <<< "$info")" 'add | length == $count' <<< "$file_info" >/dev/null; then
@@ -55,8 +67,10 @@ jobs:
               for workflow in test.yml no-comments.yml gitleaks.yml; do
                 gh workflow run "$workflow" -R "$REPO" --ref master
               done
+              break
             fi
           done
+          if [ "$EVENT_NAME" = workflow_run ]; then exit 0; fi
           head_oid=$(gh api "repos/$REPO/commits/master" --jq .sha)
           for workflow in test.yml no-comments.yml gitleaks.yml; do
             count=$(gh run list -R "$REPO" -w "$workflow" -b master --commit "$head_oid" --event workflow_dispatch --json databaseId -q length)

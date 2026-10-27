@@ -97,7 +97,8 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
 test('release tags reuse master verification instead of starting another full Windows matrix', () => {
   const push = workflow.match(/^  push:\r?\n((?:    [^\n]*\r?\n)+)/m);
   assert.ok(push, 'master pushes still trigger full verification');
-  assert.match(push[1], /^    branches: \[master\]\r?$/m);
+  assert.match(push[1], /^    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1033\]\r?$/m);
+  assert.ok(workflow.includes(`github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck'))`), 'recovery branch runs only its failing browser journey');
   assert.doesNotMatch(push[1], /^    tags(?:-ignore)?:/m, 'release tags must not duplicate the tested master matrix');
 });
 
@@ -2177,7 +2178,8 @@ test('IGSH-1033 master smoke, targeted proofs and full candidate select distinct
   const features = [...workflow.matchAll(/fromJSON\('(\[[^'\n]+\])'\)/g)].map(match => JSON.parse(match[1])).find(values => values.includes('chat-dictation'));
   const evaluate = (event, inputs = {}) => JSON.parse(JSON.stringify(require('node:vm').runInNewContext(
     expression, {
-      inputs, github: { event_name: event },
+      inputs, github: { event_name: event, ref: 'refs/heads/master' },
+      startsWith: (value, prefix) => value.startsWith(prefix),
       fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value),
     })));
   assert.deepEqual(evaluate('push'), ['appearance']);

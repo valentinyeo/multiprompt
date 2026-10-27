@@ -34,6 +34,18 @@ try {
       assert.ok(bytes.length > 10000);
     }
   }
+  if (process.env.CHAT_LONG_PROOF === '1') assert.ok(fs.existsSync(path.join(root, 'full-history/long-chat.json')), 'missing native continuity observations');
+  if (fs.existsSync(path.join(root, 'full-history/long-chat.json'))) {
+    const continuity = json('full-history/long-chat.json');
+    assert.ok(continuity.sourceBytes > 18 * 1024 * 1024);
+    assert.ok(continuity.restoreMs <= 2000);
+    const build = json('build.json');
+    assert.ok(continuity.sustainedMs >= (build.tag ? 1800000 : 5000));
+    assert.ok(continuity.samples.length >= (build.tag ? 1500 : 3));
+    for (const sample of continuity.samples) assert.ok(sample.ink >= 8 && sample.width >= 200 && sample.height >= 100);
+    const copied = fs.readFileSync(path.join(root, 'full-history/sustained-copied.txt'), 'utf8');
+    assert.ok(copied.includes('IGSH815 assistant 23'));
+  }
   const build = json('build.json');
   const doctor = json('full-history/doctor.json');
   assert.equal(doctor.sha256.toLowerCase(), build.sha256.toLowerCase());

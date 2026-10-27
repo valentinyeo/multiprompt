@@ -1,13 +1,5 @@
 name: Chat table bench
 on:
-  pull_request:
-    paths:
-      - build.zig
-      - src/chat_render.zig
-      - src/chat_markdown.zig
-      - src/chat_table_measure.zig
-      - tools/chat-table-bench/**
-      - .github/workflows/chat-table-bench.yml
   workflow_dispatch:
 permissions:
   contents: read

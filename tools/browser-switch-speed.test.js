@@ -336,6 +336,7 @@ function journeyMatrix(source, event, feature = '', ref = 'refs/heads/master', f
     github: { event_name: event, ref },
     inputs: { feature, ...flags },
     fromJSON: JSON.parse,
+    startsWith: (value, prefix) => value.startsWith(prefix),
     format: (pattern, value) => pattern.replace('{0}', value),
   }, { timeout: 1000 });
 }
@@ -353,12 +354,14 @@ function assertsDispatchOnly(source) {
 test('IGSH-1033 PR and master smoke stay small; candidate runs retain the full matrix', () => {
   const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
   function contract(source) {
-    assert.match(source, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
+    assert.match(source, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1033\]\n  workflow_dispatch:/m);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'push'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'push', 'all'), full);
     assert.deepEqual(journeyMatrix(source, 'push', 'relaunch-saved-sessions'), ['relaunch-saved-sessions']);
+    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1072-proof-1'), ['chat-dictation']);
+    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1061-recovery'), ['browser-pane-stuck']);
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837'), full);
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
   }
@@ -465,7 +468,7 @@ function assertsFrozen(source, driver, app, yaml) {
   assert.match(app, /win32WriteAll\(h, "1\\n"\)/);
   assert.match(app, /if \(job.confirmed\) \{\s+setBrowserFrozenMarkerForShell\(idx, job.frozen\)/);
   assert.match(app, /browser_frozen != job.frozen\) return;/);
-  const timeout = yaml.match(/timeout-minutes: \$\{\{ (?:matrix.feature == '(?:pane-layout|chat-switch-speed)' && \d+ \|\| )*matrix.feature == 'browser-switch-speed' && (\d+) \|\| (\d+) \}\}/);
+  const timeout = yaml.match(/timeout-minutes: \$\{\{ (?:inputs.long_chat_proof && \d+ \|\| )?(?:matrix.feature == '(?:pane-layout|chat-switch-speed)' && \d+ \|\| )*matrix.feature == 'browser-switch-speed' && (\d+) \|\| (\d+) \}\}/);
   assert.ok(timeout);
   const sets = source.match(/\$modes = @\(([^\n]+)\)/)[1].match(/'[^']+'/g).filter(mode => mode.includes('frozen_')).length;
   const samples = Number(source.match(/Contains\('frozen_'\)\) \{ (\d+) \}/)[1]);
@@ -765,4 +768,12 @@ test('IGSH-724 native handoff targets Chrome web contents and real keys distingu
   for (const before of ['IGSH-724 Alt+Q sent a page key to browser chrome', 'IGSH-724 opening a pane sent Space to browser chrome', '++keys', 'foreach ($round in 1..5)', 'Alt+Q sent a page key to the browser menu']) {
     assert.throws(() => assertsPageFocus(focus, main, browser, journey.replace(before, '')));
   }
+});
+
+
+test('long-chat continuity reserves thirty minutes without shortening browser freeze budgets', () => {
+  const timeout = workflow.match(/timeout-minutes: \$\{\{ inputs.long_chat_proof && (\d+) \|\| matrix.feature/);
+  assert.ok(timeout, 'native long-chat proof must have its own observation budget');
+  assert.ok(Number(timeout[1]) >= 40, 'thirty-minute observation plus setup and cleanup');
+  assertsFrozen(journey, control, browser, workflow);
 });
