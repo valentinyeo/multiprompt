@@ -1,5 +1,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+test.before(() => {
+  const clipping = fs.readFileSync(path.join(__dirname, '../src/chat_float.zig'), 'utf8');
+  assert.match(clipping, /out\.add\(title\.pill,/, 'The title clipping must use its rounded outline, not the floating-control moat');
+});
 
 function scene(gap = 0) {
   const width = 200, height = 100;
