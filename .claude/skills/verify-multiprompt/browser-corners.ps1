@@ -85,6 +85,7 @@ $pane = Open-BrowserPane 'corners-open'
 $browser = [VerifyNative]::PaneWindow($script:window)
 if ($browser -eq [IntPtr]::Zero) { throw 'No owned browser pane for corner journey' }
 Focus-LockedBrowser $browser
+[VerifyNative]::ClickBrowserContent($browser, $script:window)
 Press @(0x11, 0x4C) 'Ctrl+L: open synthetic white corner control page'
 $browserRoot = [System.Windows.Automation.AutomationElement]::FromHandle($browser)
 $omniboxCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'OmniboxViewViews')
