@@ -960,7 +960,7 @@ test('native frame sampling stays scheduled while retaining every measured gap a
 test('Windows notification stand-in keeps the supplied reader push algorithm and emits appended data', () => {
   assert.match(read('tools/verify-chat-delivery/boundary.py'), /def watch_reader\(\):/);
   const script = String.raw`
-import ast,base64,ctypes,ctypes.wintypes,io,json,os,sys,tempfile
+import ast,base64,ctypes,ctypes.wintypes,io,json,os,re,sys,tempfile
 from pathlib import Path
 from unittest.mock import patch
 root = Path(sys.argv[1])
@@ -968,7 +968,8 @@ tree = ast.parse((root / 'tools/verify-chat-delivery/boundary.py').read_text(enc
 function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'watch_reader')
 with tempfile.TemporaryDirectory() as temp:
     home = Path(temp)
-    path = home / '.claude/projects/-work-demo/sid.jsonl'
+    cwd = str(home / 'work' / 'demo')
+    path = home / '.claude/projects' / re.sub(r'[^A-Za-z0-9]', '-', cwd) / 'sid.jsonl'
     path.parent.mkdir(parents=True)
     event = lambda text: dict(type='assistant',message=dict(role='assistant',content=[dict(type='text',text=text)]))
     path.write_text(json.dumps(event('original boundary row')) + '\n')
@@ -987,7 +988,7 @@ with tempfile.TemporaryDirectory() as temp:
     kernel.FindCloseChangeNotification = Call(lambda *args: calls.append('closed'))
     kernel.WaitForSingleObject = Call(wait)
     source = (root / 'src/chat_history_reader.py').read_bytes()
-    q = dict(id=7,codex=False,sid='sid',tmux='',cwd='/work/demo',cached_sid='',inode=0,offset=0,live=False)
+    q = dict(id=7,codex=False,sid='sid',tmux='',cwd=cwd,cached_sid='',inode=0,offset=0,live=False)
     stream = io.TextIOWrapper(io.BytesIO(base64.b64encode(source) + b'\n' + json.dumps(q).encode() + b'\n'))
     output = io.StringIO()
     scope = dict(ROOT=home,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys)
