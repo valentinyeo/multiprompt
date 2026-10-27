@@ -1359,12 +1359,12 @@ def search_response(q, path, agent, sid):
     return "\n".join((header, *(wire_row(row) for row in hits), END, ""))
 
 
-def response(q, source=None, as_owner=False):
+def response(q, source=None, as_owner=False, resolved=None):
     if ISSUE_268_CHAT_FIND and "search" in q:
         query = q["search"]
         if not isinstance(query, str) or not 1 <= len(query) <= 200:
             raise ValueError("invalid search")
-    agent, sid, path, delegated = resolve_response_path(q, source, as_owner)
+    agent, sid, path, delegated = resolved or resolve_response_path(q, source, as_owner)
     if delegated is not None:
         return delegated
     if ISSUE_268_CHAT_FIND and "search" in q:
@@ -1470,7 +1470,7 @@ def response(q, source=None, as_owner=False):
             oldest = base
             rows = rows[row_start:]
         if jumped and not rows:
-            return response(dict(q, no_jump=True), source, as_owner)
+            return response(dict(q, no_jump=True), source, as_owner, resolved)
         status = status_header(source, info.st_size, agent, captured)
         if q.get("live") is True and agent == "claude" and tmux and mode != "older":
             status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux))
@@ -1691,6 +1691,103 @@ def settle_response(q, source=None, as_owner=False):
         return error("read_failed")
 
 
+def watch(source, as_owner=False):
+    import ctypes
+    import selectors
+    import struct
+
+    q = json.loads(sys.stdin.buffer.readline())
+    owner = conversation_owner(q.get("cwd", "")) if not q.get("codex") else None
+    if owner and owner[1] != HOME and not as_owner:
+        bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"
+        child = subprocess.Popen(["sudo", "-n", "-H", "-u", owner[0], "--", "python3", "-u", "-c", bootstrap, "--watch", "--owner"], stdin=subprocess.PIPE)
+        try:
+            child.stdin.write(base64.b64encode(source.encode()) + b"\n" + json.dumps(q).encode() + b"\n")
+            child.stdin.flush()
+            while os.read(sys.stdin.fileno(), 4096):
+                pass
+        finally:
+            child.stdin.close()
+            child.wait()
+        return
+    resolved = resolve_response_path(q, source, as_owner)
+    agent, sid, path, delegated = resolved
+    if delegated is not None or path is None:
+        print(json.dumps(dict(id=q["id"], wire=delegated or missing_response(q, "session transcript not found"))), flush=True)
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.inotify_init1.argtypes = [ctypes.c_int]
+    libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+    fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+    if fd < 0:
+        raise OSError(ctypes.get_errno(), "inotify_init1")
+    control = None
+    try:
+        if libc.inotify_add_watch(fd, os.fsencode(path.parent), 0x00000FCE) < 0:
+            raise OSError(ctypes.get_errno(), "inotify_add_watch")
+        q = dict(q, sid=sid, follow=False)
+        with selectors.DefaultSelector() as selector:
+            selector.register(fd, selectors.EVENT_READ, "file")
+            selector.register(sys.stdin.fileno(), selectors.EVENT_READ, "input")
+            if q.get("tmux"):
+                control = subprocess.Popen(["tmux", "-C", "attach-session", "-f", "read-only,ignore-size", "-t", "=" + q["tmux"]],
+                                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                selector.register(control.stdout, selectors.EVENT_READ, "tmux")
+            previous = None
+            while True:
+                started = time.monotonic_ns()
+                wire = response(q, source, as_owner, resolved)
+                fields = wire.split("\n", 1)[0].split("\t")
+                if fields[3] != "ok":
+                    print(json.dumps(dict(id=q["id"], wire=wire)), flush=True)
+                    return
+                signature = (fields[4], fields[6], fields[7], fields[12], tuple(line for line in wire.splitlines()[1:-1] if json.loads(line).get("role") == "status"))
+                if signature != previous:
+                    frame = dict(id=q["id"], wire=wire, read_us=(time.monotonic_ns() - started) // 1000)
+                    print(json.dumps(frame, separators=(",", ":")), flush=True)
+                    previous = signature
+                q.update(cached_sid=fields[4], offset=int(fields[6]), inode=int(fields[7]),
+                         mtime=int(fields[11]), probe=fields[12], start=int(fields[14]), before=0)
+                if fields[8] == "1":
+                    continue
+                changed = False
+                while not changed:
+                    for key, _mask in selector.select():
+                        if key.data == "input":
+                            if not os.read(key.fd, 4096):
+                                return
+                        elif key.data == "tmux":
+                            output = os.read(key.fd, 65536)
+                            if not output:
+                                return
+                            changed = changed or b"%output " in output or b"%extended-output " in output
+                        else:
+                            events = os.read(fd, 65536)
+                            at = 0
+                            while at + 16 <= len(events):
+                                _wd, mask, _cookie, length = struct.unpack_from("iIII", events, at)
+                                name = os.fsdecode(events[at + 16:at + 16 + length].split(b"\0", 1)[0])
+                                at += 16 + length
+                                if mask & 0x4000:
+                                    changed = True
+                                if name == path.name:
+                                    changed = True
+                                elif q.get("tmux") and mask & 0x180 and name.endswith(".jsonl"):
+                                    latest = resolve_response_path(dict(q, follow=True), source, as_owner)
+                                    if latest[2] is not None and latest[2] != path:
+                                        resolved = latest
+                                        agent, sid, path, _delegated = latest
+                                        q["sid"] = sid
+                                        if libc.inotify_add_watch(fd, os.fsencode(path.parent), 0x00000FCE) < 0:
+                                            raise OSError(ctypes.get_errno(), "inotify_add_watch")
+                                        changed = True
+    finally:
+        os.close(fd)
+        if control is not None:
+            control.terminate()
+            control.communicate()
+
+
 def serve(source):
     for line in sys.stdin.buffer:
         query = None
@@ -1718,7 +1815,9 @@ def serve(source):
         print(json.dumps(dict(id=rid, wire=wire), separators=(",", ":")), flush=True)
 
 
-if __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
+if __name__ == "__main__" and "--watch" in sys.argv[1:]:
+    watch(globals().get("READER_SOURCE"), "--owner" in sys.argv[1:])
+elif __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
     serve(globals().get("READER_SOURCE"))
 elif __name__ == "__main__":
     try:

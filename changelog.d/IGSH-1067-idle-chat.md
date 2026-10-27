@@ -1,1 +1,1 @@
-Open chats no longer inspect unrelated server processes on every refresh.
+Open chats receive new messages without repeatedly reloading unchanged conversations.
