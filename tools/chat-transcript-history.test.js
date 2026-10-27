@@ -132,6 +132,8 @@ var disk_bytes: ?[]const u8 = null;
 var remote_pages: []const []const u8 = &.{};
 var remote_calls: usize = 0;
 var cache_writes: usize = 0;
+var capture_cache = false;
+var captured_cache: std.ArrayList(u8) = .empty;
 var status_layout_calls: usize = 0;
 fn layoutChatControls() void { status_layout_calls += 1; _ = chatReadBoundary(); }
 fn chatNewMessagesChanged(_: bool) void {}
@@ -150,7 +152,14 @@ fn chatHistoryFetch(_: chat_transcript.Identity, _: u32, _: chat_history.History
     return true;
 }
 fn win32MakePath(_: []const u8) void {}
-fn writeFileAtomicW(_: []const u8, _: []const u8) bool { cache_writes += 1; return true; }
+fn writeFileAtomicW(_: []const u8, bytes: []const u8) bool {
+    cache_writes += 1;
+    if (capture_cache) {
+        captured_cache.clearRetainingCapacity();
+        captured_cache.appendSlice(std.heap.page_allocator, bytes) catch return false;
+    }
+    return true;
+}
 fn chatHistoryPrune(_: []const u8) void {}
 fn debugLog(_: []const u8) void {}
 fn chatBenchEnabled() bool { return false; }
@@ -443,6 +452,35 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
 }
 test('executed production switch/refresh/completion/layout code keeps cached full history, scroll and stale results safe', () => {
   const run = runHarness(fn('chatDeferTranscriptLoad'));
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
+test('pushed replies persist without waiting for another transcript event', () => {
+  const cases = String.raw`
+test "cache-first switch-back pushed persistence" {
+    const a = std.heap.page_allocator;
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "") };
+    defer one.history.deinit(a);
+    defer if (one.result) |*history| history.deinit(a);
+    capture_cache = true;
+    defer captured_cache.deinit(a);
+    try one.history.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n{\"role\":\"assistant\",\"id\":\"old\",\"text\":\"First reply\",\"offset\":0,\"end\":100}\n@@MP_END@@\n", 1, one.key);
+    one.cache_written = 500;
+    ticks = 600;
+    var wire: std.ArrayList(u8) = .empty;
+    try wire.appendSlice(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t0\t-\tdelta\t0\n{\"role\":\"assistant\",\"id\":\"new\",\"text\":\"Pushed second reply\",\"offset\":100,\"end\":200}\n@@MP_END@@\n");
+    chatFileFetchThread(&one, one.key, 2, false, .{ .wire = wire, .id = 2, .read_us = 0 });
+    try std.testing.expectEqual(@as(usize, 0), remote_calls);
+    try std.testing.expectEqual(@as(usize, 1), cache_writes);
+    var restored = try chat_history.History.decode(a, captured_cache.items, one.key);
+    defer restored.deinit(a);
+    try std.testing.expect(std.mem.indexOf(u8, restored.rows.items, "First reply") != null);
+    try std.testing.expect(std.mem.indexOf(u8, restored.rows.items, "Pushed second reply") != null);
+    try std.testing.expectEqual(@as(usize, 2), restored.blocks.items.len);
+    try std.testing.expect(!one.cache_dirty);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases);
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
 });
