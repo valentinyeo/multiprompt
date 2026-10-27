@@ -1,6 +1,8 @@
 name: Native runner sessions
 
 on:
+  push:
+    branches: [ceo/IGSH-1043]
   pull_request:
     paths:
       - src/chat_history_reader.py
@@ -23,6 +25,7 @@ permissions:
 
 jobs:
   runners:
+    if: github.event_name != 'pull_request' || github.head_ref != 'ceo/IGSH-1043'
     uses: ./.github/workflows/verify.yml
     with:
       feature: chat-delivery
