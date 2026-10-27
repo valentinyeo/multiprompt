@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
@@ -84,4 +86,30 @@ test('switching targets the real composer that Chat View restores on activation'
   assert.match(focus, /\$composer = \[ChatDeliveryDesktop\]::Composer\(\$main\)/);
   assert.match(focus, /\$composer -ne \[IntPtr\]::Zero -and \[ChatDeliveryDesktop\]::FocusOwnedWindow\(\$main, \$app\.Id, \$composer\)/);
   assert.doesNotMatch(focus, /FocusOwnedWindow\(\$main, \$app\.Id, \$main\)/);
+});
+
+test('branch push proof classifies against master after a rebase removes the old head', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'switch-proof-routing-'));
+  try {
+    const git = (...args) => execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
+    git('init', '--quiet');
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--quiet', '--allow-empty', '-m', 'base');
+    const base = git('rev-parse', 'HEAD');
+    git('update-ref', 'refs/remotes/origin/master', base);
+    fs.writeFileSync(path.join(directory, 'app.js'), 'changed\n');
+    git('add', 'app.js');
+    git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--quiet', '-m', 'candidate');
+    for (const [event, ref, before] of [['push', 'refs/heads/ceo/IGSH-1068', 'missing-before-rebase'], ['workflow_dispatch', 'refs/heads/ceo/IGSH-1068', ''], ['push', 'refs/heads/master', base], ['pull_request', 'refs/pull/610/merge', base]]) {
+      const output = path.join(directory, 'outputs');
+      fs.writeFileSync(output, '');
+      const result = spawnSync('bash', ['-e', '-o', 'pipefail', fileURLToPath(new URL('./classify-test-paths.sh', import.meta.url))], {
+        cwd: directory, encoding: 'utf8', timeout: 10000,
+        env: { ...process.env, EVENT: event, GITHUB_REF: ref, BASE: before, HEAD: git('rev-parse', 'HEAD'), RUNNER_TEMP: directory, GITHUB_OUTPUT: output },
+      });
+      assert.equal(result.status, 0, `${event}: ${result.stderr}`);
+      assert.match(fs.readFileSync(output, 'utf8'), /heavy=true/);
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
