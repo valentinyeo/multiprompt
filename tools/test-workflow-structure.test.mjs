@@ -9,12 +9,32 @@ function verifyRouting(text) {
   const jobs = Object.fromEntries([...text.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   assert.equal(jobs.changes, undefined);
   assert.doesNotMatch(text, /needs\.changes|needs:.*\bchanges\b/);
+  const paths = jobs.paths;
+  assert.match(paths, /runs-on: ubuntu-latest/);
+  assert.match(paths, /timeout-minutes: 2/);
+  assert.doesNotMatch(paths, /^    needs:/m);
+  assert.match(paths, /heavy: \$\{\{ steps\.paths\.outputs\.heavy \}\}/);
+  const pathSteps = paths.split(/(?=^      - )/m).filter(step => step.startsWith('      - '));
+  const pathCheckout = pathSteps.findIndex(step => step.includes('uses: actions/checkout@'));
+  assert.match(pathSteps[pathCheckout], /fetch-depth: 0/);
+  assert.match(pathSteps[pathCheckout + 1], /id: paths\n        shell: bash\n/);
+  assert.match(jobs.test, /^    needs: paths\n    if: needs\.paths\.outputs\.heavy == 'true'\n/m);
+  assert.match(jobs['test-windows-update'], /^    needs: \[paths, build-windows\]\n    if: needs\.paths\.outputs\.heavy == 'true' && needs\.build-windows\.result == 'success'\n/m);
+  const result = jobs['test-result'];
+  assert.match(result, /name: test\n/);
+  assert.match(result, /if: always\(\)/);
+  assert.match(result, /HEAVY: \$\{\{ needs\.paths\.outputs\.heavy \}\}/);
+  assert.match(result, /accept windows "\$WINDOWS"/);
+  assert.match(result, /accept windows "\$UPDATE"/);
+  assert.match(result, /accept always "\$PATHS"/);
   for (const name of names) {
     const job = jobs[name];
     assert.ok(job, name);
-    assert.doesNotMatch(job, /^    if:/m);
-    if (name === 'test-windows-update') assert.match(job, /^    needs: \[build-windows\]$/m);
-    else assert.doesNotMatch(job, /^    needs:/m);
+    if (name === 'test' || name === 'test-windows-update') assert.match(job, /^    if:/m);
+    else {
+      assert.doesNotMatch(job, /^    if:/m);
+      assert.doesNotMatch(job, /^    needs:/m);
+    }
     const steps = job.split(/(?=^      - )/m).filter(step => step.startsWith('      - '));
     const checkout = steps.findIndex(step => step.includes('uses: actions/checkout@'));
     assert.ok(checkout >= 0, name);
@@ -46,6 +66,7 @@ test('each test job classifies after full-history checkout and gates all heavy s
 test('routing checks reject the removed dependency, missing history, classifier and heavy guards', () => {
   for (const [before, after] of [
     ['jobs:\n', 'jobs:\n  changes:\n    runs-on: ubuntu-latest\n'],
+    ["    needs: paths\n    if: needs.paths.outputs.heavy == 'true'\n", ''],
     ['    runs-on: windows-latest', '    needs: changes\n    runs-on: windows-latest'],
     ['          fetch-depth: 0', '          fetch-depth: 1'],
     ['        id: paths', '        id: missing'],

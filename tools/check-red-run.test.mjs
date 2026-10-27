@@ -19,7 +19,8 @@ test('red-run admission checks every PR without a hand-picked test or source rev
   assert.match(tests, /uses: \.\/\.github\/workflows\/check-red-run.yml/);
   assert.match(tests, /needs: \[[^\n]*check-red-run[^\n]*\]/);
   assert.match(tests, /RED_RUN: \$\{\{ needs.check-red-run.result \}\}/);
-  assert.match(tests, /require_jobs "\$WINDOWS"[^\n]*"\$RED_RUN"/);
+  assert.match(tests, /accept windows "\$WINDOWS"/);
+  assert.match(tests, /accept always "\$RED_RUN"/);
 });
 
 function fixture(t) {

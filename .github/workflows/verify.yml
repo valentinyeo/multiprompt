@@ -147,6 +147,33 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  features:
+    name: features
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      features: ${{ steps.sel.outputs.features }}
+      appearance: ${{ steps.sel.outputs.appearance }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Select changed feature journeys
+        id: sel
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo 'features=[]' >> "$GITHUB_OUTPUT"
+            echo 'appearance=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node tools/classify-verify-features.mjs
   reopen-board-contract:
     runs-on: ubuntu-latest
     steps:
@@ -222,7 +249,8 @@ jobs:
           path: evidence/
           if-no-files-found: error
   verify:
-    if: inputs.feature != 'chat-sync-audit'
+    needs: features
+    if: needs.features.result == 'success' && inputs.feature != 'chat-sync-audit' && (github.event_name != 'pull_request' || needs.features.outputs.features != '[]' || inputs.chat_notes_proof || inputs.chat_retention_proof || inputs.feature)
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
     timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
@@ -230,7 +258,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && needs.features.outputs.features != '[]' && fromJSON(needs.features.outputs.features) || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
@@ -639,6 +667,22 @@ jobs:
           name: verify-${{ env.FEATURE }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
           path: evidence/
           if-no-files-found: error
+  verify-appearance:
+    name: ${{ github.event_name == 'pull_request' && needs.features.outputs.appearance != 'true' && 'verify (appearance)' || 'verify-appearance-hold' }}
+    needs: [features, verify]
+    if: always() && github.event_name == 'pull_request' && needs.features.outputs.appearance != 'true' && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report the required appearance check
+        env:
+          FEATURES: ${{ needs.features.result }}
+        run: |
+          if [ "$FEATURES" != success ]; then
+            echo 'Changed-feature selection failed'
+            exit 1
+          fi
+          echo 'Appearance files did not change; the required check reports without a Windows journey'
   tmux-identity-semantics:
     if: inputs.feature == 'tmux-binding'
     needs: verify

@@ -32,7 +32,7 @@ test('Windows behavioral update tests are required by CI', () => {
   const update = jobs['test-windows-update'];
   const build = jobs['build-windows'];
   const source = jobs['test-update-source'];
-  assert.match(update, /^    needs: \[build-windows\]\n    runs-on: windows-latest\n/);
+  assert.match(update, /^    needs: \[paths, build-windows\]\n    if: needs\.paths\.outputs\.heavy == 'true' && needs\.build-windows\.result == 'success'\n    runs-on: windows-latest\n/);
   assert.match(update, /scenario: \[Lifecycle, Rollback\]/);
   assert.match(update, /fail-fast: false/);
   assert.match(source, /runs-on: ubuntu-latest/);

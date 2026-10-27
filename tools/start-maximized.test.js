@@ -104,7 +104,7 @@ function assertJourney(control, workflow, map) {
   assert.doesNotMatch(check, /Wait-Until|ShowWindow\(|MoveWindow\(|SetWindowPos\(/);
   assert.match(control, /\$owner -ne \$process.Id -or \[VerifyNative\]::Class\(\$script:window\) -ne 'ZigShell'/);
   assert.match(control, /"--single-window --no-window-restore"/);
-  assert.match(workflow, /github.event_name == 'pull_request' && fromJSON\('\["appearance"\]'\)/);
+  assert.match(workflow, /github\.event_name == 'pull_request' && needs\.features\.outputs\.features != '\[\]' && fromJSON\(needs\.features\.outputs\.features\)/);
   assert.match(workflow, /run: node --test [^\n]*tools\/start-maximized.test.js/);
   assert.match(workflow, /run: zig test src\/launch_plan.zig --test-filter IGSH-587/);
   assert.match(map, /`startup-maximized`/);
@@ -114,8 +114,8 @@ function assertJourney(control, workflow, map) {
 test('IGSH-587 appearance fails on an unmaximized owned main window before driver normalization', () => {
   const args = [read('.claude/skills/verify-multiprompt/control.ps1'), read('.github/workflows/verify.yml'), read('.claude/skills/verify-multiprompt/features/appearance.md')];
   assertJourney(...args);
-  assert.throws(() => assertJourney(args[0], args[1].replace('["appearance"]', '["sessions"]'), args[2]), assert.AssertionError);
-  assert.throws(() => assertJourney(args[0], args[1].replace('["appearance"]', '["appearance", "chat-dictation"]'), args[2]), assert.AssertionError);
+  assert.throws(() => assertJourney(args[0], args[1].replace('fromJSON(needs.features.outputs.features)', "fromJSON('[\"sessions\"]')"), args[2]), assert.AssertionError);
+  assert.throws(() => assertJourney(args[0], args[1].replace("needs.features.outputs.features != '[]' && fromJSON(needs.features.outputs.features)", "fromJSON('[\"appearance\", \"chat-dictation\"]')"), args[2]), assert.AssertionError);
   assert.throws(() => assertJourney(args[0].replace('if (-not $maximized)', 'if ($false)'), ...args.slice(1)));
   assert.throws(() => assertJourney(args[0].replace('IsZoomed($script:window)', 'IsZoomed($Browser)'), ...args.slice(1)));
   assert.throws(() => assertJourney(args[0].replace("        Doctor\n        $maximized", "        [void][VerifyNative]::ShowWindow($script:window, 3)\n        Doctor\n        $maximized"), ...args.slice(1)));

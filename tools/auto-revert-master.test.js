@@ -547,22 +547,24 @@ test('auto-revert workflow grants contents and pull-request writes with the exis
 test('PR smoke and full master matrix stay wired without duplicate release-tag journeys', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
   const release = fs.readFileSync(`${__dirname}/../.github/workflows/release.yml`, 'utf8');
-  assert.match(verify, /pull_request' && fromJSON\('\["appearance"\]'\)/);
+  assert.match(verify, /github\.event_name == 'pull_request' && needs\.features\.outputs\.features != '\[\]' && fromJSON\(needs\.features\.outputs\.features\)/);
+  assert.doesNotMatch(verify, /fromJSON\('\["appearance"\]'\)/);
   assert.match(verify, /github.event_name == 'push' \|\| inputs.feature == 'all'/);
   const matrices = [...verify.matchAll(/fromJSON\('(\[[^'\n]+\])'\)/g)].map(match => JSON.parse(match[1]));
-  assert.equal(matrices[1].length, 21);
-  assert.ok(matrices[1].includes('chat-dictation'));
-  assert.ok(matrices[1].includes('tmux-binding'));
-  assert.ok(matrices[1].includes('chat-send-latency'));
-  assert.ok(matrices[1].includes('remind-me'));
-  assert.ok(matrices[1].includes('chat-first-paint'));
+  const full = matrices.find(list => list.includes('chat-first-paint'));
+  assert.equal(full.length, 21);
+  assert.ok(full.includes('chat-dictation'));
+  assert.ok(full.includes('tmux-binding'));
+  assert.ok(full.includes('chat-send-latency'));
+  assert.ok(full.includes('remind-me'));
+  assert.ok(full.includes('chat-first-paint'));
   assert.match(verify, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
 });
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
-  assert.match(verify, /^  verify:\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
+  assert.match(verify, /^  verify:\n    needs: features\n    if: needs\.features\.result == 'success' && inputs\.feature != 'chat-sync-audit' && \(github\.event_name != 'pull_request' \|\| needs\.features\.outputs\.features != '\[\]' \|\| inputs\.chat_notes_proof \|\| inputs\.chat_retention_proof \|\| inputs\.feature\)\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
 
 test('controlled red proof requires the marker on appearance master pushes and excludes reverts', () => {

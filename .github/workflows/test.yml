@@ -14,8 +14,29 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  paths:
+    name: paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      heavy: ${{ steps.paths.outputs.heavy }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: paths
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash -e -o pipefail tools/classify-test-paths.sh
+
   test:
     name: test-windows (${{ matrix.group }})
+    needs: paths
+    if: needs.paths.outputs.heavy == 'true'
     runs-on: windows-latest
     timeout-minutes: ${{ matrix.group == 1 && 15 || 10 }}
     strategy:
@@ -180,7 +201,7 @@ jobs:
         if: steps.paths.outputs.heavy == 'true'
         run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js
       - name: Verify responsive startup ordering and original regression controls
-        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js
+        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js tools/classify-verify-features.test.mjs tools/same-ref-guard.test.mjs tools/windows-runner-load.test.mjs
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         if: steps.paths.outputs.heavy == 'true'
         with:
@@ -259,7 +280,8 @@ jobs:
           echo 'Release placeholder rejected; ordinary tests remain buildable'
 
   test-windows-update:
-    needs: [build-windows]
+    needs: [paths, build-windows]
+    if: needs.paths.outputs.heavy == 'true' && needs.build-windows.result == 'success'
     runs-on: windows-latest
     timeout-minutes: 10
     strategy:
@@ -610,13 +632,15 @@ jobs:
 
   test-result:
     name: test
-    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run]
+    needs: [paths, test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require every test job
         env:
+          PATHS: ${{ needs.paths.result }}
+          HEAVY: ${{ needs.paths.outputs.heavy }}
           WINDOWS: ${{ needs.test.result }}
           VPS: ${{ needs.test-vps.result }}
           BUILD: ${{ needs.build-windows.result }}
@@ -630,6 +654,13 @@ jobs:
               [ "$result" = success ] || return 1
             done
           }
+          accept() {
+            kind="$1"
+            result="$2"
+            if [ "$result" = success ]; then return 0; fi
+            if [ "$kind" = windows ] && [ "$HEAVY" = false ] && [ "$PATHS" = success ] && [ "$result" = skipped ]; then return 0; fi
+            return 1
+          }
           require_jobs success success success success success success success
           for result in failure cancelled skipped; do
             if require_jobs "$result" success success success success success success; then exit 1; fi
@@ -641,4 +672,11 @@ jobs:
             if require_jobs success success success success success success "$result"; then exit 1; fi
           done
           echo 'Aggregate routing controls passed'
-          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN"
+          accept windows "$WINDOWS" || exit 1
+          accept always "$VPS" || exit 1
+          accept always "$BUILD" || exit 1
+          accept windows "$UPDATE" || exit 1
+          accept always "$WORKER" || exit 1
+          accept always "$UPDATE_SOURCE" || exit 1
+          accept always "$RED_RUN" || exit 1
+          accept always "$PATHS" || exit 1

@@ -140,30 +140,37 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.match(tests, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run\]/);
+  assert.match(tests, /needs: \[paths, test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run\]/);
   assert.match(tests, /BUILD: \$\{\{ needs\.build-windows\.result \}\}/);
 });
 
 test('aggregate routing requires every test job and rejects every unsuccessful dependency', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const aggregate = tests.split('\n  test-result:\n')[1];
-  assert.match(aggregate, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run\]/);
-  for (const [variable, job] of Object.entries({ WINDOWS: 'test', VPS: 'test-vps', BUILD: 'build-windows', UPDATE: 'test-windows-update', WORKER: 'test-worker', UPDATE_SOURCE: 'test-update-source', RED_RUN: 'check-red-run' })) {
-    assert.ok(aggregate.includes(`${variable}: $` + `{{ needs.${job}.result }}`));
+  assert.match(aggregate, /needs: \[paths, test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run\]/);
+  for (const [variable, job] of Object.entries({ PATHS: 'paths', WINDOWS: 'test', VPS: 'test-vps', BUILD: 'build-windows', UPDATE: 'test-windows-update', WORKER: 'test-worker', UPDATE_SOURCE: 'test-update-source', RED_RUN: 'check-red-run' })) {
+    assert.ok(aggregate.includes(`${variable}: $` + `{{ needs.${job}.result }}`) || variable === 'PATHS' && aggregate.includes('PATHS: ${{ needs.paths.result }}'));
   }
+  assert.match(aggregate, /HEAVY: \$\{\{ needs\.paths\.outputs\.heavy \}\}/);
   assert.match(aggregate, /for result in "\$@"; do\n              \[ "\$result" = success \] \|\| return 1/);
   assert.match(aggregate, /for result in failure cancelled skipped; do/);
-  assert.match(aggregate, /require_jobs "\$WINDOWS" "\$VPS" "\$BUILD" "\$UPDATE" "\$WORKER" "\$UPDATE_SOURCE" "\$RED_RUN"/);
-  assert.doesNotMatch(aggregate, /CHANGES|HEAVY|needs\.changes/);
+  assert.match(aggregate, /accept windows "\$WINDOWS"/);
+  assert.match(aggregate, /accept windows "\$UPDATE"/);
+  assert.match(aggregate, /accept always "\$PATHS"/);
+  assert.doesNotMatch(aggregate, /CHANGES|needs\.changes/);
   const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
-  const success = { WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success', RED_RUN: 'success' };
-  const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, ...env } });
+  const success = { PATHS: 'success', WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success', RED_RUN: 'success' };
+  const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, HEAVY: 'true', ...env } });
   const result = run({});
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Aggregate routing controls passed/);
   for (const job of Object.keys(success)) {
     for (const status of ['failure', 'cancelled', 'skipped', 'invalid', '']) assert.equal(run({ [job]: status }).status, 1, `${job}: ${status}`);
   }
+  assert.equal(run({ WINDOWS: 'skipped', UPDATE: 'skipped', HEAVY: 'false' }).status, 0);
+  assert.equal(run({ WINDOWS: 'skipped', UPDATE: 'skipped', HEAVY: 'true' }).status, 1);
+  assert.equal(run({ WINDOWS: 'failure', HEAVY: 'false' }).status, 1);
+  assert.equal(run({ PATHS: 'failure', WINDOWS: 'skipped', UPDATE: 'skipped', HEAVY: 'false' }).status, 1);
 });
 
 test('five Windows and three VPS jobs retain the upstream test graph with independent Worker checks', () => {

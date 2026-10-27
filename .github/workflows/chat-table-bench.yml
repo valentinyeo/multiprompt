@@ -1,10 +1,37 @@
 name: Chat table bench
 on:
   workflow_dispatch:
+    inputs:
+      samples:
+        description: Sample count, fixed at 7
+        required: true
+        default: 7
+        type: number
 permissions:
   contents: read
+  actions: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      run: ${{ steps.guard.outputs.run }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Cap samples and skip a repeat on the same ref
+        id: guard
+        env:
+          GUARD_WORKFLOW: chat-table-bench.yml
+          GUARD_REF: ${{ github.ref_name }}
+          GUARD_SAMPLES: ${{ inputs.samples }}
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/same-ref-guard.mjs
   bench:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
