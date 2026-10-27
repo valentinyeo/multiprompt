@@ -24,7 +24,6 @@ const selectedTabCount = @import("sidebar.zig").selectedTabCount;
 const selectedTabsIncludeGrouped = @import("sidebar.zig").selectedTabsIncludeGrouped;
 const capacityAdmitNewAgent = @import("capacity.zig").capacityAdmitNewAgent;
 const commandCreatesAgentWorkload = @import("capacity.zig").commandCreatesAgentWorkload;
-const SEARCH_VISIBLE_ROWS = @import("app_state.zig").SEARCH_VISIBLE_ROWS;
 const SEARCH_TMUX_OFFSET = @import("app_state.zig").SEARCH_TMUX_OFFSET;
 const SEARCH_NEW_OFFSET = @import("app_state.zig").SEARCH_NEW_OFFSET;
 const SEARCH_SOUND_OFFSET = @import("app_state.zig").SEARCH_SOUND_OFFSET;
@@ -1627,7 +1626,7 @@ fn clampSearchSelectionAndScroll() void {
         app_state.g_search_sel = app_state.g_search_result_count - 1;
     }
 
-    const visible_rows: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+    const visible_rows: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
     const max_scroll = app_state.g_search_result_count - visible_rows;
     if (app_state.g_search_scroll > max_scroll) {
         app_state.g_search_scroll = max_scroll;
@@ -1639,7 +1638,7 @@ pub fn keepSearchSelectionVisible() void {
     if (app_state.g_search_result_count == 0) return;
     stepOverPaletteHeaders(false, false);
 
-    const visible_rows: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+    const visible_rows: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
     if (app_state.g_search_sel < app_state.g_search_scroll) {
         app_state.g_search_scroll = app_state.g_search_sel;
     } else if (app_state.g_search_sel >= app_state.g_search_scroll + visible_rows) {
@@ -2809,21 +2808,21 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "account: remove server 1" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{"account: remove server 1"}, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_1_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "account: remove server 2" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{"account: remove server 2"}, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_2_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "account: remove server 3" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{"account: remove server 3"}, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_3_OFFSET;
         app_state.g_search_result_count += 1;

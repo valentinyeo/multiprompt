@@ -528,7 +528,6 @@ const armStartupConsoleGeometrySettle = @import("console.zig").armStartupConsole
 const settleConsoleGeometry = @import("console.zig").settleConsoleGeometry;
 const BROWSER_EDGE_MASK_COUNT = @import("app_state.zig").BROWSER_EDGE_MASK_COUNT;
 const CHAT_FONT_DEFAULT_PT = @import("app_state.zig").CHAT_FONT_DEFAULT_PT;
-const SEARCH_VISIBLE_ROWS = @import("app_state.zig").SEARCH_VISIBLE_ROWS;
 const SEARCH_WHEEL_ROWS = @import("app_state.zig").SEARCH_WHEEL_ROWS;
 const SEARCH_TMUX_OFFSET = @import("app_state.zig").SEARCH_TMUX_OFFSET;
 const SEARCH_NEW_OFFSET = @import("app_state.zig").SEARCH_NEW_OFFSET;
@@ -1129,6 +1128,8 @@ const uiUnscaled = @import("drawing.zig").uiUnscaled;
 const searchRowH = @import("drawing.zig").searchRowH;
 const searchInputH = @import("drawing.zig").searchInputH;
 const searchOverlayW = @import("drawing.zig").searchOverlayW;
+const searchFooterH = @import("drawing.zig").searchFooterH;
+const searchOverlayOy = @import("drawing.zig").searchOverlayOy;
 const searchOverlayOx = @import("drawing.zig").searchOverlayOx;
 const searchResultRowAtClientPoint = @import("drawing.zig").searchResultRowAtClientPoint;
 const paintSidebar = @import("sidebar.zig").paintSidebar;
@@ -1830,10 +1831,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const click_ow: i32 = searchOverlayW();
                 const click_rh: i32 = searchRowH();
                 const click_ih: i32 = searchInputH();
-                const click_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
-                const click_oh: i32 = click_ih + @as(i32, @intCast(click_capacity)) * click_rh;
+                const click_capacity: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
+                const click_oh: i32 = click_ih + @as(i32, @intCast(click_capacity)) * click_rh + searchFooterH();
                 const click_ox = searchOverlayOx(click_win_w, click_ow);
-                const click_oy = @divFloor(click_win_h - click_oh, 3);
+                const click_oy = searchOverlayOy(click_win_h, click_oh);
 
                 if (searchResultRowAtClientPoint(mx, my)) |clicked_row| {
                     if (paletteRowIsHeader(app_state.g_search_results[clicked_row])) return 0;
@@ -2069,10 +2070,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const wheel_ow: i32 = searchOverlayW();
                 const wheel_rh: i32 = searchRowH();
                 const wheel_ih: i32 = searchInputH();
-                const wheel_vis: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
-                const wheel_oh: i32 = wheel_ih + @as(i32, @intCast(wheel_vis)) * wheel_rh;
+                const wheel_vis: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
+                const wheel_oh: i32 = wheel_ih + @as(i32, @intCast(wheel_vis)) * wheel_rh + searchFooterH();
                 const wheel_ox = searchOverlayOx(wheel_win_w, wheel_ow);
-                const wheel_oy = @divFloor(wheel_win_h - wheel_oh, 3);
+                const wheel_oy = searchOverlayOy(wheel_win_h, wheel_oh);
                 if (pt.x >= wheel_ox and pt.x < wheel_ox + wheel_ow and pt.y >= wheel_oy and pt.y < wheel_oy + wheel_oh) {
                     const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
                     app_state.g_search_wheel_remainder += @as(i32, delta);
@@ -2200,11 +2201,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const drag_win_h = drag_rc.bottom - drag_rc.top;
                 const drag_rh: i32 = searchRowH();
                 const drag_ih: i32 = searchInputH();
-                const drag_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+                const drag_capacity: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
                 const drag_vis: i32 = @intCast(@min(app_state.g_search_result_count -| app_state.g_search_scroll, drag_capacity));
                 if (drag_vis > 0) {
-                    const drag_oh: i32 = drag_ih + @as(i32, @intCast(drag_capacity)) * drag_rh;
-                    const drag_oy = @divFloor(drag_win_h - drag_oh, 3);
+                    const drag_oh: i32 = drag_ih + @as(i32, @intCast(drag_capacity)) * drag_rh + searchFooterH();
+                    const drag_oy = searchOverlayOy(drag_win_h, drag_oh);
                     var hover: i32 = @divFloor(my_drag - (drag_oy + drag_ih), drag_rh);
                     if (hover < 0) hover = 0;
                     if (hover >= drag_vis) hover = drag_vis - 1;
@@ -4283,10 +4284,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         app_state.g_search_sel = if (app_state.g_search_sel >= app_state.g_search_result_count - 1) 0 else app_state.g_search_sel + 1;
                     },
                     2 => {
-                        app_state.g_search_sel = if (app_state.g_search_sel > SEARCH_VISIBLE_ROWS) app_state.g_search_sel - SEARCH_VISIBLE_ROWS else 0;
+                        app_state.g_search_sel = if (app_state.g_search_sel > @import("drawing.zig").searchVisibleRows()) app_state.g_search_sel - @import("drawing.zig").searchVisibleRows() else 0;
                     },
                     3 => {
-                        const next_sel = app_state.g_search_sel + SEARCH_VISIBLE_ROWS;
+                        const next_sel = app_state.g_search_sel + @import("drawing.zig").searchVisibleRows();
                         app_state.g_search_sel = if (next_sel >= app_state.g_search_result_count) app_state.g_search_result_count - 1 else next_sel;
                     },
                     6 => {
@@ -8743,7 +8744,7 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
     app_state.g_search_results[1] = SEARCH_THEME_BACK_OFFSET;
     app_state.g_search_results[2] = SEARCH_THEME_BACK_OFFSET;
     const x = @divFloor(1000 - @import("drawing.zig").searchOverlayW(), 2) + 20;
-    const y = @divFloor(700 - (searchInputH() + 3 * searchRowH()), 3) + searchInputH() + @divFloor(searchRowH(), 2);
+    const y = searchOverlayOy(700, searchInputH() + 3 * searchRowH() + searchFooterH()) + searchInputH() + @divFloor(searchRowH(), 2);
     const lp: LPARAM = @intCast((y << 16) | x);
     var point = w.POINT{ .x = x, .y = y };
     try std.testing.expect(w.ClientToScreen(hwnd, &point) != 0);
