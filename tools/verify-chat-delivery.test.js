@@ -1017,3 +1017,15 @@ print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
 `;
   assert.match(execFileSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 30000 }), /WINDOWS_NOTIFICATION_BOUNDARY_OK/);
 });
+
+
+test('retained-history wheel recovery focuses its verified transcript recipient', () => {
+  const start = drive.indexOf('function Retention-Top {');
+  const end = drive.indexOf('\nfunction Assert-Retention', start);
+  const recovery = drive.slice(start, end);
+  const focus = '[void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, [IntPtr]$rows[0].Current.NativeWindowHandle)';
+  assert.ok(start >= 0 && end > start);
+  assert.ok(recovery.includes(focus), 'wheel must target the owned transcript, not the composer');
+  assert.ok(recovery.indexOf(focus) < recovery.indexOf('::WheelOwnedTranscript'));
+  assert.match(recovery, /\$position\.scroll -eq 0/);
+});

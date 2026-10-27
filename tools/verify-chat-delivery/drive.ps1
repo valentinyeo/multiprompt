@@ -357,6 +357,7 @@ function Retention-Top {
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
     $rows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
     if ($rows.Count -ne 1) { throw 'Retained transcript ownership missing' }
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, [IntPtr]$rows[0].Current.NativeWindowHandle)
     [void](Wait-For 'restore first message after the proof copy moved selection to the bottom' {
         $position = Divider-State
         if ($position -and $position.scroll -eq 0) { return $true }
