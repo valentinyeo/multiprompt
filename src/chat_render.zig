@@ -812,16 +812,7 @@ fn chatFlowBlock(hdc: HANDLE, text: []const u16, block: ChatBlock, area: RECT, p
         return null;
     }
     if (block.kind == .table) return chatFlowTable(hdc, text, area, paint, hit, offset, height);
-    if (block.role == .user) {
-        const ref = chat_reply.reference(text);
-        const start = if (ref) |r| r.body_start else 0;
-        var body = area;
-        body.top += chatReplyLineHeight(text);
-        var body_h: i32 = 0;
-        const link = chatFlowText(hdc, text[start..], body, false, paint, hit, offset + start, &body_h, null, true);
-        if (height) |h| h.* = body_h + chatReplyLineHeight(text);
-        return link;
-    }
+    if (block.role == .user) return chatFlowText(hdc, text, area, false, paint, hit, offset, height, null, true);
     if (!block.markdown or block.role == .code) return chatFlowText(hdc, text, area, block.role == .code, paint, hit, offset, height, null, false);
     if (block.kind == .list) {
         var body = area;
@@ -946,7 +937,9 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
                 shown = chatImgMeasure(body, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
                 bubble_w = @max(bubble_w, @min(chat_style.bubbleMaxWidth(width, uiScaled(720)), shown.max_w + 2 * pad));
             }
-            _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
+            const start = if (ref) |r| r.body_start else 0;
+            _ = chatFlowBlock(hdc, body, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start + start, &flow_h);
+            flow_h += chatReplyLineHeight(text);
             var bubble_h = flow_h + 2 * pad;
             if (shown.count > 0) {
                 const gap = uiScaled(CHAT_IMG_GAP);
@@ -3593,10 +3586,11 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
             bubble.top += chatReplyLineHeight(text);
             chatPaintReplyLine(hdc, text, rc);
             fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor(), true, true);
-            const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = rc.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
+            const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
-            _ = chatFlowBlock(hdc, text, block, text_rc, true, null, disp.start, null);
+            const start = if (chat_reply.reference(text)) |r| r.body_start else 0;
+            _ = chatFlowBlock(hdc, text[start..], block, text_rc, true, null, disp.start + start, null);
         },
         .prose => {
             fillBubbleStyled(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
@@ -4095,15 +4089,17 @@ fn chatTranscriptCharAt(hwnd: HANDLE, x: i32, y: i32) ?usize {
         area.right -= uiScaled(CHAT_CODE_PAD);
         area.top += uiScaled(CHAT_CODE_PAD + CHAT_CODE_HEADER);
     }
+    const start = if (block.role == .user) (if (chat_reply.reference(text)) |r| r.body_start else 0) else 0;
+    if (start > 0) area.top += chatReplyLineHeight(text);
     const block_rect = chatSelectionRect(index);
     const content_y = y + app_state.g_chat_scroll_y;
-    if (content_y < block_rect.top) return disp.start;
+    if (content_y < block_rect.top) return disp.start + start;
     if (content_y >= block_rect.bottom) return disp.start + disp.len;
-    var char: usize = disp.start;
+    var char: usize = disp.start + start;
     const dc = GetDC(hwnd);
     if (dc == null) return char;
     defer _ = ReleaseDC(hwnd, dc);
-    _ = chatFlowBlock(dc, text, block, area, false, .{ .x = x, .y = y, .char = &char }, disp.start, null);
+    _ = chatFlowBlock(dc, text[start..], block, area, false, .{ .x = x, .y = y, .char = &char }, disp.start + start, null);
     return char;
 }
 
@@ -4504,11 +4500,13 @@ fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
         area.right -= uiScaled(CHAT_CODE_PAD);
         area.top += uiScaled(CHAT_CODE_PAD + CHAT_CODE_HEADER);
     }
+    const start = if (block.role == .user) (if (chat_reply.reference(text)) |r| r.body_start else 0) else 0;
+    if (start > 0) area.top += chatReplyLineHeight(text);
     if (!pointInRect(area, x, y)) return null;
     const dc = GetDC(hwnd);
     if (dc == null) return null;
     defer _ = ReleaseDC(hwnd, dc);
-    return chatFlowBlock(dc, text, block, area, false, .{ .x = x, .y = y }, disp.start, null);
+    return chatFlowBlock(dc, text[start..], block, area, false, .{ .x = x, .y = y }, disp.start + start, null);
 }
 
 fn chatContextLinkText(buf: []const u16, link: ?link_detect.Range) ?[]const u16 {
@@ -4894,6 +4892,7 @@ fn chatPaintNavRing(hdc: HANDLE, rc: RECT) void {
 }
 
 pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) void {
+    chatReplyResolve();
     var client_rc = RECT{ .left = 0, .top = 0, .right = w, .bottom = h };
     var canvas = @import("smooth.zig").Canvas.init(mem_dc);
     defer canvas.deinit();
@@ -5376,8 +5375,8 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_LBUTTONDOWN => {
-            chatReplyJumpClear();
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
+            chatReplyJumpClear();
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatNoteAt(GET_X(lp), GET_Y(lp))) |index| {
                 app_state.g_chat_blocks[index].note_open = !app_state.g_chat_blocks[index].note_open;

@@ -23,6 +23,7 @@ const chat_markdown = @import("chat_markdown.zig");
 const chat_style = @import("chat_style.zig");
 const chat_transcript = @import("chat_transcript.zig");
 const chat_echo = @import("chat_echo.zig");
+const chat_reply = @import("chat_reply.zig");
 const chat_diff = @import("chat_diff.zig");
 const ChatBlock = chat_markdown.Block;
 const HANDLE = usize;
@@ -119,6 +120,18 @@ fn chatPaintAgentHeader(_: HANDLE, _: ChatBlock, _: RECT) void { headers += 1; }
 fn chatEchoBlockConfirmed(_: []const u16, _: ChatBlock) bool { return true; }
 `;
 const acceptance = `
+test "production compact reference paints only the reply body above its bubble" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("> Original message\\n> Second source line\\n> Third source line\\n\\nMy answer");
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .user };
+    const rect = chatMeasureBlockRect(0, text, block, .single, 400, 10, null);
+    chatPaintBlock(0, text, block, .single, rect);
+    try std.testing.expectEqualSlices(u16, w("My answer"), drawn[0..drawn_len]);
+    try std.testing.expectEqualSlices(u16, w("↩ Original message"), metadata[0..metadata_len]);
+    try std.testing.expectEqual(rect.top + 24, filled.top);
+    try std.testing.expectEqual(rect.bottom, filled.bottom);
+    try std.testing.expect(rect.bottom - rect.top < 100);
+}
 test "injected production folded rows and open body preserve ordinary user bubbles" {
     var text: [512]u16 = undefined;
     const message = try chat_transcript.messageBlocks("<cross-session-message from='uds:/private.sock' from-mode='bypass' from-name='RUNNER 7'>scope &amp; tests</cross-session-message>", &text, 0, .user, &g_chat_blocks);
@@ -234,8 +247,8 @@ test "ISSUE-263 production tool geometry painting folding hit testing and open-a
 function runHarness(oldColor = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh299-'));
   try {
-    copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig'], dir);
-    let functions = ['chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatMeasureBlockRect', 'chatPaintTime', 'chatNoteBodyRect', 'chatPaintBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'].map(body).join('\n');
+    copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig', 'chat_reply.zig'], dir);
+    let functions = [...['chatReplyLineHeight', 'chatPaintReplyLine'].filter(name => source.includes(`fn ${name}(`)), 'chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatMeasureBlockRect', 'chatPaintTime', 'chatNoteBodyRect', 'chatPaintBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'].map(body).join('\n');
     if (oldColor) functions = functions.replace('chat_style.bubbleColors(themeConsoleBg()).user', 'chat_style.bubbleColors(themeConsoleBg()).agent');
     fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + functions + acceptance).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'production'], { encoding: 'utf8', timeout: 60000 });
