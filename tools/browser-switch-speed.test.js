@@ -336,6 +336,7 @@ function journeyMatrix(source, event, feature = '', ref = 'refs/heads/master', f
     github: { event_name: event, ref },
     inputs: { feature, ...flags },
     fromJSON: JSON.parse,
+    startsWith: (value, prefix) => value.startsWith(prefix),
     format: (pattern, value) => pattern.replace('{0}', value),
   }, { timeout: 1000 });
 }
@@ -353,10 +354,11 @@ function assertsDispatchOnly(source) {
 test('PR journeys are appearance-only while master and manual runs retain the full matrix', () => {
   const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
   function contract(source) {
-    assert.match(source, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
+    assert.match(source, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*'\]\n  workflow_dispatch:/m);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'push'), full);
+    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1072-proof-1'), ['chat-dictation']);
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837'), full);
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
   }

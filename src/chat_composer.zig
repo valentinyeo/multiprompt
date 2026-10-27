@@ -90,6 +90,7 @@ const GetWindowTextLengthW = @import("win32.zig").GetWindowTextLengthW;
 const SetWindowTextW = @import("win32.zig").SetWindowTextW;
 const GetForegroundWindow = @import("win32.zig").GetForegroundWindow;
 const GetAsyncKeyState = @import("win32.zig").GetAsyncKeyState;
+const GetKeyState = @import("win32.zig").GetKeyState;
 const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
 const DeleteObject = @import("win32.zig").DeleteObject;
 const SetBkMode = @import("win32.zig").SetBkMode;
@@ -1523,8 +1524,8 @@ fn chatComposerPaintBuffered(hwnd: HANDLE, target: HANDLE) bool {
 fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRESULT {
     if (app_state.g_chat_ac.open and (msg == WM_KEYDOWN or msg == 0x0102)) list_input.skills.keyboard();
     const down = @as(i16, @bitCast(@as(u16, 0x8000)));
-    if (chatDictationKey(msg, wp, lp, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0)) return 0;
-    if (msg == WM_KEYDOWN and wp == 0x41 and isCtrlDown() and (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0) {
+    if (chatDictationKey(msg, wp, lp, (GetKeyState(0x11) & down) != 0, (GetKeyState(0x10) & down) != 0, (GetKeyState(@as(i32, VK_MENU)) & down) != 0)) return 0;
+    if (msg == WM_KEYDOWN and wp == 0x41 and (GetKeyState(0x11) & down) != 0 and (GetKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0) {
         _ = SendMessageW(hwnd, 0x00B1, 0, -1);
         return 0;
     }
@@ -1573,7 +1574,7 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
         return result;
     }
     if (msg == WM_KEYDOWN and wp != 0x09) app_state.g_chat_ac_tab_accepted = false;
-    if (msg == WM_KEYDOWN and wp == 0xBF and isCtrlDown() and (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0) {
+    if (msg == WM_KEYDOWN and wp == 0xBF and (GetKeyState(0x11) & down) != 0 and (GetKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0) {
         chatAcOpenBrowse();
         return 0;
     }
@@ -1635,9 +1636,9 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
             app_state.g_chat_ac_tab_accepted = false;
             return 0;
         }
-        if (wp == 0x1B or wp == 0x0B or (wp == 0x09 and app_state.g_chat_ac.open) or ((wp == 0x2F or wp == 0x1F) and isCtrlDown() and (GetAsyncKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0)) return 0;
+        if (wp == 0x1B or wp == 0x0B or (wp == 0x09 and app_state.g_chat_ac.open) or ((wp == 0x2F or wp == 0x1F) and (GetKeyState(0x11) & down) != 0 and (GetKeyState(@as(i32, VK_MENU)) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0)) return 0;
         if (wp == 0x0D) {
-            const shift = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
+            const shift = (GetKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
             if (!shift) {
                 if (app_state.g_chat_ac.open and !CHAT_AC_ENTER_SENDS) {
                     if (chatAcAccept()) return 0;
