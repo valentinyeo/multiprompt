@@ -26,3 +26,10 @@ The red run must execute this journey with the app source unchanged from origin/
 ## Gotchas
 
 This is a synthetic Claude/SSH/tmux boundary on GitHub's free Windows runner, not a signed-in live agent. Production transcript discovery, Python reader, history/cache, native layout, selection/copy and app restart are real. No desktop, build or test runs on the VPS. Existing driver condition observations are reused; no new timing constants, page limits or row caps are introduced.
+
+## Retained refresh performance (IGSH-1100)
+
+Run `gh workflow run verify.yml --ref <branch> -f feature=chat-delivery -f chat_retention_proof=true`.
+The retention journey preserves 2,000 messages through 200 arrivals, a source replacement, and an empty refresh. Every copied stage must remain complete, ordered, and unique. Every measured arrival, including the source replacement, remains below the existing 100 ms limit; repeated cached switches remain below 150 ms. Inspect `retention.json`, `full-history/retention-arrival.log`, and the before/after screenshots.
+
+The production-history regression in `tools/chat-transcript-history.test.js` requires unchanged layout prefixes to survive replacement and same-length edited text to invalidate reuse. The last mutable message remains outside the reused prefix.
