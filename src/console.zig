@@ -2422,6 +2422,7 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     @import("chat_composer.zig").chatDraftCloseForShell(idx);
     accountRecordClose(idx);
     if (remember_closed) {
+        if (!@import("launch_cache.zig").pending) app_state.g_tmux_closed.restored = true;
         const closing = &app_state.shells[idx];
         app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len]) catch debugLog("Could not remember closed tmux session");
     }

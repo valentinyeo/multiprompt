@@ -777,14 +777,16 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         pos += 1;
     }
 
-    const closed = std.json.Stringify.valueAlloc(std.heap.page_allocator, app_state.g_tmux_closed.entries.items, .{}) catch return false;
-    defer std.heap.page_allocator.free(closed);
-    const closed_key = ",\"closed_tmux\":";
-    if (pos + closed_key.len + closed.len + 1 > json_buf.len) return false;
-    @memcpy(json_buf[pos .. pos + closed_key.len], closed_key);
-    pos += closed_key.len;
-    @memcpy(json_buf[pos .. pos + closed.len], closed);
-    pos += closed.len;
+    if (app_state.g_tmux_closed.restored) {
+        const closed = std.json.Stringify.valueAlloc(std.heap.page_allocator, app_state.g_tmux_closed.entries.items, .{}) catch return false;
+        defer std.heap.page_allocator.free(closed);
+        const closed_key = ",\"closed_tmux\":";
+        if (pos + closed_key.len + closed.len + 1 > json_buf.len) return false;
+        @memcpy(json_buf[pos .. pos + closed_key.len], closed_key);
+        pos += closed_key.len;
+        @memcpy(json_buf[pos .. pos + closed.len], closed);
+        pos += closed.len;
+    }
     json_buf[pos] = '}';
     pos += 1;
 
@@ -1585,7 +1587,10 @@ pub fn restoreSession() u32 {
         startup_bytes = null;
         break :ready bytes;
     } else readSessionBytes(path);
-    const bytes = json_buf orelse return 0;
+    const bytes = json_buf orelse {
+        app_state.g_tmux_closed.restored = true;
+        return 0;
+    };
     defer std.heap.page_allocator.free(bytes);
 
     const prepared = @import("launch_cache.zig").pending and startupRestoreReady();
@@ -2090,6 +2095,18 @@ test "ISSUE-569 saved view and selected session use the same source during start
     try std.testing.expect(savedStarredView(parsed.value, tabs[0..count]));
     cache.pending = false;
     try std.testing.expect(!savedStarredView(parsed.value, tabs[0..count]));
+}
+
+test "IGSH-1043 unknown startup close metadata differs from a known empty set" {
+    const a = std.testing.allocator;
+    const previous = "{\"tabs\":[],\"closed_tmux\":[{\"host\":0,\"session\":\"runner-empty\"}]}";
+    for ([_][]const u8{ "{\"tabs\":[]}", "{\"tabs\":[],\"closed_tmux\":[]}" }, 0..) |current, i| {
+        const bytes = try mergeStartupSelection(a, previous, current);
+        defer a.free(bytes);
+        var parsed = try json_reader.parse(a, bytes);
+        defer parsed.deinit();
+        try std.testing.expectEqual(@as(usize, if (i == 0) 1 else 0), json_reader.array(json_reader.field(parsed.value, "closed_tmux")).len);
+    }
 }
 
 test "IGSH-1043 startup selection preserves current close intent" {

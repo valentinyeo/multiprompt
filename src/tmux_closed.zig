@@ -17,6 +17,7 @@ pub const Entry = struct {
 };
 
 pub const Closed = struct {
+    restored: bool = false,
     entries: std.ArrayList(Entry) = .empty,
 
     pub fn contains(self: *const Closed, host: u8, name: []const u8) bool {
@@ -43,6 +44,7 @@ pub const Closed = struct {
     }
 
     pub fn restore(self: *Closed, a: std.mem.Allocator, value: std.json.Value) !void {
+        self.restored = true;
         if (value != .array) return;
         records: for (value.array.items) |item| {
             if (item != .object) continue;

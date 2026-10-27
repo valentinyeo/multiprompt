@@ -1,2 +1,3 @@
-Hax runner chats now show their saved messages instead of opening empty.
-Closed sessions stay hidden after syncing, while Reopen Closed still restores them.
+Hax runner chats now show their saved messages.
+Closed sessions stay hidden after syncing.
+Reopen Closed still brings them back.
