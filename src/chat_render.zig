@@ -5131,6 +5131,7 @@ pub fn chatReplyResolve() void {
         debugLog("[chat] reply source matched before focus");
         chatSelectionClear();
         chatReplyJumpClear();
+        debugLog("[chat] reply selection cleared before focus");
         chatNavFocus(i);
         var log: [96]u8 = undefined;
         debugLog(std.fmt.bufPrint(&log, "[chat] reply source index={d} offset={d}", .{ i, block.source_offset }) catch "[chat] reply source");
@@ -5197,7 +5198,9 @@ fn chatNavFocus(index: usize) void {
     app_state.g_chat_nav_source = block.source_offset;
     app_state.g_chat_nav_segment = block.segment;
     app_state.g_chat_nav_stamp = block.stamp_ms;
+    debugLog("[chat] navigation focus before reveal");
     chatNavReveal(index);
+    debugLog("[chat] navigation focus after reveal");
     if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
 

@@ -28,7 +28,7 @@ $y = [int]($probe.y - $bounds.Top)
 $actions.Add(@{case=$plan.name; input='click compact reply reference'; x=$x; y=$y})
 $offset = (Read-Shared "$settings/debug.log").Length
 [ChatDeliveryDesktop]::PressClient([IntPtr]$views[0].Current.NativeWindowHandle, $app.Id, $x, $y)
-[void](Wait-For 'jump selects the original, not later messages' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[chat\] reply source index=2 offset=\d+' })
+[void](Wait-For 'jump selects the original, not later messages' { Doctor $true; (Read-Shared "$settings/debug.log").Substring($offset) -match '\[chat\] reply source index=2 offset=\d+' })
 [void](Wait-For 'source highlight reaches the screen' {
     Shot 'reply-highlighted'
     & node "$PSScriptRoot/chat-reply-reference-proof.mjs" highlight $Evidence
