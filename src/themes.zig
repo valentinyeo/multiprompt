@@ -37,6 +37,15 @@ const repositionActive = @import("window_layout.zig").repositionActive;
 const resetFontCache = @import("drawing.zig").resetFontCache;
 const KillTimer = @import("win32.zig").KillTimer;
 
+pub fn setWideAscii(out: *[64]u16, value: []const u8) void {
+    out.* = std.mem.zeroes([64]u16);
+    const n = @min(value.len, out.len - 1);
+    for (0..n) |i| {
+        const c = value[i];
+        out[i] = if (c >= 32 and c < 127) @intCast(c) else '?';
+    }
+}
+
 pub const Choice = enum { system, dark, mid, light, amoled, edge_gray, multiprompt };
 
 pub fn choose(choice: Choice) void {
@@ -59,15 +68,6 @@ pub fn choose(choice: Choice) void {
     if (choice == .multiprompt) @import("clipboard.zig").startSpinnerTimerIfNeeded();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
     saveGlobalTheme();
-}
-
-pub fn setWideAscii(out: *[64]u16, value: []const u8) void {
-    out.* = std.mem.zeroes([64]u16);
-    const n = @min(value.len, out.len - 1);
-    for (0..n) |i| {
-        const c = value[i];
-        out[i] = if (c >= 32 and c < 127) @intCast(c) else '?';
-    }
 }
 
 fn resetDevThemeDefaults() void {

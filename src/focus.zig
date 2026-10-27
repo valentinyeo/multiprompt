@@ -212,6 +212,10 @@ pub noinline fn focusGuard(target: HANDLE) bool {
 }
 
 fn focusGuardAt(target: HANDLE, caller: usize, raise_container: bool) bool {
+    if (@import("settings_panel.zig").ownsForeground() and !@import("settings_panel.zig").ownsWindow(target)) {
+        focusTrace(.blocked, target, caller);
+        return false;
+    }
     focusGuardReadMouse();
     const now = GetTickCount64();
     if (focusGuardPasteAllows(target, app_state.g_focus_paste_target, app_state.g_main_hwnd)) {

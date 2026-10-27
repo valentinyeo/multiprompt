@@ -86,6 +86,10 @@ try {
         if (-not $field.Current.IsPassword) { throw "Settings exposes a readable key field: $name" }
     }
     $result.checks += @{ name = 'settings-accessible-controls'; passed = $true; maskedKeys = 2; ownerPid = $process.Id }
+    if ((Get-ItemPropertyValue -LiteralPath $environmentPath -Name DEEPGRAM_API_KEY) -cne 'settings-dictation-before' -or
+        (Get-Content -LiteralPath $uploadConfig -Raw) -notmatch 'upload_secret = "settings-upload-before"') { throw 'Opening Settings changed existing keys' }
+    $result.checks += @{ name = 'settings-opening-keeps-keys'; passed = $true }
+
 
     foreach ($theme in @(@{ name = 'Light'; value = 'light' }, @{ name = 'System'; value = 'system' }, @{ name = 'Dark'; value = 'dark' })) {
         Click-Setting $theme.name

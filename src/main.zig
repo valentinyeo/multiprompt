@@ -4045,6 +4045,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         @import("win32.zig").WM_APP_SETTINGS_OPEN => {
+            cancelShellRefocus(hwnd);
             if (app_state.g_search_active) _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
             if (app_state.g_shortcuts_active) _ = SendMessageW(hwnd, WM_APP_SHORTCUTS_CLOSE, 0, 0);
             if (app_state.g_changelog_active) _ = SendMessageW(hwnd, WM_APP_CHANGELOG_CLOSE, 0, 0);

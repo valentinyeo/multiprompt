@@ -351,7 +351,7 @@ function assertsDispatchOnly(source) {
 }
 
 test('PR journeys are appearance-only while master and manual runs retain the full matrix', () => {
-  const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
+  const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'settings-panel', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
   function contract(source) {
     assert.match(source, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), ['appearance']);
@@ -367,6 +367,7 @@ test('PR journeys are appearance-only while master and manual runs retain the fu
     ["(github.event_name == 'push' ||", "(github.event_name == 'pull_request' ||"],
     ["inputs.feature == 'all'", "inputs.feature == 'appearance'"],
     ['"appearance", "chat-dictation",', '"appearance",'],
+    ['"settings-panel", ', ''],
   ]) {
     const broken = workflow.replace(before, after);
     assert.notEqual(broken, workflow, before);

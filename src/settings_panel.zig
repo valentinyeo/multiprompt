@@ -352,7 +352,7 @@ const DrawItem = extern struct {
 };
 
 fn drawControl(item: *const DrawItem) void {
-    const control = std.meta.intToEnum(Control, item.id) catch return;
+    const control = std.enums.fromInt(Control, item.id) orelse return;
     const rc = item.rect;
     const selected = switch (control) {
         .theme_system => state.g_system_theme,
@@ -360,7 +360,7 @@ fn drawControl(item: *const DrawItem) void {
         .theme_light => !state.g_system_theme and state.g_light_theme,
         else => false,
     };
-    const background = w.CreateSolidBrush(tokens.ReaderControl);
+    const background = w.CreateSolidBrush(if (control == .close) tokens.ReaderPanel else tokens.ReaderControl);
     defer _ = w.DeleteObject(background);
     _ = w.FillRect(item.hdc, &rc, background);
     if (control == .terminal) {
@@ -461,7 +461,7 @@ fn contentProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) call
             return 1;
         },
         w.WM_COMMAND => {
-            const control = std.meta.intToEnum(Control, @as(u16, @truncate(wp))) catch return 0;
+            const control = std.enums.fromInt(Control, @as(u16, @truncate(wp))) orelse return 0;
             const notification: u16 = @truncate(wp >> 16);
             if (notification == 0x100 or notification == 6) ensureVisible(control);
             if ((control == .dictation or control == .upload) and !loading) {
