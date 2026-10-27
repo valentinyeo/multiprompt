@@ -27,6 +27,11 @@ test('every tools/, extension/ and service/test/ test file runs in build.zig or 
   assert.deepEqual(missing, [], `add these to a node --test step in build.zig (test-vps runs on every PR): ${missing.join(', ')}`);
 });
 
+test('tools contains no copied test backups', () => {
+  const backups = fs.readdirSync(path.join(root, 'tools')).filter(file => /\.test\.[cm]?js\.orig$/.test(file));
+  assert.deepEqual(backups, [], 'remove copied test backups; keep the active regression tests');
+});
+
 test('the local Wine chat gates exist and are not wired into CI', () => {
   for (const file of localOnly) assert.ok(fs.existsSync(path.join(root, file)));
   assert.deepEqual(unwired([...localOnly], runners()), [...localOnly]);
