@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import selectors
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -1684,6 +1685,39 @@ class HistoryReaderTest(unittest.TestCase):
         reply = json.loads(line)
         self.assertTrue(reply['wire'].endswith(reader.END + '\n'))
         return reply
+
+    @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
+    def test_watch_reuses_control_capture_without_spawning_tmux_per_update(self):
+        real_tmux = shutil.which('tmux')
+        socket = 'push-' + self.home.name
+        subprocess.run([real_tmux, '-L', socket, '-f', '/dev/null', 'new-session', '-d', '-s', 'term-1', 'cat'], check=True)
+        self.addCleanup(lambda: subprocess.run([real_tmux, '-L', socket, 'kill-server'], capture_output=True))
+        log = self.home / 'tmux-calls.jsonl'
+        tools = self.home / 'bin'
+        tools.mkdir()
+        wrapper = tools / 'tmux'
+        wrapper.write_text('#!' + sys.executable + '\nimport json,os,sys\n' +
+                           'with open(' + repr(str(log)) + ', "a") as log: log.write(json.dumps(sys.argv[1:]) + "\\n")\n' +
+                           'os.execv(' + repr(real_tmux) + ', [' + repr(real_tmux) + ', "-L", ' + repr(socket) + '] + sys.argv[1:])\n')
+        wrapper.chmod(0o755)
+        self.query.update(follow=False, live=True)
+        self.write(self.event('control first'))
+        with patch.dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH']):
+            server = self.start_server('--watch')
+        first = self.server_request(server, self.query)
+        self.assertIn('control first', first['wire'])
+        with self.path.open('a') as output:
+            output.write(json.dumps(self.event('control second')) + '\n')
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertTrue(selector.select(timeout=5), 'control append did not push')
+        second = json.loads(server.stdout.readline())
+        self.assertIn('control second', second['wire'])
+        server.stdin.close()
+        self.assertEqual(server.wait(timeout=5), 0, server.stderr.read())
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(sum(call[:1] == ['-C'] for call in calls), 1)
+        self.assertFalse(any(call[:1] == ['capture-pane'] for call in calls), calls)
 
     def test_watch_pushes_appends_without_requests_and_stays_idle(self):
         self.query.update(tmux='', live=False, follow=True)
