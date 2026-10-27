@@ -125,10 +125,15 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 11)
 
     def test_igsh1043_native_rewrite_cannot_reuse_another_message_identity(self):
-        first = reader.conversation_rows(dict(kind='assistant', text='Original saved answer'), 'claude', 123)[0]
-        again = reader.conversation_rows(dict(kind='assistant', text='Original saved answer'), 'claude', 123)[0]
-        replaced = reader.conversation_rows(dict(kind='assistant', text='Rewritten different answer'), 'claude', 123)[0]
-        repeated = reader.conversation_rows(dict(kind='assistant', text='Original saved answer'), 'claude', 456)[0]
+        def saved_message(text, offset):
+            rows = reader.conversation_rows(dict(kind='assistant', text=text), 'claude', offset)
+            self.assertEqual(len(rows), 1, 'Native saved reply must be readable')
+            self.assertIn('id', rows[0])
+            return rows[0]
+        first = saved_message('Original saved answer', 123)
+        again = saved_message('Original saved answer', 123)
+        replaced = saved_message('Rewritten different answer', 123)
+        repeated = saved_message('Original saved answer', 456)
         self.assertEqual(first['id'], again['id'])
         self.assertNotEqual(first['id'], replaced['id'])
         self.assertNotEqual(first['id'], repeated['id'])
@@ -138,7 +143,7 @@ class HistoryReaderTest(unittest.TestCase):
         with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '10\n', '')), \
                 patch.object(reader, 'process_table', return_value={10: (1, ['hax'])}), \
                 patch.object(reader, 'read_process_cwd', return_value='/work/demo'), \
-                patch.object(reader, 'open_hax_transcript', return_value=None):
+                patch.object(reader, 'open_hax_transcript', return_value=None, create=True):
             self.assertIsNone(reader.resolve_tmux_agent('claude', 'runner-starting'))
 
     def test_igsh1043_idle_hax_keeps_its_exact_saved_session(self):
