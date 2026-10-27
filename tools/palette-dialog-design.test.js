@@ -13,7 +13,7 @@ test('IGSH-1061: palette paints the approved neutral card, not blue selection or
   assert.match(paint, /RGB\(0x18, 0x18, 0x18\)/);
   assert.match(paint, /RECENT SESSIONS/);
   assert.match(paint, /Search sessions and commands/);
-  assert.match(paint, /fillRoundRect\(hdc, sel_rc, uiScaled\(20\)/);
+  assert.match(paint, /fillRoundRect\(hdc, sel_rc, uiScaled\(10\)/);
   assert.doesNotMatch(paint, /(?:shells\[shell_idx\]|sess)\.ram_mb/);
   assert.match(paint, /workspaceDisplayName\(app_state\.shells\[shell_idx\]\.workspace/);
 });
@@ -72,4 +72,12 @@ test('IGSH-1061: custom native surfaces use declared Win32 APIs and guarded focu
   assert.match(dialog, /focus\.ShowWindow\(hwnd, 5\)/);
   assert.match(dialog, /focus\.SetFocus\(hwnd\)/);
   assert.doesNotMatch(dialog, /w\.(?:ShowWindow|SetFocus|SetForegroundWindow)\(/);
+});
+
+
+test('IGSH-1061: dialog measures body against full content width and uses approved corner radius', () => {
+  const dialog = read('src/dialog.zig');
+  assert.match(dialog, /var body = w\.RECT\{ \.left = 0, \.top = 0, \.right = width - state\.px\(48\), \.bottom = 0 \}/);
+  assert.match(dialog, /fillRoundRect\(dc, state\.card, state\.px\(20\), outline\)/);
+  assert.match(dialog, /fillRoundRect\(dc, inner, state\.px\(20\) - 1, panel\)/);
 });

@@ -2481,7 +2481,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
                     if (ri == app_state.g_search_sel) {
                         const sel_rc = RECT{ .left = ox + uiScaled(16), .top = ry, .right = ox + overlay_w - uiScaled(16), .bottom = ry + row_h };
-                        @import("smooth.zig").fillRoundRect(hdc, sel_rc, uiScaled(20), if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(0x35, 0x35, 0x35));
+                        @import("smooth.zig").fillRoundRect(hdc, sel_rc, uiScaled(10), if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(0x35, 0x35, 0x35));
                     }
 
                     if (paletteHeaderIndex(result_idx)) |header| {
