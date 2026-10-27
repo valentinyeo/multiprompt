@@ -34,7 +34,9 @@ test('Manage Snippets is searchable, rendered, and Enter deletes instead of past
 });
 
 test('released builds can repeat the keyboard proof through the content-write App boundary', () => {
-  const workflow = fs.readFileSync(path.join(root, '.github/workflows/manage-snippets.yml'), 'utf8');
+  const workflowPath = path.join(root, '.github/workflows/manage-snippets.yml');
+  assert.ok(fs.existsSync(workflowPath), 'native snippet proof workflow must exist');
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
   assert.match(workflow, /repository_dispatch:\s+types: \[manage-snippets-proof\]/);
   assert.match(workflow, /feature: command-palette/);
   assert.match(workflow, /tag: \$\{\{ github\.event\.client_payload\.tag \|\| '' \}\}/);
