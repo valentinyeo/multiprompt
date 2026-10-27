@@ -2606,7 +2606,6 @@ pub fn switchToShell(idx: u32) void {
     var timing: switch_timing.Trace = .{};
     const timing_previous = switch_timing.begin(&timing);
     defer switch_timing.finish(&timing, timing_previous, idx);
-    Sleep(300);
     if (idx < app_state.shell_count and app_state.shells[idx].browser_frozen) wakeBrowserPaneFromFreeze(idx);
     if (app_state.g_starred_workspace and idx < app_state.shell_count) {
         if (@import("workspaces.zig").starredShellVisible(idx)) {
