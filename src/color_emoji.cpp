@@ -81,7 +81,16 @@ struct Painter {
         return true;
     }
     bool draw(HDC dc, const wchar_t *text, unsigned length, RECT bounds, float em) {
-        if (!ready(em) || FAILED(target->BindDC(dc, &bounds))) return false;
+        RECT clip;
+        if (GetClipBox(dc, &clip) == ERROR) return false;
+        RECT visible = {
+            bounds.left > clip.left ? bounds.left : clip.left,
+            bounds.top > clip.top ? bounds.top : clip.top,
+            bounds.right < clip.right ? bounds.right : clip.right,
+            bounds.bottom < clip.bottom ? bounds.bottom : clip.bottom
+        };
+        if (visible.left >= visible.right || visible.top >= visible.bottom) return true;
+        if (!ready(em) || FAILED(target->BindDC(dc, &visible))) return false;
         wchar_t symbol[3];
         if (length == 1 && (text[0] == 0x2713 || text[0] == 0x2717)) {
             symbol[0] = text[0] == 0x2713 ? 0x2705 : 0x274c;
@@ -98,12 +107,12 @@ struct Painter {
         DWRITE_TEXT_METRICS metrics;
         if (SUCCEEDED(layout->GetMetrics(&metrics)) && metrics.widthIncludingTrailingWhitespace > bounds.right - bounds.left)
             layout->SetFontSize(em * (bounds.right - bounds.left) / metrics.widthIncludingTrailingWhitespace, {0, length});
-        const auto background = GetPixel(dc, bounds.left, bounds.top);
+        const auto background = GetBkMode(dc) == OPAQUE ? GetBkColor(dc) : GetPixel(dc, visible.left, visible.top);
         target->BeginDraw();
         target->Clear(D2D1::ColorF(GetRValue(background) / 255.0f, GetGValue(background) / 255.0f, GetBValue(background) / 255.0f));
         const auto color = GetTextColor(dc);
         brush->SetColor(D2D1::ColorF(GetRValue(color) / 255.0f, GetGValue(color) / 255.0f, GetBValue(color) / 255.0f));
-        target->DrawTextLayout(D2D1::Point2F(), layout, brush,
+        target->DrawTextLayout(D2D1::Point2F(float(bounds.left - visible.left), float(bounds.top - visible.top)), layout, brush,
             static_cast<D2D1_DRAW_TEXT_OPTIONS>(D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT));
         const HRESULT result = target->EndDraw();
         layout->Release();

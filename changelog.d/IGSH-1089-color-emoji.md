@@ -1,1 +1,1 @@
-Chat replies and reaction menus now show colorful emojis.
+Chats and reactions now show color emojis.

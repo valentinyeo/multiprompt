@@ -679,3 +679,47 @@ test "IGSH-1089 color emoji preserve source and GDI advances with chromatic pixe
         try std.testing.expect(w.WriteFile(file, &bmp, bmp.len, &written, null) != 0 and written == bmp.len);
     }
 }
+
+test "IGSH-1089 partially scrolled emoji keep the message background and clipping" {
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = 200, .height = -60 } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const font = fonts.chat(-24, false, false, false, .{}) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(font);
+    defer resetFonts();
+    const old_font = w.SelectObject(dc, font);
+    defer _ = w.SelectObject(dc, old_font);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. 200 * 60 * 4];
+    @memset(pixels, 32);
+    _ = w.SetBkMode(dc, w.TRANSPARENT);
+    _ = w.SetTextColor(dc, 0xffffff);
+    const saved = w.SaveDC(dc);
+    defer _ = w.RestoreDC(dc, saved);
+    _ = w.IntersectClipRect(dc, 0, 0, 100, 20);
+    var rect = w.RECT{ .left = 20, .top = -12, .right = 100, .bottom = 28 };
+    _ = draw(dc, L("👍"), 2, &rect, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX);
+    _ = GdiFlush();
+    var size: w.SIZE = undefined;
+    try std.testing.expect(w.GetTextExtentPoint32W(dc, L("👍"), 2, &size) != 0);
+    var colored: usize = 0;
+    var background: usize = 0;
+    for (0..60) |y| {
+        for (0..200) |x| {
+            const pixel = pixels[(y * 200 + x) * 4 ..][0..3];
+            if (x >= 100 or y >= 20) try std.testing.expectEqualSlices(u8, &.{ 32, 32, 32 }, pixel);
+            if (y < 20 and x >= 20 and x < 20 + @as(usize, @intCast(size.cx)) and std.mem.eql(u8, pixel, &.{ 32, 32, 32 })) background += 1;
+            if (@max(pixel[0], pixel[1], pixel[2]) - @min(pixel[0], pixel[1], pixel[2]) > 24) colored += 1;
+        }
+    }
+    try std.testing.expect(colored > 5);
+    try std.testing.expect(background > 10);
+    try std.testing.expectEqualSlices(u8, &.{ 32, 32, 32 }, pixels[0..3]);
+}
