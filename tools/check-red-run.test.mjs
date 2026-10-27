@@ -195,4 +195,5 @@ test('regression admission installs the pinned Zig compiler before executing pro
   assert.match(step, /70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00/);
   assert.match(step, /sha256sum -c -/);
   assert.match(step, /echo "\$RUNNER_TEMP\/zig-x86_64-linux-0\.16\.0" >> "\$GITHUB_PATH"/);
+  assert.match(step, /echo "ZIG=\$RUNNER_TEMP\/zig-x86_64-linux-0\.16\.0\/zig" >> "\$GITHUB_ENV"/);
 });

@@ -47,6 +47,7 @@ jobs:
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           echo "ZIG=$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" >> "$GITHUB_ENV"
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+          echo "ZIG=$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" >> "$GITHUB_ENV"
       - name: Test admission controls
         run: node --test tools/check-red-run.test.mjs
       - name: Require changed tests to fail on merge-base source
