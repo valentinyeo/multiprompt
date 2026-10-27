@@ -502,7 +502,7 @@ pub fn build(b: *std.Build) void {
     chat_drafts_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_drafts_tests.step);
     vps_test_step.dependOn(&chat_drafts_tests.step);
-    const chat_switch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-switch.test.js", "tools/chat-shell-override.test.js" });
+    const chat_switch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-switch.test.js", "tools/chat-shell-override.test.js", "tools/chat-shape-switch.test.js" });
     chat_switch_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_switch_tests.step);
     vps_test_step.dependOn(&chat_switch_tests.step);

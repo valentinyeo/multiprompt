@@ -9,6 +9,10 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Run only on a GitHub Windows runner through verify.yml' }
+$shapeProof = $env:CHAT_SHAPE_PROOF -eq '1'
+$shapeProfile = $env:CHAT_SWITCH_PROFILE -eq '1'
+if ($shapeProof -and $Feature -ne 'chat-switch-speed') { throw 'Shape proof requires the chat-switch-speed journey' }
+if ($shapeProfile -and -not $shapeProof) { throw 'Switch profiling requires the shape-proof journey' }
 switch ($Feature) {
         'chat-full-history' {
             & "$PSScriptRoot/../../../tools/verify-chat-delivery/drive.ps1" -Feature $Feature -Exe $Exe -Ssh "$(Split-Path $Exe)/ssh.exe" -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
@@ -2663,7 +2667,11 @@ try {
             New-Item -ItemType Directory -Path $extensionRoot | Out-Null
             $switchExtensionRoot = (Resolve-Path -LiteralPath $extensionRoot).Path
         }
-        Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse
+        if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) {
+            Copy-Item $env:VERIFY_EXTENSION_ROOT $extension -Recurse
+        } else {
+            Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse
+        }
         $manifestPath = Join-Path $extension 'manifest.json'
         $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
         $publicKey = 'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDQp16XVv5KtjSlsEqMuPshm2xYXIvCx5DIAvNpHvxVpg2xJylPEsBoMC3pNeqqz9qG3g9MHQx7X08ItIevQXaOEWBrX7ZVHHXzoQBnlQ/LZbcSkpFucyNItAURMUCGg8XpwuAXi+rFcMkBcib6IpHklkAk97Kxc3NTevJ8TNSUewIDAQAB'
@@ -2762,7 +2770,15 @@ try {
         $env:MP_VERIFY_STATE = $remoteState
         $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/ssh-path.txt'), (Join-Path (Split-Path $Exe) 'ssh.exe'))
-        & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 400
+        if ($shapeProof) {
+            $shapeFile = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-1040/chat-shapes.json')).Path
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-shapes $shapeFile
+            if ($LASTEXITCODE -ne 0) { throw 'Measured-shape transcript seeding failed' }
+            Copy-Item -LiteralPath $shapeFile (Join-Path $Evidence 'chat-shapes.json')
+            Copy-Item -LiteralPath (Join-Path $remoteState 'chat-shape-manifest.json') (Join-Path $Evidence 'chat-shape-manifest.json')
+        } else {
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 400
+        }
         if ($LASTEXITCODE -ne 0) { throw 'Remote transcript seeding failed' }
         $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
         $remoteSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = $remoteTabs } -Depth 6
@@ -6220,6 +6236,24 @@ try {
             $result.checks += @{ name = 'manage-snippets'; seeded = 2; deleted = 'Remove Me'; preserved = 'Keep Me'; escapeUnchanged = $true; reloadedAfterRestart = $true; entry = 'Ctrl+K Manage Snippets' }
         }
         'chat-switch-speed' {
+            $shapeResult = $null
+            if ($shapeProof) {
+                Add-Type -AssemblyName System.Windows.Forms
+                Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-switch-observer.cs')
+                $shapeResult = [ordered]@{ schema = 1; source = 'GitHub Windows native desktop'; setup_passed = $false; errors = @(); app = @{ tag = $env:RELEASE_TAG; sha256 = $ExpectedHash; optimization = $env:VERIFY_OPTIMIZATION }; fixture = (Get-Content (Join-Path $Evidence 'chat-shape-manifest.json') -Raw | ConvertFrom-Json); session_shells = @(); modes = [ordered]@{ browser_closed = @(); browser_open = @() }; idle = @{} }
+            }
+            function Save-ShapeLatest([string]$Expected, [string]$Marker, [string]$Name) {
+                Focus-Palette 'chat view select all' 6364
+                Press @(0x0D) 'Enter: select actual rendered transcript'
+                [Windows.Forms.Clipboard]::Clear()
+                Press @(0x11, 0x43) 'Ctrl+C: verify the generated latest message outside timing'
+                $copied = [Windows.Forms.Clipboard]::GetText()
+                $latest = [regex]::Match($copied, [regex]::Escape($Expected))
+                $last = [regex]::Match($copied, [regex]::Escape($Marker))
+                if (-not $latest.Success -or -not $last.Success) { throw 'Copied target transcript does not contain the generated latest message and endpoint' }
+                [IO.File]::WriteAllText((Join-Path $Evidence $Name), ($latest.Value + "`n" + $last.Value), (New-Object Text.UTF8Encoding($false)))
+                Press @(0x1B) 'Esc: clear the copied transcript selection'
+            }
             function Test-TabChat($tab) { return [bool]($tab.PSObject.Properties['cv'] -and $tab.cv) }
             $sessionCount = 5
             $switchCount = 20
@@ -6231,9 +6265,14 @@ try {
             foreach ($mode in $modes) { $timings[$mode] = @{ samples_ms = @(); app_ms = @(); hang_ms = @(); missing = 0; median_ms = $null; max_ms = $null; max_hang_ms = $null; first_frame_layout_w = @(); first_frame_client_w = @(); first_frame_wrong_width = 0; moved_after_first_frame = 0; moved_lines = @() } }
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $gapCase = @{ name = 'chat-switch-speed'; status = 'failed'; detail = 'Chat switch measurement did not complete'; phase = 'initial-console' }
-            function Read-SharedLog([string]$Path) {
+            function Read-SharedLog([string]$Path, [long]$ByteOffset = 0) {
                 $stream = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
-                try { $reader = New-Object System.IO.StreamReader($stream); try { return $reader.ReadToEnd() } finally { $reader.Dispose() } } finally { $stream.Dispose() }
+                try {
+                    if ($ByteOffset -gt $stream.Length) { throw 'Switch log was truncated' }
+                    [void]$stream.Seek($ByteOffset, [IO.SeekOrigin]::Begin)
+                    $reader = New-Object System.IO.StreamReader($stream)
+                    try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+                } finally { $stream.Dispose() }
             }
             function Add-SeedTurn([string]$SessionName, [int]$Round) {
                 $index = [int]($SessionName -replace '^.*-', '') - 1
@@ -6288,6 +6327,11 @@ try {
                 Snapshot 'before'
                 [VerifyNative]::StartHangProbe($script:window)
                 $probeStarted = $true
+                if ($shapeProof) {
+                    $shapeResult.session_shells = $shellIds
+                    $shapeResult.setup_passed = $true
+                    $shapeResult.idle.before = [ChatSwitchObserver]::Measure($process.Id, $script:window, -1, $log, 0, '', $settleMs, $null)
+                }
                 foreach ($mode in $modes) {
                     $open = $mode -eq 'browser_open'
                     if ($open) {
@@ -6319,15 +6363,30 @@ try {
                         $target = ($current + 1) % $sessionCount
                         Doctor
                         Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before the switch' 10
-                        Add-SeedTurn (Read-Session).tabs[$target].tmux_session $sample
+                        $turn = if ($shapeProof -and $open) { $sample + $switchCount } else { $sample }
+                        Add-SeedTurn (Read-Session).tabs[$target].tmux_session $turn
                         Start-Sleep -Milliseconds 300
                         $offset = (Get-Item -LiteralPath $log).Length
                         $needle = '[switch] chat content shown shell=' + $shellIds[$target] + ' '
                         Record "Ctrl+$($target + 1): switch to Chat View session $target ($mode sample $sample)"
-                        $measured = [VerifyNative]::SwitchToSession($target, $log, $offset, $needle, $settleMs)
+                        $shapeSample = $null
+                        if ($shapeProof) {
+                            [VerifyNative]::ResetHangProbe()
+                            $jobClock = [Diagnostics.Stopwatch]::StartNew()
+                            $jobBefore = $job.ReadAccounting()
+                            $shapeSample = [ChatSwitchObserver]::Measure($process.Id, $script:window, $target, $log, $offset, $needle, $settleMs, $null)
+                            $jobAfter = $job.ReadAccounting()
+                            $jobClock.Stop()
+                            $jobCpu = ([double]$jobAfter.UserTime + $jobAfter.KernelTime - $jobBefore.UserTime - $jobBefore.KernelTime) / 10000
+                            $shapeSample.owned_job = @{ cpu_ms = $jobCpu; elapsed_ms = $jobClock.Elapsed.TotalMilliseconds; cpu_one_core_percent = 100 * $jobCpu / $jobClock.Elapsed.TotalMilliseconds; active_before = $jobBefore.ActiveProcesses; active_after = $jobAfter.ActiveProcesses }
+                            $shapeSample.hang_ms = [VerifyNative]::HangProbeMax()
+                            $measured = @($shapeSample.shown_ms, $shapeSample.hang_ms)
+                        } else {
+                            $measured = [VerifyNative]::SwitchToSession($target, $log, $offset, $needle, $settleMs)
+                        }
                         if ((Read-Session).active_tab -ne $target) { throw "Switch $sample did not select session $target" }
                         $text = Read-SharedLog $log
-                        $range = if ($offset -le $text.Length) { $text.Substring($offset) } else { '' }
+                        $range = if ($shapeProof) { Read-SharedLog $log $offset } elseif ($offset -le $text.Length) { $text.Substring($offset) } else { '' }
                         $appMs = $null
                         $found = [regex]::Match($range, [regex]::Escape($needle) + 'blocks=\d+ ms=(\d+)')
                         if ($found.Success) { $appMs = [int]$found.Groups[1].Value }
@@ -6346,12 +6405,73 @@ try {
                         $timings[$mode].app_ms += $appMs
                         $timings[$mode].hang_ms += [Math]::Round($measured[1], 1)
                         $range | Set-Content -Encoding UTF8 (Join-Path $Evidence ("{0}-{1}-debug.log" -f $mode, $sample))
+                        if ($shapeProof) {
+                            if (-not $widths.Success -or $shapeSample.shown_ms -lt 0) { throw 'Shape sample needs a completed target paint with geometry' }
+                            $shapeSample.index = $sample
+                            $shapeSample.browser_mode = $mode
+                            $shapeSample.source_shell = $shellIds[$current]
+                            $shapeSample.target_shell = $shellIds[$target]
+                            $shapeSample.layout_width = [int]$widths.Groups[1].Value
+                            $shapeSample.client_width = [int]$widths.Groups[2].Value
+                            $shapeSample.post_paint_moves = $laterMoves.Count -gt 0
+                            $shapeSample.expected_latest = "Session $target live answer $turn"
+                            $shapeSample.last_marker = "IGSH1040_LAST_$($target + 1)"
+                            $shapeSample.latest_receipt = "$mode-$sample-latest.txt"
+                            Save-ShapeLatest $shapeSample.expected_latest $shapeSample.last_marker $shapeSample.latest_receipt
+                            $sourceOffset = (Get-Item -LiteralPath $log).Length
+                            Press @(0x11, (0x31 + $current)) 'Return to the identical source for a separate image replay'
+                            Wait-Until { (Read-Session).active_tab -eq $current -and (Read-SharedLog $log $sourceOffset).Contains('[switch] chat content shown shell=' + $shellIds[$current] + ' ') } 'same source painted before image replay' 30
+                            $imageOffset = (Get-Item -LiteralPath $log).Length
+                            $imagePrefix = "$mode-$sample"
+                            $image = [ChatSwitchObserver]::Measure($process.Id, $script:window, $target, $log, $imageOffset, $needle, $settleMs, (Join-Path $Evidence $imagePrefix))
+                            $image.source_shell = $shellIds[$current]
+                            $image.target_shell = $shellIds[$target]
+                            $image.image_prefix = $imagePrefix
+                            $shapeSample.frame_probe = $image
+                            $shapeResult.modes[$mode] += $shapeSample
+                        }
                         $current = $target
                     }
                     $timings[$mode].median_ms = Get-SwitchMedian $timings[$mode].samples_ms
                     $timings[$mode].max_ms = ($timings[$mode].samples_ms | Measure-Object -Maximum).Maximum
                     $timings[$mode].max_hang_ms = ($timings[$mode].hang_ms | Measure-Object -Maximum).Maximum
                     if (-not $open) { Snapshot 'action' }
+                }
+                if ($shapeProof) {
+                    $shapeResult.idle.after = [ChatSwitchObserver]::Measure($process.Id, $script:window, -1, $log, 0, '', $settleMs, $null)
+                    if ($shapeProfile) {
+                        $gapCase.phase = 'separate-profile'
+                        $allSamples = @($shapeResult.modes.browser_closed) + @($shapeResult.modes.browser_open)
+                        $slow = $allSamples | Sort-Object -Property shown_ms -Descending | Select-Object -First 1
+                        $profileClosed = $slow.browser_mode -eq 'browser_closed'
+                        if ($profileClosed) {
+                            for ($tab = 0; $tab -lt $sessionCount; $tab++) {
+                                Press @(0x11, (0x31 + $tab)) 'Select a session to restore the browser-closed profile mode'
+                                Wait-Until { (Read-Session).active_tab -eq $tab } 'profile browser-close target selected'
+                                Press-CloseBrowserPane 'Close this owned pane before the separate baseline profile'
+                            }
+                        }
+                        $profileSource = [Array]::IndexOf($shellIds, $slow.source_shell)
+                        $profileTarget = [Array]::IndexOf($shellIds, $slow.target_shell)
+                        if ((Read-Session).active_tab -eq $profileSource) {
+                            Press @(0x11, (0x31 + $profileTarget)) 'Leave the source so the profile setup must perform a real switch'
+                            Wait-Until { (Read-Session).active_tab -eq $profileTarget } 'profile setup reached a distinct session'
+                        }
+                        $profileOffset = (Get-Item -LiteralPath $log).Length
+                        Press @(0x11, (0x31 + $profileSource)) 'Restore the slowest measured source before profiling'
+                        Wait-Until { (Read-Session).active_tab -eq $profileSource -and (Read-SharedLog $log $profileOffset).Contains('[switch] chat content shown shell=' + $slow.source_shell + ' ') } 'profile source painted' 30
+                        $profileOffset = (Get-Item -LiteralPath $log).Length
+                        . (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-switch-profile.ps1')
+                        Invoke-ChatSwitchProfile -TargetProcessId $process.Id -Directory (Join-Path $Evidence 'switch-profile') -Route @{ source_shell = $slow.source_shell; target_shell = $slow.target_shell; original_shown_ms = $slow.shown_ms; browser_closed = $profileClosed } -Switch {
+                            [ChatSwitchObserver]::Measure($process.Id, $script:window, $profileTarget, $log, $profileOffset, ('[switch] chat content shown shell=' + $slow.target_shell + ' '), $settleMs, $null)
+                        }
+                        $profileRange = (Read-SharedLog $log $profileOffset)
+                        $profileRange | Set-Content -Encoding UTF8 (Join-Path $Evidence 'switch-profile/app-stages.log')
+                    }
+                    [IO.File]::WriteAllText((Join-Path $Evidence 'shape-switch.json'), ($shapeResult | ConvertTo-Json -Depth 18), (New-Object Text.UTF8Encoding($false)))
+                    $gapCase.phase = 'verdict'
+                    & $env:MP_VERIFY_PYTHON (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-switch-evidence.py') (Join-Path $Evidence 'shape-switch.json')
+                    if ($LASTEXITCODE -ne 0) { throw 'Real-shape switch evidence failed; inspect shape-switch-verdict.json' }
                 }
                 $gapCase.phase = 'verdict'
                 $summary = foreach ($mode in $modes) { "$mode median $($timings[$mode].median_ms) ms (limit $chatLimitMs), worst $($timings[$mode].max_ms) ms, worst window hang $($timings[$mode].max_hang_ms) ms (limit $hangLimitMs), switches without chat shown: $($timings[$mode].missing), first frame at wrong width: $($timings[$mode].first_frame_wrong_width), layout moved after first frame: $($timings[$mode].moved_after_first_frame)" }
@@ -6367,6 +6487,10 @@ try {
             } finally {
                 if ($probeStarted) { [VerifyNative]::StopHangProbe() }
                 Save-Json $timings 'switch-timings.json'
+                if ($shapeProof -and $null -ne $shapeResult) {
+                    if ($gapCase.status -ne 'passed' -and $gapCase.phase -ne 'verdict') { $shapeResult.errors += $gapCase.detail }
+                    [IO.File]::WriteAllText((Join-Path $Evidence 'shape-switch.json'), ($shapeResult | ConvertTo-Json -Depth 18), (New-Object Text.UTF8Encoding($false)))
+                }
                 Save-Json (Read-Session) 'switch-final-session.json'
                 if (Test-Path -LiteralPath $log) { Copy-Item -LiteralPath $log (Join-Path $Evidence 'chat-switch-debug.log') -ErrorAction SilentlyContinue }
             }
