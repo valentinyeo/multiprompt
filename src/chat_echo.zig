@@ -3,7 +3,7 @@ const std = @import("std");
 pub const MIN_PARTIAL: usize = 12;
 const BLOCK_NORM_CAP: usize = 32768;
 
-fn isSpace(c: u16) bool {
+inline fn isSpace(c: u16) bool {
     return c == ' ' or c == '\t' or c == '\r' or c == '\n' or c == 0xA0;
 }
 
@@ -33,7 +33,7 @@ pub fn normalize(text: []const u16, out: []u16) []const u16 {
     var pending_space = false;
     var i: usize = 0;
     while (i < text.len) {
-        const tag = pastedTagLen(text, i);
+        const tag = if (text[i] == '<') pastedTagLen(text, i) else 0;
         if (tag > 0) {
             if (n > 0) pending_space = true;
             i += tag;
@@ -64,6 +64,18 @@ fn stripTrailingEllipsis(s: []const u16) []const u16 {
     return s[0..end];
 }
 
+fn indexOfText(text: []const u16, needle: []const u16) ?usize {
+    if (needle.len == 0) return 0;
+    if (needle.len > text.len) return null;
+    const candidates = text[0 .. text.len - needle.len + 1];
+    var start: usize = 0;
+    while (std.mem.indexOfScalarPos(u16, candidates, start, needle[0])) |i| {
+        if (std.mem.eql(u16, text[i..][0..needle.len], needle)) return i;
+        start = i + 1;
+    }
+    return null;
+}
+
 pub fn blockMatches(block_text: []const u16, prefix: []const u16) bool {
     if (prefix.len == 0) return false;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
@@ -74,7 +86,7 @@ pub fn blockMatches(block_text: []const u16, prefix: []const u16) bool {
         const cut = stripTrailingEllipsis(norm);
         return cut.len >= MIN_PARTIAL and std.mem.eql(u16, prefix[0..cut.len], cut);
     }
-    if (prefix.len >= MIN_PARTIAL) return std.mem.indexOf(u16, norm, prefix) != null;
+    if (prefix.len >= MIN_PARTIAL) return indexOfText(norm, prefix) != null;
     if (norm.len > prefix.len and norm[norm.len - prefix.len - 1] == ' ') {
         return std.mem.eql(u16, norm[norm.len - prefix.len ..], prefix);
     }
@@ -173,7 +185,7 @@ const Normalized = struct {
     fn next(self: *Normalized) ?u16 {
         var space = false;
         while (self.pos < self.text.len) {
-            const tag = pastedTagLen(self.text, self.pos);
+            const tag = if (self.text[self.pos] == '<') pastedTagLen(self.text, self.pos) else 0;
             if (tag > 0 or isSpace(self.text[self.pos])) {
                 self.pos += if (tag > 0) tag else 1;
                 space = self.started;
@@ -340,20 +352,18 @@ test "reserved uncertain sends stay unconfirmed across restart" {
     try std.testing.expectEqual(OutboxState.delivered, stateOnLoad(@intFromEnum(OutboxState.delivered), true));
 }
 
-fn messageMatches(block: []const u16, p: Pending) bool {
+fn messageMatches(block: []const u16, p: Pending, norm: []const u16) bool {
     if (p.text.len == 0) return newBlockMatches(block, p.prefix);
     if (sameText(block, p.text)) return true;
-    var full: [16384]u16 = undefined;
-    const norm = normalize(p.text, &full);
-    if (pastePlaceholderMatches(block, norm)) return true;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
     const body = normalize(block, &buf);
+    if (pastePlaceholderMatches(body, norm)) return true;
     const cut = stripTrailingEllipsis(body);
     if (cut.len < body.len and cut.len >= MIN_PARTIAL and cut.len < norm.len and std.mem.startsWith(u16, norm, cut)) return true;
     if (norm.len == 0 or body.len <= norm.len) return false;
     if (norm.len < MIN_PARTIAL) return body[body.len - norm.len - 1] == ' ' and std.mem.endsWith(u16, body, norm);
     if (std.mem.endsWith(u16, body, norm)) return true;
-    const at = std.mem.indexOf(u16, body, norm) orelse return false;
+    const at = indexOfText(body, norm) orelse return false;
     return (at == 0 or body[at - 1] == ' ') and (at + norm.len == body.len or body[at + norm.len] == ' ');
 }
 
@@ -368,10 +378,8 @@ pub fn isNewBlock(anchor: Anchor, stamp_ms: i64, ordinal: usize, window_full: bo
 
 const PASTE_PLACEHOLDER = [_]u16{ '[', 'P', 'a', 's', 't', 'e', 'd', ' ', 't', 'e', 'x', 't' };
 
-fn pastePlaceholderMatches(block_text: []const u16, prefix: []const u16) bool {
-    var buf: [BLOCK_NORM_CAP]u16 = undefined;
-    const norm = normalize(block_text, &buf);
-    const at = std.mem.indexOf(u16, norm, &PASTE_PLACEHOLDER) orelse return false;
+fn pastePlaceholderMatches(norm: []const u16, prefix: []const u16) bool {
+    const at = indexOfText(norm, &PASTE_PLACEHOLDER) orelse return false;
     var end = at;
     while (end > 0 and norm[end - 1] == ' ') end -= 1;
     const before = norm[0..end];
@@ -382,7 +390,9 @@ fn pastePlaceholderMatches(block_text: []const u16, prefix: []const u16) bool {
 
 pub fn newBlockMatches(block_text: []const u16, prefix: []const u16) bool {
     if (prefix.len == 0) return false;
-    return blockMatches(block_text, prefix) or pastePlaceholderMatches(block_text, prefix);
+    if (blockMatches(block_text, prefix)) return true;
+    var buf: [BLOCK_NORM_CAP]u16 = undefined;
+    return pastePlaceholderMatches(normalize(block_text, &buf), prefix);
 }
 
 fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: Pending) bool {
@@ -396,12 +406,14 @@ fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: 
 
 fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: []const i64, taken: []const ?usize, earlier: []const Pending) ?usize {
     if (p.prefix.len == 0) return null;
+    var full: [16384]u16 = undefined;
+    const norm = normalize(p.text, &full);
     for (blocks, 0..) |b, bi| {
         if (!isNewBlock(p.anchor, b.stamp_ms, bi, window_full) and !p.unanchored_delivery) continue;
         if (p.unanchored_delivery and (p.text.len == 0 or !sameText(b.text, p.text))) continue;
         if (b.stamp_ms > 0 and std.mem.indexOfScalar(i64, claimed, b.stamp_ms) != null) continue;
         if (isTaken(taken, bi, earlier, p)) continue;
-        if (messageMatches(b.text, p)) return bi;
+        if (messageMatches(b.text, p, norm)) return bi;
     }
     return null;
 }
@@ -414,7 +426,10 @@ pub fn assign(pending: []Pending, blocks: []const UserBlock, window_full: bool, 
         const bi = out[i] orelse continue;
         for (pending, 0..) |*other, j| {
             if (j <= i) continue;
-            if (other.text.len > 0 and pending[i].text.len > 0 and !sameText(other.text, pending[i].text) and messageMatches(blocks[bi].text, other.*)) continue;
+            if (other.text.len > 0 and pending[i].text.len > 0 and !sameText(other.text, pending[i].text)) {
+                var full: [16384]u16 = undefined;
+                if (messageMatches(blocks[bi].text, other.*, normalize(other.text, &full))) continue;
+            }
             if (blocks[bi].stamp_ms > 0) {
                 other.anchor.after_ms = @max(other.anchor.after_ms, blocks[bi].stamp_ms);
                 other.unanchored_delivery = false;
@@ -720,7 +735,7 @@ test "ISSUE-608 a message with leftover box text glued in front still confirms" 
     try std.testing.expect(out[0] == null);
     const short = w("yes");
     try std.testing.expect(short.len < MIN_PARTIAL);
-    try std.testing.expect(!messageMatches(&w("leftoveryes"), .{ .prefix = &short, .text = &short, .anchor = .{ .after_ms = 100 } }));
+    try std.testing.expect(!messageMatches(&w("leftoveryes"), .{ .prefix = &short, .text = &short, .anchor = .{ .after_ms = 100 } }, &short));
 }
 
 test "delivery: busy then idle and restart reserve one text write" {
@@ -941,4 +956,16 @@ test "ISSUE-460 all pending states have a hard deadline independent of busy and 
     }
     try std.testing.expect(!pendingExpired(.not_sent, 1000, 901000));
     try std.testing.expectEqual(@as(u8, 2), @intFromEnum(OutboxState.not_sent));
+}
+
+
+test "IGSH-991 text search preserves first matches and UTF16 alignment" {
+    try std.testing.expectEqual(@as(?usize, 0), indexOfText(&w("abc"), &.{}));
+    try std.testing.expectEqual(@as(?usize, null), indexOfText(&w("abc"), &w("abcd")));
+    try std.testing.expectEqual(@as(?usize, 0), indexOfText(&w("abcabc"), &w("abc")));
+    try std.testing.expectEqual(@as(?usize, 1), indexOfText(&w("aaaaabaaaaab"), &w("aaaab")));
+    try std.testing.expectEqual(@as(?usize, 3), indexOfText(&w("xyzabc"), &w("abc")));
+    try std.testing.expectEqual(@as(?usize, null), indexOfText(&w("xyzabc"), &w("abd")));
+    try std.testing.expectEqual(@as(?usize, 5), indexOfText(std.unicode.utf8ToUtf16LeStringLiteral("left 😀 right"), std.unicode.utf8ToUtf16LeStringLiteral("😀")));
+    try std.testing.expectEqual(@as(?usize, null), indexOfText(&.{ 0x00aa, 0xbb00, 0x00cc }, &.{ 0xaa00, 0x00bb }));
 }

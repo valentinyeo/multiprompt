@@ -27,6 +27,9 @@ const chat_diff = @import("chat_diff.zig");
 const ChatBlock = chat_markdown.Block;
 const HANDLE = usize;
 var clean_chat: bool = false;
+var active_shell: usize = 0;
+var shell_count: usize = 1;
+const shells = [_]struct { name: []const u16, name_len: usize }{.{ .name = std.unicode.utf8ToUtf16LeStringLiteral("REVIEWER"), .name_len = 8 }};
 const DWORD = u32;
 const UINT = u32;
 fn L(comptime text: []const u8) [*:0]const u16 { return std.unicode.utf8ToUtf16LeStringLiteral(text); }
@@ -116,7 +119,7 @@ fn chatPaintAgentHeader(_: HANDLE, _: ChatBlock, _: RECT) void { headers += 1; }
 fn chatEchoBlockConfirmed(_: []const u16, _: ChatBlock) bool { return true; }
 `;
 const acceptance = `
-test "injected production paint metadata geometry and user-send matching" {
+test "injected production folded rows and open body preserve ordinary user bubbles" {
     var text: [512]u16 = undefined;
     const message = try chat_transcript.messageBlocks("<cross-session-message from='uds:/private.sock' from-mode='bypass' from-name='RUNNER 7'>scope &amp; tests</cross-session-message>", &text, 0, .user, &g_chat_blocks);
     var injected = g_chat_blocks[0];
@@ -125,34 +128,41 @@ test "injected production paint metadata geometry and user-send matching" {
     injected.zone = stamp.zone;
     var user = injected;
     user.role = .user;
-    for ([_]i32{ 100, 320, 800 }) |width| {
-        const user_rc = chatMeasureBlockRect(0, text[0..message.len], user, .single, width, 10, null);
-        const injected_rc = chatMeasureBlockRect(0, text[0..message.len], injected, .single, width, 10, null);
-        try std.testing.expectEqual(injected_rc.left, user_rc.left);
-        try std.testing.expectEqual(injected_rc.top, user_rc.top);
-        try std.testing.expectEqual(injected_rc.right, user_rc.right);
-        try std.testing.expectEqual(injected_rc.bottom - CHAT_STATUS_H, user_rc.bottom);
-        try std.testing.expectEqual(width, injected_rc.right);
-        try std.testing.expect(injected_rc.right - injected_rc.left <= chat_style.bubbleMaxWidth(width, uiScaled(720)));
-        chatPaintBlock(0, text[0..message.len], injected, .single, injected_rc);
-        try std.testing.expectEqual(@as(u32, 0xFF1E2F4F), chat_style.argb(fill));
-        try std.testing.expectEqual(@as(i32, 20), radius);
-        try std.testing.expectEqual(injected_rc.bottom - CHAT_STATUS_H, filled.bottom);
-        try std.testing.expectEqual(@as(usize, 0), headers);
-        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("scope & tests"), drawn[0..drawn_len]);
-        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("from RUNNER 7"), metadata[0..metadata_len]);
+    for ([_]bool{ false, true }) |light| {
+        g_light_theme = light;
+        bg = if (light) 0xFFFFFF else 0;
+        for ([_]i32{ 100, 320, 800 }) |width| {
+            const user_rc = chatMeasureBlockRect(0, text[0..message.len], user, .single, width, 10, null);
+            try std.testing.expectEqual(width, user_rc.right);
+            try std.testing.expect(user_rc.right - user_rc.left <= chat_style.bubbleMaxWidth(width, uiScaled(720)));
+            chatPaintBlock(0, text[0..message.len], user, .single, user_rc);
+            try std.testing.expectEqual(if (light) @as(u32, 0xFFE5E5E5) else @as(u32, 0xFF353535), chat_style.argb(fill));
+            try std.testing.expectEqual(@as(i32, 20), radius);
+            try std.testing.expectEqual(user_rc.bottom, filled.bottom);
+            try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("scope & tests"), drawn[0..drawn_len]);
+            for ([_]bool{ false, true }) |open| {
+                injected.note_open = open;
+                const rc = chatMeasureBlockRect(0, text[0..message.len], injected, .single, width, 10, null);
+                try std.testing.expectEqual(@as(i32, 0), rc.left);
+                if (open) try std.testing.expect(rc.bottom - rc.top > 28) else try std.testing.expectEqual(@as(i32, 28), rc.bottom - rc.top);
+                fill = 0x123456;
+                drawn_len = 0;
+                chatPaintBlock(0, text[0..message.len], injected, .single, rc);
+                try std.testing.expectEqual(@as(u32, 0x123456), fill);
+                try std.testing.expectEqual(@as(usize, 0), headers);
+                try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("RUNNER 7 to REVIEWER"), metadata[0..metadata_len]);
+                if (open) try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("scope & tests"), drawn[0..drawn_len]) else try std.testing.expectEqual(@as(usize, 0), drawn_len);
+            }
+        }
     }
-    bg = 0xFFFFFF;
-    g_light_theme = true;
-    chatPaintBlock(0, text[0..message.len], injected, .single, .{ .right = 320, .bottom = 100 });
-    try std.testing.expectEqual(@as(u32, 0xFFD6E6F7), chat_style.argb(fill));
     injected.time = @splat(0);
     chatPaintTime(0, injected, .{}, true);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("from RUNNER 7"), metadata[0..metadata_len]);
     metadata_len = 0;
     chatPaintTime(0, user, .{}, true);
     try std.testing.expectEqual(@as(usize, 0), metadata_len);
-
+    g_light_theme = false;
+    bg = 0;
 }
 test "ISSUE-270 production folded and open diff rows fill the card without wrapping" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("Edited foo +4 -2-a\\n+b\\n c\\n+d\\n-e\\n+f\\n g");
@@ -225,17 +235,17 @@ function runHarness(oldColor = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh299-'));
   try {
     copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig'], dir);
-    let functions = ['chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatMeasureBlockRect', 'chatPaintTime', 'chatPaintBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'].map(body).join('\n');
-    if (oldColor) functions = functions.replace('if (block.role == .injected) chatInjectedBubbleColor() else chatUserBubbleColor()', 'chatUserBubbleColor()');
+    let functions = ['chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatMeasureBlockRect', 'chatPaintTime', 'chatNoteBodyRect', 'chatPaintBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'].map(body).join('\n');
+    if (oldColor) functions = functions.replace('chat_style.bubbleColors(themeConsoleBg()).user', 'chat_style.bubbleColors(themeConsoleBg()).agent');
     fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + functions + acceptance).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'production'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
-test('executed production paint uses blue user geometry, sender metadata and no user-send confirmation', () => {
+test('executed production paint folds runner rows and preserves ordinary user bubbles', () => {
   const result = runHarness();
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
-test('paint oracle rejects the former grey user fill (positive control)', () => {
+test('paint oracle rejects assistant fill on user bubbles (positive control)', () => {
   const result = runHarness(true);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /expected \d+, found \d+/);

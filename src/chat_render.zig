@@ -684,31 +684,6 @@ pub fn resetTableMetrics() void {
     table_metrics = .{};
 }
 
-fn chatBlockNaturalWidth(hdc: HANDLE, text: []const u16, block: ChatBlock, offset: usize, max_width: i32) i32 {
-    if (block.markdown and block.role == .injected) {
-        const parts = chatReceivedBlocks(text, offset) catch return max_width;
-        var width: i32 = 0;
-        for (parts) |part| width = @max(width, chatBlockNaturalWidth(hdc, text[part.start - offset ..][0..part.len], part, part.start, max_width));
-        return width;
-    }
-    if (block.kind == .table) {
-        const table = chatTableLayout(hdc, text, offset, max_width) orelse return max_width;
-        return table.content_w;
-    }
-    if (block.role == .code) {
-        const old = SelectObject(hdc, ensureChatCodeFont());
-        defer _ = SelectObject(hdc, old);
-        var width: i32 = 0;
-        var lines = std.mem.splitScalar(u16, text, '\n');
-        while (lines.next()) |line| width = @max(width, chatTextWidth(hdc, std.mem.trimEnd(u16, line, &.{'\r'})));
-        return width;
-    }
-    const list = block.kind == .list;
-    const body = if (list) text[block.prefix..] else text;
-    const size = chatRichSize(hdc, body, false, if (list) 0 else @intCast(block.level));
-    return size.width + (if (list) uiScaled(30) + @as(i32, block.level) * uiScaled(22) else @as(i32, 0));
-}
-
 fn chatTableLayout(hdc: HANDLE, text: []const u16, offset: usize, width: i32) ?*chat_markdown.TableLayout {
     const start = GetTickCount64();
     const before = app_state.g_chat_tables.builds;
@@ -878,6 +853,7 @@ fn chatCodePanelColor() DWORD {
 
 fn chatBlockGapBefore(has_previous: bool, role: ChatBlockRole, first: bool, pos: chat_style.BubblePos) i32 {
     if (!has_previous) return 0;
+    if (role == .injected) return uiScaled(4);
     if (pos == .middle or pos == .last) return 0;
     return if (role == .user or (first and role != .tool)) uiScaled(24) else uiScaled(6);
 }
@@ -887,6 +863,25 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
     const text = buf[disp.start .. disp.start + disp.len];
     var flow_h: i32 = 0;
     const header_h = chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H));
+    if (block.role == .injected) {
+        const pad = uiScaled(CHAT_BUBBLE_PAD);
+        const row_h = uiScaled(28);
+        const row_w = chat_style.agentBubbleWidth(width, uiScaled(720));
+        var shown = ChatImgLayout{};
+        var height = row_h;
+        if (block.note_open) {
+            _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, row_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
+            height += flow_h + 2 * pad;
+            if (imgs != null) shown = chatImgMeasure(text, row_w - 2 * pad);
+            if (shown.count > 0) {
+                shown.origin_x = pad;
+                shown.origin_y = row_h + pad + flow_h + uiScaled(CHAT_IMG_GAP);
+                height += uiScaled(CHAT_IMG_GAP) + shown.total_h;
+            }
+        }
+        if (imgs) |out_imgs| out_imgs.* = shown;
+        return .{ .left = 0, .top = y, .right = row_w, .bottom = y + height };
+    }
     if (block.kind == .table) {
         const pad = uiScaled(CHAT_CODE_PAD);
         const bubble_w = chat_style.agentBubbleWidth(width, uiScaled(720));
@@ -894,14 +889,15 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
         return .{ .left = 0, .top = y, .right = bubble_w, .bottom = y + header_h + flow_h + 2 * pad };
     }
     switch (block.role) {
-        .user, .injected => {
+        .injected => unreachable,
+        .user => {
             const pad = uiScaled(CHAT_BUBBLE_PAD);
             const max_text_w = @max(1, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
             var calc = RECT{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
             const old_font = SelectObject(hdc, ensureChatFont());
-            if (block.role != .injected or !block.markdown) _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
             _ = SelectObject(hdc, old_font);
-            const natural_w = if (block.role == .injected and block.markdown) chatBlockNaturalWidth(hdc, text, block, disp.start, max_text_w) else calc.right;
+            const natural_w = calc.right;
             var bubble_w = chat_style.bubbleWidth(width, natural_w, pad, uiScaled(720));
             var shown = ChatImgLayout{};
             if (imgs != null) {
@@ -909,7 +905,7 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
                 bubble_w = @max(bubble_w, @min(chat_style.bubbleMaxWidth(width, uiScaled(720)), shown.max_w + 2 * pad));
             }
             _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
-            var bubble_h = flow_h + 2 * pad + (if (block.role == .injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0));
+            var bubble_h = flow_h + 2 * pad;
             if (shown.count > 0) {
                 const gap = uiScaled(CHAT_IMG_GAP);
                 shown.origin_x = pad;
@@ -1009,18 +1005,17 @@ test "IGSH-376 top-level table cell sizes match master bytes" {
     }
 }
 
-test "IGSH-376 short list bubble fits the visible word exactly" {
+test "IGSH-376 expanded received list stays on one text line" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     const dc = GetDC(null) orelse return error.TestUnexpectedResult;
     defer _ = ReleaseDC(null, dc);
     const text = w("- Done");
-    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .note_open = true };
     const old = SelectObject(dc, chatRichFont(.{}, 0));
     defer _ = SelectObject(dc, old);
-    const natural = chatTextWidth(dc, w("Done")) + uiScaled(30);
     const pad = uiScaled(CHAT_BUBBLE_PAD);
     const rect = chatMeasureBlockRect(dc, text, block, .single, 752, 0, null);
-    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad, uiScaled(720)), rect.right - rect.left);
+    try std.testing.expectEqual(chat_style.agentBubbleWidth(752, uiScaled(720)), rect.right - rect.left);
     var one_line: i32 = 0;
     _ = chatRichText(dc, w("Done"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 0, false, null, 0, &one_line, false);
     var actual: i32 = 0;
@@ -1028,18 +1023,17 @@ test "IGSH-376 short list bubble fits the visible word exactly" {
     try std.testing.expectEqual(one_line, actual);
 }
 
-test "IGSH-376 short heading bubble fits the visible word exactly" {
+test "IGSH-376 expanded received heading stays on one text line" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     const dc = GetDC(null) orelse return error.TestUnexpectedResult;
     defer _ = ReleaseDC(null, dc);
     const text = w("# Ready");
-    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .note_open = true };
     const old = SelectObject(dc, chatRichFont(.{}, 1));
     defer _ = SelectObject(dc, old);
-    const natural = chatTextWidth(dc, w("Ready")) + uiScaled(0);
     const pad = uiScaled(CHAT_BUBBLE_PAD);
     const rect = chatMeasureBlockRect(dc, text, block, .single, 752, 0, null);
-    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad, uiScaled(720)), rect.right - rect.left);
+    try std.testing.expectEqual(chat_style.agentBubbleWidth(752, uiScaled(720)), rect.right - rect.left);
     var one_line: i32 = 0;
     _ = chatRichText(dc, w("Ready"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 1, false, null, 0, &one_line, false);
     var actual: i32 = 0;
@@ -1047,18 +1041,17 @@ test "IGSH-376 short heading bubble fits the visible word exactly" {
     try std.testing.expectEqual(one_line, actual);
 }
 
-test "IGSH-376 short link bubble fits the visible word exactly" {
+test "IGSH-376 expanded received link stays on one text line" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;
     const dc = GetDC(null) orelse return error.TestUnexpectedResult;
     defer _ = ReleaseDC(null, dc);
     const text = w("[docs](https://example.test/a/very/long/address)");
-    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .note_open = true };
     const old = SelectObject(dc, chatRichFont(.{}, 0));
     defer _ = SelectObject(dc, old);
-    const natural = chatTextWidth(dc, w("docs")) + uiScaled(0);
     const pad = uiScaled(CHAT_BUBBLE_PAD);
     const rect = chatMeasureBlockRect(dc, text, block, .single, 752, 0, null);
-    try std.testing.expectEqual(chat_style.bubbleWidth(752, natural, pad, uiScaled(720)), rect.right - rect.left);
+    try std.testing.expectEqual(chat_style.agentBubbleWidth(752, uiScaled(720)), rect.right - rect.left);
     var one_line: i32 = 0;
     _ = chatRichText(dc, w("docs"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 0, false, null, 0, &one_line, false);
     var actual: i32 = 0;
@@ -1072,7 +1065,7 @@ test "IGSH-376 repeated received paints hover caret and copy parse once" {
     const text = std.unicode.utf8ToUtf16LeStringLiteral("# Ready\n\n- Done\n\n```text\nalpha\n```");
     const dc = GetDC(null) orelse return error.TestUnexpectedResult;
     defer _ = ReleaseDC(null, dc);
-    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .note_open = true };
     const area = RECT{ .left = 0, .top = 0, .right = 600, .bottom = 400 };
     @memcpy(app_state.g_chat_capture[0..text.len], text);
     app_state.g_chat_last_len = text.len;
@@ -1098,7 +1091,7 @@ test "IGSH-376 received fenced code find uses its full layout" {
     @memcpy(app_state.g_chat_capture[0..text.len], text);
     app_state.g_chat_last_len = text.len;
     app_state.g_chat_block_count = 1;
-    app_state.g_chat_blocks[0] = .{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .note_open = true };
     defer {
         app_state.g_chat_last_len = 0;
         app_state.g_chat_block_count = 0;
@@ -1109,7 +1102,7 @@ test "IGSH-376 received fenced code find uses its full layout" {
     var line_h: i32 = 0;
     _ = chatFlowText(dc, w("alpha"), .{ .left = 0, .top = 0, .right = 700, .bottom = 0 }, true, false, null, 0, &line_h, null, false);
     const at = std.mem.indexOf(u16, text, w("needle")).?;
-    try std.testing.expectEqual(37 + uiScaled(CHAT_BUBBLE_PAD) + heading_h + uiScaled(6) + line_h, chatFindY(0, at));
+    try std.testing.expectEqual(37 + uiScaled(28) + uiScaled(CHAT_BUBBLE_PAD) + heading_h + uiScaled(6) + line_h, chatFindY(0, at));
 }
 
 test "IGSH-376 received table supports track drag and Shift wheel" {
@@ -1133,7 +1126,7 @@ test "IGSH-376 received table supports track drag and Shift wheel" {
     @memcpy(app_state.g_chat_capture[0..text.len], text);
     app_state.g_chat_last_len = text.len;
     app_state.g_chat_block_count = 1;
-    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .note_open = true };
     app_state.g_chat_blocks[0] = block;
     app_state.g_chat_scroll_y = 13;
     app_state.g_chat_content_left = 17;
@@ -1151,7 +1144,7 @@ test "IGSH-376 received table supports track drag and Shift wheel" {
     const pad = uiScaled(CHAT_BUBBLE_PAD);
     _ = chatFlowBlock(dc, text[parts[0].start..][0..parts[0].len], parts[0], .{ .left = 0, .top = 0, .right = rc.right - rc.left - 2 * pad, .bottom = 0 }, false, null, parts[0].start, &heading_h);
     const left = app_state.g_chat_content_left + rc.left + pad;
-    const top = rc.top - app_state.g_chat_scroll_y + pad + heading_h + uiScaled(6);
+    const top = rc.top - app_state.g_chat_scroll_y + uiScaled(28) + pad + heading_h + uiScaled(6);
     const y = top + table.layout.bodyHeight() + uiScaled(4);
     const hit = chatTableAt(left + 1, y) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(parts[1].start, hit.offset);
@@ -1173,7 +1166,7 @@ test "IGSH-376 received table supports track drag and Shift wheel" {
     try std.testing.expect(chatTableWheel(hwnd, WM_MOUSEWHEEL, wheel, coords));
     try std.testing.expect(table.layout.scroll > 0);
     const at = std.mem.indexOf(u16, text, std.unicode.utf8ToUtf16LeStringLiteral("needle")).?;
-    try std.testing.expectEqual(rc.top + pad + heading_h + uiScaled(6) + table.layout.rowY(at - parts[1].start), chatFindY(0, at));
+    try std.testing.expectEqual(rc.top + uiScaled(28) + pad + heading_h + uiScaled(6) + table.layout.rowY(at - parts[1].start), chatFindY(0, at));
 }
 
 test "IGSH-376 nested table scroll and active drag survive transcript refresh" {
@@ -1198,7 +1191,7 @@ test "IGSH-376 nested table scroll and active drag survive transcript refresh" {
     @memcpy(app_state.g_chat_capture[0..text.len], text);
     app_state.g_chat_last_len = text.len;
     app_state.g_chat_block_count = 1;
-    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .first = true, .source_offset = 900, .source_end = 1000 };
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .note_open = true, .first = true, .source_offset = 900, .source_end = 1000 };
     app_state.g_chat_blocks[0] = block;
     app_state.g_chat_scroll_y = 13;
     app_state.g_chat_content_left = 17;
@@ -1216,7 +1209,7 @@ test "IGSH-376 nested table scroll and active drag survive transcript refresh" {
     const pad = uiScaled(CHAT_BUBBLE_PAD);
     _ = chatFlowBlock(dc, text[parts[0].start..][0..parts[0].len], parts[0], .{ .left = 0, .top = 0, .right = rc.right - rc.left - 2 * pad, .bottom = 0 }, false, null, parts[0].start, &heading_h);
     const left = app_state.g_chat_content_left + rc.left + pad;
-    const top = rc.top - app_state.g_chat_scroll_y + pad + heading_h + uiScaled(6);
+    const top = rc.top - app_state.g_chat_scroll_y + uiScaled(28) + pad + heading_h + uiScaled(6);
     const y = top + table.layout.bodyHeight() + uiScaled(4);
     const hit = chatTableAt(left + 1, y) orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(parts[1].start, hit.offset);
@@ -1255,7 +1248,7 @@ test "IGSH-376 nested table scroll and active drag survive transcript refresh" {
     try std.testing.expect(!app_state.g_chat_tables.entries.contains(parts[1].start));
 }
 
-test "IGSH-376 received Markdown keeps blue sender layout selection and copied text" {
+test "IGSH-376 expanded received Markdown keeps layout selection and copied text" {
     try std.testing.expect(@import("fonts.zig").register());
     defer @import("fonts.zig").unregister();
     defer @import("drawing.zig").resetFontCache();
@@ -1278,6 +1271,7 @@ test "IGSH-376 received Markdown keeps blue sender layout selection and copied t
     const parsed = try @import("chat_transcript.zig").messageBlocks("<cross-session-message from-name='Agent Blue'># Progress\n\n**Ready** with `inline code` and [docs](https://example.test).\n\n- First item\n- Second item\n\n| Item | Status |\n| --- | --- |\n| Build | Ready |\n\n```text\nC:\\work\\file\n```</cross-session-message>", &wide, 0, .user, &blocks);
     try std.testing.expectEqual(@as(usize, 1), parsed.count);
     try std.testing.expectEqual(ChatBlockRole.injected, blocks[0].role);
+    blocks[0].note_open = true;
     const text = wide[0..parsed.len];
     var rc = chatMeasureBlockRect(dc, text, blocks[0], .single, width - 48, 24, null);
     try std.testing.expect(rc.bottom > 200 and rc.bottom < height - 24);
@@ -1380,12 +1374,12 @@ test "IGSH-376 received Markdown keeps blue sender layout selection and copied t
             .code_px = chatCodeFontPx(),
             .foreground = customColorOr("text", themeConsoleFg()),
             .background = themeConsoleBg(),
-            .bubble_background = chatInjectedBubbleColor(),
+            .bubble_background = themeConsoleBg(),
             .code_background = chatCodePanelColor(),
             .link_color = customColorOr("link", if (app_state.g_light_theme) RGB(30, 90, 170) else RGB(110, 175, 245)),
-            .bubble = rc,
+            .bubble = .{ .left = rc.left, .top = rc.top + uiScaled(28), .right = rc.right, .bottom = rc.bottom },
             .padding = uiScaled(CHAT_BUBBLE_PAD),
-            .radius = uiScaled(CHAT_BUBBLE_RADIUS),
+            .radius = @as(i32, 0),
             .paragraph = "Ready with inline code and docs.",
         }, .{ .whitespace = .indent_2 });
         defer std.testing.allocator.free(metadata);
@@ -1552,7 +1546,8 @@ test "Chat View GDI layout keeps bubble width and avatar space consistent" {
     const timed_rect = chatMeasureBlockRect(dc, text, timed_user, .single, 160, 0, null);
     try std.testing.expectEqual(bubble, timed_rect);
     const injected_rect = chatMeasureBlockRect(dc, text, injected, .single, 160, 0, null);
-    try std.testing.expectEqual(uiScaled(CHAT_STATUS_H), injected_rect.bottom - timed_rect.bottom);
+    try std.testing.expectEqual(uiScaled(28), injected_rect.bottom - injected_rect.top);
+    try std.testing.expectEqual(@as(i32, 0), injected_rect.left);
     var reply = ChatBlock{ .start = 0, .len = text.len, .role = .prose, .markdown = true };
     const plain = chatMeasureBlockRect(dc, text, reply, .single, 320, 0, null);
     reply.first = true;
@@ -1648,7 +1643,7 @@ pub fn chatFindY(index: usize, position: ?usize) i32 {
         const body = app_state.g_chat_capture[disp.start..][0..disp.len];
         var match_y: i32 = 0;
         _ = chatFlowBlock(dc, body, block, area, false, .{ .x = 0, .y = 0, .find = .{ .position = at, .y = &match_y } }, disp.start, null);
-        return rect.top + pad + match_y;
+        return rect.top + uiScaled(28) + pad + match_y;
     }
     const text = app_state.g_chat_capture[start..at];
     if (detail) {
@@ -3523,6 +3518,11 @@ fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool) void {
     _ = chatDrawText(hdc, &label, @intCast(len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | (if (right) @as(UINT, DT_RIGHT) else 0));
 }
 
+fn chatNoteBodyRect(rc: RECT) RECT {
+    const pad = uiScaled(CHAT_BUBBLE_PAD);
+    return .{ .left = rc.left + pad, .top = rc.top + uiScaled(28) + pad, .right = rc.right - pad, .bottom = rc.bottom - pad };
+}
+
 fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_style.BubblePos, source_rc: RECT) void {
     if (app_state.clean_chat and block.role == .tool) return;
     _ = SetBkMode(hdc, TRANSPARENT);
@@ -3531,6 +3531,23 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
     const text = buf[disp.start .. disp.start + disp.len];
     const text_color = customColorOr("text", themeConsoleFg());
     _ = SetBkMode(hdc, TRANSPARENT);
+    if (block.role == .injected) {
+        const old_font = SelectObject(hdc, chatMetadataFont());
+        _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(120, 124, 132)));
+        var arrow = RECT{ .left = rc.left, .top = rc.top, .right = rc.left + uiScaled(18), .bottom = rc.top + uiScaled(28) };
+        _ = chatDrawText(hdc, if (block.note_open) L("⌃") else L("⌄"), 1, &arrow, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        var label_buf: [256]u16 = undefined;
+        const recipient: []const u16 = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].name[0..app_state.shells[app_state.active_shell].name_len] else &.{};
+        const len = @import("chat_transcript.zig").noteLabel(&label_buf, std.mem.sliceTo(&block.sender, 0), recipient, text);
+        var label = RECT{ .left = arrow.right, .top = arrow.top, .right = rc.right, .bottom = arrow.bottom };
+        _ = chatDrawText(hdc, &label_buf, @intCast(len), &label, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = SelectObject(hdc, old_font);
+        if (block.note_open) {
+            _ = SetTextColor(hdc, text_color);
+            _ = chatFlowBlock(hdc, text, block, chatNoteBodyRect(rc), true, null, disp.start, null);
+        }
+        return;
+    }
     if (block.kind == .table) {
         fillBubbleStyled(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), true, true);
         const pad = uiScaled(CHAT_CODE_PAD);
@@ -3539,15 +3556,14 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
         return;
     }
     switch (block.role) {
-        .user, .injected => {
-            const status_h = if (block.role == .injected) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
-            const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h };
-            fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), if (block.role == .injected) chatInjectedBubbleColor() else chatUserBubbleColor(), true, true);
+        .injected => unreachable,
+        .user => {
+            const bubble = rc;
+            fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor(), true, true);
             const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
             _ = chatFlowBlock(hdc, text, block, text_rc, true, null, disp.start, null);
-            if (status_h > 0) chatPaintTime(hdc, block, chatStatusRowRect(bubble), true);
         },
         .prose => {
             fillBubbleStyled(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
@@ -3859,6 +3875,15 @@ fn chatTranscriptBlockAtPoint(y_client: i32) ?usize {
     return null;
 }
 
+fn chatNoteAt(x: i32, y: i32) ?usize {
+    const index = chatTranscriptBlockAtPoint(y) orelse return null;
+    if (app_state.g_chat_blocks[index].role != .injected) return null;
+    const rc = app_state.g_chat_layout_rects[index];
+    if (x < rc.left + app_state.g_chat_content_left or x >= rc.right + app_state.g_chat_content_left or
+        y + app_state.g_chat_scroll_y >= rc.top + uiScaled(28)) return null;
+    return index;
+}
+
 fn chatToolAt(x: i32, y: i32) ?usize {
     const index = chatTranscriptBlockAtPoint(y) orelse return null;
     if (app_state.g_chat_blocks[index].role != .tool) return null;
@@ -3993,7 +4018,7 @@ fn chatTranscriptSelectionBlockAt(y: i32) ?usize {
     const content_y = y + app_state.g_chat_scroll_y;
     for (0..app_state.g_chat_block_count + app_state.g_chat_echo_layout_count) |i| {
         const display = chatSelectionDisplay(i) orelse continue;
-        if (display.block.role == .tool) continue;
+        if (display.block.role == .tool or (display.block.role == .injected and !display.block.note_open)) continue;
         const rc = chatSelectionRect(i);
         const dy = @max(@as(i64, rc.top) - content_y, @max(0, @as(i64, content_y) - rc.bottom));
         if (dy < distance) {
@@ -4019,7 +4044,10 @@ fn chatTranscriptCharAt(hwnd: HANDLE, x: i32, y: i32) ?usize {
         area.left += uiScaled(CHAT_CODE_PAD);
         area.right -= uiScaled(CHAT_CODE_PAD);
         area.top += uiScaled(CHAT_CODE_PAD);
-    } else if (block.role == .user or block.role == .injected) {
+    } else if (block.role == .injected) {
+        if (!block.note_open) return null;
+        area = chatNoteBodyRect(area);
+    } else if (block.role == .user) {
         area.left += uiScaled(CHAT_BUBBLE_PAD);
         area.right -= uiScaled(CHAT_BUBBLE_PAD);
         area.top += uiScaled(CHAT_BUBBLE_PAD);
@@ -4425,7 +4453,10 @@ fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
         area.left += uiScaled(CHAT_CODE_PAD);
         area.right -= uiScaled(CHAT_CODE_PAD);
         area.top += uiScaled(CHAT_CODE_PAD);
-    } else if (block.role == .user or block.role == .injected) {
+    } else if (block.role == .injected) {
+        if (!block.note_open) return null;
+        area = chatNoteBodyRect(area);
+    } else if (block.role == .user) {
         area.left += uiScaled(CHAT_BUBBLE_PAD);
         area.right -= uiScaled(CHAT_BUBBLE_PAD);
         area.top += uiScaled(CHAT_BUBBLE_PAD);
@@ -4677,12 +4708,14 @@ fn chatTableAt(x: i32, y: i32) ?struct { offset: usize, left: i32, top: i32, lay
     const block = app_state.g_chat_blocks[index];
     const rc = app_state.g_chat_layout_rects[index];
     const received = block.role == .injected and block.markdown;
+    if (received and !block.note_open) return null;
     if (block.kind != .table and !received) return null;
     const pad = uiScaled(if (received) CHAT_BUBBLE_PAD else CHAT_CODE_PAD);
     const left = app_state.g_chat_content_left + rc.left + pad;
     var top = rc.top - app_state.g_chat_scroll_y + chat_style.headerHeight(block, uiScaled(CHAT_AGENT_HEADER_H)) + pad;
     var offset = block.start;
     if (received) {
+        top += uiScaled(28);
         const dc = GetDC(app_state.g_chat_transcript_hwnd) orelse return null;
         defer _ = ReleaseDC(app_state.g_chat_transcript_hwnd, dc);
         const disp = chatBlockDisplayRange(app_state.g_chat_capture[0..app_state.g_chat_last_len], block);
@@ -4999,7 +5032,6 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     return 0;
 }
 
-
 fn chatNavEligible(index: usize) bool {
     const block = app_state.g_chat_blocks[index];
     return block.role != .tool and block.len > 0 and !g_reaction_view.hides(index);
@@ -5224,7 +5256,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             var cursor: POINT = undefined;
             _ = GetCursorPos(&cursor);
             _ = ScreenToClient(hwnd, &cursor);
-            if (chatToolAt(cursor.x, cursor.y) != null or chatChoiceAt(cursor.x, cursor.y) != null or app_state.g_chat_hover_link != null or app_state.g_chat_hover_copy != null or app_state.g_chat_hover_image) {
+            if (chatNoteAt(cursor.x, cursor.y) != null or chatToolAt(cursor.x, cursor.y) != null or chatChoiceAt(cursor.x, cursor.y) != null or app_state.g_chat_hover_link != null or app_state.g_chat_hover_copy != null or app_state.g_chat_hover_image) {
                 _ = SetCursor(LoadCursorW(null, @ptrFromInt(32649)));
                 return 1;
             }
@@ -5233,6 +5265,12 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         WM_LBUTTONDOWN => {
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
+            if (chatNoteAt(GET_X(lp), GET_Y(lp))) |index| {
+                app_state.g_chat_blocks[index].note_open = !app_state.g_chat_blocks[index].note_open;
+                app_state.g_chat_scrolled_up = true;
+                chatImageReady();
+                return 0;
+            }
             if (chatToolAt(GET_X(lp), GET_Y(lp))) |index| {
                 app_state.g_chat_blocks[index].tool_open = !app_state.g_chat_blocks[index].tool_open;
                 chatImageReady();
@@ -5305,6 +5343,12 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         WM_LBUTTONDBLCLK => {
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
+            if (chatNoteAt(GET_X(lp), GET_Y(lp))) |index| {
+                app_state.g_chat_blocks[index].note_open = !app_state.g_chat_blocks[index].note_open;
+                app_state.g_chat_scrolled_up = true;
+                chatImageReady();
+                return 0;
+            }
             if (chatToolAt(GET_X(lp), GET_Y(lp))) |index| {
                 app_state.g_chat_blocks[index].tool_open = !app_state.g_chat_blocks[index].tool_open;
                 chatImageReady();
@@ -6883,6 +6927,95 @@ test "IGSH-1001 the scroll-down button sits on a clear gap, not on chat text" {
     try std.testing.expectEqual(ink, scrollProofColor(beside));
 }
 
+fn moreMenuProofNear(pixel: u32, r: u32, g: u32, b: u32, slack: u32) bool {
+    const near = struct {
+        fn within(a: u32, e: u32, d: u32) bool {
+            return (if (a > e) a - e else e - a) <= d;
+        }
+    }.within;
+    return near(pixel & 0xFF, r, slack) and near((pixel >> 8) & 0xFF, g, slack) and near((pixel >> 16) & 0xFF, b, slack);
+}
+
+fn moreMenuProof(frame_dc: HANDLE, frame_pixels: []const u32, frame_w: usize, pane: RECT, more: RECT, bg: u32) !void {
+    const w = @import("win32.zig");
+    const more_menu = @import("more_menu.zig");
+    const pane_w = pane.right - pane.left;
+    const pane_h = pane.bottom - pane.top;
+    var backdrop = more_menu.captureBackdrop(frame_dc, pane.left, pane.top, pane_w, pane_h, 0x00CC0020) orelse return error.TestUnexpectedResult;
+    defer backdrop.release();
+    const menu_dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(menu_dc);
+    const menu_info: w.BITMAPINFO = .{ .header = .{ .width = pane_w, .height = -pane_h } };
+    var menu_bits: ?*anyopaque = null;
+    const menu_bitmap = w.CreateDIBSection(menu_dc, &menu_info, 0, &menu_bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(menu_bitmap);
+    const old_menu = SelectObject(menu_dc, menu_bitmap);
+    defer _ = SelectObject(menu_dc, old_menu);
+    _ = w.BitBlt(menu_dc, 0, 0, pane_w, pane_h, backdrop.dc, 0, 0, 0x00CC0020);
+
+    const bounds = RECT{ .left = 0, .top = 0, .right = pane_w, .bottom = pane_h };
+    const anchor = RECT{ .left = more.left - pane.left, .top = more.top - pane.top, .right = more.right - pane.left, .bottom = more.bottom - pane.top };
+    var state: more_menu.State = .{};
+    state.enabled[@intFromEnum(more_menu.Item.model)] = false;
+    const model = std.unicode.utf8ToUtf16LeStringLiteral("Opus \u{b7} Medium");
+    @memcpy(state.model[0..model.len], model);
+    state.model_len = model.len;
+    more_menu.paint(menu_dc, bounds, anchor, &state);
+    _ = w.GdiFlush();
+
+    const pixels = @as([*]const u32, @ptrCast(@alignCast(menu_bits.?)))[0 .. @as(usize, @intCast(pane_w)) * @as(usize, @intCast(pane_h))];
+    const at = struct {
+        fn get(px: []const u32, width: i32, x: i32, y: i32) u32 {
+            return scrollProofColor(px[@as(usize, @intCast(y)) * @as(usize, @intCast(width)) + @as(usize, @intCast(x))]);
+        }
+    }.get;
+    const geo = more_menu.geometry(bounds, anchor);
+    try std.testing.expect(geo.panel.top >= anchor.bottom);
+    try std.testing.expect(geo.panel.right <= bounds.right);
+    try std.testing.expectEqual(anchor.right, geo.panel.right);
+
+    const dim_x = pane.left + 3;
+    const dim_y = pane.top + 3;
+    const source = scrollProofColor(frame_pixels[@as(usize, @intCast(dim_y)) * frame_w + @as(usize, @intCast(dim_x))]);
+    const shown = at(pixels, pane_w, 3, 3);
+    try std.testing.expect(moreMenuProofNear(shown, (source & 0xFF) * 5 / 12, ((source >> 8) & 0xFF) * 5 / 12, ((source >> 16) & 0xFF) * 5 / 12, 2));
+    _ = bg;
+
+    const panel_probe = at(pixels, pane_w, geo.panel.left + 4, geo.panel.top + @divTrunc(geo.panel.bottom - geo.panel.top, 2));
+    try std.testing.expectEqual(RGB(0x18, 0x18, 0x18), panel_probe);
+    const remove_cell = geo.cells[@intFromEnum(more_menu.Item.remove)];
+    const card_probe = at(pixels, pane_w, remove_cell.left + 4, remove_cell.top + @divTrunc(remove_cell.bottom - remove_cell.top, 2));
+    try std.testing.expectEqual(RGB(0x1F, 0x1F, 0x1F), card_probe);
+
+    var red_rows: usize = 0;
+    var y = remove_cell.top;
+    while (y < remove_cell.bottom) : (y += 1) {
+        var x = remove_cell.left;
+        while (x < remove_cell.right) : (x += 1) {
+            if (moreMenuProofNear(at(pixels, pane_w, x, y), 0xF2, 0x8B, 0x82, 24)) red_rows += 1;
+        }
+    }
+    std.debug.print("IGSH-1020 more menu: red pixels in Remove row={d}\n", .{red_rows});
+    try std.testing.expect(red_rows > 20);
+
+    var plain_red: usize = 0;
+    const approve_cell = geo.cells[@intFromEnum(more_menu.Item.approve)];
+    y = approve_cell.top;
+    while (y < approve_cell.bottom) : (y += 1) {
+        var x = approve_cell.left;
+        while (x < approve_cell.right) : (x += 1) {
+            if (moreMenuProofNear(at(pixels, pane_w, x, y), 0xF2, 0x8B, 0x82, 24)) plain_red += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), plain_red);
+
+    var enabled: [8]u8 = undefined;
+    if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
+        const bytes = @as([*]const u8, @ptrCast(menu_bits.?))[0 .. @as(usize, @intCast(pane_w)) * @as(usize, @intCast(pane_h)) * 4];
+        try scrollProofSave(L("chat-more-menu.bmp"), bytes, menu_info.header);
+    }
+}
+
 test "IGSH-933 messages scroll behind the floating title pill and into the message box" {
     try std.testing.expect(@import("fonts.zig").register());
     defer @import("fonts.zig").unregister();
@@ -7079,7 +7212,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         try std.testing.expect(outline != bg and outline != fill);
 
         const left_band = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.top, pill.left - uiScaled(8), pill.bottom);
-        const right_band = floatProofInk(frame_pixels, frame_w, bg, beside_right, pill.top, layout.transcript.right - uiScaled(16), pill.bottom);
+        const right_band = floatProofInk(frame_pixels, frame_w, bg, beside_right, pill.top, title_layout.more.left - uiScaled(8), pill.bottom);
         const above_card = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(40), layout.transcript.right, card.top);
         const gap_strip = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(12), layout.transcript.right, card.top - uiScaled(1));
         const below_pill = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.bottom + uiScaled(2), layout.transcript.right, pill.bottom + uiScaled(40));
@@ -7123,4 +7256,85 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         }
     }
     try std.testing.expect(sweep_outside > 200);
+
+    app_state.g_chat_scroll_y = middle_scroll;
+    var menu_rc = RECT{ .left = 0, .top = 0, .right = frame_w, .bottom = frame_h };
+    const menu_brush = CreateSolidBrush(bg);
+    _ = FillRect(frame_dc, &menu_rc, menu_brush);
+    _ = DeleteObject(menu_brush);
+    @import("window_layout.zig").paintChatView(frame_dc);
+    drawing.paintThreadTitle(frame_dc, frame_w);
+    _ = GdiFlush();
+    try moreMenuProof(frame_dc, frame_pixels, frame_w, layout.pane, title_layout.more, bg);
+}
+
+test "IGSH-1030 five received notes take five compact rows instead of bubbles" {
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("IGSH-1030 native journey is now fully green.\nLong machine details stay hidden until opened.\nSee https://example.com/run");
+    const note = ChatBlock{ .start = 0, .len = text.len, .role = .injected, .markdown = true, .first = true };
+    var y: i32 = 0;
+    for (0..5) |_| {
+        const row = chatMeasureBlockRect(dc, text, note, .single, 640, y, null);
+        try std.testing.expectEqual(uiScaled(28), row.bottom - row.top);
+        y = row.bottom;
+    }
+    try std.testing.expectEqual(uiScaled(140), y);
+    const own = ChatBlock{ .start = 0, .len = text.len, .role = .user, .first = true };
+    const own_rect = chatMeasureBlockRect(dc, text, own, .single, 640, 0, null);
+    try std.testing.expect(own_rect.bottom > uiScaled(28));
+}
+
+test "IGSH-1030 disclosure clicks expose body links and fold them away" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("https://example.com/run");
+    const old = .{
+        .count = app_state.g_chat_block_count,
+        .block = if (app_state.g_chat_block_count > 0) app_state.g_chat_blocks[0] else ChatBlock{ .start = 0, .len = 0, .role = .prose },
+        .rect = if (app_state.g_chat_block_count > 0) app_state.g_chat_layout_rects[0] else std.mem.zeroes(RECT),
+        .len = app_state.g_chat_last_len,
+        .left = app_state.g_chat_content_left,
+        .scroll = app_state.g_chat_scroll_y,
+        .scrolled_up = app_state.g_chat_scrolled_up,
+        .active = app_state.g_chat_active,
+        .find = app_state.g_chat_find_open,
+        .reuse = app_state.g_chat_layout_reuse,
+    };
+    const saved = try std.testing.allocator.dupe(u16, app_state.g_chat_capture[0..old.len]);
+    defer std.testing.allocator.free(saved);
+    defer {
+        app_state.g_chat_block_count = old.count;
+        app_state.g_chat_blocks[0] = old.block;
+        app_state.g_chat_layout_rects[0] = old.rect;
+        app_state.g_chat_last_len = old.len;
+        app_state.g_chat_content_left = old.left;
+        app_state.g_chat_scroll_y = old.scroll;
+        app_state.g_chat_scrolled_up = old.scrolled_up;
+        app_state.g_chat_active = old.active;
+        app_state.g_chat_find_open = old.find;
+        app_state.g_chat_layout_reuse = old.reuse;
+        @memcpy(app_state.g_chat_capture[0..old.len], saved);
+    }
+    app_state.g_chat_block_count = 1;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = text.len, .role = .injected, .markdown = true };
+    app_state.g_chat_last_len = text.len;
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_content_left = 0;
+    app_state.g_chat_scroll_y = 0;
+    app_state.g_chat_active = false;
+    app_state.g_chat_find_open = false;
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    app_state.g_chat_layout_rects[0] = chatMeasureBlockRect(dc, text, app_state.g_chat_blocks[0], .single, 640, 0, null);
+    try std.testing.expectEqual(@as(?usize, 0), chatNoteAt(10, 10));
+    try std.testing.expect(chatTranscriptLinkAt(null, 10, 10) == null);
+    _ = chatTranscriptWndProc(null, WM_LBUTTONDOWN, 0, (10 << 16) | 10);
+    try std.testing.expect(app_state.g_chat_blocks[0].note_open);
+    app_state.g_chat_layout_rects[0] = chatMeasureBlockRect(dc, text, app_state.g_chat_blocks[0], .single, 640, 0, null);
+    const link = chatTranscriptLinkAt(null, uiScaled(CHAT_BUBBLE_PAD) + 2, uiScaled(28 + CHAT_BUBBLE_PAD) + 2) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualSlices(u16, text, app_state.g_chat_capture[link.start..link.end]);
+    _ = chatTranscriptWndProc(null, WM_LBUTTONDOWN, 0, (10 << 16) | 10);
+    try std.testing.expect(!app_state.g_chat_blocks[0].note_open);
+    try std.testing.expect(chatTranscriptLinkAt(null, 10, 10) == null);
 }

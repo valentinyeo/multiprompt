@@ -43,7 +43,6 @@ test('role paint and hit testing omit sender headers and timestamps', () => {
   assert.match(body('chatMeasureBlockRect'), /chat_style\.headerHeight/);
   assert.match(body('chatMeasureBlockRect'), /chat_style\.bubbleWidth/);
   assert.doesNotMatch(body('chatPaintBlock'), /chatPaintAgentHeader/);
-  assert.match(body('chatPaintBlock'), /chatPaintTime/);
   assert.match(body('chatTranscriptLinkAt'), /chat_style\.headerHeight/);
   assert.match(body('refreshChatBlockCache'), /chat_style\.markScreenMessages/);
   assert.match(body('chatUserBubbleColor'), /chat_style\.bubbleColors/);
@@ -122,7 +121,10 @@ test('file attachment and inline image previews ship on every surface (issue)', 
 
 
 test('tool lines toggle before links and selection and expose all palette surfaces', () => {
-  assert.match(body('chatTranscriptWndProc'), /WM_LBUTTONDOWN => \{\s*(?:if \((?:app_state\.)?g_chat_find_open and GET_Y\(lp\) < uiScaled\((?:app_state\.)?CHAT_FIND_TOP_H\)\) return 0;\s*)?(?:if \(chatScrollUiMouseDown\(hwnd, GET_X\(lp\), GET_Y\(lp\)\)\) return 0;\s*)?if \(chatToolAt[^]*?tool_open = ![^]*?chatImageReady\(\);\s*return 0;/);
+  const click = body('chatTranscriptWndProc').split('WM_LBUTTONDOWN => {')[1].split('WM_LBUTTONUP => {')[0];
+  assert.match(click, /if \(chatToolAt[^]*?tool_open = ![^]*?chatImageReady\(\);\s*return 0;/);
+  assert.ok(click.indexOf('chatToolAt(') < click.indexOf('chatTranscriptLinkAt('));
+  assert.ok(click.indexOf('chatToolAt(') < click.indexOf('chatTranscriptMouseDown('));
   assert.match(body('chatToolAt'), /role != \.tool/);
   assert.match(body('chatToggleAllTools'), /block\.role == \.tool[^]*?block\.tool_open = open/);
   assert.match(body('refreshChatBlockCache'), /open_tools\.contains\(block\.tool_id\)/);
