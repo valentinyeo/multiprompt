@@ -1,0 +1,14 @@
+name: Structured question journey
+
+on:
+  push:
+    branches: [ceo/IGSH-1063]
+
+permissions:
+  contents: read
+
+jobs:
+  questions:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-options

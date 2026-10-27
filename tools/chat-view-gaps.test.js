@@ -912,6 +912,7 @@ test('IGSH-1063 typed question progress repaints without waiting for a transcrip
     .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
   const result = execute(t, 'question-progress', String.raw`
 const std = @import("std");
+const DWORD = u32;
 const app_state = struct {
     var active_shell: u32 = 0;
     var shells = [_]struct { shell_id: u32, permission_answered: bool = false, chat_question_other_sent: bool = false }{ .{ .shell_id = 11 }, .{ .shell_id = 22 } };
@@ -946,6 +947,6 @@ test "question progress repaint is active-session and answer specific" {
     chatPermissionCaptureRows(0, 2, 4, 2);
     try std.testing.expectEqual(@as(usize, 1), repaints);
 }
-`, ['chat_permission.zig'], 'question progress repaint');
-  assert.equal(result.status, 0, result.stdout + result.stderr);
+`, ['chat_permission.zig'], 'question progress repaint', ['-fno-llvm', '-fno-lld']);
+  assert.equal(result.status, 0, JSON.stringify(result));
 });

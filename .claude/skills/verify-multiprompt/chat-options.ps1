@@ -23,8 +23,7 @@ function Question-Answers {
     if (Test-Path $path) { return @(Get-Content $path | ForEach-Object { $_ | ConvertFrom-Json }) }
     return @()
 }
-Palette 'amoled'
-Press @(0x0D) 'Enter: AMOLED theme'
+Select-Theme 'amoled' 'theme-amoled'
 Press @(0x12, 0x43) 'Alt+C: show transcript'
 Wait-Until { (Find-Transcript) -ne [IntPtr]::Zero } 'Chat View visible'
 $script:transcript = Find-Transcript
