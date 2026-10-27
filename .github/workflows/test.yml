@@ -602,9 +602,15 @@ jobs:
           retention-days: 1
 
 
+  check-red-run:
+    uses: ./.github/workflows/check-red-run.yml
+    with:
+      base: ${{ github.event.pull_request.base.sha || github.event.before || format('{0}^', github.sha) }}
+      head: ${{ github.event.pull_request.head.sha || github.sha }}
+
   test-result:
     name: test
-    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source]
+    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -617,13 +623,14 @@ jobs:
           UPDATE: ${{ needs.test-windows-update.result }}
           WORKER: ${{ needs.test-worker.result }}
           UPDATE_SOURCE: ${{ needs.test-update-source.result }}
+          RED_RUN: ${{ needs.check-red-run.result }}
         run: |
           require_jobs() {
             for result in "$@"; do
               [ "$result" = success ] || return 1
             done
           }
-          require_jobs success success success success success success
+          require_jobs success success success success success success success
           for result in failure cancelled skipped; do
             if require_jobs "$result" success success success success success; then exit 1; fi
             if require_jobs success "$result" success success success success; then exit 1; fi
@@ -631,6 +638,7 @@ jobs:
             if require_jobs success success success "$result" success success; then exit 1; fi
             if require_jobs success success success success "$result" success; then exit 1; fi
             if require_jobs success success success success success "$result"; then exit 1; fi
+            if require_jobs success success success success success success "$result"; then exit 1; fi
           done
           echo 'Aggregate routing controls passed'
-          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE"
+          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN"

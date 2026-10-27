@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { stampTree } from './version-stamp.mjs';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -137,6 +138,39 @@ if (fs.existsSync(checker)) {
     const result = f.run();
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stdout, /RED_RUN_NOT_REQUIRED/);
+  });
+
+  test('mechanical release stamps pass only when exact generated contents match', t => {
+    const f = fixture(t);
+    const files = {
+      'src/main.zig': 'pub const APP_VERSION = "1.2.3";\n',
+      'src/changelog.zig': 'pub const CHANGELOG = [_]ChangelogEntry{\n};\n',
+      'changelog.d/DEMO-1-change.md': 'Opening tabs works.\n',
+    };
+    for (const [file, text] of Object.entries(files)) f.write(file, text);
+    const base = f.commit();
+    const stamped = stampTree(files);
+    for (const [file, text] of Object.entries(stamped.files)) f.write(file, text);
+    for (const file of stamped.removed) fs.unlinkSync(path.join(f.repo, file));
+    f.commit();
+    const result = f.run(base);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /verified mechanical release stamp/);
+    f.write('src/value.txt', 'hidden app change');
+    f.commit();
+    const hidden = f.run(base);
+    assert.notEqual(hidden.status, 0);
+    assert.match(hidden.stderr, /No changed regression tests/);
+  });
+
+  test('Python assertion regressions receive the same green-then-red proof', t => {
+    const f = fixture(t);
+    f.write('src/value.txt', 'fixed');
+    f.write('tools/value.test.py', "import pathlib, unittest\nclass Value(unittest.TestCase):\n def test_value(self): self.assertEqual(pathlib.Path('src/value.txt').read_text(), 'fixed')\nunittest.main()\n");
+    f.commit();
+    const result = f.run();
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /RED PROVEN tools\/value.test.py/);
   });
 
   test('deleted tests do not count as new regression evidence', t => {
