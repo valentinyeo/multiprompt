@@ -6254,6 +6254,15 @@ try {
                 [IO.File]::WriteAllText((Join-Path $Evidence $Name), ($latest.Value + "`n" + $last.Value), (New-Object Text.UTF8Encoding($false)))
                 Press @(0x1B) 'Esc: clear the copied transcript selection'
             }
+            function Wait-SwitchForeground {
+                Doctor
+                Wait-Until {
+                    if ([VerifyNative]::GetForegroundWindow() -ne $script:window) {
+                        [VerifyNative]::BringToForeground($script:window)
+                    }
+                    [VerifyNative]::GetForegroundWindow() -eq $script:window
+                } 'owned main window foreground before switch observation' 10
+            }
             function Test-TabChat($tab) { return [bool]($tab.PSObject.Properties['cv'] -and $tab.cv) }
             $sessionCount = 5
             $switchCount = 20
@@ -6330,6 +6339,7 @@ try {
                 if ($shapeProof) {
                     $shapeResult.session_shells = $shellIds
                     $shapeResult.setup_passed = $true
+                    Wait-SwitchForeground
                     $shapeResult.idle.before = [ChatSwitchObserver]::Measure($process.Id, $script:window, -1, $log, 0, '', $settleMs, $null)
                 }
                 foreach ($mode in $modes) {
@@ -6374,6 +6384,7 @@ try {
                             [VerifyNative]::ResetHangProbe()
                             $jobClock = [Diagnostics.Stopwatch]::StartNew()
                             $jobBefore = $job.ReadAccounting()
+                            Wait-SwitchForeground
                             $shapeSample = [ChatSwitchObserver]::Measure($process.Id, $script:window, $target, $log, $offset, $needle, $settleMs, $null)
                             $jobAfter = $job.ReadAccounting()
                             $jobClock.Stop()
@@ -6423,6 +6434,7 @@ try {
                             Wait-Until { (Read-Session).active_tab -eq $current -and (Read-SharedLog $log $sourceOffset).Contains('[switch] chat content shown shell=' + $shellIds[$current] + ' ') } 'same source painted before image replay' 30
                             $imageOffset = (Get-Item -LiteralPath $log).Length
                             $imagePrefix = "$mode-$sample"
+                            Wait-SwitchForeground
                             $image = [ChatSwitchObserver]::Measure($process.Id, $script:window, $target, $log, $imageOffset, $needle, $settleMs, (Join-Path $Evidence $imagePrefix))
                             $image.source_shell = $shellIds[$current]
                             $image.target_shell = $shellIds[$target]
@@ -6438,6 +6450,7 @@ try {
                     if (-not $open) { Snapshot 'action' }
                 }
                 if ($shapeProof) {
+                    Wait-SwitchForeground
                     $shapeResult.idle.after = [ChatSwitchObserver]::Measure($process.Id, $script:window, -1, $log, 0, '', $settleMs, $null)
                     if ($shapeProfile) {
                         $gapCase.phase = 'separate-profile'
@@ -6463,6 +6476,7 @@ try {
                         $profileOffset = (Get-Item -LiteralPath $log).Length
                         . (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-switch-profile.ps1')
                         Invoke-ChatSwitchProfile -TargetProcessId $process.Id -Directory (Join-Path $Evidence 'switch-profile') -Route @{ source_shell = $slow.source_shell; target_shell = $slow.target_shell; original_shown_ms = $slow.shown_ms; browser_closed = $profileClosed } -Switch {
+                            Wait-SwitchForeground
                             [ChatSwitchObserver]::Measure($process.Id, $script:window, $profileTarget, $log, $profileOffset, ('[switch] chat content shown shell=' + $slow.target_shell + ' '), $settleMs, $null)
                         }
                         $profileRange = (Read-SharedLog $log $profileOffset)

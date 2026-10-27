@@ -82,3 +82,17 @@ test('IGSH-1040 final evidence is checked after cleanup even when the measured b
   assert.match(workflow, /name: Check real-shape observations after owned cleanup\s+if: always\(\) && env.CHAT_SHAPE_PROOF == '1'/);
   assert.ok(workflow.includes('chat-switch-evidence.py evidence/shape-switch.json --require-cleanup'));
 });
+
+test('IGSH-1040 every direct observer call restores the exact owned foreground before timing', () => {
+  const journey = control.slice(control.indexOf("        'chat-switch-speed' {"), control.indexOf("        'chat-switch-speed' {") + 40000);
+  const calls = [...journey.matchAll(/\[ChatSwitchObserver\]::Measure\(/g)];
+  assert.equal(calls.length, 5);
+  for (const call of calls) {
+    assert.match(journey.slice(0, call.index).split('\n').slice(-2, -1).join(''), /^\s*Wait-SwitchForeground$/);
+  }
+  const helper = journey.slice(journey.indexOf('function Wait-SwitchForeground {'), journey.indexOf('function Test-TabChat('));
+  assert.match(helper, /Doctor[\s\S]*Wait-Until/);
+  assert.match(helper, /if \(\[VerifyNative\]::GetForegroundWindow\(\) -ne \$script:window\) \{[\s\S]*\[VerifyNative\]::BringToForeground\(\$script:window\)/);
+  assert.match(helper, /\[VerifyNative\]::GetForegroundWindow\(\) -eq \$script:window/);
+  assert.match(helper, /'owned main window foreground before switch observation' 10/);
+});
