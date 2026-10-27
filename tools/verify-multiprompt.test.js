@@ -24,7 +24,7 @@ const transport = control.slice(control.indexOf('function Invoke-Zsb('), control
 function evaluateWorkflowExpression(template, context) {
   return template.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, expression) => {
     const source = expression.trim();
-    const lexer = /\s*('(?:[^']|'')*'|(?:github|inputs)\.[a-z_]+|format|fromJSON|==|!=|!|&&|\|\||[(),])/gy;
+    const lexer = /\s*('(?:[^']|'')*'|(?:github|inputs)\.[a-z_]+|format|fromJSON|startsWith|==|!=|!|&&|\|\||[(),])/gy;
     const tokens = [];
     while (lexer.lastIndex < source.length) {
       const token = lexer.exec(source);
@@ -44,6 +44,14 @@ function evaluateWorkflowExpression(template, context) {
       if (token === '!') {
         const value = primary();
         return () => !value();
+      }
+      if (token === 'startsWith') {
+        expect('(');
+        const value = or();
+        expect(',');
+        const prefix = or();
+        expect(')');
+        return () => value().toLowerCase().startsWith(prefix().toLowerCase());
       }
       if (token === 'fromJSON') {
         expect('(');
@@ -170,6 +178,10 @@ test('IGSH-1028 reusable PR journeys select their requested feature and cannot c
   for (const feature of ['pane-layout', 'browser-pane-stuck']) assert.equal(evaluateWorkflowExpression(matrix, context(feature)), feature);
   assert.equal(evaluateWorkflowExpression(matrix, context(undefined)), 'appearance');
   assert.equal(evaluateWorkflowExpression(matrix, context('all')), 'appearance');
+  const dictation = context(undefined);
+  dictation.github.event_name = 'push';
+  dictation.github.ref = 'refs/heads/ceo/IGSH-1072';
+  assert.equal(evaluateWorkflowExpression(matrix, dictation), 'chat-dictation');
 });
 
 function allowsSessionOpen(text) {
