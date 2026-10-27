@@ -48,5 +48,6 @@ test('speed check runs on every PR and blocks the aggregate', () => {
   assert.match(flow, /SPEED: \$\{\{ needs\.switch-performance\.result \}\}/);
   assert.ok(flow.includes('elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then'));
   assert.match(flow, /run: \.\/tools\/check-powershell-host-names\.ps1/);
+  assert.match(flow, /name: Reject PowerShell host name collisions\n        shell: pwsh/);
   assert.match(flow, /require_jobs "\$WINDOWS"[^\n]*"\$SPEED"/);
 });

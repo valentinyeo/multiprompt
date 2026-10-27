@@ -624,7 +624,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Reject PowerShell host name collisions
-        shell: powershell
+        shell: pwsh
         run: ./tools/check-powershell-host-names.ps1
       - name: Test session speed oracle
         run: node --test tools/switch-performance.test.mjs
