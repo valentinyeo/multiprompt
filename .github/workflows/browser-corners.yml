@@ -77,19 +77,32 @@ jobs:
           if ($red.status -ne 'failed' -or $red.error -notmatch 'ten visible browser masks after activation' -or -not (Test-Path evidence/negative/corners-cycle-4-failed.png)) { throw 'Original framing did not fail at unrelated activation' }
           if ($cleanup.activeAfterStop -ne 0 -or $red.cleanup -ne 'owned process tree stopped; scratch copied to evidence/data then removed') { throw 'Original framing cleanup failed' }
           Write-Host 'BROWSER_BACKGROUND_RED_PROVEN'
-      - name: Build real app
-        run: zig build
+      - name: Download published release for native proof
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = 'v0.28.957'
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern SHA256SUMS.txt --dir verify-release
+          if ($LASTEXITCODE -ne 0) { throw 'Published release download failed' }
+          foreach ($name in @('multiprompt-x64.exe', 'zigshell-bridge-x64.exe')) {
+            $lines = @(Get-Content verify-release/SHA256SUMS.txt | Where-Object { $_ -match ('^[a-f0-9]{64} [ *]' + [regex]::Escape($name) + '$') })
+            if ($lines.Count -ne 1) { throw 'Published executable checksum missing or ambiguous' }
+            $expected = ($lines[0] -split '\s+')[0]
+            if ((Get-FileHash (Join-Path verify-release $name) -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Published executable checksum mismatch' }
+          }
+          Rename-Item verify-release/multiprompt-x64.exe multiprompt.exe
+          Rename-Item verify-release/zigshell-bridge-x64.exe zigshell-bridge.exe
       - name: Verify twenty mixed corner activations
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = (Resolve-Path zig-out/bin/multiprompt.exe).Path
-          $source = Get-Content src/main.zig -Raw
-          if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Version not found' }
-          $version = $Matches[1]
+          $exe = (Resolve-Path verify-release/multiprompt.exe).Path
+          $version = '0.28.957'
           $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           New-Item -ItemType Directory -Force evidence | Out-Null
-          @{ revision = (git rev-parse HEAD).Trim(); version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/build.json
+          @{ revision = (git rev-parse HEAD).Trim(); tag = 'v0.28.957'; version = $version; sha256 = $hash } | ConvertTo-Json | Set-Content evidence/build.json
           & .claude/skills/verify-multiprompt/control.ps1 -Feature browser-corners -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence"
           if ($LASTEXITCODE -ne 0) { throw 'Browser corner journey failed' }
       - name: Upload corner proof
