@@ -28,6 +28,9 @@ test('Manage Snippets is searchable, rendered, and Enter deletes instead of past
   const close = main.slice(main.indexOf('        WM_APP_SEARCH_CLOSE =>'), main.indexOf('        WM_APP_SEARCH_CLOSE =>') + 6000);
   assert.match(close, /g_search_snippet_delete_confirm = null/);
   assert.match(close, /g_search_snippet_manage_mode = false/);
+  const open = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN =>'), main.indexOf('        WM_APP_SEARCH_OPEN =>') + 350);
+  assert.match(open, /g_search_snippet_mode = false/);
+  assert.match(open, /g_search_snippet_manage_mode = false/);
 });
 
 test('production deletion preserves other entries across reload and failed writes', () => {
