@@ -362,11 +362,12 @@ function Retention-Top {
         [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $transcript) -and
             [ChatDeliveryDesktop]::Focus($main)[1] -eq $transcript.ToInt64()
     })
-    $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='focused transcript HWND wheel'; hwnd=$transcript.ToInt64(); delta=30000})
-    [ChatDeliveryDesktop]::WheelFocusedTranscript($main, $app.Id, $transcript, 30000)
     [void](Wait-For 'restore first message after the proof copy moved selection to the bottom' {
         $position = Divider-State
         if ($position -and $position.scroll -eq 0) { return $true }
+        [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $transcript)
+        $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='focused transcript HWND wheel'; hwnd=$transcript.ToInt64(); delta=30000})
+        [ChatDeliveryDesktop]::WheelFocusedTranscript($main, $app.Id, $transcript, 30000)
         $false
     })
 }
