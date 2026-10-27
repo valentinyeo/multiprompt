@@ -1,0 +1,29 @@
+name: IGSH-1059 bounded release-gate retry
+
+on:
+  push:
+    branches: [ceo/IGSH-1059-release-retry]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: igsh-1059-release-gate-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    if: github.repository == 'valentinyeo/multiprompt'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Retry only the timed-out merged-master gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run=$(gh api repos/valentinyeo/multiprompt/actions/runs/40538269658)
+          jq -e '.head_sha == "8cd08b7f29727262d0a2606ca6b3b329055f7660" and .run_attempt == 1 and .status == "completed" and (.conclusion == "cancelled" or .conclusion == "failure")' <<< "$run"
+          gh run rerun 40538269658 --repo valentinyeo/multiprompt
+          echo RELEASE_GATE_RETRY_REQUESTED
