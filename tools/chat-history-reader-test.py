@@ -1851,6 +1851,18 @@ class HistoryReaderTest(unittest.TestCase):
             self.assertFalse(any(row['role'] == 'assistant' for row in rows))
             self.assertLessEqual(sum(reads), 320, reads)
 
+    def test_watch_times_reader_work_with_high_resolution_counter(self):
+        self.query.update(tmux='', live=False, follow=True)
+        self.write(self.event('measured pushed reply'))
+        resolved = reader.resolve_response_path(self.query, reader.READER_SOURCE, False)
+        output = io.StringIO()
+        request = io.TextIOWrapper(io.BytesIO((json.dumps(self.query) + '\n').encode()))
+        with patch.object(sys, 'stdin', request), patch.object(sys, 'stdout', output), patch.object(reader, 'watch_changes', return_value=iter([resolved])), patch.object(time, 'perf_counter_ns', side_effect=[1_000_000, 2_345_000]), patch.object(time, 'monotonic_ns', side_effect=AssertionError('coarse Windows clock used')):
+            reader.watch(reader.READER_SOURCE)
+        frame = json.loads(output.getvalue())
+        self.assertEqual(frame['read_us'], 1345)
+        self.assertIn('measured pushed reply', frame['wire'])
+
     def test_watch_pushes_appends_without_requests_and_stays_idle(self):
         self.query.update(tmux='', live=False, follow=True)
         self.write(self.event('first pushed reply'))

@@ -161,7 +161,17 @@ fn writeFileAtomicW(_: []const u8, bytes: []const u8) bool {
     return true;
 }
 fn chatHistoryPrune(_: []const u8) void {}
-fn debugLog(_: []const u8) void {}
+var pushed_log: [256]u8 = undefined;
+var pushed_log_len: usize = 0;
+fn debugLog(line: []const u8) void {
+    if (std.mem.startsWith(u8, line, "[chat] push ")) {
+        pushed_log_len = @min(line.len, pushed_log.len);
+        @memcpy(pushed_log[0..pushed_log_len], line[0..pushed_log_len]);
+    }
+}
+var performance_ticks: i64 = 0;
+fn QueryPerformanceCounter(value: *i64) i32 { value.* = performance_ticks; performance_ticks += 1000; return 1; }
+fn QueryPerformanceFrequency(value: *i64) i32 { value.* = 1_000_000; return 1; }
 fn chatBenchEnabled() bool { return false; }
 fn PostMessageW(_: HANDLE, _: u32, _: usize, _: isize) i32 { return 1; }
 fn Sleep(_: u32) void {}
@@ -472,6 +482,7 @@ test "cache-first switch-back pushed persistence" {
     chatFileFetchThread(&one, one.key, 2, false, .{ .wire = wire, .id = 2, .read_us = 0 });
     try std.testing.expectEqual(@as(usize, 0), remote_calls);
     try std.testing.expectEqual(@as(usize, 1), cache_writes);
+    try std.testing.expect(std.mem.indexOf(u8, pushed_log[0..pushed_log_len], "apply_us=1000") != null);
     var restored = try chat_history.History.decode(a, captured_cache.items, one.key);
     defer restored.deinit(a);
     try std.testing.expect(std.mem.indexOf(u8, restored.rows.items, "First reply") != null);

@@ -1042,3 +1042,14 @@ test('retained-history recovery delivers wheel input to the verified focused HWN
   assert.match(wheel, /== IntPtr.Zero\) throw/);
   assert.doesNotMatch(wheel, /SendInput/);
 });
+
+test('remote appended-message receipt keeps the request window across delayed font logs', () => {
+  const source = read('tools/verify-chat-delivery/remote-switch.ps1');
+  const start = source.indexOf("Wait-For 'new remote messages applied'");
+  const end = source.indexOf('} 30)', start);
+  const wait = source.slice(start, end);
+  assert.ok(start > 0 && end > start);
+  assert.doesNotMatch(wait, /\$offset =/);
+  assert.match(source.slice(0, start), /\$appendLogStart = \(Read-Shared "\$settings\/debug.log"\).Length/);
+  assert.match(wait, /Substring\(\$appendLogStart\)/);
+});
