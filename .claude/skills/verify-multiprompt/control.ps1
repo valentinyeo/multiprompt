@@ -2660,6 +2660,7 @@ try {
         [IO.File]::WriteAllText((Join-Path $skillRoot 'SKILL.md'), "---`nname: pill-proof`ndescription: isolated skill color proof`n---`nReply with the given text.")
     }
     if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {
+        $extensionSource = if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) { $env:VERIFY_EXTENSION_ROOT } else { Join-Path $PSScriptRoot '../../../extension' }
         $extension = Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'
         $extensionRoot = [IO.Path]::GetFullPath((Split-Path $extension))
         $extensionRootExisted = Test-Path -LiteralPath $extensionRoot
@@ -2667,11 +2668,7 @@ try {
             New-Item -ItemType Directory -Path $extensionRoot | Out-Null
             $switchExtensionRoot = (Resolve-Path -LiteralPath $extensionRoot).Path
         }
-        if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) {
-            Copy-Item $env:VERIFY_EXTENSION_ROOT $extension -Recurse
-        } else {
-            Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse
-        }
+        Copy-Item $extensionSource $extension -Recurse
         $manifestPath = Join-Path $extension 'manifest.json'
         $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
         $publicKey = 'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDQp16XVv5KtjSlsEqMuPshm2xYXIvCx5DIAvNpHvxVpg2xJylPEsBoMC3pNeqqz9qG3g9MHQx7X08ItIevQXaOEWBrX7ZVHHXzoQBnlQ/LZbcSkpFucyNItAURMUCGg8XpwuAXi+rFcMkBcib6IpHklkAk97Kxc3NTevJ8TNSUewIDAQAB'
@@ -6284,13 +6281,16 @@ try {
                 } finally { $stream.Dispose() }
             }
             function Add-SeedTurn([string]$SessionName, [int]$Round) {
-                $index = [int]($SessionName -replace '^.*-', '') - 1
-                $sid = 'a1b2c3d4-0927-4000-8000-0000000009{0:D2}' -f $index
+                $seed = Get-Content (Join-Path $remoteState 'state.json') -Raw | ConvertFrom-Json
+                $sid = $seed.sids.PSObject.Properties[$SessionName].Value
+                $index = [Array]::IndexOf(@($seed.sessions), $SessionName)
+                if (-not $sid -or $index -lt 0) { throw 'Selected session has no seeded transcript identity' }
                 $folder = ('C:/verify/work{0}' -f $index) -replace '[^A-Za-z0-9]', '-'
                 $path = Join-Path $scratch ("profile/.claude/projects/$folder/$sid.jsonl")
                 $text = "Session $index live answer $Round`n`n" + ('This paragraph stands in for a running agent adding a new answer to the conversation while another session is in front. ' * 3)
                 $row = [ordered]@{ type = 'assistant'; timestamp = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'); sessionId = $sid; uuid = [guid]::NewGuid().ToString(); isSidechain = $false; message = [ordered]@{ role = 'assistant'; id = ('msg_live_' + [guid]::NewGuid().ToString('N').Substring(0, 12)); model = 'claude-opus-5-5'; content = @(@{ type = 'text'; text = $text }) } }
                 [IO.File]::AppendAllText($path, (($row | ConvertTo-Json -Depth 6 -Compress) + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+                return @{ session_id = $sid; expected_latest = "Session $index live answer $Round"; last_marker = "IGSH1040_LAST_$($index + 1)" }
             }
             $result.checks += $gapCase
             $shellIds = @()
@@ -6374,7 +6374,7 @@ try {
                         Doctor
                         Wait-Until { [VerifyNative]::GetForegroundWindow() -eq $script:window } 'main window foreground before the switch' 10
                         $turn = if ($shapeProof -and $open) { $sample + $switchCount } else { $sample }
-                        Add-SeedTurn (Read-Session).tabs[$target].tmux_session $turn
+                        $seedTurn = Add-SeedTurn (Read-Session).tabs[$target].tmux_session $turn
                         Start-Sleep -Milliseconds 300
                         $offset = (Get-Item -LiteralPath $log).Length
                         $needle = '[switch] chat content shown shell=' + $shellIds[$target] + ' '
@@ -6425,8 +6425,9 @@ try {
                             $shapeSample.layout_width = [int]$widths.Groups[1].Value
                             $shapeSample.client_width = [int]$widths.Groups[2].Value
                             $shapeSample.post_paint_moves = $laterMoves.Count -gt 0
-                            $shapeSample.expected_latest = "Session $target live answer $turn"
-                            $shapeSample.last_marker = "IGSH1040_LAST_$($target + 1)"
+                            $shapeSample.session_id = $seedTurn.session_id
+                            $shapeSample.expected_latest = $seedTurn.expected_latest
+                            $shapeSample.last_marker = $seedTurn.last_marker
                             $shapeSample.latest_receipt = "$mode-$sample-latest.txt"
                             Save-ShapeLatest $shapeSample.expected_latest $shapeSample.last_marker $shapeSample.latest_receipt
                             $sourceOffset = (Get-Item -LiteralPath $log).Length

@@ -2,7 +2,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+const read = name => {
+  const file = path.join(__dirname, '..', name);
+  assert.ok(fs.existsSync(file), `Missing native switching support: ${name}`);
+  return fs.readFileSync(file, 'utf8');
+};
 const control = read('.claude/skills/verify-multiprompt/control.ps1');
 const workflow = read('.github/workflows/verify.yml');
 const observer = read('tools/verify-chat-delivery/chat-switch-observer.cs');
@@ -11,7 +15,7 @@ const profile = read('tools/verify-chat-delivery/chat-switch-profile.ps1');
 function defaultPath(source) {
   assert.match(source, /else \{\s+& \$env:MP_VERIFY_PYTHON \$env:MP_VERIFY_BOUNDARY shell seed-many 400/);
   assert.match(source, /else \{\s+\$measured = \[VerifyNative\]::SwitchToSession\(/);
-  assert.match(source, /Copy-Item \(Join-Path \$PSScriptRoot '\.\.\/\.\.\/\.\.\/extension'\) \$extension -Recurse/);
+  assert.ok(source.includes("else { Join-Path $PSScriptRoot '../../../extension' }"));
   assert.ok(source.includes('$timings[$mode].median_ms -gt $chatLimitMs'));
   assert.ok(source.includes('$timings[$mode].max_hang_ms -gt $hangLimitMs'));
   assert.ok(source.includes('$timings[$mode].first_frame_wrong_width -gt 0'));
@@ -31,7 +35,8 @@ test('IGSH-1040 opt-in keeps published946 app, bridge and extension together and
   assert.ok(workflow.includes("env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall'"));
   assert.ok(workflow.includes('git archive --format=zip "--output=$archive" $env:RELEASE_TAG extension'));
   assert.ok(workflow.includes("'45bef2a5da04ef62f4e3a2789467b17adb6ee4e38db3d6fc34916beef6f700cd'"));
-  assert.match(control, /if \(\$shapeProof -and \$env:VERIFY_EXTENSION_ROOT\) \{\s+Copy-Item \$env:VERIFY_EXTENSION_ROOT/);
+  assert.ok(control.includes('$extensionSource = if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) { $env:VERIFY_EXTENSION_ROOT }'));
+  assert.ok(control.includes('Copy-Item $extensionSource $extension -Recurse'));
   assert.ok(workflow.includes('chat-shapes-test.py'));
   assert.ok(workflow.includes('chat-switch-evidence-test.py'));
 });
@@ -129,4 +134,47 @@ try {
 `], { encoding: 'utf8', timeout: 30000 });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /POWERSHELL_IDLE_IMAGE_BINDING_PROVEN/);
+});
+
+test('IGSH-1040 receipts follow seeded session identity, not saved-tab position', () => {
+  const helper = control.slice(control.indexOf('            function Add-SeedTurn('), control.indexOf('            $result.checks += $gapCase', control.indexOf('            function Add-SeedTurn(')));
+  assert.ok(helper.includes('$seed.sids.PSObject.Properties[$SessionName].Value'));
+  assert.ok(helper.includes('[Array]::IndexOf(@($seed.sessions), $SessionName)'));
+  assert.ok(control.includes('$shapeSample.expected_latest = $seedTurn.expected_latest'));
+  assert.ok(control.includes('$shapeSample.last_marker = $seedTurn.last_marker'));
+  assert.doesNotMatch(helper, /SessionName -replace|0927-4000/);
+});
+
+test('IGSH-1040 reordered saved tabs append and verify only their mapped transcript', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const helper = control.slice(control.indexOf('            function Add-SeedTurn('), control.indexOf('            $result.checks += $gapCase', control.indexOf('            function Add-SeedTurn(')));
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
+$ErrorActionPreference = 'Stop'
+$scratch = Join-Path $env:TEMP ('receipt-' + [guid]::NewGuid().ToString('N'))
+$remoteState = Join-Path $scratch 'remote'
+try {
+  New-Item -ItemType Directory -Path $remoteState | Out-Null
+  $names = @('session-blue', 'session-green', 'session-red', 'session-gold', 'session-grey')
+  $ids = @{}
+  for ($i = 0; $i -lt 5; $i++) {
+    $ids[$names[$i]] = 'stable-id-' + $i
+    $folder = Join-Path $scratch ('profile/.claude/projects/C--verify-work' + $i)
+    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $folder ($ids[$names[$i]] + '.jsonl')), '')
+  }
+  @{ sessions = $names; sids = $ids } | ConvertTo-Json | Set-Content (Join-Path $remoteState 'state.json')
+  ${helper}
+  foreach ($i in @(4, 0, 1, 2, 3)) {
+    $receipt = Add-SeedTurn $names[$i] 7
+    $file = Join-Path $scratch ('profile/.claude/projects/C--verify-work' + $i + '/stable-id-' + $i + '.jsonl')
+    $row = Get-Content $file -Raw | ConvertFrom-Json
+    if ($receipt.session_id -ne $row.sessionId -or $row.sessionId -ne $ids[$names[$i]]) { throw 'Wrong transcript identity' }
+    if (-not $row.message.content[0].text.StartsWith($receipt.expected_latest)) { throw 'Receipt differs from appended text' }
+    if ($receipt.last_marker -ne ('IGSH1040_LAST_' + ($i + 1))) { throw 'Wrong seeded endpoint' }
+  }
+  'REORDERED_SESSION_RECEIPTS_PROVEN'
+} finally { if (Test-Path $scratch) { Remove-Item $scratch -Recurse -Force } }
+`], { encoding: 'utf8', timeout: 30000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /REORDERED_SESSION_RECEIPTS_PROVEN/);
 });
