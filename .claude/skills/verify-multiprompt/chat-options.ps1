@@ -1,3 +1,4 @@
+Add-Type -AssemblyName System.Windows.Forms
 $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
 function Read-Choices([string]$Expect) {
     if (-not (Test-Path $log)) { return $null }
@@ -46,6 +47,7 @@ Wait-Until { Test-Path $headingsReady } 'synthetic section headings printed'
 Press @(0x12, 0x43) 'Alt+C: inspect the question without answer options'
 Wait-Until { (Find-Transcript) -ne [IntPtr]::Zero } 'section question transcript visible'
 Wait-Until {
+    [System.Windows.Forms.Clipboard]::Clear()
     Palette 'chat view select all text'
     Press @(0x0D) 'Enter: select rendered transcript'
     Palette 'chat view copy selection'
