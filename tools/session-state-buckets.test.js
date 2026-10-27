@@ -58,7 +58,7 @@ test("Current UI names Alt+E Waiting and Alt+X Archive", () => {
 });
 
 test("Archived palette command opens the permanent Archived destination", () => {
-  const confirm = source.slice(source.indexOf("if (target == SEARCH_ARCHIVED_VIEW_OFFSET)"), source.indexOf("if (target == SEARCH_SNIPPETS_MENU_OFFSET"));
+  const confirm = source.slice(source.indexOf("if (target == SEARCH_ARCHIVED_VIEW_OFFSET)"), source.indexOf("if (target == SEARCH_SNIPPETS_MENU_OFFSET)"));
   assert.match(confirm, /g_all_sessions_tab = AS_TAB_ARCHIVED/);
   assert.doesNotMatch(confirm, /killed_count|g_all_sessions_killed_only|resurrectArchivedByKey/);
 });

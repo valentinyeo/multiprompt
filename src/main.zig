@@ -4760,9 +4760,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     openAllSessions(hwnd);
                     return 0;
                 }
-                if (target == SEARCH_SNIPPETS_MENU_OFFSET or target == SEARCH_SNIPPET_MANAGE_OFFSET) {
+                if (target == SEARCH_SNIPPET_MANAGE_OFFSET) {
+                    _ = SendMessageW(hwnd, WM_APP_SNIPPETS_OPEN, 0, 0);
+                    app_state.g_search_snippet_manage_mode = true;
+                    return 0;
+                }
+                if (target == SEARCH_SNIPPETS_MENU_OFFSET) {
                     app_state.g_search_snippet_mode = true;
-                    app_state.g_search_snippet_manage_mode = target == SEARCH_SNIPPET_MANAGE_OFFSET;
+                    app_state.g_search_snippet_manage_mode = false;
                     app_state.g_search_snippet_delete_confirm = null;
                     app_state.g_search_workspace_mode = false;
                     app_state.g_search_workspace_delete_mode = false;

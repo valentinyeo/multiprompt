@@ -21,7 +21,7 @@ test('Manage Snippets is searchable, rendered, and Enter deletes instead of past
   const palette = read('command_palette.zig');
   assert.match(palette, /"manage snippets", "delete snippet", "remove snippet"/);
   assert.match(read('sidebar.zig'), /L\("Manage Snippets"\)/);
-  assert.match(main, /target == SEARCH_SNIPPETS_MENU_OFFSET or target == SEARCH_SNIPPET_MANAGE_OFFSET/);
+  assert.match(main, /if \(target == SEARCH_SNIPPET_MANAGE_OFFSET\) \{\s*_ = SendMessageW\(hwnd, WM_APP_SNIPPETS_OPEN, 0, 0\);\s*app_state\.g_search_snippet_manage_mode = true/);
   const action = main.slice(main.indexOf('const sn_idx = target - SEARCH_SNIPPET_OFFSET;', main.indexOf('if (target == SEARCH_SNIPPET_CREATE_OFFSET)')));
   assert.match(action, /if \(app_state.g_search_snippet_manage_mode\) \{\s*_ = SendMessageW\(hwnd, WM_APP_SNIPPET_DELETE, 0, 0\);\s*return 0;/);
   assert.ok(action.indexOf('WM_APP_SNIPPET_DELETE') < action.indexOf('pasteSnippet(sn_idx)'));
