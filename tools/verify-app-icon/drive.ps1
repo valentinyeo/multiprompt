@@ -21,7 +21,7 @@ public static class AppIconProbe {
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc p, IntPtr l);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
-    [DllImport("user32.dll")] static extern IntPtr SendMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] static extern IntPtr SendMessageTimeoutW(IntPtr h, uint m, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
     [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] static extern IntPtr GetClassLongPtr(IntPtr h, int i);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     public static IntPtr[] VisibleWindows(uint[] pids) {
@@ -34,8 +34,18 @@ public static class AppIconProbe {
         }, IntPtr.Zero);
         return found.ToArray();
     }
+    public static int IndexOf(byte[] haystack, byte[] needle) {
+        for (int i = 0; i + needle.Length <= haystack.Length; i++) {
+            if (haystack[i] != needle[0]) continue;
+            int j = 1;
+            while (j < needle.Length && haystack[i + j] == needle[j]) j++;
+            if (j == needle.Length) return i;
+        }
+        return -1;
+    }
     public static IntPtr WindowIcon(IntPtr h, bool big) {
-        IntPtr icon = SendMessageW(h, 0x7F, (IntPtr)(big ? 1 : 0), IntPtr.Zero);
+        IntPtr icon;
+        if (SendMessageTimeoutW(h, 0x7F, (IntPtr)(big ? 1 : 0), IntPtr.Zero, 2, 5000, out icon) == IntPtr.Zero) icon = IntPtr.Zero;
         if (icon == IntPtr.Zero) icon = GetClassLongPtr(h, big ? -14 : -34);
         return icon;
     }
@@ -98,6 +108,9 @@ try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Executable checksum mismatch' }
     if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Executable version mismatch' }
 
+    $exeBytes = [IO.File]::ReadAllBytes($Exe)
+    $missing = @(16, 32, 48, 64, 256 | Where-Object { [AppIconProbe]::IndexOf($exeBytes, [IO.File]::ReadAllBytes("$assets/icon$_.png")) -lt 0 })
+    Add-Check 'exe-embeds-all-frames' ($missing.Count -eq 0) "approved icon frames missing from the executable: $(if ($missing.Count) { $missing -join ', ' } else { 'none' }) of 16, 32, 48, 64, 256"
     $exeIcon = [Drawing.Icon]::ExtractAssociatedIcon($Exe)
     $exeBitmap = [Drawing.Bitmap]::new($exeIcon.ToBitmap())
     $exeBitmap.Save("$Evidence/exe-icon.png", [Drawing.Imaging.ImageFormat]::Png)
@@ -115,11 +128,13 @@ try {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     while ($windows.Count -eq 0 -and $timer.Elapsed.TotalSeconds -lt 60) {
         Start-Sleep -Milliseconds 500
-        $windows = @([AppIconProbe]::VisibleWindows([uint32[]](Get-OwnedProcessIds)))
+        $windows = @([AppIconProbe]::VisibleWindows([uint32[]]@(Get-OwnedProcessIds)))
     }
     Add-Check 'window-visible' ($windows.Count -gt 0) "visible app windows: $($windows.Count)"
     if ($windows.Count -eq 0) { throw 'The app window never appeared' }
     Start-Sleep -Seconds 5
+    $windows = @([AppIconProbe]::VisibleWindows([uint32[]]@(Get-OwnedProcessIds)))
+    if ($windows.Count -eq 0) { throw 'The app window disappeared after it appeared' }
     $window = $windows[0]
 
     $big = [AppIconProbe]::WindowIcon($window, $true)
@@ -153,8 +168,8 @@ try {
     $state.cleanup = "remaining_owned_processes=$remaining; scratch_removed=$(-not (Test-Path $scratch))"
 }
 
-$passed = (@($checks | Where-Object { -not $_.passed }).Count -eq 0) -and ($checks.Count -ge 5)
+$passed = (@($checks | Where-Object { -not $_.passed }).Count -eq 0) -and ($checks.Count -ge 6)
 $result = [ordered]@{ feature = 'app-icon'; status = $(if ($passed) { 'passed' } else { 'failed' }); version = $ExpectedVersion; sha256 = $ExpectedHash; checks = $checks; cleanup = $state.cleanup }
 $result | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 "$Evidence/result.json"
-if (-not $passed) { throw "app-icon verification failed: $($state.failure)" }
+if (-not $passed) { throw "app-icon verification failed: $((@($checks | Where-Object { -not $_.passed } | ForEach-Object { $_.name }) -join ', ')) $($state.failure)" }
 Write-Output 'VERIFIED app-icon with the real exe and retained evidence'
