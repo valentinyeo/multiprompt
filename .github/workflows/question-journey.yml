@@ -3,6 +3,8 @@ name: Structured question journey
 on:
   push:
     branches: [ceo/IGSH-1063]
+  repository_dispatch:
+    types: [structured-question-proof]
 
 permissions:
   contents: read
@@ -12,3 +14,4 @@ jobs:
     uses: ./.github/workflows/verify.yml
     with:
       feature: chat-options
+      tag: ${{ github.event.client_payload.tag || '' }}

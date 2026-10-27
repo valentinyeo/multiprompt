@@ -1090,3 +1090,14 @@ test('IGSH-1063 question boundary records single, multiple and Other answers exa
     assert.equal(events.filter(event => event.message?.content?.[0]?.tool_use_id === calls[0].message.content[0].id).length, 1);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+test('IGSH-1063 question proof selects the saved AMOLED theme and supports published assets', () => {
+  const journey = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/chat-options.ps1'), 'utf8');
+  assert.match(journey, /Select-Theme 'amoled' 'theme-amoled'/);
+  assert.doesNotMatch(journey, /Palette '(?:theme )?amoled'/);
+  const adapter = fs.readFileSync(path.join(root, '.github/workflows/question-journey.yml'), 'utf8');
+  assert.match(adapter, /types: \[structured-question-proof\]/);
+  assert.match(adapter, /feature: chat-options/);
+  assert.match(adapter, /tag: \$\{\{ github\.event\.client_payload\.tag \|\| '' \}\}/);
+});
