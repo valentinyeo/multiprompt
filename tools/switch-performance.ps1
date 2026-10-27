@@ -108,7 +108,7 @@ try {
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try { $graphics.CopyFromScreen(0, 0, 0, 0, $bitmap.Size); $bitmap.Save("$Evidence/screen.png") } finally { $graphics.Dispose(); $bitmap.Dispose() }
     $result | ConvertTo-Json -Depth 6 | Set-Content "$Evidence/samples.json"
-    if ($null -ne $job) { $job.Dispose() }
+    if ($null -ne $job) { [void]$job.Stop(); $job.Dispose() }
     if (Test-Path $log) { Copy-Item $log "$Evidence/debug.log" }
     if (Test-Path "$profile/state/invocations.jsonl") { Copy-Item "$profile/state/invocations.jsonl" "$Evidence/invocations.jsonl" }
     Get-ChildItem "$profile/state" -Filter '*.stderr.log' -ErrorAction SilentlyContinue | Copy-Item -Destination $Evidence

@@ -48,6 +48,7 @@ test('production idle poll has real high-resolution timing', () => {
 
 test('speed check runs on every PR and blocks the aggregate', () => {
   const flow = fs.readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
+  assert.ok(flow.includes('\n  switch-performance:\n'), 'The performance job must ship');
   const speed = flow.split('\n  switch-performance:\n')[1].split('\n  test-result:\n')[0];
   assert.ok(speed.includes('ref: $' + '{{ github.event.pull_request.head.sha || github.sha }}'), 'Speed proof must build the exact PR head, not a synthetic merge');
   assert.match(flow, /check-red-run, switch-performance\]/);
@@ -152,4 +153,11 @@ test('idle measurements identify an already visited conversation', async () => {
     assert.throws(() => assess({ ...workload(), idleShell }));
   }
   assert.equal(assess(workload()).idleShell, 1);
+});
+
+
+test('performance cleanup stops its owned process tree before deleting locked state', () => {
+  const driver = fs.readFileSync(new URL('./switch-performance.ps1', import.meta.url), 'utf8');
+  const cleanup = driver.slice(driver.lastIndexOf('} finally {'));
+  assert.match(cleanup, /\$job\.Stop\(\)[\s\S]*\$job\.Dispose\(\)[\s\S]*Remove-Item -LiteralPath \$profile/);
 });
