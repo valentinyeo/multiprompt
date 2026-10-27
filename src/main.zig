@@ -1548,6 +1548,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_SIZE => {
             more_menu.close();
+            @import("workspace_switcher.zig").close();
             const SIZE_MINIMIZED: WPARAM = 1;
             if (wp == SIZE_MINIMIZED) {
                 resetPaintBackbuffer();
@@ -1644,6 +1645,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("workspaces.zig").captureWorkspaceFocus();
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+            if (!app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
+                !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
+                !app_state.g_snippet_create_active and @import("workspace_switcher.zig").headerClick(mx, my)) return 0;
 
             if (!app_state.g_search_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and
                 !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_url_picker_active and
@@ -2283,6 +2287,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (ady < 6) return 0;
                     const now = GetTickCount64();
                     if (app_state.drag_last_swap_tick != 0 and now - app_state.drag_last_swap_tick < 120) return 0;
+                    if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
                     if (sidebarStickyCardHitTest(my)) return 0;
 
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
@@ -2509,6 +2514,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
+                if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
                 if (sidebarStickyCardHitTest(my)) return 0;
                 const logical_my = my + app_state.g_sidebar_scroll;
                 const ht = hitTestSidebar(logical_my);
@@ -2553,6 +2559,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_LBUTTONDBLCLK => {
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+            if (!app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
+                !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
+                !app_state.g_snippet_create_active and @import("workspace_switcher.zig").headerClick(mx, my)) return 0;
             const tth = threadTitleHeight();
             const tth_top = threadTitleTop();
             if (tth > 0 and mx >= SIDEBAR_W() and my >= tth_top and my < tth_top + tth and app_state.active_shell < app_state.shell_count and
@@ -3649,6 +3658,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_KEYDOWN => {
+            if (@import("workspace_switcher.zig").key(wp)) return 0;
             if (app_state.g_search_active) list_input.palette.keyboard();
             if (app_state.g_url_picker_active) {
                 if (wp == 0x26) {
@@ -6438,33 +6448,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     app_state.g_pending_new_tab_group = 0;
                     showActiveShellAfterOverlay();
-                    if (workspace_idx < app_state.g_workspace_count) {
-                        const e = &app_state.g_workspaces[workspace_idx];
-                        var id_copy: [64]u8 = std.mem.zeroes([64]u8);
-                        const id_len = @min(e.id_len, id_copy.len - 1);
-                        if (id_len > 0) @memcpy(id_copy[0..id_len], e.id[0..id_len]);
-                        var name_copy: [64]u8 = std.mem.zeroes([64]u8);
-                        const name_len = @min(e.name_len, name_copy.len - 1);
-                        if (name_len > 0) @memcpy(name_copy[0..name_len], e.name[0..name_len]);
-                        var host_copy: [64]u8 = std.mem.zeroes([64]u8);
-                        const host_len = @min(e.host_len, host_copy.len - 1);
-                        if (host_len > 0) @memcpy(host_copy[0..host_len], e.host[0..host_len]);
-                        const id = id_copy[0..id_len];
-                        const name = name_copy[0..name_len];
-                        const host = host_copy[0..host_len];
-                        if (std.mem.eql(u8, id, getInstanceName())) {} else if (app_state.g_single_window and findMyWorkspaceSlot(id) != null) {
-                            switchToWorkspace(findMyWorkspaceSlot(id).?);
-                        } else if (findAndFocusWorkspaceWindow(id, name)) {} else if (host.len > 0) {} else if (app_state.g_single_window) {
-                            if (absorbWorkspaceIntoSlots(id, name)) {
-                                if (findMyWorkspaceSlot(id)) |slot| switchToWorkspace(slot);
-                            } else {
-                                newWorkspace();
-                            }
-                        } else {
-                            setWorkspaceRestoreAndSave(id, name, true);
-                            spawnWorkspaceWindow(id);
-                        }
-                    }
+                    @import("workspaces.zig").openWorkspaceByIndex(workspace_idx);
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;

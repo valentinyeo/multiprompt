@@ -1,0 +1,29 @@
+name: Workspace identity journey
+
+on:
+  push:
+    branches: [master, ceo/IGSH-1082]
+    paths:
+      - src/workspace_switcher.zig
+      - src/main.zig
+      - src/sidebar.zig
+      - src/console.zig
+      - src/workspaces.zig
+      - src/chat_composer.zig
+      - tools/sidebar-custom-groups.test.js
+      - tools/favorites.test.js
+      - .claude/skills/verify-multiprompt/workspace-switcher.ps1
+      - .github/workflows/workspace-journey.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workspace-identity-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  workspace:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: workspaces

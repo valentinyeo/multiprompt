@@ -161,6 +161,7 @@ test('IGSH-457 production Starred rows include other windows without duplicating
       sidebar.slice(start, end) + '    return 0;\n}\n';
     fs.writeFileSync(path.join(tmp, 'workspaces.zig'), 'pub fn starredShellVisible(_: usize) bool { return @import("integration.zig").local_favorite; }\n');
     fs.writeFileSync(path.join(tmp, 'window_layout.zig'), 'pub fn paneOuterMargin() i32 { return 8; }\n');
+    fs.writeFileSync(path.join(tmp, 'workspace_switcher.zig'), 'pub fn headerHeight() i32 { return 52; }\n');
     fs.writeFileSync(path.join(tmp, 'integration.zig'), (`const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -197,6 +198,7 @@ test "IGSH-457 Starred mirrors local and other-account window favorites after st
     var rows: [MAX_ROWS]Row = undefined;
     try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
     try std.testing.expectEqual(.tab, rows[0].kind);
+    try std.testing.expectEqual(@as(i32, 92), rows[0].y);
     try std.testing.expectEqual(.inbox, rows[1].kind);
     try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
     local_favorite = false;
