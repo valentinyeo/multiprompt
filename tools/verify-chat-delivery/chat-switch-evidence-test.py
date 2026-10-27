@@ -52,7 +52,7 @@ class SwitchEvidenceTest(unittest.TestCase):
                 prefix = mode + '-' + str(index)
                 sample = dict(cpu(), index=index, source_shell=source, target_shell=target, hang_ms=4,
                               layout_width=800, client_width=800, post_paint_moves=False,
-                              expected_latest=prefix, last_marker='fixture-last-' + str(target), latest_receipt=prefix + '.txt',
+                              expected_latest=prefix, latest_message_verified=True, last_marker='fixture-last-' + str(target), latest_receipt=prefix + '.txt',
                               frame_probe=dict(source_shell=source, target_shell=target, image_probe=True, forced_paints=False,
                                                frame_scope=proof.FRAME_SCOPE, shown_ms=10, capture_started_ms=11,
                                                capture_completed_ms=15, elapsed_ms=1200, image_prefix=prefix))
@@ -115,8 +115,17 @@ class SwitchEvidenceTest(unittest.TestCase):
 
     def test_self_report_without_the_actual_copied_receipt_is_rejected(self):
         (self.root / 'browser_closed-0.txt').write_text('different generated session')
-        with self.assertRaisesRegex(ValueError, 'latest-message receipt'):
+        with self.assertRaisesRegex(ValueError, 'session endpoint receipt'):
             self.evaluate()
+
+    def test_stale_target_with_correct_identity_is_a_product_failure_not_setup_error(self):
+        sample = self.value['modes']['browser_closed'][0]
+        (self.root / sample['latest_receipt']).write_text(sample['last_marker'])
+        sample['latest_message_verified'] = False
+        result = self.evaluate()
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['category'], 'switch-budget')
+        self.assertIs(result['failures'][0]['latest_message_verified'], False)
 
     def test_nonfinite_or_negative_cpu_is_rejected(self):
         for value in (float('nan'), float('inf'), -1, True):

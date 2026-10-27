@@ -108,15 +108,17 @@ def evaluate(value, root, require_cleanup=False):
             require(0 <= number(sample['cpu_at_shown_ms'], 'cpu_at_shown_ms') <= sample['cpu_ms'], 'paint CPU counter outside measured interval')
             expected = sample['expected_latest']
             receipt = artifact(root, sample['latest_receipt']).decode('utf-8-sig')
-            require(expected and expected in receipt and sample['last_marker'] in receipt, 'actual copied latest-message receipt missing')
+            require(expected and sample['last_marker'] in receipt, 'actual copied session endpoint receipt missing')
+            latest = expected in receipt
+            require(sample['latest_message_verified'] is latest, 'latest-message verdict differs from the copied receipt')
             probe = sample['frame_probe']
             require(probe['source_shell'] == sample['source_shell'] and probe['target_shell'] == sample['target_shell'] and probe['image_probe'] is True and probe['forced_paints'] is False, 'image replay must follow the same route separately')
             require(probe['frame_scope'] == FRAME_SCOPE, 'first-observation scope must remain explicit')
             require(number(probe['shown_ms'], 'image paint time') <= number(probe['capture_started_ms'], 'capture start') <= number(probe['capture_completed_ms'], 'capture end') <= number(probe['elapsed_ms'], 'image interval'), 'image capture timing missing')
             first = image(root, probe['image_prefix'] + '-first-observed')
             settled = image(root, probe['image_prefix'] + '-settled')
-            if shown >= 150 or hang >= 100 or first != settled or sample['layout_width'] != sample['client_width'] or sample['post_paint_moves']:
-                failures.append(dict(mode=mode, index=index, shown_ms=shown, hang_ms=hang, first_observed_matches_settled=first == settled))
+            if not latest or shown >= 150 or hang >= 100 or first != settled or sample['layout_width'] != sample['client_width'] or sample['post_paint_moves']:
+                failures.append(dict(mode=mode, index=index, shown_ms=shown, hang_ms=hang, latest_message_verified=latest, first_observed_matches_settled=first == settled))
         require(all(targets.count(shell) == 4 for shell in shells), 'each of five sessions needs four measured visits per mode')
     require(set(value['idle']) == {'before', 'after'}, 'matching idle observations required')
     for sample in value['idle'].values():

@@ -6250,10 +6250,11 @@ try {
                 if (-not $latest.Success -or -not $last.Success) {
                     Save-Json @{ expected = $Expected; marker = $Marker; latest_found = $latest.Success; marker_found = $last.Success; copied_characters = $copied.Length; session = (Read-Session) } 'receipt-failure.json'
                     [IO.File]::WriteAllText((Join-Path $Evidence 'receipt-failure.txt'), $copied, (New-Object Text.UTF8Encoding($false)))
-                    throw 'Copied target transcript does not contain the generated latest message and endpoint'
+                    if (-not $last.Success) { throw 'Copied target transcript belongs to a different seeded session' }
                 }
                 [IO.File]::WriteAllText((Join-Path $Evidence $Name), ($latest.Value + "`n" + $last.Value), (New-Object Text.UTF8Encoding($false)))
                 Press @(0x1B) 'Esc: clear the copied transcript selection'
+                return $latest.Success
             }
             function Wait-SwitchForeground {
                 Doctor
@@ -6433,7 +6434,7 @@ try {
                             $shapeSample.expected_latest = $seedTurn.expected_latest
                             $shapeSample.last_marker = $seedTurn.last_marker
                             $shapeSample.latest_receipt = "$mode-$sample-latest.txt"
-                            Save-ShapeLatest $shapeSample.expected_latest $shapeSample.last_marker $shapeSample.latest_receipt
+                            $shapeSample.latest_message_verified = Save-ShapeLatest $shapeSample.expected_latest $shapeSample.last_marker $shapeSample.latest_receipt
                             $sourceOffset = (Get-Item -LiteralPath $log).Length
                             Press @(0x11, (0x31 + $current)) 'Return to the identical source for a separate image replay'
                             Wait-Until { (Read-Session).active_tab -eq $current -and (Read-SharedLog $log $sourceOffset).Contains('[switch] chat content shown shell=' + $shellIds[$current] + ' ') } 'same source painted before image replay' 30
