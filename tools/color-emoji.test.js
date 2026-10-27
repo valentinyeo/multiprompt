@@ -15,7 +15,7 @@ test('Chat View and reaction menu share the native color-font painter', () => {
 test('Color clusters retain source text and original GDI selection advances', () => {
   assert.match(read('src/dwrite_text.zig'), /IGSH-1089.*color.*source/);
   assert.match(read('src/color_emoji.cpp'), /const wchar_t \*input/);
-  assert.match(read('src/color_emoji.cpp'), /GetTextExtentPoint32W\(dc, text, end, &prefix\)/);
+  assert.match(read('src/color_emoji.cpp'), /GetTextExtentExPointW\(dc, text, length, INT_MAX, &fit, positions, &extent\)/);
   assert.match(read('src/color_emoji.cpp'), /0x200d/);
   assert.match(read('src/color_emoji.cpp'), /0x1f3fb/);
   assert.match(read('src/color_emoji.cpp'), /0x1f1e6/);

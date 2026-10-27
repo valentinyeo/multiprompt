@@ -1,13 +1,12 @@
 name: Color emoji
 
 on:
-  pull_request:
-    paths:
-      - src/color_emoji.cpp
-      - src/dwrite_text.zig
-      - src/fonts.zig
-      - tools/color-emoji.test.js
-      - .github/workflows/color-emoji.yml
+  push:
+    branches: [ceo/IGSH-1089]
+  workflow_run:
+    workflows: [auto-release]
+    types: [completed]
+    branches: [master]
   workflow_dispatch:
     inputs:
       tag:
@@ -18,8 +17,34 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: color-emoji-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
 jobs:
+  release-source:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_EVENT: ${{ github.event_name == 'workflow_run' }}
+        run: |
+          if [ "$RELEASE_EVENT" != true ]; then exit 0; fi
+          tag=$(gh release view --json tagName --jq .tagName)
+          git cat-file -e "$tag:src/color_emoji.cpp" 2>/dev/null || exit 0
+          previous=$(git describe --tags --match 'v*' --abbrev=0 "$tag^")
+          if git cat-file -e "$previous:src/color_emoji.cpp" 2>/dev/null; then exit 0; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   pixels:
+    if: github.event_name != 'workflow_run'
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -49,9 +74,10 @@ jobs:
           retention-days: 14
 
   live:
-    if: github.event_name == 'workflow_dispatch'
+    needs: release-source
+    if: github.event_name != 'workflow_run' || needs.release-source.outputs.tag != ''
     uses: ./.github/workflows/verify.yml
     with:
       feature: chat-delivery
       chat_reactions_proof: true
-      tag: ${{ inputs.tag }}
+      tag: ${{ needs.release-source.outputs.tag || inputs.tag || (contains(github.event.head_commit.message, '[emoji-baseline]') && 'v0.28.963' || '') }}

@@ -133,6 +133,22 @@ public static class ChatDeliveryDesktop {
             !IsWindowVisible(transcript) || !GetWindowRect(transcript, out rect)) throw new InvalidOperationException("Transcript wheel ownership mismatch");
         WheelTranscript(main, pid, transcript, (rect.Left + rect.Right) / 2, (rect.Top + rect.Bottom) / 2, delta);
     }
+    [DllImport("user32.dll")] static extern IntPtr SendMessageW(IntPtr hwnd, uint message, UIntPtr wp, IntPtr lp);
+    [DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr hwnd, IntPtr rect, IntPtr region, uint flags);
+    [DllImport("gdi32.dll")] static extern bool GdiFlush();
+    public static double TimedTranscriptWheel(IntPtr main, uint pid, IntPtr transcript, int delta) {
+        Rect rect;
+        if (Owner(main) != pid || GetForegroundWindow() != main || Owner(transcript) != pid ||
+            !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||
+            !GetWindowRect(transcript, out rect)) throw new InvalidOperationException("Scroll timing ownership mismatch");
+        var point = new Point { X = (rect.Left + rect.Right) / 2, Y = (rect.Top + rect.Bottom) / 2 };
+        var packed = new IntPtr(unchecked((point.Y << 16) | (point.X & 0xffff)));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        SendMessageW(transcript, 0x020a, new UIntPtr(unchecked((uint)(delta << 16))), packed);
+        if (!RedrawWindow(transcript, IntPtr.Zero, IntPtr.Zero, 0x0101)) throw new InvalidOperationException("Scroll paint failed");
+        GdiFlush();
+        return clock.Elapsed.TotalMilliseconds;
+    }
     public static void PressOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
         if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
             Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||

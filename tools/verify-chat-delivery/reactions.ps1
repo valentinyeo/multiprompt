@@ -78,3 +78,21 @@ Shell-Run @('reaction-fallback')
     $LASTEXITCODE -eq 0
 })
 [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+
+$scrollStart = (Read-Shared "$settings/debug.log").Length
+Shell-Run @('messages', '200')
+$cache = Wait-For 'long emoji transcript cached' { Get-ChildItem "$settings/chat_cache/*.jsonl" | Where-Object { (Read-Shared $_.FullName).Contains('New message 199') } | Select-Object -First 1 }
+[void](Wait-For 'long emoji transcript painted' { (Read-Shared "$settings/debug.log").Substring($scrollStart) -match 'PERF\[chat\]: receive to paint ms=\d+ size=[2-9]\d\d' })
+Bind-Transcript
+$scrollView = [IntPtr]$views[0].Current.NativeWindowHandle
+$measurements = @()
+foreach ($round in 1..7) {
+    $samples = @()
+    foreach ($step in 1..20) {
+        $samples += [ChatDeliveryDesktop]::TimedTranscriptWheel($main, $app.Id, $scrollView, 120)
+    }
+    if ($round -eq 1) { Shot 'reactions-scroll-before' }
+    if ($round -gt 1) { $measurements += @{round=$round; milliseconds=$samples} }
+}
+Shot 'reactions-scroll-after'
+Save @{method='synchronous WM_MOUSEWHEEL through production window procedure, RedrawWindow and GdiFlush'; messages=200; sourceBytes=(Get-Item $cache.FullName).Length; rounds=$measurements; cpuMs=$app.TotalProcessorTime.TotalMilliseconds} "$caseDir/emoji-scroll.json"

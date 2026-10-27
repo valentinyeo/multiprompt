@@ -349,7 +349,7 @@ def shell():
         return fake_seed_many(int(ARGS[1]))
     if op == "messages" and len(ARGS) == 2:
         for i in range(int(ARGS[1])):
-            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="New message " + str(i) + "\n" + "Readable transcript paragraph with enough text to paint a full message row.\n\n" * 32)]))
+            fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="New message " + str(i) + "\n" + ("Readable transcript paragraph with enough text to paint a full message row." + (" ✓ ⚠ 👍" if state().get("name") == "reactions" else "") + "\n\n") * 32)]))
         return 0
     if op in ("retention-init", "retention-burst"):
         count = 1998 if op == "retention-init" else int(ARGS[1])

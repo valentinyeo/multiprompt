@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <d2d1.h>
 #include <dwrite.h>
+#include <limits.h>
 
 using PlainDraw = int (*)(HDC, const wchar_t *, int, RECT *, unsigned);
 
@@ -148,6 +149,13 @@ extern "C" int mp_draw_color_text(HDC dc, const wchar_t *input, unsigned length,
         length = kept + 3;
         GetTextExtentPoint32W(dc, text, length, &extent);
     }
+    auto positions = static_cast<int *>(HeapAlloc(GetProcessHeap(), 0, length * sizeof(int)));
+    int fit = 0;
+    if (!positions || !GetTextExtentExPointW(dc, text, length, INT_MAX, &fit, positions, &extent)) {
+        if (positions) HeapFree(GetProcessHeap(), 0, positions);
+        if (shortened) HeapFree(GetProcessHeap(), 0, shortened);
+        return 0;
+    }
     const int x = rect->left + ((flags & DT_RIGHT) ? width - extent.cx : (flags & DT_CENTER) ? (width - extent.cx) / 2 : 0);
     const int y = rect->top + ((flags & DT_VCENTER) ? (height - metrics.tmHeight) / 2 : 0);
     static thread_local Painter painter;
@@ -160,9 +168,7 @@ extern "C" int mp_draw_color_text(HDC dc, const wchar_t *input, unsigned length,
             end = begin;
             do { scalar(text, length, end); } while (end < length && clusterEnd(text, length, end) == end);
         }
-        SIZE prefix;
-        if (!GetTextExtentPoint32W(dc, text, end, &prefix)) break;
-        const int right = x + prefix.cx;
+        const int right = x + positions[end - 1];
         RECT cell = {left, y, right, y + metrics.tmHeight};
         const int saved = SaveDC(dc);
         IntersectClipRect(dc, rect->left, rect->top, rect->right, rect->bottom);
@@ -172,6 +178,7 @@ extern "C" int mp_draw_color_text(HDC dc, const wchar_t *input, unsigned length,
         left = right;
         begin = end;
     }
+    HeapFree(GetProcessHeap(), 0, positions);
     if (shortened) HeapFree(GetProcessHeap(), 0, shortened);
     return metrics.tmHeight;
 }
