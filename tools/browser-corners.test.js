@@ -163,4 +163,6 @@ test "background browser keeps every mask without covering foreign foreground" {
 test('IGSH-1057 native original-source checkout pins a fetchable full commit', () => {
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/browser-corners.yml'), 'utf8');
   assert.match(workflow, /ref: [a-f0-9]{40}\s/);
+  assert.match(workflow, /Get-Content evidence\/negative\/process-tree\.json/);
+  assert.match(workflow, /\$cleanup\.activeAfterStop -ne 0/);
 });

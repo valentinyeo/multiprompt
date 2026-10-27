@@ -70,9 +70,9 @@ jobs:
             & .claude/skills/verify-multiprompt/control.ps1 -Feature browser-corners -Exe $exe -ExpectedVersion $version -ExpectedHash $hash -Evidence "$pwd/evidence/negative"
           } catch { Write-Host "Original framing returned: $_" }
           $red = Get-Content evidence/negative/result.json -Raw | ConvertFrom-Json
-          $cleanup = Get-Content evidence/negative/cleanup.json -Raw | ConvertFrom-Json
+          $cleanup = Get-Content evidence/negative/process-tree.json -Raw | ConvertFrom-Json
           if ($red.status -ne 'failed' -or $red.error -notmatch 'ten visible browser masks after activation' -or -not (Test-Path evidence/negative/corners-cycle-4-failed.png)) { throw 'Original framing did not fail at unrelated activation' }
-          if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Original framing cleanup failed' }
+          if ($cleanup.activeAfterStop -ne 0 -or $red.cleanup -ne 'owned process tree stopped; scratch copied to evidence/data then removed') { throw 'Original framing cleanup failed' }
           Write-Host 'BROWSER_BACKGROUND_RED_PROVEN'
       - name: Build real app
         run: zig build
