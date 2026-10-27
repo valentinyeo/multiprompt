@@ -135,6 +135,16 @@ def fake_suggestion_shown(claude):
 
 
 def fake_screen(claude, escapes):
+    if claude.get("question"):
+        question = claude["question"]["questions"][claude["question_index"]]
+        rows = ["Claude Code", "", "☐ " + question["header"], question["question"], ""]
+        for index, option in enumerate(question["options"], 1):
+            mark = "☒ " if index in claude.get("question_selected", []) else "☐ " if question.get("multiSelect") else ""
+            rows.extend([f"  {index}. {mark}{option['label']}", "     " + option.get("description", "")])
+        rows += [f"  {len(question['options']) + 1}. Type something.", "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"]
+        if claude.get("question_other"):
+            rows.append("❯ " + claude["box"])
+        return "\n".join(rows) + "\n"
     lines = ["Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
     for question, answer in claude.get("turns", []):
         lines.extend(["❯ " + question, "● " + answer, ""])
@@ -191,7 +201,41 @@ def fake_take(claude):
     claude["mode"] = "idle"
 
 
+def fake_question_done(claude, labels):
+    question = claude["question"]["questions"][claude["question_index"]]
+    record("question-answers.jsonl", question=question["question"], labels=labels)
+    claude["question_index"] += 1
+    claude["question_selected"] = []
+    claude["question_other"] = False
+    if claude["question_index"] == len(claude["question"]["questions"]):
+        fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=claude["question_id"], content="answers received")]))
+        claude["question"] = None
+
+
 def fake_key(claude, key):
+    if claude.get("question"):
+        question = claude["question"]["questions"][claude["question_index"]]
+        if claude.get("question_other"):
+            if key == "Enter":
+                fake_question_done(claude, [claude["box"]])
+                claude["box"] = ""
+                return True
+        elif len(key) == 1 and key.isdigit():
+            index = int(key)
+            if index == len(question["options"]) + 1:
+                claude["question_other"] = True
+            elif 1 <= index <= len(question["options"]):
+                if question.get("multiSelect"):
+                    selected = claude["question_selected"]
+                    selected.remove(index) if index in selected else selected.append(index)
+                else:
+                    fake_question_done(claude, [question["options"][index - 1]["label"]])
+            else:
+                return False
+            return True
+        elif key == "Enter" and question.get("multiSelect"):
+            fake_question_done(claude, [question["options"][i - 1]["label"] for i in sorted(claude["question_selected"])])
+            return True
     if key == "Enter":
         if claude["box"]:
             text, claude["box"] = claude["box"], ""
@@ -355,6 +399,18 @@ def shell():
             body = "IGSH-975 native journey is now fully green. " + "Details follow in a very long machine message that used to fill the whole screen. " * 6 + "Run: https://example.com/run"
             fake_event("user", message=dict(role="user", content=f"[from {sender}] {body}"))
         return 0
+    if op == "question" and len(ARGS) == 2:
+        payload = json.loads(Path(ARGS[1]).read_text(encoding="utf-8"))
+        identity = "question-" + uuid.uuid4().hex
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="tool_use", id=identity, name="AskUserQuestion", input=payload)]))
+        def ask(claude):
+            claude.update(question=payload, question_id=identity, question_index=0, question_selected=[], question_other=False)
+            return True
+        return 0 if fake_run("shell", op, ARGS, ask) else 3
+    if op == "plain-list":
+        text = "I need three answers from you:\n1. Figma team\n2. Figma login\n3. QA tickets"
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=text)]))
+        return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append(["Three separate questions", text]) is None) else 3
     if op == "seed-many" and len(ARGS) == 2:
         return fake_seed_many(int(ARGS[1]))
     if op == "seed-shapes" and len(ARGS) == 2:

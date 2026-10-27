@@ -92,6 +92,18 @@ class HistoryReaderTest(unittest.TestCase):
                    dict(self.tool_call("AskUserQuestion", dict(questions=[question])), isSidechain=True))
         self.assertFalse(any(row.get("question") for row in self.read()[1]))
 
+    def test_igsh1063_question_keys_keep_enter_separate_from_permission_keys(self):
+        for digit, key in ((49, "1"), (50, "2"), (13, "Enter")):
+            with patch.object(reader.subprocess, "run") as run:
+                wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", digit=digit))
+            self.assertIn("\tquestion\tok\t", wire)
+            self.assertEqual(run.call_args.args[0], ["tmux", "send-keys", "-t", "=term-1:", key])
+        for op, digit in (("question", 27), ("question", 10), ("question", True), ("permission", 13)):
+            with patch.object(reader.subprocess, "run") as run:
+                wire = reader.stop_response(dict(op=op, id=7, tmux="term-1", digit=digit))
+            self.assertIn("\t" + op + "\terror\t", wire)
+            run.assert_not_called()
+
     def test_claude_status_header(self):
         todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]
         old = self.tool_call("TodoWrite", dict(todos=[dict(content="old", status="pending")]))

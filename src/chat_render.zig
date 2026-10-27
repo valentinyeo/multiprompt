@@ -1855,18 +1855,12 @@ const ChoiceState = struct {
 
 var g_choice: ChoiceState = .{};
 var g_choice_sig: [5]u64 = .{ 0, 0, 0, 0, 0 };
-var g_choice_rects: [chat_options.MAX_OPTIONS + 1]RECT = undefined;
+var g_choice_rects: [chat_options.MAX_OPTIONS + 2]RECT = undefined;
 var g_choice_rect_count: usize = 0;
 var g_choice_title_top: i32 = 0;
 var g_choice_card_w: i32 = 0;
-var g_choice_pick_key: u64 = 0;
-var g_choice_pick_index: usize = 0;
-var g_choice_pick_set = false;
-var g_choice_pick_prompt = false;
-var g_choice_pick_sid: u32 = 0;
-
 fn chatChoiceCardCount() usize {
-    return g_choice.group.count + @as(usize, if (g_choice.prompt) 1 else 0);
+    return g_choice.group.count + 1 + @as(usize, @intFromBool(g_choice.group.multi_select));
 }
 
 fn chatChoiceTitleH() i32 {
@@ -1884,93 +1878,32 @@ fn chatChoiceStripH() i32 {
     return uiScaled(CHOICE_GAP) + title + cards * uiScaled(CHOICE_CARD_H) + (cards - 1) * uiScaled(CHOICE_GAP);
 }
 
-fn chatChoiceKey(group: *const chat_options.Group, prompt: bool, origin: usize) u64 {
-    return if (prompt) group.hash() else group.hash() *% 31 +% origin;
-}
-
-fn chatChoiceUserText(buf: []const u16, block: ChatBlock) []const u16 {
-    const disp = chatBlockDisplayRange(buf, block);
-    return buf[disp.start .. disp.start + disp.len];
-}
-
-fn chatChoicePickFor(key: u64) bool {
-    if (!g_choice_pick_set or g_choice_pick_key != key) return false;
-    if (app_state.active_shell >= app_state.shell_count) return false;
-    return g_choice_pick_sid == app_state.shells[app_state.active_shell].shell_id;
-}
-
-fn chatChoicesFind(buf: []const u16, found: *ChoiceState) bool {
-    const blocks = app_state.g_chat_blocks[0..app_state.g_chat_block_count];
-    var last_prose: ?usize = null;
-    var i = blocks.len;
-    while (i > 0) {
-        i -= 1;
-        if (blocks[i].role == .prose) {
-            last_prose = i;
-            break;
-        }
-    }
-    const lp = last_prose orelse return false;
-    var start = lp;
-    while (start > 0 and blocks[start - 1].role != .user and blocks[start - 1].role != .injected) start -= 1;
-    var anchor = lp;
-    var user_after: ?usize = null;
-    var j = lp + 1;
-    while (j < blocks.len) : (j += 1) {
-        const role = blocks[j].role;
-        if (role == .user or role == .injected) {
-            if (role == .user) user_after = j;
-            break;
-        }
-        if (role != .tool) anchor = j;
-    }
-    var chunks: [64]chat_options.Chunk = undefined;
-    var n: usize = 0;
-    for (blocks[start .. lp + 1]) |block| {
-        if (block.role != .prose) continue;
-        if (n == chunks.len) {
-            std.mem.copyForwards(chat_options.Chunk, chunks[0 .. n - 1], chunks[1..n]);
-            n -= 1;
-        }
-        chunks[n] = .{ .text = chatChoiceUserText(buf, block), .level = if (block.kind == .list) block.level else 0 };
-        n += 1;
-    }
-    if (!chat_options.parseReply(chunks[0..n], &found.group)) return false;
-    found.present = true;
-    found.prompt = false;
-    found.anchor = anchor;
-    found.origin = start;
-    const key = chatChoiceKey(&found.group, false, start);
-    if (chatChoicePickFor(key)) found.chosen = g_choice_pick_index;
-    if (found.chosen == null) {
-        if (user_after) |ui| {
-            const reply = chatChoiceUserText(buf, blocks[ui]);
-            for (found.group.options[0..found.group.count], 0..) |*option, oi| {
-                var answer: [chat_options.TITLE_MAX + 8]u16 = undefined;
-                const len = chat_options.answerLen(option, &answer);
-                if (std.mem.startsWith(u16, reply, answer[0..len])) {
-                    found.chosen = oi;
-                    break;
-                }
+fn chatChoicesRefresh(_: []const u16) void {
+    var next: ChoiceState = .{};
+    if (app_state.active_shell < app_state.shell_count) {
+        const shell = &app_state.shells[app_state.active_shell];
+        const sid = shell.shell_id;
+        if (chatHistoryEntry(chatFileIdentity())) |entry| {
+            const prompt = &entry.history.status.question;
+            if (prompt.identity != shell.chat_question_identity) {
+                shell.chat_question_identity = prompt.identity;
+                shell.chat_question_index = 0;
+                shell.chat_question_selected = 0;
+                shell.chat_question_other = false;
+            }
+            const current = prompt.activeIndex(if (app_state.g_chat_raw_sid == sid) app_state.g_chat_raw[0..app_state.g_chat_raw_len] else &.{}, shell.chat_question_index);
+            if (current != shell.chat_question_index) {
+                shell.chat_question_selected = 0;
+                shell.chat_question_other = false;
+            }
+            shell.chat_question_index = current;
+            if (current < prompt.count) {
+                next.group = prompt.groups[current];
+                next.present = true;
+                next.prompt = true;
+                next.live = !shell.chat_question_other;
             }
         }
-    }
-    found.live = found.chosen == null and user_after == null and app_state.g_chat_echo_layout_count == 0;
-    return true;
-}
-
-fn chatChoicesRefresh(buf: []const u16) void {
-    var next: ChoiceState = .{};
-    if (app_state.active_shell < app_state.shell_count and app_state.g_chat_question.count > 0 and app_state.g_chat_question_sid == app_state.shells[app_state.active_shell].shell_id) {
-        next.group = app_state.g_chat_question;
-        next.present = true;
-        next.prompt = true;
-        if (chatChoicePickFor(chatChoiceKey(&next.group, true, 0))) next.chosen = g_choice_pick_index;
-        next.live = next.chosen == null;
-    } else _ = chatChoicesFind(buf, &next);
-    if (g_choice_pick_prompt and !(next.present and next.prompt)) {
-        g_choice_pick_set = false;
-        g_choice_pick_prompt = false;
     }
     g_choice = next;
 }
@@ -1981,7 +1914,7 @@ fn chatChoicesSig() [5]u64 {
         @intFromBool(g_choice.prompt),
         if (g_choice.present and !g_choice.prompt) g_choice.anchor else std.math.maxInt(u64),
         @intCast(chatChoiceStripH()),
-        0,
+        g_choice.group.hash(),
     };
 }
 
@@ -2018,26 +1951,23 @@ fn chatChoiceAt(x: i32, y: i32) ?usize {
 }
 
 fn chatChoiceClick(index: usize) void {
-    const chat_send = @import("chat_send.zig");
     const group = &g_choice.group;
-    const key = chatChoiceKey(group, g_choice.prompt, g_choice.origin);
-    if (g_choice.prompt) {
-        const digit = if (index < group.count) group.options[index].digit else group.other;
-        if (!chat_send.chatQuestionAnswer(app_state.active_shell, digit, group.hash())) return;
-        if (index >= group.count and app_state.g_chat_composer_hwnd != null) _ = SetFocus(app_state.g_chat_composer_hwnd);
+    const shell = &app_state.shells[app_state.active_shell];
+    const submit = group.multi_select and index == group.count + 1;
+    const digit: u8 = if (submit) 0x0D else if (index < group.count) group.options[index].digit else group.other;
+    if (!@import("chat_send.zig").chatQuestionAnswer(app_state.active_shell, digit, group.hash())) return;
+    if (index == group.count) {
+        shell.chat_question_other = true;
+        g_choice.live = false;
+        if (app_state.g_chat_composer_hwnd != null) _ = SetFocus(app_state.g_chat_composer_hwnd);
+    } else if (group.multi_select and !submit) {
+        shell.chat_question_selected ^= @as(u32, 1) << @intCast(index);
     } else {
-        if (index >= group.count) return;
-        var answer: [chat_options.TITLE_MAX + 8]u16 = undefined;
-        const len = chat_options.answerLen(&group.options[index], &answer);
-        if (!chat_send.chatSendChoice(answer[0..len])) return;
+        shell.chat_question_index += 1;
+        shell.chat_question_selected = 0;
+        app_state.g_chat_layout_dirty = true;
+        app_state.g_chat_layout_reuse = 0;
     }
-    g_choice_pick_key = key;
-    g_choice_pick_index = index;
-    g_choice_pick_set = true;
-    g_choice_pick_sid = app_state.shells[app_state.active_shell].shell_id;
-    g_choice_pick_prompt = g_choice.prompt;
-    g_choice.chosen = index;
-    g_choice.live = false;
     if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
 
@@ -2065,7 +1995,7 @@ fn chatPaintChoiceTitle(hdc: HANDLE, text_color: DWORD, sub_color: DWORD) void {
     }
 }
 
-var g_choice_logged: u64 = 0;
+var g_choice_logged: u64 = std.math.maxInt(u64);
 
 fn chatChoicesLog() void {
     var hash: u64 = @as(u64, @intFromBool(g_choice.live)) + 2 * @as(u64, @intFromBool(g_choice.prompt));
@@ -2083,8 +2013,8 @@ fn chatChoicesLog() void {
 }
 
 fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
-    if (!g_choice.present or g_choice_rect_count == 0) return;
     chatChoicesLog();
+    if (!g_choice.present or g_choice_rect_count == 0) return;
     const text_color = customColorOr("text", themeConsoleFg());
     const sub_color = customColorOr("subtitle", if (app_state.g_light_theme) RGB(85, 98, 115) else RGB(138, 138, 138));
     _ = SetBkMode(hdc, TRANSPARENT);
@@ -2099,13 +2029,13 @@ fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
         if (rc.bottom < 0 or rc.top > view_h) continue;
         if (rc.bottom <= paint.top or rc.top >= paint.bottom) continue;
         const option: ?*const chat_options.Option = if (i < group.count) &group.options[i] else null;
-        const selected = g_choice.chosen != null and g_choice.chosen.? == i;
+        const selected = i < group.count and app_state.shells[app_state.active_shell].chat_question_selected & (@as(u32, 1) << @intCast(i)) != 0;
         fillBubbleStyled(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), if (selected) chatUserBubbleColor() else chatAgentBubbleColor(), true, true);
         const pad = uiScaled(12);
         const badge = uiScaled(26);
         const badge_rc = RECT{ .left = rc.left + pad, .top = rc.top + @divTrunc(rc.bottom - rc.top - badge, 2), .right = rc.left + pad + badge, .bottom = rc.top + @divTrunc(rc.bottom - rc.top - badge, 2) + badge };
         @import("smooth.zig").fillEllipse(hdc, badge_rc, if (selected) text_color else chatUserBubbleColor());
-        const label_char = [1]u16{if (option) |o| (if (o.label_len > 0) o.label[0] else '?') else group.other};
+        const label_char = [1]u16{if (option) |o| (if (o.label_len > 0) o.label[0] else '?') else if (i == group.count) group.other else 0x2713};
         var label_rc = badge_rc;
         _ = SelectObject(hdc, ensureChatFont());
         _ = SetTextColor(hdc, if (selected) chatUserBubbleColor() else sub_color);
@@ -2118,7 +2048,7 @@ fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
         const text_left = badge_rc.right + uiScaled(12);
         const text_right = rc.right - pad;
         const detail: []const u16 = if (option) |o| o.detailSlice() else &.{};
-        const title: []const u16 = if (option) |o| o.titleSlice() else other_title;
+        const title: []const u16 = if (option) |o| o.titleSlice() else if (i == group.count) other_title else std.unicode.utf8ToUtf16LeStringLiteral("Submit");
         _ = SelectObject(hdc, chatRichFont(.{ .bold = true }, 0));
         _ = SetTextColor(hdc, text_color);
         if (detail.len > 0) {

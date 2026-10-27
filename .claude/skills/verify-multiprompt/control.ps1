@@ -2750,10 +2750,10 @@ try {
         Save-Json $bindingSeed 'seed-session.json'
         $result.seedBoundary = 'One saved bare SSH tab with no terminal binding. Only SSH is replaced by an owned console showing an existing named terminal session. The real app resolves its public pane-info request, adopts, saves and restores its binding; command receipts prove five exact reattachments and no session creation. No live server, credentials or real Claude are used.'
     }
-    if ($Feature -eq 'chat-switch-speed') {
+    if ($Feature -in @('chat-switch-speed', 'chat-options')) {
         $remoteState = Join-Path $scratch 'remote-state'
         New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
-        $remoteNames = @(1..5 | ForEach-Object { "verify-agent-$_" })
+        $remoteNames = if ($Feature -eq 'chat-options') { @('verify-agent-1') } else { @(1..5 | ForEach-Object { "verify-agent-$_" }) }
         $remotePanes = [ordered]@{}
         $remoteSids = [ordered]@{}
         for ($i = 0; $i -lt $remoteNames.Count; $i++) {
@@ -2774,14 +2774,26 @@ try {
             Copy-Item -LiteralPath $shapeFile (Join-Path $Evidence 'chat-shapes.json')
             Copy-Item -LiteralPath (Join-Path $remoteState 'chat-shape-manifest.json') (Join-Path $Evidence 'chat-shape-manifest.json')
         } else {
-            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 400
+            $seedRounds = if ($Feature -eq 'chat-options') { 1 } else { 400 }
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many $seedRounds
         }
         if ($LASTEXITCODE -ne 0) { throw 'Remote transcript seeding failed' }
+        if ($Feature -eq 'chat-options') {
+            $remoteDocument.name = 'chat-options'
+            $remoteDocument.mode = 'busy'
+            $remoteDocument.sid = $remoteSids['verify-agent-1']
+            $remoteDocument.transcript = Join-Path $remoteDocument.home ('.claude/projects/C--verify-work0/' + $remoteDocument.sid + '.jsonl')
+            [IO.File]::WriteAllText((Join-Path $remoteState 'state.json'), (ConvertTo-Json -InputObject $remoteDocument -Depth 6), (New-Object Text.UTF8Encoding($false)))
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell busy
+            if ($LASTEXITCODE -ne 0) { throw 'Question input boundary failed' }
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell plain-list
+            if ($LASTEXITCODE -ne 0) { throw 'Ordinary list fixture failed' }
+        }
         $remoteTabs = @($remoteNames | ForEach-Object { @{ kind = 'tmux'; name = ('Remote ' + $_); manual = $true; tmux_host = 0; tmux_session = $_; cv = $false; pid = 0 } })
         $remoteSeedJson = ConvertTo-Json -InputObject @{ active_tab = 0; single_window = $false; chat_active = $false; tabs = $remoteTabs } -Depth 6
         [IO.File]::WriteAllText((Join-Path $scratch 'roaming/ZigShell/session.json'), $remoteSeedJson, (New-Object Text.UTF8Encoding($false)))
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
-        $result.seedBoundary = 'The harness writes the saved-tab file once before the first launch: five tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.'
+        $result.seedBoundary = 'The harness writes the saved-tab file once before the first launch: stand-in tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.'
     }
     if ($Feature -eq 'tab-names') {
         $seedFolder = Join-Path $scratch 'GitHub'
