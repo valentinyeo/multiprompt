@@ -239,6 +239,8 @@ pub const Shell = struct {
     chat_question_index: usize = 0,
     chat_question_selected: u32 = 0,
     chat_question_other: bool = false,
+    chat_question_other_sent: bool = false,
+    chat_question_other_hash: u64 = 0,
     needs_attention: bool,
     hook_capable: bool = false,
     turn_pending: bool = false,

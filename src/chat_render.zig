@@ -1886,6 +1886,7 @@ fn chatChoicesRefresh(_: []const u16) void {
         if (chatHistoryEntry(chatFileIdentity())) |entry| {
             const prompt = &entry.history.status.question;
             if (prompt.identity != shell.chat_question_identity) {
+                @import("chat_send.zig").chatQuestionOtherFinish(app_state.active_shell);
                 shell.chat_question_identity = prompt.identity;
                 shell.chat_question_index = 0;
                 shell.chat_question_selected = 0;
@@ -1893,6 +1894,7 @@ fn chatChoicesRefresh(_: []const u16) void {
             }
             const current = prompt.activeIndex(if (app_state.g_chat_raw_sid == sid) app_state.g_chat_raw[0..app_state.g_chat_raw_len] else &.{}, shell.chat_question_index);
             if (current != shell.chat_question_index) {
+                @import("chat_send.zig").chatQuestionOtherFinish(app_state.active_shell);
                 shell.chat_question_selected = 0;
                 shell.chat_question_other = false;
             }

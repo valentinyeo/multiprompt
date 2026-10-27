@@ -990,6 +990,7 @@ fn chatPermissionSendFailedApply() void {
     for (app_state.shells[0..app_state.shell_count]) |*shell| {
         if (shell.shell_id != shell_id) continue;
         shell.permission_answered = false;
+        shell.chat_question_other_sent = false;
         shell.chat_question_identity = 0;
         @import("window_layout.zig").chatWorkingIndicatorInvalidate();
         break;

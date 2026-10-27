@@ -1628,7 +1628,8 @@ def send_response(q):
         except (OSError, subprocess.SubprocessError, UnicodeError):
             reason = "tmux_send_failed"
     status = "error" if reason else "ok"
-    return f"@mp\t{rid}\tsend\t{status}\t{reason or '-'}\t0\n{END}\n"
+    op = "question_text" if q.get("op") == "question_text" else "send"
+    return f"@mp\t{rid}\t{op}\t{status}\t{reason or '-'}\t0\n{END}\n"
 
 
 def type_into_box(target, text, rid):
@@ -1915,7 +1916,7 @@ def serve(source):
             if type(rid) is not int or rid < 0:
                 rid = 0
                 raise ValueError("invalid request id")
-            if query.get("op") == "send":
+            if query.get("op") in ("send", "question_text"):
                 wire = send_response(query)
             elif query.get("op") == "draft":
                 wire = draft_response(query)

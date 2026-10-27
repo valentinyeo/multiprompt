@@ -108,6 +108,13 @@ class HistoryReaderTest(unittest.TestCase):
             self.assertIn("\tpermission\terror\t", reader.stop_response(dict(op="permission", id=7, tmux="term-1", digit=13)))
         run.assert_not_called()
 
+    def test_igsh1063_other_text_keeps_question_reply_operation(self):
+        with patch.object(reader, "prompt_box_text", return_value=""), patch.object(reader, "clear_prompt_box", return_value=("", False)), patch.object(reader.time, "sleep"), patch.object(reader.subprocess, "run") as run:
+            wire = reader.send_response(dict(op="question_text", id=7, tmux="term-1", text="Purple"))
+        self.assertIn("\tquestion_text\tok\t", wire)
+        self.assertEqual(run.call_args_list[0].args[0], ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "Purple"])
+        self.assertEqual(run.call_args_list[1].args[0], ["tmux", "send-keys", "-t", "=term-1:", "Enter"])
+
     def test_claude_status_header(self):
         todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]
         old = self.tool_call("TodoWrite", dict(todos=[dict(content="old", status="pending")]))

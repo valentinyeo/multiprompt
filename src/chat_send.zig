@@ -420,6 +420,7 @@ pub fn sendChatPrompt() void {
         return;
     }
     var send_text: []const u16 = chatPromptNormalizeLineEndings(text_buf[0..text_len]);
+    if (chatSendQuestionText(send_text)) return;
     var composed_utf8: ?[]u8 = null;
     defer if (composed_utf8) |bytes| std.heap.page_allocator.free(bytes);
     if (app_state.g_chat_reply_len > 0) {
@@ -2632,6 +2633,33 @@ pub fn chatPermissionAnswer(shell_index: u32, action: @import("chat_permission.z
     return true;
 }
 
+fn chatSendQuestionText(text: []const u16) bool {
+    const shell = &app_state.shells[app_state.active_shell];
+    if (!shell.chat_question_other) return false;
+    if (shell.chat_question_other_sent) return true;
+    if (chatShellOp(app_state.active_shell, "question_text", text, null)) {
+        shell.chat_question_other_hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(text));
+        shell.chat_question_other_sent = true;
+        @import("chat_composer.zig").chatShellDraftNoteSend();
+    }
+    return true;
+}
+
+pub fn chatQuestionOtherFinish(shell_index: u32) void {
+    const shell = &app_state.shells[shell_index];
+    if (shell.chat_question_other_sent and shell_index == app_state.active_shell and app_state.g_chat_composer_hwnd != null) {
+        var text: [16384]u16 = undefined;
+        const len: usize = @intCast(@max(0, GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len)));
+        if (std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(chatPromptNormalizeLineEndings(text[0..len]))) == shell.chat_question_other_hash) {
+            _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+            app_state.g_chat_draft_dirty = true;
+            chatDraftFlush();
+        }
+    }
+    shell.chat_question_other_sent = false;
+    shell.chat_question_other = false;
+}
+
 pub fn chatQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_hash: u64) bool {
     if (!app_state.g_chat_active or shell_index != app_state.active_shell or shell_index >= app_state.shell_count) return false;
     var scratch: [2]u16 = undefined;
@@ -2761,6 +2789,7 @@ fn chatShellOpThread(key: @import("chat_transcript.zig").Identity, op: []const u
     const want = std.fmt.bufPrint(&needle, "\t{s}\tok\t", .{op}) catch return;
     var log: [96]u8 = undefined;
     if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, want) == null) {
+        if (std.mem.eql(u8, op, "question_text")) app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
         debugLog(std.fmt.bufPrint(&log, "[chat] {s} failed via=tmux", .{op}) catch "");
         return;
     }
