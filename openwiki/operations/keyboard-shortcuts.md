@@ -168,7 +168,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K Thread Title | [DEV] Subject header above the console (toggle) |
 | Ctrl++ / Ctrl+- / Ctrl+0 | Terminal font only (Chat View text size when Chat View is active) |
 | Ctrl+K UI Size | App/sidebar only, layered over native monitor DPI |
-| Ctrl+Shift+R | Reconnect active SSH/tmux tab |
+| Ctrl+Shift+R | Reattach active SSH/tmux tab |
 | Ctrl+K → Start new session | Restart an ended server session with the same name (also in tab actions) |
 | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) |
 | Ctrl+F in All Sessions | Reduce the list to matching sessions |
@@ -220,7 +220,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Drag tab: Pinned / Recents | Change its order inside the group or ungrouped list |
 | Click tier heading | Collapse / expand ungrouped Pinned or Recents |
 | Right-click group / Ctrl+K | Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs |
-| Right-click tab | Tab actions palette (pin / reconnect / mute / close / move / group) |
+| Right-click tab | Tab actions palette (pin / reattach / mute / close / move / group) |
 | Ctrl+F in Chat View | Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |
 | End / Ctrl+K "Chat View: Scroll to newest message" | Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch |
 | Double-click empty space | Switch between Chat View and the shell (without selecting text) |

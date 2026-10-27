@@ -556,7 +556,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
             SEARCH_TABCTX_CHAT_RESET => "chat view reset this chat clear bubbles cache",
-            SEARCH_TABCTX_RECONNECT => "reconnect tab",
+            SEARCH_TABCTX_RECONNECT => "reattach tab",
             SEARCH_TABCTX_INBOX_EXCLUDE => if (tab != null and tab.?.inbox_excluded) "inbox: show this session again" else "inbox: never show this session",
             SEARCH_TABCTX_FAVORITE => if (tab != null and tab.?.favorite) "unfavorite" else "favorite",
             SEARCH_TABCTX_MUTE => if (tab != null and tab.?.muted) "unmute tab" else "mute tab",
@@ -674,7 +674,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_FULLWIDTH_OFFSET => "full-width",
         SEARCH_SHORTCUTS_OFFSET => "keyboard shortcuts",
         SEARCH_CLOSEWIN_OFFSET => "close workspace",
-        SEARCH_RECONNECT_OFFSET => "reconnect tab",
+        SEARCH_RECONNECT_OFFSET => "reattach tab",
         SEARCH_SINGLEWIN_OFFSET => "single-window mode",
         SEARCH_INSTALLHOOK_OFFSET => "install blue dot hook",
         SEARCH_STARRED_OFFSET => "go to starred workspace favorites alt 1",
@@ -2089,8 +2089,10 @@ pub fn updateSearchResults() void {
             if (k == .vps or k == .vps2 or k == .tmux) {
                 if (app_state.g_search_result_count < app_state.g_search_results.len) {
                     const ended = app_state.shells[ti].ssh_reconnect.phase == .ended;
-                    const label = if (ended) "Start new session" else "Reconnect Tab";
-                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    const label = if (ended) "Start new session" else "Reattach Tab";
+                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len]) or
+                        (!ended and asciiContainsQueryInsensitive("reconnect tab", app_state.g_search_buf[0..app_state.g_search_len])))
+                    {
                         if (ended) {
                             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_START_SESSION;
                         } else {
