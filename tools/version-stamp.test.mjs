@@ -29,7 +29,10 @@ function repo(t, files = base()) {
     }
   };
   const commit = () => { git('add', '-A'); git('commit', '-m', 'fixture'); return git('rev-parse', 'HEAD'); };
-  const check = (from, to) => spawnSync(process.execPath, [tool, 'check', from, to], { cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(dir, '.git', 'github-output') } });
+  const env = { ...process.env, GITHUB_OUTPUT: path.join(dir, '.git', 'github-output') };
+  delete env.GITHUB_HEAD_REF;
+  delete env.GITHUB_REF_NAME;
+  const check = (from, to, extra = {}) => spawnSync(process.execPath, [tool, 'check', from, to], { cwd: dir, encoding: 'utf8', env: { ...env, ...extra } });
   write(files);
   const initial = commit();
   return { dir, git, write, commit, check, initial };
@@ -109,6 +112,19 @@ test('check accepts code edits alongside a new fragment', t => {
   r.write({ 'other.txt': 'Code change.\n', 'changelog.d/DEMO-2-code.md': 'A useful feature.\n' });
   expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
   assert.equal(fs.readFileSync(path.join(r.dir, '.git', 'github-output'), 'utf8'), 'kind=CODE\n');
+});
+
+test('app code needs a changelog note except on auto-revert branches', t => {
+  const r = repo(t, { ...base(), 'changelog.d/DEMO-2-code.md': 'A useful feature.\n', 'src/feature.zig': 'const on = true;\n' });
+  r.git('rm', '-q', 'changelog.d/DEMO-2-code.md', 'src/feature.zig');
+  const head = r.commit();
+  const normal = r.check(r.initial, head, { GITHUB_HEAD_REF: 'ceo/DEMO-2' });
+  assert.equal(normal.status, 1);
+  assert.match(normal.stderr, /App code changed: add changelog\.d/);
+  const revert = r.check(r.initial, head, { GITHUB_HEAD_REF: 'auto-revert/40533455263' });
+  expectKind(revert, 'CODE', 0);
+  const dispatched = r.check(r.initial, head, { GITHUB_REF_NAME: 'auto-revert/40533455263' });
+  expectKind(dispatched, 'CODE', 0);
 });
 
 test('check rejects a stamp with an extra byte in the entry', t => {
