@@ -605,7 +605,7 @@ jobs:
   check-red-run:
     uses: ./.github/workflows/check-red-run.yml
     with:
-      base: ${{ github.event.pull_request.base.sha || github.event.before || format('{0}^', github.sha) }}
+      base: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && github.event.before) || 'origin/master' }}
       head: ${{ github.event.pull_request.head.sha || github.sha }}
 
   switch-performance:
@@ -637,7 +637,7 @@ jobs:
       - name: Build baseline and candidate
         shell: pwsh
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'origin/master' }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && github.event.before) || 'origin/master' }}
         run: |
           $base = (git merge-base $env:BASE HEAD).Trim()
           git worktree add --detach baseline $base
@@ -654,13 +654,14 @@ jobs:
             zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o "$root/zig-out/bin/tmux.exe"
             if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
           }
+          "SPEED_HEAD=$((git rev-parse HEAD).Trim())" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "SPEED_BASE=$base" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Measure baseline session speed
         shell: powershell
         run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multiprompt.exe -Evidence evidence/base -Revision "$env:SPEED_BASE"
       - name: Measure candidate session speed
         shell: powershell
-        run: ./tools/switch-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence/head -Revision "${{ github.event.pull_request.head.sha || github.sha }}"
+        run: ./tools/switch-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence/head -Revision "$env:SPEED_HEAD"
       - name: Require session speed limits
         if: always()
         run: node tools/switch-performance.mjs report evidence/base/samples.json evidence/head/samples.json
@@ -695,15 +696,16 @@ jobs:
               [ "$result" = success ] || return 1
             done
           }
-          require_jobs success success success success success success success
+          require_jobs success success success success success success success success
           for result in failure cancelled skipped; do
-            if require_jobs "$result" success success success success success success; then exit 1; fi
-            if require_jobs success "$result" success success success success success; then exit 1; fi
-            if require_jobs success success "$result" success success success success; then exit 1; fi
-            if require_jobs success success success "$result" success success success; then exit 1; fi
-            if require_jobs success success success success "$result" success success; then exit 1; fi
-            if require_jobs success success success success success "$result" success; then exit 1; fi
-            if require_jobs success success success success success success "$result"; then exit 1; fi
+            if require_jobs "$result" success success success success success success success; then exit 1; fi
+            if require_jobs success "$result" success success success success success success; then exit 1; fi
+            if require_jobs success success "$result" success success success success success; then exit 1; fi
+            if require_jobs success success success "$result" success success success success; then exit 1; fi
+            if require_jobs success success success success "$result" success success success; then exit 1; fi
+            if require_jobs success success success success success "$result" success success; then exit 1; fi
+            if require_jobs success success success success success success "$result" success; then exit 1; fi
+            if require_jobs success success success success success success success "$result"; then exit 1; fi
           done
           echo 'Aggregate routing controls passed'
           require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN" "$SPEED"

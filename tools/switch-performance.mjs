@@ -19,25 +19,25 @@ export function assess(data) {
 }
 
 export function instrument(root) {
-  const file = path.join(root, 'src/chat_session.zig');
+  const file = path.join(root, 'src/main.zig');
   let source = fs.readFileSync(file, 'utf8');
   if (source.includes('chat-idle-poll: us=')) return;
-  const start = 'pub fn refreshChatTranscript(force: bool) void {\n';
-  const end = '    if (!refreshed and !restore_read) return;';
-  if (!source.includes(start) || !source.includes(end)) throw new Error('Unknown idle-poll timing boundary');
-  source = source.replace(start, start + `    var poll_started: i64 = 0;
-    if (@import("diagnostics.zig").verboseLoggingEnabled()) _ = @import("win32.zig").QueryPerformanceCounter(&poll_started);
-`).replace(end, `    if (!refreshed and !restore_read) {
-        if (poll_started != 0) {
-            var now: i64 = 0;
-            var frequency: i64 = 1;
-            _ = @import("win32.zig").QueryPerformanceCounter(&now);
-            _ = @import("win32.zig").QueryPerformanceFrequency(&frequency);
-            var buf: [80]u8 = undefined;
-            debugLog(std.fmt.bufPrint(&buf, "chat-idle-poll: us={d}", .{@divTrunc((now -| poll_started) * 1_000_000, @max(1, frequency))}) catch return);
-        }
-        return;
-    }`);
+  const needle = '                    chatFileOnReady();';
+  if (!source.includes(needle)) throw new Error('Unknown idle-poll timing boundary');
+  source = source.replace(needle, `                    const poll_revision = app_state.g_chat_last_hash;
+                    var poll_started: i64 = 0;
+                    if (app_state.g_chat_active and !app_state.g_chat_screen_working and !app_state.g_voice_mode_active and @import("diagnostics.zig").verboseLoggingEnabled()) _ = @import("win32.zig").QueryPerformanceCounter(&poll_started);
+                    defer {
+                        if (poll_started != 0 and poll_revision == app_state.g_chat_last_hash) {
+                            var now: i64 = 0;
+                            var frequency: i64 = 1;
+                            _ = @import("win32.zig").QueryPerformanceCounter(&now);
+                            _ = @import("win32.zig").QueryPerformanceFrequency(&frequency);
+                            var buf: [80]u8 = undefined;
+                            debugLog(std.fmt.bufPrint(&buf, "chat-idle-poll: us={d}", .{@divTrunc((now -| poll_started) * 1_000_000, @max(1, frequency))}) catch "chat-idle-poll: timing error");
+                        }
+                    }
+` + needle);
   fs.writeFileSync(file, source);
 }
 

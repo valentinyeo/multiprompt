@@ -7130,6 +7130,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (app_state.g_chat_browser_swap.shell_id != 0) return 0;
                 if (app_state.g_chat_active or app_state.g_voice_mode_active) {
                     if (!app_state.g_voice_mode_active and (IsIconic(hwnd) != 0 or IsWindowVisible(hwnd) == 0)) return 0;
+                    const poll_revision = app_state.g_chat_last_hash;
+                    var poll_started: i64 = 0;
+                    if (app_state.g_chat_active and !app_state.g_chat_screen_working and !app_state.g_voice_mode_active and @import("diagnostics.zig").verboseLoggingEnabled()) _ = @import("win32.zig").QueryPerformanceCounter(&poll_started);
+                    defer {
+                        if (poll_started != 0 and poll_revision == app_state.g_chat_last_hash) {
+                            var now: i64 = 0;
+                            var frequency: i64 = 1;
+                            _ = @import("win32.zig").QueryPerformanceCounter(&now);
+                            _ = @import("win32.zig").QueryPerformanceFrequency(&frequency);
+                            var buf: [80]u8 = undefined;
+                            debugLog(std.fmt.bufPrint(&buf, "chat-idle-poll: us={d}", .{@divTrunc((now -| poll_started) * 1_000_000, @max(1, frequency))}) catch "chat-idle-poll: timing error");
+                        }
+                    }
                     chatFileOnReady();
                     if (app_state.g_chat_active) {
                         refreshChatTranscript(false);

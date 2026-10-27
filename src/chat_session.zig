@@ -1549,8 +1549,6 @@ pub fn chatSwitchLogBrowserShown() void {
 }
 
 pub fn refreshChatTranscript(force: bool) void {
-    var poll_started: i64 = 0;
-    if (@import("diagnostics.zig").verboseLoggingEnabled()) _ = @import("win32.zig").QueryPerformanceCounter(&poll_started);
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     if (!app_state.g_chat_active or app_state.g_chat_transcript_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var client_rc: RECT = std.mem.zeroes(RECT);
@@ -1563,17 +1561,7 @@ pub fn refreshChatTranscript(force: bool) void {
     const anchor = if (follow_bottom) null else chat_history.scrollAnchor(app_state.g_chat_layout_rects[0..app_state.g_chat_block_count], old_scroll_y);
     const refreshed = refreshChatBlockCache(force);
     chatEchoMatchActive();
-    if (!refreshed and !restore_read) {
-        if (poll_started != 0) {
-            var now: i64 = 0;
-            var frequency: i64 = 1;
-            _ = @import("win32.zig").QueryPerformanceCounter(&now);
-            _ = @import("win32.zig").QueryPerformanceFrequency(&frequency);
-            var buf: [80]u8 = undefined;
-            debugLog(std.fmt.bufPrint(&buf, "chat-idle-poll: us={d}", .{@divTrunc((now -| poll_started) * 1_000_000, @max(1, frequency))}) catch return);
-        }
-        return;
-    }
+    if (!refreshed and !restore_read) return;
     if (follow_bottom) app_state.g_chat_scrolled_up = false;
     app_state.g_chat_scroll_bottom_pending = false;
     const previous_boundary = app_state.g_chat_read_boundary;

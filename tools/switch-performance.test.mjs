@@ -36,10 +36,10 @@ test('no-op, incomplete and malformed workloads cannot pass', async () => {
   }
 });
 test('production idle poll has real high-resolution timing', () => {
-  const source = fs.readFileSync(new URL('../src/chat_session.zig', import.meta.url), 'utf8');
-  const poll = source.slice(source.indexOf('pub fn refreshChatTranscript('), source.indexOf('pub fn chatRelayoutPreservingScroll('));
+  const source = fs.readFileSync(new URL('../src/main.zig', import.meta.url), 'utf8');
+  const poll = source.slice(source.indexOf('if (wp == TIMER_CHAT_REFRESH)'), source.indexOf('if (wp == TIMER_CHAT_REFRESH)') + 7000);
   assert.match(poll, /QueryPerformanceCounter\(&poll_started\)/);
-  assert.match(poll, /if \(!refreshed and !restore_read\) \{[\s\S]*chat-idle-poll: us=/);
+  assert.match(poll, /poll_revision == app_state\.g_chat_last_hash[\s\S]*chat-idle-poll: us=/);
 });
 
 test('speed check runs on every PR and blocks the aggregate', () => {
