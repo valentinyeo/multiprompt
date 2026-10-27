@@ -35,6 +35,7 @@ function verifyRouting(text) {
   }
   assert.equal((text.match(/node --test tools\/startup-responsive.test.js/g) || []).length, 1);
   assert.match(jobs['test-update-source'], /runs-on: ubuntu-latest/);
+  assert.match(jobs['test-vps'], /run: zig build test-vps[^\n]*\$\{\{ matrix\.group == 1 && '-j1' \|\| '' \}\}/, 'timed VPS shard must not compete with sibling builds and tests');
 }
 
 test('each test job classifies after full-history checkout and gates all heavy steps', () => {
@@ -47,6 +48,7 @@ test('routing checks reject the removed dependency, missing history, classifier 
     ['    runs-on: windows-latest', '    needs: changes\n    runs-on: windows-latest'],
     ['          fetch-depth: 0', '          fetch-depth: 1'],
     ['        id: paths', '        id: missing'],
+    ["${{ matrix.group == 1 && '-j1' || '' }}", ''],
     ["        if: steps.paths.outputs.heavy == 'true'", '        if: true'],
   ]) {
     assert.ok(workflow.includes(before));

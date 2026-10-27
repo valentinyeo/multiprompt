@@ -424,7 +424,7 @@ jobs:
         run: node --test tools/zsb-cdp-script.test.js
       - name: Run server tool tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
-        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3
+        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3 ${{ matrix.group == 1 && '-j1' || '' }}
       - name: Test cross-origin zsb frame input and eval
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
         run: node --test tools/zsb-iframe.test.js
