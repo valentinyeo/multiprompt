@@ -145,3 +145,15 @@ test('IGSH-813 wheel journey requires overflow and fresh strict app-log states w
     assert.throws(() => assertScrollJourney(driver + '\n' + forbidden, desktop, boundary), assert.AssertionError, forbidden);
   }
 });
+
+test('IGSH-857 measures the content viewport rather than the floating transcript window', () => {
+  const driver = fs.readFileSync(new URL('./verify-chat-delivery/drive.ps1', import.meta.url), 'utf8');
+  assert.match(driver, /function Transcript-Viewport/);
+  assert.match(driver, /\$bounds = Transcript-Viewport/);
+  assert.match(driver, /\$r.Bottom -eq \$viewBounds.Top -or/);
+  assert.match(driver, /\$r.Top -ge \$viewBounds.Top -and \$r.Bottom -lt \$viewBounds.Bottom/);
+  assert.match(driver, /FromLTRB\(\$bounds.Left, \$todoBounds.Bottom, \$bounds.Right, \$bounds.Bottom\)/);
+  assert.match(driver, /\$pillOrigin.Y -lt \$bounds.Bottom/);
+  assert.match(driver, /\$r.Bottom -eq \$bounds.Top/);
+  assert.match(driver, /\$workingHeight -ne \$expectedGapHeight/);
+});

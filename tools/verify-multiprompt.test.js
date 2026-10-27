@@ -2165,3 +2165,11 @@ test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that ta
   assert.match(read('src/chat_render.zig'), /send_latency\.markPainted\(/);
   assert.throws(() => assert.match(control.replace("'chat-send-latency'", ''), /ValidateSet\([^\n)]*'chat-send-latency'/));
 });
+
+test('IGSH-857 palette typing waits for owned foreground after asynchronous browser launch', () => {
+  const palette = control.slice(control.indexOf('function Palette('), control.indexOf('function Invoke-Zsb('));
+  assert.match(palette, /Press @\(0x11, 0x4B\) 'Ctrl\+K: open command palette'\s+Wait-Foreground\s+Type-Text \$Query/);
+  const type = control.slice(control.indexOf('function Type-Text('), control.indexOf('function Click-WorkspacePill('));
+  assert.match(type, /Doctor\s+Assert-Foreground/);
+  assert.match(type, /Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/);
+});
