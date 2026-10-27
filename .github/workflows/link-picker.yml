@@ -1,0 +1,27 @@
+name: Link picker
+
+on:
+  push:
+    branches: [ceo/IGSH-1060]
+  pull_request:
+    paths:
+      - src/clipboard.zig
+      - src/chat_composer.zig
+      - src/sidebar.zig
+      - .claude/skills/verify-multiprompt/link-picker.ps1
+      - .github/workflows/link-picker.yml
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional published release tag
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  link-picker:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: link-picker
+      tag: ${{ inputs.tag || '' }}

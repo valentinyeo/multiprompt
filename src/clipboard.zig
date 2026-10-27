@@ -6,6 +6,7 @@ const UINT = @import("win32.zig").UINT;
 const HANDLE = @import("win32.zig").HANDLE;
 const SW_SHOW = @import("win32.zig").SW_SHOW;
 const SW_HIDE = @import("win32.zig").SW_HIDE;
+const SW_SHOWNOACTIVATE = @import("win32.zig").SW_SHOWNOACTIVATE;
 const WM_APP_SHOT_PASTE = @import("win32.zig").WM_APP_SHOT_PASTE;
 const TIMER_SPINNER = @import("win32.zig").TIMER_SPINNER;
 const powerSaving = @import("power.zig").powerSaving;
@@ -84,7 +85,8 @@ const requestNativeBrowserFocus = @import("focus.zig").requestNativeBrowserFocus
 const requestShellRefocus = @import("focus.zig").requestShellRefocus;
 const openSessionLink = @import("browser_pane.zig").openSessionLink;
 const updateBrowserVisibility = @import("browser_pane.zig").updateBrowserVisibility;
-const hideActiveBrowser = @import("browser_pane.zig").hideActiveBrowser;
+const hideShellsForOverlay = @import("rename.zig").hideShellsForOverlay;
+const layoutChatControls = @import("chat_composer.zig").layoutChatControls;
 const webView2OwnsActiveShell = @import("browser_pane.zig").webView2OwnsActiveShell;
 const requestWebView2Focus = @import("browser_pane.zig").requestWebView2Focus;
 const chatComposerInsertAtCaret = @import("chat_render.zig").chatComposerInsertAtCaret;
@@ -424,10 +426,7 @@ pub fn openUrlPicker() void {
     }
     app_state.g_url_picker_active = true;
     app_state.g_url_picker_sel = 0;
-    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
-        _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
-    }
-    hideActiveBrowser();
+    hideShellsForOverlay();
     _ = SetFocus(app_state.g_main_hwnd);
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
@@ -442,6 +441,11 @@ pub fn closeUrlPickerForBrowser() void {
 
 fn closeUrlPickerInternal(refocus_shell: bool) void {
     app_state.g_url_picker_active = false;
+    if (app_state.g_chat_active) {
+        _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_SHOWNOACTIVATE);
+        _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_SHOWNOACTIVATE);
+        layoutChatControls();
+    }
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null) {
         _ = showShellConsole(app_state.active_shell, SW_SHOW, "closeUrlPickerInternal");
     }

@@ -4346,8 +4346,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
         drawModalShadow(hdc, ox, oy, overlay_w, overlay_h, radius);
 
-        const border_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
-        const border_pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
+        const border_br = CreateSolidBrush(if (app_state.g_amoled_theme) @import("design_tokens.zig").ReaderOutline else if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
+        const border_pen = CreatePen(0, 1, if (app_state.g_amoled_theme) @import("design_tokens.zig").ReaderOutline else if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
         const old_brush_b = SelectObject(hdc, border_br);
         const old_pen_b = SelectObject(hdc, border_pen);
         _ = @import("smooth.zig").drawRoundRect(hdc, ox - 1, oy - 1, ox + overlay_w + 1, oy + overlay_h + 1, radius, radius);
@@ -4356,7 +4356,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         _ = DeleteObject(border_br);
         _ = DeleteObject(border_pen);
 
-        const bg_col: DWORD = if (app_state.g_light_theme) RGB(249, 249, 249) else if (app_state.g_edge_gray_theme) RGB(51, 51, 51) else if (app_state.g_mid_theme) RGB(68, 68, 68) else RGB(40, 40, 40);
+        const bg_col: DWORD = if (app_state.g_amoled_theme) @import("design_tokens.zig").ReaderCard else if (app_state.g_light_theme) RGB(249, 249, 249) else if (app_state.g_edge_gray_theme) RGB(51, 51, 51) else if (app_state.g_mid_theme) RGB(68, 68, 68) else RGB(40, 40, 40);
         const bg_br = CreateSolidBrush(bg_col);
         const bg_pen = CreatePen(0, 1, bg_col);
         const old_brush_i = SelectObject(hdc, bg_br);
@@ -4388,12 +4388,17 @@ pub fn paintSidebar(hdc: HANDLE) void {
             const row_h = if (len > WRAP_THRESHOLD) row_h_double else row_h_single;
 
             if (abs_idx == app_state.g_url_picker_sel) {
-                var sel_rc = RECT{ .left = ox + 1, .top = ry, .right = ox + overlay_w - 1, .bottom = ry + row_h };
-                const sel_br = CreateSolidBrush(RGB(0, 122, 204));
-                _ = FillRect(hdc, &sel_rc, sel_br);
+                const sel_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(232, 232, 232) else @import("design_tokens.zig").ReaderControl);
+                const sel_pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(210, 210, 210) else @import("design_tokens.zig").ReaderOutline);
+                const old_sel_br = SelectObject(hdc, sel_br);
+                const old_sel_pen = SelectObject(hdc, sel_pen);
+                _ = @import("smooth.zig").drawRoundRect(hdc, ox + 6, ry + 2, ox + overlay_w - 6, ry + row_h - 2, 12, 12);
+                _ = SelectObject(hdc, old_sel_br);
+                _ = SelectObject(hdc, old_sel_pen);
                 _ = DeleteObject(sel_br);
+                _ = DeleteObject(sel_pen);
             }
-            _ = SetTextColor(hdc, if (abs_idx == app_state.g_url_picker_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(220, 220, 220));
+            _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(220, 220, 220));
 
             var draw_buf: [2100]u16 = undefined;
             var draw_len: usize = 0;
