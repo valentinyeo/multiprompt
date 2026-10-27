@@ -66,6 +66,7 @@ test('one merge yields to master and periodic recovery does not run for every co
   const text = workflow('automerge.yml');
   assert.match(text, /done\n\s+break\n\s+fi/);
   assert.match(text, /if \[ "\$EVENT_NAME" = workflow_run \]; then exit 0; fi\n\s+head_oid=/);
+  assert.match(text, /if \[ "\$EVENT_NAME" = workflow_run \] && \[ "\$head_oid" != "\$HEAD_SHA" \]; then continue; fi/);
   assert.match(text, /--match-head-commit "\$head_oid"/);
   assert.match(text, /tools\/automerge-admit\.sh/);
 });
