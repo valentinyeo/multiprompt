@@ -217,6 +217,21 @@ pub const History = struct {
         }
     }
 
+    pub fn requestIdAlloc(self: History, a: std.mem.Allocator, block: md.Block) !?[]u16 {
+        if (block.message_id == 0) return null;
+        var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            const parsed = try std.json.parseFromSlice(Message, a, line, .{ .ignore_unknown_fields = true });
+            defer parsed.deinit();
+            const id = parsed.value.read_id orelse parsed.value.id;
+            if (id.len == 0) continue;
+            const identity = std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, if (self.read_sid[0] != 0) &self.read_sid else &self.sid), id);
+            if (identity == block.message_id) return try std.unicode.utf8ToUtf16LeAlloc(a, id);
+        }
+        return null;
+    }
+
     pub fn deliveryEvidence(self: History, a: std.mem.Allocator, pending: echo.Pending) !echo.DeliveryEvidence {
         var result: echo.DeliveryEvidence = .{};
         var complete = (self.start == 0 and !self.restore_full) or !ISSUE_349_STRICT_DEQUEUE;
@@ -1756,4 +1771,17 @@ test "IGSH-934 a partial tail retains earlier streamed fragments of the same mes
         "{\"role\":\"assistant\",\"id\":\"stream\",\"timestamp\":\"2026-10-26T10:00:01Z\",\"text\":\"second part\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 2, key);
     try std.testing.expect(std.mem.indexOf(u16, h.text.items, std.unicode.utf8ToUtf16LeStringLiteral("first part")) != null);
     try std.testing.expect(std.mem.indexOf(u16, h.text.items, std.unicode.utf8ToUtf16LeStringLiteral("second part")) != null);
+}
+
+test "IGSH-1019 copying a request ID returns the original ID not its display hash" {
+    const a = std.testing.allocator;
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t500\t9\t0\tclaude\tterm-1\n{\"role\":\"assistant\",\"id\":\"local-row\",\"read_id\":\"original-request-123\",\"text\":\"A reply\"}\n@@MP_END@@\n", 1, transcript.Identity.initTmux(1, 0, false, "term-1", ""));
+    const id = (try h.requestIdAlloc(a, h.blocks.items[0])) orelse return error.TestUnexpectedResult;
+    defer a.free(id);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("original-request-123"), id);
+    var missing = h.blocks.items[0];
+    missing.message_id = 0;
+    try std.testing.expectEqual(@as(?[]u16, null), try h.requestIdAlloc(a, missing));
 }

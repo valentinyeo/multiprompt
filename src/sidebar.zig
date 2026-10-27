@@ -1632,7 +1632,7 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]con
     const reader = @import("themes.zig").themeReaderDark();
     _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else if (reader) tokens.ReaderHint else RGB(98, 102, 109)));
     var rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.right - uiScaled(8), .bottom = y + height };
-    if (!reader) {
+    if (!reader and !app_state.g_chat_active) {
         _ = DrawTextW(hdc, text, len, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         return;
     }
@@ -1642,6 +1642,38 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]con
         upper[n] = if (text[n] >= 'a' and text[n] <= 'z') text[n] - 32 else text[n];
     }
     _ = DrawTextW(hdc, &upper, @intCast(n), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
+fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: usize) void {
+    const shell = &app_state.shells[index];
+    const hovered = app_state.g_sidebar_hover == index;
+    const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else tokens.ReaderHint;
+    var right = column.right - uiScaled(12);
+    if (hovered) {
+        right -= uiScaled(18);
+        _ = SelectObject(hdc, uiFontClose());
+        _ = SetTextColor(hdc, hint);
+        var close = RECT{ .left = right, .top = y, .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
+        _ = DrawTextW(hdc, L("\u{00d7}"), -1, &close, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        var time: [24]u16 = undefined;
+        const time_len = inboxRelTime(shell.last_active, &time);
+        if (time_len > 0) {
+            _ = SelectObject(hdc, uiFontSubtitle());
+            var measure: RECT = std.mem.zeroes(RECT);
+            _ = DrawTextW(hdc, &time, @intCast(time_len), &measure, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
+            var stamp = RECT{ .left = right - measure.right - uiScaled(6), .top = y, .right = right - uiScaled(6), .bottom = y + tabRowH() };
+            _ = DrawTextW(hdc, &time, @intCast(time_len), &stamp, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+            right = stamp.left - uiScaled(6);
+        }
+    }
+    if (shell.needs_attention) {
+        drawAttentionDot(hdc, right - uiScaled(4), y + @divTrunc(tabRowH(), 2), uiScaled(3), RGB(137, 180, 248));
+        right -= uiScaled(14);
+    }
+    _ = SelectObject(hdc, uiFontTitle());
+    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else tokens.ReaderForeground);
+    var name = RECT{ .left = column.left + uiScaled(12), .top = y, .right = right, .bottom = y + tabRowH() };
+    if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 pub fn paintSidebar(hdc: HANDLE) void {
@@ -1795,9 +1827,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
             if (i == app_state.active_shell and LOOK_UNIFIED) {
                 const reader = @import("themes.zig").themeReaderDark();
                 const hl = if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_amoled_theme) RGB(42, 42, 42) else tintColor(sidebar_bg, RGB(160, 160, 160), 1, 6);
-                const hl_brush = CreateSolidBrush(if (reader) tokens.ReaderControl else hl);
-                const hl_pen = CreatePen(0, 1, if (reader) tokens.ReaderOutline else customColorOr("overlay_border", hl));
-                const hl_radius: i32 = if (reader) tabRowH() - 6 else 8;
+                const hl_brush = CreateSolidBrush(if (reader or (app_state.g_chat_active and !app_state.g_light_theme)) tokens.ReaderControl else hl);
+                const hl_pen = CreatePen(0, 1, if (reader or (app_state.g_chat_active and !app_state.g_light_theme)) tokens.ReaderOutline else customColorOr("overlay_border", hl));
+                const hl_radius: i32 = if (reader or app_state.g_chat_active) tabRowH() - 6 else 8;
                 const ob = SelectObject(hdc, hl_brush);
                 const op = SelectObject(hdc, hl_pen);
                 _ = @import("smooth.zig").drawRoundRect(hdc, column.left, y + 3, column.right, y + tabRowH() - 3, hl_radius, hl_radius);
@@ -1841,7 +1873,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
             if (app_state.drag_active and i != app_state.drag_src) {}
 
-            if (app_state.g_sidebar_collapsed) {
+            if (app_state.g_chat_active and !app_state.g_sidebar_collapsed) {
+                paintChatSidebarRow(hdc, column, y, i);
+            } else if (app_state.g_sidebar_collapsed) {
                 const sw = SIDEBAR_W();
 
                 var kind_rc = RECT{ .left = 0, .top = y, .right = sw - 1, .bottom = y + tabRowH() };

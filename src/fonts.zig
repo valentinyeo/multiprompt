@@ -175,12 +175,14 @@ pub const MessageMenuItem = enum(u32) {
     reaction_like = 8,
     reaction_dislike = 9,
     reaction_heart = 10,
+    copy_request_id = 11,
 
     pub fn label(self: MessageMenuItem) []const u8 {
         return switch (self) {
             .reply => "Reply",
             .copy => "Copy",
             .copy_link => "Copy link",
+            .copy_request_id => "Copy request ID",
             .send_again => "Send again",
             .remove => "Remove",
             .reaction_like => "React 👍",
@@ -194,6 +196,7 @@ pub const MessageMenuItem = enum(u32) {
             .reply => L("&Reply"),
             .copy => L("&Copy"),
             .copy_link => L("Copy &link"),
+            .copy_request_id => L("Copy request &ID"),
             .send_again => L("&Send again"),
             .remove => L("Re&move"),
             .reaction_like => L("👍 Like"),
@@ -202,11 +205,12 @@ pub const MessageMenuItem = enum(u32) {
         };
     }
 
-    fn glyph(self: MessageMenuItem) u16 {
+    pub fn glyph(self: MessageMenuItem) u16 {
         return switch (self) {
             .reply => 0xE97A,
             .copy => 0xE8C8,
             .copy_link => 0xE71B,
+            .copy_request_id => 0xE8C8,
             .send_again => 0xE724,
             .remove => 0xE74D,
             .reaction_like, .reaction_dislike, .reaction_heart => ' ',
