@@ -1644,7 +1644,7 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]con
     _ = DrawTextW(hdc, &upper, @intCast(n), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
-fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: usize) void {
+fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     const shell = &app_state.shells[index];
     const hovered = app_state.g_sidebar_hover == index;
     const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else tokens.ReaderHint;
@@ -1874,7 +1874,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             if (app_state.drag_active and i != app_state.drag_src) {}
 
             if (app_state.g_chat_active and !app_state.g_sidebar_collapsed) {
-                paintChatSidebarRow(hdc, column, y, i);
+                paintChatSidebarRow(hdc, column, y, @intCast(i));
             } else if (app_state.g_sidebar_collapsed) {
                 const sw = SIDEBAR_W();
 

@@ -11,7 +11,7 @@ on:
       - tools/verify-chat-delivery/desktop.cs
       - .github/workflows/chat-style.yml
   push:
-    branches: [master]
+    branches: [master, ceo/IGSH-1019]
     paths:
       - src/message_menu.zig
       - tools/chat-shared-style.test.js
