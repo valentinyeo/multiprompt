@@ -47,7 +47,7 @@ jobs:
         if: github.ref == 'refs/heads/ceo/IGSH-1057' || github.head_ref == 'ceo/IGSH-1057'
         with:
           repository: ${{ github.repository }}
-          ref: 4a0a7f1d
+          ref: 4a0a7f1d82a41d1658292d741e3c52ce368f0649
           persist-credentials: false
           path: negative-source
       - name: Build original browser framing control
