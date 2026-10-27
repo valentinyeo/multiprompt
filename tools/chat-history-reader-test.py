@@ -1762,6 +1762,7 @@ class HistoryReaderTest(unittest.TestCase):
 
     @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
     def test_watch_appends_do_not_recapture_screen(self):
+        self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
         tmux = shutil.which('tmux')
         socket = 'delta-' + self.home.name
         subprocess.run([tmux, '-L', socket, '-f', '/dev/null', 'new-session', '-d', '-s', 'term-1', 'cat'], check=True)
