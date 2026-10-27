@@ -964,7 +964,7 @@ import ast,base64,ctypes,ctypes.wintypes,io,json,os,sys,tempfile
 from pathlib import Path
 from unittest.mock import patch
 root = Path(sys.argv[1])
-tree = ast.parse((root / 'tools/verify-chat-delivery/boundary.py').read_text())
+tree = ast.parse((root / 'tools/verify-chat-delivery/boundary.py').read_text(encoding='utf-8'))
 function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'watch_reader')
 with tempfile.TemporaryDirectory() as temp:
     home = Path(temp)
