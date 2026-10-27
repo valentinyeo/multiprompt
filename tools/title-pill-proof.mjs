@@ -41,8 +41,7 @@ export function evaluateTitle(frame, underlay, metadata) {
 export function evaluateFolder(folder) {
   const metadata = JSON.parse(fs.readFileSync(path.join(folder, 'chat-title-meta.json'), 'utf8').replace(/^\uFEFF/, ''));
   const frames = [0, 1, 2].map(i => evaluateTitle(readBmp(path.join(folder, `chat-title-${i}-frame.bmp`)), readBmp(path.join(folder, `chat-title-${i}-underlay.bmp`)), metadata));
-  const total = key => frames.reduce((n, f) => n + f[key], 0);
-  return { theme: metadata.theme, frames, passed: frames.every(f => f.changed === 0 && f.titleInk >= 8) && total('ringInk') > 10 && total('leftInk') > 20 && total('rightInk') > 20 };
+  return { theme: metadata.theme, frames, passed: frames.every(f => f.changed === 0 && f.titleInk >= 8) && frames.some(f => f.ringInk > 10 && f.leftInk > 20 && f.rightInk > 20) };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
