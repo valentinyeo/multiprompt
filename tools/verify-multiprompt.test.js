@@ -21,10 +21,10 @@ const bridge = read('src/browser_bridge.zig');
 const journey = control.slice(control.indexOf("        'session-open' {"), control.indexOf("        'inbox' {"));
 const transport = control.slice(control.indexOf('function Invoke-Zsb('), control.indexOf('function Select-Theme('));
 
-function evaluateConcurrencyGroup(template, context) {
+function evaluateWorkflowExpression(template, context) {
   return template.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, expression) => {
     const source = expression.trim();
-    const lexer = /\s*('(?:[^']|'')*'|(?:github|inputs)\.[a-z_]+|format|==|!=|&&|\|\||[(),])/gy;
+    const lexer = /\s*('(?:[^']|'')*'|(?:github|inputs)\.[a-z_]+|format|fromJSON|==|!=|!|&&|\|\||[(),])/gy;
     const tokens = [];
     while (lexer.lastIndex < source.length) {
       const token = lexer.exec(source);
@@ -40,6 +40,16 @@ function evaluateConcurrencyGroup(template, context) {
         const value = or();
         expect(')');
         return value;
+      }
+      if (token === '!') {
+        const value = primary();
+        return () => !value();
+      }
+      if (token === 'fromJSON') {
+        expect('(');
+        const value = or();
+        expect(')');
+        return () => JSON.parse(value());
       }
       if (token === 'format') {
         expect('(');
@@ -91,7 +101,7 @@ function evaluateConcurrencyGroup(template, context) {
 }
 
 test('concurrency evaluator respects precedence, short-circuiting, format and string literals', () => {
-  const evaluate = expression => evaluateConcurrencyGroup('${{ ' + expression + ' }}', {});
+  const evaluate = expression => evaluateWorkflowExpression('${{ ' + expression + ' }}', {});
   assert.equal(evaluate("'a' == 'A' && format('{0}-{1}', 'it''s', 'ok') || 'wrong'"), "it's-ok");
   assert.equal(evaluate("'kept' || '' && 'wrong'"), 'kept');
   assert.equal(evaluate("'1' != '2' && 'differs' || 'same'"), 'differs');
@@ -130,7 +140,7 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
     github: { workflow: 'Verify desktop', ref: 'refs/heads/master', event_name: event, run_attempt: attempt, sha: 'abc123' },
     inputs: { feature, tag },
   });
-  const dispatch = (feature, tag) => evaluateConcurrencyGroup(group[1], context('workflow_dispatch', feature, tag));
+  const dispatch = (feature, tag) => evaluateWorkflowExpression(group[1], context('workflow_dispatch', feature, tag));
   assert.notEqual(dispatch('chat-delivery'), dispatch('chat-sync-audit'), 'different dispatch features need different concurrency groups');
   assert.equal(dispatch('chat-delivery', 'v0.28.823'), dispatch('chat-delivery', 'v0.28.823'));
   assert.notEqual(dispatch('chat-delivery', 'v0.28.823'), dispatch('chat-delivery'));
@@ -139,16 +149,27 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
       const current = context(event);
       current.inputs = inputs;
       const gate = event === 'push' && inputs ? `-gate-${current.github.sha}` : '';
-      assert.equal(evaluateConcurrencyGroup(group[1], current), `${current.github.workflow}-${current.github.ref}${gate}`);
+      const feature = inputs ? `-feature-${inputs.feature}` : '';
+      assert.equal(evaluateWorkflowExpression(group[1], current), `${current.github.workflow}-${current.github.ref}${gate}${feature}`);
     }
-    const first = evaluateConcurrencyGroup(group[1], context(event));
-    const rerun = evaluateConcurrencyGroup(group[1], context(event, undefined, '', '2'));
+    const first = evaluateWorkflowExpression(group[1], context(event));
+    const rerun = evaluateWorkflowExpression(group[1], context(event, undefined, '', '2'));
     assert.notEqual(rerun, first, `${event} reruns leave the group a new push cancels`);
   }
   const gateOne = context('push', 'relaunch-saved-sessions');
   const gateTwo = context('push', 'relaunch-saved-sessions');
   gateTwo.github.sha = 'def456';
-  assert.notEqual(evaluateConcurrencyGroup(group[1], gateOne), evaluateConcurrencyGroup(group[1], gateTwo), 'the release gate run of each master commit has its own group and never queues behind another commit');
+  assert.notEqual(evaluateWorkflowExpression(group[1], gateOne), evaluateWorkflowExpression(group[1], gateTwo), 'the release gate run of each master commit has its own group and never queues behind another commit');
+});
+
+test('IGSH-1028 reusable PR journeys select their requested feature and cannot cancel each other', () => {
+  const group = workflow.match(/^  group: (.+)$/m)[1];
+  const matrix = workflow.match(/^        feature: (.+)$/m)[1];
+  const context = feature => ({ github: { workflow: 'Title pill transparency', ref: 'refs/pull/579/merge', event_name: 'pull_request', run_attempt: '1', sha: 'head' }, inputs: { feature } });
+  assert.notEqual(evaluateWorkflowExpression(group, context('pane-layout')), evaluateWorkflowExpression(group, context('browser-pane-stuck')));
+  for (const feature of ['pane-layout', 'browser-pane-stuck']) assert.equal(evaluateWorkflowExpression(matrix, context(feature)), feature);
+  assert.equal(evaluateWorkflowExpression(matrix, context(undefined)), 'appearance');
+  assert.equal(evaluateWorkflowExpression(matrix, context('all')), 'appearance');
 });
 
 function allowsSessionOpen(text) {
