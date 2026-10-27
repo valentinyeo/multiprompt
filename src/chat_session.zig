@@ -62,6 +62,8 @@ const FILE_ATTRIBUTE_NORMAL = @import("win32.zig").FILE_ATTRIBUTE_NORMAL;
 const WaitForSingleObject = @import("win32.zig").WaitForSingleObject;
 const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const QueryPerformanceCounter = @import("win32.zig").QueryPerformanceCounter;
+const QueryPerformanceFrequency = @import("win32.zig").QueryPerformanceFrequency;
 const SECURITY_ATTRIBUTES = @import("win32.zig").SECURITY_ATTRIBUTES;
 const ClientToScreen = @import("win32.zig").ClientToScreen;
 const L = @import("startup.zig").L;
@@ -108,6 +110,7 @@ const chatBlockDisplayRange = @import("chat_capture.zig").chatBlockDisplayRange;
 const captureChatTranscript = @import("chat_capture.zig").captureChatTranscript;
 const ChatHistoryEntry = @import("app_state.zig").ChatHistoryEntry;
 const ChatHistoryChannel = @import("app_state.zig").ChatHistoryChannel;
+const ChatHistoryStream = @import("app_state.zig").ChatHistoryStream;
 const chatSelectionClear = @import("chat_render.zig").chatSelectionClear;
 const chatRelayout = @import("chat_render.zig").chatRelayout;
 const chat_image = @import("chat_image.zig");
@@ -470,6 +473,7 @@ pub fn chatHistoryForget(shell_id: u32) void {
             i += 1;
             continue;
         }
+        chatHistoryStreamStop(entry);
         if (entry.pending) {
             entry.retired = true;
             i += 1;
@@ -489,30 +493,59 @@ pub fn chatFileRequest(key: chat_transcript.Identity) void {
 }
 
 pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool) void {
+    chatHistoryStreamsKeep(if (app_state.g_chat_active) key.shell_id else 0);
     if ((!delivery and !app_state.g_chat_active) or key.shell_id == 0) return;
     if (app_state.g_main_hwnd == null or (!delivery and (IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0))) return;
     const entry = chatHistoryEntry(key) orelse return;
     const now = GetTickCount64();
-    if (!chat_history.retryDue(entry.pending, now, entry.next)) return;
+    if (!chat_history.retryDue(entry.pending, now, if (entry.stream == null) entry.next else 0)) return;
     const load_disk = !entry.disk_loaded;
     if (!delivery and !load_disk and !foregroundIsOurs()) {
         var input: LASTINPUTINFO = .{ .cbSize = @sizeOf(LASTINPUTINFO), .dwTime = 0 };
         if (GetLastInputInfo(&input) == 0 or @as(u32, @truncate(now)) -% input.dwTime < 5000) return;
     }
-    if (!load_disk and !chatFetchAcquire()) return;
-    if (entry.backfill.pages.items.len > 0) entry.before = entry.backfill.start;
-    entry.pending = true;
-    entry.loading_disk = load_disk;
     const known = entry.key;
     entry.key = key;
     if (key.sid[0] == 0) entry.key.sid = if (known.sid[0] != 0) known.sid else entry.history.sid;
     if (key.cwd[0] == 0) entry.key.cwd = known.cwd;
+    if (!load_disk and entry.before > 0) chatHistoryStreamStop(entry);
+    var pushed: ?ChatHistoryPush = null;
+    if (!load_disk and entry.before == 0 and !entry.history.restore_full and !chatBenchEnabled()) {
+        if (entry.stream == null) {
+            app_state.g_chat_file_request_id +%= 1;
+            entry.stream = chatHistoryStreamStart(entry.key, app_state.g_chat_file_request_id, entry.history.cursor()) orelse {
+                chatFileFailed(entry);
+                return;
+            };
+        }
+        const stream = entry.stream.?;
+        if (!stream.ready.swap(false, .acq_rel)) {
+            if (stream.ended.load(.acquire)) {
+                chatHistoryStreamStop(entry);
+                chatFileFailed(entry);
+            }
+            return;
+        }
+        pushed = .{ .wire = stream.wire, .id = stream.id, .read_us = stream.read_us };
+        stream.wire = .empty;
+        _ = @import("win32.zig").SetEvent(stream.ack);
+    }
+    if (!load_disk and pushed == null and !chatFetchAcquire()) return;
+    entry.push_pending = pushed != null;
+    if (entry.backfill.pages.items.len > 0) entry.before = entry.backfill.start;
+    entry.pending = true;
+    entry.loading_disk = load_disk;
     app_state.g_chat_file_request_id +%= 1;
     var log_buf: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log_buf, "[chat] transcript request shell={d} offset={d} before={d}", .{ key.shell_id, entry.history.offset, entry.before }) catch "[chat] transcript request");
-    const thread = std.Thread.spawn(.{}, chatFileFetchThread, .{ entry, entry.key, app_state.g_chat_file_request_id, entry.loading_disk }) catch {
+    const thread = std.Thread.spawn(.{}, chatFileFetchThread, .{ entry, entry.key, if (pushed) |push| push.id else app_state.g_chat_file_request_id, entry.loading_disk, pushed }) catch {
         entry.pending = false;
-        if (!load_disk) chatFetchRelease();
+        if (!load_disk and pushed == null) chatFetchRelease();
+        if (pushed) |push| {
+            var wire = push.wire;
+            wire.deinit(std.heap.page_allocator);
+            chatHistoryStreamStop(entry);
+        }
         chatFileFailed(entry);
         debugLog(std.fmt.bufPrint(&log_buf, "[chat] transcript load shell={d} fail bytes=0 ms=0", .{key.shell_id}) catch "[chat] transcript load fail");
         return;
@@ -529,6 +562,97 @@ fn chatFilePollInterval() u64 {
     return 500;
 }
 
+const ChatHistoryPush = struct { wire: std.ArrayList(u8), id: u32, read_us: u64 };
+
+fn chatHistoryStreamRelease(stream: *ChatHistoryStream) void {
+    if (stream.refs.fetchSub(1, .acq_rel) != 1) return;
+    chatHistoryChannelClose(&stream.channel);
+    if (stream.ack != null) _ = CloseHandle(stream.ack);
+    stream.wire.deinit(std.heap.page_allocator);
+    std.heap.page_allocator.destroy(stream);
+}
+
+fn chatHistoryStreamStop(entry: *ChatHistoryEntry) void {
+    const stream = entry.stream orelse return;
+    entry.stream = null;
+    stream.cancelled.store(true, .release);
+    if (stream.mutex.tryLock()) {
+        if (stream.channel.process != null) _ = TerminateProcess(stream.channel.process, 0);
+        stream.mutex.unlock();
+    }
+    _ = @import("win32.zig").SetEvent(stream.ack);
+    chatHistoryStreamRelease(stream);
+}
+
+pub fn chatHistoryStreamsKeep(shell_id: u32) void {
+    for (app_state.g_chat_histories.items) |entry| {
+        if (entry.key.shell_id != shell_id) chatHistoryStreamStop(entry);
+    }
+}
+
+fn chatHistoryStreamStart(key: chat_transcript.Identity, id: u32, history: chat_history.History) ?*ChatHistoryStream {
+    const a = std.heap.page_allocator;
+    if (app_state.g_chat_history_channels_closing.load(.acquire)) return null;
+    const stream = a.create(ChatHistoryStream) catch return null;
+    stream.* = .{ .id = id };
+    stream.ack = @import("win32.zig").CreateEventW(null, 0, 0, null);
+    if (stream.ack == null) {
+        a.destroy(stream);
+        return null;
+    }
+    const thread = std.Thread.spawn(.{}, chatHistoryStreamThread, .{ stream, key, history }) catch {
+        _ = CloseHandle(stream.ack);
+        a.destroy(stream);
+        return null;
+    };
+    thread.detach();
+    return stream;
+}
+
+fn chatHistoryStreamThread(stream: *ChatHistoryStream, key: chat_transcript.Identity, history: chat_history.History) void {
+    const a = std.heap.page_allocator;
+    defer chatHistoryStreamRelease(stream);
+    defer {
+        stream.ended.store(true, .release);
+        if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
+    }
+    const query = chatHistoryQuery(key, stream.id, history, 0) orelse return;
+    defer a.free(query);
+    while (!stream.mutex.tryLock()) Sleep(1);
+    const started = !stream.cancelled.load(.acquire) and chatHistoryChannelStart(key.host, &stream.channel);
+    if (stream.cancelled.load(.acquire) and stream.channel.process != null) _ = TerminateProcess(stream.channel.process, 0);
+    stream.mutex.unlock();
+    if (!started or stream.cancelled.load(.acquire)) return;
+    var written: DWORD = 0;
+    if (WriteFile(stream.channel.input, query.ptr, @intCast(query.len), &written, null) == 0 or written != query.len or
+        WriteFile(stream.channel.input, "\n", 1, &written, null) == 0 or written != 1) return;
+    var frame: std.ArrayList(u8) = .empty;
+    defer frame.deinit(a);
+    var chunk: [65536]u8 = undefined;
+    while (!stream.cancelled.load(.acquire)) {
+        while (std.mem.indexOfScalar(u8, frame.items, '\n') == null) {
+            var n: DWORD = 0;
+            if (ReadFile(stream.channel.output, &chunk, chunk.len, &n, null) == 0 or n == 0) return;
+            if (frame.items.len + n > 48 * chat_history.TAIL_BYTES + 1024) return;
+            frame.appendSlice(a, chunk[0..n]) catch return;
+        }
+        const end = std.mem.indexOfScalar(u8, frame.items, '\n').?;
+        const Reply = struct { id: u32, wire: []const u8, read_us: u64 = 0 };
+        const reply = std.json.parseFromSlice(Reply, a, frame.items[0..end], .{}) catch return;
+        defer reply.deinit();
+        if (reply.value.id != stream.id or reply.value.wire.len > 8 * chat_history.TAIL_BYTES or
+            !std.mem.endsWith(u8, reply.value.wire, "@@MP_END@@\n") or
+            std.mem.indexOf(u8, reply.value.wire, "\thistory\terror\t") != null) return;
+        stream.wire.appendSlice(a, reply.value.wire) catch return;
+        stream.read_us = reply.value.read_us;
+        std.mem.copyForwards(u8, frame.items[0..], frame.items[end + 1 ..]);
+        frame.items.len -= end + 1;
+        stream.ready.store(true, .release);
+        if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
+        if (WaitForSingleObject(stream.ack, 0xFFFFFFFF) != 0) return;
+    }
+}
+
 fn chatHistoryChannelClose(ch: *ChatHistoryChannel) void {
     if (ch.input != null) _ = CloseHandle(ch.input);
     if (ch.output != null) _ = CloseHandle(ch.output);
@@ -540,6 +664,7 @@ fn chatHistoryChannelClose(ch: *ChatHistoryChannel) void {
 }
 
 pub fn closeAllChatHistoryChannels() void {
+    chatHistoryStreamsKeep(0);
     app_state.g_chat_history_channels_closing.store(true, .release);
     if (!app_state.g_chat_history_channel_mutex.tryLock()) return;
     defer app_state.g_chat_history_channel_mutex.unlock();
@@ -552,7 +677,7 @@ fn chatHistoryChannelStart(host: u8, ch: *ChatHistoryChannel) bool {
     if (!appendSshExe(&cmd, &pos) or
         !appendWideAscii(&cmd, &pos, "-T -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 ") or
         !appendWideAscii(&cmd, &pos, tmuxSshTarget(host)) or
-        !appendWideAscii(&cmd, &pos, " python3 -u -c 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))' --serve")) return false;
+        !appendWideAscii(&cmd, &pos, if (ch.watch) " python3 -u -c 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))' --watch" else " python3 -u -c 'import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))' --serve")) return false;
     cmd[pos] = 0;
     var sa = SECURITY_ATTRIBUTES{ .nLength = @sizeOf(SECURITY_ATTRIBUTES), .lpSecurityDescriptor = null, .bInheritHandle = 1 };
     var child_input: HANDLE = null;
@@ -643,9 +768,9 @@ pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: u
     return false;
 }
 
-fn chatHistoryFetch(key: chat_transcript.Identity, id: u32, history: chat_history.History, before: u64, out: *std.ArrayList(u8)) bool {
+fn chatHistoryQuery(key: chat_transcript.Identity, id: u32, history: chat_history.History, before: u64) ?[]u8 {
     const a = std.heap.page_allocator;
-    const query = std.json.Stringify.valueAlloc(a, .{
+    return std.json.Stringify.valueAlloc(a, .{
         .id = id,
         .codex = key.codex,
         .sid = std.mem.sliceTo(&key.sid, 0),
@@ -662,7 +787,12 @@ fn chatHistoryFetch(key: chat_transcript.Identity, id: u32, history: chat_histor
         .before = before,
         .mtime = history.mtime,
         .probe = std.mem.sliceTo(&history.probe, 0),
-    }, .{}) catch return false;
+    }, .{}) catch null;
+}
+
+fn chatHistoryFetch(key: chat_transcript.Identity, id: u32, history: chat_history.History, before: u64, out: *std.ArrayList(u8)) bool {
+    const a = std.heap.page_allocator;
+    const query = chatHistoryQuery(key, id, history, before) orelse return false;
     defer a.free(query);
     if (chatBenchEnabled()) return chatBenchFetch(key.shell_id, id, query, out);
     const wire_limit: usize = if (before > 0) 64 * 1024 * 1024 else 8 * chat_history.TAIL_BYTES;
@@ -739,9 +869,11 @@ pub fn chatHistoryFetchOnce(host: u8, query: []const u8, wire_limit: usize, out:
     return std.mem.endsWith(u8, out.items, "@@MP_END@@\n");
 }
 
-fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, id: u32, load_disk: bool) void {
+fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, id: u32, load_disk: bool, pushed: ?ChatHistoryPush) void {
     const a = std.heap.page_allocator;
     const start = GetTickCount64();
+    var apply_start: i64 = 0;
+    if (pushed != null) _ = QueryPerformanceCounter(&apply_start);
     if (load_disk) {
         var path_buf: [560]u8 = undefined;
         entry.result = null;
@@ -757,12 +889,12 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
         if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
         return;
     }
-    var wire: std.ArrayList(u8) = .empty;
+    var wire: std.ArrayList(u8) = if (pushed) |push| push.wire else .empty;
     defer wire.deinit(a);
     var input = if (entry.history.restore_full) chat_history.History{} else entry.history.cursor();
     if (entry.backfill.pages.items.len > 0) input.start = entry.backfill.start;
     const publish_staged = entry.show_older and entry.backfill.pages.items.len > 0;
-    var ok = publish_staged or chatHistoryFetch(key, id, input, entry.before, &wire);
+    var ok = publish_staged or pushed != null or chatHistoryFetch(key, id, input, entry.before, &wire);
     var history: chat_history.History = .{};
     const parse_start = GetTickCount64();
     entry.unchanged = false;
@@ -836,7 +968,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
         const changed = !entry.staged and history.revision != entry.history.revision;
         entry.cache_dirty = entry.cache_dirty or changed;
         var path_buf: [560]u8 = undefined;
-        if (if (!entry.staged and entry.cache_dirty and (entry.cache_written == 0 or GetTickCount64() -| entry.cache_written >= chat_history.CACHE_WRITE_MS)) chatHistoryPath(key, &path_buf) else null) |path| {
+        if (if (!entry.staged and entry.cache_dirty and (pushed != null or entry.cache_written == 0 or GetTickCount64() -| entry.cache_written >= chat_history.CACHE_WRITE_MS)) chatHistoryPath(key, &path_buf) else null) |path| {
             const write_start = GetTickCount64();
             var snapshot = history.cursor();
             defer snapshot.deinit(a);
@@ -883,6 +1015,14 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
     }
     var log_buf: [128]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log_buf, "[chat] transcript load shell={d} {s} bytes={d} ms={d}", .{ key.shell_id, if (ok) "ok" else "fail", wire.items.len, GetTickCount64() - start }) catch "[chat] transcript load fail");
+    if (pushed) |push| {
+        var apply_end: i64 = 0;
+        var frequency: i64 = 1;
+        _ = QueryPerformanceCounter(&apply_end);
+        _ = QueryPerformanceFrequency(&frequency);
+        const apply_us = @divTrunc((apply_end -| apply_start) * 1_000_000, @max(1, frequency));
+        debugLog(std.fmt.bufPrint(&log_buf, "[chat] push shell={d} read_us={d} apply_us={d} bytes={d}", .{ key.shell_id, push.read_us, apply_us, wire.items.len }) catch "[chat] push");
+    }
     entry.ready.store(true, .release);
     if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
 }
@@ -899,7 +1039,8 @@ pub fn chatFileOnReady() void {
         if (!entry.ready.swap(false, .acq_rel)) continue;
         entry.pending = false;
         entry.show_older = false;
-        if (!entry.loading_disk) chatFetchRelease();
+        if (!entry.loading_disk and !entry.push_pending) chatFetchRelease();
+        entry.push_pending = false;
         if (entry.retired) {
             if (entry.result) |*history| history.deinit(std.heap.page_allocator);
             entry.clearLayout();
@@ -970,7 +1111,7 @@ pub fn chatFileOnReady() void {
             entry.result = null;
             entry.failures = 0;
             entry.missing_message = @splat(0);
-            entry.next = GetTickCount64() + (if (disk or entry.before > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 250) else chatFilePollInterval());
+            entry.next = GetTickCount64() + (if (disk or entry.before > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 250) else if (entry.stream != null) @as(u64, 0) else chatFilePollInterval());
             if (belongs_to_active) {
                 active_changed = !entry.unchanged or history.revision != app_state.g_chat_last_hash;
                 if (entry.prepended) app_state.g_chat_prepend_pending = true;
@@ -996,6 +1137,7 @@ pub fn chatFileOnReady() void {
             entry.before = entry.history.start;
             entry.missing_message = entry.result_missing;
             chatFileFailed(entry);
+            chatHistoryStreamStop(entry);
             if (chat_history.sameSession(key, entry.key)) active_changed = true;
         }
     }
@@ -1004,6 +1146,7 @@ pub fn chatFileOnReady() void {
         refreshChatTranscript(false);
         if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
+    if (app_state.g_chat_active) chatFileRequest(chatFileIdentity());
     if (read_ready) |ready| app_state.g_chat_read_open_ready = ready;
     if (app_state.g_chat_read_open_ready) _ = chatReadBoundary();
 }

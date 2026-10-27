@@ -956,3 +956,100 @@ test('native frame sampling stays scheduled while retaining every measured gap a
   assert.match(sampler, /gapMs = completed - last, paintMs = completed - start, painted = painted/);
   assert.match(sampler, /double remaining = start \+ 16 - clock\.Elapsed\.TotalMilliseconds/);
 });
+
+test('Windows notification stand-in keeps the supplied reader push algorithm and emits appended data', () => {
+  assert.match(read('tools/verify-chat-delivery/boundary.py'), /def watch_reader\(\):/);
+  const script = String.raw`
+import ast,base64,ctypes,ctypes.wintypes,io,json,os,re,sys,tempfile,time,subprocess
+from pathlib import Path
+from unittest.mock import patch
+root = Path(sys.argv[1])
+tree = ast.parse((root / 'tools/verify-chat-delivery/boundary.py').read_text(encoding='utf-8'))
+function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'watch_reader')
+with tempfile.TemporaryDirectory() as temp:
+    home = Path(temp)
+    cwd = str(home / 'work' / 'demo')
+    path = home / '.claude/projects' / re.sub(r'[^A-Za-z0-9]', '-', cwd) / 'sid.jsonl'
+    path.parent.mkdir(parents=True)
+    event = lambda text: dict(type='assistant',message=dict(role='assistant',content=[dict(type='text',text=text)]))
+    path.write_text(json.dumps(event('original boundary row')) + '\n')
+    calls = []
+    roots = []
+    class Call:
+        def __init__(self, fn): self.fn = fn
+        def __call__(self, *args): return self.fn(*args)
+    def wait(*args):
+        calls.append('wait')
+        if calls.count('wait') == 2: raise RuntimeError('fixture finished')
+        with path.open('a') as output: output.write(json.dumps(event('appended boundary row')) + '\n')
+        return 0
+    kernel = type('Kernel', (), {})()
+    kernel.FindFirstChangeNotificationW = Call(lambda *args: roots.append(args) or 1)
+    kernel.FindNextChangeNotification = Call(lambda *args: 1)
+    kernel.FindCloseChangeNotification = Call(lambda *args: calls.append('closed'))
+    kernel.WaitForSingleObject = Call(wait)
+    source = (root / 'src/chat_history_reader.py').read_bytes()
+    q = dict(id=7,codex=False,sid='sid',tmux='term-1',cwd=cwd,cached_sid='',inode=0,offset=0,live=True)
+    stream = io.TextIOWrapper(io.BytesIO(base64.b64encode(source) + b'\n' + json.dumps(q).encode() + b'\n'))
+    output = io.StringIO()
+    state = home / "state"
+    state.mkdir()
+    captures = []
+    def capture_screen(escapes):
+        assert escapes
+        captures.append(True)
+        return 'Ready\n❯ typed draft\n' + '─' * 50 + '\n'
+    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys,os=os,time=time,capture_screen=capture_screen)
+    exec(compile(ast.Module(body=[function],type_ignores=[]), '<boundary-watch>', 'exec'), scope)
+    with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True), patch.object(subprocess,'run',side_effect=AssertionError('stream spawned a capture process')):
+        try: scope['watch_reader']()
+        except RuntimeError as error: assert str(error) == 'fixture finished'
+    frames = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert len(frames) == 2,frames
+    assert captures == [True],captures
+    assert all('typed draft' in frame['wire'] for frame in frames)
+    assert 'original boundary row' in frames[0]['wire']
+    assert 'appended boundary row' in frames[1]['wire']
+    assert 'original boundary row' not in frames[1]['wire']
+    assert calls == ['wait','wait','closed'],calls
+    assert roots == [(str(home), True, 0x13)],roots
+print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 30000 }), /WINDOWS_NOTIFICATION_BOUNDARY_OK/);
+});
+
+
+test('retained-history recovery delivers wheel input to the verified focused HWND', () => {
+  const start = drive.indexOf('function Retention-Top {');
+  const end = drive.indexOf('\nfunction Assert-Retention', start);
+  const recovery = drive.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(recovery, /Wait-For 'retained transcript keyboard focus'/);
+  assert.match(recovery, /::Focus\(\$main\)\[1\] -eq \$transcript.ToInt64\(\)/);
+  assert.match(recovery, /input='focused transcript HWND wheel'/);
+  assert.match(recovery, /::WheelFocusedTranscript\(\$main, \$app.Id, \$transcript, 30000\)/);
+  assert.match(recovery, /\$position\.scroll -eq 0/);
+  const desktop = read('tools/verify-chat-delivery/desktop.cs');
+  const first = desktop.indexOf('    public static void WheelFocusedTranscript(');
+  const last = desktop.indexOf('    public static void PressOwnedTranscript(', first);
+  const wheel = desktop.slice(first, last);
+  assert.ok(first >= 0 && last > first);
+  for (const guard of ['Owner(main) != pid', 'GetForegroundWindow() != main', 'Owner(transcript) != pid', '!IsChild(main, transcript)', 'Class(transcript) != "ZigShellChatTranscript"', '!IsWindowVisible(transcript)', 'Focus(main)[1] != transcript.ToInt64()']) assert.ok(wheel.includes(guard), guard);
+  assert.match(wheel, /SendWheelMessage\(transcript, 0x020A,/);
+  assert.match(wheel, /delta < short.MinValue/);
+  assert.match(wheel, /delta > short.MaxValue/);
+  assert.match(wheel, /delta % 120 != 0/);
+  assert.match(wheel, /== IntPtr.Zero\) throw/);
+  assert.doesNotMatch(wheel, /SendInput/);
+});
+
+test('remote appended-message receipt keeps the request window across delayed font logs', () => {
+  const source = read('tools/verify-chat-delivery/remote-switch.ps1');
+  const start = source.indexOf("Wait-For 'new remote messages applied'");
+  const end = source.indexOf('} 30)', start);
+  const wait = source.slice(start, end);
+  assert.ok(start > 0 && end > start);
+  assert.doesNotMatch(wait, /\$offset =/);
+  assert.match(source.slice(0, start), /\$appendLogStart = \(Read-Shared "\$settings\/debug.log"\).Length/);
+  assert.match(wait, /Substring\(\$appendLogStart\)/);
+});

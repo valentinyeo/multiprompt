@@ -188,16 +188,29 @@ def newest_jsonl(paths):
             best, best_mtime = path, mtime
     return best
 
-def process_table(root=Path("/proc")):
+def process_table(root=Path("/proc"), pids=None):
 
     table = {}
     try:
-        entries = list(root.iterdir())
+        entries = list(root.iterdir()) if pids is None else [root / str(pid) for pid in pids]
     except OSError:
         return table
+    seen = set()
     for entry in entries:
-        if not entry.name.isdigit():
+        if not entry.name.isdigit() or entry.name in seen:
             continue
+        seen.add(entry.name)
+        if pids is not None:
+            try:
+                tasks = list((entry / "task").iterdir())
+            except OSError:
+                tasks = []
+            for task in tasks:
+                try:
+                    children = (task / "children").read_text().split()
+                    entries.extend(root / child for child in children if child.isdigit())
+                except OSError:
+                    pass
         try:
             stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
             raw = (entry / "cmdline").read_bytes()
@@ -351,7 +364,7 @@ def resolve_tmux_agent(agent, name, pid=None):
         pane_pids = [int(line) for line in result.stdout.split() if line.isdigit()]
         if not pane_pids:
             return None
-        pid = agent_pid_for_panes(pane_pids, process_table(), agent)
+        pid = agent_pid_for_panes(pane_pids, process_table(pids=pane_pids), agent)
         if pid is None:
             return None
     cwd = read_process_cwd(pid)
@@ -1108,10 +1121,10 @@ def queue_item(text):
     return dict(text=html.unescape(body)[:QUEUE_TEXT], sender='Task' if kind == 'task-notification' else html.unescape(sender or 'another session'), injected=True)
 
 
-def live_fields(source, size, tmux):
+def live_fields(source, size, tmux, shown=None):
     queue, sent = queue_replay(source, size)
     fields = dict(queue=[queue_item(text) for text in queue[:QUEUE_SHOWN]], sent=[queue_item(text) for text in sent[-QUEUE_SHOWN:]])
-    draft = box_draft("=" + tmux + ":")
+    draft = box_draft_text(shown) if shown is not None else box_draft("=" + tmux + ":")
     if draft is not None:
         fields["draft"] = draft[:DRAFT_TEXT]
     return fields
@@ -1346,12 +1359,12 @@ def search_response(q, path, agent, sid):
     return "\n".join((header, *(wire_row(row) for row in hits), END, ""))
 
 
-def response(q, source=None, as_owner=False):
+def response(q, source=None, as_owner=False, resolved=None):
     if ISSUE_268_CHAT_FIND and "search" in q:
         query = q["search"]
         if not isinstance(query, str) or not 1 <= len(query) <= 200:
             raise ValueError("invalid search")
-    agent, sid, path, delegated = resolve_response_path(q, source, as_owner)
+    agent, sid, path, delegated = resolved or resolve_response_path(q, source, as_owner)
     if delegated is not None:
         return delegated
     if ISSUE_268_CHAT_FIND and "search" in q:
@@ -1457,10 +1470,12 @@ def response(q, source=None, as_owner=False):
             oldest = base
             rows = rows[row_start:]
         if jumped and not rows:
-            return response(dict(q, no_jump=True), source, as_owner)
+            return response(dict(q, no_jump=True), source, as_owner, resolved)
+        if mode == "delta":
+            captured.append((base, data))
         status = status_header(source, info.st_size, agent, captured)
         if q.get("live") is True and agent == "claude" and tmux and mode != "older":
-            status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux))
+            status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux, q.get("watch_screen")))
         more = scan_more or page_more
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
@@ -1678,6 +1693,167 @@ def settle_response(q, source=None, as_owner=False):
         return error("read_failed")
 
 
+def watch_changes(q, resolved, source, as_owner):
+    import ctypes
+    import selectors
+    import struct
+
+    agent, sid, path, delegated = resolved
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.inotify_init1.argtypes = [ctypes.c_int]
+    libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+    fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+    if fd < 0:
+        raise OSError(ctypes.get_errno(), "inotify_init1")
+    control = None
+    control_buffer = b""
+    attached = False
+
+    def capture():
+        nonlocal control_buffer, attached
+        control.stdin.write(("capture-pane -p -e -J -t =" + q["tmux"] + ":\n").encode())
+        control.stdin.flush()
+        block = None
+        rows = []
+        while True:
+            while b"\n" not in control_buffer:
+                output = os.read(control.stdout.fileno(), 65536)
+                if not output:
+                    raise OSError("tmux control closed")
+                control_buffer += output
+            line, control_buffer = control_buffer.split(b"\n", 1)
+            if not attached:
+                if line.startswith(b"%end "):
+                    attached = True
+            elif block is None:
+                if line.startswith(b"%begin "):
+                    block = line[7:]
+            elif line == b"%end " + block:
+                return b"\n".join(rows).decode("utf-8", "replace")
+            elif line == b"%error " + block:
+                raise OSError("tmux capture failed")
+            else:
+                rows.append(line)
+
+    def refresh_screen():
+        if control is not None:
+            started = time.perf_counter_ns()
+            q["watch_screen"] = capture()
+            q["watch_capture_us"] = (time.perf_counter_ns() - started) // 1000
+
+    try:
+        if libc.inotify_add_watch(fd, os.fsencode(path.parent), 0x00000FCE) < 0:
+            raise OSError(ctypes.get_errno(), "inotify_add_watch")
+        with selectors.DefaultSelector() as selector:
+            selector.register(fd, selectors.EVENT_READ, "file")
+            selector.register(sys.stdin.fileno(), selectors.EVENT_READ, "input")
+            if as_owner:
+                q["watch_screen"] = ""
+            if q.get("tmux") and not as_owner:
+                control = subprocess.Popen(["tmux", "-C", "attach-session", "-f", "read-only,ignore-size", "-t", "=" + q["tmux"]],
+                                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                selector.register(control.stdout, selectors.EVENT_READ, "tmux")
+            refresh_screen()
+            yield resolved
+            while True:
+                changed = False
+                screen_changed = False
+                if b"\n" in control_buffer:
+                    lines = control_buffer.split(b"\n")
+                    control_buffer = lines.pop()
+                    changed = any(line.startswith((b"%output ", b"%extended-output ")) for line in lines)
+                    if changed:
+                        refresh_screen()
+                        yield resolved
+                        continue
+                for key, _mask in selector.select():
+                    if key.data == "input":
+                        if not os.read(key.fd, 4096):
+                            return
+                    elif key.data == "tmux":
+                        output = os.read(key.fd, 65536)
+                        if not output:
+                            return
+                        control_buffer += output
+                        lines = control_buffer.split(b"\n")
+                        control_buffer = lines.pop()
+                        screen_changed = screen_changed or any(line.startswith((b"%output ", b"%extended-output ")) for line in lines)
+                        changed = changed or screen_changed
+                    else:
+                        events = os.read(fd, 65536)
+                        at = 0
+                        while at + 16 <= len(events):
+                            _wd, mask, _cookie, length = struct.unpack_from("iIII", events, at)
+                            name = os.fsdecode(events[at + 16:at + 16 + length].split(b"\0", 1)[0])
+                            at += 16 + length
+                            if mask & 0x4000 or name == path.name:
+                                changed = True
+                            elif q.get("tmux") and mask & 0x180 and name.endswith(".jsonl"):
+                                latest = resolve_response_path(dict(q, follow=True), source, as_owner)
+                                if latest[2] is None and as_owner:
+                                    return
+                                if latest[2] is not None and latest[2] != path:
+                                    resolved = latest
+                                    agent, sid, path, delegated = latest
+                                    q["sid"] = sid
+                                    if libc.inotify_add_watch(fd, os.fsencode(path.parent), 0x00000FCE) < 0:
+                                        raise OSError(ctypes.get_errno(), "inotify_add_watch")
+                                    changed = True
+                if changed:
+                    if screen_changed:
+                        refresh_screen()
+                    yield resolved
+    finally:
+        os.close(fd)
+        if control is not None:
+            control.terminate()
+            control.communicate()
+
+
+def watch(source, as_owner=False):
+    q = json.loads(sys.stdin.buffer.readline())
+    owner = conversation_owner(q.get("cwd", "")) if not q.get("codex") else None
+    if owner and owner[1] != HOME and not as_owner:
+        discovered = tmux_owner_process("claude", q["tmux"], source) if q.get("tmux") else None
+        if discovered and discovered[1] == owner:
+            q = dict(q, discovery_pid=discovered[0])
+        bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"
+        child = subprocess.Popen(["sudo", "-n", "-H", "-u", owner[0], "--", "python3", "-u", "-c", bootstrap, "--watch", "--owner"], stdin=subprocess.PIPE)
+        try:
+            child.stdin.write(base64.b64encode(source.encode()) + b"\n" + json.dumps(q).encode() + b"\n")
+            child.stdin.flush()
+            while os.read(sys.stdin.fileno(), 4096):
+                pass
+        finally:
+            child.stdin.close()
+            child.wait()
+        return
+    resolved = resolve_response_path(q, source, as_owner)
+    agent, sid, path, delegated = resolved
+    if delegated is not None or path is None:
+        print(json.dumps(dict(id=q["id"], wire=delegated or missing_response(q, "session transcript not found"))), flush=True)
+        return
+    q = dict(q, sid=sid, follow=False)
+    previous = None
+    for resolved in watch_changes(q, resolved, source, as_owner):
+        while True:
+            started = time.perf_counter_ns() - q.pop("watch_capture_us", 0) * 1000
+            wire = response(q, source, as_owner, resolved)
+            fields = wire.split("\n", 1)[0].split("\t")
+            if fields[3] != "ok":
+                print(json.dumps(dict(id=q["id"], wire=wire)), flush=True)
+                return
+            signature = (fields[4], fields[6], fields[7], fields[12], tuple(line for line in wire.splitlines()[1:-1] if json.loads(line).get("role") == "status"))
+            if signature != previous:
+                frame = dict(id=q["id"], wire=wire, read_us=(time.perf_counter_ns() - started) // 1000)
+                print(json.dumps(frame, separators=(",", ":")), flush=True)
+                previous = signature
+            q.update(cached_sid=fields[4], offset=int(fields[6]), inode=int(fields[7]),
+                     mtime=int(fields[11]), probe=fields[12], start=int(fields[14]), before=0)
+            if fields[8] != "1":
+                break
+
+
 def serve(source):
     for line in sys.stdin.buffer:
         query = None
@@ -1705,7 +1881,9 @@ def serve(source):
         print(json.dumps(dict(id=rid, wire=wire), separators=(",", ":")), flush=True)
 
 
-if __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
+if __name__ == "__main__" and "--watch" in sys.argv[1:]:
+    watch(globals().get("READER_SOURCE"), "--owner" in sys.argv[1:])
+elif __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
     serve(globals().get("READER_SOURCE"))
 elif __name__ == "__main__":
     try:

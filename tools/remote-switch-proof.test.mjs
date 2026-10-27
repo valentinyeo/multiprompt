@@ -14,7 +14,7 @@ test('remote switch proof rejects each broken acceptance condition', () => {
   };
   const interval = elapsedMs => ({ elapsedMs, cpuMs: 1 });
   const probe = () => ({ ...interval(250), frameElapsedMs: 250, frames: Array.from({ length: 25 }, (_, i) => ({ painted: true, completedMs: (i + 1) * 10, gapMs: 10, paintMs: 1 })) });
-  const observation = { error: null, remoteHome: 'second/home', clientHome: 'local/home', idleBefore: interval(2000), idleAfter: interval(2000), switches: Array.from({ length: 40 }, (_, i) => {
+  const observation = { error: null, remoteHome: 'second/home', clientHome: 'local/home', idleBefore: interval(2000), idleAfter: interval(2000), idleThree: { ...interval(2000), sessions: 3, shell: 1 }, switches: Array.from({ length: 40 }, (_, i) => {
     const local = i < 20 ? 2 : 3;
     const shell = i % 2 ? local : 1;
     const other = i % 2 ? 1 : local;
@@ -23,7 +23,7 @@ test('remote switch proof rejects each broken acceptance condition', () => {
   try {
     write('remote-switch/observation.json', observation);
     write('remote-switch/seed-session.json', { tabs: [{ tmux_host: 2 }] });
-    write('remote-switch/session-chat.json', { tabs: [{ kind: 'tmux', tmux_host: 2, shell_id: 1 }, { kind: 'cmd', shell_id: 3, workspace: 1 }] });
+    write('remote-switch/session-chat.json', { tabs: [{ kind: 'tmux', tmux_host: 2, shell_id: 1 }, { kind: 'cmd', shell_id: 3, workspace: 1 }, { kind: 'cmd', shell_id: 4 }] });
     write('remote-switch/long-history-copied.txt', Array.from({ length: 2000 }, (_, i) => `IGSH954 message ${String(i).padStart(4, '0')}`).join('\n'));
     write('remote-switch-complete.png', Buffer.from('89504e470d0a1a0a', 'hex'));
     write('cleanup.json', { remaining_owned_processes: 0, scratch_removed: true, evidence_preserved: true });
@@ -48,6 +48,10 @@ test('remote switch proof rejects each broken acceptance condition', () => {
     reject(value => { value.idleAfter.cpuMs = 150; }, /returns to idle/);
     reject(value => { value.switches[20].workspaceAfter = value.switches[20].workspaceBefore; }, /actual workspace/);
     reject(value => { value.remoteHome = value.clientHome; }, /alternate remote/);
+    reject(value => { value.idleThree.cpuMs = 60; }, /three-session idle CPU/);
+    reject(value => { value.idleThree.sessions = 2; }, /three-session idle sample/);
+    reject(value => { value.idleThree.shell = 3; }, /long remote chat stays visible/);
+    reject(value => { value.idleThree.elapsedMs = 500; }, /three-session idle interval/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
