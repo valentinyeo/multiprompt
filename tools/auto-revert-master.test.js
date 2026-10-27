@@ -46,9 +46,11 @@ function runtime(input, event = 'workflow_dispatch', failure = null, rateLimits 
   const calls = [];
   const output = [];
   const waits = [];
-  const process = { env: { AUTO_REVERT_RUN_ID: String(input.run.id), GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: repository }, exitCode: 0 };
+  const summaries = [];
+  const process = { env: { AUTO_REVERT_RUN_ID: String(input.run.id), GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: repository, GITHUB_STEP_SUMMARY: '/summary' }, exitCode: 0 };
   const module = { exports: {} };
   const require = name => {
+    if (name === 'node:fs') return { appendFileSync(file, text) { assert.equal(file, '/summary'); summaries.push(text); } };
     assert.equal(name, 'node:child_process');
     return { execFileSync(command, args) {
       calls.push([command, ...args]);
@@ -90,7 +92,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null, rateLimits 
   };
   require.main = module;
   vm.runInNewContext(fs.readFileSync(`${__dirname}/auto-revert-master.js`, 'utf8'), { require, module, process, Atomics: { wait: (...args) => waits.push(args[3]) }, console: { log: value => output.push(value), error: value => output.push(value) } });
-  return { calls, output: output.join('\n'), process, waits };
+  return { calls, output: output.join('\n'), process, waits, summaries };
 }
 
 test('real master run-name verify full master is accepted', () => {
@@ -298,11 +300,11 @@ test('a marker for a different run is not a duplicate', () => {
   assert.equal(decide(input).action, 'revert');
 });
 
-test('ticket-less head is refused instead of selecting an older ticket commit', () => {
+test('ticket-less head is ignored instead of selecting an older ticket commit', () => {
   const input = fixture();
   input.commits[0].commit.message = 'Release version stamp';
   assert.match(decide(input).reason, /no IGSH ticket/);
-  assert.equal(decide(input).action, 'refuse');
+  assert.equal(decide(input).action, 'ignore');
 });
 
 test('head outside master first-parent history is refused', () => {
@@ -500,13 +502,18 @@ test('a merged revert pull request that a re-run still sees reaches the board wi
   assert.equal(result.process.exitCode, 0);
 });
 
-test('ticket-less red workflow opens an issue but never reverts or pushes', () => {
+for (const event of ['workflow_run', 'workflow_dispatch']) test(`ticket-less ${event} is neutral with an explanation and no mutations`, () => {
   const input = fixture();
   input.commits[0].commit.message = 'Release version stamp';
-  const result = runtime(input, 'workflow_run');
-  assert.ok(result.calls.every(call => !call.includes('revert') && !call.includes('push')));
-  assert.ok(result.calls.some(call => call.includes('POST')));
-  assert.equal(result.process.exitCode, 1);
+  const result = runtime(input, event);
+  assert.equal(result.process.exitCode, 0, result.output);
+  assert.equal(JSON.parse(result.output).action, 'ignore');
+  assert.ok(result.calls.every(call => call[0] === 'git'
+    ? ['fetch', 'rev-parse', 'log'].includes(call[1])
+    : call[0] === 'gh' && call[1] === 'api' && !call.includes('POST')));
+  assert.equal(result.summaries.length, 1);
+  assert.match(result.summaries[0], /No commit reverted: Run head subject has no IGSH ticket id/);
+  assert.ok(result.summaries[0].includes(input.run.html_url));
 });
 
 for (const [name, failure, blocked] of [
