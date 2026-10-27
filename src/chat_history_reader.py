@@ -691,7 +691,7 @@ def tool_events(event, agent, search=False):
 def conversation_rows(event, agent, offset=0, search=False):
     message = conversation_event(event, agent)
     if message and event.get("kind") in ("user", "assistant"):
-        message["id"] = "hax:" + str(offset)
+        message["id"] = "hax:" + str(offset) + ":" + hashlib.sha256(wire_row(event).encode("utf-8")).hexdigest()[:16]
     tools = tool_events(event, agent, search=search)
     if not tools or agent != "claude" or event.get("type") != "assistant":
         return ([message] if message else []) + tools

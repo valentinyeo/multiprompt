@@ -124,6 +124,15 @@ class HistoryReaderTest(unittest.TestCase):
         table[12] = (11, ['codex'])
         self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 11)
 
+    def test_igsh1043_native_rewrite_cannot_reuse_another_message_identity(self):
+        first = reader.conversation_rows(dict(kind='assistant', text='Original saved answer'), 'claude', 123)[0]
+        again = reader.conversation_rows(dict(kind='assistant', text='Original saved answer'), 'claude', 123)[0]
+        replaced = reader.conversation_rows(dict(kind='assistant', text='Rewritten different answer'), 'claude', 123)[0]
+        repeated = reader.conversation_rows(dict(kind='assistant', text='Original saved answer'), 'claude', 456)[0]
+        self.assertEqual(first['id'], again['id'])
+        self.assertNotEqual(first['id'], replaced['id'])
+        self.assertNotEqual(first['id'], repeated['id'])
+
     def test_igsh1043_hax_without_materialized_file_never_reads_another_claude_chat(self):
         self.write(self.event('Unrelated Claude conversation'))
         with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '10\n', '')), \
