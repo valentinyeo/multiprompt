@@ -10,7 +10,7 @@ Open Multiprompt and look at its taskbar button, the window corner and the file 
 
 ## Driving it with control.ps1
 
-Dispatch `verify.yml` with `feature=app-icon`, optionally with a published `tag`. The journey is `tools/verify-app-icon/drive.ps1`. It starts the real executable in an isolated profile on the GitHub Windows desktop, finds the visible app window by owning process and reads the icons Windows reports through `WM_GETICON` for both the large and the small slot. It also extracts the executable's own icon. Each icon is compared with the matching approved frame from `assets/icon<size>.png` over a dark background, and the mean per-channel difference must be at most 8 of 255.
+Dispatch `verify.yml` with `feature=app-icon`, optionally with a published `tag`. The journey is `tools/verify-app-icon/drive.ps1`. It starts the real executable in an isolated profile on the GitHub Windows desktop, finds the visible app window by owning process and reads the icons Windows reports through `WM_GETICON` for both the large and the small slot. It also extracts the executable's own icon and requires the executable to embed the bytes of all five approved frames (16, 32, 48, 64 and 256 pixels), which is how the 16 pixel frame is covered. Each icon is compared with the matching approved frame from `assets/icon<size>.png` over a dark background, and the mean per-channel difference must be at most 8 of 255.
 
 The run also captures the full primary screen, not a window rectangle, and saves the bottom strip as `taskbar-strip.png`, so the taskbar button is visible in the evidence. Inspect `desktop.png` and `taskbar-strip.png` yourself; the pixel comparison covers the icon handles, the screenshot covers what the user sees.
 
