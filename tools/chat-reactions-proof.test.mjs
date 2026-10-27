@@ -24,6 +24,7 @@ for (const [name, mutate] of [
   ['missing badge', f => f.fill(28, 120, 68, 142, 0x444444)],
   ['empty painted pill', f => f.fill(42, 126, 53, 136, 0x585858)],
   ['badge moved to second same-prefix reply', f => { f.fill(28, 120, 68, 142, 0x444444); f.fill(28, 205, 68, 227, 0x585858); f.fill(42, 211, 53, 221, 0xffffff); }],
+  ['extra assistant reaction answer', f => f.fill(20, 245, 250, 280, 0x444444)],
   ['extra normal reaction bubble', f => f.fill(20, 245, 250, 280, 0x555555)],
   ['extra pending reaction bubble', f => f.fill(20, 245, 250, 280, 0x3a3a3a)],
 ]) test(`reject ${name}`, () => {

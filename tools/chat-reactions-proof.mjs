@@ -46,7 +46,7 @@ export function inspect(image, area) {
 }
 
 export function assertBadge(frame, users = 1) {
-  assert.ok(frame.agent.length >= 2, 'two distinct fixture replies must remain visible');
+  assert.equal(frame.agent.length, 2, 'only the two original replies remain; the reaction answer stays hidden');
   assert.equal(frame.user.length, users, 'reaction must not add an ordinary bubble');
   assert.equal(frame.dim.length, 0, 'reaction must not add a queued bubble');
   assert.equal(frame.pill.length, 1, 'exactly one reaction badge');
@@ -83,6 +83,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       assert.deepEqual(sends.map(e => e.content), [expected], 'exactly one genuine transport submission');
       assert.equal(events.filter(e => e.type === 'attachment' && e.attachment?.prompt === expected).length, 1);
       assert.ok(events.some(e => e.message?.content === '👍 to: Unavailable reply [mp:0000000000000000]'));
+      assert.ok(events.some(e => e.message?.content?.some?.(part => part.text === 'Done with the queued messages.')), 'the session answered the delivered reaction');
       const area = json('reactions/area.json');
       const frames = {};
       for (const name of ['before', 'pending', 'delivered', 'restart', 'fallback']) frames[name] = inspect(readBmp(path.join(root, `reactions-${name}.bmp`)), area);
