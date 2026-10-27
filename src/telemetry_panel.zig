@@ -718,7 +718,7 @@ test "AI reset detail text uses fixed local time and countdown" {
     local.day_of_week = 6;
     local.hour = 0;
     local.minute = 5;
-    try std.testing.expectEqualStrings("Reset Sat 00:05, in 5M", formatAiPaceResetDetail(&buf, local, "5m"));
+    try std.testing.expectEqualStrings("Reset Sat 00:05, in 5m", formatAiPaceResetDetail(&buf, local, "5m"));
     const weekdays = [_][]const u8{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
     for (weekdays, 0..) |weekday, index| {
         local.day_of_week = @intCast(index);

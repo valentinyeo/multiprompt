@@ -714,7 +714,7 @@ test "IGSH-1041 usage rows paint weekly bars and exactly the shared menu-font gl
     for (&actual, 0..) |*row, y| {
         for (row, 0..) |*pixel, x| pixel.* = w.GetPixel(dc, @intCast(x + 28), @intCast(y));
     }
-    const wrong_font = w.CreateFontW(-16, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L("Arial"));
+    const wrong_font = create(-16, 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, L(MONO_FACE));
     try std.testing.expect(wrong_font != null);
     defer _ = w.DeleteObject(wrong_font);
     for ([_]w.HANDLE{ controlFont(), wrong_font }, 0..) |font, index| {
