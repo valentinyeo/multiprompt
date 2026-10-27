@@ -57,3 +57,21 @@ test('small composer buttons overlapping the transcript are not queued reaction 
   f.fill(260, 245, 291, 276, 0x414141);
   assertBadge(inspect(f.image, area));
 });
+
+test('approved reader colours identify assistant replies, not the user or composer buttons', () => {
+  const f = fixture();
+  f.fill(0, 0, 300, 300, 0x101010);
+  f.fill(120, 0, 220, 10, 0x1e1e1e);
+  f.fill(0, 285, 300, 300, 0x1e1e1e);
+  f.fill(20, 10, 250, 45, 0x3a3a3a);
+  f.fill(20, 60, 250, 116, 0x1e1e1e);
+  f.fill(20, 165, 250, 230, 0x1e1e1e);
+  f.fill(28, 120, 68, 142, 0x323232);
+  f.fill(42, 126, 53, 136, 0xffffff);
+  f.fill(260, 245, 291, 276, 0x3a3a3a);
+  const frame = inspect(f.image, area);
+  assert.deepEqual(frame.agent.map(row => row.top), [60, 165]);
+  assertBadge(frame);
+  f.fill(20, 245, 250, 280, 0x1e1e1e);
+  assert.throws(() => assertBadge(inspect(f.image, area)), assert.AssertionError);
+});
