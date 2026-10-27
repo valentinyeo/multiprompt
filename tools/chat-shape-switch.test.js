@@ -178,3 +178,13 @@ try {
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /REORDERED_SESSION_RECEIPTS_PROVEN/);
 });
+
+test('IGSH-1040 selected transcript copy queues confirmation and copy without refresh gaps', () => {
+  const receipt = control.slice(control.indexOf('function Save-ShapeLatest('), control.indexOf('function Wait-SwitchForeground'));
+  const enter = receipt.indexOf('[VerifyNative]::KeyDown(0x0D)');
+  const copy = receipt.indexOf('[VerifyNative]::KeyDown(0x43)');
+  assert.ok(enter > 0 && copy > enter);
+  assert.doesNotMatch(receipt.slice(enter, copy), /Press |Sleep|Wait-|Doctor/);
+  assert.ok(receipt.includes("'native transcript copy completed'"));
+  assert.ok(receipt.includes("if (-not $last.Success) { throw 'Copied target transcript belongs to a different seeded session' }"));
+});

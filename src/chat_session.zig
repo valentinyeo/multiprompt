@@ -510,7 +510,7 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     if (key.cwd[0] == 0) entry.key.cwd = known.cwd;
     if (!load_disk and entry.before > 0) chatHistoryStreamStop(entry);
     var pushed: ?ChatHistoryPush = null;
-    if (!load_disk and entry.before == 0 and !entry.history.restore_full and !chatBenchEnabled()) {
+    if (!load_disk and entry.before == 0 and entry.backfill.pages.items.len == 0 and !entry.history.restore_full and !chatBenchEnabled()) {
         if (entry.stream == null) {
             app_state.g_chat_file_request_id +%= 1;
             entry.stream = chatHistoryStreamStart(entry.key, app_state.g_chat_file_request_id, entry.history.cursor()) orelse {
@@ -532,7 +532,6 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     }
     if (!load_disk and pushed == null and !chatFetchAcquire()) return;
     entry.push_pending = pushed != null;
-    if (entry.backfill.pages.items.len > 0) entry.before = entry.backfill.start;
     entry.pending = true;
     entry.loading_disk = load_disk;
     app_state.g_chat_file_request_id +%= 1;
@@ -892,7 +891,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
     var wire: std.ArrayList(u8) = if (pushed) |push| push.wire else .empty;
     defer wire.deinit(a);
     var input = if (entry.history.restore_full) chat_history.History{} else entry.history.cursor();
-    if (entry.backfill.pages.items.len > 0) input.start = entry.backfill.start;
+    if (entry.before > 0 and entry.backfill.pages.items.len > 0) input.start = entry.backfill.start;
     const publish_staged = entry.show_older and entry.backfill.pages.items.len > 0;
     var ok = publish_staged or pushed != null or chatHistoryFetch(key, id, input, entry.before, &wire);
     var history: chat_history.History = .{};
@@ -960,7 +959,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
                     };
                     entry.prepended = ok;
                 } else entry.unchanged = true;
-            } else entry.backfill.deinit(a);
+            } else if (!delta) entry.backfill.deinit(a);
         }
     }
     chatPerf("parse", parse_start, wire.items.len);
@@ -1058,7 +1057,7 @@ pub fn chatFileOnReady() void {
         if (entry.result) |history| {
             const belongs_to_active = chat_history.sameSession(key, entry.key);
             if (entry.staged) {
-                entry.before = history.start;
+                entry.before = 0;
                 entry.result = null;
                 entry.failures = 0;
                 entry.next = GetTickCount64();
@@ -1072,7 +1071,7 @@ pub fn chatFileOnReady() void {
                 entry.history.newMessages(history)
             else
                 0;
-            const before = if (entry.stalled) 0 else if (disk or history.start < entry.history.start or
+            const before = if (entry.stalled) 0 else if (entry.backfill.pages.items.len > 0) entry.backfill.start else if (disk or history.start < entry.history.start or
                 (entry.before == 0 and (history.start != entry.history.start or history.inode != entry.history.inode or
                     !std.mem.eql(u8, &history.sid, &entry.history.sid)))) history.start else 0;
             if (entry.unchanged) {

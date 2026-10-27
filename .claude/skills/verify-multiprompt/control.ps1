@@ -6241,9 +6241,16 @@ try {
             }
             function Save-ShapeLatest([string]$Expected, [string]$Marker, [string]$Name) {
                 Focus-Palette 'chat view select all' 6364
-                Press @(0x0D) 'Enter: select actual rendered transcript'
                 [Windows.Forms.Clipboard]::Clear()
-                Press @(0x11, 0x43) 'Ctrl+C: verify the generated latest message outside timing'
+                Record 'Enter then Ctrl+C: copy the selected transcript before a background refresh clears selection'
+                Assert-Foreground
+                [VerifyNative]::KeyDown(0x0D)
+                [VerifyNative]::KeyUp(0x0D)
+                [VerifyNative]::KeyDown(0x11)
+                [VerifyNative]::KeyDown(0x43)
+                [VerifyNative]::KeyUp(0x43)
+                [VerifyNative]::KeyUp(0x11)
+                Wait-Until { [Windows.Forms.Clipboard]::ContainsText() } 'native transcript copy completed' 10
                 $copied = [Windows.Forms.Clipboard]::GetText()
                 $latest = [regex]::Match($copied, [regex]::Escape($Expected))
                 $last = [regex]::Match($copied, [regex]::Escape($Marker))
