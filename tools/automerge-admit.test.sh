@@ -34,6 +34,7 @@ check unknown-merge 'skip (not mergeable (UNKNOWN))' '.mergeable = "UNKNOWN"'
 check missing 'skip (required checks not green: test)' '.statusCheckRollup |= map(select(.name != "test"))'
 check pending 'skip (required checks not green: test)' '.statusCheckRollup[0].status = "IN_PROGRESS"'
 check skipped 'skip (required checks not green: test)' '.statusCheckRollup[0].conclusion = "SKIPPED"'
+check unrelated-skipped merge '.statusCheckRollup += [{name: "tmux-identity-semantics", status: "COMPLETED", conclusion: "SKIPPED"}]'
 check extra-failure 'skip (required checks not green: extra)' '.statusCheckRollup += [{name: "extra", status: "COMPLETED", conclusion: "FAILURE"}]'
 check legacy-failure 'skip (required checks not green: legacy)' '.statusCheckRollup += [{__typename: "StatusContext", context: "legacy", state: "FAILURE"}]'
 check legacy-green merge '.statusCheckRollup += [{__typename: "StatusContext", context: "legacy", state: "SUCCESS"}]'
@@ -45,7 +46,7 @@ check no-files 'skip (could not list PR files)' . 0 '[]'
 for path in tools/automerge-admit.sh tools/automerge-admit.test.sh tools/version-stamp.mjs tools/release-notes.mjs tools/sign-release.mjs src/changelog.zig src/release_signing_public_key.txt build.zig; do
     check "$path" "skip (edits release or admission machinery: $path; needs manual review)" . 0 "[\"$path\"]"
 done
-verify='["appearance", "session-restore", "workspace-focus", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me"]'
+verify='["appearance"]'
 verify_filter=".statusCheckRollup += (($verify | map({name: (\"verify (\" + . + \")\"), status: \"COMPLETED\", conclusion: \"SUCCESS\"})) + [{name: \"chat-sync-audit-changes\", status: \"COMPLETED\", conclusion: \"SUCCESS\"}, {name: \"chat-sync-audit\", status: \"COMPLETED\", conclusion: \"SKIPPED\"}])"
 check visible-green merge "$verify_filter" 0 '["src/chat.zig"]'
 check verify-failure 'skip (required checks not green: verify (appearance))' "$verify_filter | (.statusCheckRollup[] | select(.name == \"verify (appearance)\")).conclusion = \"FAILURE\"" 0 '["src/chat.zig"]'
