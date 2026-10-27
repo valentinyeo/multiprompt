@@ -137,5 +137,6 @@ test('startup snapshot needs no switch-only marker before the first real warmup 
   assert.ok(fs.existsSync(file));
   const driver = fs.readFileSync(file, 'utf8');
   assert.doesNotMatch(driver, /Wait-For 'initial conversation painted'/);
+  assert.match(driver, /Wait-For 'ten restored Chat View sessions'[\s\S]*launch step=browser[\s\S]*\$initial =/);
   assert.match(driver, /for \(\$i = 0; \$i -lt 60; \$i\+\+\)[\s\S]*Wait-For 'switch dispatch and nonempty target painted'[\s\S]*if \(\$i -ge 10\)/);
 });
