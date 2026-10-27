@@ -956,3 +956,52 @@ test('native frame sampling stays scheduled while retaining every measured gap a
   assert.match(sampler, /gapMs = completed - last, paintMs = completed - start, painted = painted/);
   assert.match(sampler, /double remaining = start \+ 16 - clock\.Elapsed\.TotalMilliseconds/);
 });
+
+test('Windows notification stand-in keeps the supplied reader push algorithm and emits appended data', () => {
+  assert.match(read('tools/verify-chat-delivery/boundary.py'), /def watch_reader\(\):/);
+  const script = String.raw`
+import ast,base64,ctypes,ctypes.wintypes,io,json,os,sys,tempfile
+from pathlib import Path
+from unittest.mock import patch
+root = Path(sys.argv[1])
+tree = ast.parse((root / 'tools/verify-chat-delivery/boundary.py').read_text())
+function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'watch_reader')
+with tempfile.TemporaryDirectory() as temp:
+    home = Path(temp)
+    path = home / '.claude/projects/-work-demo/sid.jsonl'
+    path.parent.mkdir(parents=True)
+    event = lambda text: dict(type='assistant',message=dict(role='assistant',content=[dict(type='text',text=text)]))
+    path.write_text(json.dumps(event('original boundary row')) + '\n')
+    calls = []
+    class Call:
+        def __init__(self, fn): self.fn = fn
+        def __call__(self, *args): return self.fn(*args)
+    def wait(*args):
+        calls.append('wait')
+        if calls.count('wait') == 2: raise RuntimeError('fixture finished')
+        with path.open('a') as output: output.write(json.dumps(event('appended boundary row')) + '\n')
+        return 0
+    kernel = type('Kernel', (), {})()
+    kernel.FindFirstChangeNotificationW = Call(lambda *args: 1)
+    kernel.FindNextChangeNotification = Call(lambda *args: 1)
+    kernel.FindCloseChangeNotification = Call(lambda *args: calls.append('closed'))
+    kernel.WaitForSingleObject = Call(wait)
+    source = (root / 'src/chat_history_reader.py').read_bytes()
+    q = dict(id=7,codex=False,sid='sid',tmux='',cwd='/work/demo',cached_sid='',inode=0,offset=0,live=False)
+    stream = io.TextIOWrapper(io.BytesIO(base64.b64encode(source) + b'\n' + json.dumps(q).encode() + b'\n'))
+    output = io.StringIO()
+    scope = dict(ROOT=home,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys)
+    exec(compile(ast.Module(body=[function],type_ignores=[]), '<boundary-watch>', 'exec'), scope)
+    with patch.dict(os.environ, HOME=str(home)), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True):
+        try: scope['watch_reader']()
+        except RuntimeError as error: assert str(error) == 'fixture finished'
+    frames = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert len(frames) == 2,frames
+    assert 'original boundary row' in frames[0]['wire']
+    assert 'appended boundary row' in frames[1]['wire']
+    assert 'original boundary row' not in frames[1]['wire']
+    assert calls == ['wait','wait','closed'],calls
+print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 30000 }), /WINDOWS_NOTIFICATION_BOUNDARY_OK/);
+});

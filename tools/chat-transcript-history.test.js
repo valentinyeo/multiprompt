@@ -56,6 +56,21 @@ var chat_table_drag: ?struct { offset: usize } = null;
 var g_chat_cache_pruned: u64 = 0;
 fn chatPerf(_: []const u8, _: u64, _: usize) void {}
 fn chatFetchRelease() void {}
+const ChatHistoryPush = struct { wire: std.ArrayList(u8), id: u32, read_us: u64 };
+const ChatHistoryStream = struct {
+    ready: std.atomic.Value(bool) = .init(true), ended: std.atomic.Value(bool) = .init(false),
+    id: u32 = 0, wire: std.ArrayList(u8) = .empty, read_us: u64 = 0, ack: HANDLE = null,
+};
+var test_stream: ChatHistoryStream = .{};
+var captured_key: chat_transcript.Identity = .{};
+fn chatHistoryStreamsKeep(_: u32) void {}
+fn chatHistoryStreamStop(entry: *ChatHistoryEntry) void { entry.stream = null; }
+fn chatHistoryStreamStart(key: chat_transcript.Identity, _: u32, _: chat_history.History) ?*ChatHistoryStream {
+    captured_key = key;
+    test_stream.ready.store(true, .release);
+    return &test_stream;
+}
+fn SetEvent(_: HANDLE) i32 { return 1; }
 fn UpdateWindow(_: HANDLE) i32 { return 1; }
 var g_chat_file_key: chat_transcript.Identity = .{};
 var g_chat_histories: std.ArrayList(*ChatHistoryEntry) = .empty;
@@ -268,7 +283,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     const closed = try a.create(ChatHistoryEntry);
     closed.* = .{ .key = chat_transcript.Identity.initTmux(3, 0, false, "term-closed", ""), .pending = true };
     try g_chat_histories.append(a, closed);
-    const worker = try std.Thread.spawn(.{}, chatFileFetchThread, .{ closed, closed.key, @as(u32, 1), true });
+    const worker = try std.Thread.spawn(.{}, chatFileFetchThread, .{ closed, closed.key, @as(u32, 1), true, null });
     chatHistoryForget(3);
     try std.testing.expect(closed.retired);
     worker.join();
@@ -279,7 +294,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     one.key.sid = @splat(0);
     one.loading_disk = true;
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 1, true);
+    chatFileFetchThread(&one, one.key, 1, true, null);
     chatFileOnReady();
     try std.testing.expect(g_chat_block_count > 0);
     try std.testing.expectEqualStrings("sid", std.mem.sliceTo(&one.key.sid, 0));
@@ -294,7 +309,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
         "@mp\\t2\\thistory\\tok\\tsid\\t50\\t100\\t10\\t0\\tclaude\\tterm-1\\n{\\"role\\":\\"assistant\\",\\"text\\":\\"rebuilt full reply\\"}\\n@@MP_END@@\\n",
     };
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 2, false);
+    chatFileFetchThread(&one, one.key, 2, false, null);
     try std.testing.expectEqual(@as(usize, 1), remote_calls);
     // Bounded requests never run a rehydration loop inside one worker.
     try std.testing.expect(one.result == null);
@@ -304,7 +319,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     // Reset to the latest bounded window on the next backed-off request.
     remote_pages = &.{ "@mp\\t2\\thistory\\tok\\tsid\\t0\\t100\\t10\\t0\\tclaude\\tterm-1\\n{\\\"role\\\":\\\"assistant\\\",\\\"text\\\":\\\"rebuilt full reply\\\"}\\n@@MP_END@@\\n" };
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 2, false);
+    chatFileFetchThread(&one, one.key, 2, false, null);
     try std.testing.expect(one.result != null);
     try std.testing.expectEqual(@as(usize, 500), one.history.blocks.items.len / 2);
     chatFileOnReady();
@@ -315,7 +330,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     remote_calls = 0;
     const writes_before = cache_writes;
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 4, false);
+    chatFileFetchThread(&one, one.key, 4, false, null);
     chatFileOnReady();
     try std.testing.expectEqual(writes_before, cache_writes);
     // A reset cancels an old worker's cache write even if its fetch succeeds.
@@ -323,7 +338,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     remote_calls = 0;
     one.cache_cancelled.store(true, .release);
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 5, false);
+    chatFileFetchThread(&one, one.key, 5, false, null);
     try std.testing.expect(one.result != null);
     try std.testing.expectEqual(writes_before, cache_writes);
     one.result.?.deinit(a);
@@ -334,7 +349,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     // A failed rebuild of an evicted prefix retains the shown cached tail.
     one.history.restore_full = true;
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 3, false);
+    chatFileFetchThread(&one, one.key, 3, false, null);
     chatFileOnReady();
     try std.testing.expectEqual(@as(usize, 1), g_chat_block_count);
     // Debounce flushes the final delta even if subsequent polls have no rows.
@@ -343,7 +358,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     remote_calls = 0;
     ticks = 600;
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 8, false);
+    chatFileFetchThread(&one, one.key, 8, false, null);
     try std.testing.expect(one.incremental);
     chatFileOnReady();
     try std.testing.expect(one.cache_dirty);
@@ -353,7 +368,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     remote_pages = &.{ "@mp\\t9\\thistory\\tok\\tsid\\t150\\t150\\t10\\t0\\tclaude\\tterm-1\\t0\\t" ++ ("a" ** 64) ++ "\\tdelta\\t0\\n@@MP_END@@\\n" };
     remote_calls = 0;
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 9, false);
+    chatFileFetchThread(&one, one.key, 9, false, null);
     try std.testing.expect(one.unchanged);
     chatFileOnReady();
     try std.testing.expectEqual(text_ptr, one.history.text.items.ptr);
@@ -378,7 +393,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     remote_pages = &.{ "@mp\\t10\\thistory\\tok\\tsid\\t25\\t50\\t10\\t0\\tclaude\\tterm-1\\t0\\t" ++ ("a" ** 64) ++ "\\tolder\\t25\\n{\\\"role\\\":\\\"assistant\\\",\\\"text\\\":\\\"older reply\\\"}\\n@@MP_END@@\\n" };
     remote_calls = 0;
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 10, false);
+    chatFileFetchThread(&one, one.key, 10, false, null);
     try std.testing.expect(one.prepended);
     chatFileOnReady();
     try std.testing.expectEqual(@as(usize, 3), g_chat_block_count);
@@ -394,7 +409,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     remote_pages = &.{ "@mp\\t11\\thistory\\tok\\tsid\\t150\\t150\\t10\\t0\\tclaude\\tterm-1\\t0\\t" ++ ("a" ** 64) ++ "\\tdelta\\t25\\n{\\\"role\\\":\\\"status\\\",\\\"model\\\":\\\"Opus 5.5\\\",\\\"percent_left\\\":62}\\n@@MP_END@@\\n" };
     remote_calls = 0;
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 11, false);
+    chatFileFetchThread(&one, one.key, 11, false, null);
     try std.testing.expect(one.unchanged);
     chatFileOnReady();
     try std.testing.expectEqual(status_text_ptr, one.history.text.items.ptr);
@@ -405,7 +420,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     const known_layouts = status_layout_calls;
     remote_calls = 0;
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 11, false);
+    chatFileFetchThread(&one, one.key, 11, false, null);
     chatFileOnReady();
     try std.testing.expectEqual(known_layouts, status_layout_calls);
     fake_viewport_h = 800;
@@ -422,7 +437,7 @@ function runHarness(deferSource, oldImage, cases = acceptance, scroll = fn('chat
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub fn close(_: bool) void {}\n');
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude.replace('fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }', boundary) + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow'));
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), prelude.replace('fn chatReadBoundary() chat_history.ReadBoundary { return .{}; }', boundary) + entry + (functions.map(n => n === 'chatScrollBy' ? scroll : n === 'chatRelayoutPreservingScroll' && oldImage ? oldImage : fn(n)).join('\n') + deferSource + cases).replaceAll('@import("chat_render.zig").chatViewClientRect', 'chatViewClientRect').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'cache-first switch-back'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -567,7 +582,6 @@ test('background retries, local cache, complete dynamic layout and diagnostics a
 function runMetadataHarness(text) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-metadata-'));
   const support = `
-var captured_key: chat_transcript.Identity = .{};
 var g_chat_file_request_id: u32 = 0;
 const LASTINPUTINFO = struct { cbSize: u32, dwTime: u32 };
 fn IsIconic(_: HANDLE) i32 { return 0; }
@@ -618,6 +632,7 @@ test "worker receives retained sid and cwd, including a disk-learned sid" {
     history.key.sid = @splat(0);
     @memcpy(history.history.sid[0..4], "disk");
     history.pending = false;
+    history.stream = null;
     chatFileRequest(empty);
     try std.testing.expectEqualStrings("disk", std.mem.sliceTo(&captured_key.sid, 0));
     try std.testing.expectEqualStrings("/work/demo", std.mem.sliceTo(&captured_key.cwd, 0));
@@ -631,8 +646,8 @@ test "worker receives retained sid and cwd, including a disk-learned sid" {
     const fixturePrelude = prelude.replace(fn('chatFileRequest', prelude), '');
     const request = ['chatFileRequest', 'chatFileRequestForDelivery'].filter(n => text.includes(`fn ${n}(`)).map(n => fn(n, text)).join('\n').replace('std.Thread.spawn', 'TestThread.spawn');
     fs.writeFileSync(path.join(dir, 'main-test.zig'), (fixturePrelude + entry +
-      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow'));
-    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig')], { encoding: 'utf8', timeout: 60000 });
+      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
+    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'main-test.test'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -685,7 +700,7 @@ test "cache-first switch-back IGSH-815 restart and continuation progress" {
     remote_pages = &.{ "@mp\\t2\\thistory\\tok\\tsid\\t100\\t100\\t9\\t0\\tclaude\\tterm-1\\t1\\t\\tolder\\t100\\n{\\"role\\":\\"user\\",\\"text\\":\\"duplicate\\"}\\n@@MP_END@@\\n" };
     remote_calls = 0;
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 2, false);
+    chatFileFetchThread(&one, one.key, 2, false, null);
     chatFileOnReady();
     try std.testing.expectEqual(@as(u64, 0), one.before);
     try std.testing.expectEqual(@as(u64, 100), one.history.start);
@@ -694,7 +709,7 @@ test "cache-first switch-back IGSH-815 restart and continuation progress" {
     remote_pages = &.{ "@mp\\t3\\thistory\\tok\\tsid\\t200\\t200\\t9\\t0\\tclaude\\tterm-1\\t1\\t\\tdelta\\t100\\n@@MP_END@@\\n" };
     remote_calls = 0;
     one.pending = true;
-    chatFileFetchThread(&one, one.key, 3, false);
+    chatFileFetchThread(&one, one.key, 3, false, null);
     chatFileOnReady();
     try std.testing.expectEqual(@as(u64, 0), one.before);
     try std.testing.expectEqual(ticks + chatFilePollInterval(), one.next);

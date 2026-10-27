@@ -496,12 +496,17 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     if (app_state.g_main_hwnd == null or (!delivery and (IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0))) return;
     const entry = chatHistoryEntry(key) orelse return;
     const now = GetTickCount64();
-    if (entry.pending or (entry.stream == null and now < entry.next)) return;
+    if (!chat_history.retryDue(entry.pending, now, if (entry.stream == null) entry.next else 0)) return;
     const load_disk = !entry.disk_loaded;
     if (!delivery and !load_disk and !foregroundIsOurs()) {
         var input: LASTINPUTINFO = .{ .cbSize = @sizeOf(LASTINPUTINFO), .dwTime = 0 };
         if (GetLastInputInfo(&input) == 0 or @as(u32, @truncate(now)) -% input.dwTime < 5000) return;
     }
+    const known = entry.key;
+    entry.key = key;
+    if (key.sid[0] == 0) entry.key.sid = if (known.sid[0] != 0) known.sid else entry.history.sid;
+    if (key.cwd[0] == 0) entry.key.cwd = known.cwd;
+    if (!load_disk and entry.before > 0) chatHistoryStreamStop(entry);
     var pushed: ?ChatHistoryPush = null;
     if (!load_disk and entry.before == 0 and !entry.history.restore_full and !chatBenchEnabled()) {
         if (entry.stream == null) {
@@ -528,10 +533,6 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     if (entry.backfill.pages.items.len > 0) entry.before = entry.backfill.start;
     entry.pending = true;
     entry.loading_disk = load_disk;
-    const known = entry.key;
-    entry.key = key;
-    if (key.sid[0] == 0) entry.key.sid = if (known.sid[0] != 0) known.sid else entry.history.sid;
-    if (key.cwd[0] == 0) entry.key.cwd = known.cwd;
     app_state.g_chat_file_request_id +%= 1;
     var log_buf: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log_buf, "[chat] transcript request shell={d} offset={d} before={d}", .{ key.shell_id, entry.history.offset, entry.before }) catch "[chat] transcript request");
