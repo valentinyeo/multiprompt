@@ -1019,13 +1019,16 @@ print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
 });
 
 
-test('retained-history wheel recovery focuses its verified transcript recipient', () => {
+test('retained-history recovery verifies focus before native Home input and records the path', () => {
   const start = drive.indexOf('function Retention-Top {');
   const end = drive.indexOf('\nfunction Assert-Retention', start);
   const recovery = drive.slice(start, end);
-  const focus = '[void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, [IntPtr]$rows[0].Current.NativeWindowHandle)';
   assert.ok(start >= 0 && end > start);
-  assert.ok(recovery.includes(focus), 'wheel must target the owned transcript, not the composer');
-  assert.ok(recovery.indexOf(focus) < recovery.indexOf('::WheelOwnedTranscript'));
+  assert.match(recovery, /Wait-For 'retained transcript keyboard focus'/);
+  assert.match(recovery, /FocusOwnedWindow\(\$main, \$app.Id, \$transcript\)/);
+  assert.match(recovery, /::Focus\(\$main\)\[1\] -eq \$transcript.ToInt64\(\)/);
+  assert.match(recovery, /Press @\(0x24\) 'Home: restore first retained message'/);
+  assert.ok(recovery.indexOf('retained transcript keyboard focus') < recovery.indexOf('Press @(0x24)'));
   assert.match(recovery, /\$position\.scroll -eq 0/);
+  assert.doesNotMatch(recovery, /WheelOwnedTranscript/);
 });
