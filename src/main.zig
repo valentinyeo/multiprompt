@@ -8727,7 +8727,6 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
     app_state.g_search_session_overview_mode = false;
     app_state.g_search_openall_host_mode = false;
     app_state.g_search_snippet_mode = false;
-    app_state.g_search_snippet_manage_mode = false;
     app_state.g_search_theme_mode = true;
     app_state.g_search_len = 0;
     app_state.g_search_sel = 0;
