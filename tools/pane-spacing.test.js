@@ -179,7 +179,8 @@ ${fn(browser, 'browserMaskCorner')}
 fn moveBrowserEdgeMask(side: BrowserEdgeMaskSide, x: i32, y: i32, w: i32, h: i32) void { placed_masks[@intFromEnum(side)] = .{ .left = x, .top = y, .right = x + w, .bottom = y + h }; }
 
 
-fn layoutChatControls() void {}
+var chat_layouts: usize = 0;
+fn layoutChatControls() void { chat_layouts += 1; }
 fn fontGenStale(_: u32, _: u32) bool { return false; }
 fn fontSyncShell(_: u32) bool { return true; }
 fn verboseLoggingEnabled() bool { return false; }
@@ -193,6 +194,14 @@ fn verifyShellWindowSize(_: HANDLE, _: i32, _: i32, _: i32, _: i32) void {}
 fn MoveWindow(_: HANDLE, _: i32, _: i32, _: i32, _: i32, _: i32) i32 { return 1; }
 fn CreateRoundRectRgn(_: i32, _: i32, _: i32, _: i32, _: i32, _: i32) HANDLE { return null; }
 ${production}
+test "IGSH-1059 chat layout survives a missing remote console" {
+    g_chat_active = true;
+    shells[0].hwnd = null;
+    defer { shells[0].hwnd = @ptrFromInt(2); g_chat_active = false; }
+    const before = chat_layouts;
+    repositionActive();
+    try std.testing.expectEqual(before + 1, chat_layouts);
+}
 test "split dragging inverts shared pane geometry at both scales" {
     reserved = true;
     for ([_]u32{100, 150}) |scale| {

@@ -341,7 +341,10 @@ pub fn accountRemoveServer(slot: u8) void {
     };
     const text = std.fmt.allocPrint(a, "Remove {s} ({s}) from your account on every device?\nLocal SSH settings and sessions will stay unchanged.", .{ host.name, host.hostname }) catch return;
     const wide = std.unicode.utf8ToUtf16LeAllocZ(a, text) catch return;
-    if (MessageBoxW(app_state.g_main_hwnd, wide.ptr, L("Account: Remove server"), 4 | 0x20 | 0x100) != 6) return;
+    if (@import("dialog.zig").show(app_state.g_main_hwnd, wide.ptr, L("Remove server?"), &.{
+        .{ .label = L("Cancel"), .result = 7 },
+        .{ .label = L("Remove"), .result = 6, .destructive = true },
+    }, 0) != 6) return;
     const base_bytes = app_state.g_account_local_base orelse app_state.g_account_base orelse return;
     const held = session_layout.parse(a, base_bytes) catch return;
     defer held.deinit();
@@ -2149,11 +2152,16 @@ pub fn runVaultFlowProcess() void {
         .not_found => runVaultCreateFlow(access_token, email),
         .found => |found| {
             defer std.heap.page_allocator.free(found.envelope);
-            const choice = MessageBoxW(
+            const choice = @import("dialog.zig").show(
                 null,
-                L("Unlock multiprompt sync on this computer.\n\nYes = enter your passphrase\nNo = use your recovery key instead\nCancel = do this later"),
-                L("multiprompt sync"),
-                0x00000023,
+                L("Choose how to unlock your saved sessions on this computer."),
+                L("Unlock sync"),
+                &.{
+                    .{ .label = L("Later"), .result = 2 },
+                    .{ .label = L("Use recovery key"), .result = 7 },
+                    .{ .label = L("Enter passphrase"), .result = 6 },
+                },
+                2,
             );
             const IDYES = 6;
             const IDNO = 7;

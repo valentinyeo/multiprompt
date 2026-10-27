@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { classifyTrees } from './version-stamp.mjs';
+import { autoRevertBranch, classifyTrees } from './version-stamp.mjs';
 
 const [baseRef, headRef] = process.argv.slice(2);
 if (!baseRef || !headRef || process.argv.length !== 4) {
@@ -49,6 +49,8 @@ try {
   console.log(`merge-base=${base} head=${head}`);
   if (changed.length && changed.every(file => docs.test(file))) {
     console.log('RED_RUN_NOT_REQUIRED documentation only');
+  } else if (autoRevertBranch()) {
+    console.log('RED_RUN_NOT_REQUIRED auto-revert branch undoes a master change');
   } else if (changed.length && !changed.some(file => logic.test(file)) && changed.every(file => advisory.test(file))) {
     console.log('RED_RUN_ADVISORY UI, infra, or workflow changes only');
     console.log('::warning::check-red-run is advisory for UI, infra, and workflow changes');

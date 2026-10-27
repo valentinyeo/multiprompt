@@ -23,7 +23,19 @@ jobs:
   automerge:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # SF_APP_* secrets live in this environment, limited to master, so PR branches cannot read them.
+    environment: automerge
     steps:
+      - name: Mint software-factory-runners token for update-branch
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.SF_APP_ID }}
+          private-key: ${{ secrets.SF_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: master
@@ -39,7 +51,7 @@ jobs:
           RUN_EVENT: ${{ github.event.workflow_run.event }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          AUTOMERGE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          AUTOMERGE_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = workflow_run ]; then
@@ -64,7 +76,11 @@ jobs:
             verdict=$(bash tools/automerge-admit.sh "$RUNNER_TEMP/pr-info.json" "$RUNNER_TEMP/pr-files.json" "$behind_by" "$REPO_OWNER") || verdict='skip (admission script failed)'
             echo "#$pr: $verdict"
             if [ "$verdict" = update ]; then
-              if GH_TOKEN="${AUTOMERGE_TOKEN:-$GH_TOKEN}" gh api --method PUT "repos/$REPO/pulls/$pr/update-branch" -f expected_head_sha="$head_oid" >/dev/null; then
+              if [ -z "${AUTOMERGE_TOKEN:-}" ]; then
+                echo "#$pr: skip update (no app token; github.token updates do not start checks)"
+                continue
+              fi
+              if GH_TOKEN="$AUTOMERGE_TOKEN" gh api --method PUT "repos/$REPO/pulls/$pr/update-branch" -f expected_head_sha="$head_oid" >/dev/null; then
                 echo "#$pr: updated with master"
               else
                 echo "#$pr: update branch failed"

@@ -73,7 +73,9 @@ test('one merge yields to master and periodic recovery does not run for every co
 
 test('a behind green pull request is updated through the API and not by pushing', () => {
   const text = workflow('automerge.yml');
-  assert.match(text, /AUTOMERGE_TOKEN: \$\{\{ secrets\.AUTOMERGE_TOKEN \}\}/);
+  assert.match(text, /AUTOMERGE_TOKEN: \$\{\{ steps\.app-token\.outputs\.token \}\}/);
+  assert.match(text, /uses: actions\/create-github-app-token@[0-9a-f]{40}/);
+  assert.match(text, /environment: automerge/);
   assert.doesNotMatch(text, /git (?:push|rebase|merge)/);
   const run = text.split('        run: |\n')[1].split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const block = run.match(/if \[ "\$verdict" = update \]; then[\s\S]*?\n {2}fi\n/)[0];
@@ -92,9 +94,10 @@ test('a behind green pull request is updated through the API and not by pushing'
     assert.match(calls, /token=app-token/);
     assert.match(calls, new RegExp(`api --method PUT repos/owner/repo/pulls/605/update-branch -f expected_head_sha=${head}`));
     fs.rmSync(env.CALLS);
-    const workflowToken = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...env, AUTOMERGE_TOKEN: '' } });
-    assert.equal(workflowToken.status, 0, workflowToken.stderr);
-    assert.match(fs.readFileSync(env.CALLS, 'utf8'), /token=workflow-token/);
+    const noAppToken = spawnSync('bash', ['-c', script], { encoding: 'utf8', env: { ...env, AUTOMERGE_TOKEN: '' } });
+    assert.equal(noAppToken.status, 0, noAppToken.stderr);
+    assert.match(noAppToken.stdout, /#605: skip update \(no app token/);
+    assert.equal(fs.existsSync(env.CALLS), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

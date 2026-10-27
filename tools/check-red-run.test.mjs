@@ -36,7 +36,10 @@ function fixture(t) {
   const commit = () => { git('add', '.'); git('commit', '-qm', 'fixture'); return git('rev-parse', 'HEAD'); };
   write('src/value.txt', 'broken');
   const base = commit();
-  const run = (ref = base) => spawnSync(process.execPath, [checker, ref, git('rev-parse', 'HEAD')], { cwd: repo, encoding: 'utf8' });
+  const env = { ...process.env };
+  delete env.GITHUB_HEAD_REF;
+  delete env.GITHUB_REF_NAME;
+  const run = (ref = base, extra = {}) => spawnSync(process.execPath, [checker, ref, git('rev-parse', 'HEAD')], { cwd: repo, encoding: 'utf8', env: { ...env, ...extra } });
   const regression = "const {test}=require('node:test'); const assert=require('node:assert/strict'); const fs=require('node:fs'); test('fixed value',()=>assert.equal(fs.readFileSync('src/value.txt','utf8'),'fixed'));\n";
   return { repo, git, write, commit, base, run, regression };
 }
@@ -129,6 +132,25 @@ if (fs.existsSync(checker)) {
     const result = f.run();
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /No changed regression tests/);
+  });
+
+  test('auto-revert branches undo master without a new regression, other branches still need one', t => {
+    const f = fixture(t);
+    f.write('tools/value.test.cjs', f.regression);
+    const base = f.commit();
+    fs.unlinkSync(path.join(f.repo, 'tools/value.test.cjs'));
+    f.write('src/value.txt', 'reverted');
+    f.commit();
+    const revert = f.run(base, { GITHUB_HEAD_REF: 'auto-revert/40533455263' });
+    assert.equal(revert.status, 0, revert.stdout + revert.stderr);
+    assert.match(revert.stdout, /RED_RUN_NOT_REQUIRED auto-revert/);
+    const dispatched = f.run(base, { GITHUB_REF_NAME: 'auto-revert/40533455263' });
+    assert.equal(dispatched.status, 0, dispatched.stdout + dispatched.stderr);
+    for (const branch of ['ceo/IGSH-1-auto-revert/x', 'poteto/auto-revert']) {
+      const other = f.run(base, { GITHUB_HEAD_REF: branch });
+      assert.notEqual(other.status, 0);
+      assert.match(other.stderr, /No changed regression tests/);
+    }
   });
 
   test('documentation-only changes do not need a fake regression', t => {
