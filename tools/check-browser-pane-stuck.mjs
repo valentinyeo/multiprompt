@@ -36,7 +36,7 @@ function prMatrixContract(source) {
   for (const trigger of ['src/**', 'tools/check-browser-pane-stuck.mjs']) assert.ok(source.includes(`      - ${trigger}`));
 }
 prMatrixContract(workflow);
-assert.throws(() => prMatrixContract(workflow.replace('"browser-pane-stuck"', '"missing-browser-pane-stuck"')));
+assert.throws(() => prMatrixContract(workflow.replaceAll('"browser-pane-stuck"', '"missing-browser-pane-stuck"')));
 
 const featureFiles = fs.readdirSync(path.join(root, directory, 'features')).filter(name => name.endsWith('.md') && name !== 'README.md');
 const index = read(`${directory}/features/README.md`);
