@@ -108,6 +108,9 @@ Focus-LockedBrowser $browser
 [VerifyNative]::ClickClient($script:window, ($geometry[6] - [int](1.5 * $buttonW)), ([int]($buttonH / 2)))
 Wait-Until { [VerifyNative]::IsZoomed($script:window) } 'custom maximize works while the docked browser has focus'
 $geometry = [WindowControlsProof]::Geometry($script:window)
+$restoreX = $geometry[6] - [int](1.5 * $buttonW)
+$restoreY = [int]($buttonH / 2)
+Save-Json @{ selectedGeometry = $geometry; restorePoint = @($restoreX, $restoreY); hit = [WindowControlsProof]::Hit($script:window, $restoreX, $restoreY); currentGeometry = [WindowControlsProof]::Geometry($script:window) } 'controls-restore-target.json'
 [VerifyNative]::ClickClient($script:window, ($geometry[6] - [int](1.5 * $buttonW)), ([int]($buttonH / 2)))
 Wait-Until { -not [VerifyNative]::IsZoomed($script:window) } 'custom restore with a docked browser'
 Doctor
