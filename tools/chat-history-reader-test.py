@@ -116,6 +116,40 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertIn("\tquestion_text\tok\t", wire)
         self.assertEqual(run.call_args_list[0].args[0], ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "Purple"])
         self.assertEqual(run.call_args_list[1].args[0], ["tmux", "send-keys", "-t", "=term-1:", "Enter"])
+    def test_igsh1043_hax_only_processes_are_discovered_without_provider_children(self):
+        table = {10: (1, ['bash']), 11: (10, ['/opt/bin/hax', '-p', 'neutral']),
+                 20: (1, ['bash']), 21: (20, ['/opt/bin/hax', '--resume=neutral'])}
+        self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 11)
+        self.assertEqual(reader.agent_pid_for_panes([20], table, 'codex'), 21)
+        table[12] = (11, ['codex'])
+        self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 11)
+
+    def test_igsh1043_native_hax_saved_sessions_keep_distinct_messages_and_offsets(self):
+        root = self.home / '.local/state/hax/sessions/work-demo-neutral'
+        root.mkdir(parents=True)
+        for index, sid in enumerate(['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']):
+            path = root / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+            events = [dict(type='session', version=1, hax_version='neutral', id=sid, cwd='/work/demo', timestamp='2026-01-01T00:00:00Z', provider='codex', model='neutral'),
+                      dict(kind='user', text=f'Runner {index} question'),
+                      dict(kind='assistant', text=f'Runner {index} saved reply')]
+            path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+            self.query = dict(id=7, codex=False, sid=sid, tmux='', cwd='/work/demo', cached_sid='', inode=0, offset=0, source_offsets=True)
+            fields, rows = self.read()
+            messages = [row for row in rows if row['role'] in ('user', 'assistant')]
+            self.assertEqual(fields[4], sid)
+            self.assertEqual([row['text'] for row in messages], [f'Runner {index} question', f'Runner {index} saved reply'])
+            identities = [row.get('read_id') or row.get('id') for row in messages]
+            self.assertTrue(all(identities))
+            self.assertEqual(len(set(identities)), 2)
+            with path.open('a') as output:
+                output.write(json.dumps(dict(kind='assistant', text=f'Runner {index} next reply')) + '\n')
+            _, delta = self.read()
+            self.assertEqual([row['text'] for row in delta if row['role'] == 'assistant'], [f'Runner {index} next reply'])
+            found = reader.response(dict(self.query, search=f'Runner {index} saved reply'))
+            self.assertIn(f'Runner {index} saved reply', found)
+            self.query.update(cached_sid='', inode=0, offset=0)
+            _, again = self.read()
+            self.assertEqual([row.get('read_id') or row.get('id') for row in again if row['role'] in ('user', 'assistant')][:2], identities)
 
     def test_claude_status_header(self):
         todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]

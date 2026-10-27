@@ -55,6 +55,11 @@ on:
         required: false
         default: false
         type: boolean
+      hax_sessions_proof:
+        description: Verify native hax messages and close intent across host refresh
+        required: false
+        default: false
+        type: boolean
       remote_sync_proof:
         description: Follow the second host and alternate home through two turns and a new session
         required: false
@@ -323,6 +328,7 @@ jobs:
       CHAT_SHAPE_BASELINE: ${{ inputs.chat_shape_baseline && '1' || '' }}
       CHAT_SHAPE_PROOF: ${{ inputs.chat_shape_proof && '1' || '' }}
       CHAT_SWITCH_PROFILE: ${{ inputs.chat_switch_profile && '1' || '' }}
+      CHAT_HAX_PROOF: ${{ inputs.hax_sessions_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
       CHAT_MISSING_PROOF: ${{ inputs.missing_note_proof && '1' || '' }}
       CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}

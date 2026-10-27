@@ -298,8 +298,29 @@ def fake_send(argv):
     return fake_run("app", "send-keys", argv, change)
 
 
+def hax_init(value):
+    for index, name in enumerate(value["sessions"]):
+        sid = f"11111111-1111-4111-8111-{index + 1:012d}"
+        transcript = Path(value["home"]) / ".local/state/hax/sessions/shared-runners" / f"2026-01-01T00-00-00Z_{sid}.jsonl"
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        events = [dict(type="session", version=1, id=sid, timestamp="2026-01-01T00:00:00Z", cwd=value["cwd"], provider="codex", model="neutral")]
+        if name != "runner-empty":
+            events += [dict(kind="user", text=f"IGSH1043 runner {index} question"), dict(kind="assistant", text=f"IGSH1043 runner {index} saved reply")]
+        transcript.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+        pid = value["panes"][name]
+        process = Path(value["procRoot"]) / str(pid)
+        (process / "fd").mkdir(parents=True, exist_ok=True)
+        (process / "stat").write_text(f"{pid} (hax) S 1 {pid} {pid} 0 -1", encoding="utf-8")
+        (process / "cmdline").write_bytes(b"hax\0-p\0neutral\0")
+        os.symlink(transcript, process / "fd/3")
+    fake_write(dict(mode="idle", box="", queue=[], suggestion=value["suggestion"]))
+    return 0
+
+
 def fake_init():
     value = state()
+    if value.get("hax"):
+        return hax_init(value)
     pane = str(value["panePid"])
     for target in (value["transcript"], value["meta"]):
         Path(target).parent.mkdir(parents=True, exist_ok=True)
