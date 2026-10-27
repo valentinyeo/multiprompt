@@ -34,6 +34,7 @@ try {
       assert.ok(bytes.length > 10000);
     }
   }
+  if (process.env.CHAT_LONG_PROOF === '1') assert.ok(fs.existsSync(path.join(root, 'full-history/long-chat.json')), 'missing native continuity observations');
   if (fs.existsSync(path.join(root, 'full-history/long-chat.json'))) {
     const continuity = json('full-history/long-chat.json');
     assert.ok(continuity.sourceBytes > 18 * 1024 * 1024);

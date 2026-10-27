@@ -8,7 +8,6 @@ $restore = [Diagnostics.Stopwatch]::StartNew()
 Press @(0x1B) 'Esc: return to disconnected long chat'
 $composer = Wait-For 'composer restored without a console' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 2
 Bind-Transcript
-$restore.Stop()
 if ($restore.ElapsedMilliseconds -gt 2000) { throw 'Long chat restoration exceeded two seconds' }
 Shot 'long-chat-restored'
 $duration = if ($env:RELEASE_TAG) { 1800 } else { 5 }
@@ -35,6 +34,10 @@ do {
         }
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
     if ($ink -lt 8) { throw 'Long chat has no painted message text' }
+    if ($samples.Count -eq 0) {
+        $restore.Stop()
+        if ($restore.ElapsedMilliseconds -gt 2000) { throw 'Long chat pixels restored after two seconds' }
+    }
     $samples.Add(@{ms=[int]$watch.ElapsedMilliseconds; width=$rect.Width; height=$rect.Height; ink=$ink})
     if ($watch.Elapsed.TotalSeconds -lt $duration) { Start-Sleep -Seconds 1 }
 } while ($watch.Elapsed.TotalSeconds -lt $duration)
