@@ -389,7 +389,19 @@ fn paint(hdc: w.HANDLE, text: []const u16, rect: w.RECT, flags: u32) ?i32 {
     return metric.height;
 }
 
+extern "c" fn mp_draw_color_text(w.HANDLE, [*]const u16, u32, *w.RECT, u32, *const fn (w.HANDLE, [*]const u16, i32, *w.RECT, u32) callconv(.c) i32) c_int;
+
+fn drawPlain(hdc: w.HANDLE, text: [*]const u16, count: i32, rect: *w.RECT, flags: u32) callconv(.c) i32 {
+    if (enabled()) if (paint(hdc, text[0..@intCast(count)], rect.*, flags)) |height| return height;
+    return w.DrawTextW(hdc, text, count, rect, flags);
+}
+
 pub fn draw(hdc: w.HANDLE, text: [*]const u16, count: i32, rect: *w.RECT, flags: u32) i32 {
+    if (count != 0) {
+        const len: usize = if (count < 0) std.mem.len(@as([*:0]const u16, @ptrCast(text))) else @intCast(count);
+        const height = mp_draw_color_text(hdc, text, @intCast(len), rect, flags, &drawPlain);
+        if (height != 0) return height;
+    }
     if (enabled() and count != 0) {
         const len: usize = if (count < 0) std.mem.len(@as([*:0]const u16, @ptrCast(text))) else @intCast(count);
         if (len > 0) if (paint(hdc, text[0..len], rect.*, flags)) |height| return height;
@@ -597,4 +609,73 @@ test "IGSH-678 overflowing end-ellipsis code rows keep GDI truncation and draw t
     if (@as(i32, @intCast(last_inked)) > segment.width) std.debug.print("IGSH-678 ink reaches column {d}, ellipsized width {d}\n", .{ last_inked, segment.width });
     try std.testing.expect(@as(i32, @intCast(last_inked)) <= segment.width);
     try std.testing.expect(last_inked > 0);
+}
+
+test "IGSH-1089 color emoji preserve source and GDI advances with chromatic pixels" {
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const width = 600;
+    const height = 320;
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const font = fonts.chat(-24, false, false, false, .{}) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(font);
+    defer resetFonts();
+    const old_font = w.SelectObject(dc, font);
+    defer _ = w.SelectObject(dc, old_font);
+    _ = w.SetBkMode(dc, w.TRANSPARENT);
+    _ = w.SetTextColor(dc, 0xffffff);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    const samples = [_][]const u16{ L("✓"), L("⚠"), L("👍"), L("✗"), L("👍🏽"), L("👨‍👩‍👧"), L("❤️"), L("⚠️") };
+    for ([_]bool{ false, true }) |color| {
+        @memset(pixels, 0);
+        for (samples, 0..) |sample, row| {
+            var text: [64]u16 = @splat(0);
+            @memcpy(text[0..sample.len], sample);
+            const original = text;
+            var before: w.SIZE = undefined;
+            try std.testing.expect(w.GetTextExtentPoint32W(dc, &text, @intCast(sample.len), &before) != 0);
+            var rect = w.RECT{ .left = 20, .top = @intCast(row * 40), .right = 140, .bottom = @intCast((row + 1) * 40) };
+            if (color) {
+                _ = draw(dc, &text, @intCast(sample.len), &rect, w.DT_SINGLELINE | w.DT_NOPREFIX | w.DT_VCENTER);
+            } else {
+                _ = w.DrawTextW(dc, &text, @intCast(sample.len), &rect, w.DT_SINGLELINE | w.DT_NOPREFIX | w.DT_VCENTER);
+            }
+            _ = GdiFlush();
+            try std.testing.expectEqualSlices(u16, &original, &text);
+            var after: w.SIZE = undefined;
+            try std.testing.expect(w.GetTextExtentPoint32W(dc, &text, @intCast(sample.len), &after) != 0);
+            try std.testing.expectEqual(before.cx, after.cx);
+            var chromatic: usize = 0;
+            for (row * 40..(row + 1) * 40) |y| {
+                for (20..140) |x| {
+                    const pixel = pixels[(y * width + x) * 4 ..][0..3];
+                    const low = @min(pixel[0], pixel[1], pixel[2]);
+                    const high = @max(pixel[0], pixel[1], pixel[2]);
+                    if (high - low > 24) chromatic += 1;
+                }
+            }
+            std.debug.print("IGSH-1089 color={} row={d} chromatic={d}\n", .{ color, row, chromatic });
+            if (color) try std.testing.expect(chromatic > 5);
+        }
+        var bmp: [54 + width * height * 4]u8 = undefined;
+        @memset(bmp[0..54], 0);
+        @memcpy(bmp[0..2], "BM");
+        std.mem.writeInt(u32, bmp[2..6], bmp.len, .little);
+        std.mem.writeInt(u32, bmp[10..14], 54, .little);
+        @memcpy(bmp[14..54], std.mem.asBytes(&info.header));
+        @memcpy(bmp[54..], pixels);
+        const file = w.CreateFileW(if (color) L("emoji-after.bmp") else L("emoji-before.bmp"), 0x40000000, 0, null, 2, 0x80, null);
+        try std.testing.expect(file != null and file != @as(w.HANDLE, @ptrFromInt(std.math.maxInt(usize))));
+        defer _ = w.CloseHandle(file);
+        var written: u32 = 0;
+        try std.testing.expect(w.WriteFile(file, &bmp, bmp.len, &written, null) != 0 and written == bmp.len);
+    }
 }
