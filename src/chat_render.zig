@@ -7163,17 +7163,18 @@ fn moreMenuProof(frame_dc: HANDLE, frame_pixels: []const u32, frame_w: usize, pa
     _ = bg;
 
     const panel_probe = at(pixels, pane_w, geo.panel.left + 4, geo.panel.top + @divTrunc(geo.panel.bottom - geo.panel.top, 2));
-    try std.testing.expectEqual(RGB(0x18, 0x18, 0x18), panel_probe);
+    try std.testing.expectEqual(if (app_state.g_light_theme) RGB(250, 250, 251) else RGB(0x18, 0x18, 0x18), panel_probe);
     const remove_cell = geo.cells[@intFromEnum(more_menu.Item.remove)];
     const card_probe = at(pixels, pane_w, remove_cell.left + 4, remove_cell.top + @divTrunc(remove_cell.bottom - remove_cell.top, 2));
-    try std.testing.expectEqual(RGB(0x1F, 0x1F, 0x1F), card_probe);
+    try std.testing.expectEqual(if (app_state.g_light_theme) RGB(241, 242, 244) else RGB(0x1F, 0x1F, 0x1F), card_probe);
 
+    const red = if (app_state.g_light_theme) RGB(198, 48, 42) else RGB(0xF2, 0x8B, 0x82);
     var red_rows: usize = 0;
     var y = remove_cell.top;
     while (y < remove_cell.bottom) : (y += 1) {
         var x = remove_cell.left;
         while (x < remove_cell.right) : (x += 1) {
-            if (moreMenuProofNear(at(pixels, pane_w, x, y), 0xF2, 0x8B, 0x82, 24)) red_rows += 1;
+            if (moreMenuProofNear(at(pixels, pane_w, x, y), (red & 0xFF), ((red >> 8) & 0xFF), ((red >> 16) & 0xFF), 24)) red_rows += 1;
         }
     }
     std.debug.print("IGSH-1020 more menu: red pixels in Remove row={d}\n", .{red_rows});
@@ -7185,7 +7186,7 @@ fn moreMenuProof(frame_dc: HANDLE, frame_pixels: []const u32, frame_w: usize, pa
     while (y < approve_cell.bottom) : (y += 1) {
         var x = approve_cell.left;
         while (x < approve_cell.right) : (x += 1) {
-            if (moreMenuProofNear(at(pixels, pane_w, x, y), 0xF2, 0x8B, 0x82, 24)) plain_red += 1;
+            if (moreMenuProofNear(at(pixels, pane_w, x, y), (red & 0xFF), ((red >> 8) & 0xFF), ((red >> 16) & 0xFF), 24)) plain_red += 1;
         }
     }
     try std.testing.expectEqual(@as(usize, 0), plain_red);
