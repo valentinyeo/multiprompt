@@ -10,7 +10,7 @@ extern "user32" fn EnableWindow(w.HANDLE, w.BOOL) callconv(w.WINAPI) w.BOOL;
 extern "user32" fn IsWindowEnabled(w.HANDLE) callconv(w.WINAPI) w.BOOL;
 
 pub const Button = struct {
-    label: [:0]const u16,
+    label: w.LPCWSTR,
     result: i32,
     destructive: bool = false,
 };
@@ -137,7 +137,7 @@ fn paint(dc: w.HANDLE, state: *State, bounds: w.RECT) void {
         i -= 1;
         const button = state.buttons[i];
         var measured = std.mem.zeroes(w.RECT);
-        _ = w.DrawTextW(dc, button.label.ptr, @intCast(button.label.len), &measured, w.DT_CALCRECT | w.DT_SINGLELINE | w.DT_NOPREFIX);
+        _ = w.DrawTextW(dc, button.label, -1, &measured, w.DT_CALCRECT | w.DT_SINGLELINE | w.DT_NOPREFIX);
         const button_width = @max(state.px(80), measured.right + state.px(32));
         const cell = w.RECT{ .left = x - button_width, .top = state.card.bottom - state.px(64), .right = x, .bottom = state.card.bottom - state.px(24) };
         state.cells[i] = cell;
@@ -152,7 +152,7 @@ fn paint(dc: w.HANDLE, state: *State, bounds: w.RECT) void {
         smooth.fillRoundRect(dc, face, state.px(40), fill);
         _ = w.SetTextColor(dc, if (primary or button.destructive) panel else text);
         var label = cell;
-        _ = w.DrawTextW(dc, button.label.ptr, @intCast(button.label.len), &label, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_NOPREFIX);
+        _ = w.DrawTextW(dc, button.label, -1, &label, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_NOPREFIX);
         x -= button_width + state.px(8);
     }
 }

@@ -355,6 +355,7 @@ const searchRowH = @import("drawing.zig").searchRowH;
 const searchInputH = @import("drawing.zig").searchInputH;
 const searchOverlayW = @import("drawing.zig").searchOverlayW;
 const searchOverlayOx = @import("drawing.zig").searchOverlayOx;
+const CreateFontW = @import("fonts.zig").create;
 const paletteDrawText = @import("palette_text.zig").draw;
 const uiFontTitle = @import("drawing.zig").uiFontTitle;
 const uiFontShellTabTitle = @import("drawing.zig").uiFontShellTabTitle;
