@@ -1687,6 +1687,23 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertTrue(reply['wire'].endswith(reader.END + '\n'))
         return reply
 
+    def test_watch_owner_restart_reconnects_for_fresh_parent_discovery(self):
+        self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
+        self.write(self.event('original owner session'))
+        incoming, writer = os.pipe()
+        self.addCleanup(os.close, incoming)
+        self.addCleanup(os.close, writer)
+        stdin = types.SimpleNamespace(fileno=lambda: incoming)
+        resolved = ('claude', 'sid', self.path, None)
+        with patch.object(reader.sys, 'stdin', stdin), \
+                patch.object(reader, 'resolve_response_path', return_value=('claude', '', None, 'missing')) as resolve:
+            events = reader.watch_changes(self.query, resolved, reader.READER_SOURCE, True)
+            self.assertEqual(next(events), resolved)
+            (self.path.parent / 'restarted.jsonl').write_text('{}\n')
+            with self.assertRaises(StopIteration):
+                next(events)
+        resolve.assert_called_once()
+
     def test_watch_delegates_pane_identity_to_the_transcript_owner_once(self):
         self.assertTrue(hasattr(reader, 'watch'), 'reader must provide a persistent watch')
         owner = ('secondary', Path('/home/secondary'))
