@@ -56,6 +56,7 @@ fn CloseHandle(_: HANDLE) i32 { closes += 1; return 1; }
 fn TerminateProcess(_: HANDLE, _: u32) i32 { terminations += 1; return 1; }
 fn WaitForSingleObject(_: HANDLE, _: u32) u32 { return if (mode == .dead or mode == .truncated) 0 else 258; }
 fn chatBenchEnabled() bool { return false; }
+fn chatHistoryStreamsKeep(_: u32) void {}
 fn chatBenchFetch(_: u32, _: u32, _: []const u8, _: *std.ArrayList(u8)) bool { unreachable; }
 fn chatHistoryChannelStart(host: u8, ch: *ChatHistoryChannel) bool {
     std.debug.assert(g_chat_history_channel_mutex.held);
@@ -209,7 +210,7 @@ test('persistent history production transport: reuse, framing, timeout, fallback
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-connection-'));
   try {
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, (prelude + source.slice(start, end) + '\n' + ['chatHistoryChannelClose', 'closeAllChatHistoryChannels', 'chatHistoryPersistent', 'chatHistoryFetch'].map(body).join('\n') + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(file, (prelude + source.slice(start, end) + '\n' + ['chatHistoryChannelClose', 'closeAllChatHistoryChannels', 'chatHistoryPersistent', 'chatHistoryQuery', 'chatHistoryFetch'].map(body).join('\n') + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All 5 tests passed/);
@@ -226,4 +227,130 @@ test('persistent reader bootstrap is stdin-only, noninteractive and job-owned be
   assert.ok(start.indexOf('AssignProcessToJobObject') < start.indexOf('WriteFile'));
   assert.match(body('chatHistoryFetchOnce'), /g_tunnel_job == null or AssignProcessToJobObject\(g_tunnel_job, pi.hProcess\) == 0\) return false/);
   assert.match(source, /closeAllAcChannels\(\);\s*closeAllChatHistoryChannels\(\);/);
+});
+
+test('push receiver blocks without polling, preserves coalesced frames, and releases cancelled ownership', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-push-'));
+  const state = fs.readFileSync('src/app_state.zig', 'utf8');
+  const stream = state.slice(state.indexOf('pub const ChatHistoryStream = struct {'), state.indexOf('pub var g_chat_history_channels:'));
+  const harness = String.raw`
+const std = @import("std");
+const HANDLE = ?*anyopaque;
+const DWORD = u32;
+const WM_APP_CHAT_FILE_READY = 1;
+var g_main_hwnd: HANDLE = @ptrFromInt(1);
+const SpinMutex = struct {
+    held: bool = false,
+    fn tryLock(self: *@This()) bool { if (self.held) return false; self.held = true; return true; }
+    fn unlock(self: *@This()) void { self.held = false; }
+};
+const ChatHistoryEntry = struct { stream: ?*ChatHistoryStream = null };
+const chat_transcript = struct { const Identity = struct { host: u8 = 0 }; };
+const chat_history = struct { const TAIL_BYTES = 512 * 1024; const History = struct {}; };
+var g_chat_history_channels_closing = std.atomic.Value(bool).init(false);
+var current: *ChatHistoryStream = undefined;
+var input: std.ArrayList(u8) = .empty;
+var at: usize = 0;
+var starts: usize = 0;
+var writes: usize = 0;
+var reads: usize = 0;
+var acknowledgements: usize = 0;
+var terminations: usize = 0;
+var closes: usize = 0;
+var cancel_during_start = false;
+fn Sleep(_: u32) void { unreachable; }
+fn CloseHandle(_: HANDLE) i32 { closes += 1; return 1; }
+fn TerminateProcess(_: HANDLE, _: u32) i32 { terminations += 1; return 1; }
+fn PostMessageW(_: HANDLE, _: u32, _: usize, _: isize) i32 { return 1; }
+fn SetEvent(_: HANDLE) i32 { return 1; }
+fn chatHistoryQuery(_: chat_transcript.Identity, _: u32, _: chat_history.History, _: u64) ?[]u8 {
+    return std.heap.page_allocator.dupe(u8, "{\"id\":7}") catch null;
+}
+fn chatHistoryChannelStart(_: u8, ch: *ChatHistoryChannel) bool {
+    std.debug.assert(current.mutex.held);
+    starts += 1;
+    ch.process = @ptrFromInt(2); ch.input = @ptrFromInt(3); ch.output = @ptrFromInt(4);
+    if (cancel_during_start) {
+        var entry: ChatHistoryEntry = .{ .stream = current };
+        chatHistoryStreamStop(&entry);
+        std.debug.assert(entry.stream == null);
+    }
+    return true;
+}
+fn WriteFile(_: HANDLE, _: [*]const u8, count: DWORD, written: *DWORD, _: ?*anyopaque) i32 {
+    writes += 1; written.* = count; return 1;
+}
+fn ReadFile(_: HANDLE, target: [*]u8, count: DWORD, read: *DWORD, _: ?*anyopaque) i32 {
+    reads += 1;
+    const n = @min(count, input.items.len - at);
+    @memcpy(target[0..n], input.items[at..][0..n]);
+    at += n; read.* = @intCast(n); return 1;
+}
+fn WaitForSingleObject(_: HANDLE, timeout: u32) u32 {
+    std.debug.assert(timeout == 0xFFFFFFFF);
+    std.debug.assert(current.ready.swap(false, .acq_rel));
+    std.debug.assert(std.mem.endsWith(u8, current.wire.items, "@@MP_END@@\n"));
+    std.debug.assert(current.read_us == 12 + acknowledgements);
+    acknowledgements += 1;
+    current.wire.clearRetainingCapacity();
+    return 0;
+}
+fn addFrame(id: u32, text: []const u8, read_us: u64) !void {
+    const a = std.heap.page_allocator;
+    const wire = try std.fmt.allocPrint(a, "@mp\t7\thistory\tok\tsid\t0\n{{\"text\":\"{s}\"}}\n@@MP_END@@\n", .{text});
+    defer a.free(wire);
+    const frame = try std.json.Stringify.valueAlloc(a, .{ .id = id, .wire = wire, .read_us = read_us }, .{});
+    defer a.free(frame);
+    try input.appendSlice(a, frame);
+    try input.append(a, '\n');
+}
+fn init() !void {
+    input = .empty; at = 0; starts = 0; writes = 0; reads = 0;
+    acknowledgements = 0; closes = 0; terminations = 0; cancel_during_start = false;
+    current = try std.heap.page_allocator.create(ChatHistoryStream);
+    current.* = .{ .id = 7, .ack = @ptrFromInt(5) };
+}
+test "multiple pushed frames in one pipe read require no next request and preserve backpressure" {
+    try init();
+    defer input.deinit(std.heap.page_allocator);
+    try addFrame(7, "first", 12); try addFrame(7, "second", 13);
+    chatHistoryStreamThread(current, .{}, .{});
+    try std.testing.expect(current.ended.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 2), writes);
+    try std.testing.expectEqual(@as(usize, 2), reads);
+    try std.testing.expectEqual(@as(usize, 2), acknowledgements);
+    try std.testing.expectEqual(@as(u32, 1), current.refs.load(.acquire));
+    var entry: ChatHistoryEntry = .{ .stream = current };
+    chatHistoryStreamStop(&entry);
+    try std.testing.expect(entry.stream == null);
+    try std.testing.expectEqual(@as(usize, 4), closes);
+}
+test "cancellation while starting keeps handles owned until receiver exits" {
+    try init();
+    defer input.deinit(std.heap.page_allocator);
+    cancel_during_start = true;
+    chatHistoryStreamThread(current, .{}, .{});
+    try std.testing.expectEqual(@as(usize, 0), writes);
+    try std.testing.expectEqual(@as(usize, 0), reads);
+    try std.testing.expectEqual(@as(usize, 2), terminations);
+    try std.testing.expectEqual(@as(usize, 4), closes);
+}
+test "wrong stream identity closes without publishing rows" {
+    try init();
+    defer input.deinit(std.heap.page_allocator);
+    try addFrame(99, "stale", 12);
+    chatHistoryStreamThread(current, .{}, .{});
+    try std.testing.expectEqual(@as(usize, 0), acknowledgements);
+    chatHistoryStreamRelease(current);
+    try std.testing.expectEqual(@as(usize, 4), closes);
+}
+`;
+  try {
+    const file = path.join(dir, 'push.zig');
+    const code = harness + stream + ['chatHistoryChannelClose', 'chatHistoryStreamRelease', 'chatHistoryStreamStop', 'chatHistoryStreamThread'].map(body).join('\n');
+    fs.writeFileSync(file, code.replaceAll('app_state.', '').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /All 3 tests passed/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
