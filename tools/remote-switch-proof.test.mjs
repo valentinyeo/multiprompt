@@ -55,7 +55,7 @@ test('remote switch proof rejects each broken acceptance condition', () => {
 
 test('the runner can repeat unchanged performance checks through a branch push', () => {
   const workflow = fs.readFileSync(new URL('../.github/workflows/remote-switch.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /on:\n  push:\n    branches: \[ceo\/IGSH-1059\]/);
+  assert.match(workflow, /on:\n  push:\n    branches: \[ceo\/IGSH-1059, ceo\/IGSH-990\]/);
   assert.match(workflow, /frame\.gapMs|gapMs -gt 50/);
   assert.match(workflow, /switchMs -ge 150/);
   assert.match(workflow, /cpuMs \/ \$_\.elapsedMs -ge 25/);
