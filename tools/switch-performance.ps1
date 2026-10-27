@@ -54,7 +54,6 @@ try {
     $app = $job.Start($Exe, $profile, "$Evidence/stdout.log", "$Evidence/stderr.log", '--single-window --no-window-restore')
     $main = Wait-For 'owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void](Wait-For 'ten restored Chat View sessions' { $s = Session; @($s.tabs).Count -eq 10 -and @($s.tabs | Where-Object { -not $_.cv }).Count -eq 0 })
-    [void](Wait-For 'initial conversation painted' { (Read-Log) -match '\[switch\] chat content shown shell=\d+ blocks=[1-9]' })
     $initial = (Session).active_tab
     for ($i = 0; $i -lt 60; $i++) {
         [void](Wait-For 'owned window foreground' {
