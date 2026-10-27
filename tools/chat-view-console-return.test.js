@@ -30,7 +30,7 @@ function toggle(text) {
 function harness(source) {
   const production = names.map(name => fn(source, name)).join('\n\n')
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
-    .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
+    .replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
     .replaceAll('@import("console.zig").applyBlackConsoleBackground', 'applyBlackConsoleBackground');
   return `const std = @import("std");
@@ -86,6 +86,8 @@ fn closeFind(_: bool) void {}
 fn chatAcClose() void {}
 fn chatDraftFlush() void {}
 fn chatReadMark(_: bool) bool { return false; }
+var stream_stops: usize = 0;
+fn chatHistoryStreamsKeep(shell_id: u32) void { std.debug.assert(shell_id == 0); stream_stops += 1; }
 fn syncWorking() void {}
 fn chatSelectionClear() void {}
 fn KillTimer(_: HANDLE, _: usize) BOOL { return 1; }
@@ -101,6 +103,7 @@ fn saveSession() void {}
 ${production}
 ${toggle(main)}
 fn prepare(pinned: bool, full: bool) void {
+    stream_stops = 0;
     shells[0] = .{ .full_width = full, .pinned_top = pinned };
     shells[1] = .{ .hwnd = 9, .pid = 43, .full_width_pending_console_resize = true };
     active_shell = 0;
@@ -170,6 +173,12 @@ test "pending state is consumed for a shell with no process without resetting" {
     try std.testing.expectEqual(@as(usize, 0), theme_resets);
     try std.testing.expect(visible[10]);
 }
+test "closing chat stops receiving before revealing the console" {
+    prepare(false, false);
+    closeChatView();
+    try std.testing.expectEqual(@as(usize, 1), stream_stops);
+    try std.testing.expect(visible[10]);
+}
 test "closing behind palette preserves containment until palette is dismissed" {
     prepare(false, false);
     g_search_active = true;
@@ -191,7 +200,7 @@ test('production Chat View exits reveal, lay out and focus without ordinary cons
   try {
     copyZig(['chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, (harness(source)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(file, (harness(source)).replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);
