@@ -9,9 +9,7 @@ import tempfile
 import unittest
 import zlib
 
-SPEC = importlib.util.spec_from_file_location('switch_evidence', Path(__file__).with_name('chat-switch-evidence.py'))
-proof = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(proof)
+proof = None
 
 
 def cpu():
@@ -23,6 +21,12 @@ def cpu():
 
 class SwitchEvidenceTest(unittest.TestCase):
     def setUp(self):
+        global proof
+        path = Path(__file__).with_name('chat-switch-evidence.py')
+        self.assertTrue(path.is_file(), 'Native switching requires its strict observation evaluator')
+        spec = importlib.util.spec_from_file_location('switch_evidence', path)
+        proof = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(proof)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)

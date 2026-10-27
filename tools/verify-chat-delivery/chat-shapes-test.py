@@ -9,9 +9,7 @@ import sys
 import tempfile
 import unittest
 
-SPEC = importlib.util.spec_from_file_location('chat_shapes', Path(__file__).with_name('chat-shapes.py'))
-shapes = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(shapes)
+shapes = None
 
 
 def profile(completeness='complete-host-log'):
@@ -25,6 +23,12 @@ def profile(completeness='complete-host-log'):
 
 class ChatShapesTest(unittest.TestCase):
     def setUp(self):
+        global shapes
+        path = Path(__file__).with_name('chat-shapes.py')
+        self.assertTrue(path.is_file(), 'Native switching requires its measured-size transcript generator')
+        spec = importlib.util.spec_from_file_location('chat_shapes', path)
+        shapes = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(shapes)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
