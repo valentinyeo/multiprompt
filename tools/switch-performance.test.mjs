@@ -75,3 +75,11 @@ print(json.dumps(results))
   assert.ok(result[1].screen.includes('\x1b[2mAsk next\x1b[0m'));
   assert.ok(result[2].screen.includes('draft'));
 });
+
+test('switching targets the real composer that Chat View restores on activation', () => {
+  const driver = fs.readFileSync(new URL('./switch-performance.ps1', import.meta.url), 'utf8');
+  const focus = driver.split("Wait-For 'owned window foreground'")[1].split('$offset =')[0];
+  assert.match(focus, /\$composer = \[ChatDeliveryDesktop\]::Composer\(\$main\)/);
+  assert.match(focus, /\$composer -ne \[IntPtr\]::Zero -and \[ChatDeliveryDesktop\]::FocusOwnedWindow\(\$main, \$app\.Id, \$composer\)/);
+  assert.doesNotMatch(focus, /FocusOwnedWindow\(\$main, \$app\.Id, \$main\)/);
+});

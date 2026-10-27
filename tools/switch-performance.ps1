@@ -57,7 +57,10 @@ try {
     [void](Wait-For 'initial conversation painted' { (Read-Log) -match '\[switch\] chat content shown shell=\d+ blocks=[1-9]' })
     $initial = (Session).active_tab
     for ($i = 0; $i -lt 60; $i++) {
-        [void](Wait-For 'owned window foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
+        [void](Wait-For 'owned window foreground' {
+            $composer = [ChatDeliveryDesktop]::Composer($main)
+            $composer -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+        })
         $offset = (Read-Log).Length
         $previous = (Session).active_tab
         [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
