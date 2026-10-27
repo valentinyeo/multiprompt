@@ -354,7 +354,7 @@ function assertsDispatchOnly(source) {
 test('IGSH-1033 PR and master smoke stay small; candidate runs retain the full matrix', () => {
   const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
   function contract(source) {
-    assert.match(source, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1033\]\n  workflow_dispatch:/m);
+    assert.match(source, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083, ceo\/IGSH-1033\]\n  workflow_dispatch:/m);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'push'), ['appearance']);
@@ -362,6 +362,7 @@ test('IGSH-1033 PR and master smoke stay small; candidate runs retain the full m
     assert.deepEqual(journeyMatrix(source, 'push', 'relaunch-saved-sessions'), ['relaunch-saved-sessions']);
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1072-proof-1'), ['chat-dictation']);
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1061-recovery'), ['browser-pane-stuck']);
+    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1083'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837'), full);
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
   }
@@ -501,7 +502,8 @@ function assertsSwitchExtension(driver) {
   const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'",
-    "Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse",
+    "$extensionSource = if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) { $env:VERIFY_EXTENSION_ROOT } else { Join-Path $PSScriptRoot '../../../extension' }",
+    "Copy-Item $extensionSource $extension -Recurse",
     'Add-Member -NotePropertyName key -NotePropertyValue $publicKey -Force',
     'allowed_origins = @("chrome-extension://$extensionId/")',
     "path = (Join-Path (Split-Path $Exe) 'zigshell-bridge.exe')",
@@ -523,7 +525,8 @@ function assertsSwitchExtension(driver) {
 test('switch journey installs only the fixture extension and matching native host, refuses shared registration and cleans it up', () => {
   assertsSwitchExtension(control);
   for (const before of [
-    "Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse",
+    "$extensionSource = if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) { $env:VERIFY_EXTENSION_ROOT } else { Join-Path $PSScriptRoot '../../../extension' }",
+    "Copy-Item $extensionSource $extension -Recurse",
     'Add-Member -NotePropertyName key -NotePropertyValue $publicKey -Force',
     "if (Test-Path $registry) { throw 'Switch timing requires an unregistered disposable native host' }",
     'Remove-Item -LiteralPath $switchNativeRegistry -Recurse -Force',
