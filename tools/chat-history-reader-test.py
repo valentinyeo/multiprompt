@@ -1760,6 +1760,96 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(sum(call[:1] == ['-C'] for call in calls), 1)
         self.assertFalse(any(call[:1] == ['capture-pane'] for call in calls), calls)
 
+    @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
+    def test_watch_appends_do_not_recapture_screen(self):
+        tmux = shutil.which('tmux')
+        socket = 'delta-' + self.home.name
+        subprocess.run([tmux, '-L', socket, '-f', '/dev/null', 'new-session', '-d', '-s', 'term-1', 'cat'], check=True)
+        self.addCleanup(lambda: subprocess.run([tmux, '-L', socket, 'kill-server'], capture_output=True))
+        self.write(self.event('original reply'))
+        self.query.update(live=True)
+        calls = []
+        popen = subprocess.Popen
+
+        class Input:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def write(self, data):
+                calls.append(data)
+                return self.stream.write(data)
+
+            def __getattr__(self, name):
+                return getattr(self.stream, name)
+
+        def control(command, **kwargs):
+            child = popen([tmux, '-L', socket, *command[1:]], **kwargs)
+            child.stdin = Input(child.stdin)
+            return child
+
+        input_read, input_write = os.pipe()
+        self.addCleanup(os.close, input_write)
+        with os.fdopen(input_read, 'rb') as input_stream, patch.object(sys, 'stdin', input_stream), patch.object(reader.subprocess, 'Popen', side_effect=control):
+            resolved = ('claude', 'sid', self.path, None)
+            events = reader.watch_changes(self.query, resolved, reader.READER_SOURCE, False)
+            try:
+                next(events)
+                original_screen = self.query['watch_screen']
+                initial = len(calls)
+                with self.path.open('a') as output:
+                    output.write(json.dumps(self.event('only new reply')) + '\n')
+                next(events)
+                self.assertEqual(len(calls), initial, 'transcript append repeated terminal capture')
+                self.assertEqual(self.query['watch_screen'], original_screen)
+            finally:
+                events.close()
+
+    def test_delta_reads_stay_bounded_after_large_history(self):
+        self.query.update(live=True, watch_screen='')
+        with self.path.open('w') as output:
+            for _ in range(10000):
+                output.write(json.dumps(dict(type='progress', padding='x' * 1024)) + '\n')
+            output.write(json.dumps(self.event('old reply')) + '\n')
+        self.read()
+        appended = (json.dumps(self.event('new reply')) + '\n').encode()
+        with self.path.open('ab') as output:
+            output.write(appended)
+        opened = Path.open
+        reads = []
+
+        class Measured:
+            def __init__(self, file):
+                self.file = file
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return self.file.__exit__(*args)
+
+            def read(self, count=-1):
+                data = self.file.read(count)
+                reads.append(len(data))
+                return data
+
+            def __getattr__(self, name):
+                return getattr(self.file, name)
+
+        def measured(path, *args, **kwargs):
+            file = opened(path, *args, **kwargs)
+            return Measured(file) if path == self.path and args == ('rb',) else file
+
+        with patch.object(Path, 'open', measured):
+            fields, rows = self.read()
+            self.assertEqual(fields[13], 'delta')
+            self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant'], ['new reply'])
+            self.assertLessEqual(sum(reads), len(appended) * 2 + 320, reads)
+            reads.clear()
+            fields, rows = self.read()
+            self.assertEqual(fields[13], 'delta')
+            self.assertFalse(any(row['role'] == 'assistant' for row in rows))
+            self.assertLessEqual(sum(reads), 320, reads)
+
     def test_watch_pushes_appends_without_requests_and_stays_idle(self):
         self.query.update(tmux='', live=False, follow=True)
         self.write(self.event('first pushed reply'))
