@@ -528,7 +528,6 @@ const armStartupConsoleGeometrySettle = @import("console.zig").armStartupConsole
 const settleConsoleGeometry = @import("console.zig").settleConsoleGeometry;
 const BROWSER_EDGE_MASK_COUNT = @import("app_state.zig").BROWSER_EDGE_MASK_COUNT;
 const CHAT_FONT_DEFAULT_PT = @import("app_state.zig").CHAT_FONT_DEFAULT_PT;
-const SEARCH_VISIBLE_ROWS = @import("app_state.zig").SEARCH_VISIBLE_ROWS;
 const SEARCH_WHEEL_ROWS = @import("app_state.zig").SEARCH_WHEEL_ROWS;
 const SEARCH_TMUX_OFFSET = @import("app_state.zig").SEARCH_TMUX_OFFSET;
 const SEARCH_NEW_OFFSET = @import("app_state.zig").SEARCH_NEW_OFFSET;
@@ -1832,7 +1831,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const click_ow: i32 = searchOverlayW();
                 const click_rh: i32 = searchRowH();
                 const click_ih: i32 = searchInputH();
-                const click_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+                const click_capacity: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
                 const click_oh: i32 = click_ih + @as(i32, @intCast(click_capacity)) * click_rh + searchFooterH();
                 const click_ox = searchOverlayOx(click_win_w, click_ow);
                 const click_oy = searchOverlayOy(click_win_h, click_oh);
@@ -2071,7 +2070,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const wheel_ow: i32 = searchOverlayW();
                 const wheel_rh: i32 = searchRowH();
                 const wheel_ih: i32 = searchInputH();
-                const wheel_vis: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+                const wheel_vis: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
                 const wheel_oh: i32 = wheel_ih + @as(i32, @intCast(wheel_vis)) * wheel_rh + searchFooterH();
                 const wheel_ox = searchOverlayOx(wheel_win_w, wheel_ow);
                 const wheel_oy = searchOverlayOy(wheel_win_h, wheel_oh);
@@ -2202,7 +2201,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const drag_win_h = drag_rc.bottom - drag_rc.top;
                 const drag_rh: i32 = searchRowH();
                 const drag_ih: i32 = searchInputH();
-                const drag_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+                const drag_capacity: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
                 const drag_vis: i32 = @intCast(@min(app_state.g_search_result_count -| app_state.g_search_scroll, drag_capacity));
                 if (drag_vis > 0) {
                     const drag_oh: i32 = drag_ih + @as(i32, @intCast(drag_capacity)) * drag_rh + searchFooterH();
@@ -4285,10 +4284,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         app_state.g_search_sel = if (app_state.g_search_sel >= app_state.g_search_result_count - 1) 0 else app_state.g_search_sel + 1;
                     },
                     2 => {
-                        app_state.g_search_sel = if (app_state.g_search_sel > SEARCH_VISIBLE_ROWS) app_state.g_search_sel - SEARCH_VISIBLE_ROWS else 0;
+                        app_state.g_search_sel = if (app_state.g_search_sel > @import("drawing.zig").searchVisibleRows()) app_state.g_search_sel - @import("drawing.zig").searchVisibleRows() else 0;
                     },
                     3 => {
-                        const next_sel = app_state.g_search_sel + SEARCH_VISIBLE_ROWS;
+                        const next_sel = app_state.g_search_sel + @import("drawing.zig").searchVisibleRows();
                         app_state.g_search_sel = if (next_sel >= app_state.g_search_result_count) app_state.g_search_result_count - 1 else next_sel;
                     },
                     6 => {

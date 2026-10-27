@@ -269,8 +269,17 @@ pub fn searchInputH() i32 {
     const recent = app_state.g_search_len == 0 and app_state.g_search_result_count > 0 and app_state.g_search_results[0] < app_state.MAX_SHELLS;
     return uiScaled(if (recent) @as(i32, 96) else 72);
 }
+pub fn searchVisibleRows() u32 {
+    var client: RECT = std.mem.zeroes(RECT);
+    if (GetClientRect(app_state.g_main_hwnd, &client) == 0) return SEARCH_VISIBLE_ROWS;
+    const available = client.bottom - client.top - searchInputH() - searchFooterH() - uiScaled(16);
+    return @intCast(@max(1, @min(@as(i32, SEARCH_VISIBLE_ROWS), @divFloor(available, searchRowH()))));
+}
+
 pub fn searchOverlayW() i32 {
-    return uiScaled(560);
+    var client: RECT = std.mem.zeroes(RECT);
+    if (GetClientRect(app_state.g_main_hwnd, &client) == 0) return uiScaled(560);
+    return @max(uiScaled(240), @min(uiScaled(560), client.right - client.left - uiScaled(16)));
 }
 
 pub fn searchFooterH() i32 {
@@ -303,7 +312,7 @@ pub fn searchResultRowAtClientPoint(mx: i32, my: i32) ?u32 {
     const overlay_w = searchOverlayW();
     const row_h = searchRowH();
     const input_h = searchInputH();
-    const visible_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+    const visible_capacity: u32 = @min(app_state.g_search_result_count, searchVisibleRows());
     const visible_rows: u32 = @min(app_state.g_search_result_count -| app_state.g_search_scroll, visible_capacity);
     const overlay_h = input_h + @as(i32, @intCast(visible_capacity)) * row_h + searchFooterH();
     const ox = searchOverlayOx(win_w, overlay_w);

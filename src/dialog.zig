@@ -191,8 +191,9 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
     }
 }
 
-pub fn show(owner: w.HANDLE, text: w.LPCWSTR, title: w.LPCWSTR, buttons: []const Button, selected: usize) i32 {
+pub fn show(requested_owner: w.HANDLE, text: w.LPCWSTR, title: w.LPCWSTR, buttons: []const Button, selected: usize) i32 {
     if (buttons.len == 0 or buttons.len > 3) return 2;
+    const owner = requested_owner orelse app_state.g_main_hwnd;
     _ = fonts.register();
     const class = w.WNDCLASSEXW{ .cbSize = @sizeOf(w.WNDCLASSEXW), .style = 0, .lpfnWndProc = wndProc, .cbClsExtra = 0, .cbWndExtra = 0, .hInstance = w.GetModuleHandleW(null), .hIcon = null, .hCursor = w.LoadCursorW(null, @ptrFromInt(32512)), .hbrBackground = null, .lpszMenuName = null, .lpszClassName = L("MultiPromptDialog"), .hIconSm = null };
     _ = w.RegisterClassExW(&class);
@@ -207,12 +208,18 @@ pub fn show(owner: w.HANDLE, text: w.LPCWSTR, title: w.LPCWSTR, buttons: []const
         bounds.bottom += point.y;
         bounds.left = point.x;
         bounds.top = point.y;
+    } else {
+        const x = @divFloor(bounds.right - 488, 2);
+        const y = @divFloor(bounds.bottom - 360, 2);
+        bounds = .{ .left = x, .top = y, .right = x + 488, .bottom = y + 360 };
     }
     const width = bounds.right - bounds.left;
     const height = bounds.bottom - bounds.top;
-    const screen = w.GetDC(null);
-    state.backdrop = capture(screen, bounds.left, bounds.top, width, height);
-    _ = w.ReleaseDC(null, screen);
+    if (owner != null) {
+        const screen = w.GetDC(null);
+        state.backdrop = capture(screen, bounds.left, bounds.top, width, height);
+        _ = w.ReleaseDC(null, screen);
+    }
     defer if (state.backdrop) |backdrop| backdrop.release();
     const hwnd = w.CreateWindowExW(0x00000080, L("MultiPromptDialog"), title, w.WS_POPUP, bounds.left, bounds.top, width, height, owner, null, w.GetModuleHandleW(null), null) orelse return closeResult(&state);
     defer _ = w.DestroyWindow(hwnd);
@@ -235,7 +242,7 @@ pub fn show(owner: w.HANDLE, text: w.LPCWSTR, title: w.LPCWSTR, buttons: []const
             break;
         }
         if (message.hwnd == hwnd and message.message == w.WM_KEYDOWN) {
-            state.key(message.wParam, w.GetKeyState(0x10) < 0);
+            state.key(message.wParam, w.GetAsyncKeyState(0x10) < 0);
             _ = w.InvalidateRect(hwnd, null, 0);
             continue;
         }

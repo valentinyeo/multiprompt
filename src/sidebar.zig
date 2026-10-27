@@ -85,7 +85,6 @@ const tmuxHostTagLabel = @import("capacity.zig").tmuxHostTagLabel;
 const sidebarStickyCardSpan = @import("capacity.zig").sidebarStickyCardSpan;
 const paintSidebarUpdateCard = @import("update_card.zig").paintSidebarUpdateCard;
 const DI_NORMAL = @import("app_state.zig").DI_NORMAL;
-const SEARCH_VISIBLE_ROWS = @import("app_state.zig").SEARCH_VISIBLE_ROWS;
 const SEARCH_TMUX_OFFSET = @import("app_state.zig").SEARCH_TMUX_OFFSET;
 const SEARCH_NEW_OFFSET = @import("app_state.zig").SEARCH_NEW_OFFSET;
 const SEARCH_SOUND_OFFSET = @import("app_state.zig").SEARCH_SOUND_OFFSET;
@@ -2175,7 +2174,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const overlay_w: i32 = searchOverlayW();
         const row_h: i32 = searchRowH();
         const input_h: i32 = searchInputH();
-        const visible_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+        const visible_capacity: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
         const overlay_h: i32 = @import("drawing.zig").searchFooterH() + input_h + if (app_state.g_search_rename_input_mode)
             row_h
         else
@@ -4159,7 +4158,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         }
                     }
                 }
-                if (app_state.g_search_result_count > SEARCH_VISIBLE_ROWS) {
+                if (app_state.g_search_result_count > @import("drawing.zig").searchVisibleRows()) {
                     const track_top = oy + input_h + 5;
                     const track_bottom = oy + input_h + @as(i32, @intCast(visible_capacity)) * row_h - 5;
                     const track_h = track_bottom - track_top;

@@ -21,12 +21,14 @@ test('IGSH-1061: palette paints the approved neutral card, not blue selection or
 test('IGSH-1061: pointer, wheel, reorder and paint share the new palette geometry', () => {
   const drawing = read('src/drawing.zig');
   assert.match(drawing, /pub fn searchRowH\(\) i32 \{\s*return uiScaled\(40\)/);
-  assert.match(drawing, /pub fn searchOverlayW\(\) i32 \{\s*return uiScaled\(560\)/);
+  assert.match(drawing, /pub fn searchOverlayW\(\) i32 \{[\s\S]*?uiScaled\(560\)/);
   assert.match(drawing, /pub fn searchOverlayOy[\s\S]*?uiScaled\(120\)/);
   assert.match(drawing, /const oy = searchOverlayOy\(win_h, overlay_h\)/);
   const main = read('src/main.zig');
   for (const prefix of ['click', 'wheel', 'drag']) assert.match(main, new RegExp(`const ${prefix}_oy = searchOverlayOy\\(${prefix}_win_h, ${prefix}_oh\\)`));
   assert.match(palette(), /searchOverlayOy\(win_h, overlay_h\)/);
+  assert.match(drawing, /pub fn searchVisibleRows/);
+  assert.match(read('src/command_palette.zig'), /g_search_result_count, @import\("drawing.zig"\)\.searchVisibleRows\(\)/);
 });
 
 test('IGSH-1061: native messages share the custom dialog and preserve confirmation results', () => {
