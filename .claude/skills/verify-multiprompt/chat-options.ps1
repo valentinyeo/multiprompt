@@ -50,8 +50,7 @@ Wait-Until {
     [System.Windows.Forms.Clipboard]::Clear()
     Palette 'chat view select all text'
     Press @(0x0D) 'Enter: select rendered transcript'
-    Palette 'chat view copy selection'
-    Press @(0x0D) 'Enter: copy rendered transcript'
+    Press @(0x11, 0x43) 'Ctrl+C: copy selected transcript without opening another overlay'
     [System.Windows.Forms.Clipboard]::GetText().Contains('Should I file a ticket for this?')
 } 'the final question is present in the actual rendered transcript'
 Press @(0x1B) 'Escape: clear transcript selection'
