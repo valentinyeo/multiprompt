@@ -1,0 +1,18 @@
+name: Manage snippets keyboard proof
+
+on:
+  push:
+    branches: [ceo/IGSH-1065]
+  workflow_dispatch:
+  repository_dispatch:
+    types: [manage-snippets-proof]
+
+permissions:
+  contents: read
+
+jobs:
+  snippets:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: command-palette
+      tag: ${{ github.event.client_payload.tag || '' }}

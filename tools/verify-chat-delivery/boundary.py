@@ -334,6 +334,9 @@ def shell():
         fake_event("user", message=dict(role="user", content=question))
         fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
         return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append([question, answer]) is None) else 3
+    if op == "detach-console":
+        (ROOT / "console-detached").touch()
+        return 0
     if op == "init":
         return fake_init()
     if op == "reply-reference":
@@ -396,7 +399,7 @@ def shell():
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=f"IGSH815 assistant {i:02d}")]))
             identity = "history-" + str(i)
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo history"))]))
-            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * 12000, is_error=False)]))
+            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * (40000 if state().get("longChatProof") else 12000), is_error=False)]))
         return 0
     if op == "forget-message" and len(ARGS) == 2:
         transcript = Path(state()["transcript"])
@@ -555,11 +558,15 @@ def console_rows(lines, width):
 
 
 def attach_fake(session):
+    if (ROOT / "console-detached").exists():
+        return
     kernel = console_kernel()
     handle = kernel.GetStdHandle(-11)
     previous = None
     (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
     while True:
+        if (ROOT / "console-detached").exists():
+            return
         claude = fake_locked(fake_read)
         info = INFO()
         count = wintypes.DWORD()

@@ -677,7 +677,6 @@ pub fn showActiveShellAfterOverlay() void {
     }
     if (app_state.active_shell >= app_state.shell_count) return;
     if (app_state.g_single_window and app_state.shells[app_state.active_shell].workspace != app_state.g_active_workspace) return;
-    if (app_state.shells[app_state.active_shell].hwnd == null) return;
     if (app_state.g_chat_active) {
         _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_SHOW);
         _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_SHOW);
@@ -687,6 +686,7 @@ pub fn showActiveShellAfterOverlay() void {
         _ = SetFocus(app_state.g_chat_composer_hwnd);
         return;
     }
+    if (app_state.shells[app_state.active_shell].hwnd == null) return;
     _ = showShellConsole(app_state.active_shell, SW_SHOW, "showActiveShellAfterOverlay");
     repositionActive();
     updateBrowserVisibility();

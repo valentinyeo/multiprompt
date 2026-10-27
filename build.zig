@@ -232,6 +232,9 @@ pub fn build(b: *std.Build) void {
     if (b.graph.host.result.os.tag != .windows) b.step("test", "Run Linux server tests").dependOn(vps_test_step);
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/portable-paths.test.js" }).step);
     const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs", "tools/release-version.test.mjs" });
+    const ci_admission_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ci-admission.test.js" });
+    test_step.dependOn(&ci_admission_tests.step);
+    vps_test_step.dependOn(&ci_admission_tests.step);
     const automerge_admit_tests = b.addSystemCommand(&.{ "bash", "tools/automerge-admit.test.sh" });
     test_step.dependOn(&automerge_admit_tests.step);
     vps_test_step.dependOn(&automerge_admit_tests.step);
@@ -268,6 +271,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_chat_echo_budget_tests.step);
     vps_test_step.dependOn(&run_chat_perf_tests.step);
     vps_test_step.dependOn(&run_chat_echo_budget_tests.step);
+    const chat_perf_clock_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-perf-clock.test.js" });
+    test_step.dependOn(&chat_perf_clock_tests.step);
+    vps_test_step.dependOn(&chat_perf_clock_tests.step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
     test_step.dependOn(&chat_cpu_regression.step);
     const chat_backfill_fairness_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-backfill-fairness.test.js" });
@@ -593,7 +599,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&skills_and_sync_login_tests.step);
     const system_theme_follow_tests = b.addSystemCommand(&.{ "node", "--test", "tools/system-theme-follow.test.js" });
     test_step.dependOn(&system_theme_follow_tests.step);
-    const search_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/search-selection.test.js", "tools/list-input.test.js" });
+    const search_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/search-selection.test.js", "tools/list-input.test.js", "tools/palette-dialog-design.test.js" });
     test_step.dependOn(&search_selection_tests.step);
     const ctrl_t_palette_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ctrl-t-palette-usage.test.js" });
     test_step.dependOn(&ctrl_t_palette_tests.step);
@@ -658,6 +664,9 @@ pub fn build(b: *std.Build) void {
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
     vps_test_step.dependOn(&zsb_deadline_tests.step);
+    const manage_snippets_tests = b.addSystemCommand(&.{ "node", "--test", "tools/manage-snippets.test.js" });
+    test_step.dependOn(&manage_snippets_tests.step);
+    vps_test_step.dependOn(&manage_snippets_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });
     test_step.dependOn(&snippet_form_input_tests.step);
     const console_url_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-url-copy.test.js" });
@@ -708,7 +717,7 @@ pub fn build(b: *std.Build) void {
         "tools/unarchive-semantics.test.js",      "tools/update-card.test.js",           "tools/zsb-active-tab.test.js",
         "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",      "extension/focus-guard.test.js",
         "tools/chat-queued-notes.test.js",         "tools/chat-unconfirmed-duplicate.test.js",
-        "tools/auto-release-admit.test.js",
+        "tools/auto-release-admit.test.js",       "tools/automerge-admit.test.mjs",
         "tools/chat-unread-visit.test.js",
     });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);

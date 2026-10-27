@@ -556,7 +556,7 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   assert.ok(matrices[1].includes('chat-send-latency'));
   assert.ok(matrices[1].includes('remind-me'));
   assert.ok(matrices[1].includes('chat-first-paint'));
-  assert.match(verify, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
+  assert.match(verify, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery\]\n  workflow_dispatch:/m);
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
 });
 
