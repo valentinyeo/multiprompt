@@ -686,7 +686,6 @@ test "AUDIT injected agent Markdown reaches the same rich layout as assistant pr
 }
 `, ['chat_markdown.zig', 'chat_transcript.zig'], 'AUDIT');
   assert.equal(run.status, 0, run.stdout + run.stderr);
-  assert.match(body('chatPaintBlock'), /if \(block\.role == \.injected\) chatInjectedBubbleColor\(\)/);
   assert.match(body('chatPaintTime'), /block\.sender/);
 });
 

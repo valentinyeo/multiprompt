@@ -117,11 +117,11 @@ fn fillQueue(result: *Status, items: ?[]const std.json.Value, sent: bool) void {
                 defer std.heap.page_allocator.free(wide);
                 if (injectedEnvelope(wide, true)) |injected| {
                     item.injected = true;
-                    const sender_len = injected.decode(injected.sender, item.sender[0 .. item.sender.len - 1], false);
+                    const sender_len = decodeXml(injected.sender, item.sender[0 .. item.sender.len - 1], false);
                     for (item.sender[0..sender_len]) |*c| if (c.* < 32) {
                         c.* = ' ';
                     };
-                    item.len = injected.decode(injected.body, &item.text, true);
+                    item.len = decodeXml(injected.body, &item.text, true);
                     for (item.text[0..item.len]) |*c| if (c.* < 32) {
                         c.* = ' ';
                     };
