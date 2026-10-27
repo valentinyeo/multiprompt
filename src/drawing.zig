@@ -599,6 +599,7 @@ pub fn threadTitleNameRectFor(win_w: i32, shell_idx: u32) ?RECT {
 
 pub const ChatTitleLayout = struct {
     pill: RECT,
+    more: RECT,
     icon: RECT,
     has_icon: bool,
     text: RECT,
@@ -647,14 +648,15 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     const pad = uiScaled(16);
     const margin = uiScaled(12);
     var layout: ChatTitleLayout = std.mem.zeroes(ChatTitleLayout);
-    var right_limit = column.right - margin;
+    layout.more = .{ .left = column.right - margin - pill_h, .top = pill_top, .right = column.right - margin, .bottom = pill_top + pill_h };
+    var right_limit = layout.more.left - margin;
     const meta = chatTitleMetaText();
     if (meta.len > 0) {
         const meta_w = measureTitleText(uiFontSubtitle(), meta) + pad * 2;
         const width = @min(meta_w, @divTrunc((column.right - column.left) * 2, 5));
         const meta_h = pill_h - uiScaled(4);
         const top = pill_top + @divTrunc(pill_h - meta_h, 2);
-        layout.meta_pill = .{ .left = column.right - margin - width, .top = top, .right = column.right - margin, .bottom = top + meta_h };
+        layout.meta_pill = .{ .left = layout.more.left - margin - width, .top = top, .right = layout.more.left - margin, .bottom = top + meta_h };
         layout.meta_text = .{ .left = layout.meta_pill.left + pad, .top = layout.meta_pill.top, .right = layout.meta_pill.right - pad, .bottom = layout.meta_pill.bottom };
         layout.has_meta = true;
         layout.meta_warn = app_state.g_account_reauth or app_state.g_cap_msg_until > GetTickCount64();
@@ -680,6 +682,23 @@ pub fn chatTitleHoleRect(win_w: i32) ?RECT {
         return .{ .left = column.left, .top = threadTitleTop(), .right = column.right, .bottom = threadTitleTop() + threadTitleHeight() };
     }
     return null;
+}
+
+fn paintMoreButton(hdc: HANDLE, more: RECT, border: u32, fill: u32, edge: i32) void {
+    const fillRoundRectAA = @import("chat_render.zig").fillRoundRectAA;
+    const radius = @divTrunc(more.bottom - more.top, 2);
+    fillRoundRectAA(hdc, more, radius, border);
+    fillRoundRectAA(hdc, .{ .left = more.left + edge, .top = more.top + edge, .right = more.right - edge, .bottom = more.bottom - edge }, radius - edge, fill);
+    const dot = @max(2, uiScaled(3));
+    const step = dot * 2 + @max(1, uiScaled(1));
+    const cx = @divTrunc(more.left + more.right, 2);
+    const cy = @divTrunc(more.top + more.bottom, 2);
+    const ink: u32 = if (app_state.g_light_theme) RGB(20, 20, 20) else RGB(242, 242, 242);
+    var i: i32 = -1;
+    while (i <= 1) : (i += 1) {
+        const x = cx + i * step - @divTrunc(dot, 2);
+        fillRoundRectAA(hdc, .{ .left = x, .top = cy - @divTrunc(dot, 2), .right = x + dot, .bottom = cy - @divTrunc(dot, 2) + dot }, @divTrunc(dot, 2), ink);
+    }
 }
 
 fn paintChatTitlePill(hdc: HANDLE) void {
@@ -708,6 +727,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         var text = layout.text;
         _ = DrawTextW(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
+    paintMoreButton(hdc, layout.more, border, fill, edge);
     if (layout.has_meta) {
         const meta_r = layout.meta_pill;
         fillRoundRectAA(hdc, meta_r, @divTrunc(meta_r.bottom - meta_r.top, 2), border);

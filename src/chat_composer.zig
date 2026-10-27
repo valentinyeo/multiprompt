@@ -858,7 +858,7 @@ fn ensureChatControls() bool {
             0,
             L("EDIT"),
             L(""),
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
             0,
             0,
             100,
@@ -1419,6 +1419,10 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
     defer app_state.g_focus_user_action_tick = prior_focus_action;
     if (@import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
     if (app_state.g_chat_nav_active and (msg == 0x0201 or msg == 0x0102 or msg == 0x0302 or msg == 0x0300 or GetWindowTextLengthW(hwnd) != 0)) @import("chat_render.zig").chatNavClear();
+    if (msg == WM_KEYDOWN and @import("more_menu.zig").key(wp)) {
+        if (wp == 0x0D) dropPendingEnterChar(hwnd);
+        return 0;
+    }
     if (msg == WM_KEYDOWN) {
         const key_down = @as(i16, @bitCast(@as(u16, 0x8000)));
         const nav_action = chat_keynav.action(
