@@ -65,7 +65,22 @@ export function assertBadge(frame, users = 1) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = process.argv[2];
   const json = name => JSON.parse(fs.readFileSync(path.join(root, name), 'utf8').replace(/^\uFEFF/, ''));
-  if (process.argv[3] === '--locate') {
+  if (process.argv[3] === '--hover') {
+    const image = readBmp(path.join(root, 'reactions-hover.bmp'));
+    const frame = inspect(image, json('reactions/area.json'));
+    assert.ok(frame.agent.length >= 2);
+    const first = frame.agent[0];
+    const y = first.bottom - 14;
+    for (let cell = 0; cell < 3; cell++) {
+      let ink = 0;
+      for (let py = y - 10; py < y + 10; py++) for (let px = first.right + 6 + cell * 28; px < first.right + 6 + (cell + 1) * 28; px++) {
+        const color = image.pixels.readUIntLE((py * image.width + px) * 4, 3);
+        if ([0, 8, 16].every(shift => ((color >> shift) & 255) >= 70)) ink++;
+      }
+      assert.ok(ink > 6, `hover action ${cell} is painted`);
+    }
+    console.log(JSON.stringify({ insideX: first.left + 30, insideY: y, emojiX: first.right + 20, moreX: first.right + 76, y }));
+  } else if (process.argv[3] === '--locate') {
     const frame = inspect(readBmp(path.join(root, 'reactions-before.bmp')), json('reactions/area.json'));
     assert.ok(frame.agent.length >= 2, 'fixture replies not painted');
     const first = frame.agent[0];
@@ -79,6 +94,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       assert.equal(observation.error, null);
       assert.equal(observation.composerText, 'draft stays here');
       assert.equal(observation.restartComposerText, 'draft stays here');
+      assert.equal(observation.copiedRequestId, 'msg_first');
+      assert.equal(observation.hoverMenusMatch, true);
       const clean = json('cleanup.json');
       assert.equal(clean.remaining_owned_processes, 0);
       assert.equal(clean.scratch_removed, true);
