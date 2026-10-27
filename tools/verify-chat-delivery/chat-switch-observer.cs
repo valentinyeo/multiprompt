@@ -61,7 +61,7 @@ public static class ChatSwitchObserver {
         GetWindowThreadProcessId(owner, out actual);
         if (pid <= 0 || actual != pid || GetForegroundWindow() != owner || target < -1 || target > 4)
             throw new InvalidOperationException("Switch observation requires its owned foreground window");
-        bool images = imagePrefix != null;
+        bool images = !String.IsNullOrEmpty(imagePrefix);
         if (images && target < 0) throw new InvalidOperationException("Image replay needs a real target");
         var points = new List<Dictionary<string, object>>();
         using (var app = Process.GetProcessById(pid))

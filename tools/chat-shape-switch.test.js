@@ -96,3 +96,37 @@ test('IGSH-1040 every direct observer call restores the exact owned foreground b
   assert.match(helper, /\[VerifyNative\]::GetForegroundWindow\(\) -eq \$script:window/);
   assert.match(helper, /'owned main window foreground before switch observation' 10/);
 });
+
+test('IGSH-1040 PowerShell empty-string binding keeps ordinary CPU samples image-free', () => {
+  assert.match(observer, /bool images = ![Ss]tring\.IsNullOrEmpty\(imagePrefix\);/);
+});
+
+test('IGSH-1040 native idle observer accepts PowerShell null and empty image paths without capture', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const source = path.join(__dirname, 'verify-chat-delivery/chat-switch-observer.cs').replaceAll("'", "''");
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path '${source}'
+$form = New-Object Windows.Forms.Form
+try {
+  $form.Show()
+  $form.Activate()
+  [Windows.Forms.Application]::DoEvents()
+  foreach ($prefix in @($null, '')) {
+    $sample = [ChatSwitchObserver]::Measure($PID, $form.Handle, -1, '', 0, '', 1, $prefix)
+    if ($sample.image_probe -or $sample.input -ne 'idle') { throw 'Ordinary idle window attempted image capture' }
+  }
+  $refused = $false
+  try { [void][ChatSwitchObserver]::Measure($PID, $form.Handle, -1, '', 0, '', 1, 'capture') }
+  catch {
+    if ($_.Exception.Message -notmatch 'Image replay needs a real target') { throw }
+    $refused = $true
+  }
+  if (-not $refused) { throw 'Real image replay accepted an idle target' }
+  'POWERSHELL_IDLE_IMAGE_BINDING_PROVEN'
+} finally { $form.Dispose() }
+`], { encoding: 'utf8', timeout: 30000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /POWERSHELL_IDLE_IMAGE_BINDING_PROVEN/);
+});
