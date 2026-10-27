@@ -1,4 +1,5 @@
 const std = @import("std");
+const json_reader = @import("json_reader.zig");
 const same = @import("tmux_identity.zig").same;
 
 pub const Entry = struct {
@@ -50,11 +51,12 @@ pub const Closed = struct {
             if (item != .object) continue;
             const host = item.object.get("host") orelse continue;
             const session = item.object.get("session") orelse continue;
-            if (host != .integer or host.integer < 0 or host.integer > 2 or session != .string or session.string.len > 63) continue;
+            const slot = json_reader.unsigned(host, 256);
+            if (slot > 2 or session != .string or session.string.len > 63) continue;
             for (session.string) |c| {
                 if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.' and c != ':') continue :records;
             }
-            try self.close(a, @intCast(host.integer), session.string);
+            try self.close(a, @intCast(slot), session.string);
         }
     }
 };
@@ -83,7 +85,7 @@ test "IGSH-1043 saved close intent restores without erasing newer local closes" 
     try closed.close(a, 2, "runner-one");
     const encoded = try std.json.Stringify.valueAlloc(a, closed.entries.items, .{});
     defer a.free(encoded);
-    var parsed = try std.json.parseFromSlice(std.json.Value, a, encoded, .{});
+    var parsed = try json_reader.parse(a, encoded);
     defer parsed.deinit();
     var restored = Closed{};
     defer restored.entries.deinit(a);
@@ -99,7 +101,7 @@ test "IGSH-1043 restored close intent validates host and native session names" {
     const a = std.testing.allocator;
     var closed = Closed{};
     defer closed.entries.deinit(a);
-    var parsed = try std.json.parseFromSlice(std.json.Value, a, "[{\"host\":3,\"session\":\"wrong-host\"},{\"host\":0,\"session\":\"bad;command\"},{\"host\":1,\"session\":\"Runner.One\"}]", .{});
+    var parsed = try json_reader.parse(a, "[{\"host\":3,\"session\":\"wrong-host\"},{\"host\":0,\"session\":\"bad;command\"},{\"host\":1,\"session\":\"Runner.One\"}]");
     defer parsed.deinit();
     try closed.restore(a, parsed.value);
     try std.testing.expectEqual(@as(usize, 1), closed.entries.items.len);
