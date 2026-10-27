@@ -230,5 +230,27 @@ class SwitchEvidenceTest(unittest.TestCase):
         self.assertEqual(json.loads(path.with_name('shape-switch-verdict.json').read_text())['category'], 'switch-budget')
 
 
+    def test_baseline_cli_requires_a_real_stale_reply_and_preserves_failed_product_verdict(self):
+        self.value['modes']['browser_open'][0]['latest_message_verified'] = False
+        (self.root / 'browser_open-0.txt').write_text('fixture-last-2')
+        path = self.root / 'shape-switch.json'
+        path.write_text(json.dumps(self.value))
+        command = [sys.executable, str(Path(__file__).with_name('chat-switch-evidence.py')), str(path), '--expect-regression']
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        verdict = json.loads(path.with_name('shape-switch-verdict.json').read_text())
+        self.assertEqual(verdict['status'], 'failed')
+        self.assertIs(verdict['product_acceptance_proven'], False)
+        self.assertIn('BASELINE_STALE_REPLY_RECORDED', result.stdout)
+        self.value['setup_passed'] = False
+        path.write_text(json.dumps(self.value))
+        self.assertEqual(subprocess.run(command, capture_output=True).returncode, 1)
+        self.value['setup_passed'] = True
+        self.value['modes']['browser_open'][0]['latest_message_verified'] = True
+        (self.root / 'browser_open-0.txt').write_text('browser_open-0 fixture-last-2')
+        path.write_text(json.dumps(self.value))
+        self.assertEqual(subprocess.run(command, capture_output=True).returncode, 1)
+
+
 if __name__ == '__main__':
     unittest.main()

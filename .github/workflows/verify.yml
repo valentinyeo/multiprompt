@@ -30,6 +30,11 @@ on:
         required: false
         default: false
         type: boolean
+      chat_shape_baseline:
+        description: Record the known v0.28.946 stale-reply regression without claiming product acceptance
+        required: false
+        default: false
+        type: boolean
       chat_shape_proof:
         description: Use anonymous audit-size chats with strict switch and ordinary CPU evidence
         required: false
@@ -83,6 +88,10 @@ on:
   workflow_call:
     inputs:
       chat_reactions_proof:
+        required: false
+        default: false
+        type: boolean
+      chat_shape_baseline:
         required: false
         default: false
         type: boolean
@@ -263,6 +272,7 @@ jobs:
       CHAT_NOTES_PROOF: ${{ inputs.chat_notes_proof && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       CHAT_SWITCH_PROOF: ${{ inputs.remote_switch_proof && '1' || '' }}
+      CHAT_SHAPE_BASELINE: ${{ inputs.chat_shape_baseline && '1' || '' }}
       CHAT_SHAPE_PROOF: ${{ inputs.chat_shape_proof && '1' || '' }}
       CHAT_SWITCH_PROFILE: ${{ inputs.chat_switch_profile && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
@@ -670,7 +680,12 @@ jobs:
       - name: Check real-shape observations after owned cleanup
         if: always() && env.CHAT_SHAPE_PROOF == '1'
         run: |
-          python tools/verify-chat-delivery/chat-switch-evidence.py evidence/shape-switch.json --require-cleanup
+          $baseline = @()
+          if ($env:CHAT_SHAPE_BASELINE -eq '1') {
+            if ($env:RELEASE_TAG -ne 'v0.28.946') { throw 'Baseline recording requires published v0.28.946' }
+            $baseline = @('--expect-regression')
+          }
+          python tools/verify-chat-delivery/chat-switch-evidence.py evidence/shape-switch.json --require-cleanup @baseline
           if ($LASTEXITCODE -ne 0) { throw 'Real-shape evidence or cleanup did not satisfy the recorded contract' }
       - name: Retain pre-launch failure result
         if: always()

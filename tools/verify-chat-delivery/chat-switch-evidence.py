@@ -137,6 +137,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('evidence')
     parser.add_argument('--require-cleanup', action='store_true')
+    parser.add_argument('--expect-regression', action='store_true')
     args = parser.parse_args()
     path = Path(args.evidence)
     try:
@@ -146,4 +147,9 @@ if __name__ == '__main__':
     path.parent.mkdir(parents=True, exist_ok=True)
     path.with_name('shape-switch-verdict.json').write_text(json.dumps(result, indent=2))
     print(json.dumps(result))
+    if args.expect_regression:
+        recorded = result['category'] == 'switch-budget' and any(sample['latest_message_verified'] is False for sample in result['failures'])
+        if recorded:
+            print('BASELINE_STALE_REPLY_RECORDED')
+        raise SystemExit(0 if recorded else 1)
     raise SystemExit(0 if result['status'] == 'passed' else 1)

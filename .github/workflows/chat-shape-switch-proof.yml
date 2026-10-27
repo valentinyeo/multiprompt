@@ -1,5 +1,6 @@
 name: Real-size session switch proof
 on:
+  workflow_dispatch:
   push:
     branches: [ceo/IGSH-1040]
 permissions:
@@ -10,5 +11,6 @@ jobs:
     with:
       feature: chat-switch-speed
       tag: v0.28.946
+      chat_shape_baseline: true
       chat_shape_proof: true
       chat_switch_profile: true

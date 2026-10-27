@@ -6490,7 +6490,12 @@ try {
                     }
                     [IO.File]::WriteAllText((Join-Path $Evidence 'shape-switch.json'), ($shapeResult | ConvertTo-Json -Depth 18), (New-Object Text.UTF8Encoding($false)))
                     $gapCase.phase = 'verdict'
-                    & $env:MP_VERIFY_PYTHON (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-switch-evidence.py') (Join-Path $Evidence 'shape-switch.json')
+                    $baseline = @()
+                    if ($env:CHAT_SHAPE_BASELINE -eq '1') {
+                        if ($env:RELEASE_TAG -ne 'v0.28.946') { throw 'Baseline recording requires published v0.28.946' }
+                        $baseline = @('--expect-regression')
+                    }
+                    & $env:MP_VERIFY_PYTHON (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-switch-evidence.py') (Join-Path $Evidence 'shape-switch.json') @baseline
                     if ($LASTEXITCODE -ne 0) { throw 'Real-shape switch evidence failed; inspect shape-switch-verdict.json' }
                 }
                 $gapCase.phase = 'verdict'
