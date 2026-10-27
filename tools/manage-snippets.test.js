@@ -33,6 +33,13 @@ test('Manage Snippets is searchable, rendered, and Enter deletes instead of past
   assert.match(open, /g_search_snippet_manage_mode = false/);
 });
 
+test('released builds can repeat the keyboard proof through the content-write App boundary', () => {
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/manage-snippets.yml'), 'utf8');
+  assert.match(workflow, /repository_dispatch:\s+types: \[manage-snippets-proof\]/);
+  assert.match(workflow, /feature: command-palette/);
+  assert.match(workflow, /tag: \$\{\{ github\.event\.client_payload\.tag \|\| '' \}\}/);
+});
+
 test('production deletion preserves other entries across reload and failed writes', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'manage-snippets-'));
   try {
