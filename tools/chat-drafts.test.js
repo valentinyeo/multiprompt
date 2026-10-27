@@ -219,7 +219,7 @@ function lifecycle() {
   const close = body('closeShellRemember');
   const closeStart = close.indexOf('    if (idx >= shell_count) return;');
   const closeEnd = close.indexOf('    accountRecordClose(idx);');
-  const historyStart = close.indexOf('    if (remember_closed) {');
+  const historyStart = close.indexOf('    if (remember_closed) {\n        if (g_closed_count >= MAX_CLOSED_HISTORY) {');
   const historyEnd = close.indexOf('\n    if (shells[idx].kind == .tmux)', historyStart);
   const compactStart = close.indexOf('    var i = idx;');
   const compactEnd = close.indexOf('    pruneEmptyGroups();', compactStart);
