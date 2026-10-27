@@ -592,6 +592,7 @@ pub extern "user32" fn InternalGetWindowText(HANDLE, [*]u16, i32) callconv(WINAP
 pub extern "user32" fn GetWindowTextLengthW(HANDLE) callconv(WINAPI) i32;
 pub extern "user32" fn SetWindowTextW(HANDLE, LPCWSTR) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetForegroundWindow() callconv(WINAPI) HANDLE;
+pub extern "user32" fn GetKeyState(i32) callconv(WINAPI) i16;
 pub extern "user32" fn GetAsyncKeyState(i32) callconv(WINAPI) i16;
 pub extern "user32" fn mouse_event(DWORD, DWORD, DWORD, DWORD, usize) callconv(WINAPI) void;
 pub extern "user32" fn SetWindowsHookExW(i32, HOOKPROC, HANDLE, DWORD) callconv(WINAPI) HANDLE;
