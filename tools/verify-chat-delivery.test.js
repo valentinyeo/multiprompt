@@ -993,7 +993,7 @@ with tempfile.TemporaryDirectory() as temp:
     output = io.StringIO()
     scope = dict(ROOT=home,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys)
     exec(compile(ast.Module(body=[function],type_ignores=[]), '<boundary-watch>', 'exec'), scope)
-    with patch.dict(os.environ, HOME=str(home)), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True):
+    with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True):
         try: scope['watch_reader']()
         except RuntimeError as error: assert str(error) == 'fixture finished'
     frames = [json.loads(line) for line in output.getvalue().splitlines()]
