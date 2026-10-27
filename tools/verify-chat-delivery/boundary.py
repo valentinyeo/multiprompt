@@ -755,7 +755,8 @@ def watch_reader():
         kernel.FindNextChangeNotification.argtypes = [wintypes.HANDLE]
         kernel.FindCloseChangeNotification.argtypes = [wintypes.HANDLE]
         kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-        notification = kernel.FindFirstChangeNotificationW(str(ROOT), True, 0x13)
+        watch_root = os.path.commonpath([str(ROOT), str(resolved[2].parent)])
+        notification = kernel.FindFirstChangeNotificationW(watch_root, True, 0x13)
         if notification == ctypes.c_void_p(-1).value:
             raise ctypes.WinError(ctypes.get_last_error())
         try:

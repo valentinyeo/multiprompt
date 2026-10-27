@@ -974,6 +974,7 @@ with tempfile.TemporaryDirectory() as temp:
     event = lambda text: dict(type='assistant',message=dict(role='assistant',content=[dict(type='text',text=text)]))
     path.write_text(json.dumps(event('original boundary row')) + '\n')
     calls = []
+    roots = []
     class Call:
         def __init__(self, fn): self.fn = fn
         def __call__(self, *args): return self.fn(*args)
@@ -983,7 +984,7 @@ with tempfile.TemporaryDirectory() as temp:
         with path.open('a') as output: output.write(json.dumps(event('appended boundary row')) + '\n')
         return 0
     kernel = type('Kernel', (), {})()
-    kernel.FindFirstChangeNotificationW = Call(lambda *args: 1)
+    kernel.FindFirstChangeNotificationW = Call(lambda *args: roots.append(args) or 1)
     kernel.FindNextChangeNotification = Call(lambda *args: 1)
     kernel.FindCloseChangeNotification = Call(lambda *args: calls.append('closed'))
     kernel.WaitForSingleObject = Call(wait)
@@ -991,7 +992,9 @@ with tempfile.TemporaryDirectory() as temp:
     q = dict(id=7,codex=False,sid='sid',tmux='',cwd=cwd,cached_sid='',inode=0,offset=0,live=False)
     stream = io.TextIOWrapper(io.BytesIO(base64.b64encode(source) + b'\n' + json.dumps(q).encode() + b'\n'))
     output = io.StringIO()
-    scope = dict(ROOT=home,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys)
+    state = home / "state"
+    state.mkdir()
+    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys,os=os)
     exec(compile(ast.Module(body=[function],type_ignores=[]), '<boundary-watch>', 'exec'), scope)
     with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True):
         try: scope['watch_reader']()
@@ -1002,6 +1005,7 @@ with tempfile.TemporaryDirectory() as temp:
     assert 'appended boundary row' in frames[1]['wire']
     assert 'original boundary row' not in frames[1]['wire']
     assert calls == ['wait','wait','closed'],calls
+    assert roots == [(str(home), True, 0x13)],roots
 print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
 `;
   assert.match(execFileSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 30000 }), /WINDOWS_NOTIFICATION_BOUNDARY_OK/);
