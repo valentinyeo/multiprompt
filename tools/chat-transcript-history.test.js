@@ -468,7 +468,7 @@ test "cache-first switch-back pushed persistence" {
     one.cache_written = 500;
     ticks = 600;
     var wire: std.ArrayList(u8) = .empty;
-    try wire.appendSlice(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t0\t-\tdelta\t0\n{\"role\":\"assistant\",\"id\":\"new\",\"text\":\"Pushed second reply\",\"offset\":100,\"end\":200}\n@@MP_END@@\n");
+    try wire.appendSlice(a, "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t0\t" ++ ("a" ** 64) ++ "\tdelta\t0\n{\"role\":\"assistant\",\"id\":\"new\",\"text\":\"Pushed second reply\",\"offset\":100,\"end\":200}\n@@MP_END@@\n");
     chatFileFetchThread(&one, one.key, 2, false, .{ .wire = wire, .id = 2, .read_us = 0 });
     try std.testing.expectEqual(@as(usize, 0), remote_calls);
     try std.testing.expectEqual(@as(usize, 1), cache_writes);
