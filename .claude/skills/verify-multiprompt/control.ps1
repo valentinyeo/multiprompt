@@ -887,7 +887,7 @@ public static class GroupRailProof {
             int secondHeader = top + headerHeight + (collapsed ? 0 : 2 * rowHeight);
             int groupBottom = secondHeader + headerHeight + 2 * rowHeight;
             var background = image.GetPixel(clientLeft + S(2, dpi, scale), top);
-            var muted = System.Drawing.Color.FromArgb(98, 102, 109);
+            var muted = System.Drawing.Color.FromArgb(138, 138, 138);
             var rail = System.Drawing.Color.FromArgb(145, 149, 157);
             int fillMismatch = 0, railPixels = 0, brightHeaderPixels = 0, largestPrefixGap = 0;
             var nameXs = new List<int>();
@@ -957,7 +957,7 @@ public static class GroupRailProof {
             int clientLeft = origin.X - frame.Left;
             int right = clientLeft + S(220, dpi, scale) - S(8, dpi, scale);
             int sectionHeight = 24, buttonHeight = 32;
-            var muted = System.Drawing.Color.FromArgb(98, 102, 109);
+            var muted = System.Drawing.Color.FromArgb(138, 138, 138);
             var sectionBackground = image.GetPixel(right, sectionTop + sectionHeight / 2);
             int firstInk = -1, inkPixels = 0, mutedPixels = 0, topInk = int.MaxValue, inkColumns = 0;
             var columnTops = new List<int>();
@@ -990,7 +990,7 @@ public static class GroupRailProof {
             double capRatio = textColumns == 0 ? 1.0 : (double)capColumns / textColumns;
             bool present = inkPixels >= 15;
             bool noArrow = present && Math.Abs(firstInk - headlineX) <= Math.Max(3, S(3, dpi, scale));
-            bool mixedCase = present && capRatio < 0.5;
+            bool capitals = present && capRatio > 0.75;
             bool mutedInk = mutedPixels >= 8;
             int buttonTop = sectionTop + sectionHeight + 2 * rowHeight + 4;
             var buttonBackground = image.GetPixel(right, buttonTop + buttonHeight / 2);
@@ -1006,9 +1006,9 @@ public static class GroupRailProof {
             bool plusOnly = buttonInk >= 4 && maxX - minX + 1 <= S(24, dpi, scale) && maxY - minY + 1 <= S(24, dpi, scale);
             proof["labelPresent"] = present;
             proof["noArrow"] = noArrow;
-            proof["mixedCase"] = mixedCase;
+            proof["capitals"] = capitals;
             proof["mutedInk"] = mutedInk;
-            proof["sameStyle"] = present && mixedCase && mutedInk && noArrow;
+            proof["sameStyle"] = present && capitals && mutedInk && noArrow;
             proof["plusOnly"] = plusOnly;
             proof["labelFirstInkX"] = firstInk;
             proof["headlineX"] = headlineX;

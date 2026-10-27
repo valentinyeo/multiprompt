@@ -327,7 +327,10 @@ function execute(control) {
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub var last: usize = 0;\npub fn paintRun(_: anytype, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { last = at; }\n');
     let functions = ['chatReceivedBlocks', 'chatBlockDisplayRange', 'chatRichSize', 'chatRichText', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY'].map(name => body(name)).join('\n');
     const render = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
-    functions = render.slice(render.indexOf('const TableMeasureBackend ='), render.indexOf('fn chatBlockNaturalWidth(')) + functions;
+    const start = render.indexOf('const TableMeasureBackend =');
+    const end = render.indexOf('fn chatTableLayout(');
+    assert.ok(start >= 0 && end > start, 'table measurement declarations');
+    functions = render.slice(start, end) + functions;
     if (control) functions = functions.replace('area.left - layout.scroll;', 'area.left;');
     fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + lineHeightPolicy + '\n' + functions + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'ISSUE-'], { encoding: 'utf8', timeout: 120000 });

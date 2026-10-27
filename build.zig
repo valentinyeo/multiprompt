@@ -252,9 +252,22 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseFast,
     }) });
     const run_chat_perf_tests = b.addRunArtifact(chat_perf_tests);
-    b.step("test-chat-perf", "Run native Chat View CPU and 50 MB history regressions").dependOn(&run_chat_perf_tests.step);
+    const chat_echo_budget_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/chat_perf_test.zig"),
+            .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
+            .optimize = stable_optimize,
+        }),
+        .filters = &.{"IGSH-991"},
+    });
+    const run_chat_echo_budget_tests = b.addRunArtifact(chat_echo_budget_tests);
+    const chat_perf_step = b.step("test-chat-perf", "Run native Chat View CPU and 50 MB history regressions");
+    chat_perf_step.dependOn(&run_chat_perf_tests.step);
+    chat_perf_step.dependOn(&run_chat_echo_budget_tests.step);
     test_step.dependOn(&run_chat_perf_tests.step);
+    test_step.dependOn(&run_chat_echo_budget_tests.step);
     vps_test_step.dependOn(&run_chat_perf_tests.step);
+    vps_test_step.dependOn(&run_chat_echo_budget_tests.step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
     test_step.dependOn(&chat_cpu_regression.step);
     const chat_backfill_fairness_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-backfill-fairness.test.js" });
@@ -717,7 +730,7 @@ pub fn build(b: *std.Build) void {
         const group: usize = if (dependency == &run_exe_tests.step or dependency == &run_usage_telemetry_tests.step or
             dependency == &chat_cpu_regression.step)
             0
-        else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or
+        else if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or dependency == &run_chat_echo_budget_tests.step or
             dependency == &pane_spacing_tests.step or dependency == &chat_drop_tests.step)
             1
         else if (dependency == &ssh_reconnect_tests.step or dependency == &bridge_profile_tests.step or
@@ -749,7 +762,7 @@ pub fn build(b: *std.Build) void {
         b.step("test-vps-group-3", "Run server source, install guard, browser self-test and chat draft fixtures"),
     };
     for (vps_test_step.dependencies.items) |dependency| {
-        const group: usize = if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or
+        const group: usize = if (dependency == &chat_view_gaps_tests.step or dependency == &run_chat_perf_tests.step or dependency == &run_chat_echo_budget_tests.step or
             dependency == &ssh_reconnect_tests.step or dependency == &chat_switch_tests.step or
             dependency == &frequent_integration_tests.step or dependency == &chat_drop_tests.step or
             dependency == &reply_quote_tests.step or dependency == &chat_skill_tab_tests.step or

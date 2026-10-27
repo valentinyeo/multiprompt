@@ -29,6 +29,7 @@ pub const Block = struct {
     diff_start: usize = 0,
     diff_len: usize = 0,
     tool_open: bool = false,
+    note_open: bool = false,
     source_offset: u64 = 0,
     source_end: u64 = 0,
     segment: u64 = 0,

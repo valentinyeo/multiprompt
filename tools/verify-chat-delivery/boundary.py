@@ -336,6 +336,12 @@ def shell():
         return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append([question, answer]) is None) else 3
     if op == "init":
         return fake_init()
+    if op == "session-notes":
+        senders = ["Hax Runner 10", "Chief Of Staff", "Poteto", "hax-runner-6", "hax-runner-2"]
+        for sender in senders:
+            body = "IGSH-975 native journey is now fully green. " + "Details follow in a very long machine message that used to fill the whole screen. " * 6 + "Run: https://example.com/run"
+            fake_event("user", message=dict(role="user", content=f"[from {sender}] {body}"))
+        return 0
     if op == "seed-many" and len(ARGS) == 2:
         return fake_seed_many(int(ARGS[1]))
     if op == "messages" and len(ARGS) == 2:

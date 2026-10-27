@@ -55,6 +55,11 @@ on:
         required: false
         default: false
         type: boolean
+      chat_notes_proof:
+        description: Match Android runner-note rows with native expand and fold clicks
+        required: false
+        default: false
+        type: boolean
       chat_reactions_proof:
         description: Right-click reactions, transport, same-target restart and fallback
         required: false
@@ -67,6 +72,10 @@ on:
         type: boolean
   workflow_call:
     inputs:
+      chat_notes_proof:
+        required: false
+        default: false
+        type: boolean
       feature:
         required: true
         type: string
@@ -214,7 +223,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
@@ -224,6 +233,7 @@ jobs:
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_REACTIONS_PROOF: ${{ inputs.chat_reactions_proof && '1' || '' }}
+      CHAT_NOTES_PROOF: ${{ inputs.chat_notes_proof && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       CHAT_SWITCH_PROOF: ${{ inputs.remote_switch_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
@@ -253,6 +263,9 @@ jobs:
         run: node tools/check-workspace-focus.mjs
       - name: Check browser recovery journey contract
         run: node tools/check-browser-pane-stuck.mjs
+      - name: Check runner-note pixel oracle
+        if: env.CHAT_NOTES_PROOF == '1'
+        run: node --test tools/chat-notes-proof.test.mjs
       - name: Validate journey and syntax
         shell: powershell
         env:
@@ -547,6 +560,30 @@ jobs:
           $doctor = Get-Content evidence/negative/fresh-skills/doctor.json -Raw | ConvertFrom-Json
           if ($observed.error -notlike '*newly added skill discovered within five seconds*' -or -not $doctor.chat -or $clean.remaining_owned_processes -ne 0 -or -not $clean.scratch_removed) { throw "Negative control failed for the wrong reason: $($observed.error)" }
           Write-Host 'OLD_MASTER_SKILL_REFRESH_RED_OK'
+          $global:LASTEXITCODE = 0
+      - name: Require the released pre-fix runner-note control to fail
+        if: env.CHAT_NOTES_PROOF == '1' && env.RELEASE_TAG == ''
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force negative-notes, evidence/notes-negative | Out-Null
+          gh release download v0.28.946 --repo $env:GITHUB_REPOSITORY --pattern multiprompt-x64.exe --dir negative-notes
+          if ($LASTEXITCODE -ne 0) { throw 'Runner-note negative release download failed' }
+          $exe = "$pwd/negative-notes/multiprompt-x64.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '45bef2a5da04ef62f4e3a2789467b17adb6ee4e38db3d6fc34916beef6f700cd') { throw 'Runner-note negative release identity mismatch' }
+          Copy-Item verify-bin/ssh.exe, verify-bin/tmux.exe negative-notes/
+          @{ tag='v0.28.946'; sha256=$hash } | ConvertTo-Json | Set-Content evidence/notes-negative/build.json
+          try {
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature chat-delivery -Exe $exe -ExpectedVersion '0.28.946' -ExpectedHash $hash -Evidence "$pwd/evidence/notes-negative"
+          } catch { Write-Host "Negative control returned: $_" }
+          $red = Get-Content evidence/notes-negative/result.json -Raw | ConvertFrom-Json
+          $cleanup = Get-Content evidence/notes-negative/cleanup.json -Raw | ConvertFrom-Json
+          if ($red.status -ne 'failed' -or $red.error -notmatch 'IGSH-1030 expected five compact runner rows') { throw 'Runner-note negative control failed for the wrong reason' }
+          if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Runner-note negative cleanup failed' }
+          Write-Host 'RELEASED_RUNNER_NOTE_NEGATIVE_CONTROL_REJECTED'
           $global:LASTEXITCODE = 0
       - name: Launch Doctor Drive Evidence Cleanup
         timeout-minutes: ${{ env.FEATURE == 'chat-dictation' && 5 || 30 }}
