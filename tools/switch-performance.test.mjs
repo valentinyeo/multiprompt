@@ -10,7 +10,7 @@ async function oracle() {
   assert.ok(fs.existsSync(new URL('./switch-performance.mjs', import.meta.url)), 'The performance oracle must ship');
   return import('./switch-performance.mjs');
 }
-const workload = () => ({ sessionCount: 10, transcriptBytes: 250 * 1024 * 1024, switches: Array.from({ length: 50 }, (_, i) => ({ shell: i % 10, us: 1000, blocks: 2 })), idleUs: Array(10).fill(100) });
+const workload = () => ({ sessionCount: 10, transcriptBytes: 250 * 1024 * 1024, idleShell: 1, switches: Array.from({ length: 50 }, (_, i) => ({ shell: i % 10, us: 1000, blocks: 2 })), idleUs: Array(10).fill(100) });
 
 test('complete workload passes; injected 300 ms switching fails', async () => {
   const { assess } = await oracle();
@@ -139,4 +139,13 @@ test('startup snapshot needs no switch-only marker before the first real warmup 
   assert.doesNotMatch(driver, /Wait-For 'initial conversation painted'/);
   assert.match(driver, /Wait-For 'ten restored Chat View sessions'[\s\S]*launch step=browser[\s\S]*\$initial =/);
   assert.match(driver, /for \(\$i = 0; \$i -lt 60; \$i\+\+\)[\s\S]*Wait-For 'switch dispatch and nonempty target painted'[\s\S]*if \(\$i -ge 10\)/);
+});
+
+
+test('idle measurements identify an already visited conversation', async () => {
+  const { assess } = await oracle();
+  for (const idleShell of [undefined, -1, 10, 1.5]) {
+    assert.throws(() => assess({ ...workload(), idleShell }));
+  }
+  assert.equal(assess(workload()).idleShell, 1);
 });

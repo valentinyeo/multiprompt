@@ -82,11 +82,22 @@ try {
         }
         Start-Sleep -Milliseconds 300
     }
+    $result.finalTab = (Session).active_tab
+    if ($result.finalTab -ne $initial) { throw 'Switch cycle failed to return to initial session' }
+    [void](Wait-For 'idle conversation foreground' {
+        $composer = [ChatDeliveryDesktop]::Composer($main)
+        $composer -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    })
+    $idleTarget = ($initial + 1) % 10
+    $offset = (Read-Log).Length
+    [ChatDeliveryDesktop]::Chord(@(0x11, 0x09))
+    [void](Wait-For 'loaded idle conversation selected' { (Session).active_tab -eq $idleTarget })
+    $idleShellId = (Session).tabs[$idleTarget].shell_id
+    [void](Wait-For 'loaded idle conversation painted' { (Read-Log).Substring($offset) -match ('\[switch\] chat content shown shell=' + $idleShellId + ' blocks=[1-9]') })
+    $result.idleShell = $idleTarget
     $idleOffset = (Read-Log).Length
     [void](Wait-For 'ten unchanged idle Chat View polls' { [regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60)
     $result.idleUs = @([regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)') | ForEach-Object { [long]$_.Groups[1].Value })
-    $result.finalTab = (Session).active_tab
-    if ($result.finalTab -ne $initial) { throw 'Switch cycle failed to return to initial session' }
     $app.Refresh()
     $result.cpuMs = $app.TotalProcessorTime.TotalMilliseconds
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
