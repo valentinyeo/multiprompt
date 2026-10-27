@@ -1,10 +1,16 @@
+import builtins
+import ctypes
+import io
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
+from unittest import mock
 
 
 SCRIPT = """
@@ -16,6 +22,32 @@ with path.open("rb") as source:
     held = source.read().decode("utf-8")
 print(json.dumps(dict(held=held, current=path.read_text(encoding="utf-8"))))
 """
+
+
+class ReaderContract(unittest.TestCase):
+    def test_shared_reader_preserves_path_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = str(Path(directory) / "session.jsonl")
+            Path(target).write_bytes(b"original")
+            windows = types.ModuleType("os")
+            windows.__dict__.update(os.__dict__)
+            windows.name = "nt"
+            windows.O_BINARY = getattr(os, "O_BINARY", 0)
+            kernel = mock.Mock()
+            kernel.CreateFileW.side_effect = lambda file, *args: os.open(file, os.O_RDONLY)
+            crt = types.ModuleType("msvcrt")
+            crt.open_osfhandle = lambda handle, flags: handle
+            original_io, original_builtin = io.open, builtins.open
+            try:
+                with mock.patch.dict(sys.modules, os=windows, msvcrt=crt), mock.patch.object(ctypes, "WinDLL", create=True, return_value=kernel):
+                    adapter = runpy.run_path(str(Path(__file__).with_name("sitecustomize.py")))
+                    with adapter["shared_open"](target, "rb") as source:
+                        self.assertEqual(source.name, target)
+                        self.assertEqual(source.read(), b"original")
+                        source.seek(0)
+                        self.assertEqual(source.read(), b"original")
+            finally:
+                io.open, builtins.open = original_io, original_builtin
 
 
 @unittest.skipUnless(os.name == "nt", "Windows remote-reader boundary")
