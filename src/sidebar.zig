@@ -1660,7 +1660,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: usize) void {
         var close = RECT{ .left = right, .top = y, .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
         _ = DrawTextW(hdc, L("\u{00d7}"), -1, &close, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
         var time: [24]u16 = undefined;
-        const time_len = inboxRelTime(shell.last_active, &time);
+        const time_len = @import("inbox.zig").inboxRelTime(shell.last_active, &time);
         if (time_len > 0) {
             _ = SelectObject(hdc, uiFontSubtitle());
             var measure: RECT = std.mem.zeroes(RECT);

@@ -5396,12 +5396,12 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_LBUTTONDOWN => {
+            if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
             if (chatMessageActionAt(GET_X(lp), GET_Y(lp))) |action| {
                 const index = chat_hover_message orelse return 0;
                 if (action == 1) chatReplyToBlock(index) else _ = chatMessageMenu(hwnd, msg, wp, lp, index);
                 return 0;
             }
-            if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
             chatReplyJumpClear();
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatNoteAt(GET_X(lp), GET_Y(lp))) |index| {
