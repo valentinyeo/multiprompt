@@ -230,7 +230,7 @@ pub fn show(requested_owner: w.HANDLE, text: w.LPCWSTR, title: w.LPCWSTR, button
         _ = EnableWindow(owner, 1);
         _ = focus.SetForegroundWindow(owner);
     };
-    _ = w.ShowWindow(hwnd, 5);
+    _ = focus.ShowWindow(hwnd, 5);
     _ = focus.SetForegroundWindow(hwnd);
     _ = focus.SetFocus(hwnd);
     _ = w.UpdateWindow(hwnd);

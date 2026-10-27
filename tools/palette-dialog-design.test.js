@@ -60,3 +60,14 @@ test('IGSH-1061: static labels and shortcut hints use the formatter, not user se
   assert.match(formatter, /L\("Ctrl"\)/);
   assert.match(formatter, /L\("Shift"\)/);
 });
+
+test('IGSH-1061: custom native surfaces use declared Win32 APIs and guarded focus', () => {
+  const declarations = new Set([...read('src/win32.zig').matchAll(/\b(?:fn|const)\s+(\w+)/g)].map(match => match[1]));
+  const missing = source => [...new Set([...source.matchAll(/\bw\.(\w+)/g)].map(match => match[1]))].filter(name => !declarations.has(name));
+  for (const name of ['dialog', 'palette_text']) assert.deepEqual(missing(read(`src/${name}.zig`)), [], name);
+  assert.deepEqual(missing('w.NotAWin32Export()'), ['NotAWin32Export']);
+  const dialog = read('src/dialog.zig');
+  assert.match(dialog, /focus\.ShowWindow\(hwnd, 5\)/);
+  assert.match(dialog, /focus\.SetFocus\(hwnd\)/);
+  assert.doesNotMatch(dialog, /w\.(?:ShowWindow|SetFocus|SetForegroundWindow)\(/);
+});
