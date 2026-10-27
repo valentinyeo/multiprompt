@@ -2,7 +2,7 @@ name: check-red-run
 
 on:
   push:
-    branches: [ceo/IGSH-1012, ceo/IGSH-1057]
+    branches: [ceo/IGSH-1012, ceo/IGSH-1057, ceo/IGSH-1059]
   workflow_call:
     inputs:
       base:

@@ -76,6 +76,10 @@ on:
         required: false
         default: false
         type: boolean
+      long_chat_proof:
+        required: false
+        default: false
+        type: boolean
       chat_notes_proof:
         required: false
         default: false
@@ -221,7 +225,7 @@ jobs:
     if: inputs.feature != 'chat-sync-audit'
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
-    timeout-minutes: ${{ matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
+    timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
     strategy:
       fail-fast: false
       max-parallel: 6
@@ -241,6 +245,7 @@ jobs:
       CHAT_SWITCH_PROOF: ${{ inputs.remote_switch_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
       CHAT_MISSING_PROOF: ${{ inputs.missing_note_proof && '1' || '' }}
+      CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
       FEATURE: ${{ matrix.feature }}
@@ -589,7 +594,7 @@ jobs:
           Write-Host 'RELEASED_RUNNER_NOTE_NEGATIVE_CONTROL_REJECTED'
           $global:LASTEXITCODE = 0
       - name: Launch Doctor Drive Evidence Cleanup
-        timeout-minutes: ${{ env.FEATURE == 'chat-dictation' && 5 || 30 }}
+        timeout-minutes: ${{ inputs.long_chat_proof && 40 || env.FEATURE == 'chat-dictation' && 5 || 30 }}
         if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'chat-switch-speed' && env.FEATURE != 'browser-own-profile' && env.FEATURE != 'title-bar'
         shell: powershell
         run: |
