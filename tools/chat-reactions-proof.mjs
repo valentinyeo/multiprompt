@@ -48,6 +48,7 @@ export function inspect(image, area) {
     groups[group].push({ left: left + area.left, right: right + area.left + 1, top: top + area.top, bottom: bottom + area.top + 1, ink });
   }
   for (const list of Object.values(groups)) list.sort((a, b) => a.top - b.top);
+  if (groups.user.length) groups.agent = groups.agent.filter(reply => reply.top >= groups.user[0].bottom);
   return groups;
 }
 

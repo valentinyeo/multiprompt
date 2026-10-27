@@ -85,3 +85,23 @@ test('reject a detached badge below its message', () => {
   f.fill(42, 126, 53, 136, 0xffffff);
   assert.throws(() => assertBadge(inspect(f.image, area)));
 });
+
+test('approved reader colors still identify the enclosed reaction', () => {
+  const f = fixture();
+  f.fill(0, 0, 300, 300, 0x101010);
+  f.fill(20, 10, 250, 45, 0x3a3a3a);
+  f.fill(20, 60, 250, 150, 0x1e1e1e);
+  f.fill(20, 165, 250, 230, 0x1e1e1e);
+  f.fill(28, 120, 68, 142, 0x353535);
+  f.fill(42, 126, 53, 136, 0xffffff);
+  assertBadge(inspect(f.image, area));
+});
+
+test('floating title is not the first reply after the setup prompt', () => {
+  const f = fixture();
+  f.fill(200, 5, 296, 40, 0x444444);
+  const frame = inspect(f.image, area);
+  assert.equal(frame.agent.length, 2);
+  assert.equal(frame.agent[0].top, 60);
+  assertBadge(frame);
+});
