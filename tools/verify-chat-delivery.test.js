@@ -1062,7 +1062,11 @@ test('IGSH-1063 question boundary records single, multiple and Other answers exa
       name: 'chat-options', mode: 'busy', suggestion: '', fake: true, sid: 'sid', cwd: 'C:/verify/work', panePid: 4242,
       transcript, meta: path.join(dir, 'home/.claude/sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
     }));
-    const run = (mode, ...args) => execFileSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), mode, ...args], { env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8' });
+    const run = (mode, ...args) => {
+      const result = require('node:child_process').spawnSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), mode, ...args], { env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      return result.stdout;
+    };
     const key = (...keys) => run('tmux', 'send-keys', '-t', '=verify-agent:', ...keys);
     run('shell', 'init');
     run('shell', 'plain-list');

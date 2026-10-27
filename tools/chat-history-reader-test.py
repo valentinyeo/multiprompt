@@ -62,7 +62,8 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertFalse(any(row.get("question") for row in self.read()[1]))
         call = self.tool_call("AskUserQuestion", dict(questions=questions))
         self.write(prose, call)
-        status = next(row for row in self.read()[1] if row["role"] == "status")
+        status = next((row for row in self.read()[1] if row["role"] == "status"), None)
+        self.assertIsNotNone(status, "pending structured question must reach the client")
         self.assertEqual(status["question"], dict(id="call-263", questions=questions))
         self.assertEqual(next(row for row in self.read()[1] if row["role"] == "status")["question"], status["question"])
         with self.path.open("a") as target:
@@ -78,7 +79,8 @@ class HistoryReaderTest(unittest.TestCase):
                                  dict(label="Orange", description="Warm contrast")])
         self.write(dict(type="response_item", payload=dict(type="function_call", call_id="q1",
                    name="request_user_input", arguments=json.dumps(dict(questions=[question])))))
-        status = next(row for row in self.read()[1] if row["role"] == "status")
+        status = next((row for row in self.read()[1] if row["role"] == "status"), None)
+        self.assertIsNotNone(status, "pending Codex question must reach the client")
         self.assertEqual(status["question"]["id"], "q1")
         self.assertEqual(status["question"]["provider"], "codex")
         self.assertEqual(status["question"]["questions"], [question])

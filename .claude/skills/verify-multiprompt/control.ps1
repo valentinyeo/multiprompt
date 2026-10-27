@@ -2753,7 +2753,7 @@ try {
     if ($Feature -in @('chat-switch-speed', 'chat-options')) {
         $remoteState = Join-Path $scratch 'remote-state'
         New-Item -ItemType Directory -Force -Path $remoteState, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
-        $remoteNames = if ($Feature -eq 'chat-options') { @('verify-agent-1') } else { @(1..5 | ForEach-Object { "verify-agent-$_" }) }
+        $remoteNames = @(if ($Feature -eq 'chat-options') { 'verify-agent-1' } else { 1..5 | ForEach-Object { "verify-agent-$_" } })
         $remotePanes = [ordered]@{}
         $remoteSids = [ordered]@{}
         for ($i = 0; $i -lt $remoteNames.Count; $i++) {

@@ -97,7 +97,7 @@ const Identity = struct { shell_id: u32, host: u8 = 0, tmux: [16:0]u8 = @splat(0
 const app_state = struct {
     var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
     var shell_count: u32 = 2;
-    var shells = [_]struct { shell_id: u32, permission_answered: bool = true }{
+    var shells = [_]struct { shell_id: u32, permission_answered: bool = true, chat_question_other_sent: bool = true, chat_question_identity: u64 = 123 }{
         .{ .shell_id = 22 }, .{ .shell_id = 11 },
     };
 };
@@ -121,6 +121,8 @@ test "failed remote permission is retryable by stable shell id" {
         try std.testing.expectEqual(@as(u32, 11), app_state.g_chat_permission_send_failed.load(.acquire));
         const before = invalidations;
         chatPermissionSendFailedApply();
+        try std.testing.expect(!app_state.shells[1].chat_question_other_sent);
+        try std.testing.expectEqual(@as(u64, 0), app_state.shells[1].chat_question_identity);
         try std.testing.expect(!app_state.shells[1].permission_answered);
         try std.testing.expect(app_state.shells[0].permission_answered);
         try std.testing.expectEqual(@as(u32, 0), app_state.g_chat_permission_send_failed.load(.acquire));
