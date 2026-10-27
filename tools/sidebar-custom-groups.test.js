@@ -88,6 +88,8 @@ test("workspace identity remains visible when numbered pills are hidden", () => 
   assert.match(layout, /@import\("workspace_switcher.zig"\).paintHeader\(hdc\)/);
   const main = fs.readFileSync(path.join(__dirname, "../src/main.zig"), "utf8");
   assert.match(main, /@import\("workspace_switcher.zig"\).headerClick\(mx, my\)/);
+  const doubleClick = main.slice(main.indexOf("        WM_LBUTTONDBLCLK => {"), main.indexOf("        WM_MBUTTONDOWN => {"));
+  assert.match(doubleClick, /workspace_switcher.zig"\).headerClick\(mx, my\)/, "rapid reopening must handle Windows double-click delivery");
   const switcher = fs.readFileSync(path.join(__dirname, "../src/workspace_switcher.zig"), "utf8");
   assert.match(switcher, /workspaceDisplayName\(app_state.g_active_workspace/);
   assert.match(switcher, /openWorkspaceByIndex/);
@@ -106,7 +108,9 @@ test("keyboard-selected sessions scroll below the fixed workspace name", () => {
 
 
 test("workspace card dismissal uses real owner input and its named native window", () => {
-  const driver = fs.readFileSync(path.join(__dirname, "../.claude/skills/verify-multiprompt/workspace-switcher.ps1"), "utf8");
+  const driverPath = path.join(__dirname, "../.claude/skills/verify-multiprompt/workspace-switcher.ps1");
+  assert.ok(fs.existsSync(driverPath), "native workspace card journey is installed");
+  const driver = fs.readFileSync(driverPath, "utf8");
   assert.match(driver, /'MultiPromptWorkspaceSwitcher', 'Workspaces'/);
   const main = fs.readFileSync(path.join(__dirname, "../src/main.zig"), "utf8");
   const composer = fs.readFileSync(path.join(__dirname, "../src/chat_composer.zig"), "utf8");

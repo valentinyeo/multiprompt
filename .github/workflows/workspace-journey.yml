@@ -9,6 +9,9 @@ on:
       - src/sidebar.zig
       - src/console.zig
       - src/workspaces.zig
+      - src/chat_composer.zig
+      - tools/sidebar-custom-groups.test.js
+      - tools/favorites.test.js
       - .claude/skills/verify-multiprompt/workspace-switcher.ps1
       - .github/workflows/workspace-journey.yml
 

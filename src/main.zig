@@ -2559,6 +2559,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_LBUTTONDBLCLK => {
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+            if (!app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
+                !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
+                !app_state.g_snippet_create_active and @import("workspace_switcher.zig").headerClick(mx, my)) return 0;
             const tth = threadTitleHeight();
             const tth_top = threadTitleTop();
             if (tth > 0 and mx >= SIDEBAR_W() and my >= tth_top and my < tth_top + tth and app_state.active_shell < app_state.shell_count and
