@@ -5080,13 +5080,16 @@ fn chatReplyJumpClear() void {
 }
 
 fn chatReplyAt(x: i32, y: i32) ?usize {
-    for (0..app_state.g_chat_block_count + app_state.g_chat_echo_layout_count) |i| {
-        const display = chatSelectionDisplay(i) orelse continue;
-        if (display.block.role != .user or chat_reply.reference(display.text) == null) continue;
+    const captured = chatTranscriptBlockAtPoint(y);
+    const first = captured orelse app_state.g_chat_block_count;
+    const end = if (captured != null) first + 1 else first + app_state.g_chat_echo_layout_count;
+    for (first..end) |i| {
         var rc = chatSelectionRect(i);
         rc.top -= app_state.g_chat_scroll_y;
-        rc.bottom = rc.top + chatReplyLineHeight(display.text);
-        if (pointInRect(rc, x, y)) return i;
+        rc.bottom = rc.top + uiScaled(24);
+        if (!pointInRect(rc, x, y)) continue;
+        const display = chatSelectionDisplay(i) orelse continue;
+        if (display.block.role == .user and chat_reply.reference(display.text) != null) return i;
     }
     return null;
 }
