@@ -347,7 +347,7 @@ function Retention-Copy([string]$Stage, [int]$Count) {
     $expected = @(0..($Count - 3) | ForEach-Object { 'IGSH934 message {0:00000}' -f $_ })
     if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-934 retained copy missing or reordered at $Stage" }
     Press @(0x1B) 'Esc: clear retained selection'
-    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    [void](Wait-For 'retained selection returns typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
     $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chat\] unread divider count=\d marker=\d+ index=\d+ unknown=(\d)')
     if (@($frames | Where-Object { $_.Groups[1].Value -eq '1' }).Count -gt 0) { throw 'IGSH-934 retained read position became unknown' }
     if (Get-Variable retentionAnchor -Scope Script -ErrorAction SilentlyContinue) { Retention-Top }

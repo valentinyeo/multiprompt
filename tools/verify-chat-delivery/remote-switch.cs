@@ -26,7 +26,7 @@ public sealed class RemoteSwitchFrames : IDisposable {
         this.view = view;
         timer = CreateWaitableTimerEx(IntPtr.Zero, null, 2, 0x00100002);
         if (timer == IntPtr.Zero) throw new InvalidOperationException("High-resolution frame timer unavailable");
-        thread = new Thread(Run) { IsBackground = true };
+        thread = new Thread(Run) { IsBackground = true, Priority = ThreadPriority.AboveNormal };
         clock.Start();
         thread.Start();
     }
