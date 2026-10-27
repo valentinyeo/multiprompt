@@ -29,3 +29,18 @@ test('chat title is regular text without agent icons', () => {
   assert.match(paint, /SelectObject\(hdc, uiFontTitle\(\)\)/);
   assert.doesNotMatch(paint, /drawAgentIcon|drawAttentionDot/);
 });
+
+test('received messages use one below-message panel with real request IDs', () => {
+  const render = fs.readFileSync('src/chat_render.zig', 'utf8');
+  assert.match(render, /requestIdAlloc/);
+  assert.match(render, /message_menu.zig"\)\.track/);
+  assert.match(render, /11 => if \(request_id\)/);
+  assert.match(render, /if \(action == 1\) chatReplyToBlock\(index\) else _ = chatMessageMenu/);
+  const menu = fs.existsSync('src/message_menu.zig') ? fs.readFileSync('src/message_menu.zig', 'utf8') : '';
+  assert.match(menu, /scaled\(232\)/);
+  assert.match(menu, /scaled\(34\)/);
+  assert.match(menu, /ReaderControl/);
+  assert.match(menu, /ReaderOutline/);
+  assert.match(menu, /ReaderRaised/);
+  assert.match(menu, /anchor.bottom \+ scaled\(6\)/);
+});

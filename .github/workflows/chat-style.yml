@@ -1,0 +1,38 @@
+name: Shared chat style
+
+on:
+  pull_request:
+    paths:
+      - src/message_menu.zig
+      - tools/chat-shared-style.test.js
+      - tools/chat-reactions-proof.mjs
+      - tools/chat-reactions-proof.test.mjs
+      - tools/verify-chat-delivery/reactions.ps1
+      - tools/verify-chat-delivery/desktop.cs
+      - .github/workflows/chat-style.yml
+  push:
+    branches: [master]
+    paths:
+      - src/message_menu.zig
+      - tools/chat-shared-style.test.js
+      - tools/chat-reactions-proof.mjs
+      - tools/verify-chat-delivery/reactions.ps1
+      - tools/verify-chat-delivery/desktop.cs
+      - .github/workflows/chat-style.yml
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-chat-style-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  reactions:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      tag: ${{ github.event.release.tag_name || '' }}
+      chat_reactions_proof: true

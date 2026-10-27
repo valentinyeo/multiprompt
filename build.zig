@@ -27,7 +27,6 @@ pub fn build(b: *std.Build) void {
         if (std.mem.allEqual(u8, &key, 0)) @panic("Release signing public key is still the all-zero placeholder; configure it before publishing");
     }
 
-
     const mod = b.addModule("multiprompt", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,

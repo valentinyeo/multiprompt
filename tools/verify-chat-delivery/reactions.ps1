@@ -21,13 +21,13 @@ $menu = Wait-For 'owned reaction menu logged' {
 $up = [char]::ConvertFromUtf32(0x1f44d)
 $down = [char]::ConvertFromUtf32(0x1f44e)
 $heart = [string][char]0x2764 + [char]0xfe0f
-if ($menu -cne "React $up,React $down,React $heart,Reply,Copy") { throw "IGSH975_REACTIONS_MISSING: $menu" }
+if ($menu -cne "React $up,React $down,React $heart,Reply,Copy,Copy request ID") { throw "IGSH975_REACTIONS_MISSING: $menu" }
 $popup = Wait-For 'owned native reaction popup visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } } 5
 Shot 'reactions-menu'
-$firstItem = [ChatDeliveryDesktop]::FirstMenuItem($popup, $app.Id, 5)
-Save @{count=5; left=$firstItem.Left; top=$firstItem.Top; right=$firstItem.Right; bottom=$firstItem.Bottom} "$caseDir/menu-item.json"
+$firstItem = [ChatDeliveryDesktop]::FirstMenuItem($popup, $app.Id)
+Save @{count=6; left=$firstItem.Left; top=$firstItem.Top; right=$firstItem.Right; bottom=$firstItem.Bottom} "$caseDir/menu-item.json"
 $actions.Add(@{case=$plan.name; input='real mouse click first native reaction menu item'})
-[ChatDeliveryDesktop]::PressOwnedMenu($main, $app.Id, $popup, 5)
+[ChatDeliveryDesktop]::PressOwnedMenu($main, $app.Id, $popup)
 [void](Wait-For 'one reaction reached the real send queue' { @((Fake-State).queue).Count -eq 1 })
 $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
 if ($observation.composerText -cne $plan.text) { throw 'Reaction cleared the composer draft' }

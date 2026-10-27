@@ -682,9 +682,9 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
         right_limit = layout.meta_pill.left - margin;
     }
     const center = @divTrunc(column.left + column.right, 2);
-    const icon_w: i32 = if (!@import("themes.zig").themeReaderDark() and (shell.ai_agent != 0 or shell.needs_attention)) uiScaled(30) else 0;
+    const icon_w: i32 = 0;
     const name = shell.name[0..shell.name_len];
-    const text_w = measureTitleText(uiFontThreadTitle(), name);
+    const text_w = measureTitleText(uiFontTitle(), name);
     const max_w = @min(column.right - column.left - margin * 2, 2 * (right_limit - center));
     if (max_w < pad * 2 + uiScaled(40)) return null;
     const width = std.math.clamp(icon_w + text_w + pad * 2, pad * 2 + uiScaled(40), max_w);
@@ -732,16 +732,8 @@ fn paintChatTitlePill(hdc: HANDLE) void {
     _ = SetBkMode(hdc, TRANSPARENT);
     fillRoundRectAA(hdc, layout.pill, @divTrunc(layout.pill.bottom - layout.pill.top, 2), border);
     fillRoundRectAA(hdc, .{ .left = layout.pill.left + edge, .top = layout.pill.top + edge, .right = layout.pill.right - edge, .bottom = layout.pill.bottom - edge }, @divTrunc(layout.pill.bottom - layout.pill.top, 2) - edge, fill);
-    if (layout.has_icon) {
-        var icon = layout.icon;
-        if (shell.needs_attention) {
-            drawAttentionDot(hdc, @divTrunc(icon.left + icon.right, 2), @divTrunc(icon.top + icon.bottom, 2), 4, customColorOr("attention", RGB(80, 140, 255)));
-        } else {
-            drawAgentIcon(hdc, &icon, shell.ai_agent, shell.activity == .active);
-        }
-    }
     if (shell.name_len > 0) {
-        _ = SelectObject(hdc, uiFontThreadTitle());
+        _ = SelectObject(hdc, uiFontTitle());
         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(20, 20, 20) else if (@import("themes.zig").themeReaderDark()) tokens.ReaderForeground else RGB(255, 255, 255));
         var text = layout.text;
         _ = DrawTextW(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);

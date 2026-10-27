@@ -2525,7 +2525,7 @@ fn bubbleRunSpan(i: usize) ?[2]i32 {
     if (run.first == run.last) return null;
     return .{
         app_state.g_chat_layout_rects[run.first].top - app_state.g_chat_scroll_y,
-        app_state.g_chat_layout_rects[run.last].bottom - app_state.g_chat_scroll_y - (if (g_reaction_view.mask(run.last) != 0) uiScaled(28) else @as(i32, 0)),
+        app_state.g_chat_layout_rects[run.last].bottom - app_state.g_chat_scroll_y,
     };
 }
 
@@ -3776,8 +3776,13 @@ fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
     const old = SelectObject(hdc, app_state.g_chat_rich_fonts[11]);
     defer _ = SelectObject(hdc, old);
     const count: i32 = @intCast(@popCount(mask));
-    var pill = RECT{ .left = rc.left + uiScaled(8), .top = rc.bottom - uiScaled(24), .right = rc.left + uiScaled(24 + count * 24), .bottom = rc.bottom - uiScaled(2) };
-    fillRoundRectAA(hdc, pill, uiScaled(11), chat_style.shift(chatAgentBubbleColor(), if (app_state.g_light_theme) -12 else 20));
+    var pill = RECT{ .left = rc.left + uiScaled(8), .top = rc.bottom - uiScaled(34), .right = rc.left + uiScaled(24 + count * 24), .bottom = rc.bottom - uiScaled(12) };
+    const reader = @import("themes.zig").themeReaderDark();
+    if (reader) {
+        const edge = @max(1, uiScaled(1));
+        fillRoundRectAA(hdc, pill, uiScaled(11), @import("design_tokens.zig").ReaderOutline);
+        fillRoundRectAA(hdc, .{ .left = pill.left + edge, .top = pill.top + edge, .right = pill.right - edge, .bottom = pill.bottom - edge }, uiScaled(11) - edge, @import("design_tokens.zig").ReaderRaised);
+    } else fillRoundRectAA(hdc, pill, uiScaled(11), chat_style.shift(chatAgentBubbleColor(), if (app_state.g_light_theme) -12 else 20));
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     _ = SetBkMode(hdc, TRANSPARENT);
     pill.left += uiScaled(8);
@@ -4850,8 +4855,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             rc.bottom -= app_state.g_chat_scroll_y;
             if (rc.top > h) break;
             if (rc.bottom <= paint.top or rc.top >= paint.bottom or rc.right <= paint.left or rc.left >= paint.right) continue;
-            var body_rc = rc;
-            if (g_reaction_view.mask(i) != 0) body_rc.bottom -= uiScaled(28);
+            const body_rc = rc;
             g_bubble_span = bubbleRunSpan(i);
             chatPaintBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], body_rc);
             g_bubble_span = null;
@@ -4868,6 +4872,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
                 _ = DeleteObject(mark);
             }
         }
+        chatPaintMessageActions(mem_dc);
         chatPaintReadDivider(mem_dc, w);
         chatPaintChoices(mem_dc, h, paint);
         for (0..app_state.g_chat_echo_layout_count) |i| {
@@ -4910,6 +4915,43 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
     chatPaintTopFade(mem_dc, w);
     chatPaintScrollUi(&canvas, mem_dc, w, @max(1, h - app_state.g_chat_bottom_inset));
     @import("chat_find_ui.zig").paint(mem_dc, w);
+}
+
+var chat_hover_message: ?usize = null;
+
+fn chatMessageActionRect(index: usize) ?RECT {
+    if (index >= app_state.g_chat_block_count) return null;
+    const block = app_state.g_chat_blocks[index];
+    if ((block.role != .prose and block.role != .code) or block.reaction_reference == 0) return null;
+    const rc = app_state.g_chat_layout_rects[index];
+    var client: RECT = undefined;
+    chatViewClientRect(&client);
+    const left = rc.right + app_state.g_chat_content_left + uiScaled(6);
+    if (left + uiScaled(84) > client.right) return null;
+    const bottom = rc.bottom - app_state.g_chat_scroll_y;
+    return .{ .left = left, .top = bottom - uiScaled(28), .right = left + uiScaled(84), .bottom = bottom };
+}
+
+fn chatMessageActionAt(x: i32, y: i32) ?u8 {
+    const index = chat_hover_message orelse return null;
+    const rc = chatMessageActionRect(index) orelse return null;
+    if (x < rc.left or x >= rc.right or y < rc.top or y >= rc.bottom) return null;
+    return @intCast(@divTrunc(x - rc.left, uiScaled(28)));
+}
+
+fn chatPaintMessageActions(dc: HANDLE) void {
+    const index = chat_hover_message orelse return;
+    const rc = chatMessageActionRect(index) orelse return;
+    const old = SelectObject(dc, @import("drawing.zig").uiFontTitle());
+    defer _ = SelectObject(dc, old);
+    _ = SetBkMode(dc, TRANSPARENT);
+    _ = SetTextColor(dc, if (app_state.g_light_theme) RGB(105, 105, 105) else @import("design_tokens.zig").ReaderHint);
+    const labels = [_]LPCWSTR{ L("\u{263A}"), L("\u{21A9}"), L("\u{2026}") };
+    for (labels, 0..) |label, i| {
+        const offset: i32 = @intCast(i);
+        var cell = RECT{ .left = rc.left + offset * uiScaled(28), .top = rc.top, .right = rc.left + (offset + 1) * uiScaled(28), .bottom = rc.bottom };
+        _ = DrawTextW(dc, label, -1, &cell, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    }
 }
 
 fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_block: ?usize) LRESULT {
@@ -4957,6 +4999,8 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     if (chatHistoryEntry(reaction_identity)) |entry| reaction_sid = entry.history.sid;
     const reaction_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
     const reaction_reference = if (block_at) |index| app_state.g_chat_blocks[index].reaction_reference else 0;
+    const request_id: ?[]u16 = if (block_at) |index| (if (chatHistoryEntry(reaction_identity)) |entry| entry.history.requestIdAlloc(std.heap.page_allocator, app_state.g_chat_blocks[index]) catch null else null) else null;
+    defer if (request_id) |id| std.heap.page_allocator.free(id);
     var items = chatContextMenuItems(keyboard_block == null and chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions);
     if (block_at) |index| {
         const role = app_state.g_chat_blocks[index].role;
@@ -4967,7 +5011,17 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
             items.len += 3;
         }
     }
-    var menu_log: [128]u8 = undefined;
+    if (request_id != null) {
+        var write: usize = 0;
+        for (items.items[0..items.len]) |item| {
+            if (item == .copy_link) continue;
+            items.items[write] = item;
+            write += 1;
+        }
+        items.items[write] = .copy_request_id;
+        items.len = write + 1;
+    }
+    var menu_log: [192]u8 = undefined;
     var menu_log_len: usize = 0;
     for (items.items[0..items.len], 0..) |item, i| {
         _ = AppendMenuW(menu, MF_STRING, @intFromEnum(item), item.text());
@@ -4978,7 +5032,20 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     var pt = POINT{ .x = GET_X(lp), .y = GET_Y(lp) };
     _ = ClientToScreen(hwnd, &pt);
     _ = SetForegroundWindow(app_state.g_main_hwnd);
-    const cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null);
+    const cmd: u32 = if (request_id != null and block_at != null) custom: {
+        var anchor = app_state.g_chat_layout_rects[block_at.?];
+        anchor.left += app_state.g_chat_content_left;
+        anchor.right += app_state.g_chat_content_left;
+        anchor.top -= app_state.g_chat_scroll_y;
+        anchor.bottom -= app_state.g_chat_scroll_y;
+        var origin = POINT{ .x = 0, .y = 0 };
+        _ = ClientToScreen(hwnd, &origin);
+        anchor.left += origin.x;
+        anchor.right += origin.x;
+        anchor.top += origin.y;
+        anchor.bottom += origin.y;
+        break :custom @import("message_menu.zig").track(app_state.g_main_hwnd, anchor, items.items[0..items.len]);
+    } else @intCast(TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null));
     switch (cmd) {
         8, 9, 10 => if (reply_text) |quote| {
             const current_identity = chatFileIdentity();
@@ -4990,6 +5057,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
             }
             chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
         },
+        11 => if (request_id) |id| chatCopyTextToClipboard(id),
         7 => if (link_text) |text| chatCopyTextToClipboard(text),
         1 => chatCopyTextToClipboard(if (items.copy_target == .selection) selection_text else message_text),
         5 => if (echo_id) |id| chatEchoSendAgain(id),
@@ -5282,6 +5350,17 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                     }
                 }
             }
+            var message_hover = chatTranscriptBlockAtPoint(GET_Y(lp));
+            if (message_hover) |index| {
+                if (chatMessageActionRect(index)) |actions| {
+                    const bubble = app_state.g_chat_layout_rects[index];
+                    if (GET_X(lp) < bubble.left + app_state.g_chat_content_left or GET_X(lp) >= actions.right) message_hover = null;
+                } else message_hover = null;
+            }
+            if (message_hover != chat_hover_message) {
+                chat_hover_message = message_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             const copy_hover = chatTranscriptCopyAt(GET_X(lp), GET_Y(lp));
             if (copy_hover != app_state.g_chat_hover_copy) {
                 app_state.g_chat_hover_copy = copy_hover;
@@ -5302,6 +5381,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             app_state.g_chat_hover_link = null;
             app_state.g_chat_hover_copy = null;
             app_state.g_chat_hover_image = false;
+            chat_hover_message = null;
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
@@ -5309,13 +5389,18 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             var cursor: POINT = undefined;
             _ = GetCursorPos(&cursor);
             _ = ScreenToClient(hwnd, &cursor);
-            if (chatReplyAt(cursor.x, cursor.y) != null or chatNoteAt(cursor.x, cursor.y) != null or chatToolAt(cursor.x, cursor.y) != null or chatChoiceAt(cursor.x, cursor.y) != null or app_state.g_chat_hover_link != null or app_state.g_chat_hover_copy != null or app_state.g_chat_hover_image) {
+            if (chatMessageActionAt(cursor.x, cursor.y) != null or chatNoteAt(cursor.x, cursor.y) != null or chatToolAt(cursor.x, cursor.y) != null or chatChoiceAt(cursor.x, cursor.y) != null or app_state.g_chat_hover_link != null or app_state.g_chat_hover_copy != null or app_state.g_chat_hover_image) {
                 _ = SetCursor(LoadCursorW(null, @ptrFromInt(32649)));
                 return 1;
             }
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_LBUTTONDOWN => {
+            if (chatMessageActionAt(GET_X(lp), GET_Y(lp))) |action| {
+                const index = chat_hover_message orelse return 0;
+                if (action == 1) chatReplyToBlock(index) else _ = chatMessageMenu(hwnd, msg, wp, lp, index);
+                return 0;
+            }
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
             chatReplyJumpClear();
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
@@ -5606,7 +5691,7 @@ test "status row todo expansion stays on its tab and unknown tabs have no strip"
 
 const ChatContextCopyTarget = enum { selection, message, nothing };
 const ChatContextMenu = struct {
-    items: [8]@import("fonts.zig").MessageMenuItem = undefined,
+    items: [9]@import("fonts.zig").MessageMenuItem = undefined,
     len: usize = 0,
     copy_target: ChatContextCopyTarget,
 };
@@ -7251,6 +7336,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         const frame_brush = CreateSolidBrush(bg);
         _ = FillRect(frame_dc, &frame_rc, frame_brush);
         _ = DeleteObject(frame_brush);
+        @import("sidebar.zig").paintSidebar(frame_dc);
         @import("window_layout.zig").paintChatView(frame_dc);
         drawing.paintThreadTitle(frame_dc, frame_w);
         chatPaintTranscriptContent(layer_dc, win_w, win_h, .{ .left = 0, .top = 0, .right = win_w, .bottom = win_h });
@@ -7305,6 +7391,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
             },
         }
 
+        if (position == .top) try scrollProofSave(L("chat-shared-desktop.bmp"), frame_bytes, frame_info.header);
         var enabled: [8]u8 = undefined;
         if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
             switch (position) {
@@ -7326,6 +7413,30 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     drawing.paintThreadTitle(frame_dc, frame_w);
     _ = GdiFlush();
     try moreMenuProof(frame_dc, frame_pixels, frame_w, layout.pane, title_layout.more, bg);
+    const message_menu = @import("message_menu.zig");
+    const items = [_]@import("fonts.zig").MessageMenuItem{ .reaction_like, .reaction_dislike, .reaction_heart, .reply, .copy, .copy_request_id };
+    const geometry = message_menu.geometry(&items);
+    const panel_dc = CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteDC(panel_dc);
+    const panel_info: w.BITMAPINFO = .{ .header = .{ .width = geometry.panel.right, .height = -geometry.panel.bottom } };
+    var panel_bits: ?*anyopaque = null;
+    const panel_bitmap = w.CreateDIBSection(panel_dc, &panel_info, 0, &panel_bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = DeleteObject(panel_bitmap);
+    const old_panel = SelectObject(panel_dc, panel_bitmap);
+    defer _ = SelectObject(panel_dc, old_panel);
+    message_menu.paint(panel_dc, &items, 3, false);
+    _ = GdiFlush();
+    const panel_len: usize = @intCast(geometry.panel.right * geometry.panel.bottom);
+    const panel_pixels = @as([*]const u32, @ptrCast(@alignCast(panel_bits.?)))[0..panel_len];
+    const center_x: usize = @intCast(@divTrunc(geometry.panel.right, 2));
+    try std.testing.expectEqual(@as(u32, 0x2E2E2E), scrollProofColor(panel_pixels[center_x]));
+    try std.testing.expectEqual(@as(u32, 0x1F1F1F), scrollProofColor(panel_pixels[@as(usize, @intCast(geometry.panel.right)) * 5 + center_x]));
+    const reply = geometry.cells[3];
+    const hover_at: usize = @intCast((reply.top + @divTrunc(reply.bottom - reply.top, 2)) * geometry.panel.right + reply.right - 5);
+    try std.testing.expectEqual(@as(u32, 0x353535), scrollProofColor(panel_pixels[hover_at]));
+    const panel_bytes = @as([*]const u8, @ptrCast(panel_bits.?))[0 .. panel_len * 4];
+    try scrollProofSave(L("chat-shared-message-menu.bmp"), panel_bytes, panel_info.header);
+    std.debug.print("IGSH-1019 native panel: outline=2E2E2E fill=1F1F1F hovered-reply=353535; six disjoint actions\n", .{});
 }
 
 test "IGSH-1030 five received notes take five compact rows instead of bubbles" {
