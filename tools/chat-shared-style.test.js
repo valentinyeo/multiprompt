@@ -53,3 +53,11 @@ test('pull requests run reaction proof instead of the appearance shortcut', () =
   assert.match(entry, /feature: chat-delivery/);
   assert.match(entry, /chat_reactions_proof: true/);
 });
+
+test('branch proof uses the full proposed change and installs the regression compiler', () => {
+  const tests = fs.readFileSync('.github/workflows/test.yml', 'utf8');
+  assert.match(tests, /base: \$\{\{ github\.event\.pull_request\.base\.sha \|\| \(github\.ref != 'refs\/heads\/master' && 'master'\)/);
+  const red = fs.readFileSync('.github/workflows/check-red-run.yml', 'utf8');
+  assert.ok(red.indexOf('name: Install Zig 0.16.0') >= 0);
+  assert.ok(red.indexOf('name: Install Zig 0.16.0') < red.indexOf('name: Require changed tests'));
+});
