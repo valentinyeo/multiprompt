@@ -212,9 +212,10 @@ pub noinline fn focusGuard(target: HANDLE) bool {
 }
 
 fn focusGuardAt(target: HANDLE, caller: usize, raise_container: bool) bool {
-    if (@import("settings_panel.zig").ownsForeground() and !@import("settings_panel.zig").ownsWindow(target)) {
-        focusTrace(.blocked, target, caller);
-        return false;
+    if (@import("settings_panel.zig").ownsForeground()) {
+        const inside = @import("settings_panel.zig").ownsWindow(target);
+        focusTrace(if (inside) .allowed else .blocked, target, caller);
+        return inside;
     }
     focusGuardReadMouse();
     const now = GetTickCount64();

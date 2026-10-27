@@ -498,6 +498,7 @@ test "Settings keeps input inside its panel and separate key dialog" {
     g_focus_user_action_tick = clock;
     try std.testing.expect(focusGuard(win(7)));
     try std.testing.expect(!focusGuard(win(3)));
+    clock += 2000;
     settings_panel.key_window = win(8);
     foreground = win(8);
     try std.testing.expect(focusGuard(win(8)));

@@ -780,6 +780,7 @@ pub fn close() void {
     const target = owner;
     const focus = previous_focus;
     const current = window;
+    if (ownsForeground()) state.g_focus_return_hwnd = if (focus != null and w.IsWindow(focus) != 0) focus else target;
     window = null;
     _ = w.DestroyWindow(current);
     release();

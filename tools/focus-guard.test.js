@@ -55,7 +55,7 @@ fn chatReadMark(_: bool) bool { return false; }
     const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
-    const withoutSettings = production.replace(/if \(settings_panel\.ownsForeground\(\) and !settings_panel\.ownsWindow\(target\)\) \{[^]*?return false;\s*\}/, '');
+    const withoutSettings = production.replace(/if \(settings_panel\.ownsForeground\(\)\) \{[^]*?return inside;\s*\}/, '');
     assert.notEqual(withoutSettings, production);
     fs.writeFileSync(file, (fixture.replace("fn reset() void {", withoutSettings + "\nfn reset() void {")).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const missingModalOwnership = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
