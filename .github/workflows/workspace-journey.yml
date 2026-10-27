@@ -1,0 +1,18 @@
+name: Workspace identity journey
+
+on:
+  push:
+    branches: [master, ceo/IGSH-1082]
+    paths:
+      - src/workspace_switcher.zig
+      - .claude/skills/verify-multiprompt/workspace-switcher.ps1
+      - .github/workflows/workspace-journey.yml
+
+permissions:
+  contents: read
+
+jobs:
+  workspace:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: workspaces
