@@ -278,7 +278,7 @@ test('IGSH-893 a stalled precondition fails within its named timeout', { skip: p
 
 test('IGSH-1072 queued composer shortcuts read message-time modifiers after physical release', () => {
   const composer = read('src/chat_composer.zig');
-  const dispatch = composer.slice(composer.indexOf('fn chatComposerSubclassCore('), composer.indexOf('pub fn fullWidthShouldResizeConsole('));
+  const dispatch = composer.slice(composer.indexOf('fn chatComposerSubclassCore('), composer.indexOf('    if (chatImagePasteIntercept(msg, wp))', composer.indexOf('fn chatComposerSubclassCore(')));
   assert.doesNotMatch(dispatch, /GetAsyncKeyState|isCtrlDown\(/);
   assert.match(dispatch, /GetKeyState\(0x11\)/);
   assert.match(dispatch, /GetKeyState\(0x10\)/);
