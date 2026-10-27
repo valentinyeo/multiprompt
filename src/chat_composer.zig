@@ -2359,7 +2359,7 @@ test "IGSH-813 pill is centered outside transcript and close keeps its count and
     try std.testing.expect(chatNewMessagesRect() == null);
 }
 
-fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start, mic_stop, transcript, typing, reply }) !void {
+fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start, mic_stop, transcript, typing, reply, queued_ctrl_stop, queued_select }) !void {
     const w = @import("win32.zig");
     const saved_shell_draft = shell_draft;
     defer shell_draft = saved_shell_draft;
@@ -2493,8 +2493,33 @@ fn testChatDictation(action: enum { ctrl_start, ctrl_stop, enter_stop, mic_start
         try std.testing.expect(app_state.g_dictation_running.load(.acquire));
         try std.testing.expectEqual(DictationState.listening, chat_dictation_state);
     }
+    if (action == .queued_ctrl_stop or action == .queued_select) {
+        const Keyboard = struct {
+            extern "user32" fn GetKeyboardState([*]u8) callconv(WINAPI) BOOL;
+            extern "user32" fn SetKeyboardState([*]const u8) callconv(WINAPI) BOOL;
+        };
+        var previous: [256]u8 = undefined;
+        try std.testing.expect(Keyboard.GetKeyboardState(&previous) != 0);
+        defer _ = Keyboard.SetKeyboardState(&previous);
+        try std.testing.expect((GetAsyncKeyState(0x11) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0);
+        var queued: [256]u8 = @splat(0);
+        queued[0x11] = 0x80;
+        queued[0xA2] = 0x80;
+        try std.testing.expect(Keyboard.SetKeyboardState(&queued) != 0);
+        _ = chatComposerSubclassCore(edit, WM_KEYDOWN, if (action == .queued_select) 0x41 else 0x44, 1);
+        if (action == .queued_select) {
+            var start: DWORD = 0;
+            var end: DWORD = 0;
+            _ = SendMessageW(edit, 0x00B0, @intFromPtr(&start), @bitCast(@intFromPtr(&end)));
+            try std.testing.expectEqual(@as(DWORD, 0), start);
+            try std.testing.expectEqual(@as(DWORD, 5), end);
+            return;
+        }
+    }
     if (action == .ctrl_start or action == .mic_start or action == .typing or action == .reply) return;
-    if (action == .enter_stop) {
+    if (action == .queued_ctrl_stop) {
+        try std.testing.expect(!app_state.g_dictation_recording.load(.acquire));
+    } else if (action == .enter_stop) {
         _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 1);
         var message: w.MSG = undefined;
         try std.testing.expectEqual(@as(BOOL, 0), w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1));
@@ -2845,4 +2870,13 @@ test "IGSH-887 the wave follows the voice level and shifts left each tick" {
     chatDictationWaveTick();
     try std.testing.expectEqual(chatDictationLevelBar(2000), chat_dictation_wave[DICTATION_WAVE_BARS - 2]);
     try std.testing.expectEqual(@as(u8, 0), chat_dictation_wave[DICTATION_WAVE_BARS - 1]);
+}
+
+
+test "IGSH-1072 queued Ctrl+D stops after physical Ctrl release" {
+    try testChatDictation(.queued_ctrl_stop);
+}
+
+test "IGSH-1072 queued Ctrl+A selects the full dictation draft" {
+    try testChatDictation(.queued_select);
 }

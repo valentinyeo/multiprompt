@@ -274,3 +274,24 @@ test('IGSH-893 a stalled precondition fails within its named timeout', { skip: p
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /DICTATION_STALL_TIMEOUT_OK/);
 });
+
+
+test('IGSH-1072 queued composer shortcuts read message-time modifiers after physical release', () => {
+  const composer = read('src/chat_composer.zig');
+  const dispatch = composer.slice(composer.indexOf('fn chatComposerSubclassCore('), composer.indexOf('pub fn fullWidthShouldResizeConsole('));
+  assert.doesNotMatch(dispatch, /GetAsyncKeyState|isCtrlDown\(/);
+  assert.match(dispatch, /GetKeyState\(0x11\)/);
+  assert.match(dispatch, /GetKeyState\(0x10\)/);
+  assert.match(dispatch, /GetKeyState\(@as\(i32, VK_MENU\)\)/);
+  assert.ok(composer.includes('test "IGSH-1072 queued Ctrl+D stops after physical Ctrl release"'));
+  assert.ok(composer.includes('test "IGSH-1072 queued Ctrl+A selects the full dictation draft"'));
+  assert.ok(composer.includes('SetKeyboardState(&queued)'));
+});
+
+test('IGSH-1072 branch build identity is embedded and independently checked by the native journey', () => {
+  assert.match(workflow, /name: Identify branch executable[\s\S]*?git rev-parse HEAD[\s\S]*?VERIFY_VERSION=/);
+  assert.match(workflow, /run: zig build[^\n]*-Dversion="\$\{\{ env\.VERIFY_VERSION \}\}"/);
+  assert.match(workflow, /version = \$env:VERIFY_VERSION/);
+  assert.match(driver, /Executable build\/version marker mismatch/);
+  assert.match(driver, /Doctor: wrong version in/);
+});
