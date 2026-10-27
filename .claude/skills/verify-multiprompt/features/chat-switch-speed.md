@@ -27,6 +27,10 @@ Run on demand with `workflow_dispatch` using feature `chat-switch-speed` on a br
 
 Enable `chat_shape_proof` with `feature=chat-switch-speed`.
 Use `tag=v0.28.946` for the released baseline.
+Enable `chat_shape_baseline` only for that known regression.
+A valid baseline requires an observed stale latest reply.
+Setup failures and an unexpectedly passing baseline remain errors.
+The recorded product verdict remains failed, never accepted.
 Leave `tag` empty for the ReleaseSmall candidate.
 These runs require approved repository access.
 Never run this journey on the VPS.
