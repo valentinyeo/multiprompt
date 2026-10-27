@@ -313,8 +313,9 @@ test('IGSH-1072 executable resolver rejects stale revisions and wrong versions b
   const script = workflow.match(/name: Resolve real executable[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1].replace(/^ {10}/gm, '');
   const revision = 'a'.repeat(40);
   const version = '1.2.3';
-  for (const [marker, expectedError] of [
+  for (const [marker, expectedError, expectedRevision = revision] of [
     [`MPVERSION=${version};MPREVISION=${revision};`, ''],
+    [`MPVERSION=${version};MPREVISION=${revision};`, 'Executable source revision mismatch', 'b'.repeat(40)],
     [`MPVERSION=${version};MPREVISION=${'b'.repeat(40)};`, 'Executable source revision mismatch'],
     [`MPVERSION=9.9.9;MPREVISION=${revision};`, 'Executable version mismatch'],
     [`MPVERSION=${version};`, 'Executable source revision mismatch'],
@@ -326,7 +327,7 @@ test('IGSH-1072 executable resolver rejects stale revisions and wrong versions b
       fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'zigshell-bridge.exe'), 'bridge');
       const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `function git { '${revision}' }\n${script}`], {
         cwd: directory,
-        env: { ...process.env, RELEASE_TAG: '', VERIFY_VERSION: version, VERIFY_REVISION: revision, GITHUB_ENV: path.join(directory, 'github-env') },
+        env: { ...process.env, RELEASE_TAG: '', VERIFY_VERSION: version, VERIFY_REVISION: expectedRevision, GITHUB_ENV: path.join(directory, 'github-env') },
         encoding: 'utf8',
       });
       assert.ifError(result.error);
