@@ -9,7 +9,9 @@ on:
       - tools/title-pill-proof*
       - .github/workflows/title-pill.yml
   push:
-    branches: [master]
+    branches: [master, ceo/IGSH-1028]
+  repository_dispatch:
+    types: [title-pill-release]
   workflow_dispatch:
     inputs:
       tag:
@@ -29,12 +31,12 @@ jobs:
     uses: ./.github/workflows/verify.yml
     with:
       feature: pane-layout
-      tag: ${{ inputs.tag || '' }}
+      tag: ${{ inputs.tag || github.event.client_payload.tag || '' }}
   browser-pane-stuck:
     uses: ./.github/workflows/verify.yml
     with:
       feature: browser-pane-stuck
-      tag: ${{ inputs.tag || '' }}
+      tag: ${{ inputs.tag || github.event.client_payload.tag || '' }}
   pixels:
     name: title-pill (${{ matrix.theme }})
     runs-on: windows-latest
@@ -51,7 +53,7 @@ jobs:
         run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.event.client_payload.tag || github.ref }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -59,7 +61,7 @@ jobs:
       - name: Record tested source
         shell: pwsh
         env:
-          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.client_payload.tag }}
         run: |
           @{ revision = (git rev-parse HEAD); tag = $env:RELEASE_TAG; theme = $env:MULTIPROMPT_TITLE_PILL_THEME } | ConvertTo-Json | Set-Content -Encoding utf8 build.json
       - name: Install Zig 0.16.0
