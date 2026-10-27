@@ -151,6 +151,14 @@ public static class ChatDeliveryDesktop {
         inputs[1].Data.Mouse.Flags = 4;
         if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Transcript click input failed");
     }
+    public static void HoverOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
+        if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
+            Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||
+            !IsWindowVisible(transcript) || WindowFromPoint(new Point { X = x, Y = y }) != transcript) throw new InvalidOperationException("Transcript hover ownership mismatch");
+        var inputs = new Input[1];
+        inputs[0].Data.Mouse = new Mouse { X = (int)Math.Round(x * 65535.0 / (GetSystemMetrics(0) - 1)), Y = (int)Math.Round(y * 65535.0 / (GetSystemMetrics(1) - 1)), Flags = 0x8001 };
+        if (SendInput(1, inputs, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Transcript hover input failed");
+    }
     public static void RightClickOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
         if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
             Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||

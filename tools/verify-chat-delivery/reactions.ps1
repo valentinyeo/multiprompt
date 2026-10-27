@@ -24,6 +24,33 @@ $heart = [string][char]0x2764 + [char]0xfe0f
 if ($menu -cne "React $up,React $down,React $heart,Reply,Copy,Copy request ID") { throw "IGSH975_REACTIONS_MISSING: $menu" }
 $popup = Wait-For 'owned native reaction popup visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } } 5
 Shot 'reactions-menu'
+for ($key = 0; $key -lt 6; $key++) { Press @(0x28) 'Down: select the next message action' }
+Press @(0x0D) 'Enter: copy the original request ID'
+[void](Wait-For 'original request ID reached the clipboard' { [Windows.Forms.Clipboard]::GetText() -ceq 'msg_first' })
+$observation.copiedRequestId = [Windows.Forms.Clipboard]::GetText()
+[ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $point.x, $point.y)
+$hover = Wait-For 'all three message hover controls are painted' {
+    Shot 'reactions-hover'
+    $ErrorActionPreference = 'Continue'
+    $located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --hover 2> "$caseDir/oracle-hover-stderr.log"
+    if ($LASTEXITCODE -eq 0) { ($located -join "`n") | ConvertFrom-Json }
+}
+foreach ($entry in @('emoji', 'more')) {
+    $menuStart = (Read-Shared "$settings/debug.log").Length
+    $x = if ($entry -eq 'emoji') { $hover.emojiX } else { $hover.moreX }
+    [ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, ($x - [int]$bounds.Left), ($hover.y - [int]$bounds.Top))
+    [void](Wait-For 'hover opens the same combined message menu' {
+        $tail = (Read-Shared "$settings/debug.log").Substring($menuStart)
+        $tail.Contains('[chat] message menu items=' + $menu)
+    })
+    $popup = Wait-For 'owned combined hover menu visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    Shot ('reactions-menu-' + $entry)
+    if ($entry -eq 'emoji') {
+        Press @(0x1B) 'Esc: dismiss the emoji entry menu'
+        [ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $hover.insideX, $hover.insideY)
+    }
+}
+$observation.hoverMenusMatch = $true
 $firstItem = [ChatDeliveryDesktop]::FirstMenuItem($popup, $app.Id)
 Save @{count=6; left=$firstItem.Left; top=$firstItem.Top; right=$firstItem.Right; bottom=$firstItem.Bottom} "$caseDir/menu-item.json"
 $actions.Add(@{case=$plan.name; input='real mouse click first native reaction menu item'})
