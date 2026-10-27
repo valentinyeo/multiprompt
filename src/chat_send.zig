@@ -2681,7 +2681,9 @@ pub fn chatQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_h
 
 fn chatQuestionTmuxThread(key: @import("chat_transcript.zig").Identity, keys: [@import("chat_options.zig").MAX_OPTIONS + 1]u8, count: usize) void {
     const a = std.heap.page_allocator;
-    const query = std.json.Stringify.valueAlloc(a, .{ .op = "question", .keys = keys[0..count], .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0) }, .{}) catch return;
+    var values: [@import("chat_options.zig").MAX_OPTIONS + 1]u32 = undefined;
+    for (keys[0..count], 0..) |key_value, index| values[index] = key_value;
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = "question", .keys = values[0..count], .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0) }, .{}) catch return;
     defer a.free(query);
     var wire: std.ArrayList(u8) = .empty;
     defer wire.deinit(a);

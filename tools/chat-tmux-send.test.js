@@ -229,3 +229,48 @@ test('worker uses existing persistent reader and background settlement uses pure
   assert.doesNotMatch(body('chatPaintEchoStatus'), /Waiting to send|Waiting for transcript|Queued, session is busy/);
   assert.doesNotMatch(body('chatPaintEchoStatus'), /Delivered/);
 });
+
+test('IGSH-1063 question worker sends numeric key arrays through the reader protocol', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'question-wire-'));
+  try {
+    const worker = body('chatQuestionTmuxThread')
+      .replaceAll('@import("chat_transcript.zig").Identity', 'Identity')
+      .replaceAll('@import("chat_options.zig").MAX_OPTIONS', 'MAX_OPTIONS')
+      .replaceAll('@import("chat_session.zig").chatHistoryPersistent', 'chatHistoryPersistent');
+    const harness = String.raw`
+const std = @import("std");
+const MAX_OPTIONS = 4;
+const Identity = struct { host: u8 = 0, shell_id: u32 = 7, tmux: [8:0]u8 = "term-1\x00\x00".* };
+const app_state = struct { var g_chat_permission_send_failed = std.atomic.Value(u32).init(0); };
+var recorded: std.ArrayList(u8) = .empty;
+fn debugLog(_: []const u8) void {}
+fn chatHistoryPersistent(_: u8, _: u32, query: []const u8, _: usize, wire: *std.ArrayList(u8), _: ?*std.atomic.Value(bool)) bool {
+    recorded.appendSlice(std.testing.allocator, query) catch unreachable;
+    wire.appendSlice(std.heap.page_allocator, "@mp\t7\tquestion\tok\t-\t0\n") catch unreachable;
+    return true;
+}
+test "question keys are numbers, operation and target remain strings" {
+    defer recorded.deinit(std.testing.allocator);
+    for ([_][]const u8{ &.{'2'}, &.{ '1', '2', 13 }, &.{9} }) |keys| {
+        recorded.clearRetainingCapacity();
+        var buffer: [MAX_OPTIONS + 1]u8 = @splat(0);
+        @memcpy(buffer[0..keys.len], keys);
+        chatQuestionTmuxThread(.{}, buffer, keys.len);
+        const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, recorded.items, .{});
+        defer parsed.deinit();
+        const value = parsed.value.object;
+        try std.testing.expectEqualStrings("question", value.get("op").?.string);
+        try std.testing.expectEqualStrings("term-1", value.get("tmux").?.string);
+        try std.testing.expect(value.get("keys").? == .array);
+        const numbers = value.get("keys").?.array.items;
+        try std.testing.expectEqual(keys.len, numbers.len);
+        for (keys, numbers) |key, number| try std.testing.expectEqual(@as(i64, key), number.integer);
+    }
+}
+`;
+    const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(file, harness + worker);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-fno-llvm', '-fno-lld'], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, JSON.stringify(result));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
