@@ -148,7 +148,7 @@ test("configured rows pair weekly usage with its reset and retain secondary quot
   assert.match(menu, /formatAiPaceResetDetail/);
   assert.match(menu, /aiPaceWord\(goal\.pace\)/);
   assert.match(menu, /formatAiPaceBonusReset/);
-  assert.match(menu, /5H \{s\}.*Fable \{s\}/);
+  assert.match(menu, /5h \{s\}.*Fable \{s\}/);
   assert.match(menu, /goal\.retrying/);
   assert.match(menu, /AppendMenuW/);
   assert.match(source, /IGSH-908 native usage menu retains distinct pools/);

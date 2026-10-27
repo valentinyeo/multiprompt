@@ -1,6 +1,7 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
+const MenuRowStyle = @import("fonts.zig").MenuRowStyle;
 const DWORD = @import("win32.zig").DWORD;
 const HANDLE = @import("win32.zig").HANDLE;
 const SW_SHOW = @import("win32.zig").SW_SHOW;
@@ -713,28 +714,28 @@ test "AI reset detail text uses fixed local time and countdown" {
     local.day = 22;
     local.hour = 19;
     var buf: [96]u8 = undefined;
-    try std.testing.expectEqualStrings("RESETS SUN 19:00, IN 1D 23H", formatAiPaceResetDetail(&buf, local, "1D 23H"));
+    try std.testing.expectEqualStrings("Reset Sun 19:00, in 1d 23h", formatAiPaceResetDetail(&buf, local, "1d 23h"));
     local.day_of_week = 6;
     local.hour = 0;
     local.minute = 5;
-    try std.testing.expectEqualStrings("RESETS SAT 00:05, IN 5M", formatAiPaceResetDetail(&buf, local, "5M"));
-    const weekdays = [_][]const u8{ "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
+    try std.testing.expectEqualStrings("Reset Sat 00:05, in 5M", formatAiPaceResetDetail(&buf, local, "5m"));
+    const weekdays = [_][]const u8{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
     for (weekdays, 0..) |weekday, index| {
         local.day_of_week = @intCast(index);
-        const text = formatAiPaceResetDetail(&buf, local, "DUE");
-        try std.testing.expectEqualStrings(weekday, text[7..10]);
-        try std.testing.expect(std.mem.endsWith(u8, text, ", IN DUE"));
+        const text = formatAiPaceResetDetail(&buf, local, "due");
+        try std.testing.expectEqualStrings(weekday, text[6..9]);
+        try std.testing.expect(std.mem.endsWith(u8, text, ", in due"));
     }
-    try std.testing.expectEqualStrings(" | BONUS 10-22", formatAiPaceBonusReset(&buf, local));
+    try std.testing.expectEqualStrings(" | Bonus 10-22", formatAiPaceBonusReset(&buf, local));
     local.month = 1;
     local.day = 2;
-    try std.testing.expectEqualStrings(" | BONUS 01-02", formatAiPaceBonusReset(&buf, local));
+    try std.testing.expectEqualStrings(" | Bonus 01-02", formatAiPaceBonusReset(&buf, local));
 }
 
 test "AI pace words distinguish ahead on pace and behind" {
-    try std.testing.expectEqualStrings("AHEAD", aiPaceWord(.ahead));
-    try std.testing.expectEqualStrings("ON PACE", aiPaceWord(.on_pace));
-    try std.testing.expectEqualStrings("BEHIND", aiPaceWord(.behind));
+    try std.testing.expectEqualStrings("Above pace", aiPaceWord(.ahead));
+    try std.testing.expectEqualStrings("On pace", aiPaceWord(.on_pace));
+    try std.testing.expectEqualStrings("Below pace", aiPaceWord(.behind));
 }
 
 test "Ladder clusters, short labels and in_ladder" {
@@ -817,9 +818,9 @@ test "AI telemetry account labels are safe for live streams" {
 fn aiPaceProviderLabel(goal: *const AiPaceGoal) []const u8 {
     if (goal.label_len > 0) return goal.shortLabel();
     return switch (goal.provider) {
-        .claude => "CLAUDE",
-        .codex => "CODEX",
-        .kimi => "KIMI",
+        .claude => "Claude",
+        .codex => "Codex",
+        .kimi => "Kimi",
         .unknown => "AI",
     };
 }
@@ -855,22 +856,22 @@ fn formatAiPacePercent(buf: []u8, tenths: anytype) []const u8 {
 
 fn formatAiPaceResetCountdown(buf: []u8, reset_filetime: u64) []const u8 {
     const now = nowFileTime();
-    if (reset_filetime <= now) return "DUE";
+    if (reset_filetime <= now) return "due";
     const ticks_per_minute: u64 = 60 * 10_000_000;
     const remaining_minutes = @divTrunc(reset_filetime - now + ticks_per_minute - 1, ticks_per_minute);
     const days = @divTrunc(remaining_minutes, 24 * 60);
     const hours = @divTrunc(remaining_minutes, 60);
     const minutes = remaining_minutes % 60;
-    if (days > 0) return std.fmt.bufPrint(buf, "{d}D {d}H", .{ days, hours % 24 }) catch "?";
-    if (hours > 0) return std.fmt.bufPrint(buf, "{d}H {d}M", .{ hours, minutes }) catch "?";
-    return std.fmt.bufPrint(buf, "{d}M", .{minutes}) catch "?";
+    if (days > 0) return std.fmt.bufPrint(buf, "{d}d {d}h", .{ days, hours % 24 }) catch "?";
+    if (hours > 0) return std.fmt.bufPrint(buf, "{d}h {d}m", .{ hours, minutes }) catch "?";
+    return std.fmt.bufPrint(buf, "{d}m", .{minutes}) catch "?";
 }
 
 fn aiPaceWord(pace: AiPace) []const u8 {
     return switch (pace) {
-        .ahead => "AHEAD",
-        .on_pace => "ON PACE",
-        .behind => "BEHIND",
+        .ahead => "Above pace",
+        .on_pace => "On pace",
+        .behind => "Below pace",
     };
 }
 
@@ -883,13 +884,13 @@ fn aiPaceLocalTime(filetime: u64) ?SYSTEMTIME {
 }
 
 fn formatAiPaceResetDetail(buf: []u8, local: SYSTEMTIME, countdown: []const u8) []const u8 {
-    const weekdays = [_][]const u8{ "SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT" };
+    const weekdays = [_][]const u8{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
     const weekday = if (local.day_of_week < weekdays.len) weekdays[local.day_of_week] else "?";
-    return std.fmt.bufPrint(buf, "RESETS {s} {d:0>2}:{d:0>2}, IN {s}", .{ weekday, local.hour, local.minute, countdown }) catch "RESETS ?";
+    return std.fmt.bufPrint(buf, "Reset {s} {d:0>2}:{d:0>2}, in {s}", .{ weekday, local.hour, local.minute, countdown }) catch "Reset unknown";
 }
 
 fn formatAiPaceBonusReset(buf: []u8, local: SYSTEMTIME) []const u8 {
-    return std.fmt.bufPrint(buf, " | BONUS {d:0>2}-{d:0>2}", .{ local.month, local.day }) catch "";
+    return std.fmt.bufPrint(buf, " | Bonus {d:0>2}-{d:0>2}", .{ local.month, local.day }) catch "";
 }
 
 fn formatAiPaceWeeklyReset(buf: []u8, goal: AiPaceGoal) []const u8 {
@@ -982,7 +983,8 @@ fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void {
     _ = paintAiPaceWeekRuns(hdc, x, rect, limit, text, text);
 }
 
-fn createAiUsageMenu(snapshot: AiPaceSnapshot) HANDLE {
+fn createAiUsageMenu(snapshot: AiPaceSnapshot, rows: *[256]MenuRowStyle) HANDLE {
+    rows.* = @splat(.{});
     const w = @import("win32.zig");
     const menu = w.CreatePopupMenu() orelse return null;
     const count = @min(snapshot.goal_count, snapshot.goals.len);
@@ -1012,9 +1014,9 @@ fn createAiUsageMenu(snapshot: AiPaceSnapshot) HANDLE {
         const five_reset = formatAiPaceFiveHourReset(&five_reset_buf, goal);
         const fable = if (goal.has_fable_used) formatAiPacePercent(&fable_buf, goal.fable_used_tenths) else "";
         const secondary = if (goal.has_fable_used)
-            std.fmt.bufPrint(&secondary_buf, "5H {s} | reset {s} | Fable {s}", .{ five, if (five_reset.len > 0) five_reset else "unknown", fable }) catch continue
+            std.fmt.bufPrint(&secondary_buf, "5h {s} | reset {s} | Fable {s}", .{ five, if (five_reset.len > 0) five_reset else "unknown", fable }) catch continue
         else
-            std.fmt.bufPrint(&secondary_buf, "5H {s} | reset {s}", .{ five, if (five_reset.len > 0) five_reset else "unknown" }) catch continue;
+            std.fmt.bufPrint(&secondary_buf, "5h {s} | reset {s}", .{ five, if (five_reset.len > 0) five_reset else "unknown" }) catch continue;
         const today = if (!snapshot.from_ladder and goal.has_daily_goal)
             std.fmt.bufPrint(&today_buf, "Today: {s} of daily goal", .{formatAiPacePercent(&progress_buf, goal.progress_tenths)}) catch ""
         else
@@ -1030,7 +1032,9 @@ fn createAiUsageMenu(snapshot: AiPaceSnapshot) HANDLE {
             var wide: [257]u16 = @splat(0);
             const length = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], line) catch continue;
             wide[length] = 0;
-            _ = w.AppendMenuW(menu, w.MF_STRING, 1 + slot * lines.len + index, wide[0..length :0].ptr);
+            if (w.AppendMenuW(menu, w.MF_STRING, 1 + slot * lines.len + index, wide[0..length :0].ptr) != 0 and index == 0) {
+                rows[@intCast(w.GetMenuItemCount(menu) - 1)].usage = .{ .used_tenths = if (goal.has_total_used) goal.total_used_tenths else null };
+            }
         }
     }
     return menu;
@@ -1038,12 +1042,27 @@ fn createAiUsageMenu(snapshot: AiPaceSnapshot) HANDLE {
 
 pub fn showSidebarAiUsageMenu() void {
     const w = @import("win32.zig");
-    const menu = createAiUsageMenu(app_state.g_ai_pace) orelse return;
+    var rows: [256]MenuRowStyle = undefined;
+    const menu = createAiUsageMenu(app_state.g_ai_pace, &rows) orelse return;
     defer _ = w.DestroyMenu(menu);
     const card = sidebarStickyCardRect();
     var point = w.POINT{ .x = card.left, .y = card.top - @import("window_layout.zig").paneGap() };
     _ = w.ClientToScreen(app_state.g_main_hwnd, &point);
-    _ = @import("fonts.zig").trackPopupMenu(menu, w.TPM_RETURNCMD | 0x0020, point.x, point.y, 0, app_state.g_main_hwnd, null);
+    _ = @import("fonts.zig").trackPopupMenuWithRows(menu, w.TPM_RETURNCMD | 0x0020, point.x, point.y, 0, app_state.g_main_hwnd, null, &rows);
+    const closing_time: w.DWORD = @bitCast(w.GetMessageTime());
+    var pending: w.MSG = undefined;
+    if (w.PeekMessageW(&pending, app_state.g_main_hwnd, w.WM_LBUTTONDOWN, w.WM_LBUTTONDBLCLK, 0) == 0) return;
+    var mouse = pending.pt;
+    if (w.ScreenToClient(app_state.g_main_hwnd, &mouse) == 0) return;
+    var diagnostic: [192]u8 = undefined;
+    if (std.fmt.bufPrint(&diagnostic, "usage panel close: message={d} time={d} closing={d} x={d} y={d}", .{ pending.message, pending.time, closing_time, mouse.x, mouse.y })) |text| {
+        @import("diagnostics.zig").debugLog(text);
+    } else |_| {}
+    if ((pending.message == w.WM_LBUTTONDOWN or pending.message == w.WM_LBUTTONDBLCLK) and pending.time == closing_time and
+        mouse.x >= card.left and mouse.x < card.right and mouse.y >= card.top and mouse.y < card.bottom)
+    {
+        _ = w.PeekMessageW(&pending, app_state.g_main_hwnd, pending.message, pending.message, 1);
+    }
 }
 
 test "IGSH-908 native usage menu retains distinct pools, quota data and reset rows" {
@@ -1062,10 +1081,14 @@ test "IGSH-908 native usage menu retains distinct pools, quota data and reset ro
     }
     snapshot.goals[0].has_fable_used = true;
     snapshot.goals[0].fable_used_tenths = 180;
-    const menu = createAiUsageMenu(snapshot) orelse return error.TestUnexpectedResult;
+    var rows: [256]MenuRowStyle = undefined;
+    const menu = createAiUsageMenu(snapshot, &rows) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyMenu(menu);
     try std.testing.expectEqual(@as(i32, 11), w.GetMenuItemCount(menu));
-    const expected = [_][]const u8{ "CL1 Primary: 13% week used", "CX Codex: 32% week used", "CL2 Secondary: 56% week used", "5H 20% | reset unknown | Fable 18%" };
+    for ([_]usize{ 0, 4, 8 }, used) |index, quota| {
+        try std.testing.expectEqual(quota, rows[index].usage.?.used_tenths.?);
+    }
+    const expected = [_][]const u8{ "CL1 Primary: 13% week used", "CX Codex: 32% week used", "CL2 Secondary: 56% week used", "5h 20% | reset unknown | Fable 18%" };
     var found = [_]usize{0} ** expected.len;
     var reset_rows: usize = 0;
     for (0..11) |index| {

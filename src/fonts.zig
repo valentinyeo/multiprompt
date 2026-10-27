@@ -225,6 +225,11 @@ const MenuInfo = extern struct {
 };
 extern "user32" fn SetMenuInfo(w.HANDLE, *const MenuInfo) callconv(w.WINAPI) w.BOOL;
 
+pub const MenuRowStyle = struct {
+    ink: ?w.DWORD = null,
+    usage: ?struct { used_tenths: ?u16 } = null,
+};
+
 const MessageMenuStyle = struct {
     background: w.HANDLE,
     hover: w.DWORD,
@@ -232,6 +237,7 @@ const MessageMenuStyle = struct {
     dim: w.DWORD,
     icons: w.HANDLE,
     show_icons: bool,
+    rows: []const MenuRowStyle = &.{},
 };
 var message_menu_style: ?MessageMenuStyle = null;
 threadlocal var menu_window_hook: w.HANDLE = null;
@@ -346,7 +352,7 @@ fn styleMenuWindow(hwnd: w.HANDLE) void {
 }
 
 pub fn trackMessagePopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT) w.BOOL {
-    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, true);
+    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, true, &.{});
 }
 
 fn mixColor(a: w.DWORD, b: w.DWORD) w.DWORD {
@@ -356,7 +362,7 @@ fn mixColor(a: w.DWORD, b: w.DWORD) w.DWORD {
     return r | (g << 8) | (bl << 16);
 }
 
-fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, show_icons: bool) w.BOOL {
+fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, show_icons: bool, rows: []const MenuRowStyle) w.BOOL {
     const chat_style = @import("chat_style.zig");
     const bound = menu_theme;
     const look = chat_style.menuLook(if (bound) |theme| theme.background() else unboundBackground());
@@ -378,7 +384,7 @@ fn trackThemedPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved:
         if (menu_window_hook != null) _ = w.UnhookWindowsHookEx(menu_window_hook);
         menu_window_hook = previous_hook;
     }
-    return trackPopupMenuStyled(menu, flags, x, y, reserved, owner, rect, .{ .background = background, .hover = look.hover, .ink = ink, .dim = mixColor(ink, look.fill), .icons = icons, .show_icons = show_icons });
+    return trackPopupMenuStyled(menu, flags, x, y, reserved, owner, rect, .{ .background = background, .hover = look.hover, .ink = ink, .dim = mixColor(ink, look.fill), .icons = icons, .show_icons = show_icons, .rows = rows });
 }
 
 pub fn messageMenuIconFont() w.HANDLE {
@@ -399,6 +405,7 @@ const MenuLabel = struct {
     len: i32 = 0,
     state: u32 = 0,
     id: u32 = 0,
+    style: MenuRowStyle = .{},
 };
 const MeasureItem = extern struct {
     kind: u32,
@@ -422,7 +429,11 @@ const DrawItem = extern struct {
 var menu_labels: []MenuLabel = &.{};
 
 pub fn trackPopupMenu(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT) w.BOOL {
-    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, false);
+    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, false, &.{});
+}
+
+pub fn trackPopupMenuWithRows(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, rows: []const MenuRowStyle) w.BOOL {
+    return trackThemedPopupMenu(menu, flags, x, y, reserved, owner, rect, false, rows);
 }
 
 fn trackPopupMenuStyled(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved: i32, owner: w.HANDLE, rect: ?*const w.RECT, style: ?MessageMenuStyle) w.BOOL {
@@ -436,6 +447,9 @@ fn trackPopupMenuStyled(menu: w.HANDLE, flags: w.UINT, x: i32, y: i32, reserved:
     for (menu_labels, 0..) |*label, i| {
         const pos: u32 = @intCast(i);
         label.state = w.GetMenuState(menu, pos, 0x400);
+        if (style) |theme| {
+            if (i < theme.rows.len) label.style = theme.rows[i];
+        }
         if (label.state & 0x810 != 0) continue;
         label.id = w.GetMenuItemID(menu, @intCast(pos));
         label.len = w.GetMenuStringW(menu, pos, &label.text, label.text.len, 0x400);
@@ -484,7 +498,7 @@ pub fn menuMessage(msg: w.UINT, lp: w.LPARAM) ?w.LRESULT {
         var size: w.SIZE = .{ .cx = 0, .cy = 16 };
         _ = w.GetTextExtentPoint32W(dc, &label.text, label.len, &size);
         item.width = @intCast(size.cx + 48);
-        item.height = @intCast(@max(if (message_menu_style != null) @as(i32, @import("chat_style.zig").MENU_ROW_HEIGHT) else 24, size.cy + 8));
+        item.height = @intCast(@max(if (message_menu_style != null) @as(i32, @import("chat_style.zig").MENU_ROW_HEIGHT) else 24, size.cy + 8) + @as(i32, if (label.style.usage != null) 14 else 0));
         return 1;
     }
     if (msg == 0x2b) {
@@ -510,11 +524,26 @@ pub fn menuMessage(msg: w.UINT, lp: w.LPARAM) ?w.LRESULT {
         defer _ = w.SelectObject(item.dc, old);
         const old_mode = w.SetBkMode(item.dc, 1);
         defer _ = w.SetBkMode(item.dc, old_mode);
-        const old_color = w.SetTextColor(item.dc, if (style) |theme| (if (disabled) theme.dim else theme.ink) else w.GetSysColor(if (disabled) 17 else if (selected) 14 else 7));
+        const old_color = w.SetTextColor(item.dc, if (style) |theme| (if (disabled) theme.dim else label.style.ink orelse theme.ink) else w.GetSysColor(if (disabled) 17 else if (selected) 14 else 7));
         defer _ = w.SetTextColor(item.dc, old_color);
         var text_rect = item.rect;
         text_rect.left += if (style) |theme| (if (theme.show_icons) @as(i32, 36) else 28) else 28;
+        if (label.style.usage != null) text_rect.bottom -= 14;
         _ = w.DrawTextW(item.dc, &label.text, label.len, &text_rect, w.DT_SINGLELINE | w.DT_VCENTER);
+        if (label.style.usage) |usage| {
+            if (style) |theme| {
+                var bar = w.RECT{ .left = text_rect.left, .right = item.rect.right - 20, .top = item.rect.bottom - 10, .bottom = item.rect.bottom - 6 };
+                const track = w.CreateSolidBrush(theme.dim);
+                defer _ = w.DeleteObject(track);
+                _ = w.FillRect(item.dc, &bar, track);
+                if (usage.used_tenths) |used| {
+                    bar.right = bar.left + @divTrunc((bar.right - bar.left) * @as(i32, @min(used, 1000)), 1000);
+                    const fill = w.CreateSolidBrush(label.style.ink orelse theme.ink);
+                    defer _ = w.DeleteObject(fill);
+                    _ = w.FillRect(item.dc, &bar, fill);
+                }
+            }
+        }
         const icons_on = if (style) |theme| theme.show_icons else false;
         if (icons_on) {
             if (std.enums.fromInt(MessageMenuItem, label.id)) |action| {
@@ -649,6 +678,64 @@ fn drawMenuRowForTest(selected: bool, bg: w.DWORD) !struct { fill: w.DWORD, hove
         .middle = w.GetPixel(dc, 150, chat_style.MENU_ROW_HEIGHT / 2),
         .edge = w.GetPixel(dc, 0, chat_style.MENU_ROW_HEIGHT / 2),
     };
+}
+
+test "IGSH-1041 usage rows paint weekly bars and exactly the shared menu-font glyphs" {
+    defer unregister();
+    try std.testing.expect(register());
+    const screen = w.GetDC(null);
+    defer _ = w.ReleaseDC(null, screen);
+    const dc = w.CreateCompatibleDC(screen);
+    try std.testing.expect(dc != null);
+    defer _ = w.DeleteDC(dc);
+    const bitmap = w.CreateCompatibleBitmap(screen, 200, 46);
+    try std.testing.expect(bitmap != null);
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const background = w.CreateSolidBrush(0x1E1E1E);
+    defer _ = w.DeleteObject(background);
+    var labels = [_]MenuLabel{.{ .len = 5, .style = .{ .usage = .{ .used_tenths = 320 } } }};
+    @memcpy(labels[0].text[0..5], L("Reply"));
+    menu_labels = &labels;
+    defer menu_labels = &.{};
+    message_menu_style = .{ .background = background, .hover = 0x303030, .ink = 0xFFFFFF, .dim = 0x808080, .icons = null, .show_icons = false };
+    defer message_menu_style = null;
+    var item = std.mem.zeroes(DrawItem);
+    item.kind = 1;
+    item.dc = dc;
+    item.rect = .{ .left = 0, .top = 0, .right = 200, .bottom = 46 };
+    item.data = @intFromPtr(&labels[0]);
+    try std.testing.expectEqual(@as(?w.LRESULT, 1), menuMessage(0x2b, @bitCast(@intFromPtr(&item))));
+    try std.testing.expectEqual(@as(w.DWORD, 0xFFFFFF), w.GetPixel(dc, 75, 36));
+    try std.testing.expectEqual(@as(w.DWORD, 0x808080), w.GetPixel(dc, 76, 36));
+    try std.testing.expectEqual(@as(w.DWORD, 0x1E1E1E), w.GetPixel(dc, 75, 35));
+    var actual: [32][96]w.DWORD = undefined;
+    for (&actual, 0..) |*row, y| {
+        for (row, 0..) |*pixel, x| pixel.* = w.GetPixel(dc, @intCast(x + 28), @intCast(y));
+    }
+    const wrong_font = w.CreateFontW(-16, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L("Arial"));
+    try std.testing.expect(wrong_font != null);
+    defer _ = w.DeleteObject(wrong_font);
+    for ([_]w.HANDLE{ controlFont(), wrong_font }, 0..) |font, index| {
+        _ = w.FillRect(dc, &item.rect, background);
+        const old_font = w.SelectObject(dc, font);
+        defer _ = w.SelectObject(dc, old_font);
+        _ = w.SetBkMode(dc, 1);
+        _ = w.SetTextColor(dc, 0xFFFFFF);
+        var text_rect = w.RECT{ .left = 28, .top = 0, .right = 200, .bottom = 32 };
+        _ = w.DrawTextW(dc, L("Reply"), 5, &text_rect, w.DT_SINGLELINE | w.DT_VCENTER);
+        var differing: usize = 0;
+        for (actual, 0..) |row, y| {
+            for (row, 0..) |pixel, x| differing += @intFromBool(pixel != w.GetPixel(dc, @intCast(x + 28), @intCast(y)));
+        }
+        if (index == 0) try std.testing.expectEqual(@as(usize, 0), differing) else try std.testing.expect(differing > 0);
+    }
+    for ([_]?u16{ null, 0, 1200 }) |used| {
+        labels[0].style.usage = .{ .used_tenths = used };
+        _ = menuMessage(0x2b, @bitCast(@intFromPtr(&item)));
+        try std.testing.expectEqual(@as(w.DWORD, if (used != null and used.? > 0) 0xFFFFFF else 0x808080), w.GetPixel(dc, 179, 36));
+    }
 }
 
 test "IGSH-892 right-click menu rows use chat bubble colours with a rounded hover highlight" {
