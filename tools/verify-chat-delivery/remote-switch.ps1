@@ -32,10 +32,10 @@ Bind-Transcript
 Shell-Run @('turn', '99')
 Press @(0x11, 0x09) 'Ctrl+Tab: prepare unread remote visit'
 Bind-Transcript
+$appendLogStart = (Read-Shared "$settings/debug.log").Length
 [void](Wait-For 'new remote messages applied' {
-    $offset = (Read-Shared "$settings/debug.log").Length
     Press @(0x11, 0x30) 'Ctrl+0: verify appended messages'
-    $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
+    $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($appendLogStart), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
     $m.Count -gt 0 -and [int]$m[$m.Count - 1].Groups[1].Value -ge ($script:switchInitialBlocks + 2)
 } 30)
 [void](Scroll-Transcript 120)

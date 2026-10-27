@@ -775,9 +775,9 @@ def watch_reader():
                         result.append(None)
                 return result
             def refresh_screen():
-                started = time.monotonic_ns()
+                started = time.perf_counter_ns()
                 q["watch_screen"] = capture_screen(True)
-                q["watch_capture_us"] = (time.monotonic_ns() - started) // 1000
+                q["watch_capture_us"] = (time.perf_counter_ns() - started) // 1000
 
             previous = fingerprint()
             refresh_screen()

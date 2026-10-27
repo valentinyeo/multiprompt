@@ -62,6 +62,8 @@ const FILE_ATTRIBUTE_NORMAL = @import("win32.zig").FILE_ATTRIBUTE_NORMAL;
 const WaitForSingleObject = @import("win32.zig").WaitForSingleObject;
 const INVALID_HANDLE_VALUE_PTR = @import("win32.zig").INVALID_HANDLE_VALUE_PTR;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
+const QueryPerformanceCounter = @import("win32.zig").QueryPerformanceCounter;
+const QueryPerformanceFrequency = @import("win32.zig").QueryPerformanceFrequency;
 const SECURITY_ATTRIBUTES = @import("win32.zig").SECURITY_ATTRIBUTES;
 const ClientToScreen = @import("win32.zig").ClientToScreen;
 const L = @import("startup.zig").L;
@@ -870,6 +872,8 @@ pub fn chatHistoryFetchOnce(host: u8, query: []const u8, wire_limit: usize, out:
 fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, id: u32, load_disk: bool, pushed: ?ChatHistoryPush) void {
     const a = std.heap.page_allocator;
     const start = GetTickCount64();
+    var apply_start: i64 = 0;
+    if (pushed != null) _ = QueryPerformanceCounter(&apply_start);
     if (load_disk) {
         var path_buf: [560]u8 = undefined;
         entry.result = null;
@@ -1012,7 +1016,12 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
     var log_buf: [128]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log_buf, "[chat] transcript load shell={d} {s} bytes={d} ms={d}", .{ key.shell_id, if (ok) "ok" else "fail", wire.items.len, GetTickCount64() - start }) catch "[chat] transcript load fail");
     if (pushed) |push| {
-        debugLog(std.fmt.bufPrint(&log_buf, "[chat] push shell={d} read_us={d} apply_ms={d} bytes={d}", .{ key.shell_id, push.read_us, GetTickCount64() - start, wire.items.len }) catch "[chat] push");
+        var apply_end: i64 = 0;
+        var frequency: i64 = 1;
+        _ = QueryPerformanceCounter(&apply_end);
+        _ = QueryPerformanceFrequency(&frequency);
+        const apply_us = @divTrunc((apply_end -| apply_start) * 1_000_000, @max(1, frequency));
+        debugLog(std.fmt.bufPrint(&log_buf, "[chat] push shell={d} read_us={d} apply_us={d} bytes={d}", .{ key.shell_id, push.read_us, apply_us, wire.items.len }) catch "[chat] push");
     }
     entry.ready.store(true, .release);
     if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);

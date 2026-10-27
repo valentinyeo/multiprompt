@@ -1737,9 +1737,9 @@ def watch_changes(q, resolved, source, as_owner):
 
     def refresh_screen():
         if control is not None:
-            started = time.monotonic_ns()
+            started = time.perf_counter_ns()
             q["watch_screen"] = capture()
-            q["watch_capture_us"] = (time.monotonic_ns() - started) // 1000
+            q["watch_capture_us"] = (time.perf_counter_ns() - started) // 1000
 
     try:
         if libc.inotify_add_watch(fd, os.fsencode(path.parent), 0x00000FCE) < 0:
@@ -1837,7 +1837,7 @@ def watch(source, as_owner=False):
     previous = None
     for resolved in watch_changes(q, resolved, source, as_owner):
         while True:
-            started = time.monotonic_ns() - q.pop("watch_capture_us", 0) * 1000
+            started = time.perf_counter_ns() - q.pop("watch_capture_us", 0) * 1000
             wire = response(q, source, as_owner, resolved)
             fields = wire.split("\n", 1)[0].split("\t")
             if fields[3] != "ok":
@@ -1845,7 +1845,7 @@ def watch(source, as_owner=False):
                 return
             signature = (fields[4], fields[6], fields[7], fields[12], tuple(line for line in wire.splitlines()[1:-1] if json.loads(line).get("role") == "status"))
             if signature != previous:
-                frame = dict(id=q["id"], wire=wire, read_us=(time.monotonic_ns() - started) // 1000)
+                frame = dict(id=q["id"], wire=wire, read_us=(time.perf_counter_ns() - started) // 1000)
                 print(json.dumps(frame, separators=(",", ":")), flush=True)
                 previous = signature
             q.update(cached_sid=fields[4], offset=int(fields[6]), inode=int(fields[7]),
