@@ -293,8 +293,57 @@ test('IGSH-1072 branch build identity is embedded and independently checked by t
   assert.match(workflow, /run: zig build[^\n]*-Dversion="\$\{\{ env\.VERIFY_VERSION \}\}"/);
   assert.match(workflow, /version = \$env:VERIFY_VERSION/);
   const identity = workflow.slice(workflow.indexOf('      - name: Identify branch executable'), workflow.indexOf('      - name: Build branch executable'));
-  assert.match(identity, /^          \$version \+= '-verify\.' \+ \$revision\.Substring\(0, 12\)$/m);
-  assert.doesNotMatch(identity, /\$env:FEATURE/);
+  assert.match(identity, /git describe --tags --match 'v\[0-9\]\*' --abbrev=0 HEAD/);
+  assert.match(identity, /VERIFY_REVISION=\$revision/);
+  assert.doesNotMatch(identity, /\$env:FEATURE|-verify\./);
+  assert.match(workflow, /-Drevision="\$\{\{ env\.VERIFY_REVISION \}\}"/);
+  assert.match(workflow, /\$embeddedRevision -cne \$revision -or -not \$binary\.Contains\("MPREVISION=\$revision;"\)/);
+  assert.match(workflow, /if \(-not \$binary\.Contains\("MPVERSION=\$version;"\)\) \{ throw 'Executable version mismatch' \}/);
+  assert.match(read('src/main.zig'), /pub export const mp_revision_marker:[^\n]*"MPREVISION=" \+\+ build_config\.build_revision/);
+  for (const options of ['stable_opts', 'dev_opts']) {
+    assert.ok(read('build.zig').includes(`${options}.addOption([]const u8, "build_revision", build_revision orelse "")`));
+  }
   assert.match(driver, /Executable build\/version marker mismatch/);
   assert.match(driver, /Doctor: wrong version in/);
+});
+
+test('IGSH-1072 executable resolver rejects stale revisions and wrong versions before any journey', { skip: process.platform !== 'win32' }, () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const script = workflow.match(/name: Resolve real executable[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1].replace(/^ {10}/gm, '');
+  const revision = 'a'.repeat(40);
+  const version = '1.2.3';
+  for (const [marker, expectedError] of [
+    [`MPVERSION=${version};MPREVISION=${revision};`, ''],
+    [`MPVERSION=${version};MPREVISION=${'b'.repeat(40)};`, 'Executable source revision mismatch'],
+    [`MPVERSION=9.9.9;MPREVISION=${revision};`, 'Executable version mismatch'],
+    [`MPVERSION=${version};`, 'Executable source revision mismatch'],
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-identity-'));
+    try {
+      fs.mkdirSync(path.join(directory, 'zig-out', 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'multiprompt.exe'), marker);
+      fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'zigshell-bridge.exe'), 'bridge');
+      const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `function git { '${revision}' }\n${script}`], {
+        cwd: directory,
+        env: { ...process.env, RELEASE_TAG: '', VERIFY_VERSION: version, VERIFY_REVISION: revision, GITHUB_ENV: path.join(directory, 'github-env') },
+        encoding: 'utf8',
+      });
+      assert.ifError(result.error);
+      if (expectedError) {
+        assert.notEqual(result.status, 0, marker);
+        assert.ok((result.stdout + result.stderr).includes(expectedError), result.stdout + result.stderr);
+        assert.equal(fs.existsSync(path.join(directory, 'evidence', 'build.json')), false);
+      } else {
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        const build = JSON.parse(fs.readFileSync(path.join(directory, 'evidence', 'build.json'), 'utf8').replace(/^\uFEFF/, ''));
+        assert.equal(build.revision, revision);
+        assert.equal(build.embeddedRevision, revision);
+        assert.equal(build.version, version);
+        assert.equal(build.sha256, createHash('sha256').update(marker).digest('hex'));
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
 });

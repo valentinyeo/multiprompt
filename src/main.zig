@@ -1295,6 +1295,7 @@ const update_check = @import("update_check.zig");
 const usage_telemetry = @import("usage_telemetry.zig");
 const usage_telemetry_mode = @import("usage_telemetry_mode.zig");
 pub export const mp_version_marker: [("MPVERSION=" ++ APP_VERSION ++ ";").len]u8 = ("MPVERSION=" ++ APP_VERSION ++ ";").*;
+pub export const mp_revision_marker: [("MPREVISION=" ++ build_config.build_revision ++ ";").len]u8 = ("MPREVISION=" ++ build_config.build_revision ++ ";").*;
 const workspace_snooze = @import("workspace_snooze.zig");
 const reminders_load = @import("reminders_load.zig");
 const crash_recorder = @import("crash_recorder.zig");
