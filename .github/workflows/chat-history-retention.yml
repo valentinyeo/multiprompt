@@ -1,7 +1,7 @@
 name: Retained chat history
 on:
   push:
-    branches: [master]
+    branches: [master, ceo/IGSH-1052]
     paths:
       - tools/verify-chat-delivery/**
       - .github/workflows/chat-history-retention.yml
