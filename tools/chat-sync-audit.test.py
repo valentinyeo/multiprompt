@@ -66,6 +66,46 @@ class ChatSyncAuditTest(unittest.TestCase):
                     self.assertEqual(audit.audit_pane(reader, '%1', 'remote-tab', 'claude', 99,
                                                      ROOT / 'zig-out/bin/chat-audit', sleep=lambda _: None), [])
 
+    def test_igsh1018_image_caption_is_tool_activity_not_missing_conversation(self):
+        reader = audit.load_reader()
+        caption = 'Neutral image caption with a menu and answer cards'
+        call = dict(type='assistant', uuid='call-event', message=dict(role='assistant', content=[dict(type='tool_use', id='image-call', name='SendUserFile', input=dict(caption=caption, files=[]))]))
+        result = dict(type='user', uuid='result-event', message=dict(role='user', content=[dict(type='tool_result', tool_use_id='image-call', content='Image delivered')]))
+        answer = dict(type='assistant', uuid='answer-event', message=dict(role='assistant', id='answer-message', content=[dict(type='text', text=caption)]))
+        other = json.loads(json.dumps(call))
+        other['message']['content'][0]['name'] = 'AnotherTool'
+        original_run = subprocess.run
+        capture = '● ' + caption + '\n' + '\n' * 8
+        def run(argv, **kwargs):
+            if argv[:2] == ['tmux', 'capture-pane']:
+                return capture
+            return original_run(argv, capture_output=True, text=True, timeout=10, check=True, **kwargs).stdout
+        cases = [
+            ('caption', [call, result], [call, result], 0),
+            ('missing real answer', [call, result, answer], [call, result], 1),
+            ('visible real answer', [call, result, answer], [call, result, answer], 0),
+            ('unrelated tool', [other, result], [other, result], 1),
+            ('unlocated text', [], [], 1),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'transcript.jsonl'
+            for name, events, shown, expected in cases:
+                with self.subTest(name=name):
+                    data = ''.join(json.dumps(event) + '\n' for event in events)
+                    path.write_text(data)
+                    rows = reader.pair_tool_rows([row for event in shown for row in reader.conversation_rows(event, 'claude')])
+                    wire = self.wire(rows).replace('\t0\t100\t', f'\t0\t{len(data.encode())}\t', 1)
+                    with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', path)), \
+                            patch.object(reader, 'claude_session_metadata', return_value=('sid', '/neutral')), \
+                            patch.object(reader, 'read_process_cwd', return_value='/neutral'), \
+                            patch.object(reader, 'response', return_value=wire), \
+                            patch.object(audit, 'run', side_effect=run):
+                        findings = audit.audit_pane(reader, '%1', 'neutral', 'claude', 1, ROOT / 'zig-out/bin/chat-audit', sleep=lambda _: None)
+                    self.assertEqual(len(findings), expected)
+                    if name == 'missing real answer':
+                        self.assertTrue(any(row['record'] == 'conversation' for row in findings[0]['transcript_lines']))
+
+
     def test_crafted_wire_reports_each_drift_kind(self):
         rows = [
             dict(role='user', text='<command-name>neutral</command-name>', timestamp='2026-10-17T15:06:44Z'),
