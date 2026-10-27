@@ -542,6 +542,7 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
         if (pushed) |push| {
             var wire = push.wire;
             wire.deinit(std.heap.page_allocator);
+            chatHistoryStreamStop(entry);
         }
         chatFileFailed(entry);
         debugLog(std.fmt.bufPrint(&log_buf, "[chat] transcript load shell={d} fail bytes=0 ms=0", .{key.shell_id}) catch "[chat] transcript load fail");
@@ -1127,6 +1128,7 @@ pub fn chatFileOnReady() void {
             entry.before = entry.history.start;
             entry.missing_message = entry.result_missing;
             chatFileFailed(entry);
+            chatHistoryStreamStop(entry);
             if (chat_history.sameSession(key, entry.key)) active_changed = true;
         }
     }

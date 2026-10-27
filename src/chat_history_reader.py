@@ -1745,7 +1745,9 @@ def watch_changes(q, resolved, source, as_owner):
         with selectors.DefaultSelector() as selector:
             selector.register(fd, selectors.EVENT_READ, "file")
             selector.register(sys.stdin.fileno(), selectors.EVENT_READ, "input")
-            if q.get("tmux"):
+            if as_owner:
+                q["watch_screen"] = ""
+            if q.get("tmux") and not as_owner:
                 control = subprocess.Popen(["tmux", "-C", "attach-session", "-f", "read-only,ignore-size", "-t", "=" + q["tmux"]],
                                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
                 selector.register(control.stdout, selectors.EVENT_READ, "tmux")
@@ -1805,6 +1807,9 @@ def watch(source, as_owner=False):
     q = json.loads(sys.stdin.buffer.readline())
     owner = conversation_owner(q.get("cwd", "")) if not q.get("codex") else None
     if owner and owner[1] != HOME and not as_owner:
+        discovered = tmux_owner_process("claude", q["tmux"], source) if q.get("tmux") else None
+        if discovered and discovered[1] == owner:
+            q = dict(q, discovery_pid=discovered[0])
         bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"
         child = subprocess.Popen(["sudo", "-n", "-H", "-u", owner[0], "--", "python3", "-u", "-c", bootstrap, "--watch", "--owner"], stdin=subprocess.PIPE)
         try:

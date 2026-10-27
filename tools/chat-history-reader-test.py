@@ -1,6 +1,7 @@
 import base64
 import importlib.util
 import json
+import io
 import os
 import selectors
 import shutil
@@ -1685,6 +1686,29 @@ class HistoryReaderTest(unittest.TestCase):
         reply = json.loads(line)
         self.assertTrue(reply['wire'].endswith(reader.END + '\n'))
         return reply
+
+    def test_watch_delegates_pane_identity_to_the_transcript_owner_once(self):
+        self.assertTrue(hasattr(reader, 'watch'), 'reader must provide a persistent watch')
+        owner = ('secondary', Path('/home/secondary'))
+        query = dict(self.query, cwd='/home/secondary/project', follow=True)
+        class Input(io.BytesIO):
+            def close(self):
+                self.payload = self.getvalue()
+                super().close()
+        incoming = types.SimpleNamespace(buffer=io.BytesIO(json.dumps(query).encode() + b'\n'), fileno=lambda: 55)
+        child = types.SimpleNamespace(stdin=Input(), wait=lambda: 0)
+        with patch.object(reader, 'conversation_owner', return_value=owner), \
+                patch.object(reader, 'tmux_owner_process', return_value=(99, owner)) as discover, \
+                patch.object(reader.subprocess, 'Popen', return_value=child) as start, \
+                patch.object(reader.sys, 'stdin', incoming), patch.object(reader.os, 'read', return_value=b''):
+            reader.watch(reader.READER_SOURCE)
+        discover.assert_called_once_with('claude', query['tmux'], reader.READER_SOURCE)
+        command = start.call_args.args[0]
+        self.assertEqual(command[:6], ['sudo', '-n', '-H', '-u', 'secondary', '--'])
+        self.assertEqual(command[-2:], ['--watch', '--owner'])
+        supplied, forwarded = child.stdin.payload.splitlines()
+        self.assertEqual(base64.b64decode(supplied).decode(), reader.READER_SOURCE)
+        self.assertEqual(json.loads(forwarded), dict(query, discovery_pid=99))
 
     @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
     def test_watch_reuses_control_capture_without_spawning_tmux_per_update(self):
