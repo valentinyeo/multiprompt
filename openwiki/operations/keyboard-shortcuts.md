@@ -129,6 +129,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+G | Collapse / expand tab group |
 | Alt+; / Ctrl+; | Use snippets |
 | Ctrl+K -&gt; Create Snippet | Save a named paste block |
+| Ctrl+K -&gt; Manage Snippets | Delete saved snippets; Esc cancels |
 | Delete twice in snippets | Delete the selected saved snippet |
 | F2 / double-click | Rename tab or selected Inbox session |
 

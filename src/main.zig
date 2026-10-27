@@ -698,6 +698,7 @@ const REMIND_PRESET_CUSTOM = @import("app_state.zig").REMIND_PRESET_CUSTOM;
 const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
 const SEARCH_SNIPPETS_MENU_OFFSET = @import("app_state.zig").SEARCH_SNIPPETS_MENU_OFFSET;
+const SEARCH_SNIPPET_MANAGE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_MANAGE_OFFSET;
 const SEARCH_SNIPPET_CREATE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_CREATE_OFFSET;
 const SEARCH_SNIPPET_BACK_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_BACK_OFFSET;
 const SEARCH_SNIPPET_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_OFFSET;
@@ -3840,6 +3841,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_SEARCH_CLOSE => {
+            app_state.g_search_snippet_mode = false;
+            app_state.g_search_snippet_manage_mode = false;
             const was_from_inbox = app_state.g_search_from_inbox;
             app_state.g_search_from_inbox = false;
             app_state.g_search_spawn_ws = 0xFF;
@@ -3990,6 +3993,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         keepSearchSelectionVisible();
                         showHeaderNoticeAscii("Snippet deleted", 1800, false);
                         _ = InvalidateRect(hwnd, null, 0);
+                    } else {
+                        showHeaderNoticeAscii("Could not delete snippet; saved snippets unchanged", 3500, true);
                     }
                     return 0;
                 }
@@ -4753,8 +4758,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     openAllSessions(hwnd);
                     return 0;
                 }
-                if (target == SEARCH_SNIPPETS_MENU_OFFSET) {
+                if (target == SEARCH_SNIPPETS_MENU_OFFSET or target == SEARCH_SNIPPET_MANAGE_OFFSET) {
                     app_state.g_search_snippet_mode = true;
+                    app_state.g_search_snippet_manage_mode = target == SEARCH_SNIPPET_MANAGE_OFFSET;
                     app_state.g_search_snippet_delete_confirm = null;
                     app_state.g_search_workspace_mode = false;
                     app_state.g_search_workspace_delete_mode = false;
@@ -4782,6 +4788,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (target == SEARCH_SNIPPET_BACK_OFFSET) {
                     app_state.g_search_snippet_mode = false;
+                    app_state.g_search_snippet_manage_mode = false;
                     app_state.g_search_snippet_delete_confirm = null;
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 0;
@@ -4796,8 +4803,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (target >= SEARCH_SNIPPET_OFFSET and target < SEARCH_SNIPPET_OFFSET + MAX_SNIPPETS) {
                     const sn_idx = target - SEARCH_SNIPPET_OFFSET;
+                    if (app_state.g_search_snippet_manage_mode) {
+                        _ = SendMessageW(hwnd, WM_APP_SNIPPET_DELETE, 0, 0);
+                        return 0;
+                    }
                     app_state.g_search_active = false;
                     app_state.g_search_snippet_mode = false;
+                    app_state.g_search_snippet_manage_mode = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
                     app_state.g_pending_new_tab_group = 0;
@@ -8715,6 +8727,7 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
     app_state.g_search_session_overview_mode = false;
     app_state.g_search_openall_host_mode = false;
     app_state.g_search_snippet_mode = false;
+    app_state.g_search_snippet_manage_mode = false;
     app_state.g_search_theme_mode = true;
     app_state.g_search_len = 0;
     app_state.g_search_sel = 0;

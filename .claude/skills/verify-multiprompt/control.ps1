@@ -6183,6 +6183,49 @@ try {
             Doctor
             Snapshot 'update-idle'
             $result.checks += @{ name = 'update-command-without-ready-keeps-session'; pid = $process.Id; scale = 100; selectedTextPixels = $selectedTextPixels }
+            $snippetFile = Join-Path $scratch 'roaming/ZigShell/snippets.json'
+            foreach ($name in @('Remove Me', 'Keep Me')) {
+                Focus-Palette 'create snippet' 6255
+                Press @(0x0D) 'Enter: Create Snippet'
+                Type-Text $name
+                Press @(0x09) 'Tab: snippet text'
+                Type-Text ('Saved text for ' + $name)
+                Press @(0x11, 0x0D) 'Ctrl+Enter: save snippet'
+                Wait-Until {
+                    (Test-Path $snippetFile) -and @((Get-Content $snippetFile -Raw | ConvertFrom-Json).snippets | Where-Object { $_.name -eq $name }).Count -eq 1
+                } ('snippet saved: ' + $name)
+            }
+            $beforeSnippets = [IO.File]::ReadAllText($snippetFile)
+            Focus-Palette 'manage snippets' 6296
+            Snapshot 'manage-snippets-command'
+            Press @(0x0D) 'Enter: Manage Snippets'
+            Press @(0x0D) 'Enter: request deletion of Remove Me'
+            Snapshot 'snippet-delete-confirmation'
+            if ([IO.File]::ReadAllText($snippetFile) -cne $beforeSnippets) { throw 'First delete action changed saved snippets without confirmation' }
+            Press @(0x1B) 'Escape: cancel deletion'
+            if ([IO.File]::ReadAllText($snippetFile) -cne $beforeSnippets) { throw 'Escape deleted or changed snippets' }
+            Focus-Palette 'manage snippets' 6296
+            Press @(0x0D) 'Enter: reopen Manage Snippets'
+            Press @(0x28) 'Down: choose Keep Me'
+            Press @(0x26) 'Up: choose Remove Me'
+            Press @(0x2E) 'Delete: request selected deletion'
+            if ([IO.File]::ReadAllText($snippetFile) -cne $beforeSnippets) { throw 'Delete skipped confirmation' }
+            Press @(0x0D) 'Enter: confirm selected deletion'
+            Wait-Until {
+                $saved = Get-Content $snippetFile -Raw | ConvertFrom-Json
+                @($saved.snippets).Count -eq 1 -and $saved.snippets[0].name -eq 'Keep Me' -and $saved.snippets[0].text -eq 'Saved text for Keep Me'
+            } 'only chosen snippet removed from disk'
+            Snapshot 'snippet-deleted'
+            Press @(0x1B) 'Escape: close Manage Snippets'
+            Restart-ChatView 1
+            Focus-Palette 'use snippets' 6254
+            Press @(0x0D) 'Enter: existing snippet picker after restart'
+            Type-Text 'Keep Me'
+            $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            Wait-Until { ((Get-Content $log -Raw) -join '') -match '\[palette\] ready chars=7 count=2 target=6257' } 'remaining snippet loaded into existing picker after restart'
+            Snapshot 'snippet-kept-after-restart'
+            Press @(0x1B) 'Escape: close Use Snippets without pasting'
+            $result.checks += @{ name = 'manage-snippets'; created = 2; deleted = 'Remove Me'; preserved = 'Keep Me'; escapeUnchanged = $true; reloadedAfterRestart = $true; entry = 'Ctrl+K Manage Snippets' }
         }
         'chat-switch-speed' {
             function Test-TabChat($tab) { return [bool]($tab.PSObject.Properties['cv'] -and $tab.cv) }

@@ -170,8 +170,12 @@ fn loadSnippets() void {
     var path_buf: [512]u8 = undefined;
     const path = getSnippetsJsonPath(&path_buf) orelse return;
     const h = win32OpenRead(path) orelse return;
-    var json_buf: [131072]u8 = undefined;
-    const n = win32ReadAll(h, &json_buf);
+    const json_buf = std.heap.page_allocator.alloc(u8, MAX_SNIPPETS * ((SNIPPET_NAME_CAP + SNIPPET_TEXT_CAP) * 6 + 32) + 64) catch {
+        _ = CloseHandle(h);
+        return;
+    };
+    defer std.heap.page_allocator.free(json_buf);
+    const n = win32ReadAll(h, json_buf);
     _ = CloseHandle(h);
     if (n == 0) return;
     var parsed = json_reader.parse(std.heap.page_allocator, json_buf[0..n]) catch return;
@@ -210,19 +214,19 @@ pub fn loadSnippetsIfChanged() void {
     loadSnippets();
 }
 
-fn saveSnippets() void {
+fn saveSnippets() bool {
     var path_buf: [512]u8 = undefined;
-    const path = getSnippetsJsonPath(&path_buf) orelse return;
+    const path = getSnippetsJsonPath(&path_buf) orelse return false;
     var dir_buf: [512]u8 = undefined;
     if (getSessionDir(&dir_buf)) |dir| win32MakeDir(dir);
-    var json_buf: [131072]u8 = undefined;
+    const json_buf = std.heap.page_allocator.alloc(u8, MAX_SNIPPETS * ((SNIPPET_NAME_CAP + SNIPPET_TEXT_CAP) * 6 + 32) + 64) catch return false;
+    defer std.heap.page_allocator.free(json_buf);
     var pos: usize = 0;
     const head = "{\"version\":1,\"snippets\":[";
     @memcpy(json_buf[pos .. pos + head.len], head);
     pos += head.len;
     var first = true;
     for (0..app_state.g_snippet_count) |i| {
-        if (pos >= json_buf.len - 9000) break;
         const s = &app_state.g_snippets[i];
         if (!first) {
             json_buf[pos] = ',';
@@ -232,11 +236,11 @@ fn saveSnippets() void {
         const p1 = "{\"name\":\"";
         @memcpy(json_buf[pos .. pos + p1.len], p1);
         pos += p1.len;
-        appendJsonEscapedWide(&json_buf, &pos, s.name[0..s.name_len]);
+        appendJsonEscapedWide(json_buf, &pos, s.name[0..s.name_len]);
         const p2 = "\",\"text\":\"";
         @memcpy(json_buf[pos .. pos + p2.len], p2);
         pos += p2.len;
-        appendJsonEscapedWide(&json_buf, &pos, s.text[0..s.text_len]);
+        appendJsonEscapedWide(json_buf, &pos, s.text[0..s.text_len]);
         const p3 = "\"}";
         @memcpy(json_buf[pos .. pos + p3.len], p3);
         pos += p3.len;
@@ -247,7 +251,9 @@ fn saveSnippets() void {
     if (writeFileAtomicW(path, json_buf[0..pos])) {
         app_state.g_snippets_mtime_lo = 0;
         app_state.g_snippets_mtime_hi = 0;
+        return true;
     }
+    return false;
 }
 
 fn wideEqualsInsensitive(a: []const u16, b: []const u16) bool {
@@ -301,13 +307,20 @@ pub fn pasteSnippet(idx: usize) void {
 
 pub fn deleteSnippet(idx: usize) bool {
     if (idx >= app_state.g_snippet_count) return false;
+    const removed = app_state.g_snippets[idx];
     var i = idx;
     while (i + 1 < app_state.g_snippet_count) : (i += 1) {
         app_state.g_snippets[i] = app_state.g_snippets[i + 1];
     }
     app_state.g_snippet_count -= 1;
     app_state.g_snippets[app_state.g_snippet_count] = Snippet{};
-    saveSnippets();
+    if (!saveSnippets()) {
+        i = app_state.g_snippet_count;
+        while (i > idx) : (i -= 1) app_state.g_snippets[i] = app_state.g_snippets[i - 1];
+        app_state.g_snippets[idx] = removed;
+        app_state.g_snippet_count += 1;
+        return false;
+    }
     return true;
 }
 
@@ -489,6 +502,7 @@ pub fn openSnippetCreateForm(hwnd: HANDLE) void {
     app_state.g_search_openall_host_mode = false;
     app_state.g_tabctx_sid = 0;
     app_state.g_search_snippet_mode = false;
+    app_state.g_search_snippet_manage_mode = false;
     app_state.g_search_session_overview_mode = false;
     app_state.g_browser_url_mode = false;
     app_state.g_shell_focused = false;
@@ -551,7 +565,7 @@ pub fn saveSnippetFromForm() void {
     @memcpy(s.text[0..tlen], text_buf[0..tlen]);
     s.text_len = @intCast(tlen);
     app_state.g_snippets[idx] = s;
-    saveSnippets();
+    if (!saveSnippets()) return;
     closeSnippetCreateForm(true);
 }
 

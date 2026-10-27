@@ -664,6 +664,9 @@ pub fn build(b: *std.Build) void {
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
     vps_test_step.dependOn(&zsb_deadline_tests.step);
+    const manage_snippets_tests = b.addSystemCommand(&.{ "node", "--test", "tools/manage-snippets.test.js" });
+    test_step.dependOn(&manage_snippets_tests.step);
+    vps_test_step.dependOn(&manage_snippets_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });
     test_step.dependOn(&snippet_form_input_tests.step);
     const console_url_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-url-copy.test.js" });
