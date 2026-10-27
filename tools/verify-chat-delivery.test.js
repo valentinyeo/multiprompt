@@ -1156,6 +1156,9 @@ test('native runner-session journeys run automatically for candidates and publis
   assert.match(read(caller), /  pull_request:/);
   assert.match(read(caller), /uses: \.\/\.github\/workflows\/verify\.yml/);
   assert.match(read(caller), /feature: chat-delivery\n      hax_sessions_proof: true/);
+  const redRun = read('.github/workflows/check-red-run.yml');
+  assert.match(redRun, /name: Install Zig 0\.16\.0/);
+  assert.match(redRun, /zig-x86_64-linux-0\.16\.0.*GITHUB_PATH/);
   const released = read('.github/workflows/release.yml');
   assert.match(released, /  runner-sessions:\n    needs: \[prepare, release\]/);
   assert.match(released, /feature: chat-delivery\n      hax_sessions_proof: true\n      tag: \$\{\{ needs\.prepare\.outputs\.tag \}\}/);
