@@ -735,6 +735,8 @@ def ssh():
             return completion(remote)
         record("invocations.jsonl", kind="reader", argv=remote)
         env = os.environ.copy()
+        if os.name == "nt":
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         if state().get("remoteHome"):
             env.update(HOME=state()["remoteHome"], USERPROFILE=state()["remoteHome"])
         with (ROOT / f"reader-{os.getpid()}.stderr.log").open("ab", buffering=0) as error:

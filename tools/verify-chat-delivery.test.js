@@ -928,3 +928,15 @@ test('send-stays-gone evidence fails when a sent message comes back or a send is
   files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: `${sendTexts[11]}${sendTexts[13]}`, s: 0 }] }] }));
   assert.match(row().detail, /came back into the box and was sent again joined to the next message/);
 });
+
+
+test('Windows remote reader preserves POSIX atomic replacement while its old descriptor stays readable', () => {
+  const output = execFileSync('python3', ['-I', path.join(root, 'tools/verify-chat-delivery/test_reader_sharing.py')], { encoding: 'utf8', timeout: 60000 });
+  if (process.platform === 'win32') {
+    assert.match(output, /ORIGINAL_WINDOWS_READER_REJECTED/);
+    assert.match(output, /POSIX_REPLACEMENT_WITH_HELD_READER_OK/);
+  }
+  const boundary = read('tools/verify-chat-delivery/boundary.py');
+  assert.match(boundary, /if os.name == "nt":\s+env\["PYTHONPATH"\] = str\(Path\(__file__\).resolve\(\).parent\)/);
+  assert.match(boundary, /subprocess.call\(\[sys.executable, \*remote\[1:\]\], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer/);
+});
