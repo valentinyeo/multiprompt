@@ -35,7 +35,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -180,7 +180,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Test plain changelog fragments and update card notes
@@ -286,7 +286,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -350,7 +350,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -459,7 +459,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -529,7 +529,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020

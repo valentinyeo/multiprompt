@@ -22,7 +22,7 @@ function verifyRouting(text) {
     const classify = steps[checkout + 1];
     assert.match(classify, /id: paths\n        shell: bash\n/);
     assert.match(classify, /EVENT: \$\{\{ github.event_name \}\}/);
-    assert.match(classify, /BASE: \$\{\{ github.event.pull_request.base.sha \|\| github.event.before \}\}/);
+    assert.match(classify, /BASE: \$\{\{ github.event.pull_request.base.sha \|\| \(github.ref != 'refs\/heads\/master' && 'origin\/master'\) \|\| github.event.before \}\}/);
     assert.match(classify, /HEAD: \$\{\{ github.event.pull_request.head.sha \|\| github.sha \}\}/);
     assert.match(classify, /run: bash -e -o pipefail tools\/classify-test-paths.sh/);
     for (const step of steps.slice(checkout + 2)) {
