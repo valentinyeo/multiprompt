@@ -6,6 +6,7 @@ on:
       - src/sidebar.zig
       - src/dialog.zig
       - src/palette_text.zig
+      - tools/palette-dialog-design.test.js
       - .claude/skills/verify-multiprompt/control.ps1
       - .github/workflows/palette-dialog-design.yml
   push:
@@ -14,6 +15,7 @@ on:
       - src/sidebar.zig
       - src/dialog.zig
       - src/palette_text.zig
+      - tools/palette-dialog-design.test.js
       - .claude/skills/verify-multiprompt/control.ps1
       - .github/workflows/palette-dialog-design.yml
   workflow_dispatch:
