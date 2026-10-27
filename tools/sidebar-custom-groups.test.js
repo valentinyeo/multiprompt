@@ -112,6 +112,7 @@ test("workspace card dismissal uses real owner input and its named native window
   assert.ok(fs.existsSync(driverPath), "native workspace card journey is installed");
   const driver = fs.readFileSync(driverPath, "utf8");
   assert.match(driver, /'MultiPromptWorkspaceSwitcher', 'Workspaces'/);
+  for (const shot of ['action', 'after']) assert.ok(driver.includes(`Snapshot '${shot}'`), `required ${shot} evidence survives cleanup`);
   const main = fs.readFileSync(path.join(__dirname, "../src/main.zig"), "utf8");
   const composer = fs.readFileSync(path.join(__dirname, "../src/chat_composer.zig"), "utf8");
   for (const input of [main, composer]) assert.match(input, /@import\("workspace_switcher.zig"\).key\(wp\)/);

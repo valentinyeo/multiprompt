@@ -45,6 +45,7 @@ function Select-WorkspaceCard([int]$Workspace, [string]$Shot) {
 }
 
 $before = (Read-Session).workspace_count
+Snapshot 'action'
 Press @(0x11, 0x4E) 'Ctrl+N: create workspace'
 Wait-Until { (Read-Session).workspace_count -eq $before + 1 } 'workspace and CMD tab persisted'
 $created = (Read-Session).active_workspace
