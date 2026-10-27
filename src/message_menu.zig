@@ -128,6 +128,7 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
         },
         w.WM_RBUTTONDOWN, w.WM_MOUSEWHEEL, 0x0215, 0x001F, w.WM_DESTROY => {
             state.open = false;
+            _ = w.PostMessageW(hwnd, 0, 0, 0);
             return 0;
         },
         else => return w.DefWindowProcW(hwnd, msg, wp, lp),
