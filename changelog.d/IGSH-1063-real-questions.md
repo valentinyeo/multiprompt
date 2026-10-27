@@ -1,1 +1,1 @@
-Normal lists stay as text; answer cards appear only for real questions.
+Answer cards use real questions, never ordinary lists.
