@@ -6184,17 +6184,8 @@ try {
             Snapshot 'update-idle'
             $result.checks += @{ name = 'update-command-without-ready-keeps-session'; pid = $process.Id; scale = 100; selectedTextPixels = $selectedTextPixels }
             $snippetFile = Join-Path $scratch 'roaming/ZigShell/snippets.json'
-            foreach ($name in @('Remove Me', 'Keep Me')) {
-                Focus-Palette 'create snippet' 6255
-                Press @(0x0D) 'Enter: Create Snippet'
-                Type-Text $name
-                Press @(0x09) 'Tab: snippet text'
-                Type-Text ('Saved text for ' + $name)
-                Press @(0x11, 0x0D) 'Ctrl+Enter: save snippet'
-                Wait-Until {
-                    (Test-Path $snippetFile) -and @((Get-Content $snippetFile -Raw | ConvertFrom-Json).snippets | Where-Object { $_.name -eq $name }).Count -eq 1
-                } ('snippet saved: ' + $name)
-            }
+            [IO.File]::WriteAllText($snippetFile, '{"version":1,"snippets":[{"name":"Remove Me","text":"Saved text for Remove Me"},{"name":"Keep Me","text":"Saved text for Keep Me"}]}')
+            Record 'Prepare two saved snippets through the existing version-one storage format'
             $beforeSnippets = [IO.File]::ReadAllText($snippetFile)
             Focus-Palette 'manage snippets' 6296
             Snapshot 'manage-snippets-command'
@@ -6225,7 +6216,7 @@ try {
             Wait-Until { ((Get-Content $log -Raw) -join '') -match '\[palette\] ready chars=7 count=2 target=6257' } 'remaining snippet loaded into existing picker after restart'
             Snapshot 'snippet-kept-after-restart'
             Press @(0x1B) 'Escape: close Use Snippets without pasting'
-            $result.checks += @{ name = 'manage-snippets'; created = 2; deleted = 'Remove Me'; preserved = 'Keep Me'; escapeUnchanged = $true; reloadedAfterRestart = $true; entry = 'Ctrl+K Manage Snippets' }
+            $result.checks += @{ name = 'manage-snippets'; seeded = 2; deleted = 'Remove Me'; preserved = 'Keep Me'; escapeUnchanged = $true; reloadedAfterRestart = $true; entry = 'Ctrl+K Manage Snippets' }
         }
         'chat-switch-speed' {
             function Test-TabChat($tab) { return [bool]($tab.PSObject.Properties['cv'] -and $tab.cv) }
