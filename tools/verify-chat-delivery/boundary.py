@@ -146,7 +146,7 @@ def fake_screen(claude, escapes):
         if claude.get("question_other"):
             rows.append("❯ " + claude["box"])
         return "\n".join(rows) + "\n"
-    lines = ["Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
+    lines = ["Hax" if state().get("hax") else "Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
     for question, answer in claude.get("turns", []):
         lines.extend(["❯ " + question, "● " + answer, ""])
     lines += ["  Queued: " + " ".join(text.split()) for text in claude["queue"]]
