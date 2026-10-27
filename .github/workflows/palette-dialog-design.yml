@@ -9,7 +9,7 @@ on:
       - .claude/skills/verify-multiprompt/control.ps1
       - .github/workflows/palette-dialog-design.yml
   push:
-    branches: [master, ceo/IGSH-1061]
+    branches: [master, ceo/IGSH-1061, ceo/IGSH-1061-recovery]
     paths:
       - src/sidebar.zig
       - src/dialog.zig
