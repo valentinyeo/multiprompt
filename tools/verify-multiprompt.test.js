@@ -472,8 +472,12 @@ $script:loseOnRecord = $true
 Refuses { Type-Text 'lost before text' }
 Reset
 [VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 2
-Type-Text 'recovered text'
-Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 2) 'Text did not recover owned foreground'
+Type-Text 'recovered after late browser activation'
+Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 2 -and [VerifyNative]::Allows -eq 2) 'Text did not reacquire owned focus after late browser activation'
+Reset
+[VerifyNative]::Foreign()
+Refuses { Type-Text 'foreign text' }
+Require ([VerifyNative]::Activations -eq 50 -and [VerifyNative]::Allows -eq 50) 'Text did not bound foreign focus recovery'
 Reset
 Type-Text 'owned text'
 Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 0) 'Text repaired focus or failed to inject'
