@@ -67,6 +67,8 @@ test('composer separates attachment from its pill and paints the approved send s
   assert.match(composer, /\.left = left \+ send_size \+ uiScaled\(8\)/);
   assert.match(composer, /const attach_btn = RECT\{\s*\.left = left,[^]*?\.right = left \+ send_size,/);
   assert.match(composer, /\.left = composer_card\.left \+ uiScaled\(14\)/);
+  const holes = fs.readFileSync('src/chat_float.zig', 'utf8');
+  assert.match(holes, /out\.addFloating\(layout\.attach_btn,/);
   const paint = body(fs.readFileSync('src/window_layout.zig', 'utf8'), 'fn paintChatButton(');
   assert.match(paint, /!app_state\.g_light_theme[^]*?glyph == \.send[^]*?tokens\.ReaderRaised/);
 });
