@@ -128,7 +128,7 @@ try {
         $result.checks += @{ name = ('settings-theme-' + $theme.value); passed = $true; savedTheme = $theme.value }
     }
     Click-Setting 'Terminal details'
-    Wait-Until { $state = Read-Session; -not $state.tabs[0].cv } 'existing terminal view choice saved'
+    Wait-Until { $state = Read-Session; -not ($state.tabs[0].PSObject.Properties['cv'] -and $state.tabs[0].cv) } 'existing terminal view choice saved'
     Click-Setting 'Large'
     Wait-Until { (Read-Session).chat_font_pt -eq 16 } 'chat font changes even while the terminal is selected'
     $result.checks += @{ name = 'settings-chat-font-in-terminal'; passed = $true; points = 16 }
