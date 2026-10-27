@@ -124,6 +124,25 @@ class HistoryReaderTest(unittest.TestCase):
         table[12] = (11, ['codex'])
         self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 11)
 
+    def test_igsh1043_hax_without_materialized_file_never_reads_another_claude_chat(self):
+        self.write(self.event('Unrelated Claude conversation'))
+        with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '10\n', '')), \
+                patch.object(reader, 'process_table', return_value={10: (1, ['hax'])}), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'), \
+                patch.object(reader, 'open_hax_transcript', return_value=None):
+            self.assertIsNone(reader.resolve_tmux_agent('claude', 'runner-starting'))
+
+    def test_igsh1043_idle_hax_keeps_its_exact_saved_session(self):
+        sid = '11111111-1111-4111-8111-111111111111'
+        path = self.home / '.local/state/hax/sessions/shared-runners' / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(dict(type='session', version=1, id=sid, cwd='/work/demo')) + '\n' + json.dumps(dict(kind='assistant', text='Saved reply after runner exits')) + '\n')
+        self.query.update(sid=sid, follow=True)
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            fields, rows = self.read()
+        self.assertEqual(fields[4], sid)
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant'], ['Saved reply after runner exits'])
+
     def test_igsh1043_live_hax_uses_owned_descriptor_not_newest_same_folder(self):
         root = self.home / '.local/state/hax/sessions/shared-runners'
         root.mkdir(parents=True)

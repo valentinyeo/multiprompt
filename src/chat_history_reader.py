@@ -392,6 +392,7 @@ def codex_transcript_for_cwd(cwd):
 
 def resolve_tmux_agent(agent, name, pid=None):
 
+    table = None
     if pid is None:
         try:
             result = subprocess.run(["tmux", "list-panes", "-t", "=" + name, "-F", "#{pane_pid}"],
@@ -403,12 +404,19 @@ def resolve_tmux_agent(agent, name, pid=None):
         pane_pids = [int(line) for line in result.stdout.split() if line.isdigit()]
         if not pane_pids:
             return None
-        pid = agent_pid_for_panes(pane_pids, process_table(pids=pane_pids), agent)
+        table = process_table(pids=pane_pids)
+        pid = agent_pid_for_panes(pane_pids, table, agent)
         if pid is None:
             return None
+    try:
+        argv = table[pid][1] if table is not None else Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "replace").split("\0")
+    except (OSError, KeyError):
+        argv = []
     hax = open_hax_transcript(pid)
     if hax is not None:
         return hax
+    if argv and process_basename(argv[0]) == "hax":
+        return None
     cwd = read_process_cwd(pid)
     if agent == "claude":
         opened = open_claude_transcript(pid)
@@ -420,10 +428,6 @@ def resolve_tmux_agent(agent, name, pid=None):
             path = conversation_path("claude", sid, cwd) if cwd else None
             if path is not None:
                 return sid, path
-        try:
-            argv = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "replace").split("\0")
-        except OSError:
-            argv = []
         for index, argument in enumerate(argv[:-1]):
             if argument == "--resume" and SESSION_ID.fullmatch(argv[index + 1]):
                 resumed = argv[index + 1]
@@ -1256,6 +1260,13 @@ def resolve_response_path(q, source=None, as_owner=False):
         except PermissionError:
             resolved, denied = None, True
         sid, path = resolved if resolved else ("", None)
+        if path is None and follow and q["sid"]:
+            try:
+                pinned = conversation_path(agent, q["sid"], cwd)
+                if pinned is not None and hax_session_header(pinned):
+                    sid, path = q["sid"], pinned
+            except PermissionError:
+                denied = True
         if path is None and source is not None and not as_owner:
             discovered = tmux_owner_process(agent, tmux, source)
             if discovered:

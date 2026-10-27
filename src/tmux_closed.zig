@@ -1,4 +1,5 @@
 const std = @import("std");
+const same = @import("tmux_identity.zig").same;
 
 pub const Entry = struct {
     host: u8,
@@ -20,7 +21,7 @@ pub const Closed = struct {
 
     pub fn contains(self: *const Closed, host: u8, name: []const u8) bool {
         for (self.entries.items) |entry| {
-            if (entry.host == host and std.mem.eql(u8, entry.name[0..entry.len], name)) return true;
+            if (same(entry.host, entry.name[0..entry.len], host, name)) return true;
         }
         return false;
     }
@@ -34,7 +35,7 @@ pub const Closed = struct {
 
     pub fn reopen(self: *Closed, host: u8, name: []const u8) void {
         for (self.entries.items, 0..) |entry, i| {
-            if (entry.host == host and std.mem.eql(u8, entry.name[0..entry.len], name)) {
+            if (same(entry.host, entry.name[0..entry.len], host, name)) {
                 _ = self.entries.orderedRemove(i);
                 return;
             }
@@ -43,11 +44,14 @@ pub const Closed = struct {
 
     pub fn restore(self: *Closed, a: std.mem.Allocator, value: std.json.Value) !void {
         if (value != .array) return;
-        for (value.array.items) |item| {
+        records: for (value.array.items) |item| {
             if (item != .object) continue;
             const host = item.object.get("host") orelse continue;
             const session = item.object.get("session") orelse continue;
-            if (host != .integer or host.integer < 0 or host.integer > 255 or session != .string or session.string.len > 63) continue;
+            if (host != .integer or host.integer < 0 or host.integer > 2 or session != .string or session.string.len > 63) continue;
+            for (session.string) |c| {
+                if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.' and c != ':') continue :records;
+            }
             try self.close(a, @intCast(host.integer), session.string);
         }
     }
@@ -87,4 +91,17 @@ test "IGSH-1043 saved close intent restores without erasing newer local closes" 
     try std.testing.expect(restored.contains(2, "runner-one"));
     try std.testing.expect(restored.contains(0, "newer-close"));
     try std.testing.expectEqual(@as(usize, 2), restored.entries.items.len);
+}
+
+test "IGSH-1043 restored close intent validates host and native session names" {
+    const a = std.testing.allocator;
+    var closed = Closed{};
+    defer closed.entries.deinit(a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, "[{\"host\":3,\"session\":\"wrong-host\"},{\"host\":0,\"session\":\"bad;command\"},{\"host\":1,\"session\":\"Runner.One\"}]", .{});
+    defer parsed.deinit();
+    try closed.restore(a, parsed.value);
+    try std.testing.expectEqual(@as(usize, 1), closed.entries.items.len);
+    try std.testing.expect(closed.contains(1, "runner.one"));
+    closed.reopen(1, "RUNNER.ONE");
+    try std.testing.expectEqual(@as(usize, 0), closed.entries.items.len);
 }
