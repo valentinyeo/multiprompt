@@ -9,17 +9,17 @@ const L = @import("startup.zig").L;
 const a = std.heap.page_allocator;
 
 extern "user32" fn IsDialogMessageW(w.HANDLE, *w.MSG) callconv(w.WINAPI) w.BOOL;
+extern "user32" fn GetKeyState(i32) callconv(w.WINAPI) i16;
+extern "user32" fn EnableWindow(w.HANDLE, w.BOOL) callconv(w.WINAPI) w.BOOL;
 extern "kernel32" fn GetFileSizeEx(w.HANDLE, *i64) callconv(w.WINAPI) w.BOOL;
 extern "gdi32" fn StretchBlt(w.HANDLE, i32, i32, i32, i32, w.HANDLE, i32, i32, i32, i32, u32) callconv(w.WINAPI) w.BOOL;
 
 pub const Control = enum(u16) {
     close = 100,
-    theme_system,
-    theme_dark,
-    theme_light,
-    font_smaller,
-    font_reset,
-    font_bigger,
+    theme,
+    font_small,
+    font_normal,
+    font_large,
     terminal,
     dictation,
     upload,
@@ -35,10 +35,10 @@ var backdrop: w.HANDLE = null;
 var backdrop_size = w.SIZE{ .cx = 0, .cy = 0 };
 var edit_brush: w.HANDLE = null;
 var children: [controls_count]w.HANDLE = @splat(null);
-var key_labels: [2]w.HANDLE = @splat(null);
+var key_window: w.HANDLE = null;
+var key_edit: w.HANDLE = null;
+var key_control: Control = .dictation;
 var fonts: [3]w.HANDLE = @splat(null);
-var dirty = [2]bool{ false, false };
-var loading = false;
 var scroll: i32 = 0;
 var scale: i32 = 100;
 
@@ -52,8 +52,8 @@ fn index(control: Control) usize {
 
 pub fn panelRect(width: i32, height: i32, percent: i32) w.RECT {
     const margin = @divTrunc(16 * percent, 100);
-    const width_px = @max(1, @min(@divTrunc(640 * percent, 100), width - margin * 2));
-    const height_px = @max(1, @min(@divTrunc(620 * percent, 100), height - margin * 2));
+    const width_px = @max(1, @min(@divTrunc(600 * percent, 100), width - margin * 2));
+    const height_px = @max(1, @min(@divTrunc(568 * percent, 100), height - margin * 2));
     const left = @divTrunc(width - width_px, 2);
     const top = @divTrunc(height - height_px, 2);
     return .{ .left = left, .top = top, .right = left + width_px, .bottom = top + height_px };
@@ -72,8 +72,6 @@ fn panel() w.RECT {
 
 const ContentGeometry = struct {
     stacked: bool,
-    row_height: i32,
-    key_height: i32,
     look: w.RECT,
     keys: w.RECT,
     about: w.RECT,
@@ -81,60 +79,48 @@ const ContentGeometry = struct {
 
 fn contentGeometry() ContentGeometry {
     const width = client(viewport).right;
-    const stacked = width < s(480);
-    const row_height = s(if (stacked) @as(i32, 88) else 48);
-    const key_height = s(if (stacked) @as(i32, 88) else 52);
-    const look = w.RECT{ .left = 0, .right = width, .top = s(24), .bottom = s(24 + 52) + row_height * 2 };
-    const keys = w.RECT{ .left = 0, .right = width, .top = look.bottom + s(50), .bottom = look.bottom + s(62) + key_height * 2 };
-    const about = w.RECT{ .left = 0, .right = width, .top = keys.bottom + s(50), .bottom = keys.bottom + s(150) };
-    return .{ .stacked = stacked, .row_height = row_height, .key_height = key_height, .look = look, .keys = keys, .about = about };
+    const stacked = width < s(440);
+    const extra = if (stacked) s(40) else @as(i32, 0);
+    const look = w.RECT{ .left = 0, .right = width, .top = s(24), .bottom = s(168) + extra };
+    const keys = w.RECT{ .left = 0, .right = width, .top = look.bottom + s(44), .bottom = look.bottom + s(148) };
+    const about = w.RECT{ .left = 0, .right = width, .top = keys.bottom + s(44), .bottom = keys.bottom + s(148) };
+    return .{ .stacked = stacked, .look = look, .keys = keys, .about = about };
 }
 
 fn controlRect(control: Control) w.RECT {
     const width = client(viewport).right;
     const right = width - s(16);
-    const geometry = contentGeometry();
-    const lower = if (geometry.stacked) s(40) else 0;
+    const g = contentGeometry();
+    const extra = if (g.stacked) s(40) else @as(i32, 0);
     return switch (control) {
         .close => blk: {
             const rc = panel();
-            break :blk .{ .left = rc.right - s(64), .right = rc.right - s(28), .top = rc.top + s(24), .bottom = rc.top + s(60) };
+            break :blk .{ .left = rc.right - s(56), .right = rc.right - s(24), .top = rc.top + s(24), .bottom = rc.top + s(56) };
         },
-        .theme_system, .theme_dark, .theme_light => blk: {
-            const cell = @min(s(70), @divTrunc(width - s(32), 3));
-            const n: i32 = @intCast(@intFromEnum(control) - @intFromEnum(Control.theme_system));
+        .theme => .{ .left = right - s(120), .right = right, .top = g.look.top + s(4), .bottom = g.look.top + s(44) },
+        .font_small, .font_normal, .font_large => blk: {
+            const cell = @min(s(72), @divTrunc(width - s(32), 3));
+            const n: i32 = @intCast(@intFromEnum(control) - @intFromEnum(Control.font_small));
             const left = right - cell * 3 + cell * n;
-            const top = geometry.look.top + s(8) + lower;
-            break :blk .{ .left = left, .right = left + cell, .top = top, .bottom = top + s(34) };
+            const top = g.look.top + s(56) + extra;
+            break :blk .{ .left = left, .right = left + cell, .top = top, .bottom = top + s(32) };
         },
-        .font_smaller, .font_reset, .font_bigger => blk: {
-            const n: i32 = @intCast(@intFromEnum(control) - @intFromEnum(Control.font_smaller));
-            const left = right - s(132) + s(44) * n;
-            const top = geometry.look.top + geometry.row_height + s(8) + lower;
-            break :blk .{ .left = left, .right = left + s(44), .top = top, .bottom = top + s(34) };
-        },
-        .terminal => blk: {
-            const top = geometry.look.top + geometry.row_height * 2 + s(12);
-            break :blk .{ .left = right - s(48), .right = right, .top = top, .bottom = top + s(26) };
-        },
+        .terminal => .{ .left = right - s(40), .right = right, .top = g.look.top + s(110) + extra, .bottom = g.look.top + s(132) + extra },
         .dictation, .upload => blk: {
-            const n: i32 = if (control == .dictation) 0 else 1;
-            const top = geometry.keys.top + s(16) + n * geometry.key_height + lower;
-            break :blk .{ .left = if (geometry.stacked) s(16) else @max(s(180), @divTrunc(width, 2)), .right = right, .top = top, .bottom = top + s(30) };
+            const top = g.keys.top + (if (control == .dictation) @as(i32, 0) else s(52));
+            break :blk .{ .left = s(16), .right = right, .top = top + s(4), .bottom = top + s(48) };
         },
-        .release_notes => .{ .left = right - s(70), .right = right, .top = geometry.about.top + s(10), .bottom = geometry.about.top + s(42) },
+        .release_notes => .{ .left = s(16), .right = right, .top = g.about.top + s(4), .bottom = g.about.top + s(48) },
     };
 }
 
 fn label(control: Control) w.LPCWSTR {
     return switch (control) {
         .close => L("Close Settings"),
-        .theme_system => L("System"),
-        .theme_dark => L("Dark"),
-        .theme_light => L("Light"),
-        .font_smaller => L("Decrease chat font size"),
-        .font_reset => L("Reset chat font size"),
-        .font_bigger => L("Increase chat font size"),
+        .theme => L("Theme"),
+        .font_small => L("Small"),
+        .font_normal => L("Normal"),
+        .font_large => L("Large"),
         .terminal => L("Terminal details"),
         .dictation => L("Dictation key"),
         .upload => L("Screencast2 upload key"),
@@ -142,12 +128,21 @@ fn label(control: Control) w.LPCWSTR {
     };
 }
 
+pub fn windowKey(message: u32, vk: usize, comptime hook: bool) bool {
+    if (state.g_account_locked or message != w.WM_KEYDOWN or vk != 0xbc or isOpen()) return false;
+    const focus = @import("focus.zig");
+    const keyState = if (hook) w.GetAsyncKeyState else GetKeyState;
+    if (keyState(0x11) >= 0 or keyState(0x10) < 0 or keyState(0x12) < 0 or
+        keyState(0x5b) < 0 or keyState(0x5c) < 0 or !focus.foregroundIsOurs()) return false;
+    return focus.PostMessageW(state.g_main_hwnd, w.WM_APP_SETTINGS_OPEN, 0, 0) != 0;
+}
+
 pub fn isOpen() bool {
     return window != null;
 }
 
 pub fn ownsWindow(hwnd: w.HANDLE) bool {
-    return window != null and hwnd != null and w.GetAncestor(hwnd, 2) == window;
+    return window != null and hwnd != null and (w.GetAncestor(hwnd, 2) == window or (key_window != null and w.GetAncestor(hwnd, 2) == key_window));
 }
 
 pub fn ownsForeground() bool {
@@ -155,7 +150,7 @@ pub fn ownsForeground() bool {
 }
 
 pub fn dialogMessage(message: *w.MSG) bool {
-    return window != null and IsDialogMessageW(window, message) != 0;
+    return window != null and IsDialogMessageW(if (key_window != null) key_window else window, message) != 0;
 }
 
 fn uploadPath(out: []u8) ?[]const u8 {
@@ -208,16 +203,17 @@ pub fn replaceUploadKey(allocator: std.mem.Allocator, contents: []const u8, valu
     return output.toOwnedSlice(allocator);
 }
 
-fn loadKeys() void {
-    loading = true;
-    defer loading = false;
+fn loadKey(control: Control) void {
     var key: [512:0]u16 = @splat(0);
-    var bytes: w.DWORD = @sizeOf(@TypeOf(key));
-    if (w.RegGetValueW(w.HKEY_CURRENT_USER, L("Environment"), L("DEEPGRAM_API_KEY"), 2, null, &key, &bytes) == 0) {
-        key[key.len - 1] = 0;
-        _ = w.SetWindowTextW(children[index(.dictation)], &key);
+    defer @memset(&key, 0);
+    if (control == .dictation) {
+        var bytes: w.DWORD = @sizeOf(@TypeOf(key));
+        if (w.RegGetValueW(w.HKEY_CURRENT_USER, L("Environment"), L("DEEPGRAM_API_KEY"), 2, null, &key, &bytes) == 0) {
+            key[key.len - 1] = 0;
+            _ = w.SetWindowTextW(key_edit, &key);
+        }
+        return;
     }
-    @memset(&key, 0);
     var path_buf: [768]u8 = undefined;
     const path = uploadPath(&path_buf) orelse return;
     const contents = files.readFileAllocWin32(path, 8192) orelse return;
@@ -229,17 +225,13 @@ fn loadKeys() void {
         var config = config_value;
         const len = std.unicode.utf8ToUtf16Le(&key, config.secretSlice()) catch 0;
         key[len] = 0;
-        _ = w.SetWindowTextW(children[index(.upload)], &key);
-        @memset(&key, 0);
+        _ = w.SetWindowTextW(key_edit, &key);
         @memset(&config.secret, 0);
     }
-    dirty = .{ false, false };
 }
 
 fn saveKey(control: Control) bool {
-    const slot: usize = if (control == .dictation) 0 else 1;
-    if (!dirty[slot]) return true;
-    const edit = children[index(control)];
+    const edit = key_edit;
     const len = w.GetWindowTextLengthW(edit);
     const text = a.allocSentinel(u16, @intCast(@max(0, len)), 0) catch return false;
     defer {
@@ -289,14 +281,85 @@ fn saveKey(control: Control) bool {
         files.win32MakePath(path[0..slash]);
         if (!files.writeFileAtomicW(path, updated)) return false;
     }
-    dirty[slot] = false;
     return true;
 }
 
-fn saveKeys() bool {
-    if (saveKey(.dictation) and saveKey(.upload)) return true;
-    _ = w.MessageBoxW(window, L("This key could not be saved. Check file permissions and try again."), L("Settings"), 0x10);
-    return false;
+fn closeKey() void {
+    if (key_window == null) return;
+    const current = key_window;
+    _ = EnableWindow(window, 1);
+    key_window = null;
+    key_edit = null;
+    _ = w.DestroyWindow(current);
+    _ = @import("focus.zig").SetForegroundWindow(window);
+    _ = @import("focus.zig").SetFocus(children[index(key_control)]);
+}
+
+fn keyProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
+    const prior_action = state.g_focus_user_action_tick;
+    defer state.g_focus_user_action_tick = prior_action;
+    state.g_focus_user_action_tick = if (@import("focus.zig").foregroundIsOurs()) state.g_focus_input_tick else 0;
+    switch (message) {
+        w.WM_COMMAND => {
+            const id: u16 = @truncate(wp);
+            if (id == 2) closeKey();
+            if (id == 1) {
+                if (saveKey(key_control)) closeKey() else _ = w.MessageBoxW(hwnd, L("This key could not be saved. Check file permissions and try again."), L("Settings"), 0x10);
+            }
+            return 0;
+        },
+        state.WM_CLOSE => {
+            closeKey();
+            return 0;
+        },
+        w.WM_PAINT => {
+            var ps = std.mem.zeroes(w.PAINTSTRUCT);
+            const hdc = w.BeginPaint(hwnd, &ps);
+            const rc = client(hwnd);
+            const brush = w.CreateSolidBrush(tokens.ReaderPanel);
+            _ = w.FillRect(hdc, &rc, brush);
+            _ = w.DeleteObject(brush);
+            paintText(hdc, if (key_control == .dictation) "Dictation key" else "Screencast2 upload key", .{ .left = s(24), .right = rc.right - s(24), .top = s(16), .bottom = s(56) }, 1, tokens.ReaderForeground, 0);
+            _ = w.EndPaint(hwnd, &ps);
+            return 0;
+        },
+        0x0133, 0x0138 => {
+            const hdc: w.HANDLE = @ptrFromInt(wp);
+            _ = w.SetTextColor(hdc, tokens.ReaderForeground);
+            _ = w.SetBkColor(hdc, tokens.ReaderControl);
+            return @bitCast(@as(usize, @intFromPtr(edit_brush)));
+        },
+        else => return w.DefWindowProcW(hwnd, message, wp, lp),
+    }
+}
+
+fn openKey(control: Control) void {
+    if (key_window != null) return;
+    key_control = control;
+    const instance = w.GetModuleHandleW(null);
+    var wc = std.mem.zeroes(w.WNDCLASSEXW);
+    wc.cbSize = @sizeOf(w.WNDCLASSEXW);
+    wc.hInstance = instance;
+    wc.hCursor = w.LoadCursorW(null, @ptrFromInt(32512));
+    wc.lpszClassName = L("MultipromptSettingsKey");
+    wc.lpfnWndProc = keyProc;
+    _ = w.RegisterClassExW(&wc);
+    const bounds = client(window);
+    const width = @min(s(440), bounds.right);
+    const height = s(200);
+    var origin = w.POINT{ .x = @divTrunc(bounds.right - width, 2), .y = @divTrunc(bounds.bottom - height, 2) };
+    _ = w.ClientToScreen(window, &origin);
+    key_window = w.CreateWindowExW(0x10000 | 0x80, L("MultipromptSettingsKey"), label(control), 0x80000000 | 0x02000000, origin.x, origin.y, width, height, window, null, instance, null);
+    if (key_window == null) return;
+    key_edit = w.CreateWindowExW(0, L("EDIT"), L(""), 0x40000000 | 0x10000000 | 0x00010000 | 0x20 | 0x80, s(24), s(76), width - s(48), s(32), key_window, @ptrFromInt(10), instance, null);
+    const cancel = w.CreateWindowExW(0, L("BUTTON"), L("Cancel"), 0x40000000 | 0x10000000 | 0x00010000, width - s(208), s(140), s(84), s(36), key_window, @ptrFromInt(2), instance, null);
+    const save = w.CreateWindowExW(0, L("BUTTON"), L("Save"), 0x40000000 | 0x10000000 | 0x00010000 | 1, width - s(108), s(140), s(84), s(36), key_window, @ptrFromInt(1), instance, null);
+    for ([_]w.HANDLE{ key_edit, cancel, save }) |child| _ = w.SendMessageW(child, 0x30, @intFromPtr(fonts[0]), 1);
+    loadKey(control);
+    _ = EnableWindow(window, 0);
+    _ = @import("focus.zig").ShowWindow(key_window, 5);
+    _ = @import("focus.zig").SetForegroundWindow(key_window);
+    _ = @import("focus.zig").SetFocus(key_edit);
 }
 
 fn paintText(hdc: w.HANDLE, value: []const u8, rect_value: w.RECT, font: usize, color: u32, flags: u32) void {
@@ -316,7 +379,12 @@ fn card(hdc: w.HANDLE, value: w.RECT) void {
     var rc = value;
     rc.top -= scroll;
     rc.bottom -= scroll;
-    smooth.fillRoundRect(hdc, rc, s(16), tokens.ReaderControl);
+    smooth.fillRoundRect(hdc, rc, s(20), tokens.ReaderOutline);
+    rc.left += s(1);
+    rc.right -= s(1);
+    rc.top += s(1);
+    rc.bottom -= s(1);
+    smooth.fillRoundRect(hdc, rc, s(19), tokens.ReaderControl);
 }
 
 fn paintContent(hdc: w.HANDLE) void {
@@ -325,18 +393,41 @@ fn paintContent(hdc: w.HANDLE) void {
     defer _ = w.DeleteObject(brush);
     _ = w.FillRect(hdc, &rc, brush);
     const g = contentGeometry();
+    const extra = if (g.stacked) s(40) else @as(i32, 0);
     paintText(hdc, "LOOK", lineRect(0, s(20)), 2, tokens.ReaderHint, 0);
     card(hdc, g.look);
-    paintText(hdc, "Theme", lineRect(g.look.top + s(6), s(38)), 0, tokens.ReaderForeground, 0);
-    paintText(hdc, "Chat font size", lineRect(g.look.top + g.row_height + s(6), s(38)), 0, tokens.ReaderForeground, 0);
-    paintText(hdc, "Terminal details", lineRect(g.look.top + g.row_height * 2 + s(6), s(38)), 0, tokens.ReaderForeground, 0);
+    paintText(hdc, "Theme", lineRect(g.look.top, s(48)), 0, tokens.ReaderForeground, 0);
+    paintText(hdc, "Chat font size", lineRect(g.look.top + s(48), s(48)), 0, tokens.ReaderForeground, 0);
+    paintText(hdc, "Terminal details", lineRect(g.look.top + s(96) + extra, s(48)), 0, tokens.ReaderForeground, 0);
+    var presets = controlRect(.font_small);
+    presets.left -= s(3);
+    presets.right = controlRect(.font_large).right + s(3);
+    presets.top -= scroll + s(3);
+    presets.bottom += s(3) - scroll;
+    smooth.fillRoundRect(hdc, presets, s(19), tokens.ReaderPanel);
     paintText(hdc, "KEYS", lineRect(g.keys.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
     card(hdc, g.keys);
     paintText(hdc, "ABOUT", lineRect(g.about.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
     card(hdc, g.about);
-    paintText(hdc, "Release notes", lineRect(g.about.top + s(6), s(38)), 0, tokens.ReaderForeground, 0);
-    paintText(hdc, "Version", lineRect(g.about.top + s(52), s(38)), 0, tokens.ReaderForeground, 0);
-    paintText(hdc, @import("main.zig").APP_VERSION, lineRect(g.about.top + s(52), s(38)), 0, tokens.ReaderHint, w.DT_RIGHT);
+    paintText(hdc, "Version", lineRect(g.about.top + s(52), s(52)), 0, tokens.ReaderForeground, 0);
+    paintText(hdc, @import("main.zig").APP_VERSION, lineRect(g.about.top + s(52), s(52)), 0, tokens.ReaderHint, w.DT_RIGHT);
+    const separator = w.CreateSolidBrush(tokens.ReaderOutline);
+    defer _ = w.DeleteObject(separator);
+    for ([_]i32{ g.look.top + s(48), g.look.top + s(96) + extra, g.keys.top + s(52), g.about.top + s(52) }) |top| {
+        const line = lineRect(top, @max(1, s(1)));
+        _ = w.FillRect(hdc, &line, separator);
+    }
+}
+
+fn currentTheme() []const u8 {
+    if (state.g_system_theme) return "System";
+    if (state.g_light_theme) return "Light";
+    if (state.g_mid_theme) return "Mid";
+    if (state.g_amoled_theme) return "AMOLED";
+    if (state.g_edge_gray_theme) return "Edge gray";
+    if (state.g_multiprompt_theme) return "Multiprompt";
+    if (state.g_dev_theme_active) return "Custom";
+    return "Dark";
 }
 
 const DrawItem = extern struct {
@@ -354,36 +445,39 @@ const DrawItem = extern struct {
 fn drawControl(item: *const DrawItem) void {
     const control = std.enums.fromInt(Control, item.id) orelse return;
     const rc = item.rect;
+    const preset = control == .font_small or control == .font_normal or control == .font_large;
     const selected = switch (control) {
-        .theme_system => state.g_system_theme,
-        .theme_dark => !state.g_system_theme and !state.g_light_theme and !state.g_mid_theme and !state.g_amoled_theme and !state.g_edge_gray_theme and !state.g_multiprompt_theme and !state.g_dev_theme_active,
-        .theme_light => !state.g_system_theme and state.g_light_theme,
+        .font_small => state.g_chat_font_pt == 12,
+        .font_normal => state.g_chat_font_pt == 14,
+        .font_large => state.g_chat_font_pt == 16,
         else => false,
     };
-    const background = w.CreateSolidBrush(if (control == .close) tokens.ReaderPanel else tokens.ReaderControl);
+    const background = w.CreateSolidBrush(if (control == .close or preset) tokens.ReaderPanel else tokens.ReaderControl);
     defer _ = w.DeleteObject(background);
     _ = w.FillRect(item.hdc, &rc, background);
     if (control == .terminal) {
         const on = !state.g_chat_active;
-        smooth.fillRoundRect(item.hdc, rc, s(13), if (on) tokens.ReaderForeground else tokens.ReaderRaised);
-        const thumb_size = s(20);
+        smooth.fillRoundRect(item.hdc, rc, s(11), if (on) tokens.ReaderForeground else tokens.ReaderRaised);
+        const thumb_size = s(16);
         const left = if (on) rc.right - thumb_size - s(3) else rc.left + s(3);
         smooth.fillEllipse(item.hdc, .{ .left = left, .right = left + thumb_size, .top = s(3), .bottom = s(3) + thumb_size }, if (on) tokens.ReaderPanel else tokens.ReaderHint);
+        return;
+    }
+    if (control == .dictation or control == .upload or control == .release_notes) {
+        paintText(item.hdc, if (control == .dictation) "Dictation key" else if (control == .upload) "Screencast2 upload key" else "Release notes", rc, 0, tokens.ReaderForeground, 0);
+        paintText(item.hdc, if (control == .release_notes) ">" else "Set >", rc, 0, tokens.ReaderHint, w.DT_RIGHT);
     } else {
-        smooth.fillRoundRect(item.hdc, rc, if (control == .close) s(18) else s(8), if (selected or (item.state & 0x11) != 0) tokens.ReaderRaised else tokens.ReaderControl);
-        var buffer: [24]u8 = undefined;
+        if (control == .close or selected or (item.state & 0x11) != 0) smooth.fillRoundRect(item.hdc, rc, s(16), tokens.ReaderRaised);
+        var buffer: [40]u8 = undefined;
         const value: []const u8 = switch (control) {
             .close => "x",
-            .theme_system => "System",
-            .theme_dark => "Dark",
-            .theme_light => "Light",
-            .font_smaller => "-",
-            .font_reset => std.fmt.bufPrint(&buffer, "{d}", .{state.g_chat_font_pt}) catch "",
-            .font_bigger => "+",
-            .release_notes => "Open",
+            .theme => std.fmt.bufPrint(&buffer, "{s} >", .{currentTheme()}) catch "",
+            .font_small => "Small",
+            .font_normal => "Normal",
+            .font_large => "Large",
             else => "",
         };
-        paintText(item.hdc, value, rc, 0, tokens.ReaderForeground, w.DT_CENTER);
+        paintText(item.hdc, value, rc, 0, if (selected or control == .close) tokens.ReaderForeground else tokens.ReaderHint, if (control == .theme) w.DT_RIGHT else w.DT_CENTER);
     }
 }
 
@@ -394,14 +488,6 @@ fn arrangeControls() void {
         rc.top -= scroll;
         rc.bottom -= scroll;
         _ = w.MoveWindow(children[index(control)], rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, 1);
-    }
-    const g = contentGeometry();
-    for (key_labels, 0..) |child, n| {
-        const key = controlRect(if (n == 0) .dictation else .upload);
-        const left = s(16);
-        const top = g.keys.top + s(12) + @as(i32, @intCast(n)) * g.key_height - scroll;
-        const right = if (g.stacked) g.keys.right - s(16) else key.left - s(16);
-        _ = w.MoveWindow(child, left, top, @max(1, right - left), s(38), 1);
     }
     _ = w.InvalidateRect(viewport, null, 1);
 }
@@ -418,27 +504,33 @@ fn ensureVisible(control: Control) void {
     if (rc.bottom > scroll + client(viewport).bottom) setScroll(rc.bottom - client(viewport).bottom);
 }
 
+fn chooseTheme() void {
+    const menu = w.CreatePopupMenu();
+    defer _ = w.DestroyMenu(menu);
+    const labels = [_]w.LPCWSTR{ L("System"), L("Dark"), L("Mid"), L("Light"), L("AMOLED"), L("Edge gray"), L("Multiprompt") };
+    for (labels, 0..) |name, i| _ = w.AppendMenuW(menu, 0, i + 1, name);
+    var bounds = std.mem.zeroes(w.RECT);
+    _ = w.GetWindowRect(children[index(.theme)], &bounds);
+    const selected = @import("fonts.zig").trackPopupMenu(menu, w.TPM_RETURNCMD, bounds.left, bounds.bottom, 0, window, null);
+    if (selected > 0 and selected <= labels.len) @import("themes.zig").choose(@enumFromInt(selected - 1));
+}
+
 fn dispatch(control: Control) void {
     switch (control) {
         .close => close(),
-        .theme_system, .theme_dark, .theme_light => @import("themes.zig").choose(switch (control) {
-            .theme_system => .system,
-            .theme_dark => .dark,
-            .theme_light => .light,
-            else => unreachable,
-        }),
-        .font_smaller => @import("main.zig").setChatFontPoint(state.g_chat_font_pt - 1),
-        .font_reset => @import("main.zig").setChatFontPoint(state.CHAT_FONT_DEFAULT_PT),
-        .font_bigger => @import("main.zig").setChatFontPoint(state.g_chat_font_pt + 1),
+        .theme => chooseTheme(),
+        .font_small => @import("main.zig").setChatFontPoint(12),
+        .font_normal => @import("main.zig").setChatFontPoint(14),
+        .font_large => @import("main.zig").setChatFontPoint(16),
         .terminal => _ = w.SendMessageW(owner, w.WM_APP_CHAT_TOGGLE, 0, 0),
         .release_notes => {
             const target = owner;
             close();
             if (window == null) _ = @import("focus.zig").PostMessageW(target, w.WM_APP_CHANGELOG_OPEN, 0, 0);
         },
-        .dictation, .upload => {},
+        .dictation, .upload => openKey(control),
     }
-    if (window != null) _ = @import("focus.zig").SetFocus(children[index(control)]);
+    if (window != null and key_window == null) _ = @import("focus.zig").SetFocus(children[index(control)]);
     for (children) |child| {
         if (child != null) _ = w.InvalidateRect(child, null, 1);
     }
@@ -464,10 +556,7 @@ fn contentProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) call
             const control = std.enums.fromInt(Control, @as(u16, @truncate(wp))) orelse return 0;
             const notification: u16 = @truncate(wp >> 16);
             if (notification == 0x100 or notification == 6) ensureVisible(control);
-            if ((control == .dictation or control == .upload) and !loading) {
-                if (notification == 0x300) dirty[if (control == .dictation) @as(usize, 0) else 1] = true;
-                if (notification == 0x200) _ = saveKey(control);
-            } else if (notification == 0) dispatch(control);
+            if (notification == 0) dispatch(control);
             return 0;
         },
         0x0133, 0x0138 => {
@@ -487,9 +576,11 @@ fn contentProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) call
 }
 
 fn capture() bool {
-    const rc = client(owner);
+    var rc = client(owner);
+    const sidebar = @import("browser_pane.zig").SIDEBAR_W();
+    rc.right -= sidebar;
     if (rc.right <= 0 or rc.bottom <= 0) return false;
-    var origin = w.POINT{ .x = 0, .y = 0 };
+    var origin = w.POINT{ .x = @import("browser_pane.zig").SIDEBAR_W(), .y = 0 };
     _ = w.ClientToScreen(owner, &origin);
     const screen = w.GetDC(null);
     if (screen == null) return false;
@@ -520,16 +611,13 @@ pub fn reposition() void {
         for (children) |child| {
             if (child != null) _ = w.SendMessageW(child, 0x30, @intFromPtr(fonts[0]), 1);
         }
-        for (key_labels) |child| {
-            if (child != null) _ = w.SendMessageW(child, 0x30, @intFromPtr(fonts[0]), 1);
-        }
     }
     const rc = client(owner);
-    var origin = w.POINT{ .x = 0, .y = 0 };
+    var origin = w.POINT{ .x = @import("browser_pane.zig").SIDEBAR_W(), .y = 0 };
     _ = w.ClientToScreen(owner, &origin);
-    _ = w.MoveWindow(window, origin.x, origin.y, rc.right, rc.bottom, 1);
+    _ = w.MoveWindow(window, origin.x, origin.y, @max(1, rc.right - @import("browser_pane.zig").SIDEBAR_W()), rc.bottom, 1);
     const box = panel();
-    _ = w.MoveWindow(viewport, box.left + s(24), box.top + s(92), @max(1, box.right - box.left - s(48)), @max(1, box.bottom - box.top - s(116)), 1);
+    _ = w.MoveWindow(viewport, box.left + s(24), box.top + s(80), @max(1, box.right - box.left - s(48)), @max(1, box.bottom - box.top - s(104)), 1);
     const close_rc = controlRect(.close);
     _ = w.MoveWindow(children[index(.close)], close_rc.left, close_rc.top, close_rc.right - close_rc.left, close_rc.bottom - close_rc.top, 1);
     setScroll(scroll);
@@ -539,6 +627,8 @@ fn panelProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callco
     const prior_action = state.g_focus_user_action_tick;
     defer state.g_focus_user_action_tick = prior_action;
     state.g_focus_user_action_tick = if (@import("focus.zig").foregroundIsOurs()) state.g_focus_input_tick else 0;
+    if (@import("fonts.zig").menuMessage(message, lp)) |result| return result;
+    if (message == 0x0120) if (@import("fonts.zig").menuChar(wp)) |result| return result;
     switch (message) {
         w.WM_PAINT => {
             var ps = std.mem.zeroes(w.PAINTSTRUCT);
@@ -560,7 +650,7 @@ fn panelProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callco
             inner.right -= outline;
             inner.bottom -= outline;
             smooth.fillRoundRect(hdc, inner, s(23), tokens.ReaderPanel);
-            paintText(hdc, "Settings", .{ .left = rc.left + s(28), .right = rc.right - s(80), .top = rc.top + s(22), .bottom = rc.top + s(62) }, 1, tokens.ReaderForeground, 0);
+            paintText(hdc, "Settings", .{ .left = rc.left + s(24), .right = rc.right - s(80), .top = rc.top + s(24), .bottom = rc.top + s(56) }, 1, tokens.ReaderForeground, 0);
             _ = w.EndPaint(hwnd, &ps);
             return 0;
         },
@@ -594,10 +684,11 @@ fn refreshFonts() void {
     for (&fonts) |*font| {
         if (font.* != null) _ = w.DeleteObject(font.*);
     }
-    for (&fonts, 0..) |*font, i| font.* = @import("fonts.zig").create(-s(if (i == 1) @as(i32, 24) else if (i == 2) @as(i32, 12) else 15), 0, 0, 0, if (i == 0) 400 else 600, 0, 0, 0, 0, 0, 0, 5, 0, null);
+    for (&fonts, 0..) |*font, i| font.* = @import("fonts.zig").create(-s(if (i == 1) @as(i32, 20) else if (i == 2) @as(i32, 12) else 14), 0, 0, 0, if (i == 0) 400 else 600, 0, 0, 0, 0, 0, 0, 5, 0, null);
 }
 
 pub fn open(parent: w.HANDLE) void {
+    @import("diagnostics.zig").debugLog("[settings] open entered");
     if (window != null) {
         _ = @import("focus.zig").SetForegroundWindow(window);
         return;
@@ -606,7 +697,6 @@ pub fn open(parent: w.HANDLE) void {
     previous_focus = w.GetFocus();
     scale = drawing.uiScaled(100);
     scroll = 0;
-    dirty = .{ false, false };
     refreshFonts();
     const instance = w.GetModuleHandleW(null);
     var wc = std.mem.zeroes(w.WNDCLASSEXW);
@@ -620,33 +710,30 @@ pub fn open(parent: w.HANDLE) void {
     wc.lpfnWndProc = contentProc;
     _ = w.RegisterClassExW(&wc);
     if (!capture()) {
+        @import("diagnostics.zig").debugLog("[settings] capture failed");
         release();
         return;
     }
     edit_brush = w.CreateSolidBrush(tokens.ReaderControl);
     window = w.CreateWindowExW(0x10000 | 0x80, L("MultipromptSettings"), L("Settings"), 0x80000000 | 0x02000000, 0, 0, 1, 1, owner, null, instance, null);
     if (window == null) {
+        var trace: [100]u8 = undefined;
+        @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&trace, "[settings] create failed error={d}", .{w.GetLastError()}) catch "[settings] create failed");
         release();
         return;
     }
     viewport = w.CreateWindowExW(0x10000, L("MultipromptSettingsContent"), L("Settings cards"), 0x40000000 | 0x10000000 | 0x02000000, 0, 0, 1, 1, window, null, instance, null);
     for (std.meta.tags(Control)) |control| {
-        const edit = control == .dictation or control == .upload;
         const parent_window = if (control == .close) window else viewport;
-        if (edit) {
-            const slot: usize = if (control == .dictation) 0 else 1;
-            key_labels[slot] = w.CreateWindowExW(0, L("STATIC"), label(control), 0x40000000 | 0x10000000 | 0x0200 | 0x4000, 0, 0, 1, 1, viewport, null, instance, null);
-            _ = w.SendMessageW(key_labels[slot], 0x30, @intFromPtr(fonts[0]), 1);
-        }
-        children[index(control)] = w.CreateWindowExW(0, if (edit) L("EDIT") else L("BUTTON"), if (edit) L("") else label(control), 0x40000000 | 0x10000000 | 0x00010000 | (if (edit) @as(u32, 0x20 | 0x80) else @as(u32, 0xb | 0x4000)), 0, 0, 1, 1, parent_window, @ptrFromInt(@intFromEnum(control)), instance, null);
+        children[index(control)] = w.CreateWindowExW(0, L("BUTTON"), label(control), 0x40000000 | 0x10000000 | 0x00010000 | 0xb | 0x4000, 0, 0, 1, 1, parent_window, @ptrFromInt(@intFromEnum(control)), instance, null);
         _ = w.SendMessageW(children[index(control)], 0x30, @intFromPtr(fonts[0]), 1);
     }
     reposition();
-    loadKeys();
     @import("browser_pane.zig").updateBrowserVisibility();
     _ = @import("focus.zig").ShowWindow(window, 5);
     _ = @import("focus.zig").SetForegroundWindow(window);
     _ = @import("focus.zig").SetFocus(children[index(.close)]);
+    @import("diagnostics.zig").debugLog("[settings] open completed");
 }
 
 fn release() void {
@@ -659,14 +746,14 @@ fn release() void {
         font.* = null;
     }
     children = @splat(null);
-    key_labels = @splat(null);
     viewport = null;
     owner = null;
     previous_focus = null;
 }
 
 pub fn close() void {
-    if (window == null or !saveKeys()) return;
+    if (window == null) return;
+    if (key_window != null) closeKey();
     const target = owner;
     const focus = previous_focus;
     const current = window;

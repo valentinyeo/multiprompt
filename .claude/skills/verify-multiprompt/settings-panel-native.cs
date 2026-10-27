@@ -11,7 +11,7 @@ public static class SettingsPanelPixels {
         for (int x = center - 12; x <= center + 12; x += 6) if (!Fill(image, x, y)) return false;
         return true;
     }
-    public static Dictionary<string, object> Check(string panelFile, string beforeFile, int clientLeft, int clientTop, int clientWidth, int clientHeight) {
+    public static Dictionary<string, object> Check(string panelFile, string beforeFile, int clientLeft, int clientTop, int clientWidth, int clientHeight, int sidebarLeft, int sidebarWidth) {
         using (Bitmap image = new Bitmap(panelFile))
         using (Bitmap before = new Bitmap(beforeFile)) {
             if (image.Size != before.Size) throw new InvalidOperationException("Settings changed screenshot dimensions");
@@ -32,7 +32,7 @@ public static class SettingsPanelPixels {
             }
             if (left < 0 || right - left < 300) throw new InvalidOperationException("No painted Settings panel width");
             if (Math.Abs(left + right - (clientLeft * 2 + clientWidth - 1)) > 4 ||
-                Math.Abs(top + bottom - (clientTop * 2 + clientHeight - 1)) > 4) throw new InvalidOperationException("Settings panel is not centred in its owner client");
+                Math.Abs(top + bottom - (clientTop * 2 + clientHeight - 1)) > 4) throw new InvalidOperationException("Settings panel is not centred in its content area");
             if (left <= clientLeft || right >= clientLeft + clientWidth || top <= clientTop || bottom >= clientTop + clientHeight) throw new InvalidOperationException("Settings panel is clipped");
             if (Fill(image, left + 2, top + 2) || Fill(image, right - 2, top + 2)) throw new InvalidOperationException("Settings panel is missing rounded corners");
             double original = 0, dimmed = 0;
@@ -45,9 +45,17 @@ public static class SettingsPanelPixels {
                 }
             }
             if (samples == 0 || original == 0 || dimmed >= original * 0.7) throw new InvalidOperationException("Chat behind Settings is not visibly dimmed");
+            int sidebarSamples = 0, unchanged = 0;
+            for (int x = sidebarLeft + 8; x < sidebarLeft + sidebarWidth - 8; x += 8) {
+                for (int y = clientTop + 80; y < clientTop + clientHeight - 80; y += 8) {
+                    sidebarSamples++;
+                    if (before.GetPixel(x, y).ToArgb() == image.GetPixel(x, y).ToArgb()) unchanged++;
+                }
+            }
+            if (sidebarSamples == 0 || unchanged < sidebarSamples * 0.95) throw new InvalidOperationException("Settings changed or dimmed the sidebar");
             return new Dictionary<string, object> {
                 { "bounds", new int[] { left, top, right + 1, bottom + 1 } },
-                { "fill", "#181818" }, { "centred", true }, { "rounded", true },
+                { "sidebarUnchanged", (double)unchanged / sidebarSamples }, { "fill", "#181818" }, { "centred", true }, { "rounded", true },
                 { "backdropRatio", dimmed / original }, { "backdropSamples", samples }
             };
         }

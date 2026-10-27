@@ -624,15 +624,6 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         }
         const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
         app_state.g_last_main_keyboard_event_time.store(kb.time, .release);
-        if (kb.vkCode == 0x1B and app_state.g_dictation_escape_held) {
-            if (wp == WM_KEYUP or wp == WM_SYSKEYUP) app_state.g_dictation_escape_held = false;
-            return 1;
-        }
-        if (kb.vkCode == 0x1B and wp == WM_KEYDOWN and !app_state.g_win_held and (kb.flags & 0x20) == 0 and !isCtrlDown() and
-            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and foregroundIsOurs() and queueDictationCancelFromEscape())
-        {
-            return 1;
-        }
         const prior_focus_action = app_state.g_focus_user_action_tick;
         defer app_state.g_focus_user_action_tick = prior_focus_action;
         app_state.g_focus_user_action_tick = 0;
@@ -655,12 +646,16 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (kb.vkCode == 0x5B or kb.vkCode == 0x5C) app_state.g_win_held = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
             return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
         }
-        if (kb.vkCode == 0xBC and wp == WM_KEYDOWN and isCtrlDown() and !isAltDown(kb.flags) and !app_state.g_win_held and
-            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and foregroundIsOurs())
-        {
-            _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_SETTINGS_OPEN, 0, 0);
+        if (kb.vkCode == 0x1B and app_state.g_dictation_escape_held) {
+            if (wp == WM_KEYUP or wp == WM_SYSKEYUP) app_state.g_dictation_escape_held = false;
             return 1;
         }
+        if (kb.vkCode == 0x1B and wp == WM_KEYDOWN and !app_state.g_win_held and (kb.flags & 0x20) == 0 and !isCtrlDown() and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and foregroundIsOurs() and queueDictationCancelFromEscape())
+        {
+            return 1;
+        }
+        if (@import("settings_panel.zig").windowKey(@intCast(wp), kb.vkCode, true)) return 1;
 
         if (kb.vkCode == 0x0D and wp == WM_KEYDOWN and isCtrlDown() and
             (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and

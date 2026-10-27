@@ -1360,6 +1360,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
     if (@import("window_frame.zig").handle(hwnd, msg, wp, lp)) |result| return result;
+    if (msg == WM_LBUTTONDOWN and @import("settings_panel.zig").isOpen()) {
+        @import("settings_panel.zig").close();
+        return 0;
+    }
+    if (@import("settings_panel.zig").windowKey(msg, wp, false)) return 0;
     if (!app_state.g_account_locked and @import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
     if (msg == @import("console.zig").WM_STARTUP_SHELL_READY) {
         @import("console.zig").queueStartupShell(@ptrFromInt(@as(usize, @bitCast(lp))));
@@ -4045,6 +4050,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         @import("win32.zig").WM_APP_SETTINGS_OPEN => {
+            debugLog("[settings] open dispatched");
             cancelShellRefocus(hwnd);
             if (app_state.g_search_active) _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
             if (app_state.g_shortcuts_active) _ = SendMessageW(hwnd, WM_APP_SHORTCUTS_CLOSE, 0, 0);
