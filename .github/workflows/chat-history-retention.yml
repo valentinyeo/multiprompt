@@ -1,5 +1,10 @@
 name: Retained chat history
 on:
+  push:
+    branches: [master]
+    paths:
+      - tools/verify-chat-delivery/**
+      - .github/workflows/chat-history-retention.yml
   pull_request:
     paths:
       - src/chat_history.zig
