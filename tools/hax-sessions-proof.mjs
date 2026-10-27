@@ -26,6 +26,8 @@ try {
   assert.equal(closed.savedBefore, 4);
   assert.equal(closed.savedAfter, 3);
   assert.equal(closed.hostRefresh, true);
+  assert.equal(closed.restartClosed, true);
+  assert.equal(closed.explicitReopen, true);
   assert.equal(closed.afterIds.length, 3);
   assert.ok(!closed.afterIds.includes(closed.closedId));
   assert.ok(closed.afterIds.every(id => closed.beforeIds.includes(id)));

@@ -733,6 +733,8 @@ pub const MAX_CLOSED_HISTORY = 10;
 pub var g_closed_history: [MAX_CLOSED_HISTORY]ClosedShell = undefined;
 pub var g_closed_count: u32 = 0;
 
+pub var g_tmux_closed: @import("tmux_closed.zig").Closed = .{};
+
 pub const MAX_TMUX_SESSIONS = 512;
 pub const TmuxSessionEntry = struct {
     name: [64]u8,

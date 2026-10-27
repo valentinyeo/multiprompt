@@ -105,6 +105,16 @@ def conversation_path(agent, sid, cwd, home=None):
                     denied = error
                 except OSError:
                     pass
+    state_home = Path(os.environ.get("XDG_STATE_HOME", str(home / ".local/state"))) if home == HOME else home / ".local/state"
+    hax_root = state_home / "hax/sessions"
+    try:
+        for path in hax_root.glob("*/*_" + sid + ".jsonl"):
+            if path.resolve().is_relative_to(hax_root.resolve()):
+                header = hax_session_header(path)
+                if header and header["id"] == sid:
+                    return path
+    except PermissionError as error:
+        denied = error
     if denied is not None:
         raise denied
     return None
@@ -164,7 +174,7 @@ def agent_pid_for_panes(pane_pids, table, agent):
                 continue
             seen.add(pid)
             argv = table.get(pid, (0, []))[1]
-            if argv and (process_basename(argv[0]) == agent or
+            if argv and (process_basename(argv[0]) in (agent, "hax") or
                          process_basename(argv[0]) in ("node", "bun") and len(argv) > 1 and
                          process_basename(argv[1]) in (agent, agent + ".js")):
                 return pid
@@ -303,6 +313,35 @@ def open_claude_transcript(pid):
         pass
     return newest_jsonl(paths)
 
+def hax_session_header(path):
+    try:
+        with path.open("rb") as source:
+            header = json.loads(source.readline())
+        if (isinstance(header, dict) and header.get("type") == "session" and header.get("version") == 1 and
+                isinstance(header.get("id"), str) and SESSION_ID.fullmatch(header["id"]) and
+                path.name.endswith("_" + header["id"] + ".jsonl")):
+            return header
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def open_hax_transcript(pid):
+    try:
+        for fd in Path(f"/proc/{pid}/fd").iterdir():
+            try:
+                path = Path(os.readlink(fd))
+                if path.suffix == ".jsonl":
+                    header = hax_session_header(path)
+                    if header:
+                        return header["id"], path
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return None
+
+
 def read_process_cwd(pid):
     try:
         return os.readlink(f"/proc/{pid}/cwd")
@@ -367,6 +406,9 @@ def resolve_tmux_agent(agent, name, pid=None):
         pid = agent_pid_for_panes(pane_pids, process_table(pids=pane_pids), agent)
         if pid is None:
             return None
+    hax = open_hax_transcript(pid)
+    if hax is not None:
+        return hax
     cwd = read_process_cwd(pid)
     if agent == "claude":
         opened = open_claude_transcript(pid)
@@ -401,7 +443,11 @@ def resolve_tmux_agent(agent, name, pid=None):
 def conversation_event(event, agent):
     if not isinstance(event, dict):
         return None
-    if agent == "claude":
+    if event.get("kind") in ("user", "assistant"):
+        if event.get("origin") == "compact_seed":
+            return None
+        message = {"role": event["kind"], "content": event.get("text", "")}
+    elif agent == "claude":
         attachment = event.get("attachment") if event.get("type") == "attachment" else None
         if isinstance(attachment, dict) and attachment.get("type") == "queued_command" and not event.get("isSidechain"):
             message = {"role": "user", "content": attachment.get("prompt", "")}
@@ -640,6 +686,8 @@ def tool_events(event, agent, search=False):
 
 def conversation_rows(event, agent, offset=0, search=False):
     message = conversation_event(event, agent)
+    if message and event.get("kind") in ("user", "assistant"):
+        message["id"] = "hax:" + str(offset)
     tools = tool_events(event, agent, search=search)
     if not tools or agent != "claude" or event.get("type") != "assistant":
         return ([message] if message else []) + tools

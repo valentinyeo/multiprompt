@@ -60,6 +60,28 @@ if ($plan.name -eq 'hax-reader') {
     Shot 'hax-closed-after-host-sync'
     Press @(0x1B) 'Esc: close runner proof search'
     if (@($after | Where-Object { $_.sid -eq $emptyId -or $observation.beforeIds -notcontains $_.sid }).Count -ne 0) { throw 'Close plus sync allocated or restored a runner shell' }
+    $closedSaved = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).closed_tmux)
+    if (@($closedSaved | Where-Object { $_.host -eq 0 -and $_.session -eq 'runner-empty' }).Count -ne 1) { throw 'Close intent was not saved by host and session' }
+    Restart-OwnedApp
+    $offset = (Read-Shared "$settings/debug.log").Length
+    Press @(0x11, 0x4B) 'Ctrl+K: verify closed runner after restart'
+    foreach ($letter in 'runner-empty'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+    [void](Wait-For 'persisted close survives restart and actual host refresh' {
+        $log = (Read-Shared "$settings/debug.log").Substring($offset)
+        ($log -match 'fetchHostIntoCache\(host=0\) done:.*added=4') -and ($log -match '\[palette\] ready chars=12 count=0(?:\s|$)')
+    })
+    Press @(0x1B) 'Esc: close restarted runner search'
+    $observation.restartClosed = $true
+    Press @(0x11, 0x10, 0x54) 'Ctrl+Shift+T: explicitly reopen closed runner'
+    $expectedShells = 4
+    [void](Wait-For 'explicit reopen restores only the requested runner' {
+        $rows = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
+        $rows.Count -eq 4 -and @($rows | Where-Object { $_.name -eq 'runner-empty' }).Count -eq 1
+    })
+    $observation.explicitReopen = $true
+    Press @(0x11, 0x57) 'Ctrl+W: close the explicitly reopened runner again'
+    $expectedShells = 3
+    [void](Wait-For 'reopened runner closes without a duplicate tab' { @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count -eq 3 })
 }
 $composer = Wait-For 'owned composer after runner proof' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
 [void](Wait-For 'runner proof composer foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer) })

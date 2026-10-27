@@ -124,6 +124,25 @@ class HistoryReaderTest(unittest.TestCase):
         table[12] = (11, ['codex'])
         self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 11)
 
+    def test_igsh1043_live_hax_uses_owned_descriptor_not_newest_same_folder(self):
+        root = self.home / '.local/state/hax/sessions/shared-runners'
+        root.mkdir(parents=True)
+        sid = '11111111-1111-4111-8111-111111111111'
+        owned = root / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+        owned.write_text(json.dumps(dict(type='session', version=1, id=sid, cwd='/work/demo')) + '\n')
+        other = root / '2026-01-02T00-00-00Z_22222222-2222-4222-8222-222222222222.jsonl'
+        other.write_text(json.dumps(dict(type='session', version=1, id='22222222-2222-4222-8222-222222222222', cwd='/work/demo')) + '\n')
+        os.utime(owned, (1, 1))
+        os.utime(other, (2, 2))
+        original_iterdir = Path.iterdir
+        def iterdir(path):
+            return iter([Path('/proc/11/fd/3')]) if path == Path('/proc/11/fd') else original_iterdir(path)
+        with patch.object(Path, 'iterdir', iterdir), \
+                patch.object(reader.os, 'readlink', return_value=str(owned)), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'):
+            self.assertEqual(reader.resolve_tmux_agent('claude', 'runner-one', pid=11), (sid, owned))
+            self.assertEqual(reader.resolve_tmux_agent('codex', 'runner-one', pid=11), (sid, owned))
+
     def test_igsh1043_native_hax_saved_sessions_keep_distinct_messages_and_offsets(self):
         root = self.home / '.local/state/hax/sessions/work-demo-neutral'
         root.mkdir(parents=True)
