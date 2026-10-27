@@ -530,7 +530,7 @@ jobs:
         with:
           node-version: 22
       - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/master'))
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
@@ -542,7 +542,7 @@ jobs:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Restore Zig (PR)
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/master'))
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |

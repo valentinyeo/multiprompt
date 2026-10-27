@@ -113,3 +113,21 @@ test('branch push proof classifies against master after a rebase removes the old
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('fixture persists manual tab ordering where startup actually restores it', () => {
+  const script = String.raw`
+import ast, json, pathlib, sys
+source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+tree = ast.parse(source)
+selected = [node for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id in ("seed", "snapshot") for target in node.targets)]
+namespace = {"names": ["session-" + str(i) for i in range(10)]}
+exec(compile(ast.Module(body=selected, type_ignores=[]), sys.argv[1], "exec"), namespace)
+print(json.dumps(dict(seed=namespace["seed"], snapshot=namespace.get("snapshot"))))
+`;
+  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, fileURLToPath(new URL('./switch-performance-fixture.py', import.meta.url))], { encoding: 'utf8', timeout: 10000 }));
+  assert.ok(result.snapshot, 'Manual order needs the startup snapshot, not an ignored session field');
+  assert.equal(result.snapshot.sort_auto, false);
+  assert.equal(result.snapshot.rows.length, 10);
+  assert.deepEqual(result.snapshot.rows.map(row => row.id), result.seed.tabs.map(tab => tab.shell_id));
+  assert.equal(result.snapshot.active, result.seed.tabs[result.seed.active_tab].shell_id);
+});
