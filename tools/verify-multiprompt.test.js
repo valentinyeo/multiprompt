@@ -2184,6 +2184,7 @@ test('IGSH-1033 master smoke, targeted proofs and full candidate select distinct
   assert.deepEqual(evaluate('pull_request'), ['appearance']);
   assert.deepEqual(evaluate('push', { feature: 'relaunch-saved-sessions' }), ['relaunch-saved-sessions']);
   assert.deepEqual(evaluate('workflow_run', { feature: 'all' }), features);
+  assert.deepEqual(evaluate('push', { feature: 'all' }), features);
   assert.deepEqual(evaluate('workflow_dispatch', { feature: 'pane-layout' }), ['pane-layout']);
   assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journey-policy.outputs.quarantined\), matrix.feature\) \}\}/);
   for (const key of Object.keys(policy.quarantined)) {
