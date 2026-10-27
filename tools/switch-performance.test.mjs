@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 async function oracle() {
@@ -50,4 +52,26 @@ test('speed check runs on every PR and blocks the aggregate', () => {
   assert.match(flow, /run: \.\/tools\/check-powershell-host-names\.ps1/);
   assert.match(flow, /name: Reject PowerShell host name collisions\n        shell: pwsh/);
   assert.match(flow, /require_jobs "\$WINDOWS"[^\n]*"\$SPEED"/);
+});
+
+test('empty fixture suggestion never asks the console to verify nonexistent grey text', () => {
+  const script = String.raw`
+import ast, json, pathlib, sys
+source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+tree = ast.parse(source)
+selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ("fake_suggestion_shown", "fake_screen")]
+namespace = {"SGR_DIM": "\x1b[2m", "SGR_RESET": "\x1b[0m"}
+exec(compile(ast.Module(body=selected, type_ignores=[]), sys.argv[1], "exec"), namespace)
+results = []
+for suggestion, box, mode in [("", "", "idle"), ("Ask next", "", "idle"), ("Ask next", "draft", "idle"), ("Ask next", "", "busy")]:
+    value = dict(suggestion=suggestion, box=box, mode=mode, queue=[])
+    results.append(dict(grey=namespace["fake_suggestion_shown"](value), screen=namespace["fake_screen"](value, True)))
+print(json.dumps(results))
+`;
+  const boundary = fileURLToPath(new URL('./verify-chat-delivery/boundary.py', import.meta.url));
+  const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, boundary], { encoding: 'utf8', timeout: 10000 }));
+  assert.deepEqual(result.map(row => Boolean(row.grey)), [false, true, false, false]);
+  assert.ok(!result[0].screen.includes('\x1b[2m'));
+  assert.ok(result[1].screen.includes('\x1b[2mAsk next\x1b[0m'));
+  assert.ok(result[2].screen.includes('draft'));
 });

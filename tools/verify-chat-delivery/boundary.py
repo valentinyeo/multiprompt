@@ -131,7 +131,7 @@ def fake_write(claude):
 
 
 def fake_suggestion_shown(claude):
-    return claude["mode"] == "idle" and not claude["box"]
+    return bool(claude["suggestion"]) and claude["mode"] == "idle" and not claude["box"]
 
 
 def fake_screen(claude, escapes):
