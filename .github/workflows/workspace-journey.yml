@@ -5,11 +5,19 @@ on:
     branches: [master, ceo/IGSH-1082]
     paths:
       - src/workspace_switcher.zig
+      - src/main.zig
+      - src/sidebar.zig
+      - src/console.zig
+      - src/workspaces.zig
       - .claude/skills/verify-multiprompt/workspace-switcher.ps1
       - .github/workflows/workspace-journey.yml
 
 permissions:
   contents: read
+
+concurrency:
+  group: workspace-identity-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
   workspace:
