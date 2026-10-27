@@ -309,8 +309,8 @@ fn scanUrlsInActiveShell() void {
     if (AttachConsole(pid) == 0) return;
     defer _ = FreeConsole();
 
-    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (handle == null) return;
+    const handle = openAttachedConsoleOutput() orelse return;
+    defer _ = CloseHandle(handle);
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) return;
 

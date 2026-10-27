@@ -26,6 +26,7 @@ Wait-Until {
     return [VerifyNative]::IsWindowVisible($script:pickerTranscript)
 } 'native chat transcript visible before picker'
 $transcript = $script:pickerTranscript
+Wait-ChatFocus 'Edit' 'composer-ready'
 Snapshot 'before'
 Press @(0x12, 0x57) 'Alt+W: open link list above Chat View'
 Wait-Until { -not [VerifyNative]::IsWindowVisible($transcript) } 'chat child hidden under link list'
