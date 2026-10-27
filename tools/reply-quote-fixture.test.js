@@ -42,7 +42,8 @@ test('context Reply handles user and agent blocks but not tool-only blocks', () 
   assert.match(render, /AppendMenuW\(menu, MF_STRING, @intFromEnum\(item\), item\.text\(\)\)/);
   assert.match(render, /chatContextMenuItems\([^\n]*reply_text != null/);
   assert.match(render, /4 => if \(reply_text\) \|text\| \{[^]*?selectChatReply\(text\)/);
-  assert.ok(render.indexOf("reply_text = std.heap.page_allocator.dupe") < render.indexOf("const cmd = TrackPopupMenu"));
+  assert.ok(render.indexOf("reply_text = std.heap.page_allocator.dupe") < render.indexOf("const cmd"));
+  assert.match(render, /message_menu\.zig"\)\.track/);
   assert.match(render, /block.role == \.prose or block.role == \.code/);
   const body = render.slice(render.indexOf('pub fn chatReplyToBlock('), render.indexOf('pub fn chatReplyLatestAgent('));
   assert.match(body, /role == \.tool\) return/);
