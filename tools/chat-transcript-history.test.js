@@ -769,3 +769,47 @@ test "cache-first switch-back IGSH-815 restart and continuation progress" {
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
 });
+
+test('IGSH-1100 history resets reuse unchanged layout and invalidate edited text', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-reset-prefix-'));
+  try {
+    copyZig(['chat_history.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'reset-test.zig'), `
+const std = @import("std");
+const history = @import("chat_history.zig");
+const transcript = @import("chat_transcript.zig");
+test "reset prefix" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1100, 0, false, "term-1", "");
+    var h: history.History = .{};
+    defer h.deinit(a);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    try wire.appendSlice(a, "@mp\\t1\\thistory\\tok\\tsid\\t0\\t200000\\t9\\t0\\tclaude\\tterm-1\\t0\\t\\ttail\\t0\\n");
+    for (0..2000) |i| {
+        const row = try std.fmt.allocPrint(a, "{{\\"role\\":\\"assistant\\",\\"id\\":\\"msg-{d}\\",\\"text\\":\\"message {d}\\",\\"offset\\":{d},\\"end\\":{d}}}\\n", .{ i, i, i * 100, (i + 1) * 100 });
+        defer a.free(row);
+        try wire.appendSlice(a, row);
+    }
+    try wire.appendSlice(a, "@@MP_END@@\\n");
+    try h.apply(a, wire.items, 1, key);
+    const old_text = try a.dupe(u16, h.text.items);
+    defer a.free(old_text);
+    try h.apply(a, "@mp\\t2\\thistory\\tok\\tsid\\t0\\t100\\t10\\t0\\tclaude\\tterm-1\\t0\\t\\ttail\\t0\\n" ++
+        "{\\"role\\":\\"assistant\\",\\"id\\":\\"msg-1999\\",\\"text\\":\\"message 1999\\",\\"offset\\":0,\\"end\\":100}\\n@@MP_END@@\\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 2000), h.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, old_text, h.text.items);
+    try std.testing.expectEqual(@as(usize, 1999), h.changed_from);
+    try h.apply(a, "@mp\\t3\\thistory\\tok\\tsid\\t0\\t100\\t11\\t0\\tclaude\\tterm-1\\t0\\t\\ttail\\t0\\n" ++
+        "{\\"role\\":\\"assistant\\",\\"id\\":\\"msg-0\\",\\"text\\":\\"changed 0\\",\\"offset\\":0,\\"end\\":100}\\n@@MP_END@@\\n", 3, key);
+    try std.testing.expectEqual(@as(usize, 2000), h.blocks.items.len);
+    try std.testing.expectEqual(@as(usize, 0), h.changed_from);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("changed 0"), h.text.items[0..9]);
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'reset-test.zig'), '--test-filter', 'reset prefix'], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
