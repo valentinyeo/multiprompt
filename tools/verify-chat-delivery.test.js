@@ -1146,3 +1146,17 @@ test('IGSH-1055 removing the read anchor rotates source identity without truncat
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('native runner-session journeys run automatically for candidates and published releases', () => {
+  const call = workflow.slice(workflow.indexOf('  workflow_call:'), workflow.indexOf('  pull_request:'));
+  assert.match(call, /      hax_sessions_proof:\n        required: false\n        default: false\n        type: boolean/);
+  assert.match(workflow, /!inputs\.hax_sessions_proof && github\.event_name == 'pull_request'/);
+  const caller = '.github/workflows/hax-sessions.yml';
+  assert.ok(fs.existsSync(path.join(root, caller)), 'candidate Windows journey has an automatic trigger');
+  assert.match(read(caller), /  pull_request:/);
+  assert.match(read(caller), /uses: \.\/\.github\/workflows\/verify\.yml/);
+  assert.match(read(caller), /feature: chat-delivery\n      hax_sessions_proof: true/);
+  const released = read('.github/workflows/release.yml');
+  assert.match(released, /  runner-sessions:\n    needs: \[prepare, release\]/);
+  assert.match(released, /feature: chat-delivery\n      hax_sessions_proof: true\n      tag: \$\{\{ needs\.prepare\.outputs\.tag \}\}/);
+});

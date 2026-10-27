@@ -1,0 +1,29 @@
+name: Native runner sessions
+
+on:
+  pull_request:
+    paths:
+      - src/chat_history_reader.py
+      - src/session.zig
+      - src/console.zig
+      - src/tmux_closed.zig
+      - src/account_desktop.zig
+      - src/vps.zig
+      - src/app_state.zig
+      - tools/chat-history-reader-test.py
+      - tools/hax-sessions-proof.mjs
+      - tools/verify-chat-delivery/**
+      - tools/verify-chat-delivery.test.js
+      - .github/workflows/hax-sessions.yml
+      - .github/workflows/verify.yml
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+jobs:
+  runners:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      hax_sessions_proof: true
