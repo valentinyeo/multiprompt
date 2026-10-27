@@ -54,7 +54,11 @@ try {
     process.exit(0);
   }
   const frame = JSON.parse(fs.readFileSync(path.join(directory, 'frame.json'), 'utf8'));
-  if (mode === 'probe') {
+  if (mode === 'baseline') {
+    assert.equal(frame.baseline, true);
+    assert.throws(() => probe(readBmp(path.join(evidence, 'reply-after.bmp')), frame), /Expected one dim reply reference/);
+    console.log('RELEASED_REPLY_BASELINE_REJECTED');
+  } else if (mode === 'probe') {
     fs.writeFileSync(path.join(directory, 'probe.json'), JSON.stringify(probe(readBmp(path.join(evidence, 'reply-after.bmp')), frame)));
   } else if (mode === 'highlight') {
     highlight(readBmp(path.join(evidence, 'reply-highlighted.bmp')), frame);
@@ -62,19 +66,22 @@ try {
     assert.equal(mode, 'verify');
     const observation = JSON.parse(fs.readFileSync(path.join(directory, 'observation.json'), 'utf8'));
     assert.equal(observation.error, null, observation.error);
-    assert.ok(observation.referenceClicked && observation.originalHighlighted);
+    assert.ok(frame.baseline ? observation.baselineRejected : observation.referenceClicked && observation.originalHighlighted);
     const rows = fs.readFileSync(path.join(directory, 'app-cache.jsonl'), 'utf8').trim().split('\n').slice(1).map(line => JSON.parse(line));
     const original = rows.find(row => row.role === 'assistant' && row.text?.startsWith('The original message starts here.'));
     assert.ok(original);
     const wire = original.text.split('\n').map(line => '> ' + line).join('\n') + '\n\nMy compact answer';
     assert.equal(rows.filter(row => row.role === 'user' && row.text === wire).length, 1, 'Wire quote was changed or duplicated');
-    probe(readBmp(path.join(evidence, 'reply-after.bmp')), frame);
-    highlight(readBmp(path.join(evidence, 'reply-highlighted.bmp')), frame);
+    if (frame.baseline) assert.throws(() => probe(readBmp(path.join(evidence, 'reply-after.bmp')), frame), /Expected one dim reply reference/);
+    else {
+      probe(readBmp(path.join(evidence, 'reply-after.bmp')), frame);
+      highlight(readBmp(path.join(evidence, 'reply-highlighted.bmp')), frame);
+    }
     const cleanup = JSON.parse(fs.readFileSync(path.join(evidence, 'cleanup.json'), 'utf8'));
     assert.equal(cleanup.remaining_owned_processes, 0);
     assert.equal(cleanup.scratch_removed, true);
-    fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify({ status: 'passed', compactReference: true, sourceJump: true, wirePreserved: true, cleanup }, null, 2));
-    console.log('NATIVE_COMPACT_REPLY_AND_SOURCE_JUMP_PROVEN');
+    fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify({ status: 'passed', baseline: frame.baseline, compactReference: !frame.baseline, sourceJump: !frame.baseline, wirePreserved: true, cleanup }, null, 2));
+    console.log(frame.baseline ? 'NATIVE_COMPACT_REPLY_RED_CONTROL_PROVEN' : 'NATIVE_COMPACT_REPLY_AND_SOURCE_JUMP_PROVEN');
   }
 } catch (error) {
   console.error(error.message);

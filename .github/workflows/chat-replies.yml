@@ -1,0 +1,41 @@
+name: Compact reply references
+
+on:
+  pull_request:
+    paths:
+      - 'src/chat_reply.zig'
+      - 'src/chat_render.zig'
+      - 'src/chat_session.zig'
+      - 'tools/chat-reply-reference-proof.mjs'
+      - 'tools/verify-chat-reply.ps1'
+      - 'tools/verify-chat-delivery/**'
+      - '.github/workflows/chat-replies.yml'
+      - '.github/workflows/verify.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'src/chat_reply.zig'
+      - 'src/chat_render.zig'
+      - 'src/chat_session.zig'
+      - 'tools/chat-reply-reference-proof.mjs'
+      - 'tools/verify-chat-reply.ps1'
+      - 'tools/verify-chat-delivery/**'
+      - '.github/workflows/chat-replies.yml'
+      - '.github/workflows/verify.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_reply_proof: true
+      chat_reply_baseline: true
+      tag: v0.28.952
+  candidate:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_reply_proof: true

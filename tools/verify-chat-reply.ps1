@@ -9,8 +9,15 @@ Press @(0x11, 0x30) 'Ctrl+0: measure compact replies' $true
 $actions.Add(@{case=$plan.name; input='wheel to the newest quoted reply'})
 [ChatDeliveryDesktop]::WheelOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, -12000)
 $bounds = $views[0].Current.BoundingRectangle
-$frame = @{scale=([LayoutCapture]::GetDpiForWindow($main) / 96.0); transcript=@{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}}
+$frame = @{baseline=($env:CHAT_REPLY_BASELINE -eq '1'); scale=([LayoutCapture]::GetDpiForWindow($main) / 96.0); transcript=@{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}}
 Save $frame "$caseDir/frame.json"
+if ($env:CHAT_REPLY_BASELINE -eq '1') {
+    Shot 'reply-after'
+    & node "$PSScriptRoot/chat-reply-reference-proof.mjs" baseline $Evidence
+    if ($LASTEXITCODE -ne 0) { throw 'Released baseline did not provide the expected red control' }
+    $observation.baselineRejected = $true
+    return
+}
 $probe = Wait-For 'one dim single-line reply reference' {
     Shot 'reply-after'
     & node "$PSScriptRoot/chat-reply-reference-proof.mjs" probe $Evidence
