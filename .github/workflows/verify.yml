@@ -3,7 +3,7 @@ run-name: verify ${{ inputs.feature || (github.event_name == 'push' && 'full' ||
 
 on:
   push:
-    branches: [master, 'ceo/IGSH-1072*', ceo/IGSH-1061-recovery, ceo/IGSH-1040]
+    branches: [master, 'ceo/IGSH-1072*', ceo/IGSH-1061-recovery]
   workflow_dispatch:
     inputs:
       feature:
@@ -83,6 +83,14 @@ on:
   workflow_call:
     inputs:
       chat_reactions_proof:
+        required: false
+        default: false
+        type: boolean
+      chat_shape_proof:
+        required: false
+        default: false
+        type: boolean
+      chat_switch_profile:
         required: false
         default: false
         type: boolean
@@ -242,7 +250,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ github.ref == 'refs/heads/ceo/IGSH-1040' && github.event_name == 'push' && fromJSON('["chat-switch-speed"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
@@ -255,15 +263,15 @@ jobs:
       CHAT_NOTES_PROOF: ${{ inputs.chat_notes_proof && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       CHAT_SWITCH_PROOF: ${{ inputs.remote_switch_proof && '1' || '' }}
-      CHAT_SHAPE_PROOF: ${{ (inputs.chat_shape_proof || (github.ref == 'refs/heads/ceo/IGSH-1040' && github.event_name == 'push')) && '1' || '' }}
-      CHAT_SWITCH_PROFILE: ${{ (inputs.chat_switch_profile || (github.ref == 'refs/heads/ceo/IGSH-1040' && github.event_name == 'push')) && '1' || '' }}
+      CHAT_SHAPE_PROOF: ${{ inputs.chat_shape_proof && '1' || '' }}
+      CHAT_SWITCH_PROFILE: ${{ inputs.chat_switch_profile && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
       CHAT_MISSING_PROOF: ${{ inputs.missing_note_proof && '1' || '' }}
       CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
       FEATURE: ${{ matrix.feature }}
-      RELEASE_TAG: ${{ inputs.tag || (github.ref == 'refs/heads/ceo/IGSH-1040' && github.event_name == 'push' && 'v0.28.946') || '' }}
+      RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false

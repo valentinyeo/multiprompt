@@ -28,7 +28,7 @@ test('IGSH-1040 opt-in keeps published946 app, bridge and extension together and
   assert.match(workflow, /chat_shape_proof:[\s\S]*?default: false/);
   assert.match(workflow, /chat_switch_profile:[\s\S]*?default: false/);
   assert.ok(workflow.includes("$env:RELEASE_TAG -ne 'v0.28.946'"));
-  assert.ok(workflow.includes('zig build -Doptimize=ReleaseSmall'));
+  assert.ok(workflow.includes("env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall'"));
   assert.ok(workflow.includes('git archive --format=zip "--output=$archive" $env:RELEASE_TAG extension'));
   assert.ok(workflow.includes("'45bef2a5da04ef62f4e3a2789467b17adb6ee4e38db3d6fc34916beef6f700cd'"));
   assert.match(control, /if \(\$shapeProof -and \$env:VERIFY_EXTENSION_ROOT\) \{\s+Copy-Item \$env:VERIFY_EXTENSION_ROOT/);
