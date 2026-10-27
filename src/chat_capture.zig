@@ -1000,6 +1000,9 @@ fn chatPermissionSendFailedApply() void {
 pub fn chatPermissionCaptureRows(shell_index: u32, width: usize, chars_read: DWORD, rows: usize) void {
     chatPermissionSendFailedApply();
     if (shell_index != app_state.active_shell) return;
+    if (app_state.g_chat_active and app_state.shells[shell_index].chat_question_other_sent) {
+        _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_IMAGE_READY, 0, 0);
+    }
     var lines: [70][]const u16 = undefined;
     const count = @min(rows, lines.len);
     for (0..count) |i| {

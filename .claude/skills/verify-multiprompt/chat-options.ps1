@@ -59,6 +59,7 @@ Press @(0x0D) 'Enter: submit Other answer'
 Wait-Until { @(Question-Answers).Count -eq 3 } 'Other text received'
 $other = @(Question-Answers)[2]
 if ($other.labels[0] -cne 'Purple') { throw 'Other answer changed typed text' }
+Wait-Until { $c = Read-Choices; $null -ne $c -and $c.count -eq 4 -and $c.live -eq 1 } 'Other answer advances to the next question' 30
 Snapshot 'other-amoled'
 Snapshot 'after'
 $outboxPath = Join-Path $scratch 'roaming/ZigShell/chat-outbox.json'
