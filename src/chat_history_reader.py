@@ -857,6 +857,8 @@ def status_header(source, size, agent, captured=()):
                         questions = value.get("questions") if isinstance(value, dict) else None
                         if isinstance(identity, str) and isinstance(questions, list) and questions:
                             question = dict(id=identity, questions=questions) if identity not in completed_questions else None
+                            if question is not None and agent != "claude":
+                                question["provider"] = "codex"
                             question_known = True
                             break
             if agent == "claude":
@@ -1538,7 +1540,7 @@ def stop_response(q):
     name = q.get("tmux")
     op = q.get("op", "stop")
     digit = q.get("digit")
-    key = chr(digit) if op in ("permission", "question") and type(digit) is int and 49 <= digit <= 57 else "Enter" if op == "question" and type(digit) is int and digit == 13 else "Escape"
+    key = chr(digit) if op in ("permission", "question") and type(digit) is int and 49 <= digit <= 57 else "Enter" if op == "question" and type(digit) is int and digit == 13 else "Tab" if op == "question" and type(digit) is int and digit == 9 else "Escape"
     reason = None
     if op in ("permission", "question") and key == "Escape":
         reason = "invalid_" + op + "_digit"
@@ -1546,7 +1548,7 @@ def stop_response(q):
         reason = "invalid_tmux_name"
     else:
         try:
-            keys = ["C-x", "C-s"] if op == "send_queued" else ["Up"] if op == "edit_queued" else [key]
+            keys = ["C-x", "C-s"] if op == "send_queued" else ["Up"] if op == "edit_queued" else ["Up", "Tab"] if op == "question" and digit == 9 else [key]
             subprocess.run(["tmux", "send-keys", "-t", "=" + name + ":", *keys], check=True, capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             reason = "tmux_stop_failed"

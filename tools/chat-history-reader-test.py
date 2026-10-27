@@ -80,6 +80,7 @@ class HistoryReaderTest(unittest.TestCase):
                    name="request_user_input", arguments=json.dumps(dict(questions=[question])))))
         status = next(row for row in self.read()[1] if row["role"] == "status")
         self.assertEqual(status["question"]["id"], "q1")
+        self.assertEqual(status["question"]["provider"], "codex")
         self.assertEqual(status["question"]["questions"], [question])
         with self.path.open("a") as target:
             target.write(json.dumps(dict(type="response_item", payload=dict(type="function_call_output", call_id="q1", output="done"))) + "\n")
@@ -98,6 +99,10 @@ class HistoryReaderTest(unittest.TestCase):
                 wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", digit=digit))
             self.assertIn("\tquestion\tok\t", wire)
             self.assertEqual(run.call_args.args[0], ["tmux", "send-keys", "-t", "=term-1:", key])
+        with patch.object(reader.subprocess, "run") as run:
+            wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", digit=9))
+        self.assertIn("\tquestion\tok\t", wire)
+        self.assertEqual(run.call_args.args[0], ["tmux", "send-keys", "-t", "=term-1:", "Up", "Tab"])
         for op, digit in (("question", 27), ("question", 10), ("question", True), ("permission", 13)):
             with patch.object(reader.subprocess, "run") as run:
                 wire = reader.stop_response(dict(op=op, id=7, tmux="term-1", digit=digit))

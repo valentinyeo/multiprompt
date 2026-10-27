@@ -2641,7 +2641,8 @@ pub fn chatQuestionAnswer(shell_index: u32, digit: u8, question_hash: u64) bool 
     const entry = session.chatHistoryEntry(session.chatFileIdentity()) orelse return false;
     const prompt = &entry.history.status.question;
     if (shell.chat_question_index >= prompt.count or prompt.groups[shell.chat_question_index].hash() != question_hash) return false;
-    return chatAgentKey(shell_index, digit, true);
+    const group = &prompt.groups[shell.chat_question_index];
+    return chatAgentKey(shell_index, if (group.codex and digit == group.other) 0x09 else digit, true);
 }
 
 fn chatAgentKey(shell_index: u32, digit: u8, question: bool) bool {

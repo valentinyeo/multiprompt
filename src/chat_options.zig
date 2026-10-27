@@ -15,7 +15,7 @@ pub const WireQuestion = struct {
     options: []const WireOption,
     multiSelect: bool = false,
 };
-pub const WirePrompt = struct { id: []const u8, questions: []const WireQuestion };
+pub const WirePrompt = struct { id: []const u8, questions: []const WireQuestion, provider: []const u8 = "claude" };
 
 pub const Option = struct {
     label: [2]u16 = @splat(0),
@@ -45,6 +45,7 @@ pub const Group = struct {
     other: u8 = 0,
     multi_select: bool = false,
     identity: u64 = 0,
+    codex: bool = false,
 
     pub fn headerSlice(self: *const Group) []const u16 {
         return self.header[0..self.header_len];
@@ -97,7 +98,7 @@ pub const Prompt = struct {
         var result: Prompt = .{ .identity = std.hash.Wyhash.hash(0, wire.id) };
         for (wire.questions, 0..) |question, index| {
             if (question.question.len == 0 or question.options.len == 0 or question.options.len > MAX_OPTIONS) return .{};
-            var group: Group = .{ .multi_select = question.multiSelect, .identity = std.hash.Wyhash.hash(result.identity, std.mem.asBytes(&index)) };
+            var group: Group = .{ .codex = std.mem.eql(u8, wire.provider, "codex"), .multi_select = question.multiSelect, .identity = std.hash.Wyhash.hash(result.identity, std.mem.asBytes(&index)) };
             group.header_len = text(&group.header, question.header);
             group.question_len = text(&group.question, question.question);
             if (group.question_len == 0) return .{};

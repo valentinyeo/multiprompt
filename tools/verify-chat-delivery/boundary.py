@@ -140,7 +140,8 @@ def fake_screen(claude, escapes):
         rows = ["Claude Code", "", "☐ " + question["header"], question["question"], ""]
         for index, option in enumerate(question["options"], 1):
             mark = "☒ " if index in claude.get("question_selected", []) else "☐ " if question.get("multiSelect") else ""
-            rows.extend([f"  {index}. {mark}{option['label']}", "     " + option.get("description", "")])
+            cursor = "❯ " if index == 1 else "  "
+            rows.extend([f"{cursor}{index}. {mark}{option['label']}", "     " + option.get("description", "")])
         rows += [f"  {len(question['options']) + 1}. Type something.", "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"]
         if claude.get("question_other"):
             rows.append("❯ " + claude["box"])
