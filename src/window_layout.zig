@@ -222,7 +222,7 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, sto
     const hover = glyph == .stop and app_state.g_chat_stop_hover;
     const grey: u8 = if (app_state.g_light_theme) (if (hover) 128 else 104) else (if (hover) 84 else 64);
     const bg = if (enabled) RGB(grey, grey, grey) else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
-    const fill = if (enabled and !hover and @import("themes.zig").themeReaderDark()) tokens.ReaderRaised else bg;
+    const fill = if (!app_state.g_light_theme and !hover and (glyph == .send or (enabled and @import("themes.zig").themeReaderDark()))) tokens.ReaderRaised else bg;
     const brush = CreateSolidBrush(fill);
     const pen = CreatePen(0, 1, fill);
     const old_brush = SelectObject(hdc, brush);

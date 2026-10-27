@@ -61,3 +61,12 @@ test('branch proof uses the full proposed change and installs the regression com
   assert.ok(red.indexOf('name: Install Zig 0.16.0') >= 0);
   assert.ok(red.indexOf('name: Install Zig 0.16.0') < red.indexOf('name: Require changed tests'));
 });
+
+test('composer separates attachment from its pill and paints the approved send shade', () => {
+  const composer = body(fs.readFileSync('src/chat_composer.zig', 'utf8'), 'pub fn chatViewLayout(');
+  assert.match(composer, /\.left = left \+ send_size \+ uiScaled\(8\)/);
+  assert.match(composer, /const attach_btn = RECT\{\s*\.left = left,[^]*?\.right = left \+ send_size,/);
+  assert.match(composer, /\.left = composer_card\.left \+ uiScaled\(14\)/);
+  const paint = body(fs.readFileSync('src/window_layout.zig', 'utf8'), 'fn paintChatButton(');
+  assert.match(paint, /!app_state\.g_light_theme[^]*?glyph == \.send[^]*?tokens\.ReaderRaised/);
+});
