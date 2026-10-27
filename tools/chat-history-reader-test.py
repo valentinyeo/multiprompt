@@ -1152,6 +1152,35 @@ class HistoryReaderTest(unittest.TestCase):
             with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)):
                 self.assertIn('saved old reply', reader.response(self.query))
 
+    def test_IGSH_1064_follow_uses_known_owners_tmux_namespace(self):
+        self.query.update(follow=True, sid='stale', cwd='/home/secondary/project')
+        expected = '@mp\t7\thistory\tok\tlive\t0\n{"role":"assistant","text":"owner history"}\n@@MP_END@@\n'
+        with patch.object(reader, 'conversation_owner', return_value=('secondary', Path('/home/secondary'))), \
+                patch.object(reader, 'resolve_tmux_agent', return_value=None), \
+                patch.object(reader, 'tmux_owner_process', return_value=None), \
+                patch.object(reader, 'owner_response', return_value=expected):
+            self.assertEqual(reader.response(self.query, reader.READER_SOURCE), expected)
+
+    def test_IGSH_1064_stale_owner_cwd_still_discovers_exact_live_process(self):
+        self.write(self.event('current live reply'))
+        self.query.update(follow=True, cwd='/home/secondary/old-project')
+        with patch.object(reader, 'conversation_owner', return_value=('secondary', Path('/home/secondary'))), \
+                patch.object(reader, 'owner_response', side_effect=lambda q, *_: reader.missing_response(q, 'session transcript not found')), \
+                patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)):
+            wire = reader.response(self.query, reader.READER_SOURCE)
+        self.assertIn('current live reply', wire)
+        self.assertNotIn('history\tmissing', wire)
+
+    def test_IGSH_1064_owner_namespace_never_recurses_or_uses_saved_history(self):
+        self.write(self.event('saved stale reply'))
+        self.query.update(follow=True, cwd='/home/secondary/project')
+        with patch.object(reader, 'conversation_owner', return_value=('secondary', Path('/home/secondary'))), \
+                patch.object(reader, 'resolve_tmux_agent', return_value=None), \
+                patch.object(reader, 'owner_response', side_effect=AssertionError('no recursive delegation')):
+            wire = reader.response(self.query, reader.READER_SOURCE, as_owner=True)
+        self.assertIn('history\tmissing', wire)
+        self.assertNotIn('saved stale reply', wire)
+
     def test_live_cross_user_discovery_ignores_saved_sid(self):
         self.write(self.event('saved old reply'))
         self.query['follow'] = True
