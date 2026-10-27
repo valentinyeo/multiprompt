@@ -5098,6 +5098,8 @@ fn chatReplyJump(index: usize) void {
     const display = chatSelectionDisplay(index) orelse return;
     const ref = chat_reply.reference(display.text) orelse return;
     const quoted = chat_reply.source(std.heap.page_allocator, display.text, ref) catch return;
+    var log: [96]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat] reply reference index={d} chars={d}", .{ index, quoted.len }) catch "[chat] reply reference");
     g_reply_jump = .{
         .identity = chatFileIdentity(),
         .quoted = quoted,

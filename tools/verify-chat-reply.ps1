@@ -27,7 +27,7 @@ $x = [int]($probe.x - $bounds.Left)
 $y = [int]($probe.y - $bounds.Top)
 $actions.Add(@{case=$plan.name; input='click compact reply reference'; x=$x; y=$y})
 $offset = (Read-Shared "$settings/debug.log").Length
-[ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $x, $y)
+[ChatDeliveryDesktop]::PressClient([IntPtr]$views[0].Current.NativeWindowHandle, $app.Id, $x, $y)
 [void](Wait-For 'jump selects the original, not later messages' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[chat\] reply source index=2 offset=\d+' })
 [void](Wait-For 'source highlight reaches the screen' {
     Shot 'reply-highlighted'
