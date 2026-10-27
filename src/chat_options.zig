@@ -260,15 +260,28 @@ fn appendDetail(option: *Option, line: []const u16) void {
     option.detail_len = @intCast(len + take);
 }
 
+fn choiceIntro(line: []const u16) bool {
+    var text: [QUESTION_MAX]u16 = undefined;
+    const n = plainInto(&text, line);
+    if (n == 0) return false;
+    const plain = text[0..n];
+    if (plain[n - 1] == '?') return true;
+    return plain[n - 1] == ':' and (containsFold(plain, "pick one") or
+        containsFold(plain, "choose") or containsFold(plain, "which") or
+        containsFold(plain, "options") or containsFold(plain, "your call"));
+}
+
 pub fn parseReply(chunks: []const Chunk, out: *Group) bool {
     var found = false;
     var cur: Group = .{};
     var prev: u8 = 0;
     var letters = false;
     var last_chunk: usize = 0;
+    var ready = false;
     for (chunks, 0..) |chunk, ci| {
         if (chunk.level != 0) {
             finish(&cur, out, &found, &prev);
+            ready = false;
             continue;
         }
         var lines = std.mem.tokenizeAny(u16, chunk.text, &.{ '\r', '\n' });
@@ -276,8 +289,11 @@ pub fn parseReply(chunks: []const Chunk, out: *Group) bool {
             const line = trimSpace(raw);
             if (line.len == 0) continue;
             if (parseItem(line)) |item| {
-                if (item.ordinal != prev + 1 or (cur.count > 0 and item.letter != letters)) finish(&cur, out, &found, &prev);
-                if (item.ordinal == 1 or cur.count > 0) {
+                if (item.ordinal != prev + 1 or (cur.count > 0 and item.letter != letters)) {
+                    finish(&cur, out, &found, &prev);
+                    ready = false;
+                }
+                if ((item.ordinal == 1 and ready) or cur.count > 0) {
                     if (cur.count < MAX_OPTIONS) {
                         fillOption(&cur.options[cur.count], item);
                         cur.count += 1;
@@ -286,9 +302,16 @@ pub fn parseReply(chunks: []const Chunk, out: *Group) bool {
                         last_chunk = ci;
                     } else finish(&cur, out, &found, &prev);
                 }
-            } else if (cur.count > 0 and last_chunk == ci) {
+            } else if (choiceIntro(line)) {
+                finish(&cur, out, &found, &prev);
+                found = false;
+                ready = true;
+            } else if (cur.count > 0 and last_chunk == ci and raw.len > line.len and (raw[0] == ' ' or raw[0] == '\t')) {
                 appendDetail(&cur.options[cur.count - 1], line);
-            } else finish(&cur, out, &found, &prev);
+            } else {
+                finish(&cur, out, &found, &prev);
+                ready = false;
+            }
         }
     }
     finish(&cur, out, &found, &prev);
@@ -482,7 +505,7 @@ test "IGSH-984 plain lettered lines and numbered bullets are options" {
     try expectUtf16("Reuse the Yeo UX key for now", g.options[0].titleSlice());
     try expectUtf16("Fastest.", g.options[0].detailSlice());
     try expectUtf16("Make a new key", g.options[1].titleSlice());
-    const numbered = [_]Chunk{ .{ .text = w("- 1. First choice") }, .{ .text = w("- 2. Second choice") } };
+    const numbered = [_]Chunk{ .{ .text = w("Pick one:") }, .{ .text = w("- 1. First choice") }, .{ .text = w("- 2. Second choice") } };
     var n: Group = .{};
     try std.testing.expect(parseReply(&numbered, &n));
     try expectUtf16("2", n.options[1].labelSlice());

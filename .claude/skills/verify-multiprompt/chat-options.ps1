@@ -27,6 +27,38 @@ function Open-FreshCmd {
     Wait-WorkspaceSurface $state.active_workspace $state.active_tab $false
 }
 
+$headingsScript = Join-Path $scratch 'section-headings.ps1'
+$headingsReady = Join-Path $scratch 'section-headings-ready.txt'
+$headingsLines = @(
+    "'1. What a pro would add'",
+    "'A shared build check catches broken releases.'",
+    "'2. Raw material'",
+    "'Start from build logs and the failing run.'",
+    "'Should I file a ticket for this?'",
+    "Set-Content -Path '$headingsReady' -Value 'ready'",
+    '[void][Console]::In.ReadLine()'
+)
+Set-Content -Path $headingsScript -Value $headingsLines -Encoding ASCII
+$logStart = if (Test-Path $log) { (Get-Content $log -Raw).Length } else { 0 }
+Type-Text ('powershell -nop -ExecutionPolicy Bypass -File "' + $headingsScript + '"')
+Press @(0x0D) 'Enter: print numbered sections followed by a yes-no question'
+Wait-Until { Test-Path $headingsReady } 'synthetic section headings printed'
+Press @(0x12, 0x43) 'Alt+C: inspect the question without answer options'
+Wait-Until { (Find-Transcript) -ne [IntPtr]::Zero } 'section question transcript visible'
+Wait-Until {
+    Palette 'chat view select all text'
+    Press @(0x0D) 'Enter: select rendered transcript'
+    Palette 'chat view copy selection'
+    Press @(0x0D) 'Enter: copy rendered transcript'
+    [System.Windows.Forms.Clipboard]::GetText().Contains('Should I file a ticket for this?')
+} 'the final question is present in the actual rendered transcript'
+Press @(0x1B) 'Escape: clear transcript selection'
+Snapshot 'section-question'
+$sectionLog = (Get-Content $log -Raw).Substring($logStart)
+if ($sectionLog -match 'CHAT_CHOICES[^\r\n]* n=[1-9]') { throw 'Section headings became answer cards for the final yes-no question' }
+$result.checks += @{ name = 'section-headings-not-answers'; cards = 0; renderedQuestion = 'Should I file a ticket for this?' }
+Open-FreshCmd
+
 $replyAnswer = Join-Path $scratch 'reply-answer.txt'
 $replyScript = Join-Path $scratch 'reply-options.ps1'
 $replyLines = @(
