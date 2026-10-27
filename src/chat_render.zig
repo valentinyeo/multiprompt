@@ -7391,7 +7391,16 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
             },
         }
 
-        if (position == .top) try scrollProofSave(L("chat-shared-desktop.bmp"), frame_bytes, frame_info.header);
+        if (position == .top) {
+            try std.testing.expect(layout.attach_btn.right < layout.composer_card.left);
+            try std.testing.expect(layout.composer.left > layout.composer_card.left);
+            const row_y = @divTrunc(layout.send_btn.top + layout.send_btn.bottom, 2);
+            const gap_x = @divTrunc(layout.attach_btn.right + layout.composer_card.left, 2);
+            try std.testing.expectEqual(bg, scrollProofColor(frame_pixels[@intCast(row_y * frame_w + gap_x)]));
+            try std.testing.expectEqual(@as(u32, 0x353535), scrollProofColor(frame_pixels[@intCast(row_y * frame_w + layout.send_btn.right - uiScaled(5))]));
+            try std.testing.expectEqual(@as(u8, 4), @import("chat_composer.zig").chatButtonAt(@divTrunc(layout.attach_btn.left + layout.attach_btn.right, 2), row_y));
+            try scrollProofSave(L("chat-shared-desktop.bmp"), frame_bytes, frame_info.header);
+        }
         var enabled: [8]u8 = undefined;
         if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
             switch (position) {
