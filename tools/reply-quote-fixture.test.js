@@ -117,8 +117,91 @@ test "own message, newest agent, tools, and bounds" {
 }
 `;
     fs.writeFileSync(path.join(dir, 'selection.zig'), (harness + body('chatBlockDisplayRange') + body('chatReplyToBlock') + body('chatReplyLatestAgent') + checks).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'selection.zig'), '--test-filter', 'own message'], { encoding: 'utf8', timeout: 60000 });
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, 'selection.zig'), '--test-filter', 'own message'], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('compact references execute production parsing and older-source navigation', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const { copyZig } = require('./zig-copy');
+  const render = read('src/chat_render.zig');
+  const body = name => {
+    const start = render.indexOf(`fn ${name}(`);
+    assert.ok(start >= 0, `Missing production ${name}`);
+    return render.slice(start, render.indexOf('\n}', start) + 2);
+  };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'compact-replies-'));
+  try {
+    copyZig(['chat_reply.zig'], dir);
+    const harness = `
+const std = @import("std");
+const chat_reply = @import("chat_reply.zig");
+const chat_transcript = struct { const Identity = struct { shell_id: u32 = 1 }; };
+const Block = struct { start: usize = 0, len: usize = 0, role: enum { user, prose, tool, injected } = .prose, source_offset: u64 = 0 };
+const app_state = struct {
+    var g_chat_active = true;
+    var g_chat_capture: [1024]u16 = undefined;
+    var g_chat_last_len: usize = 0;
+    var g_chat_blocks: [8]Block = @splat(.{});
+    var g_chat_block_count: usize = 0;
+    var g_chat_scrolled_up = false;
+    var g_chat_scroll_bottom_pending = true;
+};
+var g_reply_jump: ?struct { identity: chat_transcript.Identity, quoted: []u16, before: u64, limit: usize } = null;
+var identity: chat_transcript.Identity = .{};
+var history_entry = struct { pending: bool = false, history: struct { start: u64 = 100 } = .{}, before: u64 = 0, show_older: bool = false, next: u64 = 55 }{};
+var focused: ?usize = null;
+var requests: usize = 0;
+var notices: usize = 0;
+fn chatFileIdentity() chat_transcript.Identity { return identity; }
+fn chatHistoryEntry(_: chat_transcript.Identity) ?*@TypeOf(history_entry) { return &history_entry; }
+fn chatFileRequest(_: chat_transcript.Identity) void { requests += 1; history_entry.pending = true; }
+fn chatBlockDisplayRange(_: []const u16, block: Block) struct { start: usize, len: usize } { return .{ .start = block.start, .len = block.len }; }
+fn debugLog(_: []const u8) void {}
+fn chatSelectionClear() void {}
+fn chatNavFocus(index: usize) void { focused = index; }
+fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { notices += 1; }
+${body('chatReplyJumpClear')}
+${body('chatReplyResolve')}
+test "load older source, choose nearest preceding original, cancel across sessions" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const text = w("different sourceOriginal lineOriginal line");
+    @memcpy(app_state.g_chat_capture[0..text.len], text);
+    app_state.g_chat_last_len = text.len;
+    app_state.g_chat_block_count = 2;
+    app_state.g_chat_blocks[0] = .{ .start = 0, .len = 16, .source_offset = 150 };
+    app_state.g_chat_blocks[1] = .{ .start = 16, .len = 13, .source_offset = 350 };
+    g_reply_jump = .{ .identity = identity, .quoted = try std.heap.page_allocator.dupe(u16, w("Original line")), .before = 300, .limit = 2 };
+    chatReplyResolve();
+    try std.testing.expect(focused == null);
+    try std.testing.expectEqual(@as(usize, 1), requests);
+    try std.testing.expect(history_entry.show_older and history_entry.before == 100 and history_entry.next == 0);
+    chatReplyResolve();
+    try std.testing.expectEqual(@as(usize, 1), requests);
+    app_state.g_chat_blocks[0] = .{ .start = 29, .len = 13, .source_offset = 50 };
+    history_entry.pending = false;
+    history_entry.history.start = 0;
+    chatReplyResolve();
+    try std.testing.expectEqual(@as(?usize, 0), focused);
+    try std.testing.expect(g_reply_jump == null);
+    g_reply_jump = .{ .identity = identity, .quoted = try std.heap.page_allocator.dupe(u16, w("missing")), .before = 300, .limit = 2 };
+    identity.shell_id = 2;
+    chatReplyResolve();
+    try std.testing.expect(g_reply_jump == null and notices == 0 and requests == 1);
+    g_reply_jump = .{ .identity = identity, .quoted = try std.heap.page_allocator.dupe(u16, w("missing")), .before = 300, .limit = 2 };
+    chatReplyResolve();
+    try std.testing.expect(g_reply_jump == null and notices == 1);
+}
+`;
+    fs.writeFileSync(path.join(dir, 'navigation.zig'), harness);
+    for (const file of ['chat_reply.zig', 'navigation.zig']) {
+      const result = spawnSync(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, file)], { encoding: 'utf8', timeout: 60000 });
+      assert.equal(result.status, 0, `${file}: signal=${result.signal} error=${result.error}\n${result.stdout}${result.stderr}`);
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -80,6 +80,11 @@ on:
         required: false
         default: false
         type: boolean
+      chat_reply_proof:
+        description: Compact quoted replies and a native jump to the highlighted source
+        required: false
+        default: false
+        type: boolean
       chat_width_proof:
         description: Capture wide and narrow message geometry with the chat-messages-only journey
         required: false
@@ -122,6 +127,14 @@ on:
         default: false
         type: boolean
       chat_retention_proof:
+        required: false
+        default: false
+        type: boolean
+      chat_reply_proof:
+        required: false
+        default: false
+        type: boolean
+      chat_reply_baseline:
         required: false
         default: false
         type: boolean
@@ -174,7 +187,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -261,7 +274,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
@@ -272,6 +285,8 @@ jobs:
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_REACTIONS_PROOF: ${{ inputs.chat_reactions_proof && '1' || '' }}
       CHAT_NOTES_PROOF: ${{ inputs.chat_notes_proof && '1' || '' }}
+      CHAT_REPLY_PROOF: ${{ inputs.chat_reply_proof && '1' || '' }}
+      CHAT_REPLY_BASELINE: ${{ inputs.chat_reply_baseline && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       CHAT_SWITCH_PROOF: ${{ inputs.remote_switch_proof && '1' || '' }}
       CHAT_SHAPE_BASELINE: ${{ inputs.chat_shape_baseline && '1' || '' }}
@@ -710,7 +725,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: verify-${{ env.FEATURE }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
+          name: verify-${{ env.FEATURE }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.chat_reply_baseline && 'baseline' || 'candidate') || '' }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
           path: evidence/
           if-no-files-found: error
   tmux-identity-semantics:

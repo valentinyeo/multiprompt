@@ -6,6 +6,7 @@ const chat_hit = @import("chat_hit.zig");
 const chat_markdown = @import("chat_markdown.zig");
 const chat_history = @import("chat_history.zig");
 const chat_echo = @import("chat_echo.zig");
+const chat_reply = @import("chat_reply.zig");
 const chat_shell_sync = @import("chat_shell_sync.zig");
 const chat_transcript = @import("chat_transcript.zig");
 const chat_style = @import("chat_style.zig");
@@ -858,6 +859,30 @@ fn chatBlockGapBefore(has_previous: bool, role: ChatBlockRole, first: bool, pos:
     return if (role == .user or (first and role != .tool)) uiScaled(24) else uiScaled(6);
 }
 
+fn chatReplyLineHeight(text: []const u16) i32 {
+    return if (chat_reply.reference(text) != null) uiScaled(24) else 0;
+}
+
+fn chatPaintReplyLine(hdc: HANDLE, text: []const u16, rc: RECT) void {
+    const ref = chat_reply.reference(text) orelse return;
+    const old = SelectObject(hdc, chatMetadataFont());
+    defer _ = SelectObject(hdc, old);
+    _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(140, 144, 152) else RGB(120, 124, 132)));
+    var line = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.top + chatReplyLineHeight(text) };
+    var preview: [512]u16 = undefined;
+    preview[0] = 0x21a9;
+    preview[1] = ' ';
+    var n = @min(ref.preview_end - ref.preview_start, preview.len - 3);
+    if (n > 0 and text[ref.preview_start + n - 1] >= 0xd800 and text[ref.preview_start + n - 1] <= 0xdbff) n -= 1;
+    @memcpy(preview[2..][0..n], text[ref.preview_start..][0..n]);
+    var len = n + 2;
+    if (ref.preview_start + n < ref.preview_end) {
+        preview[len] = 0x2026;
+        len += 1;
+    }
+    _ = chatDrawText(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
 fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_style.BubblePos, width: i32, y: i32, imgs: ?*ChatImgLayout) RECT {
     const disp = chatBlockDisplayRange(buf, block);
     const text = buf[disp.start .. disp.start + disp.len];
@@ -895,16 +920,26 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
             const max_text_w = @max(1, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
             var calc = RECT{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
             const old_font = SelectObject(hdc, ensureChatFont());
-            _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            const ref = chat_reply.reference(text);
+            const body = text[if (ref) |r| r.body_start else 0..];
+            _ = DrawTextW(hdc, body.ptr, @intCast(body.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+            var natural_w = calc.right;
+            if (ref) |r| {
+                _ = SelectObject(hdc, chatMetadataFont());
+                var preview: RECT = .{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
+                _ = DrawTextW(hdc, text[r.preview_start..r.preview_end].ptr, @intCast(r.preview_end - r.preview_start), &preview, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+                natural_w = @max(natural_w, @min(max_text_w, preview.right + uiScaled(20)));
+            }
             _ = SelectObject(hdc, old_font);
-            const natural_w = calc.right;
             var bubble_w = chat_style.bubbleWidth(width, natural_w, pad, uiScaled(720));
             var shown = ChatImgLayout{};
             if (imgs != null) {
-                shown = chatImgMeasure(text, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
+                shown = chatImgMeasure(body, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
                 bubble_w = @max(bubble_w, @min(chat_style.bubbleMaxWidth(width, uiScaled(720)), shown.max_w + 2 * pad));
             }
-            _ = chatFlowBlock(hdc, text, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start, &flow_h);
+            const start = if (ref) |r| r.body_start else 0;
+            _ = chatFlowBlock(hdc, body, block, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, null, disp.start + start, &flow_h);
+            flow_h += chatReplyLineHeight(text);
             var bubble_h = flow_h + 2 * pad;
             if (shown.count > 0) {
                 const gap = uiScaled(CHAT_IMG_GAP);
@@ -955,17 +990,9 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
 }
 
 fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32, status: bool) RECT {
-    const pad = uiScaled(CHAT_BUBBLE_PAD);
-    const max_text_w = @max(1, chat_style.bubbleMaxWidth(width, uiScaled(720)) - 2 * pad);
-    var calc = RECT{ .left = 0, .top = 0, .right = max_text_w, .bottom = 0 };
-    const old_font = SelectObject(hdc, ensureChatFont());
-    _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &calc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-    _ = SelectObject(hdc, old_font);
-    const bubble_w = chat_style.bubbleWidth(width, calc.right, pad, uiScaled(720));
-    var flow_h: i32 = 0;
-    _ = chatFlowText(hdc, text, .{ .left = 0, .top = 0, .right = @max(1, bubble_w - 2 * pad), .bottom = 0 }, false, false, null, 0, &flow_h, null, false);
-    const bubble_h = flow_h + 2 * pad + (if (app_state.clean_chat or !status) @as(i32, 0) else uiScaled(CHAT_STATUS_H));
-    return .{ .left = width - bubble_w, .top = y, .right = width, .bottom = y + bubble_h };
+    var rect = chatMeasureBlockRect(hdc, text, .{ .start = 0, .len = text.len, .role = .user }, .single, width, y, null);
+    if (!app_state.clean_chat and status) rect.bottom += uiScaled(CHAT_STATUS_H);
+    return rect;
 }
 
 test "IGSH-376 top-level table cell sizes match master bytes" {
@@ -3558,12 +3585,15 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
     switch (block.role) {
         .injected => unreachable,
         .user => {
-            const bubble = rc;
+            var bubble = rc;
+            bubble.top += chatReplyLineHeight(text);
+            chatPaintReplyLine(hdc, text, rc);
             fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor(), true, true);
             const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
-            _ = chatFlowBlock(hdc, text, block, text_rc, true, null, disp.start, null);
+            const start = if (chat_reply.reference(text)) |r| r.body_start else 0;
+            _ = chatFlowBlock(hdc, text[start..], block, text_rc, true, null, disp.start + start, null);
         },
         .prose => {
             fillBubbleStyled(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
@@ -3636,12 +3666,14 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     const actions = chat_echo.pendingActions(e.state);
     const status_h = if (!app_state.clean_chat and e.state == .not_sent) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
     const actions_h = if (!app_state.clean_chat and actions.send_again) uiScaled(26) else @as(i32, 0);
-    const bubble = RECT{ .left = rc.left, .top = rc.top, .right = rc.right, .bottom = rc.bottom - status_h - actions_h };
+    const bubble = RECT{ .left = rc.left, .top = rc.top + chatReplyLineHeight(e.text), .right = rc.right, .bottom = rc.bottom - status_h - actions_h };
+    chatPaintReplyLine(hdc, e.text, rc);
     fillBubbleStyled(hdc, bubble, uiScaled(CHAT_BUBBLE_RADIUS), chatUserBubbleColor(), true, true);
     const text_rc = RECT{ .left = bubble.left + uiScaled(CHAT_BUBBLE_PAD), .top = bubble.top + uiScaled(CHAT_BUBBLE_PAD), .right = bubble.right - uiScaled(CHAT_BUBBLE_PAD), .bottom = bubble.bottom - uiScaled(CHAT_BUBBLE_PAD) };
     _ = SelectObject(hdc, ensureChatFont());
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
-    _ = chatFlowText(hdc, e.text, text_rc, false, true, null, offset, null, null, true);
+    const start = if (chat_reply.reference(e.text)) |r| r.body_start else 0;
+    _ = chatFlowText(hdc, e.text[start..], text_rc, false, true, null, offset + start, null, null, true);
     if (e.state == .delivered and e.delivery_watch.removed_ms == 0) chatDimQueuedBubble(hdc, bubble);
     chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
     if (!app_state.clean_chat and actions.send_again) {
@@ -4060,15 +4092,17 @@ fn chatTranscriptCharAt(hwnd: HANDLE, x: i32, y: i32) ?usize {
         area.right -= uiScaled(CHAT_CODE_PAD);
         area.top += uiScaled(CHAT_CODE_PAD + CHAT_CODE_HEADER);
     }
+    const start = if (block.role == .user) (if (chat_reply.reference(text)) |r| r.body_start else 0) else 0;
+    if (start > 0) area.top += chatReplyLineHeight(text);
     const block_rect = chatSelectionRect(index);
     const content_y = y + app_state.g_chat_scroll_y;
-    if (content_y < block_rect.top) return disp.start;
+    if (content_y < block_rect.top) return disp.start + start;
     if (content_y >= block_rect.bottom) return disp.start + disp.len;
-    var char: usize = disp.start;
+    var char: usize = disp.start + start;
     const dc = GetDC(hwnd);
     if (dc == null) return char;
     defer _ = ReleaseDC(hwnd, dc);
-    _ = chatFlowBlock(dc, text, block, area, false, .{ .x = x, .y = y, .char = &char }, disp.start, null);
+    _ = chatFlowBlock(dc, text[start..], block, area, false, .{ .x = x, .y = y, .char = &char }, disp.start + start, null);
     return char;
 }
 
@@ -4469,11 +4503,13 @@ fn chatTranscriptLinkAt(hwnd: HANDLE, x: i32, y: i32) ?link_detect.Range {
         area.right -= uiScaled(CHAT_CODE_PAD);
         area.top += uiScaled(CHAT_CODE_PAD + CHAT_CODE_HEADER);
     }
+    const start = if (block.role == .user) (if (chat_reply.reference(text)) |r| r.body_start else 0) else 0;
+    if (start > 0) area.top += chatReplyLineHeight(text);
     if (!pointInRect(area, x, y)) return null;
     const dc = GetDC(hwnd);
     if (dc == null) return null;
     defer _ = ReleaseDC(hwnd, dc);
-    return chatFlowBlock(dc, text, block, area, false, .{ .x = x, .y = y }, disp.start, null);
+    return chatFlowBlock(dc, text[start..], block, area, false, .{ .x = x, .y = y }, disp.start + start, null);
 }
 
 fn chatContextLinkText(buf: []const u16, link: ?link_detect.Range) ?[]const u16 {
@@ -4859,6 +4895,7 @@ fn chatPaintNavRing(hdc: HANDLE, rc: RECT) void {
 }
 
 pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) void {
+    chatReplyResolve();
     var client_rc = RECT{ .left = 0, .top = 0, .right = w, .bottom = h };
     var canvas = @import("smooth.zig").Canvas.init(mem_dc);
     defer canvas.deinit();
@@ -5032,6 +5069,86 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     return 0;
 }
 
+var g_reply_jump: ?struct {
+    identity: chat_transcript.Identity,
+    quoted: []u16,
+    before: u64,
+    limit: usize,
+} = null;
+
+fn chatReplyJumpClear() void {
+    if (g_reply_jump) |jump| std.heap.page_allocator.free(jump.quoted);
+    g_reply_jump = null;
+}
+
+fn chatReplyAt(x: i32, y: i32) ?usize {
+    const captured = chatTranscriptBlockAtPoint(y);
+    const first = captured orelse app_state.g_chat_block_count;
+    const end = if (captured != null) first + 1 else first + app_state.g_chat_echo_layout_count;
+    for (first..end) |i| {
+        var rc = chatSelectionRect(i);
+        rc.top -= app_state.g_chat_scroll_y;
+        rc.bottom = rc.top + uiScaled(24);
+        if (!pointInRect(rc, x, y)) continue;
+        const display = chatSelectionDisplay(i) orelse continue;
+        if (display.block.role == .user and chat_reply.reference(display.text) != null) return i;
+    }
+    return null;
+}
+
+fn chatReplyJump(index: usize) void {
+    chatReplyJumpClear();
+    const display = chatSelectionDisplay(index) orelse return;
+    const ref = chat_reply.reference(display.text) orelse return;
+    const quoted = chat_reply.source(std.heap.page_allocator, display.text, ref) catch return;
+    var log: [96]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat] reply reference index={d} chars={d}", .{ index, quoted.len }) catch "[chat] reply reference");
+    g_reply_jump = .{
+        .identity = chatFileIdentity(),
+        .quoted = quoted,
+        .before = if (index < app_state.g_chat_block_count) display.block.source_offset else std.math.maxInt(u64),
+        .limit = @min(index, app_state.g_chat_block_count),
+    };
+    chatReplyResolve();
+}
+
+pub fn chatReplyResolve() void {
+    const jump = g_reply_jump orelse return;
+    if (!app_state.g_chat_active or !std.meta.eql(jump.identity, chatFileIdentity())) {
+        chatReplyJumpClear();
+        return;
+    }
+    const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
+    var i = if (jump.before == 0) @min(jump.limit, app_state.g_chat_block_count) else app_state.g_chat_block_count;
+    while (i > 0) {
+        i -= 1;
+        const block = app_state.g_chat_blocks[i];
+        if (block.role == .tool or block.role == .injected or (jump.before > 0 and block.source_offset >= jump.before)) continue;
+        const disp = chatBlockDisplayRange(buf, block);
+        if (!chat_reply.sourceMatches(buf[disp.start..][0..disp.len], jump.quoted)) continue;
+        chatSelectionClear();
+        chatReplyJumpClear();
+        chatNavFocus(i);
+        var log: [96]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[chat] reply source index={d} offset={d}", .{ i, block.source_offset }) catch "[chat] reply source");
+        return;
+    }
+    if (chatHistoryEntry(jump.identity)) |entry| {
+        if (entry.pending) return;
+        if (entry.history.start > 0) {
+            entry.before = entry.history.start;
+            entry.show_older = true;
+            entry.next = 0;
+            app_state.g_chat_scrolled_up = true;
+            app_state.g_chat_scroll_bottom_pending = false;
+            chatFileRequest(jump.identity);
+            return;
+        }
+    }
+    chatReplyJumpClear();
+    showHeaderNoticeAscii("Original message is not available", 2500, false);
+}
+
 fn chatNavEligible(index: usize) bool {
     const block = app_state.g_chat_blocks[index];
     return block.role != .tool and block.len > 0 and !g_reaction_view.hides(index);
@@ -5088,7 +5205,7 @@ fn chatNavReveal(index: usize) void {
     const top = rect.top - app_state.g_chat_scroll_y;
     const bottom = rect.bottom - app_state.g_chat_scroll_y;
     const margin = uiScaled(8);
-    const view_top = client.top + (if (app_state.g_chat_find_open) uiScaled(app_state.CHAT_FIND_TOP_H) else 0) + margin;
+    const view_top = client.top + app_state.g_chat_top_pad + (if (app_state.g_chat_find_open) uiScaled(app_state.CHAT_FIND_TOP_H) else 0) + margin;
     const view_bottom = client.bottom - margin;
     if (top < view_top) {
         chatScrollBy(view_top - top);
@@ -5256,7 +5373,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             var cursor: POINT = undefined;
             _ = GetCursorPos(&cursor);
             _ = ScreenToClient(hwnd, &cursor);
-            if (chatNoteAt(cursor.x, cursor.y) != null or chatToolAt(cursor.x, cursor.y) != null or chatChoiceAt(cursor.x, cursor.y) != null or app_state.g_chat_hover_link != null or app_state.g_chat_hover_copy != null or app_state.g_chat_hover_image) {
+            if (chatReplyAt(cursor.x, cursor.y) != null or chatNoteAt(cursor.x, cursor.y) != null or chatToolAt(cursor.x, cursor.y) != null or chatChoiceAt(cursor.x, cursor.y) != null or app_state.g_chat_hover_link != null or app_state.g_chat_hover_copy != null or app_state.g_chat_hover_image) {
                 _ = SetCursor(LoadCursorW(null, @ptrFromInt(32649)));
                 return 1;
             }
@@ -5264,6 +5381,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_LBUTTONDOWN => {
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
+            chatReplyJumpClear();
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatNoteAt(GET_X(lp), GET_Y(lp))) |index| {
                 app_state.g_chat_blocks[index].note_open = !app_state.g_chat_blocks[index].note_open;
@@ -5274,6 +5392,10 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             if (chatToolAt(GET_X(lp), GET_Y(lp))) |index| {
                 app_state.g_chat_blocks[index].tool_open = !app_state.g_chat_blocks[index].tool_open;
                 chatImageReady();
+                return 0;
+            }
+            if (chatReplyAt(GET_X(lp), GET_Y(lp))) |index| {
+                chatReplyJump(index);
                 return 0;
             }
             chatNavClear();
