@@ -292,6 +292,7 @@ test('IGSH-1072 branch build identity is embedded and independently checked by t
   assert.match(workflow, /name: Identify branch executable[\s\S]*?git rev-parse HEAD[\s\S]*?VERIFY_VERSION=/);
   assert.match(workflow, /run: zig build[^\n]*-Dversion="\$\{\{ env\.VERIFY_VERSION \}\}"/);
   assert.match(workflow, /version = \$env:VERIFY_VERSION/);
+  assert.match(workflow, /if \(\$env:FEATURE -eq 'chat-dictation'\) \{ \$version \+= '-verify\.' \+ \$revision\.Substring\(0, 12\) \}/);
   assert.match(driver, /Executable build\/version marker mismatch/);
   assert.match(driver, /Doctor: wrong version in/);
 });
