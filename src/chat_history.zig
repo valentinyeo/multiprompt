@@ -535,6 +535,18 @@ pub const History = struct {
             next.updateCursor(self.*);
         }
         if (!self.defer_render) try next.render(a);
+        var common_text: usize = 0;
+        const text_len = @min(self.text.items.len, next.text.items.len);
+        for (self.text.items[0..text_len], next.text.items[0..text_len]) |old, new| {
+            if (old != new) break;
+            common_text += 1;
+        }
+        const block_count = @min(self.last_block, next.blocks.items.len);
+        for (self.blocks.items[0..block_count], next.blocks.items[0..block_count]) |old, new| {
+            if (!std.meta.eql(old, new) or new.start + new.len > common_text or
+                new.detail_start + new.detail_len > common_text or new.diff_start + new.diff_len > common_text) break;
+            next.changed_from += 1;
+        }
         next.restore_full = mode == null and next.more and self.rows.items.len > 0;
         self.deinit(a);
         self.* = next;
