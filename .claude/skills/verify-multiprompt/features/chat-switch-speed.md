@@ -23,6 +23,65 @@ Run on demand with `workflow_dispatch` using feature `chat-switch-speed` on a br
 4. Before each switch the harness appends one new assistant answer to the target session's transcript, like a running agent that kept working while another session was in front, so the switch also has to take in new history. Each switch is one native call that starts the Stopwatch, sends the key chord, and polls the app log from the pre-switch byte offset for the content line. It returns the click-to-shown time and the longest probe round trip. The app's own `ms=` value for the same line is kept as `app_ms`.
 5. Save `switch-timings.json` from finally: per mode `samples_ms`, `app_ms`, `hang_ms`, `missing`, `median_ms`, `max_ms`, `max_hang_ms`, `first_frame_layout_w`, `first_frame_client_w`, `first_frame_wrong_width`, `moved_after_first_frame`, `moved_lines`. A switch that never shows its chat is recorded as 1200 ms and counted in `missing`. Each sample's raw log range is kept as `<mode>-<sample>-debug.log`.
 
+### Audit-shape mode and separate CPU capture
+
+Enable `chat_shape_proof` with `feature=chat-switch-speed`.
+Use `tag=v0.28.946` for the released baseline.
+Enable `chat_shape_baseline` only for that known regression.
+A valid baseline requires an observed stale latest reply.
+Setup failures and an unexpectedly passing baseline remain errors.
+The recorded product verdict remains failed, never accepted.
+Leave `tag` empty for the ReleaseSmall candidate.
+These runs require approved repository access.
+Never run this journey on the VPS.
+
+- `boundary.py shell seed-shapes` preserves process/session metadata.
+- The generator uses anonymous numeric audit statistics.
+- Four profiles preserve complete-source bytes and record counts.
+- Two endpoint markers add two explicit records.
+- The fifth profile remains a partial cache sample.
+- Message order and Markdown semantics remain generated.
+- No real messages enter fixtures or evidence.
+- Both browser modes contain twenty measured switches.
+- `shape-switch.json` records ordinary process CPU windows.
+- CPU counters include start, paint-observation, and settled values.
+- Cumulative samples expose short-window CPU spikes.
+- Percentages use one-core process time, without core division.
+- Observer CPU and whole-machine busy time stay separate.
+- Owned-job CPU also includes browsers and reader processes.
+- Owned-job counters have a separately recorded enclosing interval.
+- Idle observations use the same WM_NULL hang probe.
+- Ordinary CPU windows never force paints or capture images.
+- Separate replays capture first-observed and settled transcript images.
+- Actual transcript copy verifies generated latest-message receipts.
+- The oracle checks every switch, not the median.
+- Post-cleanup checks require no remaining owned processes.
+
+Enable `chat_switch_profile` for a separate WPR replay.
+The recorder chooses the slowest observed switch route.
+It restores that route's browser mode before recording.
+Existing or ambiguous WPR recordings stay untouched.
+`switch-profile/profile-request.json` records the target PID and interval.
+`switch-profile/cpu.etl` contains system-wide kernel samples.
+Analyze only the recorded app PID and interval.
+`app-stages.log` retains the corresponding numeric app stages.
+The trace remains explicitly unanalysed until source mapping.
+An ETL file alone never proves a bottleneck.
+Matching symbols may require additional Windows setup.
+
+Shown time covers first nonempty cached paint.
+Latest-message receipts are checked after that window.
+This does not prove latest-message paint latency.
+Product acceptance still needs that native proof.
+The current native input remains Ctrl+digit.
+It does not prove sidebar-click latency.
+The image follows the completed target-paint log.
+It does not guarantee the first compositor-presented frame.
+Those limitations remain in the oracle's output.
+The oracle always marks product acceptance unproven.
+Do not close the product ticket on these alone.
+Native compilation, execution, and profiling require Windows CI.
+
 ## Gotchas
 
 - Only SSH is replaced (stand-in `ssh.exe` and `tmux.exe` from `tools/verify-chat-delivery/launcher.c`, served by `boundary.py`); the real transcript reader, cache, layout and switching run. The seeded sessions are not real Claude or a real server.

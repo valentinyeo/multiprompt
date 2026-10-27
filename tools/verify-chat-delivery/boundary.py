@@ -347,6 +347,13 @@ def shell():
         return 0
     if op == "seed-many" and len(ARGS) == 2:
         return fake_seed_many(int(ARGS[1]))
+    if op == "seed-shapes" and len(ARGS) == 2:
+        spec = importlib.util.spec_from_file_location("chat_shapes", Path(__file__).with_name("chat-shapes.py"))
+        shapes = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(shapes)
+        fake_seed_many(0)
+        shapes.seed(ARGS[1], ROOT / "state.json")
+        return 0
     if op == "messages" and len(ARGS) == 2:
         for i in range(int(ARGS[1])):
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="New message " + str(i) + "\n" + "Readable transcript paragraph with enough text to paint a full message row.\n\n" * 32)]))
