@@ -188,16 +188,29 @@ def newest_jsonl(paths):
             best, best_mtime = path, mtime
     return best
 
-def process_table(root=Path("/proc")):
+def process_table(root=Path("/proc"), pids=None):
 
     table = {}
     try:
-        entries = list(root.iterdir())
+        entries = list(root.iterdir()) if pids is None else [root / str(pid) for pid in pids]
     except OSError:
         return table
+    seen = set()
     for entry in entries:
-        if not entry.name.isdigit():
+        if not entry.name.isdigit() or entry.name in seen:
             continue
+        seen.add(entry.name)
+        if pids is not None:
+            try:
+                tasks = list((entry / "task").iterdir())
+            except OSError:
+                tasks = []
+            for task in tasks:
+                try:
+                    children = (task / "children").read_text().split()
+                    entries.extend(root / child for child in children if child.isdigit())
+                except OSError:
+                    pass
         try:
             stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
             raw = (entry / "cmdline").read_bytes()
@@ -351,7 +364,7 @@ def resolve_tmux_agent(agent, name, pid=None):
         pane_pids = [int(line) for line in result.stdout.split() if line.isdigit()]
         if not pane_pids:
             return None
-        pid = agent_pid_for_panes(pane_pids, process_table(), agent)
+        pid = agent_pid_for_panes(pane_pids, process_table(pids=pane_pids), agent)
         if pid is None:
             return None
     cwd = read_process_cwd(pid)

@@ -1196,6 +1196,55 @@ class HistoryReaderTest(unittest.TestCase):
                                                            reader.READER_SOURCE, as_owner=True))
         resolve.assert_called_once_with('claude', 'term-1', 99)
 
+    def test_pane_discovery_visits_only_descendants_and_follows_restarts(self):
+        self.query['follow'] = True
+        self.write(self.event('first session'))
+        root = self.home / 'proc'
+
+        def process(pid, parent, argv, children=(), thread=None):
+            entry = root / str(pid)
+            entry.mkdir(parents=True, exist_ok=True)
+            (entry / 'stat').write_text(f'{pid} (process) S {parent} 0 0')
+            (entry / 'cmdline').write_bytes(b'\0'.join(arg.encode() for arg in argv) + b'\0')
+            task = entry / 'task' / str(thread or pid)
+            task.mkdir(parents=True, exist_ok=True)
+            (task / 'children').write_text(' '.join(map(str, children)))
+
+        process(10, 1, ['bash'], [11])
+        process(11, 10, ['sudo', 'claude'], [12], thread=110)
+        process(12, 11, ['node', '/opt/bin/claude.js'])
+        process(9999, 1, ['claude'])
+        original_table = reader.process_table
+        original_read = Path.read_bytes
+        visited = []
+
+        def read_bytes(path):
+            if path.name == 'cmdline' and path.parent.parent == root:
+                visited.append(int(path.parent.name))
+            return original_read(path)
+
+        def opened(pid):
+            return self.path if pid == 12 else replacement if pid == 13 else None
+
+        replacement = self.path.with_name('replacement.jsonl')
+        replacement.write_text(json.dumps(self.event('replacement session')) + '\n')
+        with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '10\n', '')), \
+                patch.object(reader, 'process_table', side_effect=lambda **kwargs: original_table(root, **kwargs)), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'), \
+                patch.object(reader, 'open_claude_transcript', side_effect=opened), \
+                patch.object(Path, 'read_bytes', read_bytes):
+            fields, rows = self.read()
+            self.assertEqual(fields[4], 'sid')
+            self.assertEqual([row['text'] for row in rows], ['first session'])
+            self.assertEqual(set(visited), {10, 11, 12}, 'idle poll must not scan unrelated processes')
+            visited.clear()
+            process(11, 10, ['sudo', 'claude'], [13], thread=110)
+            process(13, 11, ['claude'])
+            fields, rows = self.read()
+            self.assertEqual(fields[4], 'replacement')
+            self.assertEqual([row['text'] for row in rows], ['replacement session'])
+            self.assertEqual(set(visited), {10, 11, 13})
+
     def test_claude_pid_map_resolves_its_exact_jsonl(self):
         self.write(self.event())
         metadata = self.home / '.claude/sessions/99.json'
