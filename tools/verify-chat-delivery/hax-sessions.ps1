@@ -31,6 +31,7 @@ if ($plan.name -eq 'hax-reader') {
         $observation.runners.Add(@{index=$index; wanted=$wanted; sid=$before[$index].sid; copied=$script:haxCopied})
     }
 } else {
+    [void](Wait-For 'actual host inventory contains all four live runners' { (Read-Shared "$settings/debug.log") -match 'fetchHostIntoCache\(host=0\) done:.*added=4' })
     Press @(0x11, 0x34) 'Ctrl+4: select the empty runner session'
     $emptyId = $before[3].sid
     $observation.closedId = $emptyId
@@ -47,7 +48,7 @@ if ($plan.name -eq 'hax-reader') {
     Press @(0x11, 0x4B) 'Ctrl+K: refresh live host session inventory'
     foreach ($letter in 'runner-empty'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
     [void](Wait-For 'actual host session refresh completed' {
-        @((Read-Shared "$state/invocations.jsonl") -split "`n" | Where-Object { $_ -match '"kind": "list"' }).Count -gt $beforeLists
+        (@((Read-Shared "$state/invocations.jsonl") -split "`n" | Where-Object { $_ -match '"kind": "list"' }).Count -gt $beforeLists) -and ((Read-Shared "$settings/debug.log").Substring($offset) -match 'fetchHostIntoCache\(host=0\) done:.*added=4')
     })
     $after = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
     $observation.afterIds = @($after | ForEach-Object { $_.sid })

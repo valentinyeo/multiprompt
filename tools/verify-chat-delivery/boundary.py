@@ -912,6 +912,15 @@ def ssh():
     declined = declined_remote(ARGS)
     if declined:
         kind, output, exit_code = declined
+        if kind == "capacity-poll" and state().get("hax"):
+            output = "@capacity|4|0.1|8000000|6000000|0|0|0|0|0\n"
+            if "vps" in ARGS:
+                output += "".join(name + "|1700000000|10|/verify/shared-runners|hax|Hax\n" for name in session_names())
+            if command.endswith("done"):
+                output += "@@ZS_END@@\n"
+            record("invocations.jsonl", kind="list", operation="native host inventory", argv=ARGS)
+            sys.stdout.write(output)
+            return 0
         record("declined.jsonl", operation="remote command", kind=kind, argv=ARGS, command=command, exitCode=exit_code)
         sys.stdout.write(output)
         return exit_code
