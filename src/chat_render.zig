@@ -5109,14 +5109,12 @@ fn chatReplyJump(index: usize) void {
         .before = if (index < app_state.g_chat_block_count) display.block.source_offset else std.math.maxInt(u64),
         .limit = @min(index, app_state.g_chat_block_count),
     };
-    debugLog(std.fmt.bufPrint(&log, "[chat] reply pending active={} count={d} before={d}", .{ app_state.g_chat_active, app_state.g_chat_block_count, g_reply_jump.?.before }) catch "[chat] reply pending");
     chatReplyResolve();
 }
 
 pub fn chatReplyResolve() void {
     const jump = g_reply_jump orelse return;
     if (!app_state.g_chat_active or !std.meta.eql(jump.identity, chatFileIdentity())) {
-        debugLog("[chat] reply cancelled: active session changed");
         chatReplyJumpClear();
         return;
     }
@@ -5128,10 +5126,8 @@ pub fn chatReplyResolve() void {
         if (block.role == .tool or block.role == .injected or (jump.before > 0 and block.source_offset >= jump.before)) continue;
         const disp = chatBlockDisplayRange(buf, block);
         if (!chat_reply.sourceMatches(buf[disp.start..][0..disp.len], jump.quoted)) continue;
-        debugLog("[chat] reply source matched before focus");
         chatSelectionClear();
         chatReplyJumpClear();
-        debugLog("[chat] reply selection cleared before focus");
         chatNavFocus(i);
         var log: [96]u8 = undefined;
         debugLog(std.fmt.bufPrint(&log, "[chat] reply source index={d} offset={d}", .{ i, block.source_offset }) catch "[chat] reply source");
@@ -5198,9 +5194,7 @@ fn chatNavFocus(index: usize) void {
     app_state.g_chat_nav_source = block.source_offset;
     app_state.g_chat_nav_segment = block.segment;
     app_state.g_chat_nav_stamp = block.stamp_ms;
-    debugLog("[chat] navigation focus before reveal");
     chatNavReveal(index);
-    debugLog("[chat] navigation focus after reveal");
     if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
 }
 
