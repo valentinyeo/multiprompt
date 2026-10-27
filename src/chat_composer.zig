@@ -1759,6 +1759,7 @@ pub fn openChatView() void {
 }
 
 pub fn closeChatView() void {
+    @import("chat_session.zig").chatHistoryStreamsKeep(0);
     @import("chat_find_ui.zig").close(false);
     chatAcClose();
     if (!app_state.g_chat_active) return;

@@ -35,7 +35,7 @@ function fairContract(source) {
   const release = body(source, 'chatFetchRelease');
   assert.ok(release.indexOf('ReleaseMutex') < release.indexOf('PostMessageW'));
   assert.match(release, /PostMessageW\(turn.hwnd, WM_TIMER, TIMER_CHAT_REFRESH, 0\)/);
-  assert.match(body(source, 'chatFileRequestForDelivery'), /if \(!load_disk and !chatFetchAcquire\(\)\) return/);
+  assert.match(body(source, 'chatFileRequestForDelivery'), /if \(!load_disk and pushed == null and !chatFetchAcquire\(\)\) return/);
 }
 
 function stagingContract(source, model) {
@@ -45,7 +45,7 @@ function stagingContract(source, model) {
   assert.match(worker, /entry.backfill.stage\(a, &history\)/);
   assert.match(worker, /entry.backfill.start == 0 or entry.show_older/);
   assert.match(worker, /const publish_staged = entry.show_older and entry.backfill.pages.items.len > 0/);
-  assert.match(worker, /var ok = publish_staged or chatHistoryFetch/);
+  assert.match(worker, /var ok = publish_staged or pushed != null or chatHistoryFetch/);
   assert.match(worker, /if \(!entry.staged and entry.cache_dirty/);
   assert.match(model, /if \(!self.defer_render\) try next.render\(a\)/);
   const stage = model.slice(model.indexOf('    pub fn stage('), model.indexOf('    pub fn finish('));

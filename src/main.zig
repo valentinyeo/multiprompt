@@ -7142,6 +7142,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (wp == TIMER_CHAT_REFRESH) {
+                if (!app_state.g_chat_active or IsIconic(hwnd) != 0 or IsWindowVisible(hwnd) == 0) @import("chat_session.zig").chatHistoryStreamsKeep(0);
                 if (app_state.g_chat_browser_swap.shell_id != 0) return 0;
                 if (app_state.g_chat_active or app_state.g_voice_mode_active) {
                     if (!app_state.g_voice_mode_active and (IsIconic(hwnd) != 0 or IsWindowVisible(hwnd) == 0)) return 0;

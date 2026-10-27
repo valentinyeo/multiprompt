@@ -2601,6 +2601,8 @@ pub const ChatHistoryEntry = struct {
     show_older: bool = false,
     tables: chat_markdown.TableCache = .{},
     pending: bool = false,
+    push_pending: bool = false,
+    stream: ?*ChatHistoryStream = null,
     retired: bool = false,
     cache_cancelled: std.atomic.Value(bool) = .init(false),
     loaded_ms: i64 = 0,
@@ -2637,7 +2639,20 @@ pub var g_chat_cache_pruned: u64 = 0;
 
 pub var g_chat_cache_write_mutex: SpinMutex = .{};
 
+pub const ChatHistoryStream = struct {
+    channel: ChatHistoryChannel = .{ .watch = true },
+    mutex: SpinMutex = .{},
+    refs: std.atomic.Value(u32) = .init(2),
+    cancelled: std.atomic.Value(bool) = .init(false),
+    ended: std.atomic.Value(bool) = .init(false),
+    ready: std.atomic.Value(bool) = .init(false),
+    ack: HANDLE = null,
+    id: u32,
+    wire: std.ArrayList(u8) = .empty,
+    read_us: u64 = 0,
+};
 pub const ChatHistoryChannel = struct {
+    watch: bool = false,
     process: HANDLE = null,
     input: HANDLE = null,
     output: HANDLE = null,
