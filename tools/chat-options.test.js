@@ -73,3 +73,17 @@ test('IGSH-1047 real parser binds exact card text to the current question', () =
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('IGSH-1047 native proof uses a real Select All palette search alias', () => {
+  const root = path.join(__dirname, '..');
+  const journey = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/chat-options.ps1'), 'utf8');
+  const palette = fs.readFileSync(path.join(root, 'src/command_palette.zig'), 'utf8');
+  const query = journey.match(/Palette '([^']*select all[^']*)'/);
+  assert.ok(query, 'native proof must select the rendered transcript');
+  const command = palette.indexOf('= SEARCH_CHAT_SELECT_ALL_OFFSET;');
+  assert.notEqual(command, -1, 'Select All command must exist');
+  const start = palette.lastIndexOf('labelsMatchQuery(', command);
+  const aliases = palette.slice(start, command).match(/u8\{([^}]+)\}/);
+  assert.ok(aliases, 'Select All command must exist');
+  assert.ok(aliases[1].includes(`"${query[1]}"`), `unsupported Select All search: ${query[1]}`);
+});

@@ -48,7 +48,7 @@ Press @(0x12, 0x43) 'Alt+C: inspect the question without answer options'
 Wait-Until { (Find-Transcript) -ne [IntPtr]::Zero } 'section question transcript visible'
 Wait-Until {
     [System.Windows.Forms.Clipboard]::Clear()
-    Palette 'chat view select all text'
+    Palette 'select all text'
     Press @(0x0D) 'Enter: select rendered transcript'
     Press @(0x11, 0x43) 'Ctrl+C: copy selected transcript without opening another overlay'
     [System.Windows.Forms.Clipboard]::GetText().Contains('Should I file a ticket for this?')
