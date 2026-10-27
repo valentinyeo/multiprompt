@@ -49,6 +49,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null, rateLimits 
   const process = { env: { AUTO_REVERT_RUN_ID: String(input.run.id), GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: repository }, exitCode: 0 };
   const module = { exports: {} };
   const require = name => {
+    if (name === './journey-policy.json') return JSON.parse(fs.readFileSync(`${__dirname}/journey-policy.json`, 'utf8'));
     assert.equal(name, 'node:child_process');
     return { execFileSync(command, args) {
       calls.push([command, ...args]);
@@ -544,25 +545,23 @@ test('auto-revert workflow grants contents and pull-request writes with the exis
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
 });
 
-test('PR smoke and full master matrix stay wired without duplicate release-tag journeys', () => {
+test('IGSH-1033 master smoke and one full candidate matrix stay wired', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
   const release = fs.readFileSync(`${__dirname}/../.github/workflows/release.yml`, 'utf8');
-  assert.match(verify, /pull_request' && fromJSON\('\["appearance"\]'\)/);
-  assert.match(verify, /github.event_name == 'push' \|\| inputs.feature == 'all'/);
-  const matrices = [...verify.matchAll(/fromJSON\('(\[[^'\n]+\])'\)/g)].map(match => JSON.parse(match[1]));
-  assert.equal(matrices[1].length, 21);
-  assert.ok(matrices[1].includes('chat-dictation'));
-  assert.ok(matrices[1].includes('tmux-binding'));
-  assert.ok(matrices[1].includes('chat-send-latency'));
-  assert.ok(matrices[1].includes('remind-me'));
-  assert.ok(matrices[1].includes('chat-first-paint'));
-  assert.match(verify, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
-  assert.doesNotMatch(release, /gh workflow run verify\.yml/);
+  assert.match(verify, /inputs.feature == 'all' && fromJSON\('\["appearance"/);
+  assert.doesNotMatch(verify, /github.event_name == 'push' \|\| inputs.feature == 'all'/);
+  assert.ok(fs.existsSync(`${__dirname}/journey-policy.json`));
+  const features = [...verify.matchAll(/fromJSON\('(\[[^'\n]+\])'\)/g)].map(match => JSON.parse(match[1])).find(values => values.includes('chat-dictation'));
+  assert.equal(features.length, 21);
+  for (const key of ['chat-dictation', 'tmux-binding', 'chat-send-latency', 'remind-me', 'chat-first-paint']) assert.ok(features.includes(key));
+  assert.match(release, /journeys:\n    needs: prepare\n    uses: \.\/\.github\/workflows\/verify\.yml\n    with:\n      feature: all\n      revision: \$\{\{ needs.prepare.outputs.sha \}\}/);
+  assert.equal((release.match(/feature: all/g) || []).length, 1);
+  assert.match(release, /build:\n    needs: \[prepare, journeys\]/);
 });
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
-  assert.match(verify, /^  verify:\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
+  assert.match(verify, /^  verify:\n(?:    needs: [^\n]+\n|    continue-on-error: [^\n]+\n)*    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
 
 test('controlled red proof requires the marker on appearance master pushes and excludes reverts', () => {
@@ -624,4 +623,22 @@ test('permission errors fail immediately without retrying or touching master', (
   assert.equal(result.process.exitCode, 1);
   assert.equal(result.waits.length, 0);
   assert.ok(result.calls.every(call => !call.includes('push') && !call.includes('POST')));
+});
+
+for (const key of ['browser-pane-stuck', 'chat-messages-only']) {
+  test(`IGSH-1033 quarantined ${key} never reverts or opens a failure issue`, () => {
+    const input = fixture();
+    input.jobs = [{ name: `verify (${key})`, conclusion: 'failure' }];
+    input.history[0].jobs = [{ name: `verify (${key})`, conclusion: 'success' }];
+    assert.deepEqual(decide(input), { action: 'ignore', reason: 'Only quarantined journeys failed' });
+    const result = runtime(input, 'workflow_run');
+    assert.equal(result.process.exitCode, 0, result.output);
+    assert.equal(result.calls.some(call => call[0] === 'git' && call[1] === 'revert'), false);
+    assert.equal(result.calls.some(call => call[0] === 'gh' && call.includes('POST')), false);
+  });
+}
+test('IGSH-1033 a quarantined failure cannot mask an eligible parent regression', () => {
+  const input = fixture();
+  input.jobs.push({ name: 'verify (browser-pane-stuck)', conclusion: 'failure' });
+  assert.deepEqual(decide(input).journeys, ['session-restore', 'chat-focus']);
 });

@@ -54,8 +54,15 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-  build:
+  journeys:
     needs: prepare
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: all
+      revision: ${{ needs.prepare.outputs.sha }}
+
+  build:
+    needs: [prepare, journeys]
     name: build-${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:

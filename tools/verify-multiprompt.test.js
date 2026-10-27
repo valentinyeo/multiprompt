@@ -280,7 +280,7 @@ function assertsOwnedInput(source) {
   assert.equal((press.match(/::Chord\(/g) || []).length, 1);
   assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 0);
   assert.doesNotMatch(press, /Wait-Until|Start-Sleep|catch|\b(?:for|while)\s*\(/);
-  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Assert-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
+  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Wait-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
   assert.match(type, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/);
   assert.equal((type.match(/::Text\(/g) || []).length, 1);
   assert.doesNotMatch(type, /SetForegroundWindow|SetFocus|BringToForeground/);
@@ -297,7 +297,7 @@ test('IGSH-807: foreground ownership is bounded, refuses foreign input and is re
     ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', '    [void][VerifyNative]::SetForegroundWindow($script:window)\n    [void][VerifyNative]::SetForegroundWindow($script:window)\n'],
     ['    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)\n    [VerifyNative]::Chord($Keys)'],
     ['    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)\n    [VerifyNative]::Text($Text)'],
-    ["    Doctor\n    Assert-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
+    ["    Doctor\n    Wait-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
     ['$attempt -lt 50', '$true'],
     ['$attempt -lt 49', '$true'],
     ['    Assert-Foreground\n}\n\nfunction Press(', '    try { Assert-Foreground } catch {}\n}\n\nfunction Press('],
@@ -431,6 +431,10 @@ Refuses { Press @(0x41) 'lost before chord' }
 Reset
 $script:loseOnRecord = $true
 Refuses { Type-Text 'lost before text' }
+Reset
+[VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 2
+Type-Text 'recovered text'
+Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 2) 'Text did not recover owned foreground'
 Reset
 Type-Text 'owned text'
 Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 0) 'Text repaired focus or failed to inject'
@@ -586,7 +590,7 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(transport, /WriteAllText[\s\S]*?\.reply.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
   assertsOwnedInput(control);
-  assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
+  assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Wait-Foreground/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-ScratchPath \$scratch/);
 });
@@ -604,7 +608,7 @@ test('audit verification is isolated from unchanged desktop journeys and retains
   assert.match(auditJob, /file zig-out\/bin\/chat-audit \| tee evidence\/renderer-file\.txt/);
   assert.match(auditJob, /uses: actions\/upload-artifact@[a-f0-9]{40}\r?\n        with:\r?\n          name: chat-audit-linux\r?\n          path: zig-out\/bin\/chat-audit\r?\n          retention-days: 30\r?\n          if-no-files-found: error/);
   for (const ending of ['\n', '\r\n']) {
-    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
+    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n(?:    needs: [^\n]+\r?\n|    continue-on-error: [^\n]+\r?\n)*    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
   }
   assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(\.\.\/diagnostics\/chat-sync-audit.md\)/);
   assert.match(read(skill + 'diagnostics/chat-sync-audit.md'), /not a Windows desktop journey/);
@@ -2164,4 +2168,34 @@ test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that ta
   assert.match(read('src/chat_send.zig'), /send_latency\.markPressed\(\)/);
   assert.match(read('src/chat_render.zig'), /send_latency\.markPainted\(/);
   assert.throws(() => assert.match(control.replace("'chat-send-latency'", ''), /ValidateSet\([^\n)]*'chat-send-latency'/));
+});
+
+test('IGSH-1033 master smoke, targeted proofs and full candidate select distinct matrices', () => {
+  const expression = workflow.match(/^        feature: \$\{\{ (.+) \}\}$/m)[1];
+  assert.ok(fs.existsSync(path.join(root, 'tools/journey-policy.json')));
+  const policy = JSON.parse(read('tools/journey-policy.json'));
+  const features = [...workflow.matchAll(/fromJSON\('(\[[^'\n]+\])'\)/g)].map(match => JSON.parse(match[1])).find(values => values.includes('chat-dictation'));
+  const evaluate = (event, inputs = {}) => JSON.parse(JSON.stringify(require('node:vm').runInNewContext(
+    expression, {
+      inputs, github: { event_name: event },
+      fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value),
+    })));
+  assert.deepEqual(evaluate('push'), ['appearance']);
+  assert.deepEqual(evaluate('pull_request'), ['appearance']);
+  assert.deepEqual(evaluate('push', { feature: 'relaunch-saved-sessions' }), ['relaunch-saved-sessions']);
+  assert.deepEqual(evaluate('workflow_run', { feature: 'all' }), features);
+  assert.deepEqual(evaluate('workflow_dispatch', { feature: 'pane-layout' }), ['pane-layout']);
+  assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journey-policy.outputs.quarantined\), matrix.feature\) \}\}/);
+  for (const key of Object.keys(policy.quarantined)) {
+    assert.ok(features.includes(key));
+    assert.match(policy.quarantined[key].ticket, /^https:\/\/app.hypertask.ai\/detail\/project-2060\/\d+$/);
+    assert.equal(new Set(policy.quarantined[key].runs).size, 2);
+  }
+});
+
+test('IGSH-1033 historical desktop controls never run on master or release candidates', () => {
+  for (const name of ['Build IGSH-807 pre-fix focus-ring control', 'Require visible pre-fix focus rings with unchanged input cycling', 'Build the pre-fix commit 42cecfd3 negative control', 'Require pre-fix 42cecfd3 to show activity rows with the identical journey']) {
+    const step = workflow.slice(workflow.indexOf('      - name: ' + name)).split(/\n      - /)[0];
+    assert.match(step, /if: github.event_name == 'workflow_dispatch' &&/);
+  }
 });

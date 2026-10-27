@@ -135,7 +135,9 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   assert.equal(jobs['pr-build'], undefined);
   assert.match(jobs.prepare, /if: github.event_name != 'pull_request'/);
-  assert.match(jobs.build, /needs: prepare/);
+  assert.match(jobs.build, /needs: \[prepare, journeys\]/);
+  assert.match(jobs.journeys, /feature: all/);
+  assert.match(jobs.journeys, /revision: \$\{\{ needs.prepare.outputs.sha \}\}/);
   assert.match(jobs.release, /needs: \[prepare, build\]/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);

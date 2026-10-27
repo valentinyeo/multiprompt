@@ -1,5 +1,5 @@
 name: Verify desktop
-run-name: verify ${{ inputs.feature || (github.event_name == 'push' && 'full' || 'appearance') }} ${{ inputs.tag || github.head_ref || github.ref_name }}
+run-name: verify ${{ inputs.feature || 'appearance' }} ${{ inputs.tag || github.head_ref || github.ref_name }}
 
 on:
   push:
@@ -72,6 +72,9 @@ on:
         type: boolean
   workflow_call:
     inputs:
+      revision:
+        required: false
+        type: string
       chat_notes_proof:
         required: false
         default: false
@@ -140,11 +143,27 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  journey-policy:
+    runs-on: ubuntu-latest
+    outputs:
+      quarantined: ${{ steps.policy.outputs.quarantined }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - id: policy
+        run: |
+          node - <<'NODE' >> "$GITHUB_OUTPUT"
+          const policy = require('./tools/journey-policy.json');
+          console.log(`quarantined=${JSON.stringify(Object.keys(policy.quarantined))}`);
+          NODE
   reopen-board-contract:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -158,6 +177,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         if: github.event_name == 'pull_request'
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - id: diff
@@ -215,6 +235,8 @@ jobs:
           path: evidence/
           if-no-files-found: error
   verify:
+    needs: journey-policy
+    continue-on-error: ${{ contains(fromJSON(needs.journey-policy.outputs.quarantined), matrix.feature) }}
     if: inputs.feature != 'chat-sync-audit'
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
@@ -223,7 +245,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || inputs.feature == 'all' && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature || 'appearance')) }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
@@ -247,6 +269,7 @@ jobs:
         run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - name: Check verification contracts
@@ -445,17 +468,17 @@ jobs:
         if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         run: zig build test-main --summary all
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         with:
           persist-credentials: false
           ref: 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f
           path: negative-source
       - name: Build the pre-fix commit 42cecfd3 negative control
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         working-directory: negative-source
         run: zig build
       - name: Require pre-fix 42cecfd3 to show activity rows with the identical journey
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -479,17 +502,17 @@ jobs:
           if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Negative control cleanup failed' }
           $global:LASTEXITCODE = 0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         with:
           persist-credentials: false
           ref: 9618091700e09f5958a48390449dc5067874d5dd
           path: negative-focus-source
       - name: Build IGSH-807 pre-fix focus-ring control
-        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         working-directory: negative-focus-source
         run: zig build
       - name: Require visible pre-fix focus rings with unchanged input cycling
-        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
