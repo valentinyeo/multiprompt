@@ -381,6 +381,79 @@ test "delivery: IGSH-1063 Other keeps the typed answer until provider progress w
     try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("next draft"), composer_text);
 }
+test "delivery: IGSH-1102 same-millisecond accepted messages clear without retransmission" {
+    defer clear();
+    const texts = [_][]const u16{
+        std.unicode.utf8ToUtf16LeStringLiteral("Live request 1 part 1"),
+        std.unicode.utf8ToUtf16LeStringLiteral("Live request 1 part 2"),
+        std.unicode.utf8ToUtf16LeStringLiteral("Live request 1 part 3"),
+    };
+    for (texts) |text| try enqueue(text, .delivered);
+    for (g_chat_outbox.items) |*entry| entry.channel_sent = true;
+    for (texts, 0..) |text, i| {
+        const start = history_entry.history.text.items.len;
+        try history_entry.history.text.appendSlice(std.heap.page_allocator, text);
+        try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = start, .len = text.len, .stamp_ms = 2000, .message_id = i + 1 });
+    }
+    history_entry.history.revision += 1;
+    chatTmuxSettle();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try reload();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
+}
+test "delivery: IGSH-1102 repeated intent needs distinct source messages even at equal timestamps" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("yes");
+    try enqueue(text, .delivered);
+    try enqueue(text, .delivered);
+    for (g_chat_outbox.items) |*entry| entry.channel_sent = true;
+    try history_entry.history.text.appendSlice(std.heap.page_allocator, text);
+    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .message_id = 1 });
+    history_entry.history.revision += 1;
+    chatTmuxSettle();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    history_entry.history.revision += 1;
+    chatTmuxSettle();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .message_id = 2 });
+    history_entry.history.revision += 1;
+    chatTmuxSettle();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
+}
+test "delivery: IGSH-1102 distinct intents merged into one source message both confirm" {
+    defer clear();
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("first request"), .delivered);
+    try enqueue(std.unicode.utf8ToUtf16LeStringLiteral("second request"), .delivered);
+    for (g_chat_outbox.items) |*entry| entry.channel_sent = true;
+    const merged = std.unicode.utf8ToUtf16LeStringLiteral("first request\\nsecond request");
+    try history_entry.history.text.appendSlice(std.heap.page_allocator, merged);
+    try history_entry.history.blocks.append(std.heap.page_allocator, .{ .role = .user, .start = 0, .len = merged.len, .stamp_ms = 2000, .message_id = 1 });
+    history_entry.history.revision += 1;
+    chatTmuxSettle();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
+}
+test "delivery: IGSH-1102 restart preserves equal-timestamp anchor and rejects backfill" {
+    defer clear();
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("yes");
+    transcript(text, 2000);
+    g_chat_blocks[0].message_id = 2;
+    try enqueue(text, .delivered);
+    try std.testing.expect(saveChatOutbox());
+    try reload();
+    g_chat_blocks[0].message_id = 1;
+    chatEchoMatchActive();
+    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
+    g_chat_blocks[0].message_id = 2;
+    g_chat_blocks[1] = .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = 2000, .message_id = 3 };
+    g_chat_block_count = 2;
+    g_chat_last_hash +%= 1;
+    chatEchoMatchActive();
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqual(@as(usize, 0), channel_starts + writes + enters);
+}
 test "delivery: IGSH-442 busy channel waits past both budgets without retransmission then confirms" {
     defer clear();
     const text = std.unicode.utf8ToUtf16LeStringLiteral("please check the build");
@@ -1413,7 +1486,11 @@ function runHarness(control = false) {
     if (control === 'repeats' || control === 'unreadable') {
       const old = fs.readFileSync('tools/fixtures/chat-before-2b45249.zig', 'utf8');
       const oldBody = name => { const start = old.indexOf(`fn ${name}(`); return old.slice(start, old.indexOf('\n}', start) + 2); };
-      functions = functions.replace(body('chatEchoMatchActive'), oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '')) + '\n' + oldBody('chatEchoRepresentedBlock');
+      let match = oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '');
+      if (body('chatConfirmedAdd').includes('block: ChatBlock')) {
+        match = match.replace('chatConfirmedAdd(key_copy[0..e.key_len], p, g_chat_blocks[mi].start, g_chat_blocks[mi].len, g_chat_blocks[mi].stamp_ms);', 'chatConfirmedAdd(key_copy[0..e.key_len], p, g_chat_blocks[mi]);');
+      }
+      functions = functions.replace(body('chatEchoMatchActive'), match) + '\n' + oldBody('chatEchoRepresentedBlock');
     }
     fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + sourceOutboxTests).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'question-old' ? 'IGSH-1063' : control === 'reaction-index' ? 'IGSH-975 popup snapshot' : control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });

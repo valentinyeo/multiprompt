@@ -2895,6 +2895,8 @@ pub const ChatConfirmedEcho = struct {
     block_start: usize = 0,
     block_len: usize = 0,
     stamp_ms: i64 = 0,
+    message_id: u64 = 0,
+    text_hash: u64 = 0,
 };
 
 pub var g_chat_outbox: std.ArrayList(ChatOutboxEntry) = .empty;
