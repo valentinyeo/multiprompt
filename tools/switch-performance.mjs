@@ -22,6 +22,21 @@ export function assess(data) {
   return { p95Ms, maxMs: sorted.at(-1), idleMedianMs, idleMaxMs, idleShell: data.idleShell, switches: sorted.length, idlePolls: data.idleUs.length, pass: p95Ms <= 100 && idleMedianMs <= 5 };
 }
 
+export function assessRepeated(pairs) {
+  if (!Array.isArray(pairs) || pairs.length !== 5) throw new Error('Expected five alternating pairs');
+  const sha = pairs[0]?.base?.sha256;
+  if (typeof sha !== 'string' || !/^[a-f0-9]{64}$/i.test(sha)) throw new Error('Missing executable hash');
+  return pairs.map(({ base, head }) => {
+    for (const [sample, poll] of [[base, 25], [head, 750]]) {
+      if (sample.sha256 !== sha || sample.observerPollMs !== poll || !Number.isFinite(sample.observerIdleCpuMs) || sample.observerIdleCpuMs < 0 || !Number.isFinite(sample.appIdleCpuMs) || sample.appIdleCpuMs < 0 || !Number.isFinite(sample.idleWallMs) || sample.idleWallMs <= 0) throw new Error('Invalid same-binary observer accounting');
+    }
+    const baseline = assess(base);
+    const candidate = assess(head);
+    if (!candidate.pass) throw new Error('A quiet-observer run exceeded unchanged session speed limits');
+    return { baseline, candidate, observerCpuMs: { baseline: base.observerIdleCpuMs, candidate: head.observerIdleCpuMs }, appCpuMs: { baseline: base.appIdleCpuMs, candidate: head.appIdleCpuMs } };
+  });
+}
+
 export function instrument(root, profile = false) {
   const file = path.join(root, 'src/main.zig');
   let source = fs.readFileSync(file, 'utf8');
@@ -69,7 +84,7 @@ export function instrument(root, profile = false) {
         _ = @import("win32.zig").QueryPerformanceCounter(&end);
         _ = @import("win32.zig").QueryPerformanceFrequency(&frequency);
         var message: [200]u8 = undefined;
-        debugLog(std.fmt.bufPrint(&message, "idle-capture: attach_us={d} read_us={d} parse_us={d}", .{
+        @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&message, "idle-capture: attach_us={d} read_us={d} parse_us={d}", .{
             @divTrunc((profile_attach -| profile_start) * 1_000_000, @max(1, frequency)),
             @divTrunc((profile_read -| profile_attach) * 1_000_000, @max(1, frequency)),
             @divTrunc((end -| profile_read) * 1_000_000, @max(1, frequency)),
@@ -86,7 +101,12 @@ export function instrument(root, profile = false) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, ...files] = process.argv.slice(2);
   if (command === 'instrument' && (files.length === 1 || (files.length === 2 && files[1] === '--profile'))) instrument(files[0], files[1] === '--profile');
-  else if (command === 'report' && files.length === 2) {
+  else if (command === 'repeated' && files.length === 1) {
+    const pairs = Array.from({ length: 5 }, (_, index) => Object.fromEntries(['base', 'head'].map(side => [side, JSON.parse(fs.readFileSync(path.join(files[0], `run-${index + 1}`, side, 'samples.json'), 'utf8').replace(/^\uFEFF/, ''))])));
+    const rows = assessRepeated(pairs);
+    fs.writeFileSync(path.join(files[0], 'repeated-verdict.json'), JSON.stringify(rows, null, 2));
+    console.log('REPEATED_IDLE_VERIFIED', JSON.stringify(rows));
+  } else if (command === 'report' && files.length === 2) {
     const rows = files.map(file => ({ revision: JSON.parse(fs.readFileSync(file)).revision, ...assess(JSON.parse(fs.readFileSync(file))) }));
     const report = ['## Session speed', '', '| Build | Switch p95 | Slowest switch | Idle poll median | Idle poll max | Samples |', '| --- | ---: | ---: | ---: | ---: | ---: |', ...rows.map(row => `| ${row.revision} | ${row.p95Ms.toFixed(3)} ms | ${row.maxMs.toFixed(3)} ms | ${row.idleMedianMs.toFixed(3)} ms | ${row.idleMaxMs.toFixed(3)} ms | ${row.switches} switches / ${row.idlePolls} idle polls (session ${row.idleShell}) |`), '', 'Limits: switch p95 ≤100 ms; settled idle poll median ≤5 ms. Ten sessions, one 250 MiB transcript. Ten warmup idle polls are discarded before sampling an already loaded conversation after the switching cycle, not an ongoing history backfill. Diagnostic dispatch timing, with matching painted content; not input-to-pixel latency. Baseline receives identical idle-only diagnostic instrumentation. One run per build; no speedup claim.'].join('\n');
     console.log(report);

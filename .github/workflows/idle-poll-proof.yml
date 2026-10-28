@@ -67,7 +67,8 @@ jobs:
             foreach ($side in @('base', 'head')) {
               $exe = if ($side -eq 'base') { 'baseline/zig-out/bin/multiprompt.exe' } else { 'zig-out/bin/multiprompt.exe' }
               $revision = if ($side -eq 'base') { $env:SPEED_BASE } else { $env:SPEED_HEAD }
-              ./tools/switch-performance.ps1 -Exe $exe -Evidence "evidence/run-$i/$side" -Revision $revision
+              $poll = if ($side -eq 'base') { 25 } else { 750 }
+              ./tools/switch-performance.ps1 -Exe $exe -Evidence "evidence/run-$i/$side" -Revision $revision -IdleObserverPollMs $poll
               if ($LASTEXITCODE -ne 0) { throw "Workload failed: $i $side" }
             }
             node tools/switch-performance.mjs report "evidence/run-$i/base/samples.json" "evidence/run-$i/head/samples.json"
@@ -91,3 +92,5 @@ jobs:
           path: evidence
           if-no-files-found: error
           retention-days: 7
+      - name: Require all five quiet-observer workloads
+        run: node tools/switch-performance.mjs repeated evidence

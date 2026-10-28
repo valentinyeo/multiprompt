@@ -1,1 +1,1 @@
-Idle chat checks avoid repeating unchanged work.
+Idle speed checks now explain measurement overhead.

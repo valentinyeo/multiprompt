@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Evidence, [Parameter(Mandatory)][string]$Revision)
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Evidence, [Parameter(Mandatory)][string]$Revision, [ValidateSet(25, 750)][int]$IdleObserverPollMs = 750)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Performance workload runs only on GitHub Windows' }
@@ -48,7 +48,7 @@ function Session {
         } catch { return $false }
     }
 }
-$result = @{ revision=$Revision; switches=@(); idleUs=@() }
+$result = @{ revision=$Revision; observerPollMs=$IdleObserverPollMs; switches=@(); idleUs=@() }
 try {
     & python "$PSScriptRoot/switch-performance-fixture.py" $profile "$(Split-Path $Exe)/ssh.exe"
     if ($LASTEXITCODE -ne 0) { throw 'Performance fixture failed' }
@@ -112,9 +112,9 @@ try {
     $appCpuBefore = $app.TotalProcessorTime.TotalMilliseconds
     $idleTimer = [Diagnostics.Stopwatch]::StartNew()
     $warmupOffset = (Read-Log).Length
-    [void](Wait-For 'ten warmup idle Chat View polls' { [regex]::Matches((Read-Log).Substring($warmupOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60 750)
+    [void](Wait-For 'ten warmup idle Chat View polls' { [regex]::Matches((Read-Log).Substring($warmupOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60 $IdleObserverPollMs)
     $idleOffset = (Read-Log).Length
-    [void](Wait-For 'fifty unchanged idle Chat View polls' { [regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)').Count -ge 50 } 60 750)
+    [void](Wait-For 'fifty unchanged idle Chat View polls' { [regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)').Count -ge 50 } 60 $IdleObserverPollMs)
     $result.idleUs = @([regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)') | ForEach-Object { [long]$_.Groups[1].Value })
     $observer.Refresh()
     $result.observerIdleCpuMs = $observer.TotalProcessorTime.TotalMilliseconds - $observerCpuBefore

@@ -211,8 +211,8 @@ test('idle sampling discards ten warmup polls after painted selection before tak
   const start = driver.indexOf('$idleOffset = (Read-Log).Length', warmup);
   const measure = driver.indexOf("Wait-For 'fifty unchanged idle Chat View polls'", start);
   assert.ok(painted >= 0 && warmup > painted && start > warmup && measure > start);
-  assert.match(driver.slice(warmup, start), /Count -ge 10 \} 60 750\)/);
-  assert.match(driver.slice(measure), /Count -ge 50 \} 60 750\)/);
+  assert.match(driver.slice(warmup, start), /Count -ge 10 \} 60 \$IdleObserverPollMs\)/);
+  assert.match(driver.slice(measure), /Count -ge 50 \} 60 \$IdleObserverPollMs\)/);
 
 });
 
@@ -243,4 +243,38 @@ $snapshot = Session
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 10000 });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout.trim()), { attempts: 4, active: 1, tabs: 2 });
+});
+
+
+test('repeated observer proof rejects dropped runs, changed executables and sustained slow idle', async () => {
+  const { assessRepeated } = await oracle();
+  const sample = poll => ({ ...workload(), sha256: 'a'.repeat(64), observerPollMs: poll, observerIdleCpuMs: poll === 25 ? 1000 : 50, appIdleCpuMs: 100, idleWallMs: 45000 });
+  const pairs = () => Array.from({ length: 5 }, () => ({ base: sample(25), head: sample(750) }));
+  assert.equal(assessRepeated(pairs()).length, 5);
+  for (const mutate of [p => p.pop(), p => { p[0].head.sha256 = 'b'.repeat(64); }, p => { delete p[0].base.observerIdleCpuMs; }, p => { p[0].head.observerPollMs = 25; }, p => { p[3].head.idleUs.fill(5001); }, p => { p[3].head.switches.pop(); }]) {
+    const data = pairs();
+    mutate(data);
+    assert.throws(() => assessRepeated(data));
+  }
+  const slowControl = pairs();
+  slowControl[0].base.idleUs.fill(20000);
+  assert.equal(assessRepeated(slowControl)[0].baseline.pass, false);
+});
+
+test('diagnostic instrumentation qualifies capture logging and keeps ordinary builds untouched', async () => {
+  const { instrument } = await oracle();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'idle-profile-'));
+  try {
+    const target = path.join(directory, 'src');
+    copyZig(['main.zig'], target);
+    const captureFile = path.join(target, 'chat_capture.zig');
+    const original = fs.readFileSync(captureFile, 'utf8');
+    instrument(directory, true);
+    const capture = fs.readFileSync(captureFile, 'utf8');
+    assert.match(capture, /@import\("diagnostics.zig"\)\.debugLog\(std\.fmt\.bufPrint\(&message, "idle-capture:/);
+    assert.notEqual(capture, original);
+    assert.match(fs.readFileSync(path.join(target, 'main.zig'), 'utf8'), /ready_us=\{d\} transcript_us=\{d\}/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
