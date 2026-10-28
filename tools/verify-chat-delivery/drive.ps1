@@ -1171,6 +1171,7 @@ foreach ($plan in $plans) {
             if (Test-Path "$settings/crashes") {
                 New-Item -ItemType Directory -Force "$caseDir/crashes" | Out-Null
                 Copy-Item "$settings/crashes/*.txt" "$caseDir/crashes/" -ErrorAction SilentlyContinue
+                Copy-Item "$settings/crashes/*.dmp" "$caseDir/crashes/" -ErrorAction SilentlyContinue
             }
             if ($isActivity -and (Test-Path "$settings/chatcache")) { Copy-Item "$settings/chatcache" "$caseDir/chatcache" -Recurse -Force }
             if ($hasTranscript -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }

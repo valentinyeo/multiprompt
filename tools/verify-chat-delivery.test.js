@@ -1211,3 +1211,8 @@ test('full-history continuity advances a real transcript stream without adding v
   assert.match(history, /Shell-Run @\('history-refresh'\)/);
   assert.ok(history.indexOf("Shell-Run @('history-refresh')") > history.indexOf('$pollOffset ='));
 });
+
+
+test('native crash evidence retains the minidump beside its text report', () => {
+  assert.match(drive, /Copy-Item "\$settings\/crashes\/\*\.dmp" "\$caseDir\/crashes\/"/);
+});
