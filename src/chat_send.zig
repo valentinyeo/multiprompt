@@ -607,7 +607,7 @@ pub fn chatOutboxShellForKey(key: []const u8) ?u32 {
 fn chatOutboxCountIn(list: *const std.ArrayList(ChatOutboxEntry), key: []const u8) usize {
     var n: usize = 0;
     for (list.items) |e| {
-        if (std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) n += 1;
+        if (e.state != .cancelled and std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) n += 1;
     }
     return n;
 }
@@ -673,7 +673,11 @@ fn chatOutboxEnqueueIn(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
 
 fn chatOutboxEnqueueInState(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, key: []const u8, text: []const u16, state: ChatEchoState) bool {
     if (key.len == 0 or text.len == 0 or text.len > CHAT_OUTBOX_MSG_CAP) return false;
-    if (list.items.len >= CHAT_OUTBOX_TOTAL_MAX) return false;
+    var pending_count: usize = 0;
+    for (list.items) |item| {
+        if (item.state != .cancelled) pending_count += 1;
+    }
+    if (pending_count >= CHAT_OUTBOX_TOTAL_MAX) return false;
     if (chatOutboxCountIn(list, key) >= CHAT_OUTBOX_MAX_PER_KEY) return false;
     const owned = allocator.dupe(u16, text) catch return false;
     var entry = ChatOutboxEntry{};
@@ -919,7 +923,7 @@ pub fn chatEchoCountNotSentForShell(idx: u32) usize {
     var n: usize = 0;
     for (app_state.g_chat_outbox.items) |e| {
         if (e.state != .not_sent) continue;
-        if (std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) n += 1;
+        if (e.state != .cancelled and std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) n += 1;
     }
     return n;
 }

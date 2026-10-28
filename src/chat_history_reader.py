@@ -1660,7 +1660,7 @@ def held_queue_db(tmux):
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     db = sqlite3.connect(path)
     os.chmod(path, 0o600)
-    db.execute("CREATE TABLE IF NOT EXISTS messages (key TEXT PRIMARY KEY, sid TEXT NOT NULL, text TEXT NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('queued','submitted','delivered','cancelled')), scan INTEGER NOT NULL DEFAULT 0, receipt TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS messages (key TEXT PRIMARY KEY, sid TEXT NOT NULL, text TEXT NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('queued','submitted','delivered','cancelled')), scan INTEGER NOT NULL DEFAULT 0, origin INTEGER NOT NULL, source_inode INTEGER NOT NULL, receipt TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL)")
     db.execute("CREATE INDEX IF NOT EXISTS pending ON messages(sid,state,created)")
     return db
 
@@ -1681,11 +1681,15 @@ def enqueue_response(q):
     if not resolved:
         return f"@mp\t{q['id']}\tsend\terror\tagent_unavailable\t0\n{END}\n"
     sid, transcript = resolved
+    info = transcript.stat()
     with closing(held_queue_db(name)) as db, db:
-        db.execute("INSERT OR IGNORE INTO messages(key,sid,text,queued_at,state,created) VALUES (?,?,?,?,'queued',?)",
-                   (key, sid, q["text"], q["queued_at"], time.time_ns()))
+        db.execute("INSERT OR IGNORE INTO messages(key,sid,text,queued_at,state,created,origin,source_inode) VALUES (?,?,?,?,'queued',?,?,?)",
+                   (key, sid, q["text"], q["queued_at"], time.time_ns(), info.st_size, info.st_ino))
     drain_held_queue(name, sid, transcript)
-    return f"@mp\t{q['id']}\tsend\tok\t-\t0\n{END}\n"
+    with closing(held_queue_db(name)) as db:
+        identity = db.execute("SELECT sid,source_inode,origin,state,receipt FROM messages WHERE key=?", (key,)).fetchone()
+    receipt = wire_row(dict(role="delivery", message_id=key, sid=identity[0], inode=identity[1], offset=identity[2], state=identity[3], detail=identity[4]))
+    return f"@mp\t{q['id']}\tsend\tok\t-\t0\n{receipt}\n{END}\n"
 
 
 def cancel_queued_response(q):
