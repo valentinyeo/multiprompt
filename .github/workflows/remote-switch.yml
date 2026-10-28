@@ -2,7 +2,7 @@ name: Remote switch performance
 
 on:
   push:
-    branches: [ceo/IGSH-1059, ceo/IGSH-1149]
+    branches: [ceo/IGSH-1059]
   workflow_dispatch:
   pull_request:
     paths:

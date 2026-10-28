@@ -103,13 +103,13 @@ test('IGSH-1149 clipped gradient strips build only corners that can reach painte
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clipped-corners-'));
   const code = `
 const std = @import("std");
-const HANDLE = usize;
+const HANDLE = ?*anyopaque;
 const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
 const RoundGeometry = struct { x: f32, y: f32, width: f32, height: f32, diameter_x: f32, diameter_y: f32 };
 var clip = RECT{ .left = 0, .top = 0, .right = 200, .bottom = 100 };
 var fills: usize = 0;
 const w = struct {
-    fn CreateSolidBrush(_: u32) HANDLE { return 1; }
+    fn CreateSolidBrush(_: u32) HANDLE { return @ptrFromInt(1); }
     fn DeleteObject(_: HANDLE) i32 { return 1; }
     fn FillRect(_: HANDLE, _: *const RECT, _: HANDLE) i32 { return 1; }
     fn RectVisible(_: HANDLE, rc: *const RECT) i32 {
@@ -123,33 +123,33 @@ const Api = struct {
     close_figure: *const fn (HANDLE) i32 = one,
     add_path_arc: *const fn (HANDLE, f32, f32, f32, f32, f32, f32) i32 = arc,
     add_path_line: *const fn (HANDLE, f32, f32, f32, f32) i32 = line,
-    fn create(_: i32, path: *HANDLE) i32 { path.* = 1; return 0; }
+    fn create(_: i32, path: *HANDLE) i32 { path.* = @ptrFromInt(1); return 0; }
     fn one(_: HANDLE) i32 { return 0; }
     fn arc(_: HANDLE, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) i32 { return 0; }
     fn line(_: HANDLE, _: f32, _: f32, _: f32, _: f32) i32 { return 0; }
 };
 const app_state = struct { var g_gdip_api: Api = .{}; };
 const Canvas = struct {
-    hdc: HANDLE = 1,
+    hdc: HANDLE = @ptrFromInt(1),
     fn fill(_: *Canvas, _: HANDLE, _: u32) bool { fills += 1; return true; }
     ${body(source('smooth.zig'), 'fillRounded')}
 };
 test "native gradient clip retains visible corners and skips invisible paths" {
     var canvas: Canvas = .{};
     const g = RoundGeometry{ .x = 0, .y = 0, .width = 200, .height = 100, .diameter_x = 20, .diameter_y = 20 };
-    try std.testing.expect(canvas.fillRounded(1, g, 0xffffff));
+    try std.testing.expect(canvas.fillRounded(@ptrFromInt(1), g, 0xffffff));
     try std.testing.expectEqual(@as(usize, 4), fills);
     fills = 0;
     clip.top = 20; clip.bottom = 80;
-    try std.testing.expect(canvas.fillRounded(1, g, 0xffffff));
+    try std.testing.expect(canvas.fillRounded(@ptrFromInt(1), g, 0xffffff));
     try std.testing.expectEqual(@as(usize, 0), fills);
     fills = 0;
     clip.top = 0; clip.bottom = 10;
-    try std.testing.expect(canvas.fillRounded(1, g, 0xffffff));
+    try std.testing.expect(canvas.fillRounded(@ptrFromInt(1), g, 0xffffff));
     try std.testing.expectEqual(@as(usize, 2), fills);
     fills = 0;
     clip.left = 190; clip.top = 90; clip.bottom = 100;
-    try std.testing.expect(canvas.fillRounded(1, g, 0xffffff));
+    try std.testing.expect(canvas.fillRounded(@ptrFromInt(1), g, 0xffffff));
     try std.testing.expectEqual(@as(usize, 1), fills);
 }
 `;
