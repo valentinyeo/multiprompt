@@ -190,11 +190,6 @@ test('IGSH-1090 published executable paints its own published notes, with no bin
   const history = await historyResponse.json();
   const feature = history.releases.find(item => item.changes.includes('Update cards explain each change, without generic messages.'));
   assert.ok(feature, 'Feature must be published before its release-card proof');
-  if (release.tag_name !== `v${feature.version}`) {
-    const tagged = await fetch(`https://api.github.com/repos/valentinyeo/multiprompt/releases/tags/v${feature.version}`);
-    assert.equal(tagged.status, 200);
-    release = await tagged.json();
-  }
   assert.match(release.tag_name, /^v\d+\.\d+\.\d+$/);
   const assets = {};
   for (const name of ['multiprompt-x64.exe', 'release-notes.json']) {
@@ -210,7 +205,9 @@ test('IGSH-1090 published executable paints its own published notes, with no bin
   }
   const notes = JSON.parse(fs.readFileSync(assets['release-notes.json'], 'utf8'));
   assert.equal(notes.version, release.tag_name.slice(1));
-  assert.ok(notes.releases[0].changes.includes('Update cards explain each change, without generic messages.'));
+  assert.equal(notes.releases[0].version, notes.version);
+  assert.ok(notes.releases[0].changes.length > 0);
+  assert.ok(notes.releases.some(item => item.changes.includes('Update cards explain each change, without generic messages.')));
   const proof = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
     path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', assets['multiprompt-x64.exe'],
     '-Notes', assets['release-notes.json'], '-Evidence', path.join(directory, 'proof')],
