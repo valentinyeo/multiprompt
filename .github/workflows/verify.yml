@@ -145,6 +145,7 @@ on:
         type: boolean
   pull_request:
     paths:
+      - '**'
       - build.zig
       - build.zig.zon
       - .claude/skills/verify-multiprompt/**
