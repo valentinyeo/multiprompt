@@ -33,7 +33,7 @@ try {
     $deadline = [DateTime]::UtcNow.AddSeconds(30)
     do {
         $text = if (Test-Path $log) { Get-Content $log -Raw } else { '' }
-        if ($text -match '\[update\] card view=collapsed') { break }
+        if ($text -match '\[update\] card view=collapsed' -and $text -match '\[update\] card remaining=') { break }
         if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw 'Released app did not paint the card' }
         Start-Sleep -Milliseconds 100
     } while ($true)
