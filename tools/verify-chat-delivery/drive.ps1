@@ -800,8 +800,8 @@ foreach ($plan in $plans) {
             $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Shell-Input 'activity'
             [void](Wait-For 'all twelve completed tool calls in app-written cache' {
-                $rows = (Read-Shared $cache.FullName) -split "`n" | Select-Object -Skip 1 | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }
-                @($rows | Where-Object { $_.role -eq 'tool' -and $_.status -eq 'ok' -and $_.detail.Contains('verified') }).Count -eq 12
+                $completed = & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $cache.FullName --tool-count
+                $LASTEXITCODE -eq 0 -and [int]$completed -eq 12
             })
             Copy-Item $cache.FullName "$caseDir/app-cache.jsonl"
             if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Tool updates changed the composer' }
