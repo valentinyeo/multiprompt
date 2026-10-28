@@ -24,7 +24,7 @@ const transport = control.slice(control.indexOf('function Invoke-Zsb('), control
 function evaluateWorkflowExpression(template, context) {
   return template.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, expression) => {
     const source = expression.trim();
-    const lexer = /\s*('(?:[^']|'')*'|(?:github|inputs)\.[a-z_]+|format|fromJSON|startsWith|==|!=|!|&&|\|\||[(),])/gy;
+    const lexer = /\s*('(?:[^']|'')*'|needs\.journeys\.outputs\.(?:pr|full)|(?:github|inputs)\.[a-z_]+|format|fromJSON|startsWith|==|!=|!|&&|\|\||[(),])/gy;
     const tokens = [];
     while (lexer.lastIndex < source.length) {
       const token = lexer.exec(source);
@@ -72,9 +72,8 @@ function evaluateWorkflowExpression(template, context) {
       }
       assert.ok(token, 'missing concurrency operand');
       if (token.startsWith("'")) return () => token.slice(1, -1).replace(/''/g, "'");
-      assert.match(token, /^(github\.(workflow|ref|event_name|run_attempt|sha)|inputs\.[a-z_]+)$/);
-      const [object, key] = token.split('.');
-      return () => context[object]?.[key] ?? '';
+      assert.match(token, /^(github\.(workflow|ref|event_name|run_attempt|sha)|inputs\.[a-z_]+|needs\.journeys\.outputs\.(pr|full))$/);
+      return () => token.split('.').reduce((value, key) => value?.[key], context) ?? '';
     }
     function equality() {
       let left = primary();
@@ -173,11 +172,12 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
 test('IGSH-1028 reusable PR journeys select their requested feature and cannot cancel each other', () => {
   const group = workflow.match(/^  group: (.+)$/m)[1];
   const matrix = workflow.match(/^        feature: (.+)$/m)[1];
-  const context = feature => ({ github: { workflow: 'Title pill transparency', ref: 'refs/pull/579/merge', event_name: 'pull_request', run_attempt: '1', sha: 'head' }, inputs: { feature } });
+  const discovered = featureMatrix(workflow);
+  const context = feature => ({ github: { workflow: 'Title pill transparency', ref: 'refs/pull/579/merge', event_name: 'pull_request', run_attempt: '1', sha: 'head' }, inputs: { feature }, needs: { journeys: { outputs: { pr: JSON.stringify(discovered.pr), full: JSON.stringify(discovered.full) } } } });
   assert.notEqual(evaluateWorkflowExpression(group, context('pane-layout')), evaluateWorkflowExpression(group, context('browser-pane-stuck')));
   for (const feature of ['pane-layout', 'browser-pane-stuck']) assert.equal(evaluateWorkflowExpression(matrix, context(feature)), feature);
-  assert.equal(evaluateWorkflowExpression(matrix, context(undefined)), 'appearance');
-  assert.equal(evaluateWorkflowExpression(matrix, context('all')), 'appearance');
+  assert.equal(evaluateWorkflowExpression(matrix, context(undefined)), discovered.pr.join(','));
+  assert.equal(evaluateWorkflowExpression(matrix, context('all')), discovered.pr.join(','));
   const dictation = context(undefined);
   dictation.github.event_name = 'push';
   dictation.github.ref = 'refs/heads/ceo/IGSH-1072';
