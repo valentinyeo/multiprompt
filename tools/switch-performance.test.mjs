@@ -250,9 +250,9 @@ test('repeated observer proof rejects dropped runs, changed executables and sust
   const { assessRepeated } = await oracle();
   assert.equal(typeof assessRepeated, 'function', 'Repeated observer accounting must ship');
   const sample = poll => ({ ...workload(), sha256: 'a'.repeat(64), observerPollMs: poll, observerIdleCpuMs: poll === 25 ? 1000 : 50, appIdleCpuMs: 100, idleWallMs: 45000 });
-  const pairs = () => Array.from({ length: 5 }, () => ({ base: sample(25), head: sample(750) }));
+  const pairs = () => Array.from({ length: 5 }, () => ({ base: sample(750), head: { ...sample(750), sha256: 'b'.repeat(64) } }));
   assert.equal(assessRepeated(pairs()).length, 5);
-  for (const mutate of [p => p.pop(), p => { p[0].head.sha256 = 'b'.repeat(64); }, p => { delete p[0].base.observerIdleCpuMs; }, p => { p[0].head.observerPollMs = 25; }, p => { p[3].head.idleUs.fill(5001); }, p => { p[3].head.switches.pop(); }]) {
+  for (const mutate of [p => p.pop(), p => { p[1].head.sha256 = 'c'.repeat(64); }, p => { delete p[0].base.observerIdleCpuMs; }, p => { p[0].head.observerPollMs = 25; }, p => { p[3].head.idleUs.fill(5001); }, p => { p[3].head.switches.pop(); }]) {
     const data = pairs();
     mutate(data);
     assert.throws(() => assessRepeated(data));
@@ -278,4 +278,20 @@ test('diagnostic instrumentation qualifies capture logging and keeps ordinary bu
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+
+test('status polling uses isolated snapshots without attaching the UI console', () => {
+  const capture = fs.readFileSync(new URL('../src/chat_capture.zig', import.meta.url), 'utf8');
+  assert.match(capture, /if \(status_only\) @import\("console_snapshot.zig"\)\.poll\(pid, app_state\.shells\[shell_index\]\.shell_id\) orelse return null else null/);
+  const file = new URL('../src/console_snapshot.zig', import.meta.url);
+  assert.ok(fs.existsSync(file), 'Console snapshot worker must ship');
+  const source = fs.readFileSync(file, 'utf8');
+  const poll = source.slice(source.indexOf('pub fn poll('), source.indexOf('fn readExact('));
+  assert.doesNotMatch(poll, /AttachConsole|FreeConsole|WaitForSingleObject|Sleep|readExact/);
+  assert.match(poll, /PeekNamedPipe[\s\S]*available == 0[\s\S]*ReadFile/);
+  assert.match(poll, /h.request.pid == pid and h.request.sid == sid/);
+  assert.match(source, /test "snapshot polling never waits for partial data and rejects a switched session"/);
+  const main = fs.readFileSync(new URL('../src/main.zig', import.meta.url), 'utf8');
+  assert.ok(main.indexOf('runIfRequested(args)') < main.indexOf('debugLog("launch process-start'));
 });

@@ -24,15 +24,15 @@ export function assess(data) {
 
 export function assessRepeated(pairs) {
   if (!Array.isArray(pairs) || pairs.length !== 5) throw new Error('Expected five alternating pairs');
-  const sha = pairs[0]?.base?.sha256;
-  if (typeof sha !== 'string' || !/^[a-f0-9]{64}$/i.test(sha)) throw new Error('Missing executable hash');
+  const hashes = { base: pairs[0]?.base?.sha256, head: pairs[0]?.head?.sha256 };
+  if (Object.values(hashes).some(sha => typeof sha !== 'string' || !/^[a-f0-9]{64}$/i.test(sha))) throw new Error('Missing executable hash');
   return pairs.map(({ base, head }) => {
-    for (const [sample, poll] of [[base, 25], [head, 750]]) {
-      if (sample.sha256 !== sha || sample.observerPollMs !== poll || !Number.isFinite(sample.observerIdleCpuMs) || sample.observerIdleCpuMs < 0 || !Number.isFinite(sample.appIdleCpuMs) || sample.appIdleCpuMs < 0 || !Number.isFinite(sample.idleWallMs) || sample.idleWallMs <= 0) throw new Error('Invalid same-binary observer accounting');
+    for (const [sample, side] of [[base, 'base'], [head, 'head']]) {
+      if (sample.sha256 !== hashes[side] || sample.observerPollMs !== 750 || !Number.isFinite(sample.observerIdleCpuMs) || sample.observerIdleCpuMs < 0 || !Number.isFinite(sample.appIdleCpuMs) || sample.appIdleCpuMs < 0 || !Number.isFinite(sample.idleWallMs) || sample.idleWallMs <= 0) throw new Error('Invalid alternating-build accounting');
     }
     const baseline = assess(base);
     const candidate = assess(head);
-    if (!candidate.pass) throw new Error('A quiet-observer run exceeded unchanged session speed limits');
+    if (!candidate.pass) throw new Error('A candidate run exceeded unchanged session speed limits');
     return { baseline, candidate, observerCpuMs: { baseline: base.observerIdleCpuMs, candidate: head.observerIdleCpuMs }, appCpuMs: { baseline: base.appIdleCpuMs, candidate: head.appIdleCpuMs } };
   });
 }

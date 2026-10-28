@@ -1244,6 +1244,7 @@ comptime {
         _ = @import("vps.zig");
         _ = @import("chat_composer.zig");
         _ = @import("chat_capture.zig");
+        _ = @import("console_snapshot.zig");
         _ = @import("chat_session.zig");
         _ = @import("chat_render.zig");
         _ = @import("chat_find_ui.zig");
@@ -7990,6 +7991,8 @@ pub fn main(init: std.process.Init) void {
         usage_telemetry.main(init) catch {};
         return;
     }
+    if (@import("console_snapshot.zig").runIfRequested(args)) return;
+    defer @import("console_snapshot.zig").close();
     if (update_release.runHelperIfRequested(args)) return;
 
     debugLog("launch process-start version=" ++ APP_VERSION);

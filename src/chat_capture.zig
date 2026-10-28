@@ -1054,29 +1054,36 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
     if (shell_index >= app_state.shell_count or out.len < 2) return null;
     const pid = app_state.shells[shell_index].pid;
     if (pid == 0) return null;
+    const snapshot = if (status_only) @import("console_snapshot.zig").poll(pid, app_state.shells[shell_index].shell_id) orelse return null else null;
+    const screen = if (snapshot) |ready| ready else blk: {
+        _ = FreeConsole();
+        if (AttachConsole(pid) == 0) return null;
+        defer _ = FreeConsole();
+        const handle = openAttachedConsoleOutput() orelse return null;
+        defer _ = CloseHandle(handle);
+
+        var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
+        if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
+        if (info.dwSize.x <= 0 or info.dwSize.y <= 0) return null;
+        const width: usize = @intCast(info.dwSize.x);
+        if (width == 0 or width > app_state.g_chat_raw.len) return null;
+        const end_row_i32 = @min(@as(i32, info.dwSize.y) - 1, @max(@as(i32, info.dwCursorPosition.y), @as(i32, info.srWindow.bottom)));
+        const rows_cap = @min(@min(app_state.g_chat_line_starts.len, @divTrunc(app_state.g_chat_raw.len, width)), @as(usize, 1200));
+        if (rows_cap == 0) return null;
+        const available_rows: usize = @intCast(end_row_i32 + 1);
+        const rows = @min(rows_cap, available_rows);
+        const start_row: i16 = @intCast(end_row_i32 - @as(i32, @intCast(rows)) + 1);
+        const cells: DWORD = @intCast(rows * width);
+        var chars_read: DWORD = 0;
+        if (ReadConsoleOutputCharacterW(handle, &app_state.g_chat_raw, cells, .{ .x = 0, .y = start_row }, &chars_read) == 0) return null;
+
+        break :blk @import("console_snapshot.zig").Snapshot{ .width = width, .rows = rows, .raw = app_state.g_chat_raw[0..chars_read] };
+    };
+    const width = screen.width;
+    const rows = screen.rows;
+    const chars_read = screen.raw.len;
+    if (snapshot != null) @memcpy(app_state.g_chat_raw[0..chars_read], screen.raw);
     app_state.g_chat_screen_status_len = 0;
-
-    _ = FreeConsole();
-    if (AttachConsole(pid) == 0) return null;
-    defer _ = FreeConsole();
-    const handle = openAttachedConsoleOutput() orelse return null;
-    defer _ = CloseHandle(handle);
-
-    var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
-    if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
-    if (info.dwSize.x <= 0 or info.dwSize.y <= 0) return null;
-    const width: usize = @intCast(info.dwSize.x);
-    if (width == 0 or width > app_state.g_chat_raw.len) return null;
-    const end_row_i32 = @min(@as(i32, info.dwSize.y) - 1, @max(@as(i32, info.dwCursorPosition.y), @as(i32, info.srWindow.bottom)));
-    const rows_cap = @min(@min(app_state.g_chat_line_starts.len, @divTrunc(app_state.g_chat_raw.len, width)), @as(usize, if (status_only) 70 else 1200));
-    if (rows_cap == 0) return null;
-    const available_rows: usize = @intCast(end_row_i32 + 1);
-    const rows = @min(rows_cap, available_rows);
-    const start_row: i16 = @intCast(end_row_i32 - @as(i32, @intCast(rows)) + 1);
-    const cells: DWORD = @intCast(rows * width);
-    var chars_read: DWORD = 0;
-    if (ReadConsoleOutputCharacterW(handle, &app_state.g_chat_raw, cells, .{ .x = 0, .y = start_row }, &chars_read) == 0) return null;
-
     app_state.g_chat_raw_len = chars_read;
     app_state.g_chat_raw_sid = app_state.shells[shell_index].shell_id;
     chatPermissionCaptureRows(shell_index, width, chars_read, rows);
