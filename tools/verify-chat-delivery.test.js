@@ -608,6 +608,7 @@ function mockFiles(t, files) {
 
 
 test('full evidence oracle recomputes all cases and rejects corrupt screens, identity, actions and cleanup', t => {
+  const saved = JSON.parse(read('tools/fixtures/IGSH-1134/suggestion-capture.json'));
   const files = new Map();
   const base = path.join(root, 'tools/verify-chat-delivery/in-memory-evidence');
   const put = (file, value) => files.set(path.join(base, file), JSON.stringify(value));
@@ -619,7 +620,7 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
   for (const name of names) {
     const { observation, events } = fixture(name);
     observation.mode = name === 'idle-suggestion' ? 'idle' : 'busy';
-    observation.suggestion = 'Try the next step';
+    observation.suggestion = name === 'idle-suggestion' ? saved.suggestion : 'Try the next step';
     const wrapped = name === 'wrapped-leftover';
     if (wrapped) observation.leftover = leftover;
     put(`${name}/observation.json`, observation);
@@ -657,8 +658,18 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     return encoding && Buffer.isBuffer(value) ? value.toString(encoding) : value;
   });
   assert.equal(evaluateEvidence(base).status, 'passed');
+  assert.equal(JSON.parse(files.get(path.join(base, 'idle-suggestion/stand-in/ready.json'))).screen, saved.ready);
   const positive = new Map(files);
+  for (const screen of [saved.capture, saved.capture.replace('asking', '\u001b[38;2;100;100;100masking\u001b[m')]) {
+    log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen }]);
+    assert.equal(evaluateEvidence(base).status, 'passed', 'saved release capture differs only in SGR styling');
+  }
+  for (const [file, value] of positive) files.set(file, value);
   const mutations = [
+    () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace('asking', 'answering') }]),
+    () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace(saved.suggestion, '') }]),
+    () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace('\u001b[2m', '\u001b[2K') }]),
+    () => log('idle-suggestion/stand-in/agent-buffer.jsonl', fixture('idle-suggestion').events.slice(0, -1)),
     () => log('busy-send/stand-in/agent-buffer.jsonl', []),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: '❯ blank' }]),
     () => put('idle-suggestion/stand-in/state.json', { name: 'idle-suggestion', mode: 'idle', suggestion: '' }),
