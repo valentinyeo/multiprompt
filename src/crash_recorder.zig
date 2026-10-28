@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const upload = @import("report_upload.zig");
 
 pub const MAX_CRASH_FILES: usize = 10;
 pub const LOOP_MAX_CRASHES: usize = 4;
@@ -633,6 +634,8 @@ fn recordCrash() void {
     var txt_wide: [340]u16 = undefined;
     if (joinWide(&txt_wide, txt_name)) |p| _ = writeWholeFile(p, b.slice());
 
+    upload.queue(.crash, g_version, now, code, rvas[0..n_rvas]);
+
     if (reopen) {
         var marker_wide: [340]u16 = undefined;
         if (joinWide(&marker_wide, "restarted.marker")) |p| {
@@ -675,6 +678,7 @@ pub fn install(snapshot_fn: SnapshotFn, version: []const u8, is_dev: bool) void 
     g_version = version;
     g_is_dev = is_dev;
     initPaths();
+    upload.initialize(g_dir[0..g_dir_len]);
     if (win.LoadLibraryA("dbghelp.dll")) |lib| {
         if (win.GetProcAddress(lib, "MiniDumpWriteDump")) |raw| g_dump_fn = @ptrCast(@alignCast(raw));
     }
@@ -710,12 +714,14 @@ pub fn takeRestartNotice() bool {
     return noticeIsFresh(secs, unixNow());
 }
 
-pub fn writeFreezeReport(name: []const u8, bytes: []const u8) void {
+pub fn writeDiagnosticReport(name: []const u8, bytes: []const u8, freeze_notice: bool) void {
     if (g_dir_len == 0) return;
     var path: [400]u16 = undefined;
     const report = joinWide(&path, name) orelse return;
     if (!writeWholeFile(report, bytes)) return;
-    if (joinWide(&path, "freeze.marker")) |marker| _ = writeWholeFile(marker, "saved\n");
+    if (freeze_notice) {
+        if (joinWide(&path, "freeze.marker")) |marker| _ = writeWholeFile(marker, "saved\n");
+    }
 }
 
 pub fn takeFreezeNotice() bool {

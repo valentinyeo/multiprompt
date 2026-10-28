@@ -1353,6 +1353,7 @@ fn recordFrontVisit() void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (freeze_recorder.heartbeat(msg, wp)) return 0;
     freeze_recorder.note(msg, app_state.active_shell, if (app_state.g_inbox_active) .inbox else if (app_state.g_all_sessions_active) .sessions else if (app_state.g_search_active) .search else if (app_state.g_shortcuts_active) .shortcuts else if (app_state.g_changelog_active) .changelog else if (app_state.g_browser_focus_mode) .browser else if (app_state.g_chat_active) .chat else .terminal);
     if (msg == update_release.WM_RESPONSIVE) {
         update_release.ready();
@@ -8185,6 +8186,8 @@ pub fn main(init: std.process.Init) void {
     app_state.g_main_hwnd = hwnd;
     @import("browser_pane.zig").installBrowserDockHooks();
     defer @import("browser_pane.zig").uninstallBrowserDockHooks();
+    @import("report_upload.zig").start();
+    defer @import("report_upload.zig").stop();
     freeze_recorder.start(hwnd, APP_VERSION);
     defer freeze_recorder.stop();
     defer if (app_state.g_account_instance_mutex != null) {
