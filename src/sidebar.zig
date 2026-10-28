@@ -232,6 +232,7 @@ const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
+const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -2315,6 +2316,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_find = result_idx == SEARCH_CHAT_FIND_OFFSET;
                     const is_chat_tools = result_idx == SEARCH_CHAT_TOOL_STEPS_OFFSET;
                     const is_chat_newest = result_idx == SEARCH_CHAT_NEWEST_OFFSET;
+                    const is_chat_resync = result_idx == SEARCH_CHAT_RESYNC_OFFSET;
                     const is_chat_more_menu = result_idx == SEARCH_CHAT_MORE_MENU_OFFSET;
                     const is_chat_copy = result_idx == SEARCH_CHAT_COPY_CODE_OFFSET;
                     const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET or result_idx == SEARCH_CHAT_DICTATION_OFFSET;
@@ -3238,11 +3240,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
                         var find_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu) {
+                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_resync) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
                         var tools_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_more_menu) L("Chat View: More Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_more_menu) L("Chat View: More Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));

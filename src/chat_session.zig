@@ -1,5 +1,6 @@
 const chatTableRefresh = @import("chat_render.zig").chatTableRefresh;
 const chat_switch = @import("chat_switch.zig");
+const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const chat_layout_snapshot = @import("chat_layout_snapshot.zig");
 const ShowWindow = @import("focus.zig").ShowWindow;
 const SW_SHOWNOACTIVATE = @import("win32.zig").SW_SHOWNOACTIVATE;
@@ -487,6 +488,26 @@ pub fn chatHistoryForget(shell_id: u32) void {
         std.heap.page_allocator.destroy(entry);
         _ = app_state.g_chat_histories.swapRemove(i);
     }
+}
+
+pub fn chatResync() void {
+    if (!chatViewOwnsInput() or app_state.active_shell >= app_state.shell_count) return;
+    const key = chatFileIdentity();
+    if (key.shell_id == 0) return;
+    while (!app_state.g_chat_cache_write_mutex.tryLock()) Sleep(1);
+    for (app_state.g_chat_histories.items) |entry| {
+        if (entry.key.shell_id == key.shell_id) entry.cache_cancelled.store(true, .release);
+    }
+    chatHistoryForget(key.shell_id);
+    const entry = chatHistoryEntry(key);
+    if (entry) |fresh| {
+        fresh.disk_loaded = true;
+        fresh.resync = true;
+    }
+    app_state.g_chat_cache_write_mutex.unlock();
+    if (entry == null) return;
+    debugLog("[chat] resync requested");
+    chatFileRequest(key);
 }
 
 pub fn chatFileRequest(key: chat_transcript.Identity) void {
@@ -1111,6 +1132,11 @@ pub fn chatFileOnReady() void {
             entry.result = null;
             entry.failures = 0;
             entry.missing_message = @splat(0);
+            if (entry.resync and !disk and !history.more and history.start == 0) {
+                entry.resync = false;
+                if (belongs_to_active) showHeaderNoticeAscii("Chat resynced", 3000, false);
+                debugLog("[chat] resync completed");
+            }
             entry.next = GetTickCount64() + (if (disk or entry.prepended or entry.before > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 250) else if (entry.stream != null) @as(u64, 0) else chatFilePollInterval());
             if (belongs_to_active) {
                 active_changed = !entry.unchanged or history.revision != app_state.g_chat_last_hash;
