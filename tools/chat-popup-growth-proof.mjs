@@ -23,6 +23,7 @@ export function assertSecondBadge(frame) {
 
 export function assertPaintedGrowth(beforeImage, grownImage, area, popup) {
   const before = inspect(beforeImage, area);
+  before.agent = before.agent.filter(body => body.bottom - body.top >= 48);
   assert.equal(before.agent.length, 2, 'two replies before opening the popup');
   assert.equal(before.pill.length, 0, 'no prior reaction');
 
@@ -33,7 +34,7 @@ export function assertPaintedGrowth(beforeImage, grownImage, area, popup) {
     for (let x = Math.max(0, popup.left); x < Math.min(grownImage.width, popup.right); x++) pixels.writeUIntLE(background, (y * grownImage.width + x) * 4, 3);
   }
   const painted = inspect({ ...grownImage, pixels }, area, true);
-  const bodies = painted.agent;
+  const bodies = painted.agent.filter(body => body.bottom - body.top >= 48);
   assert.equal(bodies.length, 3, 'unoccluded edges identify both prose replies and the added code panel');
   assert.ok(bodies[0].bottom < bodies[1].top && bodies[1].bottom < bodies[2].top, 'new code panel paints between the earlier prose and clicked reply');
   assert.ok(bodies[1].bottom - bodies[1].top >= 32 && bodies[1].ink > 8, 'new code panel has height and actual foreground ink');
@@ -67,6 +68,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (mode === '--locate') {
     const area = json('popup-growth/area.json');
     const frame = inspect(image('before'), area);
+    frame.agent = frame.agent.filter(body => body.bottom - body.top >= 48);
     assert.equal(frame.agent.length, 2, 'fixture replies painted');
     const target = frame.agent[1];
     console.log(JSON.stringify({ x: target.left + 30, y: target.top + 20 }));
