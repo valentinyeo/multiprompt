@@ -100,6 +100,11 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
   assert.throws(() => evaluate("'a' 'b'"), assert.AssertionError);
 });
 
+test('IGSH-1113 required appearance verification cannot be filtered out for any PR', () => {
+  assert.match(workflow, /^  pull_request:\r?\n(?=\r?\n|[^\s])/m);
+  assert.ok(featureMatrix(workflow).pr.includes('appearance'));
+});
+
 test('release tags reuse master verification instead of starting another full Windows matrix', () => {
   const push = workflow.match(/^  push:\r?\n((?:    [^\n]*\r?\n)+)/m);
   assert.ok(push, 'master pushes still trigger full verification');
@@ -171,7 +176,6 @@ test('G1: workflow and harness allow session-open and Windows parses the driver'
   assert.match(control, /ValidateSet\([^\n)]*'session-open'/);
   assert.match(workflow, /Language\.Parser\]::ParseFile/);
   assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt\.test\.js/);
-  assert.match(workflow, /paths:[\s\S]*?- tools\/verify-multiprompt\.test\.js/);
   assert.throws(() => allowsSessionOpen(workflow.replace("node tools/verify-features.cjs $env:FEATURE", "")));
 });
 
@@ -995,7 +999,6 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
   assert.doesNotMatch(setup, /Assert-BrowserPane|PaneLayoutProof|Start-Sleep/);
   assert.match(control, /\$warmupStopped = \$warmupJob.Stop\(\)/);
   assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt.test.js/);
-  assert.ok(workflow.includes('- tools/verify-scratch.test.ps1'));
 });
 
 test('ISSUE-569 restore registry, real close/kill and persistent private relaunches cannot be skipped', () => {
@@ -1432,7 +1435,6 @@ test('IGSH-599 local Chat View journey observes suggestion delivery and protects
   const chat = control.slice(control.indexOf("        'chat-view' {"), control.indexOf("        'inbox' {"));
   const agent = read('tools/chat-local-agent.c');
   assert.ok(featureMatrix(workflow).full.includes('chat-view'));
-  assert.match(workflow, /- tools\/chat-local-agent\.c/);
   assert.match(workflow, /if: env\.RELEASE_TAG == ''[^\n]*\|\| env\.FEATURE == 'chat-view'/);
   assert.match(workflow, /zig cc -target x86_64-windows-gnu -O2 tools\/chat-local-agent\.c -o verify-bin\/claude\.exe/);
   assert.match(workflow, /if \(\$LASTEXITCODE -ne 0\) \{ throw 'Local Claude console stand-in build failed' \}/);
