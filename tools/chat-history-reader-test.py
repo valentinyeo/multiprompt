@@ -2736,5 +2736,95 @@ class SharedQueueDraftTest(unittest.TestCase):
         self.assertIn('"send_queued", "edit_queued"', source)
 
 
+
+class HeldQueueTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.path = self.home / 'session.jsonl'
+        self.path.write_text('')
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)).start()
+        self.send = patch.object(reader, 'send_response', return_value='@mp\t1\tsend\tok\t-\t0\n@@MP_END@@\n').start()
+        self.ready = patch.object(reader, 'held_queue_ready', return_value=False).start()
+
+    def enqueue(self, text, stamp):
+        return reader.enqueue_response(dict(id=1, tmux='term-1', text=text, queued_at=stamp))
+
+    def cancel(self, text, stamp):
+        return reader.cancel_queued_response(dict(id=2, tmux='term-1', text=text, queued_at=stamp))
+
+    def test_cancel_before_handoff_never_reaches_terminal(self):
+        self.assertIn('\tsend\tok\t', self.enqueue('target', 1))
+        self.assertIn('\tcancel_queued\tok\t', self.cancel('target', 1))
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.send.assert_not_called()
+        self.assertIn('\tcancel_queued\tok\t', self.cancel('target', 1))
+
+    def test_cancel_preserves_other_messages_and_order(self):
+        for stamp, text in enumerate(['first', 'target', 'third'], 1):
+            self.enqueue(text, stamp)
+        self.cancel('target', 2)
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual([call.args[0]['text'] for call in self.send.call_args_list], ['first'])
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'], ['third'])
+
+    def test_after_handoff_cancel_refused_even_without_receipt(self):
+        self.ready.return_value = True
+        self.enqueue('target', 1)
+        self.assertIn('\tcancel_queued\terror\tnot_queued\t', self.cancel('target', 1))
+        self.send.assert_called_once()
+
+    def test_terminal_failure_does_not_lose_unrelated_messages(self):
+        self.enqueue('first', 1)
+        self.enqueue('third', 3)
+        self.ready.return_value = True
+        self.send.side_effect = subprocess.TimeoutExpired(['tmux'], 5)
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'], ['third'])
+        self.assertIn('\tcancel_queued\terror\tnot_queued\t', self.cancel('first', 1))
+        self.assertIn('\tcancel_queued\tok\t', self.cancel('third', 3))
+
+    def test_duplicate_text_cancel_identifies_only_requested_message(self):
+        self.enqueue('same', 1)
+        self.enqueue('same', 2)
+        self.cancel('same', 2)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'], ['same'])
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.send.assert_called_once()
+
+    def test_enqueue_retry_and_cancel_tombstone_are_idempotent(self):
+        self.enqueue('target', 1)
+        self.enqueue('target', 1)
+        self.cancel('target', 1)
+        self.enqueue('target', 1)
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.send.assert_not_called()
+
+    def test_new_session_never_receives_previous_sessions_queue(self):
+        self.enqueue('target', 1)
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'other-sid', self.path)
+        self.send.assert_not_called()
+
+    def test_real_receipt_required_and_unrelated_answer_not_receipt(self):
+        self.ready.return_value = True
+        self.enqueue('target', 1)
+        self.path.write_text(json.dumps(dict(type='assistant', message=dict(role='assistant', content=[dict(type='text', text='answer')], stop_reason='end_turn'))) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [])
+        with self.path.open('a') as source:
+            source.write(json.dumps(dict(type='user', message=dict(role='user', content='target'), timestamp='2026-10-28T20:00:00Z')) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['target'])
+        self.assertIn('\tcancel_queued\terror\tnot_queued\t', self.cancel('target', 1))
+
+
 if __name__ == '__main__':
     unittest.main()
