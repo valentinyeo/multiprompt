@@ -367,7 +367,7 @@ test('IGSH-1033 master smoke stays small while release candidates retain feature
     assert.match(source, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083, ceo\/IGSH-1079, ceo\/IGSH-1033\]\n  workflow_dispatch:/m);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), featureMatrix(source).pr);
     assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), featureMatrix(source).pr);
-    assert.deepEqual(journeyMatrix(source, 'push'), featureMatrix(source).pr);
+    assert.deepEqual(journeyMatrix(source, 'push'), ['appearance', 'relaunch-saved-sessions']);
     for (const feature of full) assert.ok(journeyMatrix(source, 'push', 'all').includes(feature));
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1072-proof-1'), ['chat-dictation']);
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1061-recovery'), ['browser-pane-stuck']);
@@ -380,7 +380,7 @@ test('IGSH-1033 master smoke stays small while release candidates retain feature
   for (const [before, after] of [
     ['fromJSON(needs.journeys.outputs.pr)', 'fromJSON(needs.journeys.outputs.full)'],
     ['fromJSON(needs.journeys.outputs.full)', 'fromJSON(needs.journeys.outputs.pr)'],
-    ["github.event_name == 'push' && fromJSON(needs.journeys.outputs.pr)", "github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr)"],
+    [`github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]')`, `github.event_name == 'pull_request' && fromJSON('["appearance", "relaunch-saved-sessions"]')`],
     ["inputs.feature == 'all'", "inputs.feature == 'appearance'"],
   ]) {
     const broken = workflow.replace(before, after);

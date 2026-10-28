@@ -2271,7 +2271,7 @@ test('IGSH-1033 shared tracked quarantine protects rollback and release executio
   assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \}\}/);
   assert.match(workflow, /quarantined: \$\{\{ steps.policy.outputs.quarantined \}\}/);
   assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
-  assert.match(workflow, /github.event_name == 'push' && fromJSON\(needs.journeys.outputs.pr\)/);
+  assert.match(workflow, /github.event_name == 'push' && fromJSON\('\["appearance", "relaunch-saved-sessions"\]'\)/);
   for (const entry of Object.values(policy.quarantined)) {
     assert.equal(entry.ticket, 'https://app.hypertask.ai/detail/project-2060/1055');
     assert.deepEqual(entry.runs, ['https://github.com/valentinyeo/multiprompt/actions/runs/40450143181', 'https://github.com/valentinyeo/multiprompt/actions/runs/40454057302']);
