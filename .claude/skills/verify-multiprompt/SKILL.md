@@ -11,6 +11,28 @@ Read [features/README.md](features/README.md), then the selected feature file be
 
 Diagnostic verification maps live separately in `diagnostics/`: [Chat sync audit](diagnostics/chat-sync-audit.md) uses the dedicated GitHub Linux job, not the Windows desktop driver.
 
+## Feature control ownership
+
+- `control.ps1` keeps options, setup, dispatch and cleanup.
+- `control-feature-<name>.ps1` owns each extracted feature body.
+- Existing dedicated scripts keep their names.
+- `control-library.ps1` holds shared PowerShell helpers.
+- `control-native.cs` holds unchanged native types.
+- Same-directory dot sourcing preserves scope and paths.
+- Source readers use `readControlSource` from `tools/app-source.js`.
+- Ordinary checks never pin feature content hashes.
+
+The extraction tool is safe to rerun:
+
+```sh
+pwsh -File tools/split-feature-controls.ps1 -Path .claude/skills/verify-multiprompt/control.ps1 -Output control-ast.json
+node tools/split-feature-controls.mjs control-ast.json
+node tools/split-feature-controls.mjs --check
+```
+
+Use `--check --original` only for this migration's proof.
+Its fixture records the original source, not future constraints.
+
 ## Launch
 
 From an authenticated checkout, submit the default branch's workflow and select a feature-map file stem:

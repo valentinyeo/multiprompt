@@ -81,3 +81,40 @@ test("moving tabs between workspaces keeps groups workspace-local", () => {
   assert.match(moveSelected, /group_id = 0/);
   assert.match(moveGroup, /shells\[i\]\.workspace = slot;/);
 });
+
+test("workspace identity remains visible when numbered pills are hidden", () => {
+  const layout = fs.readFileSync(path.join(__dirname, "../src/sidebar.zig"), "utf8");
+  assert.match(layout, /wsStripHeight\(\) \+ @import\("workspace_switcher.zig"\).headerHeight\(\)/);
+  assert.match(layout, /@import\("workspace_switcher.zig"\).paintHeader\(hdc\)/);
+  const main = fs.readFileSync(path.join(__dirname, "../src/main.zig"), "utf8");
+  assert.match(main, /@import\("workspace_switcher.zig"\).headerClick\(mx, my\)/);
+  const doubleClick = main.slice(main.indexOf("        WM_LBUTTONDBLCLK => {"), main.indexOf("        WM_MBUTTONDOWN => {"));
+  assert.match(doubleClick, /workspace_switcher.zig"\).headerClick\(mx, my\)/, "rapid reopening must handle Windows double-click delivery");
+  const switcher = fs.readFileSync(path.join(__dirname, "../src/workspace_switcher.zig"), "utf8");
+  assert.match(switcher, /workspaceDisplayName\(app_state.g_active_workspace/);
+  assert.match(switcher, /openWorkspaceByIndex/);
+  assert.match(switcher, /var band = .*\.right = browser\.SIDEBAR_W\(\) - 1/, "header background must preserve the native pane separator");
+  assert.match(switcher, /WORKSPACES/);
+  assert.match(switcher, /New workspace/);
+});
+
+
+test("keyboard-selected sessions scroll below the fixed workspace name", () => {
+  const consoleSource = fs.readFileSync(path.join(__dirname, "../src/console.zig"), "utf8");
+  const ensureVisible = consoleSource.slice(consoleSource.indexOf("pub fn ensureActiveVisible()"), consoleSource.indexOf("pub fn paneGuardKeepUser("));
+  assert.match(ensureVisible, /const visible_top = .*headerHeight\(\)/);
+  assert.match(ensureVisible, /top - app_state\.g_sidebar_scroll < visible_top/);
+  assert.match(ensureVisible, /app_state\.g_sidebar_scroll = @max\(0, top - visible_top\)/);
+});
+
+
+test("workspace card dismissal uses real owner input and its named native window", () => {
+  const driverPath = path.join(__dirname, "../.claude/skills/verify-multiprompt/workspace-switcher.ps1");
+  assert.ok(fs.existsSync(driverPath), "native workspace card journey is installed");
+  const driver = fs.readFileSync(driverPath, "utf8");
+  assert.match(driver, /'MultiPromptWorkspaceSwitcher', 'Workspaces'/);
+  for (const shot of ['action', 'after']) assert.ok(driver.includes(`Snapshot '${shot}'`), `required ${shot} evidence survives cleanup`);
+  const main = fs.readFileSync(path.join(__dirname, "../src/main.zig"), "utf8");
+  const composer = fs.readFileSync(path.join(__dirname, "../src/chat_composer.zig"), "utf8");
+  for (const input of [main, composer]) assert.match(input, /@import\("workspace_switcher.zig"\).key\(wp\)/);
+});

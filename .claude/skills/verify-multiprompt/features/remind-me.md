@@ -1,5 +1,7 @@
 # Remind Me
 
+Verify on: push
+
 Open the Remind Me preset picker with Ctrl+H on a tmux session and see the hour and evening presets without choosing one.
 
 ## Sub-features

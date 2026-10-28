@@ -33,14 +33,20 @@ test('executed production Zig guard authorizes input, blocks automation, and res
     const nativeEnd = source.indexOf('\n};', start) + 3;
     const end = source.indexOf('\nvar g_main_hwnd:', nativeEnd);
     const production = (source.slice(nativeEnd, end) + '\n' + functionSlice(source, 'chatViewOwnsInput', 'chatFocusDrifted'))
-      .replaceAll('@import("workspaces.zig").captureWorkspaceFocus()', 'captureWorkspaceFocus()');
+      .replaceAll('@import("workspaces.zig").captureWorkspaceFocus()', 'captureWorkspaceFocus()')
+      .replaceAll('@import("settings_panel.zig")', 'settings_panel');
+    assert.ok(fs.existsSync(path.join(root, 'src/settings_panel.zig')), 'Settings owns its modal focus boundary');
+    const settingsSource = fs.readFileSync(path.join(root, 'src/settings_panel.zig'), 'utf8');
+    const settingsOwnership = settingsSource.slice(settingsSource.indexOf('pub fn ownsWindow('), settingsSource.indexOf('pub fn dialogMessage(')).replaceAll('w.', '');
+    assert.match(settingsOwnership, /pub fn ownsWindow/);
+    assert.match(settingsOwnership, /pub fn ownsForeground/);
     const fixture = `const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
-` + fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8');
+` + fs.readFileSync(path.join(__dirname, 'focus-guard-fixture.zig'), 'utf8') + `\nconst settings_panel = struct { var window: HANDLE = null; var key_window: HANDLE = null; ${settingsOwnership} };\n`;
     const nonClientMessage = fs.readFileSync(path.join(root, 'src/win32.zig'), 'utf8').match(/^pub const WM_NCLBUTTONDOWN[^;]+;/m);
     assert.ok(nonClientMessage, 'native frame input message comes from the shipped Win32 declarations');
     fs.writeFileSync(path.join(dir, 'win32.zig'), nonClientMessage[0]);
@@ -50,6 +56,12 @@ fn chatReadMark(_: bool) bool { return false; }
     const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     assert.match(result.stderr, /All \d+ tests passed/);
+    const withoutSettings = production.replace(/if \(settings_panel\.ownsForeground\(\)\) \{[^]*?return inside;\s*\}/, '');
+    assert.notEqual(withoutSettings, production);
+    fs.writeFileSync(file, (fixture.replace("fn reset() void {", withoutSettings + "\nfn reset() void {")).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    const missingModalOwnership = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+    assert.notEqual(missingModalOwnership.status, 0, 'removing modal ownership must allow focus theft and fail');
+    assert.match(missingModalOwnership.stderr, /Settings keeps input[^]*FAIL/);
     const missingFrameInput = production.replace(', @import("win32.zig").WM_NCLBUTTONDOWN', '');
     assert.notEqual(missingFrameInput, production);
     fs.writeFileSync(file, (fixture.replace("fn reset() void {", missingFrameInput + "\nfn reset() void {")).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));

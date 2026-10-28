@@ -1,11 +1,13 @@
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8'));
 const pane = fs.readFileSync(process.env.BROWSER_PROFILE_PANE_SOURCE || path.join(root, 'src/browser_pane.zig'), 'utf8');
 const before = read('tools/fixtures/igsh-726/browser-pane-before.zig');
 const own = read('src/browser_own_profile.zig');

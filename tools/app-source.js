@@ -28,5 +28,25 @@ function readAppSource(override) {
   }).join('').replace(/\/\/[^\n]*|\\\\[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\bapp_state\./g, token => token === 'app_state.' ? '' : token).replace(/^([ \t]*)pub (?!(?:fn main\b|const (?:panic|std_options)\b))/gm, '$1');
 }
 
-module.exports = { readAppSource };
+function readControlSource(file = path.resolve(__dirname, '../.claude/skills/verify-multiprompt/control.ps1')) {
+  const active = new Set();
+  function expand(name) {
+    name = path.resolve(name);
+    if (active.has(name)) throw new Error(`Control import cycle: ${name}`);
+    active.add(name);
+    const directory = path.dirname(name);
+    const text = fs.readFileSync(name, 'utf8')
+      .replace(/\n[ \t]*\. \(Join-Path \$PSScriptRoot '(control-feature-[a-z0-9-]+\.ps1)'\)\n[ \t]*(?=\})/g,
+        (_, child) => expand(path.join(directory, child)))
+      .replace(/^\. \(Join-Path \$PSScriptRoot '(control-library\.ps1)'\)\r?\n/gm,
+        (_, child) => expand(path.join(directory, child)))
+      .replace(/^(Add-Type -ReferencedAssemblies[^\r\n]+ -TypeDefinition )\(Get-Content \(Join-Path \$PSScriptRoot '(control-native\.cs)'\) -Raw\)$/gm,
+        (_, prefix, child) => `${prefix}@'\n${fs.readFileSync(path.join(directory, child), 'utf8')}'@`);
+    active.delete(name);
+    return text;
+  }
+  return expand(file);
+}
+
+module.exports = { readAppSource, readControlSource };
 if (require.main === module) process.stdout.write(readAppSource());

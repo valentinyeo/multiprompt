@@ -1,3 +1,4 @@
+const SEARCH_SETTINGS_OFFSET = @import("app_state.zig").SEARCH_SETTINGS_OFFSET;
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
@@ -24,7 +25,6 @@ const selectedTabCount = @import("sidebar.zig").selectedTabCount;
 const selectedTabsIncludeGrouped = @import("sidebar.zig").selectedTabsIncludeGrouped;
 const capacityAdmitNewAgent = @import("capacity.zig").capacityAdmitNewAgent;
 const commandCreatesAgentWorkload = @import("capacity.zig").commandCreatesAgentWorkload;
-const SEARCH_VISIBLE_ROWS = @import("app_state.zig").SEARCH_VISIBLE_ROWS;
 const SEARCH_TMUX_OFFSET = @import("app_state.zig").SEARCH_TMUX_OFFSET;
 const SEARCH_NEW_OFFSET = @import("app_state.zig").SEARCH_NEW_OFFSET;
 const SEARCH_SOUND_OFFSET = @import("app_state.zig").SEARCH_SOUND_OFFSET;
@@ -173,6 +173,7 @@ const SEARCH_CLEAN_CHAT_OFFSET = @import("app_state.zig").SEARCH_CLEAN_CHAT_OFFS
 const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET;
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
+const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -192,6 +193,7 @@ const REMIND_PRESET_EVENING = @import("app_state.zig").REMIND_PRESET_EVENING;
 const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
 const SEARCH_SNIPPETS_MENU_OFFSET = @import("app_state.zig").SEARCH_SNIPPETS_MENU_OFFSET;
+const SEARCH_SNIPPET_MANAGE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_MANAGE_OFFSET;
 const SEARCH_SNIPPET_CREATE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_CREATE_OFFSET;
 const SEARCH_SNIPPET_BACK_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_BACK_OFFSET;
 const SEARCH_SNIPPET_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_OFFSET;
@@ -428,8 +430,10 @@ fn paletteUsagePath(buf: *[512]u8) ?[]const u8 {
 
 fn paletteTargetTracksUsage(target: usize) bool {
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return true;
-    if (target == SEARCH_SOUND_OFFSET or
+    if (target == SEARCH_SNIPPET_MANAGE_OFFSET or
+        target == SEARCH_SOUND_OFFSET or
         target == SEARCH_THEME_MENU_OFFSET or
+        target == SEARCH_SETTINGS_OFFSET or
         (target >= SEARCH_OPENALL_OFFSET and target <= SEARCH_RECOVER_REPO_OFFSET) or
         (target >= SEARCH_NEWWIN_OFFSET and target <= SEARCH_CREATEWS_OFFSET) or
         (target >= SEARCH_WORKSPACES_MENU_OFFSET and target <= SEARCH_SNIPPET_BACK_OFFSET) or
@@ -552,7 +556,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         const tab = if (findShellById(app_state.g_tabctx_sid)) |idx| &app_state.shells[idx] else null;
         return switch (target) {
             SEARCH_TABCTX_CHAT_RESET => "chat view reset this chat clear bubbles cache",
-            SEARCH_TABCTX_RECONNECT => "reconnect tab",
+            SEARCH_TABCTX_RECONNECT => "reattach tab",
             SEARCH_TABCTX_INBOX_EXCLUDE => if (tab != null and tab.?.inbox_excluded) "inbox: show this session again" else "inbox: never show this session",
             SEARCH_TABCTX_FAVORITE => if (tab != null and tab.?.favorite) "unfavorite" else "favorite",
             SEARCH_TABCTX_MUTE => if (tab != null and tab.?.muted) "unmute tab" else "mute tab",
@@ -654,6 +658,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_THEME_DEV_RELOAD_OFFSET => "reload dev theme",
         SEARCH_SOUND_OFFSET => "notification sounds",
         SEARCH_THEME_MENU_OFFSET => "themes",
+        SEARCH_SETTINGS_OFFSET => "settings preferences look keys about",
         SEARCH_OPENALL_OFFSET => "open all vps tmux sessions",
         SEARCH_OPENFOLDER_OFFSET => "open sessions in this folder",
         SEARCH_RECOVER_REPO_OFFSET => "recover workspace repo sessions",
@@ -669,7 +674,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_FULLWIDTH_OFFSET => "full-width",
         SEARCH_SHORTCUTS_OFFSET => "keyboard shortcuts",
         SEARCH_CLOSEWIN_OFFSET => "close workspace",
-        SEARCH_RECONNECT_OFFSET => "reconnect tab",
+        SEARCH_RECONNECT_OFFSET => "reattach tab",
         SEARCH_SINGLEWIN_OFFSET => "single-window mode",
         SEARCH_INSTALLHOOK_OFFSET => "install blue dot hook",
         SEARCH_STARRED_OFFSET => "go to starred workspace favorites alt 1",
@@ -762,6 +767,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_FIND_OFFSET => "chat view find in conversation ctrl f",
         SEARCH_CHAT_TOOL_STEPS_OFFSET => "chat view open or fold all tool steps expand collapse tools",
         SEARCH_CHAT_NEWEST_OFFSET => "Chat View: Scroll to newest message jump to bottom end",
+        SEARCH_CHAT_MORE_MENU_OFFSET => "Chat View: More Menu three dots approve stop rename history archive model",
         SEARCH_CHAT_COPY_CODE_OFFSET => "chat view copy latest code block ctrl shift d",
         SEARCH_CHAT_DICTATION_OFFSET => "chat view dictation microphone speech start stop ctrl d",
         SEARCH_CHAT_ATTACH_OFFSET => "chat view attach file pdf zip log document image upload picture photo screenshot ctrl v drop drag",
@@ -801,6 +807,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_WS_BRINGBACK_OFFSET => "workspace bring back all sessions",
         SEARCH_CODEX_TMUX_OFFSET => "new codex session in this folder",
         SEARCH_SNIPPETS_MENU_OFFSET => "use snippets",
+        SEARCH_SNIPPET_MANAGE_OFFSET => "manage snippets",
         SEARCH_SNIPPET_CREATE_OFFSET => "create snippet",
         SEARCH_SNIPPET_BACK_OFFSET => "back",
         SEARCH_SESSION_OVERVIEW_MENU_OFFSET => "show all sessions",
@@ -1052,14 +1059,14 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target >= SEARCH_WS_SNOOZED_ROW_OFFSET and target < SEARCH_WS_SNOOZED_ROW_OFFSET + MAX_REMINDERS) return 1;
     if (target >= app_state.SEARCH_GROUPCTX_BASE and target < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) return 2;
     return switch (target) {
-        SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
+        SEARCH_ARCHIVED_VIEW_OFFSET, SEARCH_ARCHIVE_OFFSET, SEARCH_CLOSETAB_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_CUSTOMCMD_EDIT_OFFSET, SEARCH_END_TMUX_OFFSET, SEARCH_GOINBOX_OFFSET, SEARCH_INBOX_FREQUENT_OFFSET, SEARCH_KEEPALIVE_OFFSET, SEARCH_NEXTUNREAD_OFFSET, SEARCH_OPENALL_OFFSET, SEARCH_OPENFOLDER_OFFSET, SEARCH_POWER_ALWAYS_OFFSET, SEARCH_POWER_AUTO_OFFSET, SEARCH_POWER_OFF_OFFSET, SEARCH_RECONNECT_OFFSET, SEARCH_REMINDERS_MENU_OFFSET, SEARCH_REMIND_ME_OFFSET, SEARCH_RENAME_SYNC_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SESSION_OVERVIEW_MENU_OFFSET, SEARCH_SNIPPETS_MENU_OFFSET, SEARCH_SNIPPET_MANAGE_OFFSET, SEARCH_SNIPPET_CREATE_OFFSET, SEARCH_SYNC_NAME_OFFSET, SEARCH_UNARCHIVE_HIDDEN_OFFSET, SEARCH_UNARCHIVE_UNATTACHED_OFFSET, SEARCH_URLPICK_OFFSET => 0,
         SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_DELETE_MENU_OFFSET, SEARCH_WSMOVE_MENU_OFFSET, SEARCH_WSSORT_MENU_OFFSET, SEARCH_WS_BRINGBACK_OFFSET, SEARCH_WS_SNOOZED_OFFSET, SEARCH_WS_SNOOZE_OFFSET => 1,
         SEARCH_ADDFAVICON_OFFSET, SEARCH_FAVORITE_OFFSET, SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_GROUPMOVE_MENU_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_INBOX_EXCLUDE_OFFSET, SEARCH_MUTETAB_OFFSET, SEARCH_PIN_TOP_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => 2,
-        SEARCH_CHANGELOG_OFFSET, SEARCH_ETA_ACCURACY_OFFSET, SEARCH_ETA_NUMBERS_OFFSET, SEARCH_ETA_PROGRESS_OFFSET, SEARCH_FONT_BIGGER_OFFSET, SEARCH_FONT_RESET_OFFSET, SEARCH_FONT_SMALLER_OFFSET, SEARCH_FULLWIDTH_OFFSET, SEARCH_MOBILE_OFFSET, SEARCH_SHORTCUTS_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_THREADTITLE_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_UI_RESET_OFFSET, SEARCH_UI_SMALLER_OFFSET, SEARCH_UPDATE_OFFSET => 3,
+        SEARCH_SETTINGS_OFFSET, SEARCH_CHANGELOG_OFFSET, SEARCH_ETA_ACCURACY_OFFSET, SEARCH_ETA_NUMBERS_OFFSET, SEARCH_ETA_PROGRESS_OFFSET, SEARCH_FONT_BIGGER_OFFSET, SEARCH_FONT_RESET_OFFSET, SEARCH_FONT_SMALLER_OFFSET, SEARCH_FULLWIDTH_OFFSET, SEARCH_MOBILE_OFFSET, SEARCH_SHORTCUTS_OFFSET, SEARCH_SOUND_OFFSET, SEARCH_THEME_MENU_OFFSET, SEARCH_THREADTITLE_OFFSET, SEARCH_UI_BIGGER_OFFSET, SEARCH_UI_RESET_OFFSET, SEARCH_UI_SMALLER_OFFSET, SEARCH_UPDATE_OFFSET => 3,
         SEARCH_CRASH_NOW_OFFSET, SEARCH_CRASH_REPORTS_OFFSET, SEARCH_CUSTOMCMD_RELOAD_OFFSET, SEARCH_INSTALLHOOK_OFFSET, SEARCH_RECOVER_REPO_OFFSET, SEARCH_RESTART_OFFSET, SEARCH_SHELL_DIAG_OFFSET => 4,
         SEARCH_BROWSER_AUTOSUSPEND_OFFSET, SEARCH_BROWSER_BACK_OFFSET, SEARCH_BROWSER_ENGINE_OFFSET, SEARCH_BROWSER_FOCUS_TOGGLE_OFFSET, SEARCH_BROWSER_FOCUS_URL_OFFSET, SEARCH_BROWSER_FORWARD_OFFSET, SEARCH_BROWSER_INSTRUCT_OFFSET, SEARCH_BROWSER_MODE_OFFSET, SEARCH_BROWSER_SHOTURL_OFFSET, SEARCH_BROWSER_TOGGLE_OFFSET, SEARCH_BROWSER_URL_OFFSET, SEARCH_CLOSE_ALL_BROWSER_PANES_OFFSET, SEARCH_EXTERNAL_BROWSER_LINKS_OFFSET, SEARCH_HIBERNATE_NOW_OFFSET, SEARCH_KEEPAWAKE_OFFSET, SEARCH_ZSB_REBIND_OFFSET => 5,
         SEARCH_APPROVE_DEVICES_OFFSET, SEARCH_LADDER_AUTO_OFFSET, SEARCH_LADDER_CLAUDE_OFFSET, SEARCH_LADDER_CODEX_OFFSET, SEARCH_LADDER_DASH_OFFSET, SEARCH_LAYOUT_PULL_OFFSET, SEARCH_MULTIPROMPT_LOGIN_OFFSET, SEARCH_REMOVE_SERVER_1_OFFSET, SEARCH_REMOVE_SERVER_2_OFFSET, SEARCH_REMOVE_SERVER_3_OFFSET, SEARCH_SYNC_SIGNOUT_OFFSET, SEARCH_SYNC_STATUS_OFFSET, SEARCH_USAGE_LOGIN_INNE_OFFSET, SEARCH_USAGE_LOGIN_PRIMARY_OFFSET => 6,
-        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
+        SEARCH_CLEAN_CHAT_OFFSET, SEARCH_CHAT_AC_OFFSET, SEARCH_CHAT_NEWEST_OFFSET, SEARCH_CHAT_MORE_MENU_OFFSET, SEARCH_CHAT_ALLOW_OFFSET, SEARCH_CHAT_ALWAYS_OFFSET, SEARCH_CHAT_ATTACH_OFFSET, SEARCH_CHAT_DICTATION_OFFSET, SEARCH_CHAT_COPY_CODE_OFFSET, SEARCH_CHAT_COPY_SELECTION_OFFSET, SEARCH_CHAT_FOCUS_MESSAGES_OFFSET, SEARCH_CHAT_DENY_OFFSET, SEARCH_CHAT_DISCARD_UNSENT_OFFSET, SEARCH_CHAT_EDIT_QUEUED_OFFSET, SEARCH_CHAT_FIND_OFFSET, SEARCH_CHAT_PUSH_QUEUED_OFFSET, SEARCH_CHAT_QUEUE_CLEAR_OFFSET, SEARCH_CHAT_QUEUE_SEND_OFFSET, SEARCH_CHAT_REPLY_OFFSET, SEARCH_CHAT_REACT_LIKE_OFFSET, SEARCH_CHAT_REACT_DISLIKE_OFFSET, SEARCH_CHAT_REACT_HEART_OFFSET, SEARCH_CHAT_RESET_OFFSET, SEARCH_CHAT_RETRY_UNSENT_OFFSET, SEARCH_CHAT_SELECT_ALL_OFFSET, SEARCH_CHAT_STOP_OFFSET, SEARCH_CHAT_TAB_URL_OFFSET, SEARCH_CHAT_TODO_OFFSET, SEARCH_CHAT_TOOL_STEPS_OFFSET, SEARCH_CHAT_VIEW_OFFSET, SEARCH_CHAT_VIEW_MODE_EVERYWHERE_OFFSET, SEARCH_CHAT_VIEW_MODE_NOWHERE_OFFSET, SEARCH_SKILLS_MENU_OFFSET, SEARCH_VOICE_ALWAYS_OFF_OFFSET, SEARCH_VOICE_ALWAYS_ON_OFFSET, SEARCH_VOICE_MODE_OFF_OFFSET, SEARCH_VOICE_MODE_ON_OFFSET, SEARCH_VOICE_NEXT_OFFSET, SEARCH_VOICE_PREVIOUS_OFFSET, SEARCH_VOICE_REPLAY_OFFSET, SEARCH_VOICE_SPEED_100_OFFSET, SEARCH_VOICE_SPEED_125_OFFSET, SEARCH_VOICE_SPEED_140_OFFSET, SEARCH_VOICE_SPEED_150_OFFSET, SEARCH_VOICE_STOP_OFFSET => 7,
         else => null,
     };
 }
@@ -1622,7 +1629,7 @@ fn clampSearchSelectionAndScroll() void {
         app_state.g_search_sel = app_state.g_search_result_count - 1;
     }
 
-    const visible_rows: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+    const visible_rows: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
     const max_scroll = app_state.g_search_result_count - visible_rows;
     if (app_state.g_search_scroll > max_scroll) {
         app_state.g_search_scroll = max_scroll;
@@ -1634,7 +1641,7 @@ pub fn keepSearchSelectionVisible() void {
     if (app_state.g_search_result_count == 0) return;
     stepOverPaletteHeaders(false, false);
 
-    const visible_rows: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+    const visible_rows: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
     if (app_state.g_search_sel < app_state.g_search_scroll) {
         app_state.g_search_scroll = app_state.g_search_sel;
     } else if (app_state.g_search_sel >= app_state.g_search_scroll + visible_rows) {
@@ -2082,8 +2089,10 @@ pub fn updateSearchResults() void {
             if (k == .vps or k == .vps2 or k == .tmux) {
                 if (app_state.g_search_result_count < app_state.g_search_results.len) {
                     const ended = app_state.shells[ti].ssh_reconnect.phase == .ended;
-                    const label = if (ended) "Start new session" else "Reconnect Tab";
-                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    const label = if (ended) "Start new session" else "Reattach Tab";
+                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len]) or
+                        (!ended and asciiContainsQueryInsensitive("reconnect tab", app_state.g_search_buf[0..app_state.g_search_len])))
+                    {
                         if (ended) {
                             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_START_SESSION;
                         } else {
@@ -2479,6 +2488,13 @@ pub fn updateSearchResults() void {
         }
     }
 
+    if (app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "settings", "preferences", "look and settings", "keys", "about" }, app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SETTINGS_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
     var show_sound_toggle = (app_state.g_search_len == 0);
     if (!show_sound_toggle) {
         const sound_labels = [_][]const u8{ "notification sounds", "notification sound", "notifications", "notify", "sound", "sounds", "audio", "alert", "beep", "silent", "quiet" };
@@ -2804,21 +2820,21 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "account: remove server 1" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{"account: remove server 1"}, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_1_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "account: remove server 2" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{"account: remove server 2"}, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_2_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and
-        labelsMatchQuery(&[_][]const u8{ "account: remove server 3" }, app_state.g_search_buf[0..app_state.g_search_len]))
+        labelsMatchQuery(&[_][]const u8{"account: remove server 3"}, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_REMOVE_SERVER_3_OFFSET;
         app_state.g_search_result_count += 1;
@@ -2879,6 +2895,13 @@ pub fn updateSearchResults() void {
         labelsMatchQuery(&[_][]const u8{ "Chat View: Scroll to newest message", "jump to bottom latest end" }, app_state.g_search_buf[0..app_state.g_search_len]))
     {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_NEWEST_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_chat_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and app_state.g_search_result_count < app_state.g_search_results.len and
+        labelsMatchQuery(&[_][]const u8{ "Chat View: More Menu", "three dots options approve stop rename history archive model" }, app_state.g_search_buf[0..app_state.g_search_len]))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CHAT_MORE_MENU_OFFSET;
         app_state.g_search_result_count += 1;
     }
 
@@ -3082,6 +3105,11 @@ pub fn updateSearchResults() void {
 
     if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "inbox: frequent", "frequent", "input today", "24 hours", "watch-only", "six hours" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_INBOX_FREQUENT_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
+
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "manage snippets", "delete snippet", "remove snippet" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_MANAGE_OFFSET;
         app_state.g_search_result_count += 1;
     }
 

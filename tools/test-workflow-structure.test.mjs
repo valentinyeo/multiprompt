@@ -35,6 +35,8 @@ function verifyRouting(text) {
   }
   assert.equal((text.match(/node --test tools\/startup-responsive.test.js/g) || []).length, 1);
   assert.match(jobs['test-update-source'], /runs-on: ubuntu-latest/);
+  assert.match(jobs.test, /run: zig build test[^\n]*\$\{\{ matrix\.group == 2 && '-j1' \|\| '' \}\}/, 'timed Windows shard must not compete with sibling builds and tests');
+  assert.match(jobs['test-vps'], /run: zig build test-vps[^\n]*\$\{\{ matrix\.group == 1 && '-j1' \|\| '' \}\}/, 'timed VPS shard must not compete with sibling builds and tests');
 }
 
 test('each test job classifies after full-history checkout and gates all heavy steps', () => {
@@ -47,9 +49,69 @@ test('routing checks reject the removed dependency, missing history, classifier 
     ['    runs-on: windows-latest', '    needs: changes\n    runs-on: windows-latest'],
     ['          fetch-depth: 0', '          fetch-depth: 1'],
     ['        id: paths', '        id: missing'],
+    ["${{ matrix.group == 1 && '-j1' || '' }}", ''],
+    ["${{ matrix.group == 2 && '-j1' || '' }}", ''],
     ["        if: steps.paths.outputs.heavy == 'true'", '        if: true'],
   ]) {
     assert.ok(workflow.includes(before));
     assert.throws(() => verifyRouting(workflow.replace(before, after)), assert.AssertionError);
   }
+});
+
+test('red regression job installs the Zig compiler before running changed suites', () => {
+  const red = fs.readFileSync(new URL('../.github/workflows/check-red-run.yml', import.meta.url), 'utf8');
+  const install = red.indexOf('      - name: Install Zig 0.16.0');
+  const execute = red.indexOf('      - name: Require changed tests to fail on merge-base source');
+  assert.ok(install >= 0 && execute > install);
+  assert.match(red.slice(install, execute), /curl -fsSL https:\/\/ziglang\.org\/download\/0\.16\.0\/zig-x86_64-linux-0\.16\.0\.tar\.xz/);
+  assert.match(red.slice(install, execute), /tar -xf/);
+  assert.match(red.slice(install, execute), /zig-x86_64-linux-0\.16\.0.*GITHUB_PATH/);
+});
+
+test('branch reaction proof uses the shared journey without changing production triggers', async () => {
+  const adapterFile = new URL('../.github/workflows/reaction-journey.yml', import.meta.url);
+  assert.ok(fs.existsSync(adapterFile), 'reaction workflow adapter exists');
+  const adapter = fs.readFileSync(adapterFile, 'utf8');
+  assert.match(adapter, /branches: \[ceo\/IGSH-1012\]/);
+  assert.match(adapter, /uses: \.\/\.github\/workflows\/verify\.yml/);
+  assert.match(adapter, /feature: chat-delivery/);
+  assert.match(adapter, /chat_reactions_proof: true/);
+  const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
+  assert.match(verify, /workflow_call:\n    inputs:\n      chat_reactions_proof:/);
+  const checker = new URL('./verify-workflow-branches.mjs', import.meta.url);
+  assert.ok(fs.existsSync(checker), 'shared workflow branch checker exists');
+  const { verifyPushBranches } = await import(checker);
+  verifyPushBranches(verify);
+});
+
+test('IGSH-1113 every pull request receives the required native appearance check', async () => {
+  const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
+  const paths = verify.match(/^  pull_request:\n    paths:\n((?:      - [^\n]+\n)+)/m);
+  assert.ok(paths);
+  for (const file of ['build.zig', 'build.zig.zon', 'tools/test-workflow-structure.test.mjs', 'tools/verify-workflow-branches.mjs', 'tools/chat-history-reader-test.py', 'tools/check-red-run.mjs']) assert.ok(paths[1].split('\n').includes('      - ' + file), file);
+  const trigger = verify.match(/^  pull_request:\r?\n((?:[ \t]+[^\n]*\r?\n)+)/m)?.[1];
+  assert.ok(trigger?.includes("      - '**'"), 'required verification cannot exclude release tooling, notes or other PR paths');
+  assert.doesNotMatch(trigger, /^    (?:branches(?:-ignore)?|paths-ignore|types):|^      - ['"]?!/m);
+  const { discoverFeatures } = await import('./verify-features.cjs');
+  assert.ok(discoverFeatures().pr.includes('appearance'));
+  assert.match(verify, /github\.event_name == 'pull_request' && fromJSON\(needs\.journeys\.outputs\.pr\)/);
+});
+
+test('push verification accepts another ticket branch and rejects losing master or unrelated branches', async () => {
+  const checker = new URL('./verify-workflow-branches.mjs', import.meta.url);
+  assert.ok(fs.existsSync(checker), 'shared workflow branch checker exists');
+  const { verifyPushBranches } = await import(checker);
+  const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
+  verifyPushBranches(verify);
+  const extra = verify.replace('branches: [master,', 'branches: [master, ceo/IGSH-9999,');
+  assert.notEqual(extra, verify);
+  verifyPushBranches(extra);
+  for (const replacement of ['', 'main, ', 'unrelated, ', "'ceo/OTHER-123', "]) {
+    const invalid = verify.replace('branches: [master, ', 'branches: [' + replacement);
+    assert.notEqual(invalid, verify);
+    assert.throws(() => verifyPushBranches(invalid), assert.AssertionError);
+  }
+  const unrelated = verify.replace('branches: [master,', 'branches: [master, unrelated,');
+  assert.notEqual(unrelated, verify);
+  assert.throws(() => verifyPushBranches(unrelated), assert.AssertionError);
 });

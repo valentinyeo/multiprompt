@@ -194,6 +194,7 @@ pub fn ensurePaintBackbuffer(hdc: HANDLE, w: i32, h: i32) HANDLE {
 }
 
 pub fn resetFontCache() void {
+    @import("changelog.zig").resetChangelogLayout();
     @import("dwrite_text.zig").resetFonts();
     @import("chat_render.zig").resetTableMetrics();
     app_state.g_chat_tables.clear(std.heap.page_allocator);
@@ -263,13 +264,31 @@ pub fn uiUnscaled(px: i32) i32 {
 }
 
 pub fn searchRowH() i32 {
-    return uiScaled(32);
+    return uiScaled(40);
 }
 pub fn searchInputH() i32 {
-    return uiScaled(36);
+    const recent = app_state.g_search_len == 0 and app_state.g_search_result_count > 0 and app_state.g_search_results[0] < app_state.MAX_SHELLS;
+    return uiScaled(if (recent) @as(i32, 96) else 72);
 }
+pub fn searchVisibleRows() u32 {
+    var client: RECT = std.mem.zeroes(RECT);
+    if (GetClientRect(app_state.g_main_hwnd, &client) == 0) return SEARCH_VISIBLE_ROWS;
+    const available = client.bottom - client.top - searchInputH() - searchFooterH() - uiScaled(16);
+    return @intCast(@max(1, @min(@as(i32, SEARCH_VISIBLE_ROWS), @divFloor(available, searchRowH()))));
+}
+
 pub fn searchOverlayW() i32 {
-    return uiScaled(430);
+    var client: RECT = std.mem.zeroes(RECT);
+    if (GetClientRect(app_state.g_main_hwnd, &client) == 0) return uiScaled(560);
+    return @max(uiScaled(240), @min(uiScaled(560), client.right - client.left - uiScaled(16)));
+}
+
+pub fn searchFooterH() i32 {
+    return uiScaled(44);
+}
+
+pub fn searchOverlayOy(win_h: i32, overlay_h: i32) i32 {
+    return @max(uiScaled(8), @min(uiScaled(120), win_h - overlay_h - uiScaled(8)));
 }
 
 pub fn searchOverlayOx(win_w: i32, overlay_w: i32) i32 {
@@ -294,13 +313,13 @@ pub fn searchResultRowAtClientPoint(mx: i32, my: i32) ?u32 {
     const overlay_w = searchOverlayW();
     const row_h = searchRowH();
     const input_h = searchInputH();
-    const visible_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+    const visible_capacity: u32 = @min(app_state.g_search_result_count, searchVisibleRows());
     const visible_rows: u32 = @min(app_state.g_search_result_count -| app_state.g_search_scroll, visible_capacity);
-    const overlay_h = input_h + @as(i32, @intCast(visible_capacity)) * row_h;
+    const overlay_h = input_h + @as(i32, @intCast(visible_capacity)) * row_h + searchFooterH();
     const ox = searchOverlayOx(win_w, overlay_w);
-    const oy = @divFloor(win_h - overlay_h, 3);
+    const oy = searchOverlayOy(win_h, overlay_h);
 
-    if (mx < ox or mx >= ox + overlay_w or my < oy + input_h or my >= oy + overlay_h) return null;
+    if (mx < ox or mx >= ox + overlay_w or my < oy + input_h or my >= oy + overlay_h - searchFooterH()) return null;
     const visual_row: u32 = @intCast(@divFloor(my - (oy + input_h), row_h));
     if (visual_row >= visible_rows) return null;
     return app_state.g_search_scroll + visual_row;
@@ -599,6 +618,7 @@ pub fn threadTitleNameRectFor(win_w: i32, shell_idx: u32) ?RECT {
 
 pub const ChatTitleLayout = struct {
     pill: RECT,
+    more: RECT,
     icon: RECT,
     has_icon: bool,
     text: RECT,
@@ -647,14 +667,15 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     const pad = uiScaled(16);
     const margin = uiScaled(12);
     var layout: ChatTitleLayout = std.mem.zeroes(ChatTitleLayout);
-    var right_limit = column.right - margin;
+    layout.more = .{ .left = column.right - margin - pill_h, .top = pill_top, .right = column.right - margin, .bottom = pill_top + pill_h };
+    var right_limit = layout.more.left - margin;
     const meta = chatTitleMetaText();
     if (meta.len > 0) {
         const meta_w = measureTitleText(uiFontSubtitle(), meta) + pad * 2;
         const width = @min(meta_w, @divTrunc((column.right - column.left) * 2, 5));
         const meta_h = pill_h - uiScaled(4);
         const top = pill_top + @divTrunc(pill_h - meta_h, 2);
-        layout.meta_pill = .{ .left = column.right - margin - width, .top = top, .right = column.right - margin, .bottom = top + meta_h };
+        layout.meta_pill = .{ .left = layout.more.left - margin - width, .top = top, .right = layout.more.left - margin, .bottom = top + meta_h };
         layout.meta_text = .{ .left = layout.meta_pill.left + pad, .top = layout.meta_pill.top, .right = layout.meta_pill.right - pad, .bottom = layout.meta_pill.bottom };
         layout.has_meta = true;
         layout.meta_warn = app_state.g_account_reauth or app_state.g_cap_msg_until > GetTickCount64();
@@ -680,6 +701,23 @@ pub fn chatTitleHoleRect(win_w: i32) ?RECT {
         return .{ .left = column.left, .top = threadTitleTop(), .right = column.right, .bottom = threadTitleTop() + threadTitleHeight() };
     }
     return null;
+}
+
+fn paintMoreButton(hdc: HANDLE, more: RECT, border: u32, fill: u32, edge: i32) void {
+    const fillRoundRectAA = @import("chat_render.zig").fillRoundRectAA;
+    const radius = @divTrunc(more.bottom - more.top, 2);
+    fillRoundRectAA(hdc, more, radius, border);
+    fillRoundRectAA(hdc, .{ .left = more.left + edge, .top = more.top + edge, .right = more.right - edge, .bottom = more.bottom - edge }, radius - edge, fill);
+    const dot = @max(2, uiScaled(3));
+    const step = dot * 2 + @max(1, uiScaled(1));
+    const cx = @divTrunc(more.left + more.right, 2);
+    const cy = @divTrunc(more.top + more.bottom, 2);
+    const ink: u32 = if (app_state.g_light_theme) RGB(20, 20, 20) else RGB(242, 242, 242);
+    var i: i32 = -1;
+    while (i <= 1) : (i += 1) {
+        const x = cx + i * step - @divTrunc(dot, 2);
+        fillRoundRectAA(hdc, .{ .left = x, .top = cy - @divTrunc(dot, 2), .right = x + dot, .bottom = cy - @divTrunc(dot, 2) + dot }, @divTrunc(dot, 2), ink);
+    }
 }
 
 fn paintChatTitlePill(hdc: HANDLE) void {
@@ -708,6 +746,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         var text = layout.text;
         _ = DrawTextW(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
+    paintMoreButton(hdc, layout.more, border, fill, edge);
     if (layout.has_meta) {
         const meta_r = layout.meta_pill;
         fillRoundRectAA(hdc, meta_r, @divTrunc(meta_r.bottom - meta_r.top, 2), border);

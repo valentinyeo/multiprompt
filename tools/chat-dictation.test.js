@@ -1,10 +1,18 @@
 const { test } = require('node:test');
+
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
 const root = path.resolve(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8')).replace(/\r\n/g, '\n');
 const skill = '.claude/skills/verify-multiprompt/';
 const driver = read(skill + 'control.ps1');
 const workflow = read('.github/workflows/verify.yml');
@@ -205,8 +213,9 @@ test('IGSH-812 speech fixture is recorded, pinned, licensed, non-silent PCM with
 
 test('IGSH-812 registration is additive and existing contract checks remain on the Windows workflow', () => {
   assert.match(driver, /ValidateSet\([^\n]*'chat-dictation'/);
-  assert.match(workflow, /FEATURE -notin @\([^\n]*'chat-dictation'/);
-  assert.match(workflow, /feature:.*fromJSON\('\[[^\n]*"chat-dictation"/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-dictation'));
+  assert.ok(featureMatrix(workflow).full.includes('chat-dictation'));
   assert.match(workflow, /run: node --test [^\n]*tools\/chat-dictation.test.js/);
   assert.ok(workflow.includes('- tools/chat-dictation.test.js'));
   assert.ok(workflow.includes('- tools/fixtures/IGSH-812/**'));
@@ -273,4 +282,146 @@ test('IGSH-893 a stalled precondition fails within its named timeout', { skip: p
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /DICTATION_STALL_TIMEOUT_OK/);
+});
+
+
+test('IGSH-1072 queued composer shortcuts read message-time modifiers after physical release', () => {
+  const composer = read('src/chat_composer.zig');
+  const dispatch = composer.slice(composer.indexOf('fn chatComposerSubclassCore('), composer.indexOf('    if (chatImagePasteIntercept(msg, wp))', composer.indexOf('fn chatComposerSubclassCore(')));
+  assert.doesNotMatch(dispatch, /GetAsyncKeyState|isCtrlDown\(/);
+  assert.match(dispatch, /GetKeyState\(0x11\)/);
+  assert.match(dispatch, /GetKeyState\(0x10\)/);
+  assert.match(dispatch, /GetKeyState\(@as\(i32, VK_MENU\)\)/);
+  assert.ok(composer.includes('test "IGSH-1072 queued Ctrl+D stops after physical Ctrl release"'));
+  assert.ok(composer.includes('test "IGSH-1072 queued Ctrl+A selects the full dictation draft"'));
+  assert.ok(composer.includes('SetKeyboardState(&queued)'));
+});
+
+test('IGSH-1072 branch build identity is embedded and independently checked by the native journey', () => {
+  assert.match(workflow, /name: Identify branch executable[\s\S]*?git rev-parse HEAD[\s\S]*?VERIFY_VERSION=/);
+  assert.match(workflow, /run: zig build[^\n]*-Dversion="\$\{\{ env\.VERIFY_VERSION \}\}"/);
+  assert.match(workflow, /version = \$env:VERIFY_VERSION/);
+  const identity = workflow.slice(workflow.indexOf('      - name: Identify branch executable'), workflow.indexOf('      - name: Build branch executable'));
+  assert.match(identity, /git describe --tags --match 'v\[0-9\]\*' --abbrev=0 HEAD/);
+  assert.match(identity, /VERIFY_REVISION=\$revision/);
+  assert.doesNotMatch(identity, /\$env:FEATURE|-verify\./);
+  assert.match(workflow, /-Drevision="\$\{\{ env\.VERIFY_REVISION \}\}"/);
+  assert.match(workflow, /\$embeddedRevision -cne \$revision -or -not \$binary\.Contains\("MPREVISION=\$revision;"\)/);
+  assert.match(workflow, /if \(-not \$binary\.Contains\("MPVERSION=\$version;"\)\) \{ throw 'Executable version mismatch' \}/);
+  const build = read('build.zig');
+  assert.match(build, /revision_marker = b\.fmt\("MPREVISION=\{s\};", \.\{build_revision orelse ""\}\)/);
+  assert.match(build, /pub export const mp_revision_marker:/);
+  assert.match(build, /std\.zig\.fmtString\(revision_marker\)/);
+  for (const executable of ['exe', 'dev_exe']) {
+    assert.ok(build.includes(`${executable}.root_module.addObject(revision_object)`));
+  }
+  assert.match(driver, /Executable build\/version marker mismatch/);
+  assert.match(driver, /Doctor: wrong version in/);
+});
+
+test('IGSH-1072 executable resolver rejects stale revisions and wrong versions before any journey', { skip: process.platform !== 'win32' }, () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const script = workflow.match(/name: Resolve real executable[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1].replace(/^ {10}/gm, '');
+  const revision = 'a'.repeat(40);
+  const version = '1.2.3';
+  for (const [marker, expectedError, expectedRevision = revision] of [
+    [`MPVERSION=${version};MPREVISION=${revision};`, ''],
+    [`MPVERSION=${version};MPREVISION=${revision};`, 'Executable source revision mismatch', 'b'.repeat(40)],
+    [`MPVERSION=${version};MPREVISION=${'b'.repeat(40)};`, 'Executable source revision mismatch'],
+    [`MPVERSION=9.9.9;MPREVISION=${revision};`, 'Executable version mismatch'],
+    [`MPVERSION=${version};`, 'Executable source revision mismatch'],
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-identity-'));
+    try {
+      fs.mkdirSync(path.join(directory, 'zig-out', 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'multiprompt.exe'), marker);
+      fs.writeFileSync(path.join(directory, 'zig-out', 'bin', 'zigshell-bridge.exe'), 'bridge');
+      const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `function git { '${revision}' }\n${script}`], {
+        cwd: directory,
+        env: { ...process.env, RELEASE_TAG: '', VERIFY_VERSION: version, VERIFY_REVISION: expectedRevision, GITHUB_ENV: path.join(directory, 'github-env') },
+        encoding: 'utf8',
+      });
+      assert.ifError(result.error);
+      if (expectedError) {
+        assert.notEqual(result.status, 0, marker);
+        assert.ok((result.stdout + result.stderr).includes(expectedError), result.stdout + result.stderr);
+        assert.equal(fs.existsSync(path.join(directory, 'evidence', 'build.json')), false);
+      } else {
+        assert.equal(result.status, 0, result.stdout + result.stderr);
+        const build = JSON.parse(fs.readFileSync(path.join(directory, 'evidence', 'build.json'), 'utf8').replace(/^\uFEFF/, ''));
+        assert.equal(build.revision, revision);
+        assert.equal(build.embeddedRevision, revision);
+        assert.equal(build.version, version);
+        assert.equal(build.sha256, createHash('sha256').update(marker).digest('hex'));
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+test('IGSH-1103 generated failure and update results retain verified executable identity', () => {
+  const retain = workflow.match(/name: Retain pre-launch failure result[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1];
+  const generated = retain.split('\n').filter(line => line.includes('@{ feature = '));
+  assert.equal(generated.length, 2);
+  for (const line of generated) {
+    assert.match(line, /version = \$env:VERIFY_VERSION;/);
+    assert.match(line, /sha256 = \$env:VERIFY_SHA256;/);
+  }
+});
+
+test('IGSH-1103 retained results preserve failure details and actual executable identity', { skip: process.platform !== 'win32' }, () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const script = workflow.match(/name: Retain pre-launch failure result[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1].replace(/^ {10}/gm, '');
+  const version = '1.2.3';
+  const sha256 = createHash('sha256').update('resolved executable').digest('hex');
+  const existing = { feature: 'appearance', status: 'failed', version, sha256, checks: [{ name: 'native-crash', passed: false }], error: 'original failure', cleanup: 'original cleanup' };
+  for (const [feature, result, update, resolved = true] of [
+    ['chat-messages-only', null, null],
+    ['chat-delivery', null, null],
+    ['appearance', existing, null],
+    ['appearance', { ...existing, status: 'passed' }, null],
+    ['safe-updates', null, { success: false, checks: [{ name: 'rollback', passed: false }], cleanup: 'fixture cleanup' }],
+    ['safe-updates', null, { success: true, checks: [{ name: 'rollback', passed: true }], cleanup: 'fixture cleanup' }],
+    ['appearance', null, null, false],
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-retained-identity-'));
+    try {
+      const evidence = path.join(directory, 'evidence');
+      fs.mkdirSync(evidence);
+      if (result) fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result));
+      if (update) fs.writeFileSync(path.join(evidence, 'safe-updates.json'), JSON.stringify(update));
+      const run = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        cwd: directory,
+        env: { ...process.env, FEATURE: feature, VERIFY_VERSION: resolved ? version : '', VERIFY_SHA256: resolved ? sha256 : '' },
+        encoding: 'utf8',
+      });
+      assert.ifError(run.error);
+      assert.equal(run.status, 0, run.stdout + run.stderr);
+      const retained = JSON.parse(fs.readFileSync(path.join(evidence, 'result.json'), 'utf8').replace(/^\uFEFF/, ''));
+      if (result) {
+        assert.deepEqual(retained, result);
+      } else {
+        assert.equal(retained.feature, feature);
+        assert.equal(retained.version || '', resolved ? version : '');
+        assert.equal(retained.sha256 || '', resolved ? sha256 : '');
+        assert.equal(retained.status, update?.success ? 'passed' : 'failed');
+        if (update) {
+          assert.deepEqual(retained.checks, update.checks);
+          assert.equal(retained.cleanup, update.cleanup);
+        } else {
+          assert.match(retained.error, /Workflow failed before the harness produced a result/);
+          assert.match(retained.cleanup, /disposable runner teardown/);
+          if (feature === 'chat-delivery') {
+            assert.deepEqual(retained.cases.map(item => item.name), ['busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync', 'send-stays-gone']);
+            assert.ok(retained.cases.every(item => item.passed === false));
+          }
+        }
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
 });

@@ -1432,11 +1432,22 @@ pub fn voiceHandleUtterance(result: *VoiceResult) void {
     invalidateChatHeader();
 }
 
-fn readDeepgramApiKey(out: []u8) ?[]const u8 {
+pub fn readDeepgramApiKey(out: []u8) ?[]const u8 {
     if (out.len == 0) return null;
     var len: usize = readUserEnvRegistryAscii("DEEPGRAM_API_KEY", out);
     while (len > 0 and (out[len - 1] == ' ' or out[len - 1] == '\r' or out[len - 1] == '\n' or out[len - 1] == '\t')) len -= 1;
     return if (len == 0) null else out[0..len];
+}
+
+pub fn saveDeepgramApiKey(value: [:0]const u16) bool {
+    const w = @import("win32.zig");
+    var current: w.HANDLE = null;
+    if (w.RegOpenCurrentUser(0x20006, &current) != 0) return false;
+    defer _ = w.RegCloseKey(current);
+    var environment: w.HANDLE = null;
+    if (w.RegCreateKeyExW(current, L("Environment"), 0, null, 0, 0x20006, null, &environment, null) != 0) return false;
+    defer _ = w.RegCloseKey(environment);
+    return w.RegSetValueExW(environment, L("DEEPGRAM_API_KEY"), 0, 1, value.ptr, @intCast((value.len + 1) * 2)) == 0;
 }
 
 pub fn logDeepgramKeySource() void {

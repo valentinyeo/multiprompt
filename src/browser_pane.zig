@@ -3173,7 +3173,8 @@ pub fn snippetFormAnchoredBesideBrowser() bool {
 }
 
 pub fn browserChromeHiddenForOverlay() bool {
-    return app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_inbox_active or app_state.g_all_sessions_active or app_state.g_url_picker_active or
+    return @import("settings_panel.zig").isOpen() or
+        app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_inbox_active or app_state.g_all_sessions_active or app_state.g_url_picker_active or
         (app_state.g_snippet_create_active and !snippetFormAnchoredBesideBrowser()) or
         (app_state.g_search_active and !paletteAnchoredBesideBrowser());
 }
@@ -3504,7 +3505,12 @@ test "IGSH-523 docked pane without an extension never resolves on health ticks" 
     app_state.shells[0].browser_bind_nonce[0] = 'X';
     app_state.shells[0].browser_bind_nonce_len = 1;
     for (0..5) |_| {
+        var message: @import("win32.zig").MSG = undefined;
+        _ = @import("win32.zig").PeekMessageW(&message, null, 0, 0, 0);
+        try std.testing.expectEqual(@as(BOOL, 0), IsHungAppWindow(hwnd));
         browserHealthTick();
+        try std.testing.expectEqual(hwnd, app_state.shells[0].browser_hwnd);
+        try std.testing.expectEqual(@as(u8, 0), app_state.shells[0].browser_health_misses);
         for (app_state.g_browser_resolve_inflight) |entry| try std.testing.expectEqual(@as(u32, 0), entry.shell_id);
         try std.testing.expectEqual(@as(i64, 0), app_state.shells[0].browser_window_id);
         try std.testing.expectEqualStrings("connected", browserConnectionState(&app_state.shells[0]));
@@ -4533,7 +4539,7 @@ pub fn browserChromeForegroundAllowed() bool {
 }
 
 pub fn browserChromeCanStayVisible() bool {
-    return app_state.g_main_hwnd != null and IsIconic(app_state.g_main_hwnd) == 0;
+    return !app_state.g_monitor_transition.active and app_state.g_main_hwnd != null and IsIconic(app_state.g_main_hwnd) == 0 and !browserChromeHiddenForOverlay();
 }
 
 pub fn activeBrowserEdgeMasksAllowed() bool {
@@ -4565,7 +4571,7 @@ fn browserEdgeMaskWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callc
     defer app_state.g_focus_user_action_tick = prior_focus_action;
     switch (msg) {
         WM_NCHITTEST => {
-            if (!browserChromeForegroundAllowed() or !activeBrowserEdgeMasksAllowed()) {
+            if (!browserChromeCanStayVisible() or !activeBrowserEdgeMasksAllowed()) {
                 hideBrowserEdgeMasks();
                 return @intCast(HTTRANSPARENT);
             }
@@ -4736,8 +4742,12 @@ pub fn raiseBrowserEdgeMasksZOrderOnly() void {
         suspendBrowserEdgeMaskRaiseForPopup();
         return;
     }
-    if (!activeBrowserEdgeMasksAllowed() or IsIconic(app_state.g_main_hwnd) != 0 or !foregroundIsOurs()) {
+    if (!activeBrowserEdgeMasksAllowed() or !browserChromeCanStayVisible()) {
         hideBrowserEdgeMasks();
+        return;
+    }
+    if (!foregroundIsOurs()) {
+        suspendBrowserEdgeMaskRaiseForPopup();
         return;
     }
     for (0..BROWSER_EDGE_MASK_COUNT) |i| {
@@ -4753,10 +4763,11 @@ pub fn refreshBrowserEdgeMasks() void {
         suspendBrowserEdgeMaskRaiseForPopup();
         return;
     }
-    if (!activeBrowserEdgeMasksAllowed() or !browserChromeForegroundAllowed()) {
+    if (!activeBrowserEdgeMasksAllowed() or !browserChromeCanStayVisible()) {
         hideBrowserEdgeMasks();
         return;
     }
+    if (!foregroundIsOurs()) return;
     const layout = calcBrowserLayout() orelse {
         hideBrowserEdgeMasks();
         return;
@@ -4775,12 +4786,16 @@ pub fn armBrowserEdgeMaskRaise() void {
         suspendBrowserEdgeMaskRaiseForPopup();
         return;
     }
-    if (!activeBrowserEdgeMasksAllowed() or !browserChromeForegroundAllowed()) {
+    if (!activeBrowserEdgeMasksAllowed() or !browserChromeCanStayVisible()) {
         hideBrowserEdgeMasks();
         return;
     }
     if (browserChromeHiddenForOverlay()) {
         hideBrowserEdgeMasks();
+        return;
+    }
+    if (!foregroundIsOurs()) {
+        suspendBrowserEdgeMaskRaiseForPopup();
         return;
     }
     if (app_state.g_browser_edge_mask_raise_ticks > 0) return;
@@ -4849,10 +4864,7 @@ fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
         hideBrowserEdgeMasks();
         return;
     }
-    if (!browserChromeForegroundAllowed()) {
-        hideBrowserEdgeMasks();
-        return;
-    }
+    if (!browserChromeForegroundAllowed()) return;
     refreshBrowserControlMaskColor(layout);
     ensureBrowserEdgeMaskWindows();
 

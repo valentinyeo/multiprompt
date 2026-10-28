@@ -202,3 +202,15 @@ test('IGSH-612 empty Ctrl+K groups rows and keeps selection off headers', () => 
   assert.match(main, /stepOverPaletteHeaders\(/);
   assert.equal(Number(state.match(/pub const SEARCH_PALETTE_HEADER_OFFSET: usize = (\d+);/)[1]), 11000);
 });
+
+test('IGSH-1081 Reattach is named consistently in Ctrl+K and tab actions', () => {
+  const globalRow = sidebar.slice(sidebar.indexOf('} else if (is_reconnect) {'), sidebar.indexOf('} else if (is_singlewin) {'));
+  assert.match(globalRow, /L\("Reattach Tab"\)/);
+  const contextRow = sidebar.slice(sidebar.indexOf('const tc_label:'), sidebar.indexOf('const tc_shortcut:'));
+  assert.match(contextRow, /L\("Reattach Tab"\)/);
+  assert.match(palette, /SEARCH_RECONNECT_OFFSET => "reattach tab"/);
+  assert.match(palette, /SEARCH_TABCTX_RECONNECT => "reattach tab"/);
+  assert.match(read('src/shortcuts.zig'), /Ctrl\+Shift\+R", \.b = "Reattach active SSH\/tmux tab"/);
+  assert.match(main, /if \(target == SEARCH_RECONNECT_OFFSET\) \{[^]*?WM_APP_RECONNECT/);
+  assert.match(palette, /"reconnect", "reconnect tab", "reattach"/);
+});

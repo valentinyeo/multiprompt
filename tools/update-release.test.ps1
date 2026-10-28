@@ -178,12 +178,45 @@ try {
                 try { $bitmap.Save((Join-Path $Evidence 'update-card-expanded.png')) } finally { $bitmap.Dispose() }
                 $observedAll | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-expanded.json')
                 Passed 'update card opens the full list on click'
+                Select-Release 'v9.11.0'
+                Assert (Save-Update $cardExe '0.0.0' 'x64') 'Quiet release was not staged'
+                $deadline = [DateTime]::UtcNow.AddSeconds(30)
+                do {
+                    $cardLog = -join (Get-Content $log -Raw)
+                    if ($cardLog -match '\[update\] quiet release waiting 9\.11\.0') { break }
+                    Assert (-not $cardProcess.HasExited) 'Quiet update interrupted the app'
+                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Quiet release was not processed' }
+                    Start-Sleep -Milliseconds 100
+                } while ($true)
+                $cardProcess.Refresh()
+                Assert ($cardProcess.Responding) 'Quiet update blocked the app'
+                Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Quiet update window unavailable'
+                $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
+                $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                $dc = $graphics.GetHdc()
+                try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Quiet update screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
+                try { $bitmap.Save((Join-Path $Evidence 'update-card-quiet.png')) } finally { $bitmap.Dispose() }
+                Passed 'maintenance release waits without an update card'
+                Select-Release 'v9.10.0'
+                Assert (Save-Update $cardExe '0.0.0' 'x64') 'Real product notes were not restored'
+                $deadline = [DateTime]::UtcNow.AddSeconds(30)
+                do {
+                    $cardLog = -join (Get-Content $log -Raw)
+                    $afterQuiet = $cardLog.Substring($cardLog.IndexOf('[update] quiet release waiting'))
+                    if ($afterQuiet -match '\[update\] card view=collapsed n=3') { break }
+                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Real product notes did not show again' }
+                    Start-Sleep -Milliseconds 100
+                } while ($true)
                 $versionMatch = [regex]::Match([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Verifier)), 'MPVERSION=(\d+\.\d+\.\d+);')
                 Assert $versionMatch.Success 'Native verifier version marker missing'
                 $oldVersion = $versionMatch.Groups[1].Value
                 $newVersion = '9.99.999'
                 Assert ($NativeUpdate -and (Test-Path $NativeUpdate)) 'Native update build was not supplied'
                 Assert ([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($NativeUpdate)).Contains("MPVERSION=$newVersion;")) 'Native update build has the wrong version'
+                $installedNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
+                $installedNotes.version = $newVersion
+                $installedNotes.releases = @(@{ version = $newVersion; changes = @('Restart keeps your chats open.') }) + @($installedNotes.releases)
+                [IO.File]::WriteAllText("$cardExe.update/release-notes.json", ($installedNotes | ConvertTo-Json -Depth 8))
                 Remove-Item -LiteralPath "$cardExe.update/ready.txt" -Force
                 Move-Item -LiteralPath $cardExe -Destination "$Root/card.running.exe"
                 Copy-Item -LiteralPath $NativeUpdate -Destination $cardExe

@@ -5,7 +5,7 @@ const echo = @import("chat_echo.zig");
 const md = @import("chat_markdown.zig");
 
 fn now() std.Io.Timestamp {
-    return std.Io.Clock.awake.now(std.testing.io);
+    return std.Io.Clock.cpu_thread.now(std.testing.io);
 }
 fn ms(start: std.Io.Timestamp) i64 {
     return @intCast(start.durationTo(now()).toMilliseconds());
@@ -27,13 +27,16 @@ test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
     const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
     var h: history.History = .{};
     defer h.deinit(a);
+    const parse_wall_start = std.Io.Clock.awake.now(std.testing.io);
     const parse_start = now();
     try h.apply(a, wire.items, 1, key);
     const parse_ms = ms(parse_start);
+    const parse_wall_ms = parse_wall_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds();
     try std.testing.expectEqual(messages, h.blocks.items.len);
     try std.testing.expect(h.rows.items.len >= 50 * 1024 * 1024 - 256);
     try std.testing.expect(parse_ms < 3000);
 
+    const delta_wall_start = std.Io.Clock.awake.now(std.testing.io);
     const delta_start = now();
     var suffix = try h.suffix(a);
     defer suffix.deinit(a);
@@ -41,6 +44,7 @@ test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
     try suffix.apply(a, "@mp\t2\thistory\tok\tsid\t52428800\t52428900\t9\t0\tclaude\tterm-1\n{\"role\":\"user\",\"text\":\"new prompt\"}\n@@MP_END@@\n", 2, key);
     try h.appendParsed(a, &suffix);
     const delta_ms = ms(delta_start);
+    const delta_wall_ms = delta_wall_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds();
     try std.testing.expectEqual(messages + 1, h.blocks.items.len);
     try std.testing.expectEqual(messages - 1, h.changed_from);
     try std.testing.expect(delta_ms < 100);
@@ -50,14 +54,16 @@ test "CPU707 synthetic 50 MB parse, incremental append and reconcile budgets" {
     for (h.blocks.items, 0..) |b, i| users[i] = .{ .text = h.text.items[b.start..][0..b.len], .stamp_ms = b.stamp_ms };
     var pending: [20]echo.Pending = @splat(.{ .prefix = std.unicode.utf8ToUtf16LeStringLiteral("new prompt"), .text = std.unicode.utf8ToUtf16LeStringLiteral("new prompt"), .anchor = .{ .counted = true } });
     var picked: [20]?usize = undefined;
+    const reconcile_wall_start = std.Io.Clock.awake.now(std.testing.io);
     const reconcile_start = now();
     echo.assign(&pending, users, false, &.{}, &picked);
     try std.testing.expectEqual(@as(?usize, messages), picked[0]);
     for (picked[1..]) |p| try std.testing.expect(p == null);
     try std.testing.expectEqual(@as(?usize, messages), echo.represented(pending[0].text, users));
     const reconcile_ms = ms(reconcile_start);
+    const reconcile_wall_ms = reconcile_wall_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds();
     try std.testing.expect(reconcile_ms < 1000);
-    std.debug.print("CPU707 benchmark bytes={d} messages={d} parse_ms={d} delta_ms={d} reconcile_ms={d}\n", .{ wire.items.len, messages, parse_ms, delta_ms, reconcile_ms });
+    std.debug.print("CPU707 benchmark bytes={d} messages={d} parse_ms={d} delta_ms={d} reconcile_ms={d} clock=awake parse_cpu_ms={d} delta_cpu_ms={d} reconcile_cpu_ms={d} cpu_clock=cpu_thread\n", .{ wire.items.len, messages, parse_wall_ms, delta_wall_ms, reconcile_wall_ms, parse_ms, delta_ms, reconcile_ms });
 }
 
 test "CPU707 bounded cache and tail/older paging preserve complete accessible history" {
@@ -145,15 +151,16 @@ test "ISSUE-421 layout cache invalidates same-length text font and scale and kee
     try std.testing.expectEqual(@as(usize, 5), cache.builds);
 }
 
-test "IGSH-961 reconcile cost grows with blocks, block length and pending message length" {
+test "IGSH-991 CPU961 pending echo assignment stays within 50 ms on long histories" {
     const a = std.heap.page_allocator;
     const block_counts = [_]usize{ 1200, 2800, 12200 };
     const block_chars = [_]usize{ 60, 600 };
     const pending_chars = [_]usize{ 40, 2000, 12000 };
+    var slowest_ms: i64 = 0;
     for (block_counts) |count| for (block_chars) |chars| {
         const storage = try a.alloc(u16, count * chars);
         defer a.free(storage);
-        const users = try a.alloc(echo.UserBlock, count);
+        const users = try a.alloc(echo.UserBlock, count + 1);
         defer a.free(users);
         for (0..count) |i| {
             const slice = storage[i * chars ..][0..chars];
@@ -164,13 +171,22 @@ test "IGSH-961 reconcile cost grows with blocks, block length and pending messag
             const text = try a.alloc(u16, pending_len);
             defer a.free(text);
             for (text, 0..) |*c, k| c.* = if (k % 9 == 8) ' ' else @intCast('A' + k % 26);
-            var pending: [1]echo.Pending = .{.{ .prefix = text[0..@min(text.len, 40)], .text = text, .anchor = .{ .counted = true } }};
-            var picked: [1]?usize = undefined;
-            const start = now();
-            echo.assign(&pending, users, false, &.{}, &picked);
-            const elapsed = ms(start);
-            std.mem.doNotOptimizeAway(picked[0]);
-            std.debug.print("CPU961 reconcile blocks={d} block_chars={d} pending_chars={d} ms={d}\n", .{ count, chars, pending_len, elapsed });
+            users[count] = .{ .text = text };
+            for (0..5) |trial| for ([_]bool{ false, true }) |present| {
+                var pending: [1]echo.Pending = .{.{ .prefix = text[0..@min(text.len, 40)], .text = text, .anchor = .{ .counted = true } }};
+                var picked: [1]?usize = undefined;
+                const wall_start = std.Io.Clock.awake.now(std.testing.io);
+                const start = now();
+                echo.assign(&pending, users[0 .. count + @intFromBool(present)], false, &.{}, &picked);
+                const elapsed = ms(start);
+                const wall_ms = wall_start.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds();
+                std.mem.doNotOptimizeAway(picked[0]);
+                try std.testing.expectEqual(if (present) @as(?usize, count) else null, picked[0]);
+                slowest_ms = @max(slowest_ms, elapsed);
+                std.debug.print("CPU961 reconcile blocks={d} block_chars={d} pending_chars={d} trial={d} present={} ms={d} mode={s} clock=cpu_thread wall_ms={d}\n", .{ count, chars, pending_len, trial, present, elapsed, @tagName(@import("builtin").mode), wall_ms });
+            };
         }
     };
+    std.debug.print("CPU991 matching slowest_ms={d} budget_ms=50 mode={s} clock=cpu_thread\n", .{ slowest_ms, @tagName(@import("builtin").mode) });
+    try std.testing.expect(slowest_ms <= 50);
 }

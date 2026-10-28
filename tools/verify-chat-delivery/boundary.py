@@ -131,11 +131,22 @@ def fake_write(claude):
 
 
 def fake_suggestion_shown(claude):
-    return claude["mode"] == "idle" and not claude["box"]
+    return bool(claude["suggestion"]) and claude["mode"] == "idle" and not claude["box"]
 
 
 def fake_screen(claude, escapes):
-    lines = ["Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
+    if claude.get("question"):
+        question = claude["question"]["questions"][claude["question_index"]]
+        rows = ["Claude Code", "", "☐ " + question["header"], question["question"], ""]
+        for index, option in enumerate(question["options"], 1):
+            mark = "☒ " if index in claude.get("question_selected", []) else "☐ " if question.get("multiSelect") else ""
+            cursor = "❯ " if index == 1 else "  "
+            rows.extend([f"{cursor}{index}. {mark}{option['label']}", "     " + option.get("description", "")])
+        rows += [f"  {len(question['options']) + 1}. Type something.", "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"]
+        if claude.get("question_other"):
+            rows.append("❯ " + claude["box"])
+        return "\n".join(rows) + "\n"
+    lines = ["Hax" if claude.get("hax") else "Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
     for question, answer in claude.get("turns", []):
         lines.extend(["❯ " + question, "● " + answer, ""])
     lines += ["  Queued: " + " ".join(text.split()) for text in claude["queue"]]
@@ -191,7 +202,41 @@ def fake_take(claude):
     claude["mode"] = "idle"
 
 
+def fake_question_done(claude, labels):
+    question = claude["question"]["questions"][claude["question_index"]]
+    record("question-answers.jsonl", question=question["question"], labels=labels)
+    claude["question_index"] += 1
+    claude["question_selected"] = []
+    claude["question_other"] = False
+    if claude["question_index"] == len(claude["question"]["questions"]):
+        fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=claude["question_id"], content="answers received")]))
+        claude["question"] = None
+
+
 def fake_key(claude, key):
+    if claude.get("question"):
+        question = claude["question"]["questions"][claude["question_index"]]
+        if claude.get("question_other"):
+            if key == "Enter":
+                fake_question_done(claude, [claude["box"]])
+                claude["box"] = ""
+                return True
+        elif len(key) == 1 and key.isdigit():
+            index = int(key)
+            if index == len(question["options"]) + 1:
+                claude["question_other"] = True
+            elif 1 <= index <= len(question["options"]):
+                if question.get("multiSelect"):
+                    selected = claude["question_selected"]
+                    selected.remove(index) if index in selected else selected.append(index)
+                else:
+                    fake_question_done(claude, [question["options"][index - 1]["label"]])
+            else:
+                return False
+            return True
+        elif key == "Enter" and question.get("multiSelect"):
+            fake_question_done(claude, [question["options"][i - 1]["label"] for i in sorted(claude["question_selected"])])
+            return True
     if key == "Enter":
         if claude["box"]:
             text, claude["box"] = claude["box"], ""
@@ -253,8 +298,29 @@ def fake_send(argv):
     return fake_run("app", "send-keys", argv, change)
 
 
+def hax_init(value):
+    for index, name in enumerate(value["sessions"]):
+        sid = f"11111111-1111-4111-8111-{index + 1:012d}"
+        transcript = Path(value["home"]) / ".local/state/hax/sessions/shared-runners" / f"2026-01-01T00-00-00Z_{sid}.jsonl"
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        events = [dict(type="session", version=1, id=sid, timestamp="2026-01-01T00:00:00Z", cwd=value["cwd"], provider="codex", model="neutral")]
+        if name != "runner-empty":
+            events += [dict(kind="user", text=f"IGSH1043 runner {index} question"), dict(kind="assistant", text=f"IGSH1043 runner {index} saved reply")]
+        transcript.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+        pid = value["panes"][name]
+        process = Path(value["procRoot"]) / str(pid)
+        (process / "fd").mkdir(parents=True, exist_ok=True)
+        (process / "stat").write_text(f"{pid} (hax) S 1 {pid} {pid} 0 -1", encoding="utf-8")
+        (process / "cmdline").write_bytes(b"hax\0-p\0neutral\0")
+        os.symlink(transcript, process / "fd/3")
+    fake_write(dict(hax=True, mode="idle", box="", queue=[], suggestion=value["suggestion"]))
+    return 0
+
+
 def fake_init():
     value = state()
+    if value.get("hax"):
+        return hax_init(value)
     pane = str(value["panePid"])
     for target in (value["transcript"], value["meta"]):
         Path(target).parent.mkdir(parents=True, exist_ok=True)
@@ -334,10 +400,58 @@ def shell():
         fake_event("user", message=dict(role="user", content=question))
         fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
         return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append([question, answer]) is None) else 3
+    if op == "live-turn" and len(ARGS) == 2:
+        def complete(claude):
+            accepted = list(claude["queue"])
+            fake_take(claude)
+            answer = "Live answer " + ARGS[1]
+            fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
+            claude.setdefault("turns", []).append([" | ".join(accepted), answer])
+            record("live-turns.jsonl", turn=int(ARGS[1]), accepted=accepted, answer=answer)
+            return True
+        return 0 if fake_run("shell", op, ARGS, complete) else 3
+    if op == "detach-console":
+        (ROOT / "console-detached").touch()
+        return 0
     if op == "init":
         return fake_init()
+    if op == "reply-reference":
+        original = "The original message starts here.\nSecond original line for context.\nThird original line stays on the wire.\nFourth original line ends the quote."
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=original)]))
+        for i in range(20):
+            fake_event("user", message=dict(role="user", content=f"Intervening question {i}"))
+            fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=f"Intervening answer {i}")]))
+        quoted = "\n".join("> " + line for line in original.split("\n"))
+        fake_event("user", message=dict(role="user", content=quoted + "\n\nMy compact answer"))
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text="Reply received.")]))
+        return 0
+    if op == "session-notes":
+        senders = ["Hax Runner 10", "Chief Of Staff", "Poteto", "hax-runner-6", "hax-runner-2"]
+        for sender in senders:
+            body = "IGSH-975 native journey is now fully green. " + "Details follow in a very long machine message that used to fill the whole screen. " * 6 + "Run: https://example.com/run"
+            fake_event("user", message=dict(role="user", content=f"[from {sender}] {body}"))
+        return 0
+    if op == "question" and len(ARGS) == 2:
+        payload = json.loads(Path(ARGS[1]).read_text(encoding="utf-8"))
+        identity = "question-" + uuid.uuid4().hex
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="tool_use", id=identity, name="AskUserQuestion", input=payload)]))
+        def ask(claude):
+            claude.update(question=payload, question_id=identity, question_index=0, question_selected=[], question_other=False)
+            return True
+        return 0 if fake_run("shell", op, ARGS, ask) else 3
+    if op == "plain-list":
+        text = "I need three answers from you:\n1. Figma team\n2. Figma login\n3. QA tickets"
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=text)]))
+        return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append(["Three separate questions", text]) is None) else 3
     if op == "seed-many" and len(ARGS) == 2:
         return fake_seed_many(int(ARGS[1]))
+    if op == "seed-shapes" and len(ARGS) == 2:
+        spec = importlib.util.spec_from_file_location("chat_shapes", Path(__file__).with_name("chat-shapes.py"))
+        shapes = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(shapes)
+        fake_seed_many(0)
+        shapes.seed(ARGS[1], ROOT / "state.json")
+        return 0
     if op == "messages" and len(ARGS) == 2:
         for i in range(int(ARGS[1])):
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text="New message " + str(i) + "\n" + "Readable transcript paragraph with enough text to paint a full message row.\n\n" * 32)]))
@@ -354,12 +468,46 @@ def shell():
             rows = transcript.read_bytes().splitlines(keepends=True)
             output.write(b"".join(rows if op == "retention-init" else rows[-count:]))
         return 0
-    if op == "retention-reset":
+    if op == "retention-reset" or (op == "forget-message" and len(ARGS) == 2):
         transcript = Path(state()["transcript"])
-        tail = b"".join(transcript.read_bytes().splitlines(keepends=True)[-20:])
+        rows = transcript.read_bytes().splitlines(keepends=True)
+        if op == "forget-message":
+            kept = [row for row in rows if json.loads(row).get("message", {}).get("id") != ARGS[1]]
+            if len(kept) != len(rows) - 1:
+                raise ValueError("Expected one source message to disappear")
+        else:
+            kept = rows[-20:]
         replacement = transcript.with_suffix(".replacement")
-        replacement.write_bytes(tail)
-        os.replace(replacement, transcript)
+        replacement.write_bytes(b"".join(kept))
+        if os.name == "nt":
+            class RenameInfo(ctypes.Structure):
+                _fields_ = [("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE),
+                            ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * 1)]
+
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                          wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+            kernel.CreateFileW.restype = wintypes.HANDLE
+            kernel.SetFileInformationByHandle.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+            kernel.SetFileInformationByHandle.restype = wintypes.BOOL
+            kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+            kernel.CloseHandle.restype = wintypes.BOOL
+            handle = kernel.CreateFileW(str(replacement), 0x10000, 7, None, 3, 0x80, None)
+            if handle == wintypes.HANDLE(-1).value:
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                filename = str(transcript.resolve()).encode("utf-16-le")
+                buffer = ctypes.create_string_buffer(RenameInfo.FileName.offset + len(filename) + ctypes.sizeof(wintypes.WCHAR))
+                info = ctypes.cast(buffer, ctypes.POINTER(RenameInfo)).contents
+                info.Flags = 1 | 2
+                info.FileNameLength = len(filename)
+                ctypes.memmove(ctypes.addressof(buffer) + RenameInfo.FileName.offset, filename, len(filename))
+                if not kernel.SetFileInformationByHandle(handle, 22, buffer, len(buffer)):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            finally:
+                kernel.CloseHandle(handle)
+        else:
+            os.replace(replacement, transcript)
         return 0
     if op == "retention-empty":
         transcript = Path(state()["transcript"])
@@ -380,15 +528,7 @@ def shell():
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=f"IGSH815 assistant {i:02d}")]))
             identity = "history-" + str(i)
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo history"))]))
-            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * 12000, is_error=False)]))
-        return 0
-    if op == "forget-message" and len(ARGS) == 2:
-        transcript = Path(state()["transcript"])
-        rows = transcript.read_bytes().splitlines(keepends=True)
-        kept = [row for row in rows if json.loads(row).get("message", {}).get("id") != ARGS[1]]
-        if len(kept) != len(rows) - 1:
-            raise ValueError("Expected one source message to disappear")
-        transcript.write_bytes(b"".join(kept))
+            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * (40000 if state().get("longChatProof") else 12000), is_error=False)]))
         return 0
     if op == "todo":
         fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id="activity-todo", name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))]))
@@ -539,11 +679,15 @@ def console_rows(lines, width):
 
 
 def attach_fake(session):
+    if (ROOT / "console-detached").exists():
+        return
     kernel = console_kernel()
     handle = kernel.GetStdHandle(-11)
     previous = None
     (ROOT / f"transport-{os.getpid()}.txt").write_text(session, encoding="utf-8")
     while True:
+        if (ROOT / "console-detached").exists():
+            return
         claude = fake_locked(fake_read)
         info = INFO()
         count = wintypes.DWORD()
@@ -585,18 +729,22 @@ def attach_fake(session):
         time.sleep(0.05)
 
 
+def capture_screen(escapes):
+    value = state()
+    if value.get("fake"):
+        return fake_locked(lambda: fake_screen(fake_read(), escapes))
+    shown = screen(value, box_buffer() if stateful(value) else None)
+    if escapes and value["mode"] == "idle":
+        suggestion = value["suggestion"]
+        shown = shown.replace("\u276f " + suggestion, "\u276f " + SGR_DIM + suggestion + SGR_RESET, 1)
+    return shown
+
+
 def tmux():
     fake = state().get("fake")
     if ARGS[:1] == ["capture-pane"]:
-        if fake:
-            shown = fake_locked(lambda: fake_screen(fake_read(), "-e" in ARGS))
-        else:
-            value = state()
-            shown = screen(value, box_buffer() if stateful(value) else None)
+        shown = capture_screen("-e" in ARGS)
         record("capture.jsonl", argv=ARGS, screen=shown)
-        if not fake and "-e" in ARGS and state()["mode"] == "idle":
-            suggestion = state()["suggestion"]
-            shown = shown.replace("\u276f " + suggestion, "\u276f " + SGR_DIM + suggestion + SGR_RESET, 1)
         sys.stdout.reconfigure(newline="\n")
         sys.stdout.write(shown)
         return 0
@@ -700,6 +848,62 @@ def completion(remote):
     return 95
 
 
+def watch_reader():
+    import base64
+
+    source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
+    namespace = dict(__name__="verified_remote_reader")
+    exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
+
+    def changes(q, resolved, supplied_source, as_owner):
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.FindFirstChangeNotificationW.argtypes = [wintypes.LPCWSTR, wintypes.BOOL, wintypes.DWORD]
+        kernel.FindFirstChangeNotificationW.restype = wintypes.HANDLE
+        kernel.FindNextChangeNotification.argtypes = [wintypes.HANDLE]
+        kernel.FindCloseChangeNotification.argtypes = [wintypes.HANDLE]
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        watch_root = os.path.commonpath([str(ROOT), str(resolved[2].parent).removeprefix("\\\\?\\")])
+        notification = kernel.FindFirstChangeNotificationW(watch_root, True, 0x13)
+        if notification == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            paths = [resolved[2], ROOT / "claude.json", ROOT / "box.json", ROOT / "state.json"]
+            def fingerprint():
+                result = []
+                for path in paths:
+                    try:
+                        info = path.stat()
+                        result.append((info.st_ino, info.st_size, info.st_mtime_ns))
+                    except FileNotFoundError:
+                        result.append(None)
+                return result
+            def refresh_screen():
+                started = time.perf_counter_ns()
+                q["watch_screen"] = capture_screen(True)
+                q["watch_capture_us"] = (time.perf_counter_ns() - started) // 1000
+
+            previous = fingerprint()
+            refresh_screen()
+            yield resolved
+            while True:
+                if kernel.WaitForSingleObject(notification, 0xFFFFFFFF) != 0:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if not kernel.FindNextChangeNotification(notification):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                current = fingerprint()
+                if current != previous:
+                    if current[1:] != previous[1:]:
+                        refresh_screen()
+                    previous = current
+                    yield resolved
+        finally:
+            kernel.FindCloseChangeNotification(notification)
+
+    namespace["watch_changes"] = changes
+    namespace["watch"](namespace["READER_SOURCE"])
+    return 0
+
+
 def ssh():
     if ARGS == ["-V"]:
         print("OpenSSH_verification")
@@ -708,6 +912,15 @@ def ssh():
     declined = declined_remote(ARGS)
     if declined:
         kind, output, exit_code = declined
+        if kind == "capacity-poll" and state().get("hax"):
+            output = "@capacity|4|0.1|8000000|6000000|0|0|0|0|0\n"
+            if "vps" in ARGS:
+                output += "".join(name + "|1700000000|10|/verify/shared-runners|hax|Hax\n" for name in session_names())
+            if command.endswith("done"):
+                output += "@@ZS_END@@\n"
+            record("invocations.jsonl", kind="list", operation="native host inventory", argv=ARGS)
+            sys.stdout.write(output)
+            return 0
         record("declined.jsonl", operation="remote command", kind=kind, argv=ARGS, command=command, exitCode=exit_code)
         sys.stdout.write(output)
         return exit_code
@@ -721,7 +934,19 @@ def ssh():
         if remote[1].endswith("/mp_complete.py"):
             return completion(remote)
         record("invocations.jsonl", kind="reader", argv=remote)
+        if remote[-1:] == ["--watch"]:
+            value = state()
+            if value.get("remoteHome"):
+                os.environ.update(HOME=value["remoteHome"], USERPROFILE=value["remoteHome"])
+            try:
+                return watch_reader()
+            except Exception:
+                import traceback
+                (ROOT / f"reader-{os.getpid()}.stderr.log").write_text(traceback.format_exc(), encoding="utf-8")
+                raise
         env = os.environ.copy()
+        if os.name == "nt":
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         if state().get("remoteHome"):
             env.update(HOME=state()["remoteHome"], USERPROFILE=state()["remoteHome"])
         with (ROOT / f"reader-{os.getpid()}.stderr.log").open("ab", buffering=0) as error:

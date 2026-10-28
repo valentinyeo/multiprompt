@@ -3,7 +3,7 @@ const std = @import("std");
 pub const MIN_PARTIAL: usize = 12;
 const BLOCK_NORM_CAP: usize = 32768;
 
-fn isSpace(c: u16) bool {
+inline fn isSpace(c: u16) bool {
     return c == ' ' or c == '\t' or c == '\r' or c == '\n' or c == 0xA0;
 }
 
@@ -33,7 +33,7 @@ pub fn normalize(text: []const u16, out: []u16) []const u16 {
     var pending_space = false;
     var i: usize = 0;
     while (i < text.len) {
-        const tag = pastedTagLen(text, i);
+        const tag = if (text[i] == '<') pastedTagLen(text, i) else 0;
         if (tag > 0) {
             if (n > 0) pending_space = true;
             i += tag;
@@ -64,6 +64,18 @@ fn stripTrailingEllipsis(s: []const u16) []const u16 {
     return s[0..end];
 }
 
+fn indexOfText(text: []const u16, needle: []const u16) ?usize {
+    if (needle.len == 0) return 0;
+    if (needle.len > text.len) return null;
+    const candidates = text[0 .. text.len - needle.len + 1];
+    var start: usize = 0;
+    while (std.mem.indexOfScalarPos(u16, candidates, start, needle[0])) |i| {
+        if (std.mem.eql(u16, text[i..][0..needle.len], needle)) return i;
+        start = i + 1;
+    }
+    return null;
+}
+
 pub fn blockMatches(block_text: []const u16, prefix: []const u16) bool {
     if (prefix.len == 0) return false;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
@@ -74,7 +86,7 @@ pub fn blockMatches(block_text: []const u16, prefix: []const u16) bool {
         const cut = stripTrailingEllipsis(norm);
         return cut.len >= MIN_PARTIAL and std.mem.eql(u16, prefix[0..cut.len], cut);
     }
-    if (prefix.len >= MIN_PARTIAL) return std.mem.indexOf(u16, norm, prefix) != null;
+    if (prefix.len >= MIN_PARTIAL) return indexOfText(norm, prefix) != null;
     if (norm.len > prefix.len and norm[norm.len - prefix.len - 1] == ' ') {
         return std.mem.eql(u16, norm[norm.len - prefix.len ..], prefix);
     }
@@ -148,6 +160,7 @@ pub const SEND_SKEW_MS: i64 = 60_000;
 
 pub const Anchor = struct {
     after_ms: i64 = 0,
+    after_id: u64 = 0,
     sent_ms: i64 = 0,
     user_count: u32 = 0,
     counted: bool = false,
@@ -156,7 +169,10 @@ pub const Anchor = struct {
 pub const UserBlock = struct {
     text: []const u16,
     stamp_ms: i64 = 0,
+    message_id: u64 = 0,
 };
+
+pub const Claim = struct { message_id: u64 = 0, stamp_ms: i64 = 0, text_hash: u64 = 0 };
 
 pub const Pending = struct {
     prefix: []const u16,
@@ -173,7 +189,7 @@ const Normalized = struct {
     fn next(self: *Normalized) ?u16 {
         var space = false;
         while (self.pos < self.text.len) {
-            const tag = pastedTagLen(self.text, self.pos);
+            const tag = if (self.text[self.pos] == '<') pastedTagLen(self.text, self.pos) else 0;
             if (tag > 0 or isSpace(self.text[self.pos])) {
                 self.pos += if (tag > 0) tag else 1;
                 space = self.started;
@@ -198,6 +214,13 @@ pub fn sameText(a: []const u16, b: []const u16) bool {
         if (l != r) return false;
         if (l == null) return true;
     }
+}
+
+pub fn textHash(text: []const u16) u64 {
+    var hash = std.hash.Wyhash.init(0);
+    var normalized = Normalized{ .text = text };
+    while (normalized.next()) |c| hash.update(std.mem.asBytes(&c));
+    return hash.final();
 }
 
 pub const OutboxState = enum(u8) { queued = 0, sending = 1, not_sent = 2, delivered = 3 };
@@ -340,20 +363,18 @@ test "reserved uncertain sends stay unconfirmed across restart" {
     try std.testing.expectEqual(OutboxState.delivered, stateOnLoad(@intFromEnum(OutboxState.delivered), true));
 }
 
-fn messageMatches(block: []const u16, p: Pending) bool {
+fn messageMatches(block: []const u16, p: Pending, norm: []const u16) bool {
     if (p.text.len == 0) return newBlockMatches(block, p.prefix);
     if (sameText(block, p.text)) return true;
-    var full: [16384]u16 = undefined;
-    const norm = normalize(p.text, &full);
-    if (pastePlaceholderMatches(block, norm)) return true;
     var buf: [BLOCK_NORM_CAP]u16 = undefined;
     const body = normalize(block, &buf);
+    if (pastePlaceholderMatches(body, norm)) return true;
     const cut = stripTrailingEllipsis(body);
     if (cut.len < body.len and cut.len >= MIN_PARTIAL and cut.len < norm.len and std.mem.startsWith(u16, norm, cut)) return true;
     if (norm.len == 0 or body.len <= norm.len) return false;
     if (norm.len < MIN_PARTIAL) return body[body.len - norm.len - 1] == ' ' and std.mem.endsWith(u16, body, norm);
     if (std.mem.endsWith(u16, body, norm)) return true;
-    const at = std.mem.indexOf(u16, body, norm) orelse return false;
+    const at = indexOfText(body, norm) orelse return false;
     return (at == 0 or body[at - 1] == ' ') and (at + norm.len == body.len or body[at + norm.len] == ' ');
 }
 
@@ -368,10 +389,8 @@ pub fn isNewBlock(anchor: Anchor, stamp_ms: i64, ordinal: usize, window_full: bo
 
 const PASTE_PLACEHOLDER = [_]u16{ '[', 'P', 'a', 's', 't', 'e', 'd', ' ', 't', 'e', 'x', 't' };
 
-fn pastePlaceholderMatches(block_text: []const u16, prefix: []const u16) bool {
-    var buf: [BLOCK_NORM_CAP]u16 = undefined;
-    const norm = normalize(block_text, &buf);
-    const at = std.mem.indexOf(u16, norm, &PASTE_PLACEHOLDER) orelse return false;
+fn pastePlaceholderMatches(norm: []const u16, prefix: []const u16) bool {
+    const at = indexOfText(norm, &PASTE_PLACEHOLDER) orelse return false;
     var end = at;
     while (end > 0 and norm[end - 1] == ' ') end -= 1;
     const before = norm[0..end];
@@ -382,7 +401,9 @@ fn pastePlaceholderMatches(block_text: []const u16, prefix: []const u16) bool {
 
 pub fn newBlockMatches(block_text: []const u16, prefix: []const u16) bool {
     if (prefix.len == 0) return false;
-    return blockMatches(block_text, prefix) or pastePlaceholderMatches(block_text, prefix);
+    if (blockMatches(block_text, prefix)) return true;
+    var buf: [BLOCK_NORM_CAP]u16 = undefined;
+    return pastePlaceholderMatches(normalize(block_text, &buf), prefix);
 }
 
 fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: Pending) bool {
@@ -394,19 +415,29 @@ fn isTaken(taken: []const ?usize, bi: usize, earlier: []const Pending, current: 
     return false;
 }
 
-fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: []const i64, taken: []const ?usize, earlier: []const Pending) ?usize {
+fn pickBlock(p: Pending, blocks: []const UserBlock, window_full: bool, claimed: []const Claim, taken: []const ?usize, earlier: []const Pending) ?usize {
     if (p.prefix.len == 0) return null;
+    var full: [16384]u16 = undefined;
+    const norm = normalize(p.text, &full);
+    const pending_hash = if (claimed.len > 0) textHash(p.text) else 0;
     for (blocks, 0..) |b, bi| {
-        if (!isNewBlock(p.anchor, b.stamp_ms, bi, window_full) and !p.unanchored_delivery) continue;
+        const after_anchor = b.message_id != 0 and p.anchor.after_id != 0 and b.stamp_ms == p.anchor.after_ms and (for (blocks[0..bi]) |before| {
+            if (before.message_id == p.anchor.after_id) break true;
+        } else false);
+        if (!isNewBlock(p.anchor, b.stamp_ms, bi, window_full) and !after_anchor and !p.unanchored_delivery) continue;
         if (p.unanchored_delivery and (p.text.len == 0 or !sameText(b.text, p.text))) continue;
-        if (b.stamp_ms > 0 and std.mem.indexOfScalar(i64, claimed, b.stamp_ms) != null) continue;
+        const already_claimed = for (claimed) |claim| {
+            if (claim.text_hash != 0 and claim.text_hash != pending_hash) continue;
+            if (if (b.message_id != 0 and claim.message_id != 0) b.message_id == claim.message_id else b.stamp_ms > 0 and b.stamp_ms == claim.stamp_ms) break true;
+        } else false;
+        if (already_claimed) continue;
         if (isTaken(taken, bi, earlier, p)) continue;
-        if (messageMatches(b.text, p)) return bi;
+        if (messageMatches(b.text, p, norm)) return bi;
     }
     return null;
 }
 
-pub fn assign(pending: []Pending, blocks: []const UserBlock, window_full: bool, claimed: []const i64, out: []?usize) void {
+pub fn assign(pending: []Pending, blocks: []const UserBlock, window_full: bool, claimed: []const Claim, out: []?usize) void {
     for (out) |*o| o.* = null;
     const n = @min(pending.len, out.len);
     for (0..n) |i| {
@@ -414,9 +445,15 @@ pub fn assign(pending: []Pending, blocks: []const UserBlock, window_full: bool, 
         const bi = out[i] orelse continue;
         for (pending, 0..) |*other, j| {
             if (j <= i) continue;
-            if (other.text.len > 0 and pending[i].text.len > 0 and !sameText(other.text, pending[i].text) and messageMatches(blocks[bi].text, other.*)) continue;
+            if (other.text.len > 0 and pending[i].text.len > 0 and !sameText(other.text, pending[i].text)) {
+                var full: [16384]u16 = undefined;
+                if (messageMatches(blocks[bi].text, other.*, normalize(other.text, &full))) continue;
+            }
             if (blocks[bi].stamp_ms > 0) {
-                other.anchor.after_ms = @max(other.anchor.after_ms, blocks[bi].stamp_ms);
+                if (blocks[bi].stamp_ms >= other.anchor.after_ms) {
+                    other.anchor.after_ms = blocks[bi].stamp_ms;
+                    other.anchor.after_id = blocks[bi].message_id;
+                }
                 other.unanchored_delivery = false;
             } else if (other.anchor.user_count <= bi) {
                 other.anchor.user_count = @intCast(bi + 1);
@@ -577,7 +614,7 @@ test "scenario: full window with an old identical yes never confirms a new yes" 
 test "scenario: a third yes confirms after two were confirmed" {
     var p: [64]u16 = undefined;
     const blocks = [_]UserBlock{ ub("yes", 1_000), ub("yes", 2_000) };
-    const claimed = [_]i64{ 1_000, 2_000 };
+    const claimed = [_]Claim{ .{ .stamp_ms = 1_000 }, .{ .stamp_ms = 2_000 } };
     var pending = [_]Pending{.{ .prefix = prefixOf("yes", &p), .anchor = .{ .after_ms = 2_000, .sent_ms = 2_100 } }};
     var out: [1]?usize = undefined;
     assign(&pending, &blocks, false, &claimed, &out);
@@ -599,7 +636,7 @@ test "scenario: two pending yes with one delivered confirm only the oldest" {
     assign(&pending, &blocks, false, &.{}, &out);
     try std.testing.expectEqual(@as(?usize, 1), out[0]);
     try std.testing.expect(out[1] == null);
-    const claimed = [_]i64{1_000};
+    const claimed = [_]Claim{.{ .stamp_ms = 1_000 }};
     assign(pending[1..], &blocks, false, &claimed, out[0..1]);
     try std.testing.expect(out[0] == null);
     const later = [_]UserBlock{ ub("start", 500), ub("yes", 1_000), ub("yes", 1_200) };
@@ -720,7 +757,7 @@ test "ISSUE-608 a message with leftover box text glued in front still confirms" 
     try std.testing.expect(out[0] == null);
     const short = w("yes");
     try std.testing.expect(short.len < MIN_PARTIAL);
-    try std.testing.expect(!messageMatches(&w("leftoveryes"), .{ .prefix = &short, .text = &short, .anchor = .{ .after_ms = 100 } }));
+    try std.testing.expect(!messageMatches(&w("leftoveryes"), .{ .prefix = &short, .text = &short, .anchor = .{ .after_ms = 100 } }, &short));
 }
 
 test "delivery: busy then idle and restart reserve one text write" {
@@ -941,4 +978,36 @@ test "ISSUE-460 all pending states have a hard deadline independent of busy and 
     }
     try std.testing.expect(!pendingExpired(.not_sent, 1000, 901000));
     try std.testing.expectEqual(@as(u8, 2), @intFromEnum(OutboxState.not_sent));
+}
+
+
+test "IGSH-991 text search preserves first matches and UTF16 alignment" {
+    try std.testing.expectEqual(@as(?usize, 0), indexOfText(&w("abc"), &.{}));
+    try std.testing.expectEqual(@as(?usize, null), indexOfText(&w("abc"), &w("abcd")));
+    try std.testing.expectEqual(@as(?usize, 0), indexOfText(&w("abcabc"), &w("abc")));
+    try std.testing.expectEqual(@as(?usize, 1), indexOfText(&w("aaaaabaaaaab"), &w("aaaab")));
+    try std.testing.expectEqual(@as(?usize, 3), indexOfText(&w("xyzabc"), &w("abc")));
+    try std.testing.expectEqual(@as(?usize, null), indexOfText(&w("xyzabc"), &w("abd")));
+    try std.testing.expectEqual(@as(?usize, 5), indexOfText(std.unicode.utf8ToUtf16LeStringLiteral("left 😀 right"), std.unicode.utf8ToUtf16LeStringLiteral("😀")));
+    try std.testing.expectEqual(@as(?usize, null), indexOfText(&.{ 0x00aa, 0xbb00, 0x00cc }, &.{ 0xaa00, 0x00bb }));
+}
+
+test "IGSH-1102 distinct accepted messages in one millisecond all confirm" {
+    const first = w("Live request 1 part 1");
+    const second = w("Live request 1 part 2");
+    const third = w("Live request 1 part 3");
+    var blocks = [_]UserBlock{ ub("Live request 1 part 1", 2000), ub("Live request 1 part 2", 2000), ub("Live request 1 part 3", 2000) };
+    if (@hasField(UserBlock, "message_id")) {
+        for (&blocks, 0..) |*block, i| block.message_id = i + 1;
+    }
+    var pending = [_]Pending{
+        .{ .text = &first, .prefix = &first, .anchor = .{ .after_ms = 1000 } },
+        .{ .text = &second, .prefix = &second, .anchor = .{ .after_ms = 1000 } },
+        .{ .text = &third, .prefix = &third, .anchor = .{ .after_ms = 1000 } },
+    };
+    var assigned: [3]?usize = undefined;
+    assign(&pending, &blocks, true, &.{}, &assigned);
+    try std.testing.expectEqual(@as(?usize, 0), assigned[0]);
+    try std.testing.expectEqual(@as(?usize, 1), assigned[1]);
+    try std.testing.expectEqual(@as(?usize, 2), assigned[2]);
 }

@@ -133,6 +133,17 @@ public static class ChatDeliveryDesktop {
             !IsWindowVisible(transcript) || !GetWindowRect(transcript, out rect)) throw new InvalidOperationException("Transcript wheel ownership mismatch");
         WheelTranscript(main, pid, transcript, (rect.Left + rect.Right) / 2, (rect.Top + rect.Bottom) / 2, delta);
     }
+    [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", SetLastError=true)] static extern IntPtr SendWheelMessage(IntPtr hwnd, uint message, UIntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+    public static void WheelOwnedTranscriptMessage(IntPtr main, uint pid, IntPtr transcript, int delta) {
+        Rect rect;
+        if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
+            Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||
+            !IsWindowVisible(transcript) || !GetWindowRect(transcript, out rect)) throw new InvalidOperationException("Owned transcript wheel ownership mismatch");
+        if (delta == 0 || delta < short.MinValue || delta > short.MaxValue || delta % 120 != 0) throw new ArgumentOutOfRangeException("delta");
+        int x = (rect.Left + rect.Right) / 2, y = (rect.Top + rect.Bottom) / 2;
+        IntPtr result;
+        if (SendWheelMessage(transcript, 0x020A, new UIntPtr(unchecked((uint)(ushort)delta << 16)), new IntPtr(unchecked((y << 16) | (x & 0xffff))), 2, 2000, out result) == IntPtr.Zero) throw new InvalidOperationException("Owned transcript WM_MOUSEWHEEL failed");
+    }
     public static void PressOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
         if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
             Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||

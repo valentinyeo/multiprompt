@@ -1,8 +1,10 @@
 import base64
 import importlib.util
 import json
+import io
 import os
 import selectors
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -47,6 +49,159 @@ class HistoryReaderTest(unittest.TestCase):
         self.query['start'] = int(fields[14])
         self.query.pop('before', None)
         return fields, [json.loads(line) for line in lines[1:-1]]
+
+    def test_igsh1063_only_structured_pending_questions(self):
+        questions = [dict(question="Which colour?", header="Accent", multiSelect=False,
+                          options=[dict(label="Lime", description="Bright contrast"),
+                                   dict(label="Orange", description="Warm contrast")]),
+                     dict(question="Which devices?", header="Devices", multiSelect=True,
+                          options=[dict(label="Desktop", description="Windows"),
+                                   dict(label="Phone", description="Android")])]
+        prose = self.event("I need three answers from you:\n1. Figma team\n2. Figma login\n3. QA tickets")
+        self.write(prose)
+        self.assertFalse(any(row.get("question") for row in self.read()[1]))
+        call = self.tool_call("AskUserQuestion", dict(questions=questions))
+        self.write(prose, call)
+        status = next((row for row in self.read()[1] if row["role"] == "status"), None)
+        self.assertIsNotNone(status, "pending structured question must reach the client")
+        self.assertEqual(status["question"], dict(id="call-263", questions=questions))
+        self.assertEqual(next(row for row in self.read()[1] if row["role"] == "status")["question"], status["question"])
+        with self.path.open("a") as target:
+            target.write(json.dumps(self.tool_result("answered")) + "\n")
+        self.assertIsNone(next(row for row in self.read()[1] if row["role"] == "status")["question"])
+
+    def test_igsh1063_codex_structured_questions_complete(self):
+        self.query["codex"] = True
+        self.path = self.home / ".codex/sessions/rollout-2026-sid.jsonl"
+        self.path.parent.mkdir(parents=True)
+        question = dict(id="colour", question="Which colour?", header="Accent",
+                        options=[dict(label="Lime", description="Bright contrast"),
+                                 dict(label="Orange", description="Warm contrast")])
+        self.write(dict(type="response_item", payload=dict(type="function_call", call_id="q1",
+                   name="request_user_input", arguments=json.dumps(dict(questions=[question])))))
+        status = next((row for row in self.read()[1] if row["role"] == "status"), None)
+        self.assertIsNotNone(status, "pending Codex question must reach the client")
+        self.assertEqual(status["question"]["id"], "q1")
+        self.assertEqual(status["question"]["provider"], "codex")
+        self.assertEqual(status["question"]["questions"], [question])
+        with self.path.open("a") as target:
+            target.write(json.dumps(dict(type="response_item", payload=dict(type="function_call_output", call_id="q1", output="done"))) + "\n")
+        self.assertIsNone(next(row for row in self.read()[1] if row["role"] == "status")["question"])
+
+    def test_igsh1063_answered_sidechain_and_embedded_question_text_not_pending(self):
+        question = dict(question="Real question?", header="Pick", options=[dict(label="A"), dict(label="B")])
+        self.write(self.tool_call("AskUserQuestion", dict(questions=[question])), self.tool_result("done"),
+                   self.event('AskUserQuestion {"questions": []}'),
+                   dict(self.tool_call("AskUserQuestion", dict(questions=[question])), isSidechain=True))
+        self.assertFalse(any(row.get("question") for row in self.read()[1]))
+
+    def test_igsh1063_question_keys_keep_order_and_permission_boundaries(self):
+        for keys, expected in (([49], ["1"]), ([50], ["2"]), ([49, 50, 13], ["1", "2", "Enter"]), ([9], ["Up", "Tab"])):
+            with patch.object(reader.subprocess, "run") as run:
+                wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", keys=keys))
+            self.assertIn("\tquestion\tok\t", wire)
+            self.assertEqual(run.call_args.args[0], ["tmux", "send-keys", "-t", "=term-1:", *expected])
+        for keys in ([], [27], [10], [True], [49, 50, "Enter"], None):
+            with patch.object(reader.subprocess, "run") as run:
+                wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", keys=keys))
+            self.assertIn("\tquestion\terror\t", wire)
+            run.assert_not_called()
+        with patch.object(reader.subprocess, "run") as run:
+            self.assertIn("\tpermission\terror\t", reader.stop_response(dict(op="permission", id=7, tmux="term-1", digit=13)))
+        run.assert_not_called()
+
+    def test_igsh1063_other_text_keeps_question_reply_operation(self):
+        with patch.object(reader, "prompt_box_text", return_value=""), patch.object(reader, "clear_prompt_box", return_value=("", False)), patch.object(reader.time, "sleep"), patch.object(reader.subprocess, "run") as run:
+            wire = reader.send_response(dict(op="question_text", id=7, tmux="term-1", text="Purple"))
+        self.assertIn("\tquestion_text\tok\t", wire)
+        self.assertEqual(run.call_args_list[0].args[0], ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "Purple"])
+        self.assertEqual(run.call_args_list[1].args[0], ["tmux", "send-keys", "-t", "=term-1:", "Enter"])
+    def test_igsh1043_hax_only_processes_are_discovered_without_provider_children(self):
+        table = {10: (1, ['bash']), 11: (10, ['/opt/bin/hax', '-p', 'neutral']),
+                 20: (1, ['bash']), 21: (20, ['/opt/bin/hax', '--resume=neutral'])}
+        self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 11)
+        self.assertEqual(reader.agent_pid_for_panes([20], table, 'codex'), 21)
+        table[12] = (11, ['codex'])
+        self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 11)
+
+    def test_igsh1043_native_rewrite_cannot_reuse_another_message_identity(self):
+        def saved_message(text, offset):
+            rows = reader.conversation_rows(dict(kind='assistant', text=text), 'claude', offset)
+            self.assertEqual(len(rows), 1, 'Native saved reply must be readable')
+            self.assertIn('id', rows[0])
+            return rows[0]
+        first = saved_message('Original saved answer', 123)
+        again = saved_message('Original saved answer', 123)
+        replaced = saved_message('Rewritten different answer', 123)
+        repeated = saved_message('Original saved answer', 456)
+        self.assertEqual(first['id'], again['id'])
+        self.assertNotEqual(first['id'], replaced['id'])
+        self.assertNotEqual(first['id'], repeated['id'])
+
+    def test_igsh1043_hax_without_materialized_file_never_reads_another_claude_chat(self):
+        self.write(self.event('Unrelated Claude conversation'))
+        with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '10\n', '')), \
+                patch.object(reader, 'process_table', return_value={10: (1, ['hax'])}), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'), \
+                patch.object(reader, 'open_hax_transcript', return_value=None, create=True):
+            self.assertIsNone(reader.resolve_tmux_agent('claude', 'runner-starting'))
+
+    def test_igsh1043_idle_hax_keeps_its_exact_saved_session(self):
+        sid = '11111111-1111-4111-8111-111111111111'
+        path = self.home / '.local/state/hax/sessions/shared-runners' / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(dict(type='session', version=1, id=sid, cwd='/work/demo')) + '\n' + json.dumps(dict(kind='assistant', text='Saved reply after runner exits')) + '\n')
+        self.query.update(sid=sid, follow=True)
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            fields, rows = self.read()
+        self.assertEqual(fields[4], sid)
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant'], ['Saved reply after runner exits'])
+
+    def test_igsh1043_live_hax_uses_owned_descriptor_not_newest_same_folder(self):
+        root = self.home / '.local/state/hax/sessions/shared-runners'
+        root.mkdir(parents=True)
+        sid = '11111111-1111-4111-8111-111111111111'
+        owned = root / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+        owned.write_text(json.dumps(dict(type='session', version=1, id=sid, cwd='/work/demo')) + '\n')
+        other = root / '2026-01-02T00-00-00Z_22222222-2222-4222-8222-222222222222.jsonl'
+        other.write_text(json.dumps(dict(type='session', version=1, id='22222222-2222-4222-8222-222222222222', cwd='/work/demo')) + '\n')
+        os.utime(owned, (1, 1))
+        os.utime(other, (2, 2))
+        original_iterdir = Path.iterdir
+        def iterdir(path):
+            return iter([Path('/proc/11/fd/3')]) if path == Path('/proc/11/fd') else original_iterdir(path)
+        with patch.object(Path, 'iterdir', iterdir), \
+                patch.object(reader.os, 'readlink', return_value=str(owned)), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'):
+            self.assertEqual(reader.resolve_tmux_agent('claude', 'runner-one', pid=11), (sid, owned))
+            self.assertEqual(reader.resolve_tmux_agent('codex', 'runner-one', pid=11), (sid, owned))
+
+    def test_igsh1043_native_hax_saved_sessions_keep_distinct_messages_and_offsets(self):
+        root = self.home / '.local/state/hax/sessions/work-demo-neutral'
+        root.mkdir(parents=True)
+        for index, sid in enumerate(['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']):
+            path = root / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+            events = [dict(type='session', version=1, hax_version='neutral', id=sid, cwd='/work/demo', timestamp='2026-01-01T00:00:00Z', provider='codex', model='neutral'),
+                      dict(kind='user', text=f'Runner {index} question'),
+                      dict(kind='assistant', text=f'Runner {index} saved reply')]
+            path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+            self.query = dict(id=7, codex=False, sid=sid, tmux='', cwd='/work/demo', cached_sid='', inode=0, offset=0, source_offsets=True)
+            fields, rows = self.read()
+            messages = [row for row in rows if row['role'] in ('user', 'assistant')]
+            self.assertEqual(fields[4], sid)
+            self.assertEqual([row['text'] for row in messages], [f'Runner {index} question', f'Runner {index} saved reply'])
+            identities = [row.get('read_id') or row.get('id') for row in messages]
+            self.assertTrue(all(identities))
+            self.assertEqual(len(set(identities)), 2)
+            with path.open('a') as output:
+                output.write(json.dumps(dict(kind='assistant', text=f'Runner {index} next reply')) + '\n')
+            _, delta = self.read()
+            self.assertEqual([row['text'] for row in delta if row['role'] == 'assistant'], [f'Runner {index} next reply'])
+            found = reader.response(dict(self.query, search=f'Runner {index} saved reply'))
+            self.assertIn(f'Runner {index} saved reply', found)
+            self.query.update(cached_sid='', inode=0, offset=0)
+            _, again = self.read()
+            self.assertEqual([row.get('read_id') or row.get('id') for row in again if row['role'] in ('user', 'assistant')][:2], identities)
 
     def test_claude_status_header(self):
         todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]
@@ -1152,6 +1307,35 @@ class HistoryReaderTest(unittest.TestCase):
             with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)):
                 self.assertIn('saved old reply', reader.response(self.query))
 
+    def test_IGSH_1064_follow_uses_known_owners_tmux_namespace(self):
+        self.query.update(follow=True, sid='stale', cwd='/home/secondary/project')
+        expected = '@mp\t7\thistory\tok\tlive\t0\n{"role":"assistant","text":"owner history"}\n@@MP_END@@\n'
+        with patch.object(reader, 'conversation_owner', return_value=('secondary', Path('/home/secondary'))), \
+                patch.object(reader, 'resolve_tmux_agent', return_value=None), \
+                patch.object(reader, 'tmux_owner_process', return_value=None), \
+                patch.object(reader, 'owner_response', return_value=expected):
+            self.assertEqual(reader.response(self.query, reader.READER_SOURCE), expected)
+
+    def test_IGSH_1064_stale_owner_cwd_still_discovers_exact_live_process(self):
+        self.write(self.event('current live reply'))
+        self.query.update(follow=True, cwd='/home/secondary/old-project')
+        with patch.object(reader, 'conversation_owner', return_value=('secondary', Path('/home/secondary'))), \
+                patch.object(reader, 'owner_response', side_effect=lambda q, *_: reader.missing_response(q, 'session transcript not found')), \
+                patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)):
+            wire = reader.response(self.query, reader.READER_SOURCE)
+        self.assertIn('current live reply', wire)
+        self.assertNotIn('history\tmissing', wire)
+
+    def test_IGSH_1064_owner_namespace_never_recurses_or_uses_saved_history(self):
+        self.write(self.event('saved stale reply'))
+        self.query.update(follow=True, cwd='/home/secondary/project')
+        with patch.object(reader, 'conversation_owner', return_value=('secondary', Path('/home/secondary'))), \
+                patch.object(reader, 'resolve_tmux_agent', return_value=None), \
+                patch.object(reader, 'owner_response', side_effect=AssertionError('no recursive delegation')):
+            wire = reader.response(self.query, reader.READER_SOURCE, as_owner=True)
+        self.assertIn('history\tmissing', wire)
+        self.assertNotIn('saved stale reply', wire)
+
     def test_live_cross_user_discovery_ignores_saved_sid(self):
         self.write(self.event('saved old reply'))
         self.query['follow'] = True
@@ -1166,6 +1350,55 @@ class HistoryReaderTest(unittest.TestCase):
             self.assertIn('saved old reply', reader.response(dict(self.query, sid='', discovery_pid=99),
                                                            reader.READER_SOURCE, as_owner=True))
         resolve.assert_called_once_with('claude', 'term-1', 99)
+
+    def test_pane_discovery_visits_only_descendants_and_follows_restarts(self):
+        self.query['follow'] = True
+        self.write(self.event('first session'))
+        root = self.home / 'proc'
+
+        def process(pid, parent, argv, children=(), thread=None):
+            entry = root / str(pid)
+            entry.mkdir(parents=True, exist_ok=True)
+            (entry / 'stat').write_text(f'{pid} (process) S {parent} 0 0')
+            (entry / 'cmdline').write_bytes(b'\0'.join(arg.encode() for arg in argv) + b'\0')
+            task = entry / 'task' / str(thread or pid)
+            task.mkdir(parents=True, exist_ok=True)
+            (task / 'children').write_text(' '.join(map(str, children)))
+
+        process(10, 1, ['bash'], [11])
+        process(11, 10, ['sudo', 'claude'], [12], thread=110)
+        process(12, 11, ['node', '/opt/bin/claude.js'])
+        process(9999, 1, ['claude'])
+        original_table = reader.process_table
+        original_read = Path.read_bytes
+        visited = []
+
+        def read_bytes(path):
+            if path.name == 'cmdline' and path.parent.parent == root:
+                visited.append(int(path.parent.name))
+            return original_read(path)
+
+        def opened(pid):
+            return self.path if pid == 12 else replacement if pid == 13 else None
+
+        replacement = self.path.with_name('replacement.jsonl')
+        replacement.write_text(json.dumps(self.event('replacement session')) + '\n')
+        with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '10\n', '')), \
+                patch.object(reader, 'process_table', side_effect=lambda **kwargs: original_table(root, **kwargs)), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'), \
+                patch.object(reader, 'open_claude_transcript', side_effect=opened), \
+                patch.object(Path, 'read_bytes', read_bytes):
+            fields, rows = self.read()
+            self.assertEqual(fields[4], 'sid')
+            self.assertEqual([row['text'] for row in rows], ['first session'])
+            self.assertEqual(set(visited), {10, 11, 12}, 'idle poll must not scan unrelated processes')
+            visited.clear()
+            process(11, 10, ['sudo', 'claude'], [13], thread=110)
+            process(13, 11, ['claude'])
+            fields, rows = self.read()
+            self.assertEqual(fields[4], 'replacement')
+            self.assertEqual([row['text'] for row in rows], ['replacement session'])
+            self.assertEqual(set(visited), {10, 11, 13})
 
     def test_claude_pid_map_resolves_its_exact_jsonl(self):
         self.write(self.event())
@@ -1575,9 +1808,9 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(int(fields[5]), offset)
         self.assertEqual([row['text'] for row in rows], ['new row'])
 
-    def start_server(self):
+    def start_server(self, mode="--serve"):
         bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"
-        server = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, '--serve'],
+        server = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, mode],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                   env=dict(os.environ, HOME=str(self.home)))
         def cleanup():
@@ -1601,9 +1834,374 @@ class HistoryReaderTest(unittest.TestCase):
         with selectors.DefaultSelector() as selector:
             selector.register(server.stdout, selectors.EVENT_READ)
             self.assertTrue(selector.select(timeout=5), 'reader reply timed out')
-        reply = json.loads(server.stdout.readline())
+        line = server.stdout.readline()
+        self.assertTrue(line.startswith(b'{'), 'reader must keep a framed connection: ' + repr(line))
+        reply = json.loads(line)
         self.assertTrue(reply['wire'].endswith(reader.END + '\n'))
         return reply
+
+    def test_watch_owner_restart_reconnects_for_fresh_parent_discovery(self):
+        self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
+        self.write(self.event('original owner session'))
+        incoming, writer = os.pipe()
+        self.addCleanup(os.close, incoming)
+        self.addCleanup(os.close, writer)
+        stdin = types.SimpleNamespace(fileno=lambda: incoming)
+        resolved = ('claude', 'sid', self.path, None)
+        with patch.object(reader.sys, 'stdin', stdin), \
+                patch.object(reader, 'resolve_response_path', return_value=('claude', '', None, 'missing')) as resolve:
+            events = reader.watch_changes(self.query, resolved, reader.READER_SOURCE, True)
+            self.assertEqual(next(events), resolved)
+            (self.path.parent / 'restarted.jsonl').write_text('{}\n')
+            with self.assertRaises(StopIteration):
+                next(events)
+        resolve.assert_called_once()
+
+    def test_watch_follows_session_created_before_metadata_changes(self):
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        from threading import Event
+
+        self.write(self.event('old conversation'))
+        incoming, writer = os.pipe()
+        self.addCleanup(os.close, incoming)
+        self.addCleanup(os.close, writer)
+        stdin = types.SimpleNamespace(fileno=lambda: incoming)
+        old = ('claude', 'sid', self.path, None)
+        replacement = self.path.with_name('new-session.jsonl')
+        discovered = Event()
+        metadata_ready = Event()
+
+        def resolve(query, source, owner):
+            discovered.set()
+            return ('claude', 'new-session', replacement, None) if metadata_ready.is_set() else old
+
+        with patch.object(reader.sys, 'stdin', stdin), patch.object(reader, 'resolve_response_path', side_effect=resolve):
+            events = reader.watch_changes(self.query, old, reader.READER_SOURCE, True)
+            self.assertEqual(next(events), old)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                following = pool.submit(next, events)
+                replacement.touch()
+                created_seen = discovered.wait(2)
+                metadata_ready.set()
+                replacement.write_text(json.dumps(self.event('reply after session restart')) + '\n')
+                try:
+                    current = following.result(timeout=2)
+                except TimeoutError:
+                    with self.path.open('a') as output:
+                        output.write('\n')
+                    current = following.result(timeout=2)
+            events.close()
+        self.assertTrue(created_seen, 'new session creation must trigger discovery')
+        self.assertEqual(current[2], replacement, 'reply stayed on old session when metadata followed file creation')
+        wire = reader.response(dict(self.query, sid='new-session', follow=False), resolved=current)
+        self.assertIn('reply after session restart', wire)
+
+    def test_watch_follows_completed_session_when_metadata_arrives_last(self):
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        from threading import Event
+
+        self.write(self.event('old conversation'))
+        metadata = self.home / '.claude/sessions/4242.json'
+        metadata.parent.mkdir()
+        metadata.write_text(json.dumps(dict(sessionId='sid')))
+        incoming, writer = os.pipe()
+        self.addCleanup(os.close, incoming)
+        self.addCleanup(os.close, writer)
+        stdin = types.SimpleNamespace(fileno=lambda: incoming)
+        old = ('claude', 'sid', self.path, None)
+        replacement = self.path.with_name('completed-session.jsonl')
+        discovered = Event()
+
+        discoveries = []
+
+        def resolve(query, source, owner):
+            sid = json.loads(metadata.read_text())['sessionId']
+            discoveries.append(sid)
+            if len(discoveries) >= 3:
+                discovered.set()
+            return ('claude', sid, replacement, None) if sid != 'sid' else old
+
+        with patch.object(reader.sys, 'stdin', stdin), patch.object(reader, 'resolve_response_path', side_effect=resolve):
+            events = reader.watch_changes(self.query, old, reader.READER_SOURCE, True)
+            self.assertEqual(next(events), old)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                following = pool.submit(next, events)
+                replacement.write_text(json.dumps(self.event('completed reply before metadata')) + '\n')
+                created_seen = discovered.wait(2)
+                pending_metadata = metadata.with_suffix('.tmp')
+                pending_metadata.write_text(json.dumps(dict(sessionId='completed-session')))
+                pending_metadata.replace(metadata)
+                try:
+                    current = following.result(timeout=2)
+                except TimeoutError:
+                    with self.path.open('a') as output:
+                        output.write('\n')
+                    current = following.result(timeout=2)
+            events.close()
+        self.assertTrue(created_seen)
+        self.assertEqual(current[2], replacement, 'completed reply stayed stale after session metadata changed')
+
+    def test_reader_fixture_repairs_are_checked_without_a_production_change(self):
+        repo = self.home / 'admission'
+        repo.mkdir()
+
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(repo), *args], text=True,
+                                           stderr=subprocess.PIPE).strip()
+
+        git('init', '-q')
+        git('config', 'user.name', 'Test')
+        git('config', 'user.email', 'test@example.invalid')
+        (repo / 'tools').mkdir()
+        fixture = repo / 'tools/metadata-test.py'
+        fixture.write_text('import unittest\nunittest.main()\n')
+        git('add', '.')
+        git('commit', '-qm', 'initial fixture')
+        base = git('rev-parse', 'HEAD')
+        fixture.write_text('import unittest\nclass MetadataTest(unittest.TestCase):\n'
+                           '    def test_complete_metadata(self): self.assertEqual(1, 1)\nunittest.main()\n')
+        git('add', '.')
+        git('commit', '-qm', 'repair fixture')
+        head = git('rev-parse', 'HEAD')
+        env = dict(os.environ)
+        env.pop('GITHUB_HEAD_REF', None)
+        env.pop('GITHUB_REF_NAME', None)
+        command = ['node', str(ROOT / 'tools/check-red-run.mjs'), base, head]
+        result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('TEST_ONLY_PROVEN 1 changed suites', result.stdout)
+        fixture.write_text(fixture.read_text().replace('self.assertEqual(1, 1)', 'self.assertEqual(1, 2)'))
+        git('add', '.')
+        git('commit', '-qm', 'broken fixture')
+        command[-1] = git('rev-parse', 'HEAD')
+        result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('does not pass on PR source', result.stderr)
+
+    def test_watch_completed_session_metadata_save_is_atomic(self):
+        write_text = Path.write_text
+        metadata = self.home / '.claude/sessions/4242.json'
+        partial_saves = []
+
+        def partial_write(path, text, *args, **kwargs):
+            if path.parent == metadata.parent and 'completed-session' in text:
+                with path.open('w') as output:
+                    output.write(text[:1])
+                    output.flush()
+                    partial_saves.append(json.loads(metadata.read_text())['sessionId'])
+                    output.write(text[1:])
+                return len(text)
+            return write_text(path, text, *args, **kwargs)
+
+        with patch.object(Path, 'write_text', partial_write):
+            self.test_watch_follows_completed_session_when_metadata_arrives_last()
+        self.assertEqual(partial_saves, ['sid'])
+        self.assertEqual(json.loads(metadata.read_text())['sessionId'], 'completed-session')
+
+    def test_watch_delegates_pane_identity_to_the_transcript_owner_once(self):
+        self.assertTrue(hasattr(reader, 'watch'), 'reader must provide a persistent watch')
+        owner = ('secondary', Path('/home/secondary'))
+        query = dict(self.query, cwd='/home/secondary/project', follow=True)
+        class Input(io.BytesIO):
+            def close(self):
+                self.payload = self.getvalue()
+                super().close()
+        incoming = types.SimpleNamespace(buffer=io.BytesIO(json.dumps(query).encode() + b'\n'), fileno=lambda: 55)
+        child = types.SimpleNamespace(stdin=Input(), wait=lambda: 0)
+        with patch.object(reader, 'conversation_owner', return_value=owner), \
+                patch.object(reader, 'tmux_owner_process', return_value=(99, owner)) as discover, \
+                patch.object(reader.subprocess, 'Popen', return_value=child) as start, \
+                patch.object(reader.sys, 'stdin', incoming), patch.object(reader.os, 'read', return_value=b''):
+            reader.watch(reader.READER_SOURCE)
+        discover.assert_called_once_with('claude', query['tmux'], reader.READER_SOURCE)
+        command = start.call_args.args[0]
+        self.assertEqual(command[:6], ['sudo', '-n', '-H', '-u', 'secondary', '--'])
+        self.assertEqual(command[-2:], ['--watch', '--owner'])
+        supplied, forwarded = child.stdin.payload.splitlines()
+        self.assertEqual(base64.b64decode(supplied).decode(), reader.READER_SOURCE)
+        self.assertEqual(json.loads(forwarded), dict(query, discovery_pid=99))
+
+    @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
+    def test_watch_reuses_control_capture_without_spawning_tmux_per_update(self):
+        real_tmux = shutil.which('tmux')
+        socket = 'push-' + self.home.name
+        subprocess.run([real_tmux, '-L', socket, '-f', '/dev/null', 'new-session', '-d', '-s', 'term-1', 'cat'], check=True)
+        self.addCleanup(lambda: subprocess.run([real_tmux, '-L', socket, 'kill-server'], capture_output=True))
+        log = self.home / 'tmux-calls.jsonl'
+        tools = self.home / 'bin'
+        tools.mkdir()
+        wrapper = tools / 'tmux'
+        wrapper.write_text('#!' + sys.executable + '\nimport json,os,sys\n' +
+                           'with open(' + repr(str(log)) + ', "a") as log: log.write(json.dumps(sys.argv[1:]) + "\\n")\n' +
+                           'os.execv(' + repr(real_tmux) + ', [' + repr(real_tmux) + ', "-L", ' + repr(socket) + '] + sys.argv[1:])\n')
+        wrapper.chmod(0o755)
+        self.query.update(follow=False, live=True)
+        self.write(self.event('control first'))
+        with patch.dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH']):
+            server = self.start_server('--watch')
+        first = self.server_request(server, self.query)
+        self.assertIn('control first', first['wire'])
+        with self.path.open('a') as output:
+            output.write(json.dumps(self.event('control second')) + '\n')
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertTrue(selector.select(timeout=5), 'control append did not push')
+        second = json.loads(server.stdout.readline())
+        self.assertIn('control second', second['wire'])
+        server.stdin.close()
+        self.assertEqual(server.wait(timeout=5), 0, server.stderr.read())
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual(sum(call[:1] == ['-C'] for call in calls), 1)
+        self.assertFalse(any(call[:1] == ['capture-pane'] for call in calls), calls)
+
+    @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
+    def test_watch_appends_do_not_recapture_screen(self):
+        self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
+        tmux = shutil.which('tmux')
+        socket = 'delta-' + self.home.name
+        subprocess.run([tmux, '-L', socket, '-f', '/dev/null', 'new-session', '-d', '-s', 'term-1', 'cat'], check=True)
+        self.addCleanup(lambda: subprocess.run([tmux, '-L', socket, 'kill-server'], capture_output=True))
+        self.write(self.event('original reply'))
+        self.query.update(live=True)
+        calls = []
+        popen = subprocess.Popen
+
+        class Input:
+            def __init__(self, stream):
+                self.stream = stream
+
+            def write(self, data):
+                calls.append(data)
+                return self.stream.write(data)
+
+            def __getattr__(self, name):
+                return getattr(self.stream, name)
+
+        def control(command, **kwargs):
+            child = popen([tmux, '-L', socket, *command[1:]], **kwargs)
+            child.stdin = Input(child.stdin)
+            return child
+
+        input_read, input_write = os.pipe()
+        self.addCleanup(os.close, input_write)
+        with os.fdopen(input_read, 'rb') as input_stream, patch.object(sys, 'stdin', input_stream), patch.object(reader.subprocess, 'Popen', side_effect=control):
+            resolved = ('claude', 'sid', self.path, None)
+            events = reader.watch_changes(self.query, resolved, reader.READER_SOURCE, False)
+            try:
+                next(events)
+                original_screen = self.query['watch_screen']
+                initial = len(calls)
+                with self.path.open('a') as output:
+                    output.write(json.dumps(self.event('only new reply')) + '\n')
+                next(events)
+                self.assertEqual(len(calls), initial, 'transcript append repeated terminal capture')
+                self.assertEqual(self.query['watch_screen'], original_screen)
+            finally:
+                events.close()
+
+    def test_delta_reads_stay_bounded_after_large_history(self):
+        self.query.update(live=True, watch_screen='')
+        with self.path.open('w') as output:
+            for _ in range(10000):
+                output.write(json.dumps(dict(type='progress', padding='x' * 1024)) + '\n')
+            output.write(json.dumps(self.event('old reply')) + '\n')
+        self.read()
+        appended = (json.dumps(self.event('new reply')) + '\n').encode()
+        with self.path.open('ab') as output:
+            output.write(appended)
+        opened = Path.open
+        reads = []
+
+        class Measured:
+            def __init__(self, file):
+                self.file = file
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return self.file.__exit__(*args)
+
+            def read(self, count=-1):
+                data = self.file.read(count)
+                reads.append(len(data))
+                return data
+
+            def __getattr__(self, name):
+                return getattr(self.file, name)
+
+        def measured(path, *args, **kwargs):
+            file = opened(path, *args, **kwargs)
+            return Measured(file) if path == self.path and args == ('rb',) else file
+
+        with patch.object(Path, 'open', measured):
+            fields, rows = self.read()
+            self.assertEqual(fields[13], 'delta')
+            self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant'], ['new reply'])
+            self.assertLessEqual(sum(reads), len(appended) * 2 + 320, reads)
+            reads.clear()
+            fields, rows = self.read()
+            self.assertEqual(fields[13], 'delta')
+            self.assertFalse(any(row['role'] == 'assistant' for row in rows))
+            self.assertLessEqual(sum(reads), 320, reads)
+
+    def test_watch_times_reader_work_with_high_resolution_counter(self):
+        self.assertTrue(hasattr(reader, 'watch_changes'), 'reader must provide an event watch')
+        self.query.update(tmux='', live=False, follow=True)
+        self.write(self.event('measured pushed reply'))
+        resolved = reader.resolve_response_path(self.query, reader.READER_SOURCE, False)
+        output = io.StringIO()
+        request = io.TextIOWrapper(io.BytesIO((json.dumps(self.query) + '\n').encode()))
+        with patch.object(sys, 'stdin', request), patch.object(sys, 'stdout', output), patch.object(reader, 'watch_changes', return_value=iter([resolved])), patch.object(time, 'perf_counter_ns', side_effect=[1_000_000, 2_345_000]), patch.object(time, 'monotonic_ns', side_effect=AssertionError('coarse Windows clock used')):
+            reader.watch(reader.READER_SOURCE)
+        frame = json.loads(output.getvalue())
+        self.assertEqual(frame['read_us'], 1345)
+        self.assertIn('measured pushed reply', frame['wire'])
+
+    def test_watch_pushes_appends_without_requests_and_stays_idle(self):
+        self.query.update(tmux='', live=False, follow=True)
+        self.write(self.event('first pushed reply'))
+        server = self.start_server('--watch')
+        first = self.server_request(server, self.query)
+        self.assertIn('first pushed reply', first['wire'])
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertFalse(selector.select(timeout=0.1), 'idle watch reloaded transcript')
+            with self.path.open('a') as output:
+                output.write(json.dumps(self.event('second pushed reply')) + '\n')
+            self.assertTrue(selector.select(timeout=5), 'append did not push a reply')
+        second = json.loads(server.stdout.readline())
+        self.assertEqual(second['id'], self.query['id'])
+        self.assertIn('second pushed reply', second['wire'])
+        self.assertNotIn('first pushed reply', second['wire'])
+        with self.path.open('a') as output:
+            output.write(json.dumps(self.event('third pushed reply')) + '\n')
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertTrue(selector.select(timeout=5), 'second append did not push')
+        third = json.loads(server.stdout.readline())
+        self.assertIn('third pushed reply', third['wire'])
+        self.assertNotIn('second pushed reply', third['wire'])
+        server.stdin.close()
+        self.assertEqual(server.wait(timeout=5), 0)
+        self.assertEqual(server.stderr.read(), b'')
+
+    def test_watch_follows_replaced_transcript_and_ignores_other_files(self):
+        self.query.update(tmux='', live=False)
+        self.write(self.event('old content'))
+        server = self.start_server('--watch')
+        self.server_request(server, self.query)
+        (self.path.parent / 'unrelated.jsonl').write_text('ignored\n')
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertFalse(selector.select(timeout=0.1), 'unrelated file woke transcript')
+            replacement = self.path.with_suffix('.tmp')
+            replacement.write_text(json.dumps(self.event('replacement content')) + '\n')
+            replacement.replace(self.path)
+            self.assertTrue(selector.select(timeout=5), 'replacement did not push')
+        reply = json.loads(server.stdout.readline())
+        self.assertIn('replacement content', reply['wire'])
+        self.assertNotIn('old content', reply['wire'])
 
     def test_serve_multiple_requests_observe_appends_and_eof_in_one_process(self):
         self.write(self.event('first reply'))

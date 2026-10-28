@@ -42,11 +42,13 @@ test('messages-only oracle rejects blank and out-of-window evidence', () => {
   assert.throws(() => compareTranscript(frame(), frame(), { ...rect, left: 100 }));
 });
 
-test('messages-only verification drives the real transcript and retains a required master red control', () => {
+test('messages-only verification drives the real transcript and retains a required master red control', async () => {
   const read = file => fs.readFileSync(new URL('../' + file, import.meta.url), 'utf8');
   const workflow = read('.github/workflows/verify.yml');
   const driver = read('tools/verify-chat-delivery/drive.ps1');
-  assert.match(workflow, /"chat-messages-only"/);
+  assert.match(workflow, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  const { discoverFeatures } = await import('./verify-features.cjs');
+  assert.ok(discoverFeatures().full.includes('chat-messages-only'));
   assert.match(workflow, /tools\/chat-messages-only-proof.test.mjs/);
   assert.match(workflow, /working-directory: negative-source\s+run: zig build/);
   assert.match(workflow, /ref: 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f\s+path: negative-source/);

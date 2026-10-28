@@ -287,8 +287,8 @@ fn jump() void {
             if ((at < block.start or at >= block.start + block.len) and
                 !(block.role == .tool and at >= block.detail_start and at < block.detail_start + block.detail_len)) continue;
         }
-        if (block.role == .tool and !block.tool_open) {
-            block.tool_open = true;
+        if ((block.role == .tool and !block.tool_open) or (block.role == .injected and !block.note_open)) {
+            if (block.role == .tool) block.tool_open = true else block.note_open = true;
             app_state.g_chat_layout_reuse = 0;
             var client: win32.RECT = std.mem.zeroes(win32.RECT);
             _ = win32.GetClientRect(app_state.g_chat_transcript_hwnd, &client);

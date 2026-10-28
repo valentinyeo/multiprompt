@@ -1,5 +1,7 @@
 # Chat first paint
 
+Verify on: push
+
 One failure class: Chat View shows one layout in the first frame after launch and a different layout once restore finishes (IGSH-925: the message card was drawn for a narrow pane while the transcript and message box kept the full width, then everything jumped).
 
 ## Sub-features

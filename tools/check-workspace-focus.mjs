@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import appSource from './app-source.js';
+const { readControlSource } = appSource;
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
-const driver = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8').replace(/\r\n/g, '\n') : read('.claude/skills/verify-multiprompt/control.ps1');
+const driver = readControlSource(process.argv[2]).replace(/\r\n/g, '\n');
 
 function nativePaletteFocusContract(source) {
   const native = source.match(/public static IntPtr GetFocusedWindow\(IntPtr hwnd\) \{([\s\S]*?)\n    \}/)?.[1];
