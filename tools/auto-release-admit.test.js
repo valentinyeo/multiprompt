@@ -6,6 +6,11 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
+
 const root = path.resolve(__dirname, '..');
 const oldCheck = `set -euo pipefail
 sha=$(git rev-parse HEAD)
@@ -46,10 +51,6 @@ function fixture(t) {
   fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}
 const fs = require('node:fs');
 
-function featureMatrix(source) {
-  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
-  return require('./verify-features.cjs').discoverFeatures();
-}
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
 if (process.env.GH_FAIL === 'true') process.exit(1);
