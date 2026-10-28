@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        side: [candidate]
+        side: [baseline, candidate]
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
@@ -55,7 +55,7 @@ jobs:
           Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Check the independent performance oracle
-        run: node --test harness/tools/remote-switch-proof.test.mjs
+        run: node --test harness/tools/remote-switch-proof.test.mjs harness/tools/smooth-shapes.test.js
       - name: Build the actual Windows application
         working-directory: app
         run: zig build
@@ -79,31 +79,37 @@ jobs:
         env:
           CHAT_SWITCH_PROOF: '1'
         run: |
-          & harness/tools/verify-chat-delivery/drive.ps1 -Feature chat-messages-only -Exe "$pwd/app/zig-out/bin/multiprompt.exe" -Ssh "$pwd/app/zig-out/bin/ssh.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
-          $status = $LASTEXITCODE
-          if (Test-Path evidence/remote-switch/error.txt) {
-            $problem = (Get-Content evidence/remote-switch/error.txt -Raw).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-            Write-Host "::error::$problem"
-          }
-          if (Test-Path evidence/remote-switch/observation.json) {
-            $sampled = Get-Content evidence/remote-switch/observation.json -Raw | ConvertFrom-Json
-            if ($sampled.switches) {
-              $worstSwitch = ($sampled.switches | Measure-Object switchMs -Maximum).Maximum
-              $worstGap = ($sampled.switches | ForEach-Object { $_.probe.frames } | Measure-Object gapMs -Maximum).Maximum
-              $worstCpu = ($sampled.switches | ForEach-Object { 100 * $_.cpuMs / $_.elapsedMs } | Measure-Object -Maximum).Maximum
-              Write-Host "::notice::switches=$(@($sampled.switches).Count) max_switch_ms=$worstSwitch max_frame_gap_ms=$worstGap max_one_core_cpu_percent=$worstCpu"
+          $attempts = if ('${{ matrix.side }}' -eq 'candidate') { 5 } else { 1 }
+          $failures = @()
+          for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+            $directory = "$pwd/evidence/attempt-$attempt"
+            & powershell -NoProfile -File harness/tools/verify-chat-delivery/drive.ps1 -Feature chat-messages-only -Exe "$pwd/app/zig-out/bin/multiprompt.exe" -Ssh "$pwd/app/zig-out/bin/ssh.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$directory"
+            $status = $LASTEXITCODE
+            if (Test-Path "$directory/remote-switch/error.txt") {
+              $problem = (Get-Content "$directory/remote-switch/error.txt" -Raw).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+              Write-Host "::error::$problem"
+            }
+            if (Test-Path "$directory/remote-switch/observation.json") {
+              $sampled = Get-Content "$directory/remote-switch/observation.json" -Raw | ConvertFrom-Json
+              if ($sampled.switches) {
+                $worstSwitch = ($sampled.switches | Measure-Object switchMs -Maximum).Maximum
+                $worstGap = ($sampled.switches | ForEach-Object { $_.probe.frames } | Measure-Object gapMs -Maximum).Maximum
+                $worstCpu = ($sampled.switches | ForEach-Object { 100 * $_.cpuMs / $_.elapsedMs } | Measure-Object -Maximum).Maximum
+                Write-Host "::notice::switches=$(@($sampled.switches).Count) max_switch_ms=$worstSwitch max_frame_gap_ms=$worstGap max_one_core_cpu_percent=$worstCpu"
+              }
+            }
+            if ('${{ matrix.side }}' -eq 'candidate') {
+              if ($status -ne 0) { $failures += $attempt }
+            } else {
+              if ($status -eq 0) { throw 'Baseline unexpectedly passes every performance budget' }
+              $v = Get-Content "$directory/remote-switch/observation.json" -Raw | ConvertFrom-Json
+              if ($v.error -or @($v.switches).Count -ne 40) { throw "Baseline failed setup, not performance: $($v.error)" }
+              $bad = @($v.switches | Where-Object { $_.switchMs -ge 150 -or $_.return.switchMs -ge 150 -or $_.probe.switchMs -ge 150 -or 100 * $_.cpuMs / $_.elapsedMs -ge 25 -or 100 * $_.return.cpuMs / $_.return.elapsedMs -ge 25 -or @($_.probe.frames | Where-Object { $_.gapMs -gt 50 }).Count -gt 0 })
+              if ($bad.Count -eq 0) { throw 'Baseline did not fail a switching performance budget' }
+              Write-Host 'RED_PROVEN remote-switch on pre-fix master'
             }
           }
-          if ('${{ matrix.side }}' -eq 'candidate') {
-            if ($status -ne 0) { throw 'Candidate remote-switch performance proof failed' }
-          } else {
-            if ($status -eq 0) { throw 'Baseline unexpectedly passes every performance budget' }
-            $v = Get-Content evidence/remote-switch/observation.json -Raw | ConvertFrom-Json
-            if ($v.error -or @($v.switches).Count -ne 40) { throw "Baseline failed setup, not performance: $($v.error)" }
-            $bad = @($v.switches | Where-Object { $_.switchMs -ge 150 -or $_.return.switchMs -ge 150 -or $_.probe.switchMs -ge 150 -or 100 * $_.cpuMs / $_.elapsedMs -ge 25 -or 100 * $_.return.cpuMs / $_.return.elapsedMs -ge 25 -or @($_.probe.frames | Where-Object { $_.gapMs -gt 50 }).Count -gt 0 })
-            if ($bad.Count -eq 0) { throw 'Baseline did not fail a switching performance budget' }
-            Write-Host 'RED_PROVEN remote-switch on pre-fix master'
-          }
+          if ($failures.Count -gt 0) { throw "Remote-switch budgets failed in attempts: $failures" }
           $global:LASTEXITCODE = 0
       - name: Preserve frame records and visible proof
         if: always()

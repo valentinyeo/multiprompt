@@ -2072,8 +2072,6 @@ fn chatPaintChoices(hdc: HANDLE, view_h: i32, paint: RECT) void {
 }
 
 pub fn chatRelayout(client_width: i32) void {
-    const profile_start = GetTickCount64();
-    defer chatPerf("layout", profile_start, app_state.g_chat_layout_reuse);
     g_working_rect = null;
     app_state.g_chat_layout_dirty = false;
     if (app_state.g_chat_layout_width != client_width or app_state.g_chat_layout_scale != uiScaled(1024) or app_state.g_chat_layout_top_pad != app_state.g_chat_top_pad or app_state.g_chat_layout_font_pt != app_state.g_chat_font_pt or app_state.g_chat_find_layout_open != app_state.g_chat_find_open) app_state.g_chat_layout_reuse = 0;
@@ -4660,8 +4658,6 @@ pub fn chatStatusWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return 0;
         },
         WM_PAINT => {
-            const profile_start = GetTickCount64();
-            defer chatPerf("paint", profile_start, app_state.g_chat_block_count);
             var ps: PAINTSTRUCT = std.mem.zeroes(PAINTSTRUCT);
             const hdc = BeginPaint(hwnd, &ps);
             defer _ = EndPaint(hwnd, &ps);
@@ -5309,8 +5305,6 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return 0;
         },
         WM_PAINT => {
-            const profile_start = GetTickCount64();
-            defer chatPerf("paint", profile_start, app_state.g_chat_block_count);
             var ps: PAINTSTRUCT = std.mem.zeroes(PAINTSTRUCT);
             const hdc = BeginPaint(hwnd, &ps);
             var painted = false;
