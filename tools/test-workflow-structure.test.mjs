@@ -88,7 +88,7 @@ test('build graph and workflow branch checks receive the required native appeara
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
   const paths = verify.match(/^  pull_request:\n    paths:\n((?:      - [^\n]+\n)+)/m);
   assert.ok(paths);
-  for (const file of ['build.zig', 'build.zig.zon', 'tools/test-workflow-structure.test.mjs', 'tools/verify-workflow-branches.mjs']) assert.ok(paths[1].split('\n').includes('      - ' + file), file);
+  for (const file of ['build.zig', 'build.zig.zon', 'tools/test-workflow-structure.test.mjs', 'tools/verify-workflow-branches.mjs', 'tools/chat-history-reader-test.py', 'tools/check-red-run.mjs']) assert.ok(paths[1].split('\n').includes('      - ' + file), file);
 });
 
 test('push verification accepts another ticket branch and rejects losing master or unrelated branches', async () => {
