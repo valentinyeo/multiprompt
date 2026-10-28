@@ -3485,6 +3485,7 @@ pub fn browserHealthTick() void {
 }
 
 test "IGSH-523 docked pane without an extension never resolves on health ticks" {
+    const win = @import("win32.zig");
     const hwnd = CreateWindowExW(0, L("STATIC"), null, 0, 0, 0, 100, 100, null, null, null, null);
     try std.testing.expect(hwnd != null);
     defer _ = DestroyWindow(hwnd);
