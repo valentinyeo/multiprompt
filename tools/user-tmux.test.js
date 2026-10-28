@@ -49,27 +49,27 @@ function attached(context) {
 test('new cross-user bridges create named owner sessions and reconnect to the same pane', { skip: process.platform === 'win32' }, () => fixture(context => {
   opened(context, 'workspace');
   attached(context);
-  const before = context.owner('display-message', '-p', '-t', '=workspace', '#{pane_pid}|#{session_attached}');
+  const before = context.owner('display-message', '-p', '-t', '=workspace:', '#{pane_pid}|#{session_attached}');
   assert.equal(before.status, 0, before.stderr);
   assert.match(before.stdout.trim(), /^\d+\|1$/);
-  assert.equal(context.tmux('show-options', '-p', '-t', '=workspace', '-v', '@owner_session'), 'workspace');
-  const client = Number(context.tmux('display-message', '-p', '-t', '=workspace', '#{pane_pid}'));
+  assert.equal(context.tmux('show-options', '-p', '-t', '=workspace:', '-v', '@owner_session'), 'workspace');
+  const client = Number(context.tmux('display-message', '-p', '-t', '=workspace:', '#{pane_pid}'));
   process.kill(client, 'SIGTERM');
   attached(context);
-  const after = context.owner('display-message', '-p', '-t', '=workspace', '#{pane_pid}|#{session_attached}');
+  const after = context.owner('display-message', '-p', '-t', '=workspace:', '#{pane_pid}|#{session_attached}');
   assert.equal(after.stdout, before.stdout, 'bridge reconnect must preserve the live owner process');
 }));
 
 test('staging preserves busy legacy panes and migrates only after their process exits', { skip: process.platform === 'win32' }, () => fixture(context => {
   context.tmux('new-session', '-d', '-s', 'legacy', 'exec bash -c read');
-  const before = context.tmux('display-message', '-p', '-t', '=legacy', '#{pane_pid}');
+  const before = context.tmux('display-message', '-p', '-t', '=legacy:', '#{pane_pid}');
   opened(context, 'legacy');
   opened(context, 'legacy');
-  assert.equal(context.tmux('display-message', '-p', '-t', '=legacy', '#{pane_pid}'), before);
+  assert.equal(context.tmux('display-message', '-p', '-t', '=legacy:', '#{pane_pid}'), before);
   assert.equal(context.owner('has-session', '-t', '=legacy').status, 1, 'staging must not move an active worker');
-  context.tmux('send-keys', '-t', '=legacy', 'C-d');
+  context.tmux('send-keys', '-t', '=legacy:', 'C-d');
   attached(context);
-  const migrated = context.owner('display-message', '-p', '-t', '=legacy', '#{session_attached}');
+  const migrated = context.owner('display-message', '-p', '-t', '=legacy:', '#{session_attached}');
   assert.equal(migrated.stdout.trim(), '1');
 }));
 

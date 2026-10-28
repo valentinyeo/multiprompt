@@ -14,7 +14,7 @@ printf -v command 'exec ssh -tt %q %q' "$owner@localhost" "$remote"
 if ! tmux has-session -t "=$name" 2>/dev/null; then
     tmux new-session -d -s "$name" "$command"
 fi
-pane=$(tmux display-message -p -t "=$name" '#{pane_id}')
+pane=$(tmux display-message -p -t "=$name:" '#{pane_id}')
 tmux set-option -p -t "$pane" @owner_user "$owner"
 tmux set-option -p -t "$pane" @owner_session "$name"
 tmux set-option -p -t "$pane" @owner_directory "$directory"
