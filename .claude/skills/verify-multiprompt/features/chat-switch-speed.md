@@ -77,6 +77,8 @@ Audit-shape runs click the owned sidebar rows.
 They require default scale and 96 DPI.
 Legacy observations retain the Ctrl+digit limitation.
 Receipt copying follows each separate image replay.
+Owned app commands copy the actual rendered transcript.
+Receipt inspection does not test Ctrl+C routing.
 The copy notification cannot contaminate that replay.
 The image follows the completed target-paint log.
 It does not guarantee the first compositor-presented frame.

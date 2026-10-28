@@ -22,6 +22,17 @@ public static class ChatSwitchObserver {
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
+    [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wp, IntPtr lp, uint flags, uint timeout, out UIntPtr result);
+    public static void CopyTranscript(int pid, IntPtr owner) {
+        uint actual;
+        GetWindowThreadProcessId(owner, out actual);
+        if (actual != pid || GetForegroundWindow() != owner) throw new InvalidOperationException("Transcript copy requires its owned foreground window");
+        UIntPtr result;
+        foreach (uint message in new uint[] { 0x8000 + 149, 0x8000 + 148 }) {
+            if (SendMessageTimeout(owner, message, UIntPtr.Zero, IntPtr.Zero, 3, 10000, out result) == IntPtr.Zero)
+                throw new InvalidOperationException("Owned transcript copy command did not complete");
+        }
+    }
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, WindowProc callback, IntPtr state);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);

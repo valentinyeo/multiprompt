@@ -6241,20 +6241,12 @@ try {
                 $shapeResult = [ordered]@{ schema = 1; source = 'GitHub Windows native desktop'; setup_passed = $false; errors = @(); app = @{ tag = $env:RELEASE_TAG; sha256 = $ExpectedHash; optimization = $env:VERIFY_OPTIMIZATION }; fixture = (Get-Content (Join-Path $Evidence 'chat-shape-manifest.json') -Raw | ConvertFrom-Json); session_shells = @(); modes = [ordered]@{ browser_closed = @(); browser_open = @() }; idle = @{} }
             }
             function Save-ShapeLatest([string]$Expected, [string]$Marker, [string]$Name) {
-                Focus-Palette 'chat view select all' 6364
-                [Windows.Forms.Clipboard]::Clear()
-                Record 'Enter then Ctrl+C: copy the selected transcript before a background refresh clears selection'
+                Doctor
                 Assert-Foreground
-                [VerifyNative]::KeyDown(0x0D)
-                [VerifyNative]::KeyUp(0x0D)
-                [VerifyNative]::KeyDown(0x11)
-                try {
-                    [VerifyNative]::KeyDown(0x43)
-                    Wait-Until { [Windows.Forms.Clipboard]::ContainsText() } 'native transcript copy completed' 10
-                } finally {
-                    [VerifyNative]::KeyUp(0x43)
-                    [VerifyNative]::KeyUp(0x11)
-                }
+                Record 'Copy the actual transcript through owned app commands outside timed and image windows'
+                [Windows.Forms.Clipboard]::Clear()
+                [ChatSwitchObserver]::CopyTranscript($process.Id, $script:window)
+                Wait-Until { [Windows.Forms.Clipboard]::ContainsText() } 'owned transcript copy completed' 10
                 $copied = [Windows.Forms.Clipboard]::GetText()
                 $latest = [regex]::Match($copied, [regex]::Escape($Expected))
                 $last = [regex]::Match($copied, [regex]::Escape($Marker))

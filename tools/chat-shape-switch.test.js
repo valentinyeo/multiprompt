@@ -179,17 +179,14 @@ try {
   assert.match(result.stdout, /REORDERED_SESSION_RECEIPTS_PROVEN/);
 });
 
-test('IGSH-1040 selected transcript copy queues confirmation and copy without refresh gaps', () => {
+test('IGSH-1040 receipts use existing owned app copy commands, not keyboard focus timing', () => {
   const receipt = control.slice(control.indexOf('function Save-ShapeLatest('), control.indexOf('function Wait-SwitchForeground'));
-  const enter = receipt.indexOf('[VerifyNative]::KeyDown(0x0D)');
-  const copy = receipt.indexOf('[VerifyNative]::KeyDown(0x43)');
-  assert.ok(enter > 0 && copy > enter);
-  assert.doesNotMatch(receipt.slice(enter, copy), /Press |Sleep|Wait-|Doctor/);
-  const copied = receipt.indexOf("'native transcript copy completed'");
-  assert.ok(copied > copy);
-  assert.ok(receipt.indexOf('[VerifyNative]::KeyUp(0x43)') > copied);
-  assert.ok(receipt.indexOf('[VerifyNative]::KeyUp(0x11)') > copied);
-  assert.match(receipt, /finally \{\s+\[VerifyNative\]::KeyUp\(0x43\)/);
+  assert.ok(receipt.includes('[ChatSwitchObserver]::CopyTranscript($process.Id, $script:window)'));
+  assert.doesNotMatch(receipt, /KeyDown|KeyUp|Focus-Palette/);
+  assert.ok(observer.includes('actual != pid || GetForegroundWindow() != owner'));
+  assert.ok(observer.includes('new uint[] { 0x8000 + 149, 0x8000 + 148 }'));
+  assert.match(read('src/win32.zig'), /WM_APP_CHAT_SELECT_ALL: u32 = WM_APP \+ 149/);
+  assert.match(read('src/win32.zig'), /WM_APP_CHAT_COPY_SELECTION: u32 = WM_APP \+ 148/);
   assert.ok(receipt.includes("if (-not $last.Success) { throw 'Copied target transcript belongs to a different seeded session' }"));
 });
 
