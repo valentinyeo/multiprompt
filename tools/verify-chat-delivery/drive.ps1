@@ -746,7 +746,7 @@ foreach ($plan in $plans) {
                 $r = $_.Current.BoundingRectangle
                 -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $hostBounds.Left -and $r.Width -eq $hostBounds.Width -and ($r.Bottom -eq $hostBounds.Top -or ($r.Top -ge $hostBounds.Top -and $r.Bottom -lt $hostBounds.Bottom)) -and $r.Height -gt 0
             })
-            if ($statusRows.Count -ne 1) { throw 'CLEAN chat proof requires one owned painted status/footer row' }
+            if ($statusRows.Count -ne 1) { throw 'CLEAN chat proof requires one owned status/footer control' }
             $statusBounds = $statusRows[0].Current.BoundingRectangle
             $composerBounds = [System.Windows.Automation.AutomationElement]::FromHandle($composer).Current.BoundingRectangle
             if ($statusBounds.Bottom -eq $hostBounds.Top) {

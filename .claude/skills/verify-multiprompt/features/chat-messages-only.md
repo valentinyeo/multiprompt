@@ -56,7 +56,7 @@ The recomputed journey gate list is:
 9. Every existing unread-pill transition, overflow and fresh-log assertion passes, with `new-messages-visible.png`, `new-messages-dismissed.png` and `new-messages-jumped.png` retained.
 10. Complete evidence includes both CLEAN PNG/BMP pairs, the existing captures, source transcript and identity, zero owned processes and scratch cleanup; the pinned pre-fix control still fails specifically on visible activity pixels with successful cleanup.
 
-`node --test tools/chat-messages-only-proof.test.js` locally proves the correct synthetic pair passes and the old-oracle input with footer rows still painted is rejected, plus one-pixel, blank-message, displacement, restoration, reintroduced-working-strip and changed-gap negative controls. The Windows workflow retains both portable test suites. It also runs `zig build test-clean-chat`. `check-clean-chat-output.mjs` requires every named painter test. The complete live oracle rechecks `clean-chat-native.log`. Missing native coverage never counts as complete proof.
+`node --test tools/chat-messages-only-proof.test.js` on GitHub proves the correct synthetic pair passes and the old-oracle input with footer rows still painted is rejected, plus one-pixel, blank-message, displacement, restoration, reintroduced-working-strip and changed-gap negative controls. The Windows workflow retains both portable test suites. It also runs `zig build test-clean-chat`. `check-clean-chat-output.mjs` requires every named painter test. The complete live oracle rechecks `clean-chat-native.log`. Missing native coverage never counts as complete proof.
 
 ## Gotchas
 
