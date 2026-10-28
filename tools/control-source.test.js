@@ -80,6 +80,11 @@ test('every split PowerShell control parses on the hosted Windows path', t => {
   const ast = JSON.parse(fs.readFileSync(output, 'utf8').replace(/^\uFEFF/, ''));
   const files = fs.readdirSync(directory).filter(name => /^control.*\.ps1$/.test(name));
   assert.equal(ast.parsedFiles, files.length, 'Every physical feature and shared control must parse');
+  const invalid = copyControls(t);
+  fs.appendFileSync(path.join(invalid, imported()[0]), '\nfunction Broken {\n');
+  const rejected = spawnSync(shell, ['-NoProfile', '-File', path.join(root, 'tools/split-feature-controls.ps1'), '-Path', path.join(invalid, 'control.ps1'), '-Output', path.join(copy, 'invalid.json')], { encoding: 'utf8', timeout: 30000 });
+  assert.notEqual(rejected.status, 0, 'An invalid feature file must fail before app launch');
+  assert.match(rejected.stdout + rejected.stderr, /Missing closing|MissingEndCurlyBrace/);
 
 });
 
@@ -88,6 +93,8 @@ test('existing native workflows follow shared controls and their own feature fil
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     for (const control of ['control-library.ps1', 'control-native.cs']) assert.equal(source.split(`.claude/skills/verify-multiprompt/${control}`).length - 1, 2, `${file}: ${control}`);
   }
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  assert.match(workflow, /tools\/split-feature-controls\.ps1 -Path[^\n]+control-ast\.json/);
   const palette = fs.readFileSync(path.join(root, '.github/workflows/palette-dialog-design.yml'), 'utf8');
   assert.equal(palette.split('control-feature-command-palette.ps1').length - 1, 2);
 });
