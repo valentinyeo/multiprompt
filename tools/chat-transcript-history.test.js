@@ -861,6 +861,6 @@ test "reset prefix" {
 
 test('unchanged keyed history polls live status without synchronous console acquisition', () => {
   const refresh = fn('refreshChatBlockCache');
-  assert.match(refresh, /if \(!force\) pollChatStatus\(app_state.active_shell\)/);
+  assert.match(refresh, /if \(!force\) pollChatStatus\(active_shell\)/);
   assert.doesNotMatch(refresh, /captureChatTranscript\([^;]+true\)/);
 });

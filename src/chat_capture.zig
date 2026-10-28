@@ -1067,7 +1067,7 @@ fn chatCaptureStatus(shell_index: u32, width: usize, chars_read: usize, rows: us
     app_state.g_chat_screen_status_len = 0;
     app_state.g_chat_raw_len = chars_read;
     app_state.g_chat_raw_sid = app_state.shells[shell_index].shell_id;
-    chatPermissionCaptureRows(shell_index, width, chars_read, rows);
+    chatPermissionCaptureRows(shell_index, width, @intCast(chars_read), rows);
     {
         var prompt_row: ?usize = null;
         var pr = rows;

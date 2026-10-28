@@ -46,7 +46,7 @@ fn start() bool {
     var child_output: win.HANDLE = null;
     if (win.CreatePipe(&output, &child_output, &sa, 1 << 20) == 0) return false;
     defer _ = win.CloseHandle(child_output);
-    if (win.SetHandleInformation(input, win.HANDLE_FLAG_INHERIT, 0) == 0 or win.SetHandleInformation(output, win.HANDLE_FLAG_INHERIT, 0) == 0) return false;
+    if (win.SetHandleInformation(input, 1, 0) == 0 or win.SetHandleInformation(output, 1, 0) == 0) return false;
     var si = std.mem.zeroes(win.STARTUPINFOW);
     si.cb = @sizeOf(win.STARTUPINFOW);
     si.dwFlags = 0x100;
