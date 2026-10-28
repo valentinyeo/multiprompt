@@ -4861,6 +4861,15 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             g_bubble_span = null;
             chatPaintBlockImages(mem_dc, i, body_rc);
             chatPaintReactions(mem_dc, g_reaction_view.mask(i), rc);
+            if (g_hover_message == i and app_state.g_chat_blocks[i].role == .prose) {
+                const pen = @import("win32.zig").CreatePen(0, uiScaled(1), if (app_state.g_light_theme) 0x999999 else 0x4a4a4a);
+                const previous_pen = SelectObject(mem_dc, pen);
+                const previous_brush = SelectObject(mem_dc, GetStockObject(5));
+                _ = @import("smooth.zig").drawRoundRect(mem_dc, rc.left, rc.top, rc.right, rc.bottom, uiScaled(CHAT_BUBBLE_RADIUS * 2), uiScaled(CHAT_BUBBLE_RADIUS * 2));
+                _ = SelectObject(mem_dc, previous_brush);
+                _ = SelectObject(mem_dc, previous_pen);
+                _ = DeleteObject(pen);
+            }
             if (nav_index != null and nav_index.? == i) chatPaintNavRing(mem_dc, body_rc);
             @import("chat_find_ui.zig").paintMatch(mem_dc, app_state.g_chat_blocks[i], rc);
             if (app_state.g_voice_state == .speaking and app_state.g_voice_highlight != null and

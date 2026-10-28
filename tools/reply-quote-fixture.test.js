@@ -208,6 +208,7 @@ test "load older source, choose nearest preceding original, cancel across sessio
 });
 
 test('combined message menu captures Reply before either modal event loop', () => {
+  const render = read('src/chat_render.zig');
   const snapshot = render.indexOf("reply_text = std.heap.page_allocator.dupe");
   const combined = render.indexOf('@import("chat_message_menu.zig").track');
   const native = render.indexOf('} else @intCast(TrackPopupMenu');
