@@ -1228,10 +1228,11 @@ test "issue: remote zsb navigate --activate is degraded to a background tab" {
 fn zsbScopedCommandAllowed(argv: []const []const u8) bool {
     if (argv.len == 0) return false;
     const allowed = [_][]const u8{
-        "activate", "active-tab", "back", "click", "close-tab", "console", "cursor",
-        "doctor", "emulate", "eval", "find", "forward", "frames", "get-text", "insert",
-        "key", "links", "navigate", "open", "pane-info", "reload", "screenshot",
-        "shoturl", "snapshot", "status", "tab", "tabs", "text", "type", "url", "version",
+        "activate",   "active-tab", "back",     "click",    "close-tab", "console",   "cursor",
+        "doctor",     "emulate",    "eval",     "find",     "forward",   "frames",    "get-text",
+        "insert",     "key",        "links",    "navigate", "open",      "pane-info", "reload",
+        "screenshot", "shoturl",    "snapshot", "status",   "tab",       "tabs",      "text",
+        "type",       "url",        "version",
     };
     for (allowed) |verb| {
         if (std.mem.eql(u8, argv[0], verb)) return true;
@@ -1348,7 +1349,8 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
             (std.mem.eql(u8, argv[0], "cdp") and
                 (std.mem.eql(u8, arg, "--script") or std.mem.eql(u8, arg, "--out"))) or
             (std.mem.eql(u8, argv[0], "screenshot") and
-                (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output") or std.mem.startsWith(u8, arg, "--output=")))) {
+                (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output") or std.mem.startsWith(u8, arg, "--output="))))
+        {
             zsbSendJsonError(client, "bad_args", "command requires the local CLI", session, null);
             return;
         }

@@ -794,7 +794,7 @@ def declined_remote(argv):
         return None
     if remote == "cat ~/.local/state/token-ladder/status.json":
         return "ladder-status", "", 1
-    if re.fullmatch(r"if test -f ~/\.local/state/multiprompt/relay-v1; then mkdir -p -m 700 /tmp/mp-notify-\$\(id -u\) && rm -f /tmp/mp-notify-\$\(id -u\)/[A-Za-z0-9_-]{1,32}-[0-9a-f]{16}\.sock && printf MP_RELAY_UID: && id -u; else echo MP_RELAY_LEGACY; fi", remote):
+    if re.fullmatch(r"if test -f ~/\.local/state/multiprompt/relay-v1(?: \|\| test -f ~/\.local/state/multiprompt/browser-v1)?; then mkdir -p -m 700 /tmp/mp-notify-\$\(id -u\) && rm -f /tmp/mp-notify-\$\(id -u\)/([A-Za-z0-9_-]{1,32}-[0-9a-f]{16})\.sock(?: /tmp/mp-notify-\$\(id -u\)/\1\.browser)? && printf MP_RELAY_UID: && id -u; else echo MP_RELAY_LEGACY; fi", remote):
         return "notification-relay", "MP_RELAY_LEGACY\n", 0
     if remote in (VPS_POLL_COMMAND, "while IFS= read -r _; do { " + VPS_POLL_COMMAND + "; } </dev/null; printf '@@ZS_END@@\\n'; done"):
         return "capacity-poll", "", 1

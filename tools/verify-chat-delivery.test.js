@@ -296,8 +296,8 @@ test('background host probes are explicitly declined and unknown remote commands
   const loopStart = literal(vps, 'while IFS= read -r _; do { ');
   const loopEnd = literal(vps, '; } </dev/null; printf');
   assert.ok(loopStart && loopEnd);
-  const relay = literal(read('src/console.zig'), 'if test -f ~/.local/state/multiprompt/relay-v1;');
-  const relayCommand = relay.slice(relay.indexOf('"') + 1, -1).replace('{s}', 'fixture-0123456789abcdef');
+  const relay = literal(read('src/console.zig'), 'if test -f ~/.local/state/multiprompt/relay-v1');
+  const relayCommand = relay.slice(relay.indexOf('"') + 1, -1).replaceAll('{s}', 'fixture-0123456789abcdef');
   const ladder = literal(read('src/telemetry_panel.zig'), ' cat ~/.local/state/token-ladder/status.json').split(' {s} ')[1];
   const probes = [];
   for (const host of ['remote-1', 'remote-2', 'remote-3']) {

@@ -175,6 +175,24 @@ Grok's payload and ignores the imported copies, preventing duplicate events and
 incorrect Claude resume registration. Subagent completion must not mark its
 parent tab complete. Do not register this dispatcher on `SubagentStop`.
 
+## Install browser access for another remote user
+
+Run as that remote user from this checkout:
+
+```sh
+bash tools/install-user-browser.sh
+```
+
+Reconnect that user's SSH host in Multiprompt after updating the desktop app.
+Run `zsb status`, then `zsb selftest` inside its tmux session.
+No vault access or shared token is needed. The installer creates a private
+user-owned tunnel directory and installs only the browser wrappers.
+
+Each `.browser` SSH socket routes through a host-bound desktop listener.
+Commands cannot target another host's session, even with the same name.
+Application-wide commands and raw CDP are unavailable through this scoped
+connection. Legacy token-authenticated TCP access is unchanged.
+
 ## Chat View command and skill suggestions
 
 Install the directory on each VPS user account whose tabs need completion.
