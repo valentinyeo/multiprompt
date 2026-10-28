@@ -1,0 +1,100 @@
+name: Repeated idle polling proof
+on:
+  workflow_dispatch:
+  push:
+    branches: [ceo/IGSH-1111]
+permissions:
+  contents: read
+jobs:
+  idle-poll-proof:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Reject PowerShell host name collisions
+        shell: pwsh
+        run: ./tools/check-powershell-host-names.ps1
+      - name: Test session speed oracle
+        run: node --test tools/switch-performance.test.mjs
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          tar -xf $zip -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Zig extraction failed' }
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build baseline and candidate
+        shell: pwsh
+        env:
+          BASE: origin/master
+        run: |
+          $base = (git merge-base $env:BASE HEAD).Trim()
+          git worktree add --detach baseline $base
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline checkout failed' }
+          node tools/switch-performance.mjs instrument baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline timing instrumentation failed' }
+          node tools/switch-performance.mjs instrument .
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate timing instrumentation failed' }
+          Push-Location baseline
+          try { zig build; if ($LASTEXITCODE -ne 0) { throw 'Baseline build failed' } } finally { Pop-Location }
+          zig build
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate build failed' }
+          foreach ($root in @('baseline', '.')) {
+            zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o "$root/zig-out/bin/ssh.exe"
+            if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
+            zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o "$root/zig-out/bin/tmux.exe"
+            if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
+          }
+          "SPEED_HEAD=$((git rev-parse HEAD).Trim())" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "SPEED_BASE=$base" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Build diagnostic baseline separately from measured builds
+        shell: pwsh
+        run: |
+          git worktree add --detach profile "$env:SPEED_BASE"
+          if ($LASTEXITCODE -ne 0) { throw 'Profile checkout failed' }
+          node tools/switch-performance.mjs instrument profile --profile
+          if ($LASTEXITCODE -ne 0) { throw 'Profile instrumentation failed' }
+          Push-Location profile
+          try { zig build; if ($LASTEXITCODE -ne 0) { throw 'Profile build failed' } } finally { Pop-Location }
+          Copy-Item baseline/zig-out/bin/ssh.exe profile/zig-out/bin/ssh.exe
+          Copy-Item baseline/zig-out/bin/tmux.exe profile/zig-out/bin/tmux.exe
+      - name: Diagnose baseline idle stages
+        shell: powershell
+        run: ./tools/switch-performance.ps1 -Exe profile/zig-out/bin/multiprompt.exe -Evidence evidence/profile -Revision "$env:SPEED_BASE"
+      - name: Repeat alternating baseline and candidate workloads
+        shell: powershell
+        run: |
+          for ($i = 1; $i -le 5; $i++) {
+            foreach ($side in @('base', 'head')) {
+              $exe = if ($side -eq 'base') { 'baseline/zig-out/bin/multiprompt.exe' } else { 'zig-out/bin/multiprompt.exe' }
+              $revision = if ($side -eq 'base') { $env:SPEED_BASE } else { $env:SPEED_HEAD }
+              $poll = 750
+              ./tools/switch-performance.ps1 -Exe $exe -Evidence "evidence/run-$i/$side" -Revision $revision -IdleObserverPollMs $poll
+              if ($LASTEXITCODE -ne 0) { throw "Workload failed: $i $side" }
+            }
+            node tools/switch-performance.mjs report "evidence/run-$i/base/samples.json" "evidence/run-$i/head/samples.json"
+            if ($LASTEXITCODE -ne 0) { Write-Host "Run $i exceeded unchanged limits; retaining every sample" }
+          }
+          $global:LASTEXITCODE = 0
+      - name: Require all five candidate workloads
+        run: node tools/switch-performance.mjs repeated evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: idle-poll-proof-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 7

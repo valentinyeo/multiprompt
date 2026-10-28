@@ -22,7 +22,23 @@ export function assess(data) {
   return { p95Ms, maxMs: sorted.at(-1), idleMedianMs, idleMaxMs, idleShell: data.idleShell, switches: sorted.length, idlePolls: data.idleUs.length, pass: p95Ms <= 100 && idleMedianMs <= 5 };
 }
 
-export function instrument(root) {
+export function assessRepeated(pairs) {
+  if (!Array.isArray(pairs) || pairs.length !== 5) throw new Error('Expected five alternating pairs');
+  const hashes = { base: pairs[0]?.base?.sha256, head: pairs[0]?.head?.sha256 };
+  if (Object.values(hashes).some(sha => typeof sha !== 'string' || !/^[a-f0-9]{64}$/i.test(sha))) throw new Error('Missing executable hash');
+  return pairs.map(({ base, head }) => {
+    for (const [sample, side] of [[base, 'base'], [head, 'head']]) {
+      if (sample.sha256 !== hashes[side] || sample.observerPollMs !== 750 || !Number.isFinite(sample.observerIdleCpuMs) || sample.observerIdleCpuMs < 0 || !Number.isFinite(sample.appIdleCpuMs) || sample.appIdleCpuMs < 0 || !Number.isFinite(sample.idleWallMs) || sample.idleWallMs <= 0) throw new Error('Invalid alternating-build accounting');
+    }
+    if (!Number.isInteger(head.idleStatusReads) || head.idleStatusReads < 49) throw new Error("Missing live status acquisition during idle polls");
+    const baseline = assess(base);
+    const candidate = assess(head);
+    if (!candidate.pass) throw new Error('A candidate run exceeded unchanged session speed limits');
+    return { baseline, candidate, observerCpuMs: { baseline: base.observerIdleCpuMs, candidate: head.observerIdleCpuMs }, appCpuMs: { baseline: base.appIdleCpuMs, candidate: head.appIdleCpuMs } };
+  });
+}
+
+export function instrument(root, profile = false) {
   const file = path.join(root, 'src/main.zig');
   let source = fs.readFileSync(file, 'utf8');
   if (source.includes('chat-idle-poll: us=')) return;
@@ -42,13 +58,56 @@ export function instrument(root) {
                         }
                     }
 ` + needle);
+  if (profile) {
+    const calls = ['chatFileOnReady();', 'refreshChatTranscript(false);', 'if (app_state.g_chat_active) chatWorkingIndicatorSync();', '@import("chat_composer.zig").chatStopSlotSync();', 'voiceCheckScreenFallback();'];
+    const start = source.indexOf('if (wp == TIMER_CHAT_REFRESH)');
+    const end = source.indexOf('if (wp == TIMER_CHAT_FOREGROUND_RETRY)', start);
+    let poll = source.slice(start, end);
+    poll = poll.replace('var poll_started: i64 = 0;', 'var poll_started: i64 = 0;\n                    var poll_stages: [5]i64 = @splat(0);');
+    for (const [index, call] of calls.entries()) poll = poll.replace(call, call + `\n                    if (poll_started != 0) _ = @import("win32.zig").QueryPerformanceCounter(&poll_stages[${index}]);`);
+    poll = poll.replace('var buf: [80]u8 = undefined;', 'var buf: [256]u8 = undefined;');
+    poll = poll.replace('chat-idle-poll: us={d}', 'chat-idle-poll: us={d} ready_us={d} transcript_us={d} working_us={d} composer_us={d} voice_us={d}');
+    const times = calls.map((_, index) => `@divTrunc((poll_stages[${index}] -| ${index ? `poll_stages[${index - 1}]` : 'poll_started'}) * 1_000_000, @max(1, frequency))`);
+    poll = poll.replace('.{@divTrunc((now -| poll_started) * 1_000_000, @max(1, frequency))}', `.{@divTrunc((now -| poll_started) * 1_000_000, @max(1, frequency)), ${times.join(', ')}}`);
+    source = source.slice(0, start) + poll + source.slice(end);
+    const captureFile = path.join(root, 'src/chat_capture.zig');
+    let capture = fs.readFileSync(captureFile, 'utf8');
+    const boundary = '    _ = FreeConsole();';
+    const from = capture.indexOf('pub fn captureChatTranscript(');
+    let body = capture.slice(from);
+    body = body.replace(boundary, `    var profile_start: i64 = 0;
+    var profile_attach: i64 = 0;
+    var profile_read: i64 = 0;
+    _ = @import("win32.zig").QueryPerformanceCounter(&profile_start);
+    defer {
+        var end: i64 = 0;
+        var frequency: i64 = 1;
+        _ = @import("win32.zig").QueryPerformanceCounter(&end);
+        _ = @import("win32.zig").QueryPerformanceFrequency(&frequency);
+        var message: [200]u8 = undefined;
+        @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&message, "idle-capture: attach_us={d} read_us={d} parse_us={d}", .{
+            @divTrunc((profile_attach -| profile_start) * 1_000_000, @max(1, frequency)),
+            @divTrunc((profile_read -| profile_attach) * 1_000_000, @max(1, frequency)),
+            @divTrunc((end -| profile_read) * 1_000_000, @max(1, frequency)),
+        }) catch "idle-capture: error");
+    }
+` + boundary);
+    body = body.replace('    defer _ = FreeConsole();', '    defer _ = FreeConsole();\n    _ = @import("win32.zig").QueryPerformanceCounter(&profile_attach);');
+    body = body.replace('    app_state.g_chat_raw_len = chars_read;', '    _ = @import("win32.zig").QueryPerformanceCounter(&profile_read);\n    app_state.g_chat_raw_len = chars_read;');
+    fs.writeFileSync(captureFile, capture.slice(0, from) + body);
+  }
   fs.writeFileSync(file, source);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, ...files] = process.argv.slice(2);
-  if (command === 'instrument' && files.length === 1) instrument(files[0]);
-  else if (command === 'report' && files.length === 2) {
+  if (command === 'instrument' && (files.length === 1 || (files.length === 2 && files[1] === '--profile'))) instrument(files[0], files[1] === '--profile');
+  else if (command === 'repeated' && files.length === 1) {
+    const pairs = Array.from({ length: 5 }, (_, index) => Object.fromEntries(['base', 'head'].map(side => [side, JSON.parse(fs.readFileSync(path.join(files[0], `run-${index + 1}`, side, 'samples.json'), 'utf8').replace(/^\uFEFF/, ''))])));
+    const rows = assessRepeated(pairs);
+    fs.writeFileSync(path.join(files[0], 'repeated-verdict.json'), JSON.stringify(rows, null, 2));
+    console.log('REPEATED_IDLE_VERIFIED', JSON.stringify(rows));
+  } else if (command === 'report' && files.length === 2) {
     const rows = files.map(file => ({ revision: JSON.parse(fs.readFileSync(file)).revision, ...assess(JSON.parse(fs.readFileSync(file))) }));
     const report = ['## Session speed', '', '| Build | Switch p95 | Slowest switch | Idle poll median | Idle poll max | Samples |', '| --- | ---: | ---: | ---: | ---: | ---: |', ...rows.map(row => `| ${row.revision} | ${row.p95Ms.toFixed(3)} ms | ${row.maxMs.toFixed(3)} ms | ${row.idleMedianMs.toFixed(3)} ms | ${row.idleMaxMs.toFixed(3)} ms | ${row.switches} switches / ${row.idlePolls} idle polls (session ${row.idleShell}) |`), '', 'Limits: switch p95 ≤100 ms; settled idle poll median ≤5 ms. Ten sessions, one 250 MiB transcript. Ten warmup idle polls are discarded before sampling an already loaded conversation after the switching cycle, not an ongoing history backfill. Diagnostic dispatch timing, with matching painted content; not input-to-pixel latency. Baseline receives identical idle-only diagnostic instrumentation. One run per build; no speedup claim.'].join('\n');
     console.log(report);

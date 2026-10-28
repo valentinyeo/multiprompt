@@ -198,6 +198,7 @@ fn chatHistoryEntry(key: chat_transcript.Identity) ?*ChatHistoryEntry {
     return null;
 }
 fn captureChatTranscript(_: usize, _: []u16, _: bool) ?usize { capture_count += 1; return capture_result; }
+fn pollChatStatus(_: usize) void {}
 fn chatClassifyBlocks(_: []const u16, _: []ChatBlock) usize { return 0; }
 fn chatApplyDisplayGlyphs(_: []u16, _: []const ChatBlock) void {}
 fn chatLatestAgentReply(_: []u16) usize { return 0; }
@@ -855,4 +856,11 @@ test "reset prefix" {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+
+test('unchanged keyed history polls live status without synchronous console acquisition', () => {
+  const refresh = fn('refreshChatBlockCache');
+  assert.match(refresh, /if \(!force\) pollChatStatus\(active_shell\)/);
+  assert.doesNotMatch(refresh, /captureChatTranscript\([^;]+true\)/);
 });
