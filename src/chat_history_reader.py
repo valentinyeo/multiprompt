@@ -1794,6 +1794,9 @@ def watch_changes(q, resolved, source, as_owner):
     try:
         if libc.inotify_add_watch(fd, os.fsencode(path.parent), 0x00000FCE) < 0:
             raise OSError(ctypes.get_errno(), "inotify_add_watch")
+        metadata = HOME / ".claude/sessions"
+        metadata_watch = (libc.inotify_add_watch(fd, os.fsencode(metadata), 0x00000FCE)
+                          if agent == "claude" and q.get("tmux") and metadata.is_dir() else -1)
         with selectors.DefaultSelector() as selector:
             selector.register(fd, selectors.EVENT_READ, "file")
             selector.register(sys.stdin.fileno(), selectors.EVENT_READ, "input")
@@ -1838,7 +1841,7 @@ def watch_changes(q, resolved, source, as_owner):
                             at += 16 + length
                             if mask & 0x4000 or name == path.name:
                                 changed = True
-                            elif q.get("tmux") and mask & 0x180 and name.endswith(".jsonl"):
+                            elif q.get("tmux") and mask & 0x18A and (name.endswith(".jsonl") or _wd == metadata_watch and name.endswith(".json")):
                                 latest = resolve_response_path(dict(q, follow=True), source, as_owner)
                                 if latest[2] is None and as_owner:
                                     return

@@ -691,6 +691,9 @@ pub fn build(b: *std.Build) void {
     const zig_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zig-copy.test.js" });
     test_step.dependOn(&zig_copy_tests.step);
     vps_test_step.dependOn(&zig_copy_tests.step);
+    const live_delivery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-delivery-live-proof.test.mjs" });
+    test_step.dependOn(&live_delivery_tests.step);
+    vps_test_step.dependOn(&live_delivery_tests.step);
     const test_wiring_tests = b.addSystemCommand(&.{ "node", "--test", "tools/test-wiring.test.js", "tools/heavy-guard.test.js" });
     test_step.dependOn(&test_wiring_tests.step);
     vps_test_step.dependOn(&test_wiring_tests.step);

@@ -25,6 +25,11 @@ on:
         required: false
         default: false
         type: boolean
+      chat_live_delivery_proof:
+        description: Three busy sends and ten continuously visible replies within two seconds
+        required: false
+        default: false
+        type: boolean
       chat_accepted_proof:
         description: Check queued message pixels within one second of acceptance
         required: false
@@ -284,6 +289,7 @@ jobs:
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_ACCEPTED_PROOF: ${{ inputs.chat_accepted_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
+      CHAT_LIVE_DELIVERY_PROOF: ${{ inputs.chat_live_delivery_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_REACTIONS_PROOF: ${{ inputs.chat_reactions_proof && '1' || '' }}
       CHAT_NOTES_PROOF: ${{ inputs.chat_notes_proof && '1' || '' }}
@@ -317,7 +323,7 @@ jobs:
       - name: Check inline working pixel oracle
         run: node --test tools/chat-working-proof.test.mjs
       - name: Check unread divider contracts
-        run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs
+        run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs tools/chat-delivery-live-proof.test.mjs
       - name: Check workspace focus journey contract
         run: node tools/check-workspace-focus.mjs
       - name: Check browser recovery journey contract

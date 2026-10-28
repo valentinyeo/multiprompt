@@ -6280,9 +6280,10 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
         .user_read => {
             app_state.shells[0].chat_id = 1;
             block.stamp_ms = 12345;
+            block.message_id = 42;
             var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
             const key = @import("chat_send.zig").chatOutboxKeyForShell(0, &key_buf);
-            var confirmed = app_state.ChatConfirmedEcho{ .key_len = @intCast(key.len), .stamp_ms = block.stamp_ms };
+            var confirmed = app_state.ChatConfirmedEcho{ .key_len = @intCast(key.len), .stamp_ms = block.stamp_ms, .message_id = block.message_id };
             @memcpy(confirmed.key[0..key.len], key);
             const kept = app_state.g_chat_confirmed.items.len;
             defer app_state.g_chat_confirmed.shrinkRetainingCapacity(kept);
@@ -6291,6 +6292,7 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             const rc = chatMeasureBlockRect(dc, text, block, .single, width, 0, null);
             var unconfirmed = block;
             unconfirmed.stamp_ms = 0;
+            unconfirmed.message_id = 43;
             try std.testing.expect(!chatEchoBlockConfirmed(text, unconfirmed));
             const plain = chatMeasureBlockRect(dc, text, unconfirmed, .single, width, 0, null);
             try std.testing.expectEqual(plain.bottom - plain.top, rc.bottom - rc.top);
