@@ -84,11 +84,17 @@ test('branch reaction proof uses the shared journey without changing production 
   verifyPushBranches(verify);
 });
 
-test('build graph and workflow branch checks receive the required native appearance check', () => {
+test('IGSH-1113 every pull request receives the required native appearance check', async () => {
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
   const paths = verify.match(/^  pull_request:\n    paths:\n((?:      - [^\n]+\n)+)/m);
   assert.ok(paths);
   for (const file of ['build.zig', 'build.zig.zon', 'tools/test-workflow-structure.test.mjs', 'tools/verify-workflow-branches.mjs', 'tools/chat-history-reader-test.py', 'tools/check-red-run.mjs']) assert.ok(paths[1].split('\n').includes('      - ' + file), file);
+  const trigger = verify.match(/^  pull_request:\r?\n((?:[ \t]+[^\n]*\r?\n)+)/m)?.[1];
+  assert.ok(trigger?.includes("      - '**'"), 'required verification cannot exclude release tooling, notes or other PR paths');
+  assert.doesNotMatch(trigger, /^    (?:branches(?:-ignore)?|paths-ignore|types):|^      - ['"]?!/m);
+  const { discoverFeatures } = await import('./verify-features.cjs');
+  assert.ok(discoverFeatures().pr.includes('appearance'));
+  assert.match(verify, /github\.event_name == 'pull_request' && fromJSON\(needs\.journeys\.outputs\.pr\)/);
 });
 
 test('push verification accepts another ticket branch and rejects losing master or unrelated branches', async () => {

@@ -102,6 +102,13 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
   assert.throws(() => evaluate("'a' 'b'"), assert.AssertionError);
 });
 
+test('IGSH-1113 required appearance verification cannot be filtered out for any PR', () => {
+  const trigger = workflow.match(/^  pull_request:\r?\n((?:[ \t]+[^\n]*\r?\n)+)/m)?.[1];
+  assert.ok(trigger?.includes("      - '**'"));
+  assert.doesNotMatch(trigger, /^    (?:branches(?:-ignore)?|paths-ignore|types):|^      - ['"]?!/m);
+  assert.ok(featureMatrix(workflow).pr.includes('appearance'));
+});
+
 test('release tags reuse master verification instead of starting another full Windows matrix', () => {
   const push = workflow.match(/^  push:\r?\n((?:    [^\n]*\r?\n)+)/m);
   assert.ok(push, 'master pushes still trigger full verification');
