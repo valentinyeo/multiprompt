@@ -56,7 +56,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null, rateLimits 
   const process = { env: { AUTO_REVERT_RUN_ID: String(input.run.id), GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: repository, GITHUB_STEP_SUMMARY: '/summary' }, exitCode: 0 };
   const module = { exports: {} };
   const require = name => {
-    if (name === './journey-policy.json') return JSON.parse(fs.readFileSync(`${__dirname}/journey-policy.json`, 'utf8'));
+    if (name === './journey-policy.json') return input.policy || JSON.parse(fs.readFileSync(`${__dirname}/journey-policy.json`, 'utf8'));
     if (name === 'node:fs') return { appendFileSync(file, text) { assert.equal(file, '/summary'); summaries.push(text); } };
     assert.equal(name, 'node:child_process');
     return { execFileSync(command, args) {
@@ -695,7 +695,7 @@ for (const key of ['browser-pane-stuck', 'chat-messages-only']) {
     const input = fixture();
     input.jobs = [{ name: `verify (${key})`, conclusion: 'failure' }];
     input.history[0].jobs = [{ name: `verify (${key})`, conclusion: 'success' }];
-    assert.deepEqual(decide(input), { action: 'ignore', reason: 'Only quarantined journeys failed' });
+    input.policy = JSON.parse(fs.readFileSync(`${__dirname}/fixtures/IGSH-1033/journey-policy.json`, 'utf8'));
     const result = runtime(input, 'workflow_run');
     assert.equal(result.process.exitCode, 0, result.output);
     assert.equal(result.calls.some(call => call[0] === 'git' && call[1] === 'revert'), false);
@@ -705,5 +705,21 @@ for (const key of ['browser-pane-stuck', 'chat-messages-only']) {
 test('IGSH-1033 a quarantined failure cannot mask an eligible parent regression', () => {
   const input = fixture();
   input.jobs.push({ name: 'verify (browser-pane-stuck)', conclusion: 'failure' });
-  assert.deepEqual(decide(input).journeys, ['session-restore', 'chat-focus']);
+  input.policy = JSON.parse(fs.readFileSync(`${__dirname}/fixtures/IGSH-1033/journey-policy.json`, 'utf8'));
+  const result = runtime(input, 'workflow_run');
+  assert.equal(result.process.exitCode, 0, result.output);
+  const board = result.calls.find(call => call[0] === 'node' && call[1] === 'tools/auto-revert-board.js');
+  assert.ok(board, result.output);
+  assert.equal(board[4], 'session-restore, chat-focus');
+});
+
+test('IGSH-1033 repaired journeys remain blocking after quarantine retirement', () => {
+  assert.ok(fs.existsSync(`${__dirname}/journey-policy.json`), 'Shared quarantine policy must ship');
+  assert.deepEqual(JSON.parse(fs.readFileSync(`${__dirname}/journey-policy.json`, 'utf8')), { quarantined: {} });
+  for (const key of ['browser-pane-stuck', 'chat-messages-only']) {
+    const input = fixture();
+    input.jobs = [{ name: `verify (${key})`, conclusion: 'failure' }];
+    input.history[0].jobs = [{ name: `verify (${key})`, conclusion: 'success' }];
+    assert.equal(decide(input).action, 'revert');
+  }
 });

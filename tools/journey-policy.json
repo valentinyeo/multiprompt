@@ -1,18 +1,3 @@
 {
-  "quarantined": {
-    "browser-pane-stuck": {
-      "ticket": "https://app.hypertask.ai/detail/project-2060/1055",
-      "runs": [
-        "https://github.com/valentinyeo/multiprompt/actions/runs/40450143181",
-        "https://github.com/valentinyeo/multiprompt/actions/runs/40454057302"
-      ]
-    },
-    "chat-messages-only": {
-      "ticket": "https://app.hypertask.ai/detail/project-2060/1055",
-      "runs": [
-        "https://github.com/valentinyeo/multiprompt/actions/runs/40450143181",
-        "https://github.com/valentinyeo/multiprompt/actions/runs/40454057302"
-      ]
-    }
-  }
+  "quarantined": {}
 }

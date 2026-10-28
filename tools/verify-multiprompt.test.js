@@ -2271,7 +2271,8 @@ test('IGSH-1108 CLI writes JSON job outputs and rejects unavailable or unsafe fe
 
 test('IGSH-1033 shared tracked quarantine protects rollback and release execution', () => {
   assert.ok(fs.existsSync(path.join(root, 'tools/journey-policy.json')), 'Shared quarantine policy must ship');
-  const policy = JSON.parse(read('tools/journey-policy.json'));
+  assert.deepEqual(JSON.parse(read('tools/journey-policy.json')), { quarantined: {} });
+  const policy = JSON.parse(read('tools/fixtures/IGSH-1033/journey-policy.json'));
   assert.deepEqual(Object.keys(policy.quarantined).sort(), ['browser-pane-stuck', 'chat-messages-only']);
   assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \}\}/);
   assert.match(workflow, /quarantined: \$\{\{ steps.policy.outputs.quarantined \}\}/);
