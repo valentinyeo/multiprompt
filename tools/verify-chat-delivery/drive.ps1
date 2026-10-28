@@ -47,6 +47,7 @@ if ($env:CHAT_MISSING_PROOF -eq '1') { $plans = @(@{name='missing-transcript'; m
 if ($env:CHAT_NOTES_PROOF -eq '1') { $plans = @(@{name='session-notes'; mode='idle'; text='runner note disclosure'}) }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') { $plans = @(@{name='reactions'; mode='busy'; text='draft stays here'}) }
 if ($env:CHAT_REPLY_PROOF -eq '1') { $plans = @(@{name='reply-reference'; mode='idle'; text='compact reply navigation'}) }
+if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
@@ -100,7 +101,8 @@ function Doctor([bool]$Chat = $false) {
         throw 'Doctor: visible versioned UI Automation identity missing'
     }
     $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
-    if (@($published.shells).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 3 }).Count -ne 1 -or
+    $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1') { $expectedShells } else { 1 }
+    if (@($published.shells).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 3 }).Count -ne $expectedTmux -or
         ($expectedShells -eq 2 -and @($published.shells | Where-Object { $_.kind -eq 0 }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not published' }
     if ($Chat) {
         $focus = [ChatDeliveryDesktop]::Focus($main)
@@ -444,6 +446,7 @@ foreach ($plan in $plans) {
     $isSwitch = $plan.name -eq 'remote-switch'
     $isRemote = $plan.name -eq 'remote-sync' -or $isSwitch
     $isQueue = $plan.name -eq 'queue-draft-sync'
+    $isHax = $env:CHAT_HAX_PROOF -eq '1'
     $isSendStays = $plan.name -eq 'send-stays-gone'
     $isMissing = $plan.name -eq 'missing-transcript'
     $isActivity = $plan.name -eq 'messages-only'
@@ -452,7 +455,7 @@ foreach ($plan in $plans) {
     $isNotes = $plan.name -eq 'session-notes'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
     $isLiveDelivery = $plan.name -eq 'live-delivery'
-    $hasTranscript = $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote
+    $hasTranscript = $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -495,6 +498,14 @@ foreach ($plan in $plans) {
             $observation.texts = $queueTexts
             $observation.steps = $steps
         }
+        if ($isHax) {
+            $standIn.hax = $true
+            $standIn.sessions = @('runner-alpha', 'runner-beta', 'runner-gamma', 'runner-empty')
+            $standIn.panes = @{'runner-alpha'=4242; 'runner-beta'=4243; 'runner-gamma'=4244; 'runner-empty'=4245}
+            $standIn.procRoot = [IO.Path]::GetPathRoot($profile) + 'proc'
+            $standIn.home = "$profile/home"
+            $standIn.cwd = 'C:/verify/shared-runners'
+        }
         Save $standIn "$state/state.json"
         if ($env:CHAT_SKILLS_PROOF -eq '1') {
             New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-zebra" | Out-Null
@@ -511,6 +522,10 @@ foreach ($plan in $plans) {
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
+        if ($isHax) {
+            $savedSession.tabs = @($standIn.sessions | ForEach-Object { @{kind='tmux'; name=$_; manual=$true; tmux_host=0; tmux_session=$_; cv=$false; pid=0} })
+            $expectedShells = 4
+        }
         Save $savedSession "$settings/session.json"
         if ($isRemote) {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
@@ -532,7 +547,9 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($env:CHAT_SKILLS_PROOF -eq '1') {
+        if ($isHax) {
+            . "$PSScriptRoot/hax-sessions.ps1"
+        } elseif ($env:CHAT_SKILLS_PROOF -eq '1') {
             Type-Composer '/verify-zebra'
             if ([ChatDeliveryDesktop]::Text($composer) -cne '/verify-zebra') { throw 'Skill fixture did not type the slash and hyphen' }
             [void](Wait-For 'initial skill fetch applied' { (Read-Shared "$settings/debug.log") -match 'chat-ac: fetched host=0 bytes=[1-9]' } 20)
@@ -1156,6 +1173,10 @@ foreach ($plan in $plans) {
             if ($isActivity -and (Test-Path "$settings/chatcache")) { Copy-Item "$settings/chatcache" "$caseDir/chatcache" -Recurse -Force }
             if ($hasTranscript -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }
             $cleanup.evidence_preserved = (Test-Path "$caseDir/debug.log") -and (Test-Path "$caseDir/stand-in/ready.json")
+            if ($isHax) {
+                Copy-Item "$profile/home/.local/state/hax/sessions" "$caseDir/hax-sessions" -Recurse -Force
+                foreach ($pidValue in $standIn.panes.Values) { Remove-Item -LiteralPath "$($standIn.procRoot)/$pidValue" -Recurse -Force -ErrorAction SilentlyContinue }
+            }
             if ($hasTranscript -and $procDir) {
                 Remove-Item -LiteralPath $procDir -Recurse -Force -ErrorAction SilentlyContinue
                 $procRoot = Split-Path $procDir
@@ -1186,6 +1207,10 @@ if ($env:CHAT_REPLY_PROOF -eq '1') {
 }
 if ($env:CHAT_NOTES_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-notes-proof.mjs" verify $Evidence
+    exit $LASTEXITCODE
+}
+if ($env:CHAT_HAX_PROOF -eq '1') {
+    & node "$PSScriptRoot/../hax-sessions-proof.mjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') {

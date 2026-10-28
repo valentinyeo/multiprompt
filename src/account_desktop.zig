@@ -996,7 +996,12 @@ pub fn applyServerLayout(json: []const u8) !void {
     const local = try captureSessionLayout(a, true);
     var owned: [MAX_SHELLS]bool = undefined;
     for (app_state.shells[0..app_state.shell_count], 0..) |s, i| owned[i] = s.sync_owned;
-    const desired = try account_layout.apply(a, local, owned[0..app_state.shell_count], server.value, MAX_LWS, MAX_SHELLS);
+    var desired = try account_layout.apply(a, local, owned[0..app_state.shell_count], server.value, MAX_LWS, MAX_SHELLS);
+    var kept: std.ArrayList(session_layout.Tab) = .empty;
+    for (desired.tabs) |tab| {
+        if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);
+    }
+    desired.tabs = kept.items;
     app_state.g_account_applying = true;
     defer app_state.g_account_applying = false;
     const old_restoring = app_state.g_restoring;

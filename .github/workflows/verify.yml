@@ -55,6 +55,11 @@ on:
         required: false
         default: false
         type: boolean
+      hax_sessions_proof:
+        description: Verify native hax messages and close intent across host refresh
+        required: false
+        default: false
+        type: boolean
       remote_sync_proof:
         description: Follow the second host and alternate home through two turns and a new session
         required: false
@@ -114,6 +119,10 @@ on:
         default: false
         type: boolean
       long_chat_proof:
+        required: false
+        default: false
+        type: boolean
+      hax_sessions_proof:
         required: false
         default: false
         type: boolean
@@ -303,7 +312,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON(needs.journeys.outputs.full) || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON(needs.journeys.outputs.full) || fromJSON(format('["{0}"]', inputs.feature)) }}
         app-revision: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["5d2a820355969173090f0fcd0c72a7b3bd222141","{0}"]', github.sha)) || fromJSON('[""]') }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
@@ -323,6 +332,7 @@ jobs:
       CHAT_SHAPE_BASELINE: ${{ inputs.chat_shape_baseline && '1' || '' }}
       CHAT_SHAPE_PROOF: ${{ inputs.chat_shape_proof && '1' || '' }}
       CHAT_SWITCH_PROFILE: ${{ inputs.chat_switch_profile && '1' || '' }}
+      CHAT_HAX_PROOF: ${{ inputs.hax_sessions_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
       CHAT_MISSING_PROOF: ${{ inputs.missing_note_proof && '1' || '' }}
       CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}
