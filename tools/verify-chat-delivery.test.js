@@ -311,6 +311,8 @@ test('background host probes are explicitly declined and unknown remote commands
       probes.push({ argv: [...constant(name).trim().split(' '), '-R', '19548:127.0.0.1:12345', host], kind: 'notification-forward', output: '', code: 255 });
     }
   }
+  const userBrowserProbe = 'if test -f ~/.local/state/multiprompt/relay-v1 || test -f ~/.local/state/multiprompt/browser-v1; then mkdir -p -m 700 /tmp/mp-notify-$(id -u) && rm -f /tmp/mp-notify-$(id -u)/fixture-0123456789abcdef.sock /tmp/mp-notify-$(id -u)/fixture-0123456789abcdef.browser && printf MP_RELAY_UID: && id -u; else echo MP_RELAY_LEGACY; fi';
+  probes.push({ argv: ['-T', 'remote-3', userBrowserProbe], kind: 'notification-relay', output: 'MP_RELAY_LEGACY\n', code: 0 });
   probes.push({ argv: ['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'remote-2', ...ladder.split(' ')], kind: 'ladder-status', output: '', code: 1 });
   const unknown = [
     ['-T', 'remote-1', 'uname -a'],
