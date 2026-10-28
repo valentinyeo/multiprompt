@@ -87,6 +87,11 @@ class SwitchEvidenceTest(unittest.TestCase):
         self.value['modes']['browser_open'][0]['shown_ms'] = 150
         self.assertEqual(self.evaluate()['status'], 'failed')
 
+    def test_pixel_copy_time_cannot_be_outside_its_capture_interval(self):
+        self.value['modes']['browser_closed'][0]['frame_probe']['capture_pixels_ms'] = 0
+        with self.assertRaisesRegex(ValueError, 'pixel timestamp'):
+            self.evaluate()
+
     def test_one_slow_outlier_fails_even_with_a_fast_median(self):
         self.value['modes']['browser_closed'][7]['shown_ms'] = 150
         result = self.evaluate()

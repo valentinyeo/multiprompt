@@ -44,10 +44,13 @@ test('IGSH-1040 opt-in keeps published946 app, bridge and extension together and
 test('IGSH-1040 ordinary CPU windows do not request paints or capture images', () => {
   assert.doesNotMatch(observer, /InvalidateRect|WM_PAINT|0x000F|DwmFlush|RedrawWindow/);
   assert.match(observer, /if \(images\) \{\s+captureStarted[\s\S]*?Capture\(owner, pid/);
-  assert.match(observer, /if \(images\) Capture\(owner, pid, imagePrefix \+ "-settled"\)/);
+  assert.match(observer, /if \(images\) Capture\(owner, pid, imagePrefix \+ "-settled", clock\)/);
   assert.match(observer, /"cpu_one_core_percent", 100 \* cpu \/ elapsed/);
   assert.doesNotMatch(observer, /ProcessorCount/);
   assert.match(observer, /GetForegroundWindow\(\) != owner/);
+  assert.ok(observer.indexOf('graphics.CopyFromScreen') < observer.indexOf('double captured = clock.Elapsed.TotalMilliseconds;'));
+  assert.ok(observer.indexOf('double captured = clock.Elapsed.TotalMilliseconds;') < observer.indexOf('bitmap.Save(path'));
+  assert.ok(observer.includes('{ "capture_pixels_ms", capturePixels }'));
 });
 
 test('IGSH-1040 replay and copied receipt stay outside the ordinary measurement call', () => {

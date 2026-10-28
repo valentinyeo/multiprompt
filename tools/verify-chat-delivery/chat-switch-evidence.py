@@ -115,6 +115,8 @@ def evaluate(value, root, require_cleanup=False):
             require(probe['source_shell'] == sample['source_shell'] and probe['target_shell'] == sample['target_shell'] and probe['image_probe'] is True and probe['forced_paints'] is False, 'image replay must follow the same route separately')
             require(probe['frame_scope'] == FRAME_SCOPE, 'first-observation scope must remain explicit')
             require(number(probe['shown_ms'], 'image paint time') <= number(probe['capture_started_ms'], 'capture start') <= number(probe['capture_completed_ms'], 'capture end') <= number(probe['elapsed_ms'], 'image interval'), 'image capture timing missing')
+            if 'capture_pixels_ms' in probe:
+                require(probe['capture_started_ms'] <= number(probe['capture_pixels_ms'], 'pixel copy completion') <= probe['capture_completed_ms'], 'pixel timestamp must precede file encoding completion')
             first = image(root, probe['image_prefix'] + '-first-observed')
             settled = image(root, probe['image_prefix'] + '-settled')
             if not latest or shown >= 150 or hang >= 100 or first != settled or sample['layout_width'] != sample['client_width'] or sample['post_paint_moves']:

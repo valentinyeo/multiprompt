@@ -58,7 +58,7 @@ public static class ChatSwitchObserver {
         if (count != 1) throw new InvalidOperationException("Expected one visible owned transcript");
         return found;
     }
-    static void Capture(IntPtr owner, int pid, string path) {
+    static double Capture(IntPtr owner, int pid, string path, Stopwatch clock) {
         IntPtr view = Transcript(owner, pid);
         Rect rect;
         var origin = new Point();
@@ -66,8 +66,10 @@ public static class ChatSwitchObserver {
             throw new InvalidOperationException("Transcript capture rectangle unavailable");
         using (var bitmap = new Bitmap(rect.Right, rect.Bottom, PixelFormat.Format32bppRgb)) {
             using (var graphics = Graphics.FromImage(bitmap)) graphics.CopyFromScreen(origin.X, origin.Y, 0, 0, bitmap.Size);
+            double captured = clock.Elapsed.TotalMilliseconds;
             bitmap.Save(path + ".bmp", ImageFormat.Bmp);
             bitmap.Save(path + ".png", ImageFormat.Png);
+            return captured;
         }
     }
     public static Dictionary<string, object> Measure(int pid, IntPtr owner, int target, string log, long offset, string needle, int intervalMs, string imagePrefix) {
@@ -99,7 +101,7 @@ public static class ChatSwitchObserver {
             }
             long position = offset;
             string carry = "";
-            double shown = -1, cpuAtShown = -1, captureStarted = -1, captureCompleted = -1;
+            double shown = -1, cpuAtShown = -1, captureStarted = -1, capturePixels = -1, captureCompleted = -1;
             double nextCpu = 25;
             while (clock.Elapsed.TotalMilliseconds < intervalMs) {
                 if (target >= 0 && shown < 0) {
@@ -117,7 +119,7 @@ public static class ChatSwitchObserver {
                                 cpuAtShown = app.TotalProcessorTime.TotalMilliseconds - appStart;
                                 if (images) {
                                     captureStarted = clock.Elapsed.TotalMilliseconds;
-                                    Capture(owner, pid, imagePrefix + "-first-observed");
+                                    capturePixels = Capture(owner, pid, imagePrefix + "-first-observed", clock);
                                     captureCompleted = clock.Elapsed.TotalMilliseconds;
                                 }
                             }
@@ -137,7 +139,7 @@ public static class ChatSwitchObserver {
             double cpu = app.TotalProcessorTime.TotalMilliseconds - appStart;
             var systemEnd = SystemTimes();
             points.Add(new Dictionary<string, object> { { "elapsed_ms", elapsed }, { "cpu_ms", cpu } });
-            if (images) Capture(owner, pid, imagePrefix + "-settled");
+            if (images) Capture(owner, pid, imagePrefix + "-settled", clock);
             return new Dictionary<string, object> {
                 { "input", target < 0 ? "idle" : "sidebar-click" }, { "shown_ms", shown }, { "cpu_at_shown_ms", cpuAtShown },
                 { "elapsed_ms", elapsed }, { "cpu_ms", cpu }, { "cpu_one_core_percent", 100 * cpu / elapsed },
@@ -145,7 +147,7 @@ public static class ChatSwitchObserver {
                 { "machine_busy_percent", 100 * (1 - (systemEnd[0] - systemStart[0]) / (systemEnd[1] - systemStart[1])) },
                 { "forced_paints", false }, { "image_probe", images },
                 { "timing_scope", "first nonempty cached target paint; latest-message receipt verified after timing" },
-                { "capture_started_ms", captureStarted }, { "capture_completed_ms", captureCompleted },
+                { "capture_started_ms", captureStarted }, { "capture_pixels_ms", capturePixels }, { "capture_completed_ms", captureCompleted },
                 { "frame_scope", "first observed after completed target-paint log; not compositor-first-present" }
             };
         }
