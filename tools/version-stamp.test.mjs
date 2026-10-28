@@ -590,3 +590,32 @@ test('IGSH-1095 Zig test-only repairs need no invented product note but runtime 
   assert.equal(deleted.status, 1);
   assert.match(deleted.stderr, /App code changed/);
 });
+
+test('IGSH-1113 omits filtered historical releases while preserving current notes and validation', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const maintenance = { 'changelog.d/DEMO-1-maintenance.md': 'Fixed a test so releases stop getting stuck.\n' };
+  const product = { 'changelog.d/DEMO-2-chat.md': 'Switching chats is faster.\n' };
+  const latest = { 'changelog.d/DEMO-3-update.md': 'The update card explains each change.\n' };
+  const history = [
+    { tag: 'v0.28.896', files: base() },
+    { tag: 'v0.28.897', files: { ...base(), ...maintenance } },
+    { tag: 'v0.28.898', files: { ...base(), ...maintenance, ...product } },
+    { tag: 'v0.28.899', files: { ...base(), ...maintenance, ...product, 'changelog.d/DEMO-4-maintenance.md': 'Pipeline changes.\n' } },
+  ];
+  const files = { ...history.at(-1).files, ...latest };
+  const saved = structuredClone({ files, history });
+  const generated = buildChangelog(files, 'v0.28.900', history);
+  assert.deepEqual(releaseNotes(generated, 'v0.28.900'), {
+    version: '0.28.900', releases: [
+      { version: '0.28.900', changes: ['The update card explains each change.'] },
+      { version: '0.28.898', changes: ['Switching chats is faster.'] },
+      { version: '0.28.735', changes: ['Existing.'] },
+    ],
+  });
+  assert.deepEqual({ files, history }, saved);
+  const quiet = buildChangelog(history.at(-1).files, 'v0.28.900', history);
+  assert.deepEqual(releaseNotes(quiet, 'v0.28.900').releases[0], { version: '0.28.900', changes: [] });
+  assert.throws(() => buildChangelog({ ...files, 'changelog.d/DEMO-5-empty.md': ' \n' }, 'v0.28.900', history), /Fragment has no text/);
+  const invalid = [...history, { tag: 'v0.28.899', files: { ...files, 'changelog.d/DEMO-6-empty.md': ' \n' } }];
+  assert.throws(() => buildChangelog(files, 'v0.28.900', invalid), /Fragment has no text/);
+});
