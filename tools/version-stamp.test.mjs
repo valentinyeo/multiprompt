@@ -663,3 +663,28 @@ test('IGSH-1115 production history ignores failed tags without moving their prod
     ],
   });
 });
+
+
+test('IGSH-1131 refuses an empty release before writing invalid Zig', () => {
+  for (const extra of [{}, { 'changelog.d/DEMO-1131-check.md': 'Fixed a test so releases stop getting stuck.\n' }]) {
+    assert.throws(() => stampTree({ ...base(), ...extra }, '0.28.986'), /No unpublished product changes/);
+  }
+});
+
+test('IGSH-1131 pending notes include only changed unpublished product fragments', t => {
+  const r = repo(t);
+  r.git('tag', 'v0.28.735');
+  r.write({ 'changelog.d/DEMO-1131-chat.md': 'Your chats keep their saved order.\n' });
+  const product = r.commit();
+  const pending = rev => spawnSync(process.execPath, [tool, 'pending', 'v0.28.735', rev], { cwd: r.dir, encoding: 'utf8' });
+  const result = pending(product);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'Your chats keep their saved order.');
+  r.git('tag', 'v0.28.736');
+  r.write({ 'changelog.d/DEMO-1132-check.md': 'Fixed a test so releases stop getting stuck.\n' });
+  const maintenance = r.commit();
+  const quiet = spawnSync(process.execPath, [tool, 'pending', 'v0.28.736', maintenance], { cwd: r.dir, encoding: 'utf8' });
+  assert.equal(quiet.status, 0, quiet.stderr);
+  assert.equal(quiet.stdout, '');
+  assert.equal(pending(maintenance).stdout.trim(), 'Your chats keep their saved order.');
+});
