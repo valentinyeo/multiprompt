@@ -2483,47 +2483,64 @@ fn changelogEntryHeightWithHdc(hdc: HANDLE, idx: usize, summary_w: i32) i32 {
     return @max(min_row_h, changelogEntryTopPad() + wrapped_h + changelogEntryBottomPad());
 }
 
-fn changelogEntryHeight(idx: usize, summary_w: i32) i32 {
+var changelog_layout_width: i32 = 0;
+var changelog_layout_scale: i32 = 0;
+var changelog_row_tops: [CHANGELOG.len + 1]i32 = .{0} ** (CHANGELOG.len + 1);
+
+pub fn resetChangelogLayout() void {
+    changelog_layout_width = 0;
+}
+
+fn ensureChangelogLayout(hdc: HANDLE, summary_w: i32) void {
+    const scale = uiScaled(100);
+    if (changelog_layout_width == summary_w and changelog_layout_scale == scale) return;
+    if (hdc == null or summary_w <= 0) return;
+    changelog_row_tops[0] = 0;
+    for (0..CHANGELOG.len) |idx| {
+        changelog_row_tops[idx + 1] = changelog_row_tops[idx] + changelogEntryHeightWithHdc(hdc, idx, summary_w);
+    }
+    changelog_layout_width = summary_w;
+    changelog_layout_scale = scale;
+}
+
+fn prepareChangelogLayout(summary_w: i32) void {
+    if (changelog_layout_width == summary_w and changelog_layout_scale == uiScaled(100)) return;
     const hdc = GetDC(app_state.g_main_hwnd);
-    if (hdc == null) return changelogMinRowH();
+    if (hdc == null) return;
     defer _ = ReleaseDC(app_state.g_main_hwnd, hdc);
-    return changelogEntryHeightWithHdc(hdc, idx, summary_w);
+    ensureChangelogLayout(hdc, summary_w);
 }
 
 fn changelogEntryYRange(idx: usize, summary_w: i32) ChangelogEntryRange {
-    var top: i32 = 0;
-    var i: usize = 0;
-    while (i < idx and i < CHANGELOG.len) : (i += 1) {
-        top += changelogEntryHeight(i, summary_w);
-    }
-    const h = if (idx < CHANGELOG.len) changelogEntryHeight(idx, summary_w) else 0;
-    return .{ .top = top, .h = h };
+    prepareChangelogLayout(summary_w);
+    const i = @min(idx, CHANGELOG.len);
+    return .{ .top = changelog_row_tops[i], .h = if (i < CHANGELOG.len) changelog_row_tops[i + 1] - changelog_row_tops[i] else 0 };
 }
 
 fn changelogIndexAtContentY(content_y: i32, summary_w: i32) ?i32 {
-    if (content_y < 0) return null;
-    var cy: i32 = 0;
-    for (0..CHANGELOG.len) |idx| {
-        const h = changelogEntryHeight(idx, summary_w);
-        if (content_y >= cy and content_y < cy + h) return @intCast(idx);
-        cy += h;
+    prepareChangelogLayout(summary_w);
+    if (content_y < 0 or content_y >= changelog_row_tops[CHANGELOG.len]) return null;
+    var lo: usize = 0;
+    var hi: usize = CHANGELOG.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (changelog_row_tops[mid + 1] <= content_y) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
     }
-    return null;
+    return @intCast(lo);
 }
 
 fn changelogTotalContentHeightWithHdc(hdc: HANDLE, summary_w: i32) i32 {
-    var total: i32 = 0;
-    for (0..CHANGELOG.len) |idx| {
-        total += changelogEntryHeightWithHdc(hdc, idx, summary_w);
-    }
-    return total;
+    ensureChangelogLayout(hdc, summary_w);
+    return changelog_row_tops[CHANGELOG.len];
 }
 
 fn changelogTotalContentHeight(summary_w: i32) i32 {
-    const hdc = GetDC(app_state.g_main_hwnd);
-    if (hdc == null) return changelogMinRowH() * @as(i32, @intCast(CHANGELOG.len));
-    defer _ = ReleaseDC(app_state.g_main_hwnd, hdc);
-    return changelogTotalContentHeightWithHdc(hdc, summary_w);
+    prepareChangelogLayout(summary_w);
+    return changelog_row_tops[CHANGELOG.len];
 }
 
 fn clampChangelogState(view_h: i32, max_scroll: i32, summary_w: i32) void {
@@ -2742,16 +2759,13 @@ pub fn paintChangelogOverlay(hdc: HANDLE) void {
     if (saved_rows_dc != 0) {
         _ = IntersectClipRect(hdc, layout.ox + 1, rows_top, layout.ox + layout.overlay_w - 1, rows_bottom);
     }
-    var cy: i32 = 0;
-    for (0..CHANGELOG.len) |idx| {
+    const first: usize = @intCast(changelogIndexAtContentY(app_state.g_changelog_scroll, summary_w) orelse 0);
+    for (first..CHANGELOG.len) |idx| {
         const entry = CHANGELOG[idx];
-        const h = changelogEntryHeightWithHdc(hdc, idx, summary_w);
-        const ry = rows_top + cy - app_state.g_changelog_scroll;
-
-        if (ry + h <= rows_top or ry >= rows_bottom) {
-            cy += h;
-            continue;
-        }
+        const range = changelogEntryYRange(idx, summary_w);
+        const h = range.h;
+        const ry = rows_top + range.top - app_state.g_changelog_scroll;
+        if (ry >= rows_bottom) break;
 
         const idx_i: i32 = @intCast(idx);
         const selected = idx_i == app_state.g_changelog_sel;
@@ -2802,8 +2816,6 @@ pub fn paintChangelogOverlay(hdc: HANDLE) void {
                 bullet_y += bullet_h + changelogBulletGap();
             }
         }
-
-        cy += h;
     }
     if (saved_rows_dc != 0) _ = RestoreDC(hdc, saved_rows_dc);
 
