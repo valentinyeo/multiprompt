@@ -26,6 +26,7 @@ const Entry = struct {
     expires_ms: i64 = 0,
     channel_pending: bool = false,
     channel_sent: bool = false,
+    host_held: bool = false,
     channel_sent_ms: i64 = 0,
     sent_tick_ms: i64 = 0,
     channel_retries: u8 = 0,
@@ -53,7 +54,7 @@ var enter_ok = true;
 var notices: usize = 0;
 const chat_echo = struct { fn fileTimeToUnixMs(_: u64) i64 { return 12345; } };
 const ChatTmuxSendJob = struct {
-    key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false,
+    key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, held: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false,
     finished: std.atomic.Value(bool) = .init(true),
 };
 var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;

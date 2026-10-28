@@ -686,7 +686,9 @@ fn chatOutboxEnqueueInState(list: *std.ArrayList(ChatOutboxEntry), allocator: st
     entry.key_len = @intCast(klen);
     entry.text = owned;
     entry.state = state;
-    entry.queue_id = std.crypto.random.int(u64);
+    var random_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+    defer random_io.deinit();
+    random_io.io().random(std.mem.asBytes(&entry.queue_id));
     entry.id = app_state.g_chat_echo_next_id;
     app_state.g_chat_echo_next_id +%= 1;
     if (entry.id == 0) entry.id = app_state.g_chat_echo_next_id;
@@ -1416,10 +1418,6 @@ pub fn chatEchoSendAgain(id: u64) void {
 pub fn chatEchoRemove(id: u64) void {
     const ei = chatOutboxIndexById(id) orelse return;
     if (!chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).remove) return;
-    chatEchoRemoveEntry(ei, id);
-}
-
-fn chatEchoRemoveEntry(ei: usize, id: u64) void {
     const entry = app_state.g_chat_outbox.orderedRemove(ei);
     if (!saveChatOutbox()) {
         app_state.g_chat_outbox.insertAssumeCapacity(ei, entry);

@@ -18,6 +18,7 @@ function declaration(name) {
 }
 const prelude = `
 const std = @import("std");
+fn chatCancelFinish() void {}
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;

@@ -2826,5 +2826,44 @@ class HeldQueueTest(unittest.TestCase):
         self.assertIn('\tcancel_queued\terror\tnot_queued\t', self.cancel('target', 1))
 
 
+
+    def test_cancel_wins_race_before_submission_claim(self):
+        self.enqueue('target', 1)
+        def cancel_before_claim(*args):
+            self.assertIn('\tcancel_queued\tok\t', self.cancel('target', 1))
+            return True
+        self.ready.side_effect = cancel_before_claim
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.send.assert_not_called()
+
+    def test_submission_wins_race_before_terminal_receipt(self):
+        import threading
+        entered, release = threading.Event(), threading.Event()
+        self.ready.return_value = True
+        errors = []
+        def handing_off(q):
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError('test did not release terminal handoff')
+            return '@mp\t0\tsend\tok\t-\t0\n@@MP_END@@\n'
+        self.send.side_effect = handing_off
+        def enqueue():
+            try:
+                self.enqueue('target', 1)
+            except BaseException as error:
+                errors.append(error)
+        worker = threading.Thread(target=enqueue)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            self.assertIn('\tcancel_queued\terror\tnot_queued\t', self.cancel('target', 1))
+        finally:
+            release.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.send.assert_called_once()
+
+
 if __name__ == '__main__':
     unittest.main()
