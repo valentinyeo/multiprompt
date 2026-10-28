@@ -412,3 +412,16 @@ for (const reason of ['skip', 'red', 'green']) test(`auto-release admission: ${r
     assert.equal(f.git('--git-dir', f.remote, 'tag', '--list', 'v1.2.9'), '');
   }
 });
+
+
+test('IGSH-1115 release proof builds both architectures without publishing and authenticates history reads', () => {
+  const prepare = workflow.split('\n  prepare:\n')[1].split('\n  build:\n')[0];
+  const build = workflow.split('\n  build:\n')[1].split('\n  release:\n')[0];
+  const release = workflow.split('\n  release:\n')[1];
+  assert.match(workflow, /proof:\n        description: Build both architectures without publishing\n        type: boolean\n        default: false/);
+  assert.match(prepare, /if: inputs\.proof\n        run: node --test tools\/version-stamp\.test\.mjs tools\/release-version\.test\.mjs/);
+  assert.match(build, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(release, /if: github\.event_name != 'pull_request' && !inputs\.proof/);
+  const notes = release.split('      - name: Publish plain versioned update notes\n')[1].split('      - name: Package extension')[0];
+  assert.match(notes, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+});

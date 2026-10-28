@@ -101,7 +101,10 @@ for ($i = 0; $i -lt 20; $i++) {
 }
 Press @(0x11, 0x57) 'Ctrl+W: close the owned local fixture tab'
 $expectedShells = 1
-[void](Wait-For 'local fixture tab closed' { @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count -eq 1 })
+[void](Wait-For 'local fixture tab closed' {
+    $remaining = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
+    $remaining.Count -eq 1 -and $remaining[0].kind -eq 'tmux' -and $remaining[0].tmux_host -eq 2
+})
 Press @(0x11, 0x4E) 'Ctrl+N: create the local fixture workspace'
 $expectedShells = 2
 [void](Wait-For 'two distinct saved workspaces' {

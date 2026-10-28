@@ -749,10 +749,10 @@ jobs:
           New-Item -ItemType Directory -Force evidence | Out-Null
           if ($env:FEATURE -eq 'safe-updates' -and (Test-Path evidence/safe-updates.json)) {
             $proof = Get-Content evidence/safe-updates.json -Raw | ConvertFrom-Json
-            @{ feature = 'safe-updates'; status = $(if ($proof.success) { 'passed' } else { 'failed' }); checks = $proof.checks; cleanup = $proof.cleanup } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
+            @{ feature = 'safe-updates'; version = $env:VERIFY_VERSION; sha256 = $env:VERIFY_SHA256; status = $(if ($proof.success) { 'passed' } else { 'failed' }); checks = $proof.checks; cleanup = $proof.cleanup } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
           if (-not (Test-Path evidence/result.json)) {
-            $failure = @{ feature = $env:FEATURE; status = 'failed'; error = 'Workflow failed before the harness produced a result; inspect the job log'; cleanup = 'Harness result unavailable; disposable runner teardown is the final cleanup boundary' }
+            $failure = @{ feature = $env:FEATURE; version = $env:VERIFY_VERSION; sha256 = $env:VERIFY_SHA256; status = 'failed'; error = 'Workflow failed before the harness produced a result; inspect the job log'; cleanup = 'Harness result unavailable; disposable runner teardown is the final cleanup boundary' }
             if ($env:FEATURE -eq 'chat-delivery') {
               $failure.agentBoundary = 'stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server'
               $failure.cases = @('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync', 'send-stays-gone') | ForEach-Object { @{name=$_; passed=$false; detail='Workflow failed before journey launch'} }
