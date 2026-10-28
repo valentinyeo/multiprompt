@@ -60,7 +60,7 @@ try {
         function Wait-Card([scriptblock]$Condition, [string]$Failure) {
             $deadline = [DateTime]::UtcNow.AddSeconds(10)
             do {
-                $script:cardLog = Get-Content $log -Raw
+                $script:cardLog = if (Test-Path $log) { Get-Content $log -Raw } else { '' }
                 if (& $Condition) { return }
                 if ($process.HasExited -or [DateTime]::UtcNow -gt $deadline) { throw $Failure }
                 Start-Sleep -Milliseconds 100
@@ -94,14 +94,16 @@ try {
             $script:cardLog = ''
             Remove-Item $log -Force
             if (-not [ReleaseCardProof]::SetWindowPos($process.MainWindowHandle, [IntPtr]::Zero, 0, 0, $Width, $Height, 0x0040)) { throw 'Card resize failed' }
-            Wait-Card { $script:cardLog -match '\[update\] notes viewport=' } 'Card did not expose wrapped note bounds'
+            Wait-Card { $script:cardLog -match '\[update\] notes viewport=' -and $script:cardLog -match '\[update\] card remaining=' } 'Card did not expose wrapped note bounds'
         }
         function Toggle-Card([string]$View) {
             $click = Card-Click 'more row'
             $lp = [IntPtr](($click.y -shl 16) -bor $click.x)
+            $script:cardLog = ''
+            Remove-Item $log -Force
             $null = [ReleaseCardProof]::PostMessage($process.MainWindowHandle, 0x201, [IntPtr]1, $lp)
             $null = [ReleaseCardProof]::PostMessage($process.MainWindowHandle, 0x202, [IntPtr]0, $lp)
-            Wait-Card { $script:cardLog -match ('card view=' + $View) } 'Card expansion control did not change view'
+            Wait-Card { $script:cardLog -match ('card view=' + $View) -and $script:cardLog -match '\[update\] card remaining=' } 'Card expansion control did not change view'
         }
         Resize-Card 1024 768
         $normal = Card-Bounds
@@ -119,8 +121,10 @@ try {
         $local.Y = [int](($expanded.top + $expanded.bottom) / 2)
         if (-not [ReleaseCardProof]::ClientToScreen($process.MainWindowHandle, [ref]$local)) { throw 'Card wheel coordinate failed' }
         $wheelPoint = [IntPtr](($local.Y -shl 16) -bor ($local.X -band 0xffff))
+        $script:cardLog = ''
+        Remove-Item $log -Force
         $null = [ReleaseCardProof]::PostMessage($process.MainWindowHandle, 0x20A, [IntPtr](-120 -shl 16), $wheelPoint)
-        Wait-Card { (Card-Bounds).scroll -gt 0 } 'Notes did not scroll inside their card'
+        Wait-Card { $script:cardLog -match '\[update\] card remaining=' -and (Card-Bounds).scroll -gt 0 } 'Notes did not scroll inside their card'
         $scrolled = Card-Bounds
         $restartAfter = Card-Click 'restart button'
         if ($restartBefore.x -ne $restartAfter.x -or $restartBefore.y -ne $restartAfter.y -or $restartAfter.y -le $scrolled.bottom -or $scrolled.top -lt 0 -or $restartAfter.y -ge 480) { throw 'Scrolling moved or hid Restart' }

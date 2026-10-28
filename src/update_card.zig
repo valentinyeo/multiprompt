@@ -123,6 +123,7 @@ var measured_font_gen: u32 = 0;
 var measured_shown: usize = 0;
 var note_heights: [16]i32 = @splat(0);
 var notes_height: i32 = 0;
+var last_notes_rect: RECT = std.mem.zeroes(RECT);
 
 fn measureNotes() void {
     const sticky = sidebarStickyCardRect();
@@ -385,6 +386,10 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     const shown = card_notes.shown(card_expanded);
     const notes_rect = updateCardNotesRect(card);
     const viewport_height = @max(0, notes_rect.bottom - notes_rect.top);
+    if (!std.meta.eql(last_notes_rect, notes_rect)) {
+        last_notes_rect = notes_rect;
+        card_notes_logged = false;
+    }
     card_scroll = std.math.clamp(card_scroll, 0, @max(0, notes_height - viewport_height));
     const saved_dc = @import("win32.zig").SaveDC(hdc);
     if (saved_dc != 0) {
