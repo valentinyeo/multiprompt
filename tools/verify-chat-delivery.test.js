@@ -1101,3 +1101,14 @@ test('IGSH-1063 question proof selects the saved AMOLED theme and supports publi
   assert.match(adapter, /feature: chat-options/);
   assert.match(adapter, /tag: \$\{\{ github\.event\.client_payload\.tag \|\| '' \}\}/);
 });
+
+test('Doctor waits for visible versioned UIA state after native tab transitions without accepting another process', () => {
+  const doctor = drive.slice(drive.indexOf('function Doctor('), drive.indexOf('function Press('));
+  assert.match(doctor, /Wait-For 'visible versioned owned app' \{/);
+  assert.match(doctor, /\$element = \[System.Windows.Automation.AutomationElement\]::FromHandle\(\$main\)/);
+  assert.match(doctor, /-not \$element.Current.IsOffscreen -and \$element.Current.ProcessId -eq \$app.Id -and \$title -match/);
+  assert.match(doctor, /Save .*IsOffscreen.*ProcessId.*title.*doctor-window.json/);
+  assert.match(doctor, /throw 'Doctor: visible versioned UI Automation identity missing'/);
+  assert.match(doctor, /Owner\(\$main\) -ne \$app.Id/);
+  assert.match(doctor, /\$app.HasExited -or \$app.Path -ne \$Exe -or \(Get-FileHash \$Exe -Algorithm SHA256\).Hash -ne \$ExpectedHash/);
+});

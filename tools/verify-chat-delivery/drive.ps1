@@ -92,9 +92,15 @@ function Doctor([bool]$Chat = $false) {
     $app.Refresh()
     if ($app.HasExited -or $app.Path -ne $Exe -or (Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Doctor: executable identity mismatch' }
     if ([ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Class($main) -ne 'ZigShell') { throw 'Doctor: owned main HWND missing' }
-    $element = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+    try {
+        $element = Wait-For 'visible versioned owned app' {
+            $element = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+            $title = $element.Current.Name
+            if (-not $element.Current.IsOffscreen -and $element.Current.ProcessId -eq $app.Id -and $title -match ('multiprompt v' + [regex]::Escape($ExpectedVersion) + '(?:\s|$)')) { return $element }
+            Save @{offscreen=$element.Current.IsOffscreen; pid=$element.Current.ProcessId; title=$title; hwnd=$main.ToInt64()} "$caseDir/doctor-window.json"
+        } 10
+    } catch { throw 'Doctor: visible versioned UI Automation identity missing' }
     $title = $element.Current.Name
-    if ($element.Current.IsOffscreen -or $element.Current.ProcessId -ne $app.Id -or $title -notmatch ('multiprompt v' + [regex]::Escape($ExpectedVersion) + '(?:\s|$)')) { throw 'Doctor: visible versioned UI Automation identity missing' }
     $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
     if (@($published.shells).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 3 }).Count -ne 1 -or
         ($expectedShells -eq 2 -and @($published.shells | Where-Object { $_.kind -eq 0 }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not published' }
