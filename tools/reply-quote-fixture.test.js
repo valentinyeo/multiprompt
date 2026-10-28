@@ -42,7 +42,7 @@ test('context Reply handles user and agent blocks but not tool-only blocks', () 
   assert.match(render, /AppendMenuW\(menu, MF_STRING, @intFromEnum\(item\), item\.text\(\)\)/);
   assert.match(render, /chatContextMenuItems\([^\n]*reply_text != null/);
   assert.match(render, /4 => if \(reply_text\) \|text\| \{[^]*?selectChatReply\(text\)/);
-  assert.ok(render.indexOf("reply_text = std.heap.page_allocator.dupe") < render.indexOf("const cmd = TrackPopupMenu"));
+  assert.ok(render.indexOf("reply_text = std.heap.page_allocator.dupe") < render.indexOf("const cmd"));
   assert.match(render, /block.role == \.prose or block.role == \.code/);
   const body = render.slice(render.indexOf('pub fn chatReplyToBlock('), render.indexOf('pub fn chatReplyLatestAgent('));
   assert.match(body, /role == \.tool\) return/);
@@ -205,4 +205,11 @@ test "load older source, choose nearest preceding original, cancel across sessio
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('combined message menu captures Reply before either modal event loop', () => {
+  const snapshot = render.indexOf("reply_text = std.heap.page_allocator.dupe");
+  const combined = render.indexOf('@import("chat_message_menu.zig").track');
+  const native = render.indexOf('} else @intCast(TrackPopupMenu');
+  assert.ok(snapshot >= 0 && combined > snapshot && native > snapshot, 'both modal menus use the captured Reply text');
 });

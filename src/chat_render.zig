@@ -5034,14 +5034,14 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     var pt = POINT{ .x = GET_X(lp), .y = GET_Y(lp) };
     _ = ClientToScreen(hwnd, &pt);
     _ = SetForegroundWindow(app_state.g_main_hwnd);
-    const cmd = if (combined) combined_menu: {
+    const cmd: u32 = if (combined) combined_menu: {
         const index = block_at.?;
         const run = chat_style.runBounds(app_state.g_chat_bubble_pos[0..app_state.g_chat_block_count], index);
         pt = .{ .x = app_state.g_chat_content_left + app_state.g_chat_layout_rects[run.first].left, .y = app_state.g_chat_layout_rects[run.last].bottom - app_state.g_chat_scroll_y + uiScaled(6) };
         _ = ClientToScreen(hwnd, &pt);
         debugLog("[chat] combined message menu reactions=3 actions=Reply,Copy,Copy request ID");
         break :combined_menu @import("chat_message_menu.zig").track(app_state.g_main_hwnd, pt);
-    } else TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null);
+    } else @intCast(TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null));
     switch (cmd) {
         8, 9, 10 => if (reply_text) |quote| {
             const current_identity = chatFileIdentity();

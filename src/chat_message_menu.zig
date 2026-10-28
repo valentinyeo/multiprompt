@@ -154,7 +154,7 @@ pub fn track(owner: w.HANDLE, anchor: w.POINT) u32 {
     defer _ = w.DestroyWindow(hwnd);
     const region = w.CreateRoundRectRgn(0, 0, scaled(width) + 1, scaled(height) + 1, scaled(32), scaled(32));
     if (w.SetWindowRgn(hwnd, region, 0) == 0) _ = w.DeleteObject(region);
-    _ = w.ShowWindow(hwnd, 4);
+    _ = @import("focus.zig").ShowWindow(hwnd, 4);
     _ = w.SetCapture(hwnd);
     defer _ = w.ReleaseCapture();
     var message: w.MSG = undefined;
