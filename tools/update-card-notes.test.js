@@ -180,7 +180,19 @@ test('IGSH-1090 published executable paints its own published notes, with no bin
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const response = await fetch('https://api.github.com/repos/valentinyeo/multiprompt/releases/latest');
   assert.equal(response.status, 200);
-  const release = await response.json();
+  let release = await response.json();
+  const historyAsset = release.assets.find(asset => asset.name === 'release-notes.json');
+  assert.ok(historyAsset);
+  const historyResponse = await fetch(historyAsset.browser_download_url);
+  assert.equal(historyResponse.status, 200);
+  const history = await historyResponse.json();
+  const feature = history.releases.find(item => item.changes.includes('Update cards explain each change, without generic messages.'));
+  assert.ok(feature, 'Feature must be published before its release-card proof');
+  if (release.tag_name !== `v${feature.version}`) {
+    const tagged = await fetch(`https://api.github.com/repos/valentinyeo/multiprompt/releases/tags/v${feature.version}`);
+    assert.equal(tagged.status, 200);
+    release = await tagged.json();
+  }
   assert.match(release.tag_name, /^v\d+\.\d+\.\d+$/);
   const assets = {};
   for (const name of ['multiprompt-x64.exe', 'release-notes.json']) {
