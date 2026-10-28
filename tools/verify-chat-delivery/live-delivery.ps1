@@ -2,7 +2,29 @@
 Bind-Transcript
 $observation.rounds = [Collections.Generic.List[object]]::new()
 $frames = [Collections.Generic.List[string]]::new()
-foreach ($round in 1..10) {
+$longDelivery = $env:CHAT_LONG_PROOF -eq '1'
+$releasedLongDelivery = $longDelivery -and $env:RELEASE_TAG
+$roundCount = if ($releasedLongDelivery) { 31 } else { 10 }
+$firstReplyMs = 0L
+$observation.longDelivery = $longDelivery
+if ($longDelivery) {
+    $retained = Wait-For 'older history fully retained before live refresh' {
+        foreach ($cache in @(Get-ChildItem "$settings/chatcache/*.jsonl" -ErrorAction SilentlyContinue)) {
+            $header = Get-Content -LiteralPath $cache.FullName -TotalCount 1 | ConvertFrom-Json
+            if ($header.sid -eq $sid -and $header.start -eq 0 -and $header.offset -eq (Get-Item $transcript).Length) { return $header }
+        }
+    }
+    Save $retained "$caseDir/retained-header.json"
+}
+foreach ($round in 1..$roundCount) {
+    if ($releasedLongDelivery -and $round -gt 1) {
+        $due = $firstReplyMs + ($round - 1) * 60000
+        while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $due) {
+            Doctor $true
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if ($longDelivery -and $round -gt 1) { Shell-Run @('refresh-live-tail') }
     Shell-Input 'busy'
     $messages = @(1..3 | ForEach-Object { "Live request $round part $_" })
     foreach ($message in $messages) {
@@ -18,6 +40,7 @@ foreach ($round in 1..10) {
     Shot $queuedFrame
     $frames.Add($queuedFrame)
     Shell-Run @('live-turn', [string]$round)
+    if ($firstReplyMs -eq 0) { $firstReplyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
     $answer = "Live answer $round"
     [void](Wait-For 'fresh reply rendered without changing views' {
         $paletteStart = (Read-Shared "$settings/debug.log").Length
@@ -44,6 +67,26 @@ foreach ($round in 1..10) {
     Shot $frameName
     $frames.Add($frameName)
     $observation.rounds.Add(@{round=$round; messages=$messages; answer=$answer; shownMs=$shownMs})
+}
+$observation.sustainedMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $firstReplyMs
+if ($longDelivery) {
+    Shot 'live-chat-after'
+    Press @(0x12, 0x43) 'Alt+C: capture completed shell'
+    Shot 'live-shell-after'
+    Press @(0x12, 0x43) 'Alt+C: return after completed proof'
+    $composer = Wait-For 'composer restored after completed proof' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+    foreach ($phase in @('before', 'after')) {
+        $shellImage = [Drawing.Image]::FromFile("$Evidence/" + $(if ($phase -eq 'before') { 'live-delivery-before.png' } else { 'live-shell-after.png' }))
+        $chatImage = [Drawing.Image]::FromFile("$Evidence/" + $(if ($phase -eq 'before') { 'live-queued-01.png' } else { 'live-chat-after.png' }))
+        $pair = [Drawing.Bitmap]::new($shellImage.Width + $chatImage.Width, [Math]::Max($shellImage.Height, $chatImage.Height))
+        $graphics = [Drawing.Graphics]::FromImage($pair)
+        try {
+            $graphics.DrawImage($shellImage, 0, 0)
+            $graphics.DrawImage($chatImage, $shellImage.Width, 0)
+            $pair.Save("$Evidence/live-side-by-side-$phase.png", [Drawing.Imaging.ImageFormat]::Png)
+        } finally { $graphics.Dispose(); $pair.Dispose(); $shellImage.Dispose(); $chatImage.Dispose() }
+    }
 }
 Add-Type -AssemblyName PresentationCore, WindowsBase
 $encoder = [System.Windows.Media.Imaging.GifBitmapEncoder]::new()

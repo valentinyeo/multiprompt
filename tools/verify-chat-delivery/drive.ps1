@@ -516,6 +516,7 @@ foreach ($plan in $plans) {
         if ($hasTranscript) { Shell-Run @('init') }
         if ($isReply) { Shell-Run @('reply-reference') }
         if ($isNotes) { Shell-Run @('session-notes') }
+        if ($isLiveDelivery -and $env:CHAT_LONG_PROOF -eq '1') { Shell-Run @('history') }
         if ($isHistory) { Shell-Run @($(if ($env:CHAT_RETENTION_PROOF -eq '1') { 'retention-init' } else { 'history' })) }
         if ($isSwitch) { Shell-Run @('switch-history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
