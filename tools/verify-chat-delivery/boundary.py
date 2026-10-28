@@ -476,7 +476,7 @@ def shell():
                 raise ctypes.WinError(ctypes.get_last_error())
             try:
                 filename = str(transcript.resolve()).encode("utf-16-le")
-                buffer = ctypes.create_string_buffer(RenameInfo.FileName.offset + len(filename))
+                buffer = ctypes.create_string_buffer(RenameInfo.FileName.offset + len(filename) + ctypes.sizeof(wintypes.WCHAR))
                 info = ctypes.cast(buffer, ctypes.POINTER(RenameInfo)).contents
                 info.Flags = 1 | 2
                 info.FileNameLength = len(filename)
