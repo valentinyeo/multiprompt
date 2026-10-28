@@ -143,7 +143,7 @@ pub fn activePaneContentRect(client: RECT) RECT {
 
 pub fn repositionActive() void {
     if (app_state.active_shell >= app_state.shell_count) return;
-    if (app_state.shells[app_state.active_shell].hwnd == null or app_state.g_main_hwnd == null) return;
+    if (app_state.g_main_hwnd == null) return;
     if (!shellConsoleShouldBeVisible(app_state.active_shell) and IsWindowVisible(app_state.shells[app_state.active_shell].hwnd) != 0) _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
     if (IsIconic(app_state.g_main_hwnd) != 0) return;
     if (app_state.g_webview2_active) {
@@ -167,6 +167,7 @@ pub fn repositionActive() void {
         layoutChatControls();
         return;
     }
+    if (app_state.shells[app_state.active_shell].hwnd == null) return;
     if (!shellConsoleShouldBeVisible(app_state.active_shell)) return;
     if (fontGenStale(app_state.shells[app_state.active_shell].font_gen, app_state.g_font_gen)) _ = fontSyncShell(app_state.active_shell);
     const nudge = app_state.g_nudge_repaint;

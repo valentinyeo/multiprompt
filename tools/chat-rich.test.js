@@ -183,7 +183,7 @@ test('IGSH-567 pending bubbles share transcript ranges, hit testing, highlightin
   assert.match(body('chatTranscriptCharAt'), /chatSelectionRect/);
   assert.match(body('chatTranscriptCharAt'), /chatFlowBlock/);
   assert.match(body('chatTranscriptMouseDown'), /chatWordRangeAt\(display\.text/);
-  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, e\.text, text_rc, false, true, null, offset,/);
+  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, e\.text\[start\.\.\], text_rc, false, true, null, offset \+ start,/);
   assert.match(body('chatPaintTranscriptContent'), /chatPaintEcho\([^;]*display\.start\)/);
   assert.match(body('chatSelectionToClipboard'), /chatCopyPlainText\([^;]*display\.text/);
   assert.match(body('chatCopyTextAlloc'), /g_chat_block_count \+ g_chat_echo_layout_count/);

@@ -7,6 +7,17 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const stable_optimize: std.builtin.OptimizeMode = if (optimize == .Debug) .ReleaseSmall else optimize;
     const app_version = b.option([]const u8, "version", "Override the embedded app version");
+    const build_revision = b.option([]const u8, "revision", "Embed the verified source revision");
+    const revision_marker = b.fmt("MPREVISION={s};", .{build_revision orelse ""});
+    const revision_source = b.addWriteFiles().add("revision.zig", b.fmt("pub export const mp_revision_marker: [{d}]u8 = \"{f}\".*;\n", .{ revision_marker.len, std.zig.fmtString(revision_marker) }));
+    const revision_object = b.addObject(.{
+        .name = "build-revision",
+        .root_module = b.createModule(.{
+            .root_source_file = revision_source,
+            .target = target,
+            .optimize = stable_optimize,
+        }),
+    });
     const release = b.option(bool, "release", "Build a publishable release with a configured signing public key") orelse false;
     if (release) {
         const encoded = std.mem.trim(u8, @embedFile("src/release_signing_public_key.txt"), " \r\n\t");
@@ -34,6 +45,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    exe.root_module.addObject(revision_object);
     exe.subsystem = .Windows;
     exe.stack_size = MAIN_STACK_SIZE;
     exe.root_module.addWin32ResourceFile(.{ .file = b.path("assets/zigshell.rc") });
@@ -80,6 +92,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    dev_exe.root_module.addObject(revision_object);
     dev_exe.subsystem = .Windows;
     dev_exe.stack_size = MAIN_STACK_SIZE;
     dev_exe.root_module.addWin32ResourceFile(.{ .file = b.path("assets/zigshell.rc") });
@@ -262,7 +275,10 @@ pub fn build(b: *std.Build) void {
         }),
         .filters = &.{"IGSH-991"},
     });
-    const run_chat_echo_budget_tests = b.addRunArtifact(chat_echo_budget_tests);
+    const run_chat_echo_budget_tests = std.Build.Step.Run.create(b, "run chat echo CPU budgets");
+    run_chat_echo_budget_tests.addArtifactArg(chat_echo_budget_tests);
+    run_chat_echo_budget_tests.expectExitCode(0);
+    run_chat_echo_budget_tests.has_side_effects = true;
     const chat_perf_step = b.step("test-chat-perf", "Run native Chat View CPU and 50 MB history regressions");
     chat_perf_step.dependOn(&run_chat_perf_tests.step);
     chat_perf_step.dependOn(&run_chat_echo_budget_tests.step);
@@ -270,6 +286,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_chat_echo_budget_tests.step);
     vps_test_step.dependOn(&run_chat_perf_tests.step);
     vps_test_step.dependOn(&run_chat_echo_budget_tests.step);
+    const chat_perf_clock_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-perf-clock.test.js" });
+    test_step.dependOn(&chat_perf_clock_tests.step);
+    vps_test_step.dependOn(&chat_perf_clock_tests.step);
+    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/switch-performance.test.mjs" }).step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
     test_step.dependOn(&chat_cpu_regression.step);
     const chat_backfill_fairness_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-backfill-fairness.test.js" });
@@ -474,7 +494,7 @@ pub fn build(b: *std.Build) void {
     const run_frequent_tests = b.addRunArtifact(frequent_tests);
     test_step.dependOn(&run_frequent_tests.step);
     vps_test_step.dependOn(&run_frequent_tests.step);
-    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js", "tools/account-keys.test.js", "tools/split-settings.test.js" });
+    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/changelog-layout.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js", "tools/account-keys.test.js", "tools/split-settings.test.js" });
     frequent_integration_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&frequent_integration_tests.step);
     vps_test_step.dependOn(&frequent_integration_tests.step);
@@ -498,7 +518,7 @@ pub fn build(b: *std.Build) void {
     chat_drafts_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_drafts_tests.step);
     vps_test_step.dependOn(&chat_drafts_tests.step);
-    const chat_switch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-switch.test.js", "tools/chat-shell-override.test.js" });
+    const chat_switch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-switch.test.js", "tools/chat-shell-override.test.js", "tools/chat-shape-switch.test.js" });
     chat_switch_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_switch_tests.step);
     vps_test_step.dependOn(&chat_switch_tests.step);
@@ -595,7 +615,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&skills_and_sync_login_tests.step);
     const system_theme_follow_tests = b.addSystemCommand(&.{ "node", "--test", "tools/system-theme-follow.test.js" });
     test_step.dependOn(&system_theme_follow_tests.step);
-    const search_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/search-selection.test.js", "tools/list-input.test.js" });
+    const search_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/search-selection.test.js", "tools/list-input.test.js", "tools/palette-dialog-design.test.js" });
     test_step.dependOn(&search_selection_tests.step);
     const ctrl_t_palette_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ctrl-t-palette-usage.test.js" });
     test_step.dependOn(&ctrl_t_palette_tests.step);
@@ -660,6 +680,9 @@ pub fn build(b: *std.Build) void {
     const zsb_reply_tests = b.addSystemCommand(&.{ "node", "--test", "tools/vps-multiprompt-browser.test.js" });
     vps_test_step.dependOn(&zsb_reply_tests.step);
     vps_test_step.dependOn(&zsb_deadline_tests.step);
+    const manage_snippets_tests = b.addSystemCommand(&.{ "node", "--test", "tools/manage-snippets.test.js" });
+    test_step.dependOn(&manage_snippets_tests.step);
+    vps_test_step.dependOn(&manage_snippets_tests.step);
     const snippet_form_input_tests = b.addSystemCommand(&.{ "node", "--test", "tools/snippet-form-input.test.js" });
     test_step.dependOn(&snippet_form_input_tests.step);
     const console_url_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/console-url-copy.test.js" });
@@ -681,6 +704,9 @@ pub fn build(b: *std.Build) void {
     const zig_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zig-copy.test.js" });
     test_step.dependOn(&zig_copy_tests.step);
     vps_test_step.dependOn(&zig_copy_tests.step);
+    const live_delivery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-delivery-live-proof.test.mjs" });
+    test_step.dependOn(&live_delivery_tests.step);
+    vps_test_step.dependOn(&live_delivery_tests.step);
     const test_wiring_tests = b.addSystemCommand(&.{ "node", "--test", "tools/test-wiring.test.js", "tools/heavy-guard.test.js" });
     test_step.dependOn(&test_wiring_tests.step);
     vps_test_step.dependOn(&test_wiring_tests.step);
@@ -698,21 +724,7 @@ pub fn build(b: *std.Build) void {
     idle_front_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&idle_front_tests.step);
     vps_test_step.dependOn(&idle_front_tests.step);
-    const server_tool_tests = b.addSystemCommand(&.{
-        "node",                                   "--test",                              "--test-concurrency=4",
-        "tools/app-source.test.js",               "tools/browser-fixed-layout.test.js",  "tools/browser-overlay.test.js",
-        "tools/browser-pane-hibernation.test.js", "tools/chat-cache-bound.test.js",      "tools/chat-correctness.test.js",
-        "tools/chat-history-reader.test.js",      "tools/chat-reset.test.js",            "tools/chat-tables.test.js",
-        "tools/chat-transcript-history.test.js",  "tools/chat_injected.test.js",         "tools/crash-report.test.js",
-        "tools/debug-log.test.js",                "tools/favorites.test.js",             "tools/focus-guard.test.js",
-        "tools/idle-cpu.test.js",                 "tools/inbox-eta.test.js",             "tools/inbox-exclude.test.js",
-        "tools/power-saver.test.js",              "tools/sidebar-custom-groups.test.js", "tools/chat-shared-style.test.js", "tools/token-ladder-panel.test.js",
-        "tools/unarchive-semantics.test.js",      "tools/update-card.test.js",           "tools/zsb-active-tab.test.js",
-        "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",      "extension/focus-guard.test.js",
-        "tools/chat-queued-notes.test.js",         "tools/chat-unconfirmed-duplicate.test.js",
-        "tools/auto-release-admit.test.js",       "tools/automerge-admit.test.mjs",
-        "tools/chat-unread-visit.test.js",
-    });
+    const server_tool_tests = b.addSystemCommand(&.{ "node", "tools/discover-tests.cjs" });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     vps_test_step.dependOn(&server_tool_tests.step);

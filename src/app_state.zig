@@ -235,6 +235,12 @@ pub const Shell = struct {
     activity: ShellActivity,
     working_since_ms: u64 = 0,
     permission_answered: bool = false,
+    chat_question_identity: u64 = 0,
+    chat_question_index: usize = 0,
+    chat_question_selected: u32 = 0,
+    chat_question_other: bool = false,
+    chat_question_other_sent: bool = false,
+    chat_question_other_hash: u64 = 0,
     needs_attention: bool,
     hook_capable: bool = false,
     turn_pending: bool = false,
@@ -975,6 +981,7 @@ pub var g_search_reminders_mode: bool = false;
 pub var g_search_session_overview_mode: bool = false;
 pub var g_search_openall_host_mode: bool = false;
 pub var g_search_snippet_mode: bool = false;
+pub var g_search_snippet_manage_mode: bool = false;
 pub var g_remind_sid: u32 = 0;
 pub var g_remind_target_sid: u32 = 0;
 pub var g_browser_url_mode: bool = false;
@@ -1111,13 +1118,13 @@ pub var g_chat_hidden_tool_rows: u32 = 0;
 pub var g_chat_screen_working: bool = false;
 pub var g_chat_permission: @import("chat_permission.zig").PermissionMenu = .{};
 pub var g_chat_permission_sid: u32 = 0;
-pub var g_chat_question: @import("chat_options.zig").Group = .{};
-pub var g_chat_question_sid: u32 = 0;
 pub var g_chat_working_text: [128]u16 = std.mem.zeroes([128]u16);
 pub var g_chat_screen_status_len: usize = 0;
 pub var g_chat_working_applied: [128]u16 = std.mem.zeroes([128]u16);
 pub var g_chat_working_applied_len: usize = 0;
 pub var g_chat_raw: [262144]u16 = std.mem.zeroes([262144]u16);
+pub var g_chat_raw_len: usize = 0;
+pub var g_chat_raw_sid: u32 = 0;
 pub var g_chat_capture_storage: [262144]u16 = @splat(0);
 pub var g_chat_capture: []u16 = &g_chat_capture_storage;
 pub var g_chat_line_starts: [1400]usize = std.mem.zeroes([1400]usize);
@@ -1397,6 +1404,7 @@ pub const REMIND_PRESET_CUSTOM: usize = 12;
 pub const REMIND_PRESET_COUNT: usize = 13;
 pub const SEARCH_CODEX_TMUX_OFFSET: usize = 6253;
 pub const SEARCH_SNIPPETS_MENU_OFFSET: usize = 6254;
+pub const SEARCH_SNIPPET_MANAGE_OFFSET: usize = 6296;
 pub const SEARCH_SNIPPET_CREATE_OFFSET: usize = 6255;
 pub const SEARCH_SNIPPET_BACK_OFFSET: usize = 6256;
 pub const SEARCH_SNIPPET_OFFSET: usize = 6257;
@@ -2600,6 +2608,8 @@ pub const ChatHistoryEntry = struct {
     show_older: bool = false,
     tables: chat_markdown.TableCache = .{},
     pending: bool = false,
+    push_pending: bool = false,
+    stream: ?*ChatHistoryStream = null,
     retired: bool = false,
     cache_cancelled: std.atomic.Value(bool) = .init(false),
     loaded_ms: i64 = 0,
@@ -2636,7 +2646,20 @@ pub var g_chat_cache_pruned: u64 = 0;
 
 pub var g_chat_cache_write_mutex: SpinMutex = .{};
 
+pub const ChatHistoryStream = struct {
+    channel: ChatHistoryChannel = .{ .watch = true },
+    mutex: SpinMutex = .{},
+    refs: std.atomic.Value(u32) = .init(2),
+    cancelled: std.atomic.Value(bool) = .init(false),
+    ended: std.atomic.Value(bool) = .init(false),
+    ready: std.atomic.Value(bool) = .init(false),
+    ack: HANDLE = null,
+    id: u32,
+    wire: std.ArrayList(u8) = .empty,
+    read_us: u64 = 0,
+};
 pub const ChatHistoryChannel = struct {
+    watch: bool = false,
     process: HANDLE = null,
     input: HANDLE = null,
     output: HANDLE = null,
@@ -2873,6 +2896,8 @@ pub const ChatConfirmedEcho = struct {
     block_start: usize = 0,
     block_len: usize = 0,
     stamp_ms: i64 = 0,
+    message_id: u64 = 0,
+    text_hash: u64 = 0,
 };
 
 pub var g_chat_outbox: std.ArrayList(ChatOutboxEntry) = .empty;

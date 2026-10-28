@@ -1,5 +1,7 @@
 # Chat View
 
+Verify on: push
+
 Keep the real desktop entry journey separate from the deterministic received-message renderer proof and the [Chat delivery](chat-delivery.md) tmux-channel journey.
 
 ## Sub-features

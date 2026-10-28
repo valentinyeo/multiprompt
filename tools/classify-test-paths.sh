@@ -1,7 +1,7 @@
 base="$BASE"
 if [ "$EVENT" = pull_request ]; then
   base="$(git merge-base "$BASE" "$HEAD")"
-elif [ "$EVENT" = workflow_dispatch ]; then
+elif [ "$EVENT" = workflow_dispatch ] || { [ "$EVENT" = push ] && [ "${GITHUB_REF:-refs/heads/master}" != refs/heads/master ]; }; then
   base="$(git merge-base origin/master "$HEAD")"
 elif [ "$base" = 0000000000000000000000000000000000000000 ]; then
   base="$(git hash-object -t tree /dev/null)"

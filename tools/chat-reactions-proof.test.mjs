@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import fs from 'node:fs';
 import { inspect, assertBadge } from './chat-reactions-proof.mjs';
 import * as proof from './chat-reactions-proof.mjs';
 
@@ -117,4 +118,16 @@ test('native three-dot more glyph is visible; a missing glyph still fails', () =
   assert.equal(proof.assertHoverActions(image, first).moreX, 326);
   for (const x of [320, 323, 326]) for (const y of [136, 137]) image.pixels.writeUIntLE(0, (y * image.width + x) * 4, 3);
   assert.throws(() => proof.assertHoverActions(image, first), /hover action 2 is painted/);
+});
+
+
+test('reaction proof measures the painted transcript, excluding the floating composer', () => {
+  const driver = fs.readFileSync(new URL('./verify-chat-delivery/reactions.ps1', import.meta.url), 'utf8');
+  assert.match(driver, /frame transcript/);
+  assert.match(driver, /ScreenPoint\(\$main, 0, 0\)/);
+  assert.match(driver, /Save \$area "\$caseDir\/area.json"/);
+  const f = fixture();
+  f.fill(20, 245, 250, 280, 0x444444);
+  assert.throws(() => assertBadge(inspect(f.image, area)));
+  assertBadge(inspect(f.image, { ...area, bottom: 235 }));
 });

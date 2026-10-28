@@ -5,6 +5,12 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 const test = require('node:test');
 
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
+
 const root = path.resolve(__dirname, '..');
 const oldCheck = `set -euo pipefail
 sha=$(git rev-parse HEAD)
@@ -44,6 +50,7 @@ function fixture(t) {
   fs.writeFileSync(log, '');
   fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}
 const fs = require('node:fs');
+
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
 if (process.env.GH_FAIL === 'true') process.exit(1);
@@ -277,7 +284,7 @@ test('the admit script names the journey the verify workflow runs on every maste
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   const autoRelease = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
   assert.match(admit, /RELEASE_JOURNEY=relaunch-saved-sessions/);
-  assert.match(workflow, /fromJSON\('\["appearance", "chat-dictation", "relaunch-saved-sessions", [^\n]*\]'\)/);
+  assert.ok(featureMatrix(workflow).full.includes('relaunch-saved-sessions'));
   assert.match(autoRelease, /workflows: \[Tests, Verify desktop, Release gate\]/);
   assert.match(autoRelease, /workflow_run\.name == 'Release gate'/);
 });

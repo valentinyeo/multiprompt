@@ -1,5 +1,7 @@
 # Palette order
 
+Verify on: push
+
 Open an empty Ctrl+K with a known usage history and check the Most used band, the job groups, a removed command and renamed commands.
 
 ## Sub-features

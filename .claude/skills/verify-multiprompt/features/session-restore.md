@@ -1,5 +1,7 @@
 # Session restore
 
+Verify on: push
+
 Reopen the workspace and local CMD session that was selected, after an updater restart, a normal close or a killed process, including whether it was open in Starred or its home workspace.
 
 ## Sub-features

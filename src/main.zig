@@ -528,7 +528,6 @@ const armStartupConsoleGeometrySettle = @import("console.zig").armStartupConsole
 const settleConsoleGeometry = @import("console.zig").settleConsoleGeometry;
 const BROWSER_EDGE_MASK_COUNT = @import("app_state.zig").BROWSER_EDGE_MASK_COUNT;
 const CHAT_FONT_DEFAULT_PT = @import("app_state.zig").CHAT_FONT_DEFAULT_PT;
-const SEARCH_VISIBLE_ROWS = @import("app_state.zig").SEARCH_VISIBLE_ROWS;
 const SEARCH_WHEEL_ROWS = @import("app_state.zig").SEARCH_WHEEL_ROWS;
 const SEARCH_TMUX_OFFSET = @import("app_state.zig").SEARCH_TMUX_OFFSET;
 const SEARCH_NEW_OFFSET = @import("app_state.zig").SEARCH_NEW_OFFSET;
@@ -698,6 +697,7 @@ const REMIND_PRESET_CUSTOM = @import("app_state.zig").REMIND_PRESET_CUSTOM;
 const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
 const SEARCH_SNIPPETS_MENU_OFFSET = @import("app_state.zig").SEARCH_SNIPPETS_MENU_OFFSET;
+const SEARCH_SNIPPET_MANAGE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_MANAGE_OFFSET;
 const SEARCH_SNIPPET_CREATE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_CREATE_OFFSET;
 const SEARCH_SNIPPET_BACK_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_BACK_OFFSET;
 const SEARCH_SNIPPET_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_OFFSET;
@@ -1128,6 +1128,8 @@ const uiUnscaled = @import("drawing.zig").uiUnscaled;
 const searchRowH = @import("drawing.zig").searchRowH;
 const searchInputH = @import("drawing.zig").searchInputH;
 const searchOverlayW = @import("drawing.zig").searchOverlayW;
+const searchFooterH = @import("drawing.zig").searchFooterH;
+const searchOverlayOy = @import("drawing.zig").searchOverlayOy;
 const searchOverlayOx = @import("drawing.zig").searchOverlayOx;
 const searchResultRowAtClientPoint = @import("drawing.zig").searchResultRowAtClientPoint;
 const paintSidebar = @import("sidebar.zig").paintSidebar;
@@ -1546,6 +1548,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_SIZE => {
             more_menu.close();
+            @import("workspace_switcher.zig").close();
             const SIZE_MINIMIZED: WPARAM = 1;
             if (wp == SIZE_MINIMIZED) {
                 resetPaintBackbuffer();
@@ -1642,6 +1645,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("workspaces.zig").captureWorkspaceFocus();
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+            if (!app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
+                !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
+                !app_state.g_snippet_create_active and @import("workspace_switcher.zig").headerClick(mx, my)) return 0;
 
             if (!app_state.g_search_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and
                 !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_url_picker_active and
@@ -1829,10 +1835,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const click_ow: i32 = searchOverlayW();
                 const click_rh: i32 = searchRowH();
                 const click_ih: i32 = searchInputH();
-                const click_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
-                const click_oh: i32 = click_ih + @as(i32, @intCast(click_capacity)) * click_rh;
+                const click_capacity: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
+                const click_oh: i32 = click_ih + @as(i32, @intCast(click_capacity)) * click_rh + searchFooterH();
                 const click_ox = searchOverlayOx(click_win_w, click_ow);
-                const click_oy = @divFloor(click_win_h - click_oh, 3);
+                const click_oy = searchOverlayOy(click_win_h, click_oh);
 
                 if (searchResultRowAtClientPoint(mx, my)) |clicked_row| {
                     if (paletteRowIsHeader(app_state.g_search_results[clicked_row])) return 0;
@@ -2068,10 +2074,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const wheel_ow: i32 = searchOverlayW();
                 const wheel_rh: i32 = searchRowH();
                 const wheel_ih: i32 = searchInputH();
-                const wheel_vis: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
-                const wheel_oh: i32 = wheel_ih + @as(i32, @intCast(wheel_vis)) * wheel_rh;
+                const wheel_vis: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
+                const wheel_oh: i32 = wheel_ih + @as(i32, @intCast(wheel_vis)) * wheel_rh + searchFooterH();
                 const wheel_ox = searchOverlayOx(wheel_win_w, wheel_ow);
-                const wheel_oy = @divFloor(wheel_win_h - wheel_oh, 3);
+                const wheel_oy = searchOverlayOy(wheel_win_h, wheel_oh);
                 if (pt.x >= wheel_ox and pt.x < wheel_ox + wheel_ow and pt.y >= wheel_oy and pt.y < wheel_oy + wheel_oh) {
                     const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
                     app_state.g_search_wheel_remainder += @as(i32, delta);
@@ -2215,11 +2221,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const drag_win_h = drag_rc.bottom - drag_rc.top;
                 const drag_rh: i32 = searchRowH();
                 const drag_ih: i32 = searchInputH();
-                const drag_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
+                const drag_capacity: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
                 const drag_vis: i32 = @intCast(@min(app_state.g_search_result_count -| app_state.g_search_scroll, drag_capacity));
                 if (drag_vis > 0) {
-                    const drag_oh: i32 = drag_ih + @as(i32, @intCast(drag_capacity)) * drag_rh;
-                    const drag_oy = @divFloor(drag_win_h - drag_oh, 3);
+                    const drag_oh: i32 = drag_ih + @as(i32, @intCast(drag_capacity)) * drag_rh + searchFooterH();
+                    const drag_oy = searchOverlayOy(drag_win_h, drag_oh);
                     var hover: i32 = @divFloor(my_drag - (drag_oy + drag_ih), drag_rh);
                     if (hover < 0) hover = 0;
                     if (hover >= drag_vis) hover = drag_vis - 1;
@@ -2297,6 +2303,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (ady < 6) return 0;
                     const now = GetTickCount64();
                     if (app_state.drag_last_swap_tick != 0 and now - app_state.drag_last_swap_tick < 120) return 0;
+                    if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
                     if (sidebarStickyCardHitTest(my)) return 0;
 
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
@@ -2523,6 +2530,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
+                if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
                 if (sidebarStickyCardHitTest(my)) return 0;
                 const logical_my = my + app_state.g_sidebar_scroll;
                 const ht = hitTestSidebar(logical_my);
@@ -2567,6 +2575,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_LBUTTONDBLCLK => {
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+            if (!app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
+                !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
+                !app_state.g_snippet_create_active and @import("workspace_switcher.zig").headerClick(mx, my)) return 0;
             const tth = threadTitleHeight();
             const tth_top = threadTitleTop();
             if (tth > 0 and mx >= SIDEBAR_W() and my >= tth_top and my < tth_top + tth and app_state.active_shell < app_state.shell_count and
@@ -3663,6 +3674,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_KEYDOWN => {
+            if (@import("workspace_switcher.zig").key(wp)) return 0;
             if (app_state.g_search_active) list_input.palette.keyboard();
             if (app_state.g_url_picker_active) {
                 if (wp == 0x26) {
@@ -3730,6 +3742,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_APP_SEARCH_OPEN => {
+            app_state.g_search_snippet_mode = false;
+            app_state.g_search_snippet_manage_mode = false;
             app_state.g_focus_authorized_hwnd = null;
             app_state.g_focus_authorized_until = 0;
             app_state.g_focus_browser_shell_id = 0;
@@ -3856,6 +3870,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_SEARCH_CLOSE => {
+            app_state.g_search_snippet_mode = false;
+            app_state.g_search_snippet_manage_mode = false;
             const was_from_inbox = app_state.g_search_from_inbox;
             app_state.g_search_from_inbox = false;
             app_state.g_search_spawn_ws = 0xFF;
@@ -4006,6 +4022,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         keepSearchSelectionVisible();
                         showHeaderNoticeAscii("Snippet deleted", 1800, false);
                         _ = InvalidateRect(hwnd, null, 0);
+                    } else {
+                        showHeaderNoticeAscii("Could not delete snippet; saved snippets unchanged", 3500, true);
                     }
                     return 0;
                 }
@@ -4292,10 +4310,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         app_state.g_search_sel = if (app_state.g_search_sel >= app_state.g_search_result_count - 1) 0 else app_state.g_search_sel + 1;
                     },
                     2 => {
-                        app_state.g_search_sel = if (app_state.g_search_sel > SEARCH_VISIBLE_ROWS) app_state.g_search_sel - SEARCH_VISIBLE_ROWS else 0;
+                        app_state.g_search_sel = if (app_state.g_search_sel > @import("drawing.zig").searchVisibleRows()) app_state.g_search_sel - @import("drawing.zig").searchVisibleRows() else 0;
                     },
                     3 => {
-                        const next_sel = app_state.g_search_sel + SEARCH_VISIBLE_ROWS;
+                        const next_sel = app_state.g_search_sel + @import("drawing.zig").searchVisibleRows();
                         app_state.g_search_sel = if (next_sel >= app_state.g_search_result_count) app_state.g_search_result_count - 1 else next_sel;
                     },
                     6 => {
@@ -4769,8 +4787,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     openAllSessions(hwnd);
                     return 0;
                 }
+                if (target == SEARCH_SNIPPET_MANAGE_OFFSET) {
+                    _ = SendMessageW(hwnd, WM_APP_SNIPPETS_OPEN, 0, 0);
+                    app_state.g_search_snippet_manage_mode = true;
+                    return 0;
+                }
                 if (target == SEARCH_SNIPPETS_MENU_OFFSET) {
                     app_state.g_search_snippet_mode = true;
+                    app_state.g_search_snippet_manage_mode = false;
                     app_state.g_search_snippet_delete_confirm = null;
                     app_state.g_search_workspace_mode = false;
                     app_state.g_search_workspace_delete_mode = false;
@@ -4798,6 +4822,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (target == SEARCH_SNIPPET_BACK_OFFSET) {
                     app_state.g_search_snippet_mode = false;
+                    app_state.g_search_snippet_manage_mode = false;
                     app_state.g_search_snippet_delete_confirm = null;
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 0;
@@ -4812,8 +4837,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (target >= SEARCH_SNIPPET_OFFSET and target < SEARCH_SNIPPET_OFFSET + MAX_SNIPPETS) {
                     const sn_idx = target - SEARCH_SNIPPET_OFFSET;
+                    if (app_state.g_search_snippet_manage_mode) {
+                        _ = SendMessageW(hwnd, WM_APP_SNIPPET_DELETE, 0, 0);
+                        return 0;
+                    }
                     app_state.g_search_active = false;
                     app_state.g_search_snippet_mode = false;
+                    app_state.g_search_snippet_manage_mode = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
                     app_state.g_pending_new_tab_group = 0;
@@ -6434,33 +6464,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     app_state.g_pending_new_tab_group = 0;
                     showActiveShellAfterOverlay();
-                    if (workspace_idx < app_state.g_workspace_count) {
-                        const e = &app_state.g_workspaces[workspace_idx];
-                        var id_copy: [64]u8 = std.mem.zeroes([64]u8);
-                        const id_len = @min(e.id_len, id_copy.len - 1);
-                        if (id_len > 0) @memcpy(id_copy[0..id_len], e.id[0..id_len]);
-                        var name_copy: [64]u8 = std.mem.zeroes([64]u8);
-                        const name_len = @min(e.name_len, name_copy.len - 1);
-                        if (name_len > 0) @memcpy(name_copy[0..name_len], e.name[0..name_len]);
-                        var host_copy: [64]u8 = std.mem.zeroes([64]u8);
-                        const host_len = @min(e.host_len, host_copy.len - 1);
-                        if (host_len > 0) @memcpy(host_copy[0..host_len], e.host[0..host_len]);
-                        const id = id_copy[0..id_len];
-                        const name = name_copy[0..name_len];
-                        const host = host_copy[0..host_len];
-                        if (std.mem.eql(u8, id, getInstanceName())) {} else if (app_state.g_single_window and findMyWorkspaceSlot(id) != null) {
-                            switchToWorkspace(findMyWorkspaceSlot(id).?);
-                        } else if (findAndFocusWorkspaceWindow(id, name)) {} else if (host.len > 0) {} else if (app_state.g_single_window) {
-                            if (absorbWorkspaceIntoSlots(id, name)) {
-                                if (findMyWorkspaceSlot(id)) |slot| switchToWorkspace(slot);
-                            } else {
-                                newWorkspace();
-                            }
-                        } else {
-                            setWorkspaceRestoreAndSave(id, name, true);
-                            spawnWorkspaceWindow(id);
-                        }
-                    }
+                    @import("workspaces.zig").openWorkspaceByIndex(workspace_idx);
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
@@ -7018,7 +7022,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (wp == 0) {
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
                 @import("chat_session.zig").chatReadDeactivate();
-                if (!foregroundIsOurs()) hideBrowserEdgeMasks();
             } else {
                 focusGuardNoteActivation();
                 updateCardPoll();
@@ -7058,7 +7061,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
             } else {
                 updateBrowserVisibility();
-                if (!foregroundIsOurs()) hideBrowserEdgeMasks();
                 if (systemAltTabSuppressionActive() or GetTickCount64() >= app_state.g_ws_switch_focus_grace) {
                     cancelShellRefocus(hwnd);
                     _ = SetTimer(hwnd, TIMER_HOOK_UNINSTALL, 150, null);
@@ -7140,6 +7142,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (wp == TIMER_CHAT_REFRESH) {
+                if (!app_state.g_chat_active or IsIconic(hwnd) != 0 or IsWindowVisible(hwnd) == 0) @import("chat_session.zig").chatHistoryStreamsKeep(0);
                 if (app_state.g_chat_browser_swap.shell_id != 0) return 0;
                 if (app_state.g_chat_active or app_state.g_voice_mode_active) {
                     if (!app_state.g_voice_mode_active and (IsIconic(hwnd) != 0 or IsWindowVisible(hwnd) == 0)) return 0;
@@ -8742,7 +8745,7 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
     app_state.g_search_results[1] = SEARCH_THEME_BACK_OFFSET;
     app_state.g_search_results[2] = SEARCH_THEME_BACK_OFFSET;
     const x = @divFloor(1000 - @import("drawing.zig").searchOverlayW(), 2) + 20;
-    const y = @divFloor(700 - (searchInputH() + 3 * searchRowH()), 3) + searchInputH() + @divFloor(searchRowH(), 2);
+    const y = searchOverlayOy(700, searchInputH() + 3 * searchRowH() + searchFooterH()) + searchInputH() + @divFloor(searchRowH(), 2);
     const lp: LPARAM = @intCast((y << 16) | x);
     var point = w.POINT{ .x = x, .y = y };
     try std.testing.expect(w.ClientToScreen(hwnd, &point) != 0);

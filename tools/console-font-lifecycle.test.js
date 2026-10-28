@@ -114,7 +114,7 @@ fn pollFonts() void {
 `).replaceAll('@import("fonts.zig")', 'font_policy')
     .replaceAll('@import("win32.zig")', 'win32')
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
-    .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
+    .replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
     .replaceAll('@import("console.zig").', '').replaceAll('@import("chat_send.zig").sshRequestSessionProbe', 'sshRequestSessionProbe')
     .replaceAll('@import("inbox.zig").', '')
@@ -398,6 +398,7 @@ fn closeFind(_: bool) void {}
 fn chatAcClose() void {}
 fn chatDraftFlush() void {}
 fn chatReadMark(_: bool) bool { return false; }
+fn chatHistoryStreamsKeep(_: u32) void {}
 fn syncWorking() void {}
 fn chatSelectionClear() void {}
 fn updateBrowserVisibility() void {}
@@ -630,6 +631,7 @@ test "registration failure cannot masquerade as the shell font and mintty bypass
 `;
 
 test('IGSH-457 console lifecycle harness includes Starred workspace dependencies', () => {
+  assert.match(fn(chat, 'closeChatView'), /chatHistoryStreamsKeep\(0\)/);
   const source = harness();
   for (const name of ['starredShellVisible', 'refreshStarredWorkspace', 'inboxPublishesShell', 'loadInboxModel', 'allocateShellId', 'allocateShellIdFrom']) {
     assert.ok(source.includes(`fn ${name}(`), name);
@@ -656,7 +658,7 @@ test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold aft
     fs.cpSync(path.join(root, 'src/fonts'), path.join(dir, 'fonts'), { recursive: true });
     copyZig(['workspace_view.zig', 'chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], {
       encoding: 'utf8', timeout: 120000,
     });

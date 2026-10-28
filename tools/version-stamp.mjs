@@ -3,16 +3,24 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { tokenize } from './strip-comments.mjs';
 
 const mainPath = 'src/main.zig';
 const changelogPath = 'src/changelog.zig';
 const versionLine = /^pub const APP_VERSION = (?:build_config\.app_version orelse )?"(\d+)\.(\d+)\.(\d+)";$/m;
 const changelogStart = /(?:pub const CHANGELOG|const SOURCE_CHANGELOG) = \[_\]ChangelogEntry\{/;
-export const behindTheScenes = 'Behind the scenes fixes.';
 export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the version is stamped after merge (node tools/version-stamp.mjs release)';
+
+export function autoRevertBranch(env = process.env) {
+  return (env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || '').startsWith('auto-revert/');
+}
 
 export function plainChange(line) {
   return !!line.trim() && !(/[A-Z]+-\d+|[\/\\`]|#\d+|\b(?:PR|pull request)\s*#?\s*\d+|\b[\w-]+\.[a-zA-Z][\w.-]*|[\x00-\x1f\x7f]/i.test(line));
+}
+
+export function productChange(line) {
+  return plainChange(line) && !(/behind the scenes|latest improvements|^(?:various improvements|bug fixes|maintenance|improvements|fixes)\.?$|\b(?:checks?|tests?|CI|proofs?|pipelines?|workflows?)\b/i.test(line));
 }
 
 export function fragmentLines(file, text) {
@@ -23,16 +31,44 @@ export function fragmentLines(file, text) {
   return lines;
 }
 
+function runtimeZigTokens(source) {
+  const tokens = tokenize(source, 'zig').tokens;
+  const result = [];
+  let depth = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    if (depth === 0 && tokens[i][0] === 'word' && tokens[i][1] === 'test') {
+      if (tokens[i + 1]?.[0] === 'string') i++;
+      if (tokens[++i]?.[1] !== '{') throw new Error('Invalid Zig test declaration');
+      let testDepth = 1;
+      while (testDepth && ++i < tokens.length) {
+        if (tokens[i][0] === 'code' && tokens[i][1] === '{') testDepth++;
+        if (tokens[i][0] === 'code' && tokens[i][1] === '}') testDepth--;
+      }
+      if (testDepth) throw new Error('Unclosed Zig test declaration');
+      continue;
+    }
+    if (tokens[i][0] === 'code' && tokens[i][1] === '{') depth++;
+    if (tokens[i][0] === 'code' && tokens[i][1] === '}') depth--;
+    result.push(tokens[i]);
+  }
+  return JSON.stringify(result);
+}
+
 export function checkFragments(base, head, changed) {
-  for (const file of Object.keys(head).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) fragmentLines(file, head[file]);
-  if (changed.some(file => file.startsWith('src/')) && !changed.some(file => !(file in base) && file in head && file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
+  for (const file of Object.keys(head).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
+    const lines = fragmentLines(file, head[file]);
+    if (changed.includes(file) && lines.some(line => !productChange(line))) throw new Error(`${file}: write a specific user-visible change; omit notes for checks, tests or pipeline work`);
+  }
+  const appChanged = changed.some(file => file.startsWith('src/') &&
+    (!file.endsWith('.zig') || !(file in base) || !(file in head) || runtimeZigTokens(base[file]) !== runtimeZigTokens(head[file])));
+  if (appChanged && !changed.some(file => !(file in base) && file in head && file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
     throw new Error('App code changed: add changelog.d/<TICKET>-<slug>.md with at least one plain product line');
   }
 }
 
 export function stampTree(files, requestedVersion) {
   const removed = Object.keys(files).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md').sort();
-  if (!removed.length) return null;
+  if (!removed.length && !requestedVersion) return null;
   const current = files[mainPath]?.match(versionLine);
   if (!current) throw new Error('Expected one APP_VERSION line in src/main.zig');
   const version = requestedVersion ?? `${current[1]}.${current[2]}.${BigInt(current[3]) + 1n}`;
@@ -45,7 +81,7 @@ export function stampTree(files, requestedVersion) {
     if (!match) throw new Error(`Bad fragment filename: ${file}`);
     const lines = fragmentLines(file, files[file]);
     if (!tickets.includes(match[1])) tickets.push(match[1]);
-    bullets.push(...lines.map(text => `        .{ .text = "${escape(text)}", .ticket = "${match[1]}" },`));
+    bullets.push(...lines.filter(productChange).map(text => `        .{ .text = "${escape(text)}", .ticket = "${match[1]}" },`));
   }
   if (!changelogStart.test(files[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
   const result = { ...files };
@@ -93,7 +129,7 @@ export function buildChangelog(files, tag, history = []) {
     previous = fragmentFiles(step.files);
   }
   const added = addedSince(fragmentFiles(files), previous);
-  stamp(tag, Object.keys(added).length ? added : { 'changelog.d/IGSH-834-maintenance.md': `${behindTheScenes}\n` });
+  stamp(tag, added);
   return result[changelogPath];
 }
 
@@ -101,9 +137,9 @@ function git(args, cwd, timeout) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout });
 }
 
-function readTree(rev, cwd, remaining) {
+function readTree(rev, cwd, remaining, sourcePaths = []) {
   const read = args => git(args, cwd, remaining?.());
-  const names = read(['ls-tree', '-r', '--name-only', '-z', rev, '--', mainPath, changelogPath, 'changelog.d/']).split('\0').filter(Boolean);
+  const names = read(['ls-tree', '-r', '--name-only', '-z', rev, '--', mainPath, changelogPath, 'changelog.d/', ...sourcePaths]).split('\0').filter(Boolean);
   return Object.fromEntries(names.map(file => [file, read(['show', `${rev}:${file}`])]));
 }
 
@@ -131,16 +167,18 @@ function releaseHistory(tag, changelog) {
 }
 
 function check(baseRev, headRev) {
-  const base = readTree(baseRev);
-  const head = readTree(headRev);
   const changed = git(['diff', '--name-only', '-z', baseRev, headRev]).split('\0').filter(Boolean);
+  const sourcePaths = changed.filter(file => file.startsWith('src/') && file.endsWith('.zig'));
+  const base = readTree(baseRev, undefined, undefined, sourcePaths);
+  const head = readTree(headRev, undefined, undefined, sourcePaths);
   const kind = classifyTrees(base, head, changed);
   if (kind === 'HAND_EDIT') {
     const diff = git(['diff', '--no-ext-diff', '--unified=0', baseRev, headRev, '--', mainPath, changelogPath]);
     console.error(diff.split(/\r?\n/).filter(line => /^[+-](?![+-])/.test(line) && (/\bAPP_VERSION\s*=/.test(line) || /\.ver = /.test(line))).join('\n'));
     console.error(fixHint);
   }
-  if (kind === 'CODE') checkFragments(base, head, changed);
+  if (kind === 'CODE' && autoRevertBranch()) console.error('Changelog note not required on an auto-revert/ branch');
+  else if (kind === 'CODE') checkFragments(base, head, changed);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `kind=${kind}\n`);
   console.log(kind);
   return kind === 'HAND_EDIT' ? 1 : 0;

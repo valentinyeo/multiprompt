@@ -2,7 +2,14 @@
 Bind-Transcript
 Type-Composer $plan.text
 $bounds = $views[0].Current.BoundingRectangle
-Save @{left=[int]$bounds.Left; top=[int]$bounds.Top; right=[int]$bounds.Right; bottom=[int]$bounds.Bottom} "$caseDir/area.json"
+$frame = Wait-For 'painted transcript geometry' {
+    $frames = [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] frame transcript (-?\d+),(-?\d+),(-?\d+),(-?\d+) edit ')
+    if ($frames.Count) { $frames[$frames.Count - 1] }
+}
+$origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
+$area = @{left=$origin.X + [int]$frame.Groups[1].Value; top=$origin.Y + [int]$frame.Groups[2].Value; right=$origin.X + [int]$frame.Groups[3].Value; bottom=$origin.Y + [int]$frame.Groups[4].Value}
+if ($area.left -lt $bounds.Left -or $area.top -lt $bounds.Top -or $area.right -gt $bounds.Right -or $area.bottom -gt $bounds.Bottom -or $area.bottom -le $area.top) { throw 'Painted transcript escaped its owned view' }
+Save $area "$caseDir/area.json"
 $point = Wait-For 'two painted same-prefix replies' {
     Shot 'reactions-before'
     $ErrorActionPreference = 'Continue'

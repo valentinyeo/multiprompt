@@ -1,5 +1,7 @@
 # Status card
 
+Verify on: push
+
 Verify all three compact status pages. The AI page is a grey floating pill; click it to expand the existing themed data menu.
 
 ## Sub-features

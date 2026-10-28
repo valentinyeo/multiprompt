@@ -46,14 +46,15 @@ blocked=$(jq -r --argjson required "$required" --argjson files "$files" '
   else
     (any($files[]; test("^(src/|\\.claude/skills/verify-multiprompt/|tools/(verify-multiprompt\\.test\\.js|chat-sync-audit(\\.test)?\\.py|chat-focus\\.test\\.js|chat-view-everywhere(-policy)?\\.test\\.js|verify-chat-delivery(\\.test\\.js|/)|chat-local-agent\\.c|chat-messages-only-proof(\\.test)?\\.mjs|chat-code-font-proof\\.(mjs|test\\.js)|chat-composer-text-proof\\.(mjs|test\\.js)|start-maximized\\.test\\.js|verify-scratch\\.test\\.ps1|favorites-groups\\.test\\.js|check-browser-pane-stuck\\.mjs|check-browser-pane-locked\\.test\\.js|check-workspace-focus\\.mjs|pane-spacing\\.test\\.js|browser-switch-speed\\.test\\.js|frozen-wake\\.test\\.js|browser-own-profile\\.test\\.js))"))) as $verify
     | (any($files[]; . == "tools/chat-sync-audit.py" or . == "tools/chat-sync-audit.test.py")) as $audit
-    | ($required + if $verify then ["chat-sync-audit-changes", "verify (appearance)", "verify (session-restore)", "verify (workspace-focus)", "verify (favorites-groups)", "verify (browser-pane-stuck)", "verify (browser-pane-locked)", "verify (group-rail)", "verify (pane-layout)", "verify (chat-view)", "verify (chat-messages-only)", "verify (chat-view-everywhere)", "verify (chat-focus)", "verify (browser-own-profile)", "verify (status-card)", "verify (palette-order)", "verify (remind-me)"] else [] end + if $audit then ["chat-sync-audit"] else [] end) as $req
-    | [.statusCheckRollup[] | select((.name == "chat-sync-audit" and .status == "COMPLETED" and .conclusion == "SKIPPED" and ($audit | not)) | not)] as $roll
+    | ($required + if $verify then ["chat-sync-audit-changes", "verify (appearance)"] else [] end + if $audit then ["chat-sync-audit"] else [] end) as $req
+    | .statusCheckRollup as $roll
     | ($req + [$roll[] | .name // .context] | unique) as $names
     | [$names[] as $name
        | [$roll[] | select((.name // .context) == $name)] as $checks
        | select(($checks | length) == 0 or any($checks[];
            if .__typename == "StatusContext" then .state != "SUCCESS"
-           else .status != "COMPLETED" or .conclusion != "SUCCESS" end))
+           else .status != "COMPLETED" or (.conclusion != "SUCCESS" and
+             (.conclusion != "SKIPPED" or ($req | index($name)) != null)) end))
        | $name] | join(",")
   end' <<< "$info") || blocked='could not evaluate head checks'
 if [ -n "$blocked" ]; then echo "skip (required checks not green: $blocked)"; exit 0; fi

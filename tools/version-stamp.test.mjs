@@ -29,7 +29,10 @@ function repo(t, files = base()) {
     }
   };
   const commit = () => { git('add', '-A'); git('commit', '-m', 'fixture'); return git('rev-parse', 'HEAD'); };
-  const check = (from, to) => spawnSync(process.execPath, [tool, 'check', from, to], { cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: path.join(dir, '.git', 'github-output') } });
+  const env = { ...process.env, GITHUB_OUTPUT: path.join(dir, '.git', 'github-output') };
+  delete env.GITHUB_HEAD_REF;
+  delete env.GITHUB_REF_NAME;
+  const check = (from, to, extra = {}) => spawnSync(process.execPath, [tool, 'check', from, to], { cwd: dir, encoding: 'utf8', env: { ...env, ...extra } });
   write(files);
   const initial = commit();
   return { dir, git, write, commit, check, initial };
@@ -111,6 +114,19 @@ test('check accepts code edits alongside a new fragment', t => {
   assert.equal(fs.readFileSync(path.join(r.dir, '.git', 'github-output'), 'utf8'), 'kind=CODE\n');
 });
 
+test('app code needs a changelog note except on auto-revert branches', t => {
+  const r = repo(t, { ...base(), 'changelog.d/DEMO-2-code.md': 'A useful feature.\n', 'src/feature.zig': 'const on = true;\n' });
+  r.git('rm', '-q', 'changelog.d/DEMO-2-code.md', 'src/feature.zig');
+  const head = r.commit();
+  const normal = r.check(r.initial, head, { GITHUB_HEAD_REF: 'ceo/DEMO-2' });
+  assert.equal(normal.status, 1);
+  assert.match(normal.stderr, /App code changed: add changelog\.d/);
+  const revert = r.check(r.initial, head, { GITHUB_HEAD_REF: 'auto-revert/40533455263' });
+  expectKind(revert, 'CODE', 0);
+  const dispatched = r.check(r.initial, head, { GITHUB_REF_NAME: 'auto-revert/40533455263' });
+  expectKind(dispatched, 'CODE', 0);
+});
+
 test('check rejects a stamp with an extra byte in the entry', t => {
   const files = { ...base(), 'changelog.d/DEMO-2-code.md': 'Feature.\n' };
   const r = repo(t, files);
@@ -151,9 +167,10 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
       const pathGuard = file === 'test.yml' ? "steps\\.paths\\.outputs\\.heavy == 'true' && " : '';
       const guard = windows?.includes(cache) || updateSource?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
       assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
-      assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == '`));
+      assert.match(cache, new RegExp(`if: ${pathGuard}${guard}\\(?github\\.event_name == '`));
       if (cache.includes('uses: actions/cache/restore@')) {
-        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'pull_request'\n`));
+        const event = windows?.includes(cache) ? "\\(github\\.event_name == 'pull_request' \\|\\| github\\.event_name == 'workflow_dispatch' \\|\\| \\(github\\.event_name == 'push' && github\\.ref != 'refs/heads/master'\\)\\)" : "github\\.event_name == 'pull_request'";
+        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}${event}\n`));
       } else {
         assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
       }
@@ -389,7 +406,7 @@ test('build changelog uses the tag and fragments without changing source default
   assert.match(generated, /A useful improvement/);
   assert.deepEqual(files, saved);
   assert.equal(buildChangelog(files, 'v0.28.735'), changelog);
-  assert.match(buildChangelog(base(), 'v0.28.900'), /Behind the scenes fixes\./);
+  assert.doesNotMatch(buildChangelog(base(), 'v0.28.900'), /Behind the scenes fixes\./);
   assert.doesNotMatch(buildChangelog(base(), 'v0.28.900'), /latest improvements/);
   assert.match(buildChangelog({ ...files, 'src/changelog.zig': changelog.replace('pub const CHANGELOG', 'const SOURCE_CHANGELOG') }, 'v0.28.900'), /const SOURCE_CHANGELOG = \[_\]ChangelogEntry\{\n    \.\{ \.ver = "0\.28\.900"/);
   for (const invalid of ['0.28.900', 'v0.28.900;bad', 'v0.28.900\n', 'v00.28.900']) assert.throws(() => buildChangelog(files, invalid), /Invalid release tag/);
@@ -420,7 +437,7 @@ test('IGSH-889 a release lists only fragments added since the previous release',
   assert.match(generated, /A new improvement/);
   assert.doesNotMatch(generated, /An old improvement/);
   const quiet = buildChangelog({ ...base(), ...old }, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
-  assert.match(quiet, /Behind the scenes fixes\./);
+  assert.doesNotMatch(quiet, /Behind the scenes fixes\./);
   assert.doesNotMatch(quiet, /latest improvements/);
   assert.doesNotMatch(quiet, /An old improvement/);
 
@@ -488,7 +505,10 @@ else if (args[1] === 'create') { fs.writeFileSync(stateFile, 'OPEN'); console.lo
 else if (args[1] === 'view') { if (state === 'OPEN') { git(['update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state = 'MERGED'; fs.writeFileSync(stateFile, state); } console.log(JSON.stringify({ state, statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })); }
 else if (args[1] !== 'merge') process.exit(1);
 `, { mode: 0o755 });
-  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', detached: true, timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  if (result.error?.code === 'ETIMEDOUT') {
+    try { process.kill(-result.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+  }
   const requests = fs.readFileSync(path.join(r.dir, 'gh-log'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
   const created = requests.filter(args => args[1] === 'create').length;
   const remoteBranch = r.git('--git-dir', remote, 'rev-parse', 'refs/heads/release/0.28.736');
@@ -507,4 +527,66 @@ else if (args[1] !== 'merge') process.exit(1);
   assert.equal(r.git('worktree', 'list', '--porcelain').match(/^worktree /gm).length, 1);
   assert.equal(created, outcome === 'closed' ? 1 : 0);
   if (outcome === 'open') assert.equal(remoteBranch, leftBehind);
+});
+
+
+test('IGSH-1090 maintenance releases carry no invented note, preserving real prior notes', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const generated = buildChangelog(base(), 'v0.28.900');
+  assert.deepEqual(releaseNotes(generated, 'v0.28.900'), {
+    version: '0.28.900', releases: [
+      { version: '0.28.900', changes: [] },
+      { version: '0.28.735', changes: ['Existing.'] },
+    ],
+  });
+});
+
+test('IGSH-1090 fragment gate rejects filler and engineering notes, not specific product changes', async () => {
+  const { checkFragments } = await import('./version-stamp.mjs');
+  const name = 'changelog.d/DEMO-1-update.md';
+  for (const line of [
+    'Behind the scenes fixes.', 'Plus 2 behind the scenes fixes.',
+    'Updates include the latest improvements.', 'Various improvements.', 'Bug fixes.',
+    'Chat speed checks now ignore shared-machine pauses.',
+    'Session switching checks now preserve slow and stale replies for diagnosis.',
+    'Fixed a test so releases stop getting stuck.', 'CI now finishes sooner.',
+    'Release workflow is safer.', 'Pipeline changes.', 'Added proof for chat replies.',
+  ]) {
+    assert.throws(() => checkFragments({}, { [name]: line }, [name]), /specific user-visible change/, line);
+  }
+  for (const line of [
+    'Switching chats is faster.', 'Dictation shortcuts keep working when keys queue up.',
+    'Image captions no longer hide replies.', 'Dialogs match your chosen colors.',
+    'The update card explains each change.',
+  ]) assert.doesNotThrow(() => checkFragments({}, { [name]: line }, ['src/example.zig', name]));
+});
+
+test('IGSH-1095 Zig test-only repairs need no invented product note but runtime edits still do', t => {
+  const file = 'src/browser.zig';
+  const runtime = 'pub fn status() []const u8 { return "connected"; }\n';
+  const before = `${runtime}test "health" {\n    const state = "opening";\n    _ = state;\n}\n`;
+  const fixed = `${runtime}test "health" {\n    const text = "} test \\"quoted\\" {";\n    if (true) { _ = text; }\n}\n`;
+  const r = repo(t, { ...base(), [file]: before });
+  r.write({ [file]: fixed });
+  expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
+  for (const source of [
+    fixed.replace('return "connected"', 'return "opening"'),
+    fixed + 'pub const deadline = 90000;\n',
+    'pub const deadline = 90000;\n' + fixed,
+    fixed.replace('pub fn status()', 'pub fn changedStatus()'),
+    'pub const config = struct { test "nested" { unreachable; } };\n',
+  ]) {
+    r.write({ [file]: source });
+    const result = r.check(r.initial, r.commit());
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /App code changed/);
+  }
+  r.write({ [file]: `${runtime}test { const char = '}'; _ = char; }\n` });
+  expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
+  r.write({ [file]: runtime });
+  expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
+  r.git('rm', file);
+  const deleted = r.check(r.initial, r.commit());
+  assert.equal(deleted.status, 1);
+  assert.match(deleted.stderr, /App code changed/);
 });

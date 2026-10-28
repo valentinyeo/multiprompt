@@ -1,5 +1,7 @@
 # Chat View everywhere
 
+Verify on: push
+
 ## Sub-features
 
 - On Everywhere and Off Everywhere switch every session once, including pinned sessions.

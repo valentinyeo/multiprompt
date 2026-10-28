@@ -1,10 +1,16 @@
 const test = require('node:test');
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
 const os = require('node:os');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const skill = '.claude/skills/verify-multiprompt/';
@@ -461,7 +467,8 @@ test('keyboard journey isolates each case and retains Doctor, screenshots, raw e
 });
 
 test('feature dispatch compiles only the system boundary on release runs and preserves verified executable selection', () => {
-  assert.match(workflow, /FEATURE -notin @\([^\n]*'chat-delivery'/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-delivery'));
   assert.match(read(skill + 'control.ps1'), /'chat-delivery' \{[\s\S]*verify-chat-delivery\/drive.ps1/);
   assert.match(workflow, /if: env.RELEASE_TAG == '' \|\| env.FEATURE == 'chat-delivery'/);
   assert.match(workflow, /zig cc[^\n]*-municode[^\n]*verify-chat-delivery\/launcher.c/);
@@ -927,4 +934,186 @@ test('send-stays-gone evidence fails when a sent message comes back or a send is
   assert.match(row().detail, /none was dropped/);
   files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: `${sendTexts[11]}${sendTexts[13]}`, s: 0 }] }] }));
   assert.match(row().detail, /came back into the box and was sent again joined to the next message/);
+});
+
+
+test('Windows remote reader preserves POSIX atomic replacement while its old descriptor stays readable', () => {
+  assert.ok(fs.existsSync(path.join(root, 'tools/verify-chat-delivery/sitecustomize.py')), 'Windows reader needs POSIX delete sharing');
+  assert.ok(fs.existsSync(path.join(root, 'tools/verify-chat-delivery/test_reader_sharing.py')), 'Windows overlap controls must ship with the fixture');
+  const output = execFileSync('python3', ['-I', path.join(root, 'tools/verify-chat-delivery/test_reader_sharing.py')], { encoding: 'utf8', timeout: 60000 });
+  if (process.platform === 'win32') {
+    assert.match(output, /ORIGINAL_WINDOWS_READER_REJECTED/);
+    assert.match(output, /POSIX_REPLACEMENT_WITH_HELD_READER_OK/);
+  }
+  const boundary = read('tools/verify-chat-delivery/boundary.py');
+  assert.match(boundary, /if os.name == "nt":\s+env\["PYTHONPATH"\] = str\(Path\(__file__\).resolve\(\).parent\)/);
+  assert.match(boundary, /subprocess.call\(\[sys.executable, \*remote\[1:\]\], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer/);
+});
+
+test('retention copy observes restored composer focus without injecting another Alt activation', () => {
+  const copy = drive.slice(drive.indexOf('function Retention-Copy'), drive.indexOf('function Retention-Top'));
+  assert.match(copy, /Press @\(0x1B\) 'Esc: clear retained selection'\s+\[void\]\(Wait-For 'retained selection returns typing focus'/);
+  assert.match(copy, /\$f\[0\] -eq \$main\.ToInt64\(\) -and \$f\[1\] -eq \$composer\.ToInt64\(\)/);
+  assert.doesNotMatch(copy, /FocusOwnedWindow/);
+});
+
+test('native frame sampling stays scheduled while retaining every measured gap and paint', () => {
+  const sampler = read('tools/verify-chat-delivery/remote-switch.cs');
+  assert.match(sampler, /new Thread\(Run\) \{ IsBackground = true, Priority = ThreadPriority\.AboveNormal \}/);
+  assert.match(sampler, /gapMs = completed - last, paintMs = completed - start, painted = painted/);
+  assert.match(sampler, /double remaining = start \+ 16 - clock\.Elapsed\.TotalMilliseconds/);
+});
+
+test('Windows notification stand-in keeps the supplied reader push algorithm and emits appended data', () => {
+  assert.match(read('tools/verify-chat-delivery/boundary.py'), /def watch_reader\(\):/);
+  const script = String.raw`
+import ast,base64,ctypes,ctypes.wintypes,io,json,os,re,sys,tempfile,time,subprocess
+from pathlib import Path
+from unittest.mock import patch
+root = Path(sys.argv[1])
+tree = ast.parse((root / 'tools/verify-chat-delivery/boundary.py').read_text(encoding='utf-8'))
+function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'watch_reader')
+with tempfile.TemporaryDirectory() as temp:
+    home = Path(temp)
+    cwd = str(home / 'work' / 'demo')
+    path = home / '.claude/projects' / re.sub(r'[^A-Za-z0-9]', '-', cwd) / 'sid.jsonl'
+    path.parent.mkdir(parents=True)
+    event = lambda text: dict(type='assistant',message=dict(role='assistant',content=[dict(type='text',text=text)]))
+    path.write_text(json.dumps(event('original boundary row')) + '\n')
+    calls = []
+    roots = []
+    class Call:
+        def __init__(self, fn): self.fn = fn
+        def __call__(self, *args): return self.fn(*args)
+    def wait(*args):
+        calls.append('wait')
+        if calls.count('wait') == 2: raise RuntimeError('fixture finished')
+        with path.open('a') as output: output.write(json.dumps(event('appended boundary row')) + '\n')
+        return 0
+    kernel = type('Kernel', (), {})()
+    kernel.FindFirstChangeNotificationW = Call(lambda *args: roots.append(args) or 1)
+    kernel.FindNextChangeNotification = Call(lambda *args: 1)
+    kernel.FindCloseChangeNotification = Call(lambda *args: calls.append('closed'))
+    kernel.WaitForSingleObject = Call(wait)
+    source = (root / 'src/chat_history_reader.py').read_bytes()
+    q = dict(id=7,codex=False,sid='sid',tmux='term-1',cwd=cwd,cached_sid='',inode=0,offset=0,live=True)
+    stream = io.TextIOWrapper(io.BytesIO(base64.b64encode(source) + b'\n' + json.dumps(q).encode() + b'\n'))
+    output = io.StringIO()
+    state = home / "state"
+    state.mkdir()
+    captures = []
+    def capture_screen(escapes):
+        assert escapes
+        captures.append(True)
+        return 'Ready\n❯ typed draft\n' + '─' * 50 + '\n'
+    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys,os=os,time=time,capture_screen=capture_screen)
+    exec(compile(ast.Module(body=[function],type_ignores=[]), '<boundary-watch>', 'exec'), scope)
+    with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True), patch.object(subprocess,'run',side_effect=AssertionError('stream spawned a capture process')):
+        try: scope['watch_reader']()
+        except RuntimeError as error: assert str(error) == 'fixture finished'
+    frames = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert len(frames) == 2,frames
+    assert captures == [True],captures
+    assert all('typed draft' in frame['wire'] for frame in frames)
+    assert 'original boundary row' in frames[0]['wire']
+    assert 'appended boundary row' in frames[1]['wire']
+    assert 'original boundary row' not in frames[1]['wire']
+    assert calls == ['wait','wait','closed'],calls
+    assert roots == [(str(home), True, 0x13)],roots
+print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, root], { encoding: 'utf8', timeout: 30000 }), /WINDOWS_NOTIFICATION_BOUNDARY_OK/);
+});
+
+
+test('retained-history recovery targets the owned HWND without stealing typing focus', () => {
+  const start = drive.indexOf('function Retention-Top {');
+  const end = drive.indexOf('\nfunction Assert-Retention', start);
+  const recovery = drive.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(recovery, /FocusOwnedWindow|::Focus\(/);
+  assert.match(recovery, /input='owned transcript HWND wheel'/);
+  assert.match(recovery, /::WheelOwnedTranscriptMessage\(\$main, \$app.Id, \$transcript, 30000\)/);
+  assert.match(recovery, /\$position\.scroll -eq 0/);
+  const desktop = read('tools/verify-chat-delivery/desktop.cs');
+  const first = desktop.indexOf('    public static void WheelOwnedTranscriptMessage(');
+  const last = desktop.indexOf('    public static void PressOwnedTranscript(', first);
+  const wheel = desktop.slice(first, last);
+  assert.ok(first >= 0 && last > first);
+  for (const guard of ['Owner(main) != pid', 'GetForegroundWindow() != main', 'Owner(transcript) != pid', '!IsChild(main, transcript)', 'Class(transcript) != "ZigShellChatTranscript"', '!IsWindowVisible(transcript)']) assert.ok(wheel.includes(guard), guard);
+  assert.match(wheel, /SendWheelMessage\(transcript, 0x020A,/);
+  assert.match(wheel, /delta < short.MinValue/);
+  assert.match(wheel, /delta > short.MaxValue/);
+  assert.match(wheel, /delta % 120 != 0/);
+  assert.match(wheel, /== IntPtr.Zero\) throw/);
+  assert.doesNotMatch(wheel, /SendInput|Focus\(/);
+});
+
+test('remote appended-message receipt keeps the request window across delayed font logs', () => {
+  const source = read('tools/verify-chat-delivery/remote-switch.ps1');
+  const start = source.indexOf("Wait-For 'new remote messages applied'");
+  const end = source.indexOf('} 30)', start);
+  const wait = source.slice(start, end);
+  assert.ok(start > 0 && end > start);
+  assert.doesNotMatch(wait, /\$offset =/);
+  assert.match(source.slice(0, start), /\$appendLogStart = \(Read-Shared "\$settings\/debug.log"\).Length/);
+  assert.match(wait, /Substring\(\$appendLogStart\)/);
+});
+
+test('IGSH-1063 question boundary records single, multiple and Other answers exactly', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'structured-question-'));
+  try {
+    const transcript = path.join(dir, 'home/.claude/projects/C--verify-work/sid.jsonl');
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+      name: 'chat-options', mode: 'busy', suggestion: '', fake: true, sid: 'sid', cwd: 'C:/verify/work', panePid: 4242,
+      transcript, meta: path.join(dir, 'home/.claude/sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
+    }));
+    const run = (mode, ...args) => {
+      const result = require('node:child_process').spawnSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), mode, ...args], { env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      return result.stdout;
+    };
+    const key = (...keys) => run('tmux', 'send-keys', '-t', '=verify-agent:', ...keys);
+    run('shell', 'init');
+    run('shell', 'plain-list');
+    run('shell', 'question', path.join(root, 'tools/fixtures/IGSH-1063/questions.json'));
+    assert.match(run('tmux', 'capture-pane', '-p', '-J'), /Which colour should we use\?/);
+    key('2');
+    key('1', '2', 'Enter');
+    let answers = fs.readFileSync(path.join(dir, 'question-answers.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(answers.map(answer => answer.labels), [['Orange'], ['Desktop', 'Phone']]);
+    assert.equal(JSON.parse(run('shell', 'show')).question, null);
+    run('shell', 'question', path.join(root, 'tools/fixtures/IGSH-1063/questions.json'));
+    key('3');
+    run('tmux', 'send-keys', '-t', '=verify-agent:', '-l', '--', 'Purple');
+    key('Enter');
+    answers = fs.readFileSync(path.join(dir, 'question-answers.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(answers[2].labels, ['Purple']);
+    assert.match(run('tmux', 'capture-pane', '-p', '-J'), /Which devices should we check\?/);
+    const events = fs.readFileSync(transcript, 'utf8').trim().split('\n').map(JSON.parse);
+    const calls = events.filter(event => event.message?.content?.[0]?.name === 'AskUserQuestion');
+    assert.equal(calls.length, 2);
+    assert.equal(events.filter(event => event.message?.content?.[0]?.tool_use_id === calls[0].message.content[0].id).length, 1);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test('IGSH-1063 question proof selects the saved AMOLED theme and supports published assets', () => {
+  const journey = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/chat-options.ps1'), 'utf8');
+  assert.match(journey, /Select-Theme 'amoled' 'theme-amoled'/);
+  assert.doesNotMatch(journey, /Palette '(?:theme )?amoled'/);
+  const adapter = fs.readFileSync(path.join(root, '.github/workflows/question-journey.yml'), 'utf8');
+  assert.match(adapter, /types: \[structured-question-proof\]/);
+  assert.match(adapter, /feature: chat-options/);
+  assert.match(adapter, /tag: \$\{\{ github\.event\.client_payload\.tag \|\| '' \}\}/);
+});
+
+test('failed window identity retains observed fields and crash reports without weakening Doctor', () => {
+  const doctor = drive.slice(drive.indexOf('function Doctor('), drive.indexOf('function Press('));
+  assert.match(doctor, /Save .*IsOffscreen.*ProcessId.*title.*doctor-window.json/);
+  assert.match(doctor, /\$element.Current.IsOffscreen -or \$element.Current.ProcessId -ne \$app.Id -or \$title -notmatch/);
+  assert.match(doctor, /throw 'Doctor: visible versioned UI Automation identity missing'/);
+  assert.match(doctor, /Owner\(\$main\) -ne \$app.Id/);
+  assert.match(doctor, /\$app.HasExited -or \$app.Path -ne \$Exe -or \(Get-FileHash \$Exe -Algorithm SHA256\).Hash -ne \$ExpectedHash/);
+  assert.match(drive, /if \(Test-Path "\$settings\/crashes"\) \{/);
 });

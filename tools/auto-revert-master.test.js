@@ -1,7 +1,13 @@
 const test = require('node:test');
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
 const { decide } = require('./auto-revert-master.js');
 
 const repository = 'valentinyeo/multiprompt';
@@ -46,9 +52,11 @@ function runtime(input, event = 'workflow_dispatch', failure = null, rateLimits 
   const calls = [];
   const output = [];
   const waits = [];
-  const process = { env: { AUTO_REVERT_RUN_ID: String(input.run.id), GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: repository }, exitCode: 0 };
+  const summaries = [];
+  const process = { env: { AUTO_REVERT_RUN_ID: String(input.run.id), GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: repository, GITHUB_STEP_SUMMARY: '/summary' }, exitCode: 0 };
   const module = { exports: {} };
   const require = name => {
+    if (name === 'node:fs') return { appendFileSync(file, text) { assert.equal(file, '/summary'); summaries.push(text); } };
     assert.equal(name, 'node:child_process');
     return { execFileSync(command, args) {
       calls.push([command, ...args]);
@@ -90,7 +98,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null, rateLimits 
   };
   require.main = module;
   vm.runInNewContext(fs.readFileSync(`${__dirname}/auto-revert-master.js`, 'utf8'), { require, module, process, Atomics: { wait: (...args) => waits.push(args[3]) }, console: { log: value => output.push(value), error: value => output.push(value) } });
-  return { calls, output: output.join('\n'), process, waits };
+  return { calls, output: output.join('\n'), process, waits, summaries };
 }
 
 test('real master run-name verify full master is accepted', () => {
@@ -298,11 +306,11 @@ test('a marker for a different run is not a duplicate', () => {
   assert.equal(decide(input).action, 'revert');
 });
 
-test('ticket-less head is refused instead of selecting an older ticket commit', () => {
+test('ticket-less head is ignored instead of selecting an older ticket commit', () => {
   const input = fixture();
   input.commits[0].commit.message = 'Release version stamp';
   assert.match(decide(input).reason, /no IGSH ticket/);
-  assert.equal(decide(input).action, 'refuse');
+  assert.equal(decide(input).action, 'ignore');
 });
 
 test('head outside master first-parent history is refused', () => {
@@ -500,13 +508,18 @@ test('a merged revert pull request that a re-run still sees reaches the board wi
   assert.equal(result.process.exitCode, 0);
 });
 
-test('ticket-less red workflow opens an issue but never reverts or pushes', () => {
+for (const event of ['workflow_run', 'workflow_dispatch']) test(`ticket-less ${event} is neutral with an explanation and no mutations`, () => {
   const input = fixture();
   input.commits[0].commit.message = 'Release version stamp';
-  const result = runtime(input, 'workflow_run');
-  assert.ok(result.calls.every(call => !call.includes('revert') && !call.includes('push')));
-  assert.ok(result.calls.some(call => call.includes('POST')));
-  assert.equal(result.process.exitCode, 1);
+  const result = runtime(input, event);
+  assert.equal(result.process.exitCode, 0, result.output);
+  assert.equal(JSON.parse(result.output).action, 'ignore');
+  assert.ok(result.calls.every(call => call[0] === 'git'
+    ? ['fetch', 'rev-parse', 'log'].includes(call[1])
+    : call[0] === 'gh' && call[1] === 'api' && !call.includes('POST')));
+  assert.equal(result.summaries.length, 1);
+  assert.match(result.summaries[0], /No commit reverted: Run head subject has no IGSH ticket id/);
+  assert.ok(result.summaries[0].includes(input.run.html_url));
 });
 
 for (const [name, failure, blocked] of [
@@ -547,22 +560,22 @@ test('auto-revert workflow grants contents and pull-request writes with the exis
 test('PR smoke and full master matrix stay wired without duplicate release-tag journeys', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
   const release = fs.readFileSync(`${__dirname}/../.github/workflows/release.yml`, 'utf8');
-  assert.match(verify, /pull_request' && fromJSON\('\["appearance"\]'\)/);
+  assert.ok(featureMatrix(verify).pr.includes('appearance'));
   assert.match(verify, /github.event_name == 'push' \|\| inputs.feature == 'all'/);
-  const matrices = [...verify.matchAll(/fromJSON\('(\[[^'\n]+\])'\)/g)].map(match => JSON.parse(match[1]));
-  assert.equal(matrices[1].length, 21);
+  const matrices = [featureMatrix(verify).pr, featureMatrix(verify).full];
+  assert.ok(matrices[1].length >= 21);
   assert.ok(matrices[1].includes('chat-dictation'));
   assert.ok(matrices[1].includes('tmux-binding'));
   assert.ok(matrices[1].includes('chat-send-latency'));
   assert.ok(matrices[1].includes('remind-me'));
   assert.ok(matrices[1].includes('chat-first-paint'));
-  assert.match(verify, /^  push:\n    branches: \[master\]\n  workflow_dispatch:/m);
+  assert.match(verify, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083, ceo\/IGSH-1079\]\n  workflow_dispatch:/m);
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
 });
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
-  assert.match(verify, /^  verify:\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
+  assert.match(verify, /^  verify:\n    needs: journeys\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
 
 test('controlled red proof requires the marker on appearance master pushes and excludes reverts', () => {
@@ -624,4 +637,41 @@ test('permission errors fail immediately without retrying or touching master', (
   assert.equal(result.process.exitCode, 1);
   assert.equal(result.waits.length, 0);
   assert.ok(result.calls.every(call => !call.includes('push') && !call.includes('POST')));
+});
+
+test('auto-revert PRs pass the changelog and red-run admission rules that a revert cannot satisfy', t => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const { execFileSync, spawnSync } = require('node:child_process');
+  assert.match(fs.readFileSync(`${__dirname}/auto-revert-master.js`, 'utf8'), /const branch = `auto-revert\/\$\{runId\}`;/);
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-revert-admission-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git('init', '-q', '-b', 'master');
+  git('config', 'user.email', 'test@example.invalid');
+  git('config', 'user.name', 'Test');
+  git('config', 'commit.gpgsign', 'false');
+  fs.mkdirSync(path.join(repo, 'src'));
+  fs.mkdirSync(path.join(repo, 'changelog.d'));
+  fs.mkdirSync(path.join(repo, 'tools'));
+  fs.writeFileSync(path.join(repo, 'src/feature.txt'), 'on');
+  fs.writeFileSync(path.join(repo, 'changelog.d/DEMO-1-feature.md'), 'A feature works.\n');
+  fs.writeFileSync(path.join(repo, 'tools/feature.test.cjs'), "require('node:test')('on', () => {});\n");
+  git('add', '.');
+  git('commit', '-qm', 'feature');
+  const base = git('rev-parse', 'HEAD');
+  git('revert', '--no-edit', 'HEAD');
+  const head = git('rev-parse', 'HEAD');
+  const env = { ...process.env };
+  delete env.GITHUB_HEAD_REF;
+  delete env.GITHUB_REF_NAME;
+  delete env.GITHUB_OUTPUT;
+  delete env.NODE_TEST_CONTEXT;
+  const admit = (tool, args, branch) => spawnSync(process.execPath, [path.join(__dirname, tool), ...args], { cwd: repo, encoding: 'utf8', env: { ...env, GITHUB_HEAD_REF: branch } });
+  for (const [tool, args] of [['version-stamp.mjs', ['check', base, head]], ['check-red-run.mjs', [base, head]]]) {
+    const revert = admit(tool, args, 'auto-revert/40533455263');
+    assert.equal(revert.status, 0, `${tool}: ${revert.stdout}${revert.stderr}`);
+    const normal = admit(tool, args, 'ceo/DEMO-1');
+    assert.equal(normal.status, 1, `${tool}: ${normal.stdout}${normal.stderr}`);
+  }
 });
