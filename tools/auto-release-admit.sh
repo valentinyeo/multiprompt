@@ -14,6 +14,7 @@ if ! last_tag=$(git describe --tags --match 'v*' --first-parent --abbrev=0 HEAD 
     echo 'no release tag found; skipping' >&2
     exit 0
 fi
+published_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
 commits=$(git rev-list --first-parent "$last_tag..HEAD")
 for sha in $commits; do
     if [ -n "$(git tag --points-at "$sha")" ]; then
@@ -45,6 +46,11 @@ for sha in $commits; do
     if ! jq -e --arg job "verify ($RELEASE_JOURNEY)" '
         [.jobs[] | select(.name == $job or (.name | endswith(" / " + $job)))] | length == 1 and all(.conclusion == "success")' <<< "$verify_jobs" >/dev/null; then
         echo "$sha has no green $RELEASE_JOURNEY journey; not releasing" >&2
+        continue
+    fi
+    notes=$(node tools/version-stamp.mjs pending "$published_tag" "$sha")
+    if [ -z "$notes" ]; then
+        echo "$sha has no unpublished product notes; waiting for a useful change" >&2
         continue
     fi
     release_tag=$(node tools/release-version.mjs --next "$last_tag")

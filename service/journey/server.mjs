@@ -38,7 +38,25 @@ await addKey(keys.admin, 'admin', null);
 await addKey(keys.workspace, 'workspace', 'Notes');
 await addKey(keys.other, 'workspace', 'Missing');
 
+let reportOffline = false;
 const handler = async (req, res) => {
+  if (args.reports === 'true' && req.url === '/__journey/reports') {
+    const rows = await db.prepare('SELECT report_id,captured_at,received_at,app_version,summary,stack_trace FROM crash_reports ORDER BY received_at,rowid').all();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ reports: rows.results }));
+    return;
+  }
+  if (args.reports === 'true' && req.url.startsWith('/__journey/offline/')) {
+    reportOffline = req.url.endsWith('/true');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ offline: reportOffline }));
+    return;
+  }
+  if (reportOffline && req.url === '/v1/crash-reports') {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'fixture_offline' }));
+    return;
+  }
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const body = Buffer.concat(chunks);
