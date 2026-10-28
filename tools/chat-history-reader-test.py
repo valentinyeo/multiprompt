@@ -2903,5 +2903,11 @@ class HeldQueueTest(unittest.TestCase):
         self.send.assert_not_called()
 
 
+    def test_held_send_ignores_a_dim_prompt_suggestion(self):
+        shown = 'Claude Code\nReady\n❯ \x1b[2mTry a suggestion\x1b[0m\n' + '─' * 40 + '\n'
+        with patch.object(reader.subprocess, 'run', return_value=types.SimpleNamespace(stdout=shown, returncode=0)):
+            self.assertEqual(reader.prompt_box_text('=term-1:'), '')
+
+
 if __name__ == '__main__':
     unittest.main()
