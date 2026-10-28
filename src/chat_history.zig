@@ -343,8 +343,9 @@ pub const History = struct {
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
         const scratch = arena.allocator();
-        var incoming = std.StringHashMap(struct { rows: std.ArrayList(u8) = .empty, used: bool = false, known: bool = false, index: usize }).init(scratch);
-        var order: std.ArrayList([]const u8) = .empty;
+        var incoming = std.HashMap(RowIdentity, struct { rows: std.ArrayList(u8) = .empty, used: bool = false, known: bool = false, index: usize }, RowIdentity.Context, 80).init(scratch);
+        var order: std.ArrayList(RowIdentity) = .empty;
+        var previous_matches: std.ArrayList(?usize) = .empty;
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
@@ -361,7 +362,10 @@ pub const History = struct {
         lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            if (incoming.getPtr(try rowIdentity(scratch, line))) |entry| {
+            const key = try rowIdentity(scratch, line);
+            const matched = incoming.getPtr(key);
+            try previous_matches.append(scratch, if (matched) |entry| entry.index else null);
+            if (matched) |entry| {
                 entry.known = true;
                 shared = true;
             }
@@ -373,11 +377,13 @@ pub const History = struct {
         var rows: std.ArrayList(u8) = .empty;
         errdefer rows.deinit(a);
         var cursor_index: usize = 0;
+        var previous_index: usize = 0;
         lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            const key = try rowIdentity(scratch, line);
-            if (incoming.getPtr(key)) |replacement| {
+            const matched = previous_matches.items[previous_index];
+            previous_index += 1;
+            if (if (matched) |index| incoming.getPtr(order.items[index]) else null) |replacement| {
                 while (cursor_index <= replacement.index) : (cursor_index += 1) {
                     const added = incoming.getPtr(order.items[cursor_index]).?;
                     if (!added.known and !added.used) {
@@ -400,12 +406,48 @@ pub const History = struct {
         self.rows = rows;
     }
 
-    fn rowIdentity(a: std.mem.Allocator, line: []const u8) ![]const u8 {
-        const parsed = try std.json.parseFromSlice(Message, a, line, .{ .ignore_unknown_fields = true });
-        defer parsed.deinit();
-        const m = parsed.value;
+    const RowIdentity = struct {
+        role: []const u8,
+        id: []const u8,
+        segment: u64,
+        timestamp: []const u8,
+        text: []const u8,
+        settlement: @FieldType(Message, "settlement"),
+
+        const Context = struct {
+            pub fn hash(_: @This(), key: RowIdentity) u64 {
+                var h = std.hash.Wyhash.init(key.segment);
+                inline for (.{ "role", "id", "timestamp", "text" }) |field| {
+                    const bytes = @field(key, field);
+                    std.hash.autoHash(&h, bytes.len);
+                    h.update(bytes);
+                }
+                std.hash.autoHash(&h, key.settlement != null);
+                if (key.settlement) |fact| {
+                    std.hash.autoHash(&h, fact.operation.len);
+                    h.update(fact.operation);
+                    h.update(fact.content);
+                }
+                return h.final();
+            }
+
+            pub fn eql(_: @This(), lhs: RowIdentity, rhs: RowIdentity) bool {
+                if (lhs.segment != rhs.segment or (lhs.settlement == null) != (rhs.settlement == null)) return false;
+                inline for (.{ "role", "id", "timestamp", "text" }) |field| {
+                    if (!std.mem.eql(u8, @field(lhs, field), @field(rhs, field))) return false;
+                }
+                if (lhs.settlement) |fact| {
+                    if (!std.mem.eql(u8, fact.operation, rhs.settlement.?.operation) or !std.mem.eql(u8, fact.content, rhs.settlement.?.content)) return false;
+                }
+                return true;
+            }
+        };
+    };
+
+    fn rowIdentity(a: std.mem.Allocator, line: []const u8) !RowIdentity {
+        const m = try std.json.parseFromSliceLeaky(Message, a, line, .{ .ignore_unknown_fields = true });
         const id = m.read_id orelse m.id;
-        return std.json.Stringify.valueAlloc(a, .{ m.role, id, m.segment, m.timestamp, if (id.len == 0) m.text else "", if (id.len == 0) m.settlement else null }, .{});
+        return .{ .role = m.role, .id = id, .segment = m.segment, .timestamp = m.timestamp, .text = if (id.len == 0) m.text else "", .settlement = if (id.len == 0) m.settlement else null };
     }
 
     pub fn encode(self: History, a: std.mem.Allocator, key: transcript.Identity) ![]u8 {
