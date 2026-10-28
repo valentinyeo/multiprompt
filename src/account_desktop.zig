@@ -807,6 +807,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (job.kind != .signout and !writeDpapiFile("account-device.dat", response.bytes)) return error.Storage;
     const access = try account_client.field(response.bytes, "access_token");
     defer freeSecret(access);
+    @import("report_upload.zig").setAccess(access);
     if (job.kind == .signout or job.kind == .revoke) {
         const device = if (job.device) |id| try a.dupe(u8, id) else try account_client.field(response.bytes, "device_id");
         defer a.free(device);
@@ -817,6 +818,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         if (revoked.status == 401) reply.unauthorized = true;
         if (revoked.status != 200) return error.Revoke;
         if (job.kind == .signout) {
+            @import("report_upload.zig").setAccess("");
             accountDeleteToken();
             reply.signed_out = true;
             return;
