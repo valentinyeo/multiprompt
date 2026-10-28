@@ -3768,7 +3768,7 @@ pub fn chatReactLatestAgent(emoji: chat_reaction.Emoji) void {
     }
 }
 
-fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
+fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT, bottom_pad: i32) void {
     if (mask == 0) return;
     if (app_state.g_chat_rich_fonts[11] == null) {
         app_state.g_chat_rich_fonts[11] = @import("fonts.zig").emoji(-uiScaled(17));
@@ -3776,7 +3776,7 @@ fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
     const old = SelectObject(hdc, app_state.g_chat_rich_fonts[11]);
     defer _ = SelectObject(hdc, old);
     const count: i32 = @intCast(@popCount(mask));
-    var pill = RECT{ .left = rc.left + uiScaled(8), .top = rc.bottom - uiScaled(24), .right = rc.left + uiScaled(24 + count * 24), .bottom = rc.bottom - uiScaled(2) };
+    var pill = RECT{ .left = rc.left + uiScaled(8), .top = rc.bottom - bottom_pad - uiScaled(22), .right = rc.left + uiScaled(24 + count * 24), .bottom = rc.bottom - bottom_pad };
     fillRoundRectAA(hdc, pill, uiScaled(11), if (app_state.g_light_theme) RGB(155, 155, 155) else 0x4a4a4a);
     const edge = uiScaled(1);
     fillRoundRectAA(hdc, .{ .left = pill.left + edge, .top = pill.top + edge, .right = pill.right - edge, .bottom = pill.bottom - edge }, uiScaled(10), if (app_state.g_light_theme) RGB(225, 225, 225) else 0x353535);
@@ -4858,7 +4858,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             chatPaintBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], rc);
             g_bubble_span = null;
             chatPaintBlockImages(mem_dc, i, body_rc);
-            chatPaintReactions(mem_dc, g_reaction_view.mask(i), rc);
+            chatPaintReactions(mem_dc, g_reaction_view.mask(i), rc, uiScaled(if (app_state.g_chat_blocks[i].role == .code or app_state.g_chat_blocks[i].kind == .table) CHAT_CODE_PAD else CHAT_AGENT_PAD_Y));
             if (g_hover_message == i and app_state.g_chat_blocks[i].role == .prose) {
                 const pen = @import("win32.zig").CreatePen(0, uiScaled(1), if (app_state.g_light_theme) 0x999999 else 0x4a4a4a);
                 const previous_pen = SelectObject(mem_dc, pen);

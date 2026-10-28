@@ -18,6 +18,8 @@ test('assistant message entry points share a below-message menu with stable requ
   assert.match(menu, /copy_request_id = 11/);
   assert.match(render, /run\.last\]\.bottom - app_state\.g_chat_scroll_y \+ uiScaled\(6\)/);
   assert.match(render, /chatPaintBlock\(mem_dc, buf, app_state\.g_chat_blocks\[i\], app_state\.g_chat_bubble_pos\[i\], rc\)/);
+  assert.match(render, /\.top = rc\.bottom - bottom_pad - uiScaled\(22\)/);
+  assert.match(render, /\.bottom = rc\.bottom - bottom_pad/);
   const hover = render.slice(render.indexOf('fn chatPaintHoverActions('), render.indexOf('fn chatMessageMenu('));
   assert.match(hover, /g_hover_point orelse return/);
   assert.match(hover, /if \(app_state\.g_chat_rich_fonts\[12\] == null\)/);
