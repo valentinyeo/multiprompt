@@ -800,25 +800,6 @@ jobs:
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
-      - name: Analyze native continuity crash
-        timeout-minutes: 10
-        if: always() && inputs.long_chat_proof
-        shell: pwsh
-        run: |
-          $dumps = @(Get-ChildItem evidence -Recurse -Filter '*.dmp' -ErrorAction SilentlyContinue)
-          if ($dumps.Count -eq 0) { exit 0 }
-          $debugger = 'C:/Program Files (x86)/Windows Kits/10/Debuggers/x64/cdb.exe'
-          if (-not (Test-Path $debugger)) {
-            $setup = "$env:RUNNER_TEMP/winsdksetup.exe"
-            Invoke-WebRequest 'https://go.microsoft.com/fwlink/?linkid=2196241' -OutFile $setup
-            $install = Start-Process $setup -ArgumentList '/features OptionId.WindowsDesktopDebuggers /quiet /norestart' -Wait -PassThru
-            if ($install.ExitCode -notin @(0, 3010)) { throw "Debugger install failed: $($install.ExitCode)" }
-          }
-          if (-not (Test-Path $debugger)) { throw 'Native debugger missing after SDK setup' }
-          foreach ($dump in $dumps) {
-            & $debugger -z $dump.FullName -y "srv*$env:RUNNER_TEMP/symbols*https://msdl.microsoft.com/download/symbols" -c '!analyze -v; .ecxr; kv; q' 2>&1 | Out-File -Encoding utf8 "$($dump.FullName).analysis.txt"
-            if ($LASTEXITCODE -ne 0) { throw "Native dump analysis failed: $($dump.Name)" }
-          }
       - name: Upload durable verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
