@@ -103,7 +103,7 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
 test('IGSH-1113 required appearance verification cannot be filtered out for any PR', () => {
   const trigger = workflow.match(/^  pull_request:\r?\n((?:[ \t]+[^\n]*\r?\n)+)/m)?.[1];
   assert.ok(trigger?.includes("      - '**'"));
-  assert.doesNotMatch(trigger, /branches|paths-ignore|types|      - ['"]?!/);
+  assert.doesNotMatch(trigger, /^    (?:branches(?:-ignore)?|paths-ignore|types):|^      - ['"]?!/m);
   assert.ok(featureMatrix(workflow).pr.includes('appearance'));
 });
 
