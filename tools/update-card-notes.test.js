@@ -208,7 +208,7 @@ test('IGSH-1090 published executable paints its own published notes, with no bin
   assert.equal(notes.releases[0].version, notes.version);
   assert.ok(notes.releases[0].changes.length > 0);
   assert.ok(notes.releases.some(item => item.changes.includes('Update cards explain each change, without generic messages.')));
-  const proof = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+  const proof = spawnSync('pwsh.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
     path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', assets['multiprompt-x64.exe'],
     '-Notes', assets['release-notes.json'], '-Evidence', path.join(directory, 'proof')],
   { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
