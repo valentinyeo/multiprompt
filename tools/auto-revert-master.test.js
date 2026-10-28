@@ -551,19 +551,24 @@ test('auto-revert workflow grants contents and pull-request writes with the exis
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
 });
 
-test('PR smoke and full master matrix stay wired without duplicate release-tag journeys', () => {
+test('PR smoke and full master matrix stay wired without duplicate release-tag journeys', async () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
   const release = fs.readFileSync(`${__dirname}/../.github/workflows/release.yml`, 'utf8');
   assert.match(verify, /pull_request' && fromJSON\('\["appearance"\]'\)/);
   assert.match(verify, /github.event_name == 'push' \|\| inputs.feature == 'all'/);
   const matrices = [...verify.matchAll(/fromJSON\('(\[[^'\n]+\])'\)/g)].map(match => JSON.parse(match[1]));
-  assert.equal(matrices[1].length, 21);
-  assert.ok(matrices[1].includes('chat-dictation'));
-  assert.ok(matrices[1].includes('tmux-binding'));
-  assert.ok(matrices[1].includes('chat-send-latency'));
-  assert.ok(matrices[1].includes('remind-me'));
-  assert.ok(matrices[1].includes('chat-first-paint'));
-  assert.match(verify, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083, ceo\/IGSH-1079\]\n  workflow_dispatch:/m);
+  const full = matrices.find(features => features.includes('chat-dictation'));
+  assert.equal(full.length, 21);
+  for (const feature of ['chat-dictation', 'tmux-binding', 'chat-send-latency', 'remind-me', 'chat-first-paint']) assert.ok(full.includes(feature));
+  const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
+  verifyPushBranches(verify);
+  const expression = verify.match(/^        feature: \$\{\{ (.+) \}\}$/m)[1];
+  const targeted = require('node:vm').runInNewContext(expression, {
+    github: { event_name: 'push', ref: 'refs/heads/ceo/IGSH-1055-hax2' }, inputs: {},
+    fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value),
+    startsWith: (value, prefix) => value.startsWith(prefix),
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(targeted)), ['browser-pane-stuck', 'chat-messages-only']);
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
 });
 
