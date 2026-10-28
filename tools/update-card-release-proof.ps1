@@ -91,8 +91,12 @@ try {
             Write-Output ('WRAPPED_CARD_IMAGE=' + $Name + ':' + [Convert]::ToBase64String([IO.File]::ReadAllBytes($file)))
         }
         function Resize-Card([int]$Width, [int]$Height) {
-            $script:cardLog = ''
-            Remove-Item $log -Force
+            $before = New-Object ReleaseCardProof+Rect
+            if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$before)) { throw 'Card resize has no window' }
+            if ($before.R - $before.L -ne $Width -or $before.B - $before.T -ne $Height) {
+                $script:cardLog = ''
+                Remove-Item $log -Force
+            }
             if (-not [ReleaseCardProof]::SetWindowPos($process.MainWindowHandle, [IntPtr]::Zero, 0, 0, $Width, $Height, 0x0040)) { throw 'Card resize failed' }
             Wait-Card { $script:cardLog -match '\[update\] notes viewport=' -and $script:cardLog -match '\[update\] card remaining=' } 'Card did not expose wrapped note bounds'
         }
@@ -143,6 +147,7 @@ try {
         Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq $process.Id -and $_.Name -ieq 'powershell.exe' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
     }
+    if ($Wrapped -and (Test-Path $log)) { Get-Content $log | Select-Object -Last 80 | ForEach-Object { Write-Output ('WRAPPED_CARD_LOG=' + $_) } }
     $mutex.ReleaseMutex()
     $mutex.Dispose()
     $event.Dispose()
