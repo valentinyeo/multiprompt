@@ -656,6 +656,38 @@ class ChatSyncAuditTest(unittest.TestCase):
         self.assertEqual(self.run_audit(rows, '--contains', '> - **One question:** should high-risk'),
                          [dict(probe=0, present=True)])
 
+    def test_igsh1058_pasted_sender_note_is_not_a_missing_user_receipt(self):
+        reader = audit.load_reader()
+        note = '<pasted_content id="neutral">\n[from Neutral Lead] Please keep the shared setup aligned.\n</pasted_content id="neutral">'
+        events = [dict(type='queue-operation', operation='enqueue', content=note,
+                       timestamp='2026-10-27T12:48:42.790Z'),
+                  dict(type='queue-operation', operation='remove', content=note, reason='absorbed_mid_turn',
+                       timestamp='2026-10-27T12:49:01.679Z'),
+                  dict(type='attachment', timestamp='2026-10-27T12:48:42.521Z',
+                       attachment=dict(type='queued_command', prompt=note))]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'neutral.jsonl'
+            path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+            query = dict(id=1, codex=False, sid='sid', tmux='', cwd='', cached_sid='',
+                         inode=0, offset=0, settlement=True)
+            wire = reader.response(query, resolved=('claude', 'sid', path, None))
+            rows = [json.loads(line) for line in wire.splitlines()[1:-1]]
+            self.assertEqual(rows[-1]['timestamp'], events[1]['timestamp'])
+            self.assertTrue(rows[-1]['text'].startswith('[from Neutral Lead]'))
+            self.assertEqual(self.run_audit(rows), [])
+            self.assertEqual(self.run_audit(rows[:-1]), [])
+
+    def test_igsh1058_pasted_user_messages_still_require_delivery(self):
+        text = 'please check the neutral build'
+        wrapped = '<pasted_content id="neutral">\n' + text + '\n</pasted_content id="neutral">'
+        rows = [self.fact('enqueue', '2026-10-27T12:48:42.790Z', wrapped),
+                self.fact('remove', '2026-10-27T12:49:01.679Z', wrapped)]
+        self.assertEqual([item['kind'] for item in self.run_audit(rows)], ['pending_but_delivered'])
+        rows.append(dict(role='user', text=text, timestamp='2026-10-27T12:49:01.679Z'))
+        self.assertEqual(self.run_audit(rows), [])
+        rows[-1]['text'] = 'I wrote [from Neutral Lead] in the middle'
+        self.assertEqual([item['kind'] for item in self.run_audit(rows)], ['pending_but_delivered'])
+
     def test_protocol_queue_deliveries_are_not_desktop_pending_messages(self):
         rows = []
         for content in ['<task-notification>neutral status</task-notification>',
