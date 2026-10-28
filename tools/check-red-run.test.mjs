@@ -45,6 +45,37 @@ function fixture(t) {
 }
 
 if (fs.existsSync(checker)) {
+  test('manual master checks compare the preceding commit without weakening PR or branch proof', t => {
+    const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+    const f = fixture(t);
+    f.write('src/value.txt', 'fixed');
+    f.write('tools/value.test.cjs', f.regression);
+    const head = f.commit();
+    f.git('update-ref', 'refs/remotes/origin/master', head);
+    for (const name of ['check-red-run', 'switch-performance']) {
+      const job = workflow.split(`\n  ${name}:\n`)[1].split(/\n  [\w-]+:\n/)[0];
+      const expression = job.match(/(?:base|BASE): \$\{\{ (.+) \}\}/)?.[1];
+      assert.ok(expression, `${name} baseline expression exists`);
+      const select = new Function('github', 'format', `return (${expression});`);
+      const format = (template, value) => template.replace('{0}', value);
+      for (const [event, ref, before, pull, expected] of [
+        ['workflow_dispatch', 'refs/heads/master', undefined, undefined, f.base],
+        ['workflow_dispatch', 'refs/heads/ceo/IGSH-9999', undefined, undefined, head],
+        ['push', 'refs/heads/master', f.base, undefined, f.base],
+        ['push', 'refs/heads/ceo/IGSH-9999', f.base, undefined, head],
+        ['pull_request', 'refs/pull/1/merge', undefined, { base: { sha: f.base } }, f.base],
+      ]) {
+        const selected = select({ event_name: event, ref, sha: head, event: { before, pull_request: pull || { base: {} } } }, format);
+        assert.equal(f.git('merge-base', selected, head), expected, `${name} ${event} ${ref}`);
+        if (event === 'workflow_dispatch' && ref === 'refs/heads/master') {
+          const proof = f.run(selected);
+          assert.equal(proof.status, 0, proof.stdout + proof.stderr);
+          assert.match(proof.stdout, /RED PROVEN tools\/value.test.cjs/);
+        }
+      }
+    }
+  });
+
   test('a genuine changed regression fails only on merge-base production source', t => {
     const f = fixture(t);
     f.write('src/value.txt', 'fixed');
