@@ -574,6 +574,7 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   verifyPushBranches(verify);
   const expression = verify.match(/^        feature: \$\{\{ (.+) \}\}$/m)[1];
   const targeted = vm.runInNewContext(expression, {
+    needs: { journeys: { outputs: { pr: JSON.stringify(matrices[0]), full: JSON.stringify(matrices[1]) } } },
     github: { event_name: 'push', ref: 'refs/heads/ceo/IGSH-1055-hax2' }, inputs: {},
     fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value),
     startsWith: (value, prefix) => value.startsWith(prefix),
