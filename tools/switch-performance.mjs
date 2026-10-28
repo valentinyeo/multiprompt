@@ -70,6 +70,42 @@ export function instrument(root, profile = false) {
     const times = calls.map((_, index) => `@divTrunc((poll_stages[${index}] -| ${index ? `poll_stages[${index - 1}]` : 'poll_started'}) * 1_000_000, @max(1, frequency))`);
     poll = poll.replace('.{@divTrunc((now -| poll_started) * 1_000_000, @max(1, frequency))}', `.{@divTrunc((now -| poll_started) * 1_000_000, @max(1, frequency)), ${times.join(', ')}}`);
     source = source.slice(0, start) + poll + source.slice(end);
+    const stages = [
+      ['chat_render.zig', 'chatPaintTranscriptContent', 'paint'],
+      ['chat_render.zig', 'chatRelayout', 'layout'],
+      ['dwrite_text.zig', 'draw', 'text'],
+      ['diagnostics.zig', 'debugLog', 'logging'],
+      ['session.zig', 'saveSession', 'save'],
+    ];
+    for (const [name, fn, stage] of stages) {
+      const file = path.join(root, 'src', name);
+      let body = fs.readFileSync(file, 'utf8');
+      const signature = new RegExp(`(fn ${fn}\\([^\\n]+\\{)`);
+      if (!signature.test(body)) throw new Error(`Unknown CPU profile boundary: ${name}:${fn}`);
+      body = body.replace(signature, `$1\n    const cpu_profile_start = @import("switch_cpu_profile.zig").start();\n    defer @import("switch_cpu_profile.zig").end(.${stage}, cpu_profile_start);`);
+      fs.writeFileSync(file, body);
+    }
+    fs.writeFileSync(path.join(root, 'src/switch_cpu_profile.zig'), `
+const std = @import("std");
+const win = @import("win32.zig");
+extern "kernel32" fn QueryThreadCycleTime(win.HANDLE, *u64) callconv(win.WINAPI) win.BOOL;
+const Stage = enum { paint, layout, text, logging, save };
+threadlocal var cycles: [5]u64 = @splat(0);
+pub fn start() u64 {
+    var value: u64 = 0;
+    _ = QueryThreadCycleTime(@ptrFromInt(std.math.maxInt(usize) - 1), &value);
+    return value;
+}
+pub fn end(stage: Stage, before: u64) void { cycles[@intFromEnum(stage)] += start() -| before; }
+pub fn report() void {
+    const measured = cycles;
+    cycles = @splat(0);
+    var message: [256]u8 = undefined;
+    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&message, "UI-CYCLES paint={d} layout={d} text={d} logging={d} save={d}", .{ measured[0], measured[1], measured[2], measured[3], measured[4] }) catch return);
+}
+`);
+    source = source.replace('chat-idle-poll: us={d} ready_us=', 'chat-idle-poll: us={d} ready_us=');
+    source = source.replace('                    const poll_revision =', '                    defer @import("switch_cpu_profile.zig").report();\n                    const poll_revision =');
     const captureFile = path.join(root, 'src/chat_capture.zig');
     let capture = fs.readFileSync(captureFile, 'utf8');
     const boundary = '    _ = FreeConsole();';
