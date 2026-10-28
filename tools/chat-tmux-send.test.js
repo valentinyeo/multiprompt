@@ -154,6 +154,17 @@ test "IGSH-608 a box that will not clear never pastes and leaves the message not
     try std.testing.expect(!storage[0].channel_pending);
     try std.testing.expect(g_chat_tmux_send_job == null);
 }
+test "IGSH-1010 held rejection never falls back to terminal paste" {
+    reset();
+    const job = std.heap.page_allocator.create(ChatTmuxSendJob) catch unreachable;
+    job.* = .{ .text = std.heap.page_allocator.dupe(u16, &.{'x'}) catch unreachable, .held = true, .rejected = true };
+    g_chat_tmux_send_job = job;
+    storage[0].channel_pending = true;
+    chatTmuxSendFinish();
+    try std.testing.expectEqual(@as(usize, 0), pastes + enters);
+    try std.testing.expect(storage[0].host_held);
+    try std.testing.expectEqual(@as(@TypeOf(storage[0].state), .not_sent), storage[0].state);
+}
 test "channel write failure falls back once but a written request or retry never pastes" {
     reset(); finishJob(false, false, 1);
     try std.testing.expectEqual(@as(usize, 1), pastes);
@@ -190,7 +201,7 @@ function execute(disabled = false) {
 test('production routing and completion execute with safe write-failure fallback', () => {
   const result = execute();
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 6 tests passed/);
+  assert.match(result.stderr, /All 7 tests passed/);
 });
 test('turning the switch off executes the original console path', () => {
   const result = execute(true);

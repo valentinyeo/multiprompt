@@ -337,6 +337,11 @@ test "ISSUE-501 injected clock jump" {
     fake_tick += 1;
     chatOutboxTick();
     try std.testing.expectEqual(chat_echo.OutboxState.not_sent, storage[0].state);
+    storage[0] = .{ .host_held = true };
+    fake_tick += 3_600_000;
+    chatOutboxTick();
+    try std.testing.expectEqual(chat_echo.OutboxState.delivered, storage[0].state);
+    try std.testing.expect(!storage[0].retryable);
 }
 `;
       await zig(code, 'ISSUE-501 injected', ['chat_echo.zig']);

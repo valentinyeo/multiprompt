@@ -721,3 +721,24 @@ test "hidden reaction and its lone reply leave no New divider" {
   const result = run(prelude + body(source, 'chatRelayout') + checks);
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
+
+
+test('IGSH-1010 cancelled bubbles retain label space without retry controls', () => {
+  const prelude = layout
+    .replace('return "";', 'return "k";')
+    .replace('fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32, _: bool) RECT { unreachable; }', 'fn chatMeasureEchoRect(_: HANDLE, _: []const u16, w: i32, y: i32, _: bool) RECT { return .{ .left = 0, .top = y, .right = w, .bottom = y + 20 }; }');
+  const checks = `
+test "cancelled label remains visible in clean chat" {
+    clean_chat = true;
+    g_chat_block_count = 0;
+    const entries = [_]@TypeOf(g_chat_outbox.items[0]){.{ .key = .{ 'k', 0, 0, 0, 0, 0, 0, 0 }, .key_len = 1, .text = &.{'x'}, .id = 1, .state = chat_echo.stateOnLoad(4, true) }};
+    g_chat_outbox.items = &entries;
+    chatRelayout(400);
+    try std.testing.expectEqual(@as(usize, 1), g_chat_echo_layout_count);
+    try std.testing.expectEqual(@as(i32, 40), g_chat_echo_layout[0].bottom - g_chat_echo_layout[0].top);
+    try std.testing.expect(!chat_echo.pendingActions(entries[0].state).send_again);
+}
+`;
+  const result = run(prelude + body(source, 'chatRelayout') + checks);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
