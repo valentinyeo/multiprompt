@@ -44,7 +44,8 @@ foreach ($round in 1..$roundCount) {
     $answer = "Live answer $round"
     [void](Wait-For 'fresh reply rendered without changing views' {
         Bind-Transcript
-        if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $transcript)) { throw 'Owned transcript typing focus missing' }
+        $viewHandle = [IntPtr]$views[0].Current.NativeWindowHandle
+        if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $viewHandle)) { throw 'Owned transcript typing focus missing' }
         Press @(0x11, 0x41) 'Ctrl+A: select live conversation'
         Press @(0x11, 0x43) 'Ctrl+C: copy rendered live conversation'
         $script:liveCopied = [Windows.Forms.Clipboard]::GetText()
