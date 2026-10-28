@@ -50,6 +50,19 @@ class HistoryReaderTest(unittest.TestCase):
         self.query.pop('before', None)
         return fields, [json.loads(line) for line in lines[1:-1]]
 
+    def test_held_queue_rejects_unbound_workspace_neighbour(self):
+        self.write(self.event('unrelated completed turn'))
+        with patch.object(reader, 'subprocess') as processes, \
+                patch.object(reader, 'process_table', return_value={99: (1, ['claude'])}), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'), \
+                patch.object(reader, 'open_claude_transcript', return_value=None), \
+                patch.object(reader, 'held_queue_ready', return_value=True), \
+                patch.object(reader, 'send_response') as send:
+            processes.run.return_value = types.SimpleNamespace(returncode=0, stdout='99\n')
+            reply = reader.enqueue_response(dict(id=1, tmux='term-1', text='must not reach a neighbour', queued_at=1, message_id='bound-message'))
+        self.assertIn('\tsend\terror\tagent_unavailable\t', reply)
+        send.assert_not_called()
+
     def test_igsh1063_only_structured_pending_questions(self):
         questions = [dict(question="Which colour?", header="Accent", multiSelect=False,
                           options=[dict(label="Lime", description="Bright contrast"),

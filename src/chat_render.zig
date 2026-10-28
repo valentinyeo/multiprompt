@@ -991,7 +991,7 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
 
 fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32, status: bool) RECT {
     var rect = chatMeasureBlockRect(hdc, text, .{ .start = 0, .len = text.len, .role = .user }, .single, width, y, null);
-    if (status) rect.bottom += uiScaled(CHAT_STATUS_H);
+    if (!app_state.clean_chat and status) rect.bottom += uiScaled(CHAT_STATUS_H);
     return rect;
 }
 
@@ -2194,7 +2194,8 @@ pub fn chatRelayout(client_width: i32) void {
                 if (app_state.g_chat_echo_layout_count >= app_state.g_chat_echo_layout.len) break;
                 if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key) or g_reaction_view.hidesPending(e.id)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
-                var rc = chatMeasureEchoRect(hdc, e.text, width, y, (e.state == .not_sent or e.state == .cancelled));
+                var rc = chatMeasureEchoRect(hdc, e.text, width, y, e.state == .not_sent);
+                if (e.state == .cancelled) rc.bottom += uiScaled(CHAT_STATUS_H);
                 if (!app_state.clean_chat and chat_echo.pendingActions(e.state).send_again) rc.bottom += uiScaled(26);
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;

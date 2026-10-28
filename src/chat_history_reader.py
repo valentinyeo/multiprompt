@@ -390,7 +390,7 @@ def codex_transcript_for_cwd(cwd):
             best, best_mtime = (sid, path), mtime
     return best
 
-def resolve_tmux_agent(agent, name, pid=None):
+def resolve_tmux_agent(agent, name, pid=None, require_bound=False):
 
     table = None
     if pid is None:
@@ -434,6 +434,8 @@ def resolve_tmux_agent(agent, name, pid=None):
                 path = conversation_path("claude", resumed, cwd or "")
                 return (resumed, path) if path is not None else None
         if sid:
+            return None
+        if require_bound:
             return None
         fallback = claude_transcript_for_cwd(cwd) if cwd else None
         if fallback is None:
@@ -1698,7 +1700,7 @@ def enqueue_response(q):
     from contextlib import closing
     key = held_message_key(q)
     name = q["tmux"]
-    resolved = resolve_tmux_agent("claude", name)
+    resolved = resolve_tmux_agent("claude", name, require_bound=True)
     if not resolved:
         return f"@mp\t{q['id']}\tsend\terror\tagent_unavailable\t0\n{END}\n"
     sid, transcript = resolved
@@ -1782,7 +1784,7 @@ def drain_held_queue(tmux, sid, transcript):
             return
         if not held_queue_ready(tmux, transcript):
             return
-        current = resolve_tmux_agent("claude", tmux)
+        current = resolve_tmux_agent("claude", tmux, require_bound=True)
         if current is None or current[0] != sid or Path(current[1]) != Path(transcript):
             return
         with db:
