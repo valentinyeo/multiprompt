@@ -15,6 +15,7 @@ const checkNames = ['test', 'no-comments', 'extension-version', 'secret-scan', '
 const checks = checkNames.map(name => ({ __typename: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
 const snapshot = () => ({ data: { repository: { deleteBranchOnMerge: true, pullRequest: {
   id: 'PR_fixture', number: 42, state: 'OPEN', headRefOid: sha, baseRefOid: master,
+  baseRef: { target: { oid: master } },
   headRefName: 'feature', baseRefName: 'master', author: { login: 'owner' },
   isCrossRepository: false, isDraft: false, mergeable: 'MERGEABLE', changedFiles: 1,
   labels: page([]), files: { ...page([{ path: 'README.md', changeType: 'MODIFIED' }]), totalCount: 1 },
@@ -152,6 +153,8 @@ for (const [name, change] of [
   ['check head', pr => { pr.commits.nodes[0].commit.oid = master; }],
   ['comparison head', pr => { pr.headRef.compare.baseTarget.oid = master; }],
   ['comparison master', pr => { pr.headRef.compare.headTarget.oid = sha; }],
+  ['base target missing', pr => { pr.baseRef = null; }],
+  ['base target invalid', pr => { pr.baseRef.target.oid = 'invalid'; }],
   ['comparison missing', pr => { pr.headRef.compare = null; }],
 ]) test(`incomplete ${name} fails closed`, t => {
   const response = snapshot();
@@ -294,4 +297,16 @@ for (const [login, verdict] of [['software-factory-runners', 'merge'], ['other-a
 
 test('manual emergency inspection on master does not require a new source diff', () => {
   assert.match(workflow, /name: Prove regression on merge-base source\n        if: github.event_name == 'workflow_dispatch' && github.ref_name != github.event.repository.default_branch/);
+});
+
+test('cached PR base does not replace the current master target', t => {
+  const response = snapshot();
+  const pr = response.data.repository.pullRequest;
+  pr.baseRefOid = 'c'.repeat(40);
+  pr.headRef.compare.aheadBy = 1;
+  const f = fixture(t, response);
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /behind master by 1/);
+  assert.equal(f.calls().length, 1);
 });
