@@ -5221,6 +5221,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
+    if (@import("settings_panel.zig").windowKey(msg, wp, false)) return 0;
     if (@import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
     switch (msg) {
         0x0233 => {

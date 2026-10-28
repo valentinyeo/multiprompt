@@ -136,6 +136,8 @@ const FocusNative = struct {
     }
 };
 fn reset() void {
+    settings_panel.window = null;
+    settings_panel.key_window = null;
     g_chat_active = false;
     g_search_active = false;
     g_inbox_active = false;
@@ -486,4 +488,20 @@ test "ISSUE-451 activation repair refuses editor find overlays pane modal and ex
     clock += 1001;
     try std.testing.expect(!focusGuardComposerRepairAllowed());
     try std.testing.expect(!focusGuard(win(3)));
+}
+
+test "Settings keeps input inside its panel and separate key dialog" {
+    reset();
+    settings_panel.window = win(7);
+    foreground = win(7);
+    focusGuardNoteInput(win(7), clock, true);
+    g_focus_user_action_tick = clock;
+    try std.testing.expect(focusGuard(win(7)));
+    try std.testing.expect(!focusGuard(win(3)));
+    clock += 2000;
+    settings_panel.key_window = win(8);
+    foreground = win(8);
+    try std.testing.expect(focusGuard(win(8)));
+    try std.testing.expect(!focusGuard(win(2)));
+    try std.testing.expect(!focusGuard(win(4)));
 }
