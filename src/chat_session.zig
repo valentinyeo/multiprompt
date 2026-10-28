@@ -1131,12 +1131,12 @@ pub fn chatFileOnReady() void {
             entry.key.sid = history.sid;
             entry.result = null;
             entry.failures = 0;
+            entry.missing_message = @splat(0);
             if (entry.resync and !disk and !history.more and history.start == 0) {
                 entry.resync = false;
                 if (belongs_to_active) showHeaderNoticeAscii("Chat resynced", 3000, false);
                 debugLog("[chat] resync completed");
             }
-            entry.missing_message = @splat(0);
             entry.next = GetTickCount64() + (if (disk or entry.prepended or entry.before > 0) @as(u64, 0) else if (history.more) @as(u64, 1000) else if (chatDeliveryPending(entry.key.shell_id, false)) @as(u64, 250) else if (entry.stream != null) @as(u64, 0) else chatFilePollInterval());
             if (belongs_to_active) {
                 active_changed = !entry.unchanged or history.revision != app_state.g_chat_last_hash;

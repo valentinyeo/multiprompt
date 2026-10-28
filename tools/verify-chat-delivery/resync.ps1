@@ -15,7 +15,7 @@ foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16]
 [void](Wait-For 'more menu command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=6466') })
 Press @(0x0D) 'Enter: open More Menu'
 Shot 'resync-menu'
-foreach ($index in 1..6) { Press @(0x28) 'Down: choose Resync chat' $true }
+foreach ($index in 1..5) { Press @(0x28) 'Down: choose Resync chat' $true }
 Press @(0x0D) 'Enter: Resync chat' $true
 [void](Wait-For 'source reload completes successfully' { (Read-Shared "$settings/debug.log").Substring($offset).Contains('[chat] resync completed') } 30)
 [void](Wait-For 'stale waiting label removed' { -not ([string](Queue-View)).Contains('queued:stale waiting message') } 10)
