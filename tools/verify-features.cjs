@@ -22,6 +22,7 @@ function discoverFeatures(directory = path.join(__dirname, '../.claude/skills/ve
     if (events.includes('pull_request')) result.pr.push(feature);
   }
   if (!result.full.length || !result.pr.length) throw new Error('Desktop journey matrices must not be empty');
+  for (const features of Object.values(result)) features.sort();
   return result;
 }
 
