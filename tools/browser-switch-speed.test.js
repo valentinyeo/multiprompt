@@ -361,10 +361,11 @@ function assertsDispatchOnly(source) {
   assert.ok(featureMatrix(source).available.includes('browser-switch-speed'));
 }
 
-test('PR journeys use feature-owned smoke while master retains existing coverage', () => {
+test('PR journeys use feature-owned smoke while master retains existing coverage', async () => {
+  const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
   const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'settings-panel', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
   function contract(source) {
-    assert.match(source, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083, ceo\/IGSH-1079\]\n  workflow_dispatch:/m);
+    verifyPushBranches(source);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), featureMatrix(source).pr);
     assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), featureMatrix(source).pr);
     for (const feature of full) assert.ok(journeyMatrix(source, 'push').includes(feature));
@@ -372,6 +373,7 @@ test('PR journeys use feature-owned smoke while master retains existing coverage
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1061-recovery'), ['browser-pane-stuck']);
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1083'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1079'), ['appearance']);
+    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1055-hax2'), ['browser-pane-stuck', 'chat-messages-only']);
     for (const feature of full) assert.ok(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837').includes(feature));
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
   }
