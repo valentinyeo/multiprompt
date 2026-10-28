@@ -180,7 +180,7 @@ function browserForegroundContract(source) {
   assert.match(source, /\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id\s*Focus-BrowserPaneOwner 'shift-b-toggle' \$fifth.browser_connection_id\s*Palette 'close all browser panes'/);
   foregroundInputContract(source);
   for (const name of ['Press', 'Type-Text']) {
-    const precondition = name === 'Press' ? 'Wait-Foreground' : 'Assert-Foreground';
+    const precondition = 'Wait-Foreground';
     assert.match(source, new RegExp(`function ${name}\\([^\\n]*\\) \\{\\s*Doctor\\s*${precondition}\\s*Record`));
   }
 }
