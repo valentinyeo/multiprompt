@@ -13,7 +13,7 @@ function between(start, end) {
   return source.slice(a, b);
 }
 
-test('production changelog geometry measures history once per width or font scale, never per input', () => {
+test('production changelog geometry measures only visible history and reuses geometry until width or font scale changes', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'changelog-layout-'));
   const harness = `const std = @import("std");
 const HANDLE = ?*anyopaque;
@@ -51,14 +51,14 @@ test "geometry is reused for opening, hovering, scrolling and selection" {
     const initial = calcChangelogLayout();
     try std.testing.expect(initial.max_scroll > initial.view_h);
     const cold_measurements = measurements;
-    try std.testing.expect(cold_measurements >= CHANGELOG.len);
+    try std.testing.expect(cold_measurements > 0 and cold_measurements < CHANGELOG.len);
     measurements = 0;
     contexts = 0;
     for (0..4) |_| {
         _ = calcChangelogLayout();
-        _ = changelogTotalContentHeightWithHdc(@ptrFromInt(3), 498);
+        _ = changelogTotalContentHeight(498);
         _ = changelogIndexAtContentY(100, 498);
-        _ = changelogEntryYRange(CHANGELOG.len - 1, 498);
+        _ = changelogEntryYRange(0, 498);
     }
     try std.testing.expectEqual(@as(usize, 0), measurements);
     try std.testing.expectEqual(@as(usize, 0), contexts);
@@ -74,19 +74,24 @@ test "geometry is reused for opening, hovering, scrolling and selection" {
     try std.testing.expectEqual(top, changelogTotalContentHeight(498));
     try std.testing.expectEqual(@as(?i32, null), changelogIndexAtContentY(-1, 498));
     try std.testing.expectEqual(@as(?i32, null), changelogIndexAtContentY(top, 498));
+    app_state.g_changelog_scroll = 2000;
+    const scrolled = calcChangelogLayout();
+    try std.testing.expectEqual(@as(i32, 2000), app_state.g_changelog_scroll);
+    try std.testing.expect(scrolled.max_scroll > 2000);
+    measurements = 0;
     window_width = 600;
     _ = calcChangelogLayout();
-    try std.testing.expect(measurements >= cold_measurements);
+    try std.testing.expect(measurements > 0 and measurements < CHANGELOG.len);
     measurements = 0;
     _ = calcChangelogLayout();
     try std.testing.expectEqual(@as(usize, 0), measurements);
     fake_scale = 150;
     _ = calcChangelogLayout();
-    try std.testing.expect(measurements >= cold_measurements);
+    try std.testing.expect(measurements > 0 and measurements < CHANGELOG.len);
     measurements = 0;
     if (@hasDecl(@This(), "resetChangelogLayout")) @field(@This(), "resetChangelogLayout")();
     _ = calcChangelogLayout();
-    try std.testing.expect(measurements >= cold_measurements);
+    try std.testing.expect(measurements > 0 and measurements < CHANGELOG.len);
 }
 `;
   try {
@@ -100,7 +105,7 @@ test "geometry is reused for opening, hovering, scrolling and selection" {
 });
 
 test('font resets invalidate layout and paint visits only visible cached rows', () => {
-  const drawing = fs.readFileSync(path.join(root, 'src/drawing.zig'), 'utf8');
+  const drawing = fs.readFileSync(process.env.CHANGELOG_DRAWING_SOURCE || path.join(root, 'src/drawing.zig'), 'utf8');
   assert.match(drawing, /pub fn resetFontCache\(\) void \{\s+@import\("changelog.zig"\).resetChangelogLayout\(\);/);
   const paint = source.slice(source.indexOf('pub fn paintChangelogOverlay('));
   assert.match(paint, /if \(!app_state.g_changelog_active\) return;/);
