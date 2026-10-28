@@ -675,7 +675,10 @@ except OSError:
 try:
     with sock:
         sock.settimeout(max(0.001, deadline - time.monotonic()))
-        sock.sendall(((f"AUTH:{token}:" if token is not None else "") + f"ZSB:{session}:{payload}\n").encode())
+        if token is None:
+            sock.sendall(f"ZSB:{session}:{payload}\n".encode())
+        else:
+            sock.sendall(f"AUTH:{token}:ZSB:{session}:{payload}\n".encode())
         chunks, size = [], 0
         while True:
             remaining = deadline - time.monotonic()
