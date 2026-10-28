@@ -26,6 +26,17 @@ Wait-Until {
     return [VerifyNative]::IsWindowVisible($script:pickerTranscript)
 } 'native chat transcript visible before picker'
 $transcript = $script:pickerTranscript
+Wait-Until {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+    $script:pickerComposer = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $condition)
+    $null -ne $script:pickerComposer -and -not $script:pickerComposer.Current.IsOffscreen
+} 'owned visible composer before Alt+W'
+$composer = [IntPtr]$script:pickerComposer.Current.NativeWindowHandle
+if ($script:pickerComposer.Current.ProcessId -ne $process.Id -or [VerifyNative]::GetAncestor($composer, 2) -ne $script:window) { throw 'Picker composer belongs to another app' }
+[VerifyNative]::BringToForeground($script:window)
+Record 'Click the owned composer before Alt+W'
+[VerifyNative]::ClickClient($composer, 8, 8)
 Wait-ChatFocus 'Edit' 'composer-ready'
 Snapshot 'before'
 Press @(0x12, 0x57) 'Alt+W: open link list above Chat View'
