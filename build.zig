@@ -213,6 +213,8 @@ pub fn build(b: *std.Build) void {
     const livetest_tests = b.addTest(.{ .root_module = livetest_exe.root_module });
     test_step.dependOn(&b.addRunArtifact(livetest_tests).step);
     const vps_test_step = b.step("test-vps", "Run tests for the Linux server tools");
+    const user_tmux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/user-tmux.test.js" });
+    vps_test_step.dependOn(&user_tmux_tests.step);
     const chat_audit = b.addExecutable(.{ .name = "chat-audit", .root_module = b.createModule(.{
         .root_source_file = b.path("src/chat_audit.zig"),
         .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
