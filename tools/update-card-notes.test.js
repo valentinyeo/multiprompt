@@ -93,7 +93,7 @@ test('existing card uses the same growing rectangle for layout and hits, with th
   assert.match(card, /IntersectClipRect\(hdc, notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom\)/);
   assert.match(card, /card_scroll = std.math.clamp/);
   assert.match(card, /const bottom = card.bottom - uiScaled\(30\)/);
-  assert.match(read('src/main.zig'), /if \(msg == WM_MOUSEWHEEL and @import\("update_card.zig"\).updateCardScroll/);
+  assert.match(read('src/main.zig'), /if \(@import\("update_card.zig"\).updateCardScroll\(pt.x, pt.y, delta\)\) return 0/);
   const notes = read('src/update_notes.zig');
   for (const name of [
     'IGSH-728 picks only versions between installed and offered, newest first',
