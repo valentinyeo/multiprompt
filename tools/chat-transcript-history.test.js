@@ -749,6 +749,7 @@ test "cache-first switch-back live tail during older loading" {
     chatFileOnReady();
     try std.testing.expectEqual(@as(u64, 0), one.before);
     try std.testing.expectEqual(@as(u64, 400), one.history.offset);
+    try std.testing.expectEqual(ticks, one.next);
     try std.testing.expectEqual(@as(usize, 0), one.backfill.pages.items.len);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstsecondthirdfourth"), one.history.text.items);
 }
