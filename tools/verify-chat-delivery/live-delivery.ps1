@@ -25,7 +25,7 @@ foreach ($round in 1..10) {
         [void](Wait-For 'live palette ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
         $query = 'chat view select all'
         foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-        [void](Wait-For 'live select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+        [void](Wait-For 'live select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=\d+ target=6364(?:\s|$)') })
         Press @(0x0D) 'Enter: select live conversation'
         Press @(0x11, 0x43) 'Ctrl+C: copy rendered live conversation'
         $script:liveCopied = [Windows.Forms.Clipboard]::GetText()
@@ -36,7 +36,7 @@ foreach ($round in 1..10) {
     Press @(0x1B) 'Esc: clear live selection'
     [void](Wait-For 'accepted messages no longer pending' {
         $shown = [string](Queue-View)
-        @($messages | Where-Object { $shown.Contains($_) }).Count -eq 0
+        @($messages | Where-Object { -not $shown.Contains('sent:' + $_) }).Count -eq 0
     } 2)
     $outbox = if (Test-Path "$settings/chat-outbox.json") { Read-Shared "$settings/chat-outbox.json" } else { '{"queues":[]}' }
     [IO.File]::WriteAllText("$caseDir/round-$round-outbox.json", $outbox)
