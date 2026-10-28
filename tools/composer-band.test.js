@@ -15,3 +15,57 @@ test('IGSH-805 composer band buffered paint fills the full client background bef
   assert.notEqual(broken, buffered);
   assert.throws(() => assert.match(broken, fullClientPaint), assert.AssertionError);
 });
+
+test('repeated chat layout preserves composer font without redundant edit redraws', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const composer = require('./app-source').readAppSource();
+  const start = composer.indexOf('fn layoutChatControls()');
+  const end = composer.indexOf('    const base_h = chatComposerBaseEditH();', start);
+  assert.ok(start >= 0 && end > start);
+  const production = composer.slice(start, end) + '    _ = &layout;\n}\n';
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'composer-font-layout-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'test.zig'), `
+const std = @import("std");
+var g_chat_active = true;
+var g_chat_composer_hwnd: ?usize = 1;
+var g_chat_layout_browser_reserved = false;
+var current_font: usize = 0;
+var desired_font: usize = 42;
+var redraws: usize = 0;
+fn browserSlotReserved() bool { return false; }
+fn chatViewLayout() u8 { return 0; }
+fn ensureChatFont() ?*anyopaque { return @ptrFromInt(desired_font); }
+fn SendMessageW(_: ?usize, msg: u32, wp: usize, _: isize) isize {
+    if (msg == 0x0031) return @bitCast(current_font);
+    if (msg == 0x0030) {
+        current_font = wp;
+        redraws += 1;
+    }
+    return 0;
+}
+${production}
+test "font changes redraw once; repeated session layouts retain text and font" {
+    layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 42), current_font);
+    try std.testing.expectEqual(@as(usize, 1), redraws);
+    for (0..80) |_| layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 1), redraws);
+    desired_font = 43;
+    layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 43), current_font);
+    try std.testing.expectEqual(@as(usize, 2), redraws);
+    g_chat_active = false;
+    desired_font = 44;
+    layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 43), current_font);
+    try std.testing.expectEqual(@as(usize, 2), redraws);
+}
+`);
+    const result = spawnSync('zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
