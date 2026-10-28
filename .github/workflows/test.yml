@@ -648,6 +648,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Baseline checkout failed' }
           node tools/switch-performance.mjs instrument baseline
           if ($LASTEXITCODE -ne 0) { throw 'Baseline timing instrumentation failed' }
+          node tools/switch-performance.mjs instrument .
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate timing instrumentation failed' }
           Push-Location baseline
           try { zig build; if ($LASTEXITCODE -ne 0) { throw 'Baseline build failed' } } finally { Pop-Location }
           zig build

@@ -39,11 +39,26 @@ test('no-op, incomplete and malformed workloads cannot pass', async () => {
     assert.throws(() => assess(data));
   }
 });
-test('production idle poll has real high-resolution timing', () => {
-  const source = fs.readFileSync(new URL('../src/main.zig', import.meta.url), 'utf8');
-  const poll = source.slice(source.indexOf('if (wp == TIMER_CHAT_REFRESH)'), source.indexOf('if (wp == TIMER_CHAT_REFRESH)') + 7000);
-  assert.match(poll, /QueryPerformanceCounter\(&poll_started\)/);
-  assert.match(poll, /poll_revision == app_state\.g_chat_last_hash[\s\S]*chat-idle-poll: us=/);
+test('performance builds add high-resolution idle timing without changing the shipped app', async () => {
+  const { instrument } = await oracle();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'speed-instrument-'));
+  try {
+    fs.mkdirSync(path.join(directory, 'src'));
+    const file = path.join(directory, 'src/main.zig');
+    fs.copyFileSync(new URL('../src/main.zig', import.meta.url), file);
+    instrument(directory);
+    const source = fs.readFileSync(file, 'utf8');
+    const poll = source.slice(source.indexOf('if (wp == TIMER_CHAT_REFRESH)'), source.indexOf('if (wp == TIMER_CHAT_REFRESH)') + 7000);
+    assert.match(poll, /QueryPerformanceCounter\(&poll_started\)/);
+    assert.match(poll, /poll_revision == app_state\.g_chat_last_hash[\s\S]*chat-idle-poll: us=/);
+    instrument(directory);
+    assert.equal(fs.readFileSync(file, 'utf8'), source);
+    const flow = fs.readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
+    assert.match(flow, /node tools\/switch-performance\.mjs instrument baseline/);
+    assert.match(flow, /node tools\/switch-performance\.mjs instrument \./);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('speed check runs on every PR and blocks the aggregate', () => {
