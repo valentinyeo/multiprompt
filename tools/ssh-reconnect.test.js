@@ -940,10 +940,11 @@ test "IGSH-1081 stale probe recovery" {
     sshProbeFinish();
     try std.testing.expect(shells[0].disconnected);
     try std.testing.expect(ssh_probe_next_tick <= fake_now + 1000);
-    fake_now += 3000;
+    fake_now += 1000;
     sshProbeStart();
-    const next = ssh_probe_job orelse return error.MissingRecoveryProbe;
-    try std.testing.expectEqual(fake_now - 3000, next.items[0].spawn_tick);
+    try std.testing.expect(ssh_probe_job != null);
+    const next = ssh_probe_job.?;
+    try std.testing.expectEqual(fake_now - 1000, next.items[0].spawn_tick);
     next.healthy[0] = true;
     next.items[0].attached = true;
     next.finished.store(true, .release);
@@ -951,7 +952,7 @@ test "IGSH-1081 stale probe recovery" {
     sshProbeFinish();
     try std.testing.expect(!shells[0].disconnected);
     shells[0].ssh_reconnect.phase = .connected;
-    fake_now = ssh_probe_next_tick;
+    fake_now = @max(ssh_probe_next_tick, shells[0].spawn_tick + 3000);
     sshProbeStart();
     const idle = ssh_probe_job orelse return error.MissingIdleProbe;
     idle.healthy[0] = true;
