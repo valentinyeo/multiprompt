@@ -4,6 +4,7 @@ Find real actions in Ctrl+K, execute an app-size change and reset it while check
 
 ## Sub-features
 
+- `changelog-speed`: cold and repeated Ctrl+K Changelog opens, Page Down and Escape finish below 100 milliseconds across five samples; screen pixels must change and the UI thread must respond. Full history stays available.
 - `palette-search`: filter commands using an actual supported query.
 - `palette-execute`: execute UI Size: Increase and save 110% app scale.
 - `update-command-idle`: search Restart to update and execute with no staged update, retaining the owned app and session.
@@ -28,6 +29,7 @@ Preconditions:
 - The palette has not inherited a submenu or query from another journey; every dispatch uses fresh data.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=command-palette`; Windows runs `control.ps1 -Feature command-palette`.
+- **Changelog speed.** Before app-size changes, run five Ctrl+K `changelog` selections. Time native Enter, Page Down and Escape through changed text pixels plus a UI-thread response, without forced repaint. Save all samples and before/after response times in `changelog-speed.json`; capture `changelog-open.png`, `changelog-scrolled.png` and `changelog-closed.png`. Cold opening is included. Every measured open, scroll, close and after-close response must stay below 100 milliseconds.
 - **Search.** Press Ctrl+K and type `interface`. `action.png` shows the filtered UI Size rows with Increase selected.
 - **Execute.** Press Enter for `UI Size: Increase`. The palette closes and the app's saved `ui_scale` must be 110. Capture `after.png` showing larger chrome.
 - **Reset.** Reopen Ctrl+K and type `interface`; Down twice reaches `UI Size: Reset`, then Enter. Capture `reset.png`. The saved scale must be default 100 (the default may be omitted from the file).

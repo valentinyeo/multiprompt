@@ -1,0 +1,195 @@
+{
+  "sha256": "b5d9296aa4cce6b4c145119d709e2eabb277f94aa4e4a673527c820bdb59ec3d",
+  "features": [
+    {
+      "name": "chat-working",
+      "file": "chat-working.ps1",
+      "generated": false
+    },
+    {
+      "name": "title-bar",
+      "file": "title-bar.ps1",
+      "generated": false
+    },
+    {
+      "name": "window-controls",
+      "file": "window-controls.ps1",
+      "generated": false
+    },
+    {
+      "name": "palette-order",
+      "file": "control-feature-palette-order.ps1",
+      "generated": true
+    },
+    {
+      "name": "chat-view-everywhere",
+      "file": "control-feature-chat-view-everywhere.ps1",
+      "generated": true
+    },
+    {
+      "name": "chat-send-latency",
+      "file": "control-feature-chat-send-latency.ps1",
+      "generated": true
+    },
+    {
+      "name": "chat-focus",
+      "file": "control-feature-chat-focus.ps1",
+      "generated": true
+    },
+    {
+      "name": "appearance",
+      "file": "control-feature-appearance.ps1",
+      "generated": true
+    },
+    {
+      "name": "chat-dictation",
+      "file": "control-feature-chat-dictation.ps1",
+      "generated": true
+    },
+    {
+      "name": "chat-tables",
+      "file": "control-feature-chat-tables.ps1",
+      "generated": true
+    },
+    {
+      "name": "chat-skill-pill",
+      "file": "chat-skill-pill.ps1",
+      "generated": false
+    },
+    {
+      "name": "chat-options",
+      "file": "chat-options.ps1",
+      "generated": false
+    },
+    {
+      "name": "chat-composer-text",
+      "file": "control-feature-chat-composer-text.ps1",
+      "generated": true
+    },
+    {
+      "name": "chat-code-font",
+      "file": "control-feature-chat-code-font.ps1",
+      "generated": true
+    },
+    {
+      "name": "sessions",
+      "file": "control-feature-sessions.ps1",
+      "generated": true
+    },
+    {
+      "name": "session-restore",
+      "file": "control-feature-session-restore.ps1",
+      "generated": true
+    },
+    {
+      "name": "workspaces",
+      "file": "workspace-switcher.ps1",
+      "generated": false
+    },
+    {
+      "name": "tab-names",
+      "file": "control-feature-tab-names.ps1",
+      "generated": true
+    },
+    {
+      "name": "favorites-groups",
+      "file": "control-feature-favorites-groups.ps1",
+      "generated": true
+    },
+    {
+      "name": "tmux-binding",
+      "file": "tmux-binding.ps1",
+      "generated": false
+    },
+    {
+      "name": "relaunch-saved-sessions",
+      "file": "control-feature-relaunch-saved-sessions.ps1",
+      "generated": true
+    },
+    {
+      "name": "session-open",
+      "file": "control-feature-session-open.ps1",
+      "generated": true
+    },
+    {
+      "name": "workspace-focus",
+      "file": "control-feature-workspace-focus.ps1",
+      "generated": true
+    },
+    {
+      "name": "chat-view",
+      "file": "control-feature-chat-view.ps1",
+      "generated": true
+    },
+    {
+      "name": "inbox",
+      "file": "control-feature-inbox.ps1",
+      "generated": true
+    },
+    {
+      "name": "remind-me",
+      "file": "control-feature-remind-me.ps1",
+      "generated": true
+    },
+    {
+      "name": "session-tabs",
+      "file": "control-feature-session-tabs.ps1",
+      "generated": true
+    },
+    {
+      "name": "group-rail",
+      "file": "control-feature-group-rail.ps1",
+      "generated": true
+    },
+    {
+      "name": "pane-layout",
+      "file": "control-feature-pane-layout.ps1",
+      "generated": true
+    },
+    {
+      "name": "chat-first-paint",
+      "file": "control-feature-chat-first-paint.ps1",
+      "generated": true
+    },
+    {
+      "name": "browser-switch-speed",
+      "file": "control-feature-browser-switch-speed.ps1",
+      "generated": true
+    },
+    {
+      "name": "browser-corners",
+      "file": "browser-corners.ps1",
+      "generated": false
+    },
+    {
+      "name": "browser-pane-locked",
+      "file": "control-feature-browser-pane-locked.ps1",
+      "generated": true
+    },
+    {
+      "name": "browser-pane-stuck",
+      "file": "control-feature-browser-pane-stuck.ps1",
+      "generated": true
+    },
+    {
+      "name": "browser-own-profile",
+      "file": "control-feature-browser-own-profile.ps1",
+      "generated": true
+    },
+    {
+      "name": "status-card",
+      "file": "control-feature-status-card.ps1",
+      "generated": true
+    },
+    {
+      "name": "command-palette",
+      "file": "control-feature-command-palette.ps1",
+      "generated": true
+    },
+    {
+      "name": "chat-switch-speed",
+      "file": "control-feature-chat-switch-speed.ps1",
+      "generated": true
+    }
+  ]
+}

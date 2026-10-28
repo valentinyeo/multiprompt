@@ -1,10 +1,18 @@
 const { test } = require('node:test');
+
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
 const { readChangelogEntry } = require('./changelog-entry');
 const root = path.resolve(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8'));
 const skill = '.claude/skills/verify-multiprompt/';
 const focus = read('src/focus.zig');
 const shortcuts = read('src/shortcuts.zig');
@@ -226,8 +234,9 @@ test('ISSUE-716 Windows journey uses real keys, owned mouse input, shared normal
 
 test('ISSUE-716 feature registration, PR journey, public docs and user changelog are complete', () => {
   assert.match(driver, /ValidateSet\([^\n]*'chat-focus'/);
-  assert.match(workflow, /FEATURE -notin @\([^\n]*'chat-focus'/);
-  assert.match(workflow, /feature:.*fromJSON\('\[[^\n]*"chat-focus"/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-focus'));
+  assert.ok(featureMatrix(workflow).full.includes('chat-focus'));
   assert.ok(workflow.includes('- tools/chat-focus.test.js'));
   assert.match(workflow, /run: node --test [^\n]*tools\/chat-focus.test.js/);
   const map = read(skill + 'features/chat-focus.md');

@@ -2582,8 +2582,9 @@ pub fn ensureActiveVisible() void {
     const top: i32 = tabRowY(app_state.active_shell) orelse return;
     const bot: i32 = top + tabRowH();
     const vis_h = sidebarVisibleH();
-    if (top - app_state.g_sidebar_scroll < 0) {
-        app_state.g_sidebar_scroll = top;
+    const visible_top = @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
+    if (top - app_state.g_sidebar_scroll < visible_top) {
+        app_state.g_sidebar_scroll = @max(0, top - visible_top);
     } else if (bot - app_state.g_sidebar_scroll > vis_h) {
         app_state.g_sidebar_scroll = bot - vis_h;
     }
@@ -2756,7 +2757,10 @@ pub fn switchToShell(idx: u32) void {
         }
     }
     app_state.g_chat_switch_preparing = false;
-    if (defer_browser and app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    if (defer_browser and app_state.g_chat_transcript_hwnd != null) {
+        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+        _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
+    }
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
     if (!app_state.g_restoring) publishInboxState();
     app_state.g_skip_view_bump = false;

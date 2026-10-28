@@ -142,15 +142,15 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.match(tests, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run\]/);
+  assert.match(tests, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance\]/);
   assert.match(tests, /BUILD: \$\{\{ needs\.build-windows\.result \}\}/);
 });
 
 test('aggregate routing requires every test job and rejects every unsuccessful dependency', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const aggregate = tests.split('\n  test-result:\n')[1];
-  assert.match(aggregate, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run\]/);
-  for (const [variable, job] of Object.entries({ WINDOWS: 'test', VPS: 'test-vps', BUILD: 'build-windows', UPDATE: 'test-windows-update', WORKER: 'test-worker', UPDATE_SOURCE: 'test-update-source', RED_RUN: 'check-red-run' })) {
+  assert.match(aggregate, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance\]/);
+  for (const [variable, job] of Object.entries({ WINDOWS: 'test', VPS: 'test-vps', BUILD: 'build-windows', UPDATE: 'test-windows-update', WORKER: 'test-worker', UPDATE_SOURCE: 'test-update-source', RED_RUN: 'check-red-run', SPEED: 'switch-performance' })) {
     assert.ok(aggregate.includes(`${variable}: $` + `{{ needs.${job}.result }}`));
   }
   assert.match(aggregate, /for result in "\$@"; do\n              \[ "\$result" = success \] \|\| return 1/);
@@ -158,7 +158,7 @@ test('aggregate routing requires every test job and rejects every unsuccessful d
   assert.match(aggregate, /require_jobs "\$WINDOWS" "\$VPS" "\$BUILD" "\$UPDATE" "\$WORKER" "\$UPDATE_SOURCE" "\$RED_RUN"/);
   assert.doesNotMatch(aggregate, /CHANGES|HEAVY|needs\.changes/);
   const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
-  const success = { WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success', RED_RUN: 'success' };
+  const success = { WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success', RED_RUN: 'success', SPEED: 'success' };
   const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, ...env } });
   const result = run({});
   assert.equal(result.status, 0, result.stderr);
@@ -210,7 +210,7 @@ test('lightweight workflows cancel superseded PRs, a running master verify is ne
   }
   const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   assert.match(verify, /^  pull_request:/m);
-  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\$\{\{ inputs\.feature && github\.event_name == 'push' && format\('-gate-\{0\}', github\.sha\) \|\| '' \}\}\$\{\{ github\.run_attempt != '1' && format\('-rerun-\{0\}', github\.sha\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m);
+  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ inputs\.chat_reply_proof && format\('-reply-\{0\}', inputs\.tag \|\| 'candidate'\) \|\| '' \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\$\{\{ inputs\.feature && github\.event_name == 'push' && format\('-gate-\{0\}', github\.sha\) \|\| '' \}\}\$\{\{ github\.run_attempt != '1' && format\('-rerun-\{0\}', github\.sha\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m);
   const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
   assert.match(scan, /^  push:\n    branches: \[master\]\n  pull_request:/m);
   assert.match(scan, /^  schedule:/m);
@@ -413,4 +413,17 @@ for (const reason of ['skip', 'red', 'green']) test(`auto-release admission: ${r
     assert.equal(f.git('tag', '--list', 'v1.2.9'), '');
     assert.equal(f.git('--git-dir', f.remote, 'tag', '--list', 'v1.2.9'), '');
   }
+});
+
+
+test('IGSH-1115 release proof builds both architectures without publishing and authenticates history reads', () => {
+  const prepare = workflow.split('\n  prepare:\n')[1].split('\n  build:\n')[0];
+  const build = workflow.split('\n  build:\n')[1].split('\n  release:\n')[0];
+  const release = workflow.split('\n  release:\n')[1];
+  assert.match(workflow, /proof:\n        description: Build both architectures without publishing\n        type: boolean\n        default: false/);
+  assert.match(prepare, /if: inputs\.proof\n        run: node --test tools\/version-stamp\.test\.mjs tools\/release-version\.test\.mjs/);
+  assert.match(build, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(release, /if: github\.event_name != 'pull_request' && !inputs\.proof/);
+  const notes = release.split('      - name: Publish plain versioned update notes\n')[1].split('      - name: Package extension')[0];
+  assert.match(notes, /GH_TOKEN: \$\{\{ github\.token \}\}/);
 });

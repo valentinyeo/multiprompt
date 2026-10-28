@@ -8,6 +8,10 @@ on:
       tag:
         description: Release tag to create, for example v0.28.712
         required: true
+      proof:
+        description: Build both architectures without publishing
+        type: boolean
+        default: false
 
   workflow_call:
     inputs:
@@ -35,6 +39,9 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Verify release history on the branch
+        if: inputs.proof
+        run: node --test tools/version-stamp.test.mjs tools/release-version.test.mjs
       - name: Resolve release version and commit
         id: version
         env:
@@ -87,6 +94,7 @@ jobs:
       - name: Build
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           node tools/version-stamp.mjs build "$TAG"
           zig build -Dtarget=${{ matrix.target }} -Drelease=${{ github.event_name != 'pull_request' }} -Dversion="${TAG#v}"
@@ -110,7 +118,7 @@ jobs:
     needs: [prepare, build]
     permissions:
       contents: write
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && !inputs.proof
     runs-on: ubuntu-latest
     concurrency:
       group: release-${{ needs.prepare.outputs.tag }}
@@ -130,6 +138,7 @@ jobs:
       - name: Publish plain versioned update notes
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           node tools/version-stamp.mjs build "$TAG"
           node tools/release-notes.mjs src/changelog.zig "$TAG" dist/release-notes.json

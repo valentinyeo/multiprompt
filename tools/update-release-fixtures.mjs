@@ -18,7 +18,7 @@ if (root === '--prepare-key') {
   process.exit(0);
 }
 const wrong = generateKeyPairSync('ed25519');
-for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0', true], ['9.10.0', false]]) {
+for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0', true], ['9.10.0', false], ['9.11.0', false]]) {
   const dir = path.join(root, `v${version}`);
   fs.mkdirSync(dir, { recursive: true });
   const app = Buffer.concat([fs.readFileSync(path.join(root, broken ? 'broken.exe' : 'fixture.exe')), Buffer.from(`MPVERSION=${version};`)]);
@@ -30,8 +30,8 @@ for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0'
     { version: '9.9.0', changes: ['Middle change.'] },
     { version: '10.0.0', changes: ['Not offered yet.'] },
     { version: '0.0.0', changes: ['Already installed.'] },
-    { version, changes: ['Typing feels faster.', 'Chats keep your place.', 'Fix IGSH-123.', 'Fix src/main.zig.'] },
-  ] : [{ version, changes: ['Typing feels faster.'] }];
+    { version, changes: ['Typing feels faster.', 'Chats keep your place.', 'Fix IGSH-123.', 'Fix src/main.zig.', 'Behind the scenes fixes.', 'Chat speed checks now ignore shared-machine pauses.'] },
+  ] : [{ version, changes: version === '9.11.0' ? [] : ['Typing feels faster.'] }];
   fs.writeFileSync(path.join(dir, 'release-notes.json'), JSON.stringify({ version, releases }));
   names.push('release-notes.json');
   const sums = Buffer.from(names.map(name => `${createHash('sha256').update(fs.readFileSync(path.join(dir, name))).digest('hex')}  ${name}\n`).join(''));

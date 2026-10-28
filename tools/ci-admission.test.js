@@ -14,10 +14,10 @@ test('only Tests completion wakes automerge; scheduled recovery remains', () => 
   assert.match(text, /cancel-in-progress: false/);
 });
 
-test('appearance excludes unrelated edits without losing native or journey coverage', () => {
+test('IGSH-1113 required appearance covers every edit without losing native or journey coverage', () => {
   const text = workflow('verify.yml');
   const paths = text.split('  pull_request:\n')[1].split('\npermissions:')[0];
-  assert.doesNotMatch(paths, /- ['"]?\*\*['"]?\s*$/m);
+  assert.match(paths, /- ['"]?\*\*['"]?\s*$/m);
   assert.match(paths, /- src\/\*\*/);
   assert.match(paths, /- \.claude\/skills\/verify-multiprompt\/\*\*/);
 });

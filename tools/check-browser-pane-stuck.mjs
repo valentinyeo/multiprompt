@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
+import { discoverFeatures } from './verify-features.cjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import appSource from './app-source.js';
+const { readControlSource } = appSource;
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 const directory = '.claude/skills/verify-multiprompt';
-const driver = read(`${directory}/control.ps1`);
+const driver = readControlSource().replace(/\r\n/g, '\n');
 const workflow = read('.github/workflows/verify.yml');
 const map = read(`${directory}/features/browser-pane-stuck.md`);
 
@@ -29,14 +33,17 @@ for (const [file, names] of [
   for (const name of names) assert.ok(read(file).includes(`test "${name}"`), `behavior unit exists: ${name}`);
 }
 
-function prMatrixContract(source) {
-  const features = JSON.parse(source.match(/feature:.*github\.event_name == 'pull_request'.*fromJSON\('(\[[^']+\])'\)/)?.[1] || '[]');
-  for (const feature of ['appearance', 'browser-pane-stuck']) assert.ok(features.includes(feature), `PR matrix includes ${feature}`);
+function matrixContract(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.pr\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  const features = discoverFeatures();
+  assert.ok(features.pr.includes('appearance'), 'PR smoke includes appearance');
+  assert.ok(features.full.includes('browser-pane-stuck'), 'master matrix includes browser recovery');
   assert.ok(source.includes('FEATURE: ${{ matrix.feature }}'));
   for (const trigger of ['src/**', 'tools/check-browser-pane-stuck.mjs']) assert.ok(source.includes(`      - ${trigger}`));
 }
-prMatrixContract(workflow);
-assert.throws(() => prMatrixContract(workflow.replaceAll('"browser-pane-stuck"', '"missing-browser-pane-stuck"')));
+matrixContract(workflow);
+assert.throws(() => matrixContract(workflow.replace('fromJSON(needs.journeys.outputs.full)', 'fromJSON(needs.journeys.outputs.missing)')));
 
 const featureFiles = fs.readdirSync(path.join(root, directory, 'features')).filter(name => name.endsWith('.md') && name !== 'README.md');
 const index = read(`${directory}/features/README.md`);
@@ -53,7 +60,7 @@ for (const file of featureFiles) {
   const name = file.slice(0, -3);
   assert.ok(index.includes(`](${file})`), `index lists ${name}`);
   if (!desktopFeatures.includes(file)) continue;
-  assert.ok(workflow.includes(`'${name}'`), `workflow allows ${name}`);
+  assert.ok(discoverFeatures().available.includes(name), `workflow allows ${name}`);
   assert.ok(driver.includes(`        '${name}' {`), `driver implements ${name}`);
 }
 for (const section of ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']) {

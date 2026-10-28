@@ -1,5 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const src = require('./app-source').readAppSource();
 const build = fs.readFileSync('build.zig', 'utf8');
@@ -183,7 +185,7 @@ test('IGSH-567 pending bubbles share transcript ranges, hit testing, highlightin
   assert.match(body('chatTranscriptCharAt'), /chatSelectionRect/);
   assert.match(body('chatTranscriptCharAt'), /chatFlowBlock/);
   assert.match(body('chatTranscriptMouseDown'), /chatWordRangeAt\(display\.text/);
-  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, e\.text, text_rc, false, true, null, offset,/);
+  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, e\.text\[start\.\.\], text_rc, false, true, null, offset \+ start,/);
   assert.match(body('chatPaintTranscriptContent'), /chatPaintEcho\([^;]*display\.start\)/);
   assert.match(body('chatSelectionToClipboard'), /chatCopyPlainText\([^;]*display\.text/);
   assert.match(body('chatCopyTextAlloc'), /g_chat_block_count \+ g_chat_echo_layout_count/);
@@ -209,7 +211,7 @@ test('IGSH-717 queued-message clicks do not swallow selection mouse-down', () =>
 });
 
 test('IGSH-717 driver proves painted selection before Enter and retains strict quote checks', () => {
-  const control = fs.readFileSync('.claude/skills/verify-multiprompt/control.ps1', 'utf8');
+  const control = readControlSource();
   const pixels = control.slice(control.indexOf('public static int TranscriptSelectionPixels('), control.indexOf('public static List<int[]> GreyButtonPixels('));
   const expression = pixels.match(/if \((\(c.R ==[^]*?)\) count\+\+;/)?.[1];
   assert.ok(expression);

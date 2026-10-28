@@ -167,9 +167,10 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
       const pathGuard = file === 'test.yml' ? "steps\\.paths\\.outputs\\.heavy == 'true' && " : '';
       const guard = windows?.includes(cache) || updateSource?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
       assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
-      assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == '`));
+      assert.match(cache, new RegExp(`if: ${pathGuard}${guard}\\(?github\\.event_name == '`));
       if (cache.includes('uses: actions/cache/restore@')) {
-        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'pull_request'\n`));
+        const event = windows?.includes(cache) ? "\\(github\\.event_name == 'pull_request' \\|\\| github\\.event_name == 'workflow_dispatch' \\|\\| \\(github\\.event_name == 'push' && github\\.ref != 'refs/heads/master'\\)\\)" : "github\\.event_name == 'pull_request'";
+        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}${event}\n`));
       } else {
         assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
       }
@@ -405,18 +406,18 @@ test('build changelog uses the tag and fragments without changing source default
   assert.match(generated, /A useful improvement/);
   assert.deepEqual(files, saved);
   assert.equal(buildChangelog(files, 'v0.28.735'), changelog);
-  assert.match(buildChangelog(base(), 'v0.28.900'), /Behind the scenes fixes\./);
+  assert.doesNotMatch(buildChangelog(base(), 'v0.28.900'), /Behind the scenes fixes\./);
   assert.doesNotMatch(buildChangelog(base(), 'v0.28.900'), /latest improvements/);
   assert.match(buildChangelog({ ...files, 'src/changelog.zig': changelog.replace('pub const CHANGELOG', 'const SOURCE_CHANGELOG') }, 'v0.28.900'), /const SOURCE_CHANGELOG = \[_\]ChangelogEntry\{\n    \.\{ \.ver = "0\.28\.900"/);
   for (const invalid of ['0.28.900', 'v0.28.900;bad', 'v0.28.900\n', 'v00.28.900']) assert.throws(() => buildChangelog(files, invalid), /Invalid release tag/);
   const r = repo(t, files);
-  const result = spawnSync(process.execPath, [tool, 'build', 'v0.28.900'], { cwd: r.dir, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [tool, 'build', 'v0.28.900', '[]'], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), generated);
   assert.equal(fs.readFileSync(path.join(r.dir, 'src/main.zig'), 'utf8'), main);
   assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/DEMO-2-new.md'), 'utf8'), files['changelog.d/DEMO-2-new.md']);
   assert.equal(r.git('diff', '--name-only'), 'src/changelog.zig');
-  const again = spawnSync(process.execPath, [tool, 'build', 'v0.28.900'], { cwd: r.dir, encoding: 'utf8' });
+  const again = spawnSync(process.execPath, [tool, 'build', 'v0.28.900', '[]'], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(again.status, 0, again.stderr);
   assert.equal(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), generated);
 });
@@ -436,7 +437,7 @@ test('IGSH-889 a release lists only fragments added since the previous release',
   assert.match(generated, /A new improvement/);
   assert.doesNotMatch(generated, /An old improvement/);
   const quiet = buildChangelog({ ...base(), ...old }, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
-  assert.match(quiet, /Behind the scenes fixes\./);
+  assert.doesNotMatch(quiet, /Behind the scenes fixes\./);
   assert.doesNotMatch(quiet, /latest improvements/);
   assert.doesNotMatch(quiet, /An old improvement/);
 
@@ -451,7 +452,7 @@ test('IGSH-889 a release lists only fragments added since the previous release',
   r.write({ 'changelog.d/DEMO-4-latest.md': 'Latest release change.\n' });
   r.commit();
   r.git('tag', 'v0.28.738');
-  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738'], { cwd: r.dir, encoding: 'utf8' });
+  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738', JSON.stringify(['v0.28.735', 'v0.28.736', 'v0.28.737'])], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(built.status, 0, built.stderr);
   const written = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
   assert.doesNotMatch(written, /An old improvement/);
@@ -504,7 +505,10 @@ else if (args[1] === 'create') { fs.writeFileSync(stateFile, 'OPEN'); console.lo
 else if (args[1] === 'view') { if (state === 'OPEN') { git(['update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state = 'MERGED'; fs.writeFileSync(stateFile, state); } console.log(JSON.stringify({ state, statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })); }
 else if (args[1] !== 'merge') process.exit(1);
 `, { mode: 0o755 });
-  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', detached: true, timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  if (result.error?.code === 'ETIMEDOUT') {
+    try { process.kill(-result.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+  }
   const requests = fs.readFileSync(path.join(r.dir, 'gh-log'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
   const created = requests.filter(args => args[1] === 'create').length;
   const remoteBranch = r.git('--git-dir', remote, 'rev-parse', 'refs/heads/release/0.28.736');
@@ -523,4 +527,139 @@ else if (args[1] !== 'merge') process.exit(1);
   assert.equal(r.git('worktree', 'list', '--porcelain').match(/^worktree /gm).length, 1);
   assert.equal(created, outcome === 'closed' ? 1 : 0);
   if (outcome === 'open') assert.equal(remoteBranch, leftBehind);
+});
+
+
+test('IGSH-1090 maintenance releases carry no invented note, preserving real prior notes', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const generated = buildChangelog(base(), 'v0.28.900');
+  assert.deepEqual(releaseNotes(generated, 'v0.28.900'), {
+    version: '0.28.900', releases: [
+      { version: '0.28.900', changes: [] },
+      { version: '0.28.735', changes: ['Existing.'] },
+    ],
+  });
+});
+
+test('IGSH-1090 fragment gate rejects filler and engineering notes, not specific product changes', async () => {
+  const { checkFragments } = await import('./version-stamp.mjs');
+  const name = 'changelog.d/DEMO-1-update.md';
+  for (const line of [
+    'Behind the scenes fixes.', 'Plus 2 behind the scenes fixes.',
+    'Updates include the latest improvements.', 'Various improvements.', 'Bug fixes.',
+    'Chat speed checks now ignore shared-machine pauses.',
+    'Session switching checks now preserve slow and stale replies for diagnosis.',
+    'Fixed a test so releases stop getting stuck.', 'CI now finishes sooner.',
+    'Release workflow is safer.', 'Pipeline changes.', 'Added proof for chat replies.',
+  ]) {
+    assert.throws(() => checkFragments({}, { [name]: line }, [name]), /specific user-visible change/, line);
+  }
+  for (const line of [
+    'Switching chats is faster.', 'Dictation shortcuts keep working when keys queue up.',
+    'Image captions no longer hide replies.', 'Dialogs match your chosen colors.',
+    'The update card explains each change.',
+  ]) assert.doesNotThrow(() => checkFragments({}, { [name]: line }, ['src/example.zig', name]));
+});
+
+test('IGSH-1095 Zig test-only repairs need no invented product note but runtime edits still do', t => {
+  const file = 'src/browser.zig';
+  const runtime = 'pub fn status() []const u8 { return "connected"; }\n';
+  const before = `${runtime}test "health" {\n    const state = "opening";\n    _ = state;\n}\n`;
+  const fixed = `${runtime}test "health" {\n    const text = "} test \\"quoted\\" {";\n    if (true) { _ = text; }\n}\n`;
+  const r = repo(t, { ...base(), [file]: before });
+  r.write({ [file]: fixed });
+  expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
+  for (const source of [
+    fixed.replace('return "connected"', 'return "opening"'),
+    fixed + 'pub const deadline = 90000;\n',
+    'pub const deadline = 90000;\n' + fixed,
+    fixed.replace('pub fn status()', 'pub fn changedStatus()'),
+    'pub const config = struct { test "nested" { unreachable; } };\n',
+  ]) {
+    r.write({ [file]: source });
+    const result = r.check(r.initial, r.commit());
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /App code changed/);
+  }
+  r.write({ [file]: `${runtime}test { const char = '}'; _ = char; }\n` });
+  expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
+  r.write({ [file]: runtime });
+  expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
+  r.git('rm', file);
+  const deleted = r.check(r.initial, r.commit());
+  assert.equal(deleted.status, 1);
+  assert.match(deleted.stderr, /App code changed/);
+});
+
+test('IGSH-1113 omits filtered historical releases while preserving current notes and validation', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const maintenance = { 'changelog.d/DEMO-1-maintenance.md': 'Fixed a test so releases stop getting stuck.\n' };
+  const product = { 'changelog.d/DEMO-2-chat.md': 'Switching chats is faster.\nAdded proof for chat replies.\n' };
+  const latest = { 'changelog.d/DEMO-3-update.md': 'The update card explains each change.\n' };
+  const history = [
+    { tag: 'v0.28.896', files: base() },
+    { tag: 'v0.28.897', files: { ...base(), ...maintenance } },
+    { tag: 'v0.28.898', files: { ...base(), ...maintenance, ...product } },
+    { tag: 'v0.28.899', files: { ...base(), ...maintenance, ...product, 'changelog.d/DEMO-4-maintenance.md': 'Pipeline changes.\n' } },
+  ];
+  const files = { ...history.at(-1).files, ...latest };
+  const saved = structuredClone({ files, history });
+  const generated = buildChangelog(files, 'v0.28.900', history);
+  assert.deepEqual(releaseNotes(generated, 'v0.28.900'), {
+    version: '0.28.900', releases: [
+      { version: '0.28.900', changes: ['The update card explains each change.'] },
+      { version: '0.28.898', changes: ['Switching chats is faster.'] },
+      { version: '0.28.735', changes: ['Existing.'] },
+    ],
+  });
+  assert.deepEqual({ files, history }, saved);
+  const quiet = buildChangelog(history.at(-1).files, 'v0.28.900', history);
+  assert.deepEqual(releaseNotes(quiet, 'v0.28.900').releases[0], { version: '0.28.900', changes: [] });
+  assert.throws(() => buildChangelog({ ...files, 'changelog.d/DEMO-5-empty.md': ' \n' }, 'v0.28.900', history), /Fragment has no text/);
+  const invalid = [...history, { tag: 'v0.28.899', files: { ...files, 'changelog.d/DEMO-6-empty.md': ' \n' } }];
+  assert.throws(() => buildChangelog(files, 'v0.28.900', invalid), /Fragment has no text/);
+});
+
+test('IGSH-1115 failed tags cannot consume unpublished product notes', async t => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const r = repo(t);
+  r.git('tag', 'v0.28.735');
+  r.write({ 'changelog.d/DEMO-1115-recovered.md': 'Your chats keep their saved order.\n' });
+  r.commit();
+  r.git('tag', 'v0.28.736');
+  r.git('tag', 'v0.28.737');
+  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738', JSON.stringify(['v0.28.735'])], { cwd: r.dir, encoding: 'utf8' });
+  assert.equal(built.status, 0, built.stderr);
+  const written = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
+  assert.deepEqual(releaseNotes(written, 'v0.28.738'), {
+    version: '0.28.738', releases: [
+      { version: '0.28.738', changes: ['Your chats keep their saved order.'] },
+      { version: '0.28.735', changes: ['Existing.'] },
+    ],
+  });
+  assert.doesNotMatch(written, /\.ver = "0\.28\.73[67]"/);
+  assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/DEMO-1115-recovered.md'), 'utf8'), 'Your chats keep their saved order.\n');
+});
+
+test('IGSH-1115 production history ignores failed tags without moving their product notes into failed versions', { skip: process.platform === 'win32' }, async t => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const r = repo(t);
+  r.git('tag', 'v0.28.735');
+  r.write({ 'changelog.d/DEMO-1115-recovered.md': 'Your chats keep their saved order.\n' });
+  r.commit();
+  r.git('tag', 'v0.28.736');
+  r.git('tag', 'v0.28.737');
+  const bin = path.join(r.dir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'gh'), '#!/usr/bin/env node\nprocess.stdout.write("v0.28.735\\n");\n', { mode: 0o755 });
+  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738'], {
+    cwd: r.dir, encoding: 'utf8', env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH },
+  });
+  assert.equal(built.status, 0, built.stderr);
+  assert.deepEqual(releaseNotes(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), 'v0.28.738'), {
+    version: '0.28.738', releases: [
+      { version: '0.28.738', changes: ['Your chats keep their saved order.'] },
+      { version: '0.28.735', changes: ['Existing.'] },
+    ],
+  });
 });

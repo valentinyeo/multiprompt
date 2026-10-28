@@ -92,14 +92,14 @@ test('existing card uses the same growing rectangle for layout and hits, with th
     'IGSH-728 picks only versions between installed and offered, newest first',
     'IGSH-948 shows three lines then and N more, and the full list when expanded',
     'IGSH-948 keeps sixteen lines and counts the rest as more even when expanded',
-    'IGSH-948 groups quiet releases into one behind the scenes line and never shows filler',
+    'IGSH-1090 keeps real notes individual and maintenance releases quiet',
     'IGSH-728 skips ticket ids, file paths, file names and PR numbers',
   ]) assert.ok(notes.includes(`test "${name}"`));
   assert.match(notes, /lines: \[16\]\[512\]u8/);
   assert.match(notes, /!versionNewer\(installed, release.version\) or versionNewer\(offered, release.version\)/);
   assert.match(notes, /while \(at < result.count and !versionNewer\(versions\[at\], release.version\)\)/);
   assert.match(notes, /"and \{d\} more", \.\{rest\}/);
-  assert.match(notes, /pub const BEHIND_THE_SCENES = "Behind the scenes fixes\.";/);
+  assert.match(card, /if \(card_notes\.count == 0 or/);
 });
 
 test('master painter fails the exact card-note observability contract required by the new journey', () => {
@@ -125,6 +125,11 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(suite, /PrintWindow\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /\$bitmap.Save\(\(Join-Path \$Evidence 'update-card-notes.png'\)\)/);
   assert.match(suite, /Tampered notes accepted/);
+  assert.match(suite, /maintenance release waits without an update card/);
+  assert.match(suite, /update-card-quiet\.png/);
+  assert.match(suite, /Real product notes did not show again/);
+  assert.match(suite, /\$installedNotes\.version = \$newVersion/);
+  assert.match(suite, /Restart keeps your chats open/);
   const journey = read('tools/update-release-journey.ps1');
   assert.match(journey, /update card shows aggregated plain notes/);
   assert.match(journey, /Missing update card screenshot/);
@@ -136,11 +141,17 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(fixture, /names.push\('release-notes.json'\)/);
 });
 
-test('quiet releases use the same behind the scenes line in the stamper and the card, never the old filler', async () => {
-  const { behindTheScenes } = await import('./version-stamp.mjs');
-  assert.equal(behindTheScenes, 'Behind the scenes fixes.');
-  assert.ok(read('src/update_notes.zig').includes(`BEHIND_THE_SCENES = "${behindTheScenes}"`));
-  assert.equal(read('tools/version-stamp.mjs').includes('latest improvements'), false);
+test('IGSH-1090 publication removes engineering notes and filler, not real product lines', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const source = `pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "1.1.0", .items = &.{
+        .{ .text = "Behind the scenes fixes.", .ticket = "" },
+        .{ .text = "Chat speed checks now ignore shared-machine pauses.", .ticket = "" },
+        .{ .text = "Dictation shortcuts keep working when keys queue up.", .ticket = "" },
+    } },
+};`;
+  assert.deepEqual(releaseNotes(source, 'v1.1.0').releases[0].changes, ['Dictation shortcuts keep working when keys queue up.']);
+  assert.doesNotMatch(read('tools/version-stamp.mjs'), /IGSH-834-maintenance|export const behindTheScenes/);
 });
 
 test('changed implementation is comment-free and leaves no error log', async () => {
@@ -157,4 +168,55 @@ test('changed implementation is comment-free and leaves no error log', async () 
   const files = fs.readdirSync(root, { recursive: true, withFileTypes: true });
   assert.equal(files.some(file => file.isFile() && file.name === 'error.log'), false);
   assert.match(read('changelog.d/README.md'), /No ticket ids, file names, paths, code names or PR numbers/);
+});
+
+
+test('IGSH-1090 published executable paints its own published notes, with no binary edits', {
+  skip: process.platform !== 'win32' || process.env.GITHUB_WORKFLOW !== 'Test repeat',
+  timeout: 180000,
+}, async t => {
+  const os = require('node:os');
+  const { createHash } = require('node:crypto');
+  const { spawnSync } = require('node:child_process');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'released-card-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const response = await fetch('https://api.github.com/repos/valentinyeo/multiprompt/releases/latest');
+  assert.equal(response.status, 200);
+  let release = await response.json();
+  const historyAsset = release.assets.find(asset => asset.name === 'release-notes.json');
+  assert.ok(historyAsset);
+  const historyResponse = await fetch(historyAsset.browser_download_url);
+  assert.equal(historyResponse.status, 200);
+  const history = await historyResponse.json();
+  const feature = history.releases.find(item => item.changes.includes('Update cards explain each change, without generic messages.'));
+  assert.ok(feature, 'Feature must be published before its release-card proof');
+  if (release.tag_name !== `v${feature.version}`) {
+    const tagged = await fetch(`https://api.github.com/repos/valentinyeo/multiprompt/releases/tags/v${feature.version}`);
+    assert.equal(tagged.status, 200);
+    release = await tagged.json();
+  }
+  assert.match(release.tag_name, /^v\d+\.\d+\.\d+$/);
+  const assets = {};
+  for (const name of ['multiprompt-x64.exe', 'release-notes.json']) {
+    const asset = release.assets.find(asset => asset.name === name);
+    assert.ok(asset, name);
+    assert.match(asset.browser_download_url, /^https:\/\/github\.com\/valentinyeo\/multiprompt\/releases\/download\//);
+    const download = await fetch(asset.browser_download_url);
+    assert.equal(download.status, 200);
+    const bytes = Buffer.from(await download.arrayBuffer());
+    assert.equal(`sha256:${createHash('sha256').update(bytes).digest('hex')}`, asset.digest);
+    assets[name] = path.join(directory, name);
+    fs.writeFileSync(assets[name], bytes);
+  }
+  const notes = JSON.parse(fs.readFileSync(assets['release-notes.json'], 'utf8'));
+  assert.equal(notes.version, release.tag_name.slice(1));
+  assert.ok(notes.releases[0].changes.includes('Update cards explain each change, without generic messages.'));
+  const proof = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', assets['multiprompt-x64.exe'],
+    '-Notes', assets['release-notes.json'], '-Evidence', path.join(directory, 'proof')],
+  { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
+  assert.equal(proof.status, 0, proof.stdout + proof.stderr);
+  assert.match(proof.stdout, /RELEASE_CARD_RECEIPT=/);
+  assert.match(proof.stdout, /RELEASE_CARD_PNG=/);
+  console.log(proof.stdout);
 });

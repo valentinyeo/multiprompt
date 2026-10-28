@@ -33,7 +33,7 @@ function decide({ run, repository, commits, jobs, history = [] }) {
     return { action: 'skip', reason: `Commit ${target.sha} already has a revert on master` };
   }
   const ticket = subject.match(/\b(IGSH-\d+):(?:\s|$)/)?.[1];
-  if (!ticket) return refuse('Run head subject has no IGSH ticket id');
+  if (!ticket) return { action: 'ignore', reason: 'Run head subject has no IGSH ticket id' };
   if (!failed.length) return refuse('No failed verify journey found in the run');
   const baselines = new Map();
   for (const key of failed) {
@@ -101,11 +101,14 @@ function main() {
   }
   const decision = decide({ run, repository, commits, jobs, history });
   console.log(JSON.stringify({ dryRun, runId, ...decision }, null, 2));
+  if (decision.action === 'ignore') {
+    if (process.env.GITHUB_STEP_SUMMARY) require('node:fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, `No commit reverted: ${decision.reason}\n\nRun: ${run.html_url}\n`);
+    return;
+  }
   if (dryRun) {
     if (decision.action === 'refuse') throw new Error(decision.reason);
     return;
   }
-  if (decision.action === 'ignore') return;
   const marker = `Auto-Revert-Run: ${runId}`;
   const failing = jobs.filter(job => job.conclusion === 'failure').map(job => job.name).join(', ') || 'Unknown failed job';
   const ticket = decision.ticket || commits.find(commit => commit.sha === run.head_sha)?.commit.message.split('\n')[0].match(/\bIGSH-\d+\b/)?.[0] || 'Unknown ticket';

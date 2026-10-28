@@ -97,7 +97,7 @@ const Identity = struct { shell_id: u32, host: u8 = 0, tmux: [16:0]u8 = @splat(0
 const app_state = struct {
     var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
     var shell_count: u32 = 2;
-    var shells = [_]struct { shell_id: u32, permission_answered: bool = true }{
+    var shells = [_]struct { shell_id: u32, permission_answered: bool = true, chat_question_other_sent: bool = true, chat_question_identity: u64 = 123 }{
         .{ .shell_id = 22 }, .{ .shell_id = 11 },
     };
 };
@@ -121,6 +121,8 @@ test "failed remote permission is retryable by stable shell id" {
         try std.testing.expectEqual(@as(u32, 11), app_state.g_chat_permission_send_failed.load(.acquire));
         const before = invalidations;
         chatPermissionSendFailedApply();
+        try std.testing.expect(!app_state.shells[1].chat_question_other_sent);
+        try std.testing.expectEqual(@as(u64, 0), app_state.shells[1].chat_question_identity);
         try std.testing.expect(!app_state.shells[1].permission_answered);
         try std.testing.expect(app_state.shells[0].permission_answered);
         try std.testing.expectEqual(@as(u32, 0), app_state.g_chat_permission_send_failed.load(.acquire));
@@ -901,4 +903,50 @@ test "IGSH-870 newest reply survives tail gap and older pages restore all messag
 }
 `, ['chat_history.zig', 'chat_transcript.zig'], 'IGSH-870', ['-fno-llvm', '-fno-lld']);
   assert.equal(native.status, 0, JSON.stringify(native));
+});
+
+test('IGSH-1063 typed question progress repaints without waiting for a transcript message', (t) => {
+  const capture = fileBody('chat_capture.zig', 'chatPermissionCaptureRows')
+    .replaceAll('@import("focus.zig").PostMessageW', 'PostMessageW')
+    .replaceAll('@import("window_layout.zig").chatWorkingIndicatorInvalidate', 'chatWorkingIndicatorInvalidate')
+    .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
+  const result = execute(t, 'question-progress', String.raw`
+const std = @import("std");
+const DWORD = u32;
+const app_state = struct {
+    var active_shell: u32 = 0;
+    var shells = [_]struct { shell_id: u32, permission_answered: bool = false, chat_question_other_sent: bool = false }{ .{ .shell_id = 11 }, .{ .shell_id = 22 } };
+    var g_chat_raw: [4]u16 = @splat(' ');
+    var g_chat_permission: @import("chat_permission.zig").PermissionMenu = .{};
+    var g_chat_permission_sid: u32 = 11;
+    var g_chat_active = true;
+    const g_main_hwnd: usize = 123;
+    const WM_APP_CHAT_IMAGE_READY = 456;
+};
+var repaints: usize = 0;
+fn chatPermissionSendFailedApply() void {}
+fn chatQuestionCaptureRows(_: u32, _: []const []const u16) void {}
+fn chatWorkingIndicatorInvalidate() void {}
+fn debugLog(_: []const u8) void {}
+fn PostMessageW(hwnd: usize, message: u32, _: usize, _: isize) i32 {
+    std.debug.assert(hwnd == 123 and message == 456);
+    repaints += 1;
+    return 1;
+}
+` + capture + String.raw`
+test "question progress repaint is active-session and answer specific" {
+    chatPermissionCaptureRows(0, 2, 4, 2);
+    try std.testing.expectEqual(@as(usize, 0), repaints);
+    app_state.shells[1].chat_question_other_sent = true;
+    chatPermissionCaptureRows(1, 2, 4, 2);
+    try std.testing.expectEqual(@as(usize, 0), repaints);
+    app_state.shells[0].chat_question_other_sent = true;
+    chatPermissionCaptureRows(0, 2, 4, 2);
+    try std.testing.expectEqual(@as(usize, 1), repaints);
+    app_state.g_chat_active = false;
+    chatPermissionCaptureRows(0, 2, 4, 2);
+    try std.testing.expectEqual(@as(usize, 1), repaints);
+}
+`, ['chat_permission.zig'], 'question progress repaint', ['-fno-llvm', '-fno-lld']);
+  assert.equal(result.status, 0, JSON.stringify(result));
 });

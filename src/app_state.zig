@@ -235,6 +235,12 @@ pub const Shell = struct {
     activity: ShellActivity,
     working_since_ms: u64 = 0,
     permission_answered: bool = false,
+    chat_question_identity: u64 = 0,
+    chat_question_index: usize = 0,
+    chat_question_selected: u32 = 0,
+    chat_question_other: bool = false,
+    chat_question_other_sent: bool = false,
+    chat_question_other_hash: u64 = 0,
     needs_attention: bool,
     hook_capable: bool = false,
     turn_pending: bool = false,
@@ -1111,13 +1117,13 @@ pub var g_chat_hidden_tool_rows: u32 = 0;
 pub var g_chat_screen_working: bool = false;
 pub var g_chat_permission: @import("chat_permission.zig").PermissionMenu = .{};
 pub var g_chat_permission_sid: u32 = 0;
-pub var g_chat_question: @import("chat_options.zig").Group = .{};
-pub var g_chat_question_sid: u32 = 0;
 pub var g_chat_working_text: [128]u16 = std.mem.zeroes([128]u16);
 pub var g_chat_screen_status_len: usize = 0;
 pub var g_chat_working_applied: [128]u16 = std.mem.zeroes([128]u16);
 pub var g_chat_working_applied_len: usize = 0;
 pub var g_chat_raw: [262144]u16 = std.mem.zeroes([262144]u16);
+pub var g_chat_raw_len: usize = 0;
+pub var g_chat_raw_sid: u32 = 0;
 pub var g_chat_capture_storage: [262144]u16 = @splat(0);
 pub var g_chat_capture: []u16 = &g_chat_capture_storage;
 pub var g_chat_line_starts: [1400]usize = std.mem.zeroes([1400]usize);
@@ -2889,6 +2895,8 @@ pub const ChatConfirmedEcho = struct {
     block_start: usize = 0,
     block_len: usize = 0,
     stamp_ms: i64 = 0,
+    message_id: u64 = 0,
+    text_hash: u64 = 0,
 };
 
 pub var g_chat_outbox: std.ArrayList(ChatOutboxEntry) = .empty;

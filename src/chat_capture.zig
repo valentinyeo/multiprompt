@@ -990,6 +990,8 @@ fn chatPermissionSendFailedApply() void {
     for (app_state.shells[0..app_state.shell_count]) |*shell| {
         if (shell.shell_id != shell_id) continue;
         shell.permission_answered = false;
+        shell.chat_question_other_sent = false;
+        shell.chat_question_identity = 0;
         @import("window_layout.zig").chatWorkingIndicatorInvalidate();
         break;
     }
@@ -998,6 +1000,9 @@ fn chatPermissionSendFailedApply() void {
 pub fn chatPermissionCaptureRows(shell_index: u32, width: usize, chars_read: DWORD, rows: usize) void {
     chatPermissionSendFailedApply();
     if (shell_index != app_state.active_shell) return;
+    if (app_state.g_chat_active and app_state.shells[shell_index].chat_question_other_sent) {
+        _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_IMAGE_READY, 0, 0);
+    }
     var lines: [70][]const u16 = undefined;
     const count = @min(rows, lines.len);
     for (0..count) |i| {
@@ -1017,21 +1022,6 @@ pub fn chatPermissionCaptureRows(shell_index: u32, width: usize, chars_read: DWO
         if (menu == null) @import("diagnostics.zig").debugLog("[chat] permission cleared");
         @import("window_layout.zig").chatWorkingIndicatorInvalidate();
     }
-    chatQuestionCaptureRows(shell_index, lines[0..count]);
-}
-
-fn chatQuestionCaptureRows(shell_index: u32, lines: []const []const u16) void {
-    const options = @import("chat_options.zig");
-    var question: options.Group = .{};
-    const found = options.parseQuestion(lines, &question);
-    const sid = app_state.shells[shell_index].shell_id;
-    const had = app_state.g_chat_question.count > 0 and app_state.g_chat_question_sid == sid;
-    const changed = had != found or (found and !question.eql(&app_state.g_chat_question));
-    if (found) app_state.g_chat_question = question else app_state.g_chat_question.count = 0;
-    app_state.g_chat_question_sid = sid;
-    if (!changed or !app_state.g_chat_active or app_state.g_main_hwnd == null) return;
-    @import("diagnostics.zig").debugLog(if (found) "[chat] question shown" else "[chat] question cleared");
-    _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_IMAGE_READY, 0, 0);
 }
 
 fn chatConsoleTableRows(raw: []const u16, width: usize, scratch: []u16, table_rows: []bool) void {
@@ -1087,6 +1077,8 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
     var chars_read: DWORD = 0;
     if (ReadConsoleOutputCharacterW(handle, &app_state.g_chat_raw, cells, .{ .x = 0, .y = start_row }, &chars_read) == 0) return null;
 
+    app_state.g_chat_raw_len = chars_read;
+    app_state.g_chat_raw_sid = app_state.shells[shell_index].shell_id;
     chatPermissionCaptureRows(shell_index, width, chars_read, rows);
     {
         var prompt_row: ?usize = null;

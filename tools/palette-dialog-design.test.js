@@ -1,9 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8'));
 
 const palette = () => read('src/sidebar.zig').split('if (app_state.g_search_active) {')[1].split('if (app_state.g_shortcuts_active)')[0];
 
@@ -90,8 +92,14 @@ test('IGSH-1061: palette typing waits for owned foreground after asynchronous br
   assert.ok(body, 'production palette journey exists');
   assert.match(body, /Press @\(0x11, 0x4B\) 'Ctrl\+K: open command palette'\s+Wait-Foreground\s+Type-Text \$Query/,
     'the cancelled browser can take foreground after Ctrl+K; settle ownership before typing');
-  assert.match(read('.github/workflows/palette-dialog-design.yml'), /node tools\/check-red-run\.mjs \"\$base\" HEAD \| tee palette-red\.log/,
-    'native proof checks the changed regression instead of assuming the original first test fails');
+  const workflow = read('.github/workflows/palette-dialog-design.yml');
+  assert.match(workflow, /red-control:\s+if: github\.ref != 'refs\/heads\/master'\s+uses: \.\/\.github\/workflows\/check-red-run\.yml/);
+  assert.match(workflow, /base: \$\{\{ github\.event\.pull_request\.base\.sha \|\| 'origin\/master' \}\}/);
+  assert.match(workflow, /head: \$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /palette-dialog-design:\s+needs: red-control/);
+  assert.match(workflow, /needs\.red-control\.result == 'success' \|\| needs\.red-control\.result == 'skipped'/);
+  assert.match(read('.github/workflows/check-red-run.yml'), /runs-on: ubuntu-latest/);
+  assert.doesNotMatch(workflow, /node tools\/check-red-run\.mjs/);
   const typing = control.match(/function Type-Text\([^]*?\n\}/)?.[0];
   assert.match(typing, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/,
     'typing must still refuse input when foreground is foreign');

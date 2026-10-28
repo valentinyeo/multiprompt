@@ -1,12 +1,20 @@
 const test = require('node:test');
+
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
 const os = require('node:os');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
 const root = path.resolve(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8'));
 const skill = '.claude/skills/verify-multiprompt/';
 const drive = read('tools/verify-chat-delivery/drive.ps1');
 const workflow = read('.github/workflows/verify.yml');
@@ -461,7 +469,8 @@ test('keyboard journey isolates each case and retains Doctor, screenshots, raw e
 });
 
 test('feature dispatch compiles only the system boundary on release runs and preserves verified executable selection', () => {
-  assert.match(workflow, /FEATURE -notin @\([^\n]*'chat-delivery'/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-delivery'));
   assert.match(read(skill + 'control.ps1'), /'chat-delivery' \{[\s\S]*verify-chat-delivery\/drive.ps1/);
   assert.match(workflow, /if: env.RELEASE_TAG == '' \|\| env.FEATURE == 'chat-delivery'/);
   assert.match(workflow, /zig cc[^\n]*-municode[^\n]*verify-chat-delivery\/launcher.c/);
@@ -1019,28 +1028,27 @@ print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
 });
 
 
-test('retained-history recovery delivers wheel input to the verified focused HWND', () => {
+test('retained-history recovery targets the owned HWND without stealing typing focus', () => {
   const start = drive.indexOf('function Retention-Top {');
   const end = drive.indexOf('\nfunction Assert-Retention', start);
   const recovery = drive.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.match(recovery, /Wait-For 'retained transcript keyboard focus'/);
-  assert.match(recovery, /::Focus\(\$main\)\[1\] -eq \$transcript.ToInt64\(\)/);
-  assert.match(recovery, /input='focused transcript HWND wheel'/);
-  assert.match(recovery, /::WheelFocusedTranscript\(\$main, \$app.Id, \$transcript, 30000\)/);
+  assert.doesNotMatch(recovery, /FocusOwnedWindow|::Focus\(/);
+  assert.match(recovery, /input='owned transcript HWND wheel'/);
+  assert.match(recovery, /::WheelOwnedTranscriptMessage\(\$main, \$app.Id, \$transcript, 30000\)/);
   assert.match(recovery, /\$position\.scroll -eq 0/);
   const desktop = read('tools/verify-chat-delivery/desktop.cs');
-  const first = desktop.indexOf('    public static void WheelFocusedTranscript(');
+  const first = desktop.indexOf('    public static void WheelOwnedTranscriptMessage(');
   const last = desktop.indexOf('    public static void PressOwnedTranscript(', first);
   const wheel = desktop.slice(first, last);
   assert.ok(first >= 0 && last > first);
-  for (const guard of ['Owner(main) != pid', 'GetForegroundWindow() != main', 'Owner(transcript) != pid', '!IsChild(main, transcript)', 'Class(transcript) != "ZigShellChatTranscript"', '!IsWindowVisible(transcript)', 'Focus(main)[1] != transcript.ToInt64()']) assert.ok(wheel.includes(guard), guard);
+  for (const guard of ['Owner(main) != pid', 'GetForegroundWindow() != main', 'Owner(transcript) != pid', '!IsChild(main, transcript)', 'Class(transcript) != "ZigShellChatTranscript"', '!IsWindowVisible(transcript)']) assert.ok(wheel.includes(guard), guard);
   assert.match(wheel, /SendWheelMessage\(transcript, 0x020A,/);
   assert.match(wheel, /delta < short.MinValue/);
   assert.match(wheel, /delta > short.MaxValue/);
   assert.match(wheel, /delta % 120 != 0/);
   assert.match(wheel, /== IntPtr.Zero\) throw/);
-  assert.doesNotMatch(wheel, /SendInput/);
+  assert.doesNotMatch(wheel, /SendInput|Focus\(/);
 });
 
 test('remote appended-message receipt keeps the request window across delayed font logs', () => {
@@ -1052,4 +1060,62 @@ test('remote appended-message receipt keeps the request window across delayed fo
   assert.doesNotMatch(wait, /\$offset =/);
   assert.match(source.slice(0, start), /\$appendLogStart = \(Read-Shared "\$settings\/debug.log"\).Length/);
   assert.match(wait, /Substring\(\$appendLogStart\)/);
+});
+
+test('IGSH-1063 question boundary records single, multiple and Other answers exactly', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'structured-question-'));
+  try {
+    const transcript = path.join(dir, 'home/.claude/projects/C--verify-work/sid.jsonl');
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+      name: 'chat-options', mode: 'busy', suggestion: '', fake: true, sid: 'sid', cwd: 'C:/verify/work', panePid: 4242,
+      transcript, meta: path.join(dir, 'home/.claude/sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
+    }));
+    const run = (mode, ...args) => {
+      const result = require('node:child_process').spawnSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), mode, ...args], { env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      return result.stdout;
+    };
+    const key = (...keys) => run('tmux', 'send-keys', '-t', '=verify-agent:', ...keys);
+    run('shell', 'init');
+    run('shell', 'plain-list');
+    run('shell', 'question', path.join(root, 'tools/fixtures/IGSH-1063/questions.json'));
+    assert.match(run('tmux', 'capture-pane', '-p', '-J'), /Which colour should we use\?/);
+    key('2');
+    key('1', '2', 'Enter');
+    let answers = fs.readFileSync(path.join(dir, 'question-answers.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(answers.map(answer => answer.labels), [['Orange'], ['Desktop', 'Phone']]);
+    assert.equal(JSON.parse(run('shell', 'show')).question, null);
+    run('shell', 'question', path.join(root, 'tools/fixtures/IGSH-1063/questions.json'));
+    key('3');
+    run('tmux', 'send-keys', '-t', '=verify-agent:', '-l', '--', 'Purple');
+    key('Enter');
+    answers = fs.readFileSync(path.join(dir, 'question-answers.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(answers[2].labels, ['Purple']);
+    assert.match(run('tmux', 'capture-pane', '-p', '-J'), /Which devices should we check\?/);
+    const events = fs.readFileSync(transcript, 'utf8').trim().split('\n').map(JSON.parse);
+    const calls = events.filter(event => event.message?.content?.[0]?.name === 'AskUserQuestion');
+    assert.equal(calls.length, 2);
+    assert.equal(events.filter(event => event.message?.content?.[0]?.tool_use_id === calls[0].message.content[0].id).length, 1);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test('IGSH-1063 question proof selects the saved AMOLED theme and supports published assets', () => {
+  const journey = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/chat-options.ps1'), 'utf8');
+  assert.match(journey, /Select-Theme 'amoled' 'theme-amoled'/);
+  assert.doesNotMatch(journey, /Palette '(?:theme )?amoled'/);
+  const adapter = fs.readFileSync(path.join(root, '.github/workflows/question-journey.yml'), 'utf8');
+  assert.match(adapter, /types: \[structured-question-proof\]/);
+  assert.match(adapter, /feature: chat-options/);
+  assert.match(adapter, /tag: \$\{\{ github\.event\.client_payload\.tag \|\| '' \}\}/);
+});
+
+test('failed window identity retains observed fields and crash reports without weakening Doctor', () => {
+  const doctor = drive.slice(drive.indexOf('function Doctor('), drive.indexOf('function Press('));
+  assert.match(doctor, /Save .*IsOffscreen.*ProcessId.*title.*doctor-window.json/);
+  assert.match(doctor, /\$element.Current.IsOffscreen -or \$element.Current.ProcessId -ne \$app.Id -or \$title -notmatch/);
+  assert.match(doctor, /throw 'Doctor: visible versioned UI Automation identity missing'/);
+  assert.match(doctor, /Owner\(\$main\) -ne \$app.Id/);
+  assert.match(doctor, /\$app.HasExited -or \$app.Path -ne \$Exe -or \(Get-FileHash \$Exe -Algorithm SHA256\).Hash -ne \$ExpectedHash/);
+  assert.match(drive, /if \(Test-Path "\$settings\/crashes"\) \{/);
 });

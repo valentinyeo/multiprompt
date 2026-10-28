@@ -50,6 +50,73 @@ class HistoryReaderTest(unittest.TestCase):
         self.query.pop('before', None)
         return fields, [json.loads(line) for line in lines[1:-1]]
 
+    def test_igsh1063_only_structured_pending_questions(self):
+        questions = [dict(question="Which colour?", header="Accent", multiSelect=False,
+                          options=[dict(label="Lime", description="Bright contrast"),
+                                   dict(label="Orange", description="Warm contrast")]),
+                     dict(question="Which devices?", header="Devices", multiSelect=True,
+                          options=[dict(label="Desktop", description="Windows"),
+                                   dict(label="Phone", description="Android")])]
+        prose = self.event("I need three answers from you:\n1. Figma team\n2. Figma login\n3. QA tickets")
+        self.write(prose)
+        self.assertFalse(any(row.get("question") for row in self.read()[1]))
+        call = self.tool_call("AskUserQuestion", dict(questions=questions))
+        self.write(prose, call)
+        status = next((row for row in self.read()[1] if row["role"] == "status"), None)
+        self.assertIsNotNone(status, "pending structured question must reach the client")
+        self.assertEqual(status["question"], dict(id="call-263", questions=questions))
+        self.assertEqual(next(row for row in self.read()[1] if row["role"] == "status")["question"], status["question"])
+        with self.path.open("a") as target:
+            target.write(json.dumps(self.tool_result("answered")) + "\n")
+        self.assertIsNone(next(row for row in self.read()[1] if row["role"] == "status")["question"])
+
+    def test_igsh1063_codex_structured_questions_complete(self):
+        self.query["codex"] = True
+        self.path = self.home / ".codex/sessions/rollout-2026-sid.jsonl"
+        self.path.parent.mkdir(parents=True)
+        question = dict(id="colour", question="Which colour?", header="Accent",
+                        options=[dict(label="Lime", description="Bright contrast"),
+                                 dict(label="Orange", description="Warm contrast")])
+        self.write(dict(type="response_item", payload=dict(type="function_call", call_id="q1",
+                   name="request_user_input", arguments=json.dumps(dict(questions=[question])))))
+        status = next((row for row in self.read()[1] if row["role"] == "status"), None)
+        self.assertIsNotNone(status, "pending Codex question must reach the client")
+        self.assertEqual(status["question"]["id"], "q1")
+        self.assertEqual(status["question"]["provider"], "codex")
+        self.assertEqual(status["question"]["questions"], [question])
+        with self.path.open("a") as target:
+            target.write(json.dumps(dict(type="response_item", payload=dict(type="function_call_output", call_id="q1", output="done"))) + "\n")
+        self.assertIsNone(next(row for row in self.read()[1] if row["role"] == "status")["question"])
+
+    def test_igsh1063_answered_sidechain_and_embedded_question_text_not_pending(self):
+        question = dict(question="Real question?", header="Pick", options=[dict(label="A"), dict(label="B")])
+        self.write(self.tool_call("AskUserQuestion", dict(questions=[question])), self.tool_result("done"),
+                   self.event('AskUserQuestion {"questions": []}'),
+                   dict(self.tool_call("AskUserQuestion", dict(questions=[question])), isSidechain=True))
+        self.assertFalse(any(row.get("question") for row in self.read()[1]))
+
+    def test_igsh1063_question_keys_keep_order_and_permission_boundaries(self):
+        for keys, expected in (([49], ["1"]), ([50], ["2"]), ([49, 50, 13], ["1", "2", "Enter"]), ([9], ["Up", "Tab"])):
+            with patch.object(reader.subprocess, "run") as run:
+                wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", keys=keys))
+            self.assertIn("\tquestion\tok\t", wire)
+            self.assertEqual(run.call_args.args[0], ["tmux", "send-keys", "-t", "=term-1:", *expected])
+        for keys in ([], [27], [10], [True], [49, 50, "Enter"], None):
+            with patch.object(reader.subprocess, "run") as run:
+                wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", keys=keys))
+            self.assertIn("\tquestion\terror\t", wire)
+            run.assert_not_called()
+        with patch.object(reader.subprocess, "run") as run:
+            self.assertIn("\tpermission\terror\t", reader.stop_response(dict(op="permission", id=7, tmux="term-1", digit=13)))
+        run.assert_not_called()
+
+    def test_igsh1063_other_text_keeps_question_reply_operation(self):
+        with patch.object(reader, "prompt_box_text", return_value=""), patch.object(reader, "clear_prompt_box", return_value=("", False)), patch.object(reader.time, "sleep"), patch.object(reader.subprocess, "run") as run:
+            wire = reader.send_response(dict(op="question_text", id=7, tmux="term-1", text="Purple"))
+        self.assertIn("\tquestion_text\tok\t", wire)
+        self.assertEqual(run.call_args_list[0].args[0], ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "Purple"])
+        self.assertEqual(run.call_args_list[1].args[0], ["tmux", "send-keys", "-t", "=term-1:", "Enter"])
+
     def test_claude_status_header(self):
         todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]
         old = self.tool_call("TodoWrite", dict(todos=[dict(content="old", status="pending")]))
@@ -1703,6 +1770,147 @@ class HistoryReaderTest(unittest.TestCase):
             with self.assertRaises(StopIteration):
                 next(events)
         resolve.assert_called_once()
+
+    def test_watch_follows_session_created_before_metadata_changes(self):
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        from threading import Event
+
+        self.write(self.event('old conversation'))
+        incoming, writer = os.pipe()
+        self.addCleanup(os.close, incoming)
+        self.addCleanup(os.close, writer)
+        stdin = types.SimpleNamespace(fileno=lambda: incoming)
+        old = ('claude', 'sid', self.path, None)
+        replacement = self.path.with_name('new-session.jsonl')
+        discovered = Event()
+        metadata_ready = Event()
+
+        def resolve(query, source, owner):
+            discovered.set()
+            return ('claude', 'new-session', replacement, None) if metadata_ready.is_set() else old
+
+        with patch.object(reader.sys, 'stdin', stdin), patch.object(reader, 'resolve_response_path', side_effect=resolve):
+            events = reader.watch_changes(self.query, old, reader.READER_SOURCE, True)
+            self.assertEqual(next(events), old)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                following = pool.submit(next, events)
+                replacement.touch()
+                created_seen = discovered.wait(2)
+                metadata_ready.set()
+                replacement.write_text(json.dumps(self.event('reply after session restart')) + '\n')
+                try:
+                    current = following.result(timeout=2)
+                except TimeoutError:
+                    with self.path.open('a') as output:
+                        output.write('\n')
+                    current = following.result(timeout=2)
+            events.close()
+        self.assertTrue(created_seen, 'new session creation must trigger discovery')
+        self.assertEqual(current[2], replacement, 'reply stayed on old session when metadata followed file creation')
+        wire = reader.response(dict(self.query, sid='new-session', follow=False), resolved=current)
+        self.assertIn('reply after session restart', wire)
+
+    def test_watch_follows_completed_session_when_metadata_arrives_last(self):
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        from threading import Event
+
+        self.write(self.event('old conversation'))
+        metadata = self.home / '.claude/sessions/4242.json'
+        metadata.parent.mkdir()
+        metadata.write_text(json.dumps(dict(sessionId='sid')))
+        incoming, writer = os.pipe()
+        self.addCleanup(os.close, incoming)
+        self.addCleanup(os.close, writer)
+        stdin = types.SimpleNamespace(fileno=lambda: incoming)
+        old = ('claude', 'sid', self.path, None)
+        replacement = self.path.with_name('completed-session.jsonl')
+        discovered = Event()
+
+        discoveries = []
+
+        def resolve(query, source, owner):
+            sid = json.loads(metadata.read_text())['sessionId']
+            discoveries.append(sid)
+            if len(discoveries) >= 3:
+                discovered.set()
+            return ('claude', sid, replacement, None) if sid != 'sid' else old
+
+        with patch.object(reader.sys, 'stdin', stdin), patch.object(reader, 'resolve_response_path', side_effect=resolve):
+            events = reader.watch_changes(self.query, old, reader.READER_SOURCE, True)
+            self.assertEqual(next(events), old)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                following = pool.submit(next, events)
+                replacement.write_text(json.dumps(self.event('completed reply before metadata')) + '\n')
+                created_seen = discovered.wait(2)
+                pending_metadata = metadata.with_suffix('.tmp')
+                pending_metadata.write_text(json.dumps(dict(sessionId='completed-session')))
+                pending_metadata.replace(metadata)
+                try:
+                    current = following.result(timeout=2)
+                except TimeoutError:
+                    with self.path.open('a') as output:
+                        output.write('\n')
+                    current = following.result(timeout=2)
+            events.close()
+        self.assertTrue(created_seen)
+        self.assertEqual(current[2], replacement, 'completed reply stayed stale after session metadata changed')
+
+    def test_reader_fixture_repairs_are_checked_without_a_production_change(self):
+        repo = self.home / 'admission'
+        repo.mkdir()
+
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(repo), *args], text=True,
+                                           stderr=subprocess.PIPE).strip()
+
+        git('init', '-q')
+        git('config', 'user.name', 'Test')
+        git('config', 'user.email', 'test@example.invalid')
+        (repo / 'tools').mkdir()
+        fixture = repo / 'tools/metadata-test.py'
+        fixture.write_text('import unittest\nunittest.main()\n')
+        git('add', '.')
+        git('commit', '-qm', 'initial fixture')
+        base = git('rev-parse', 'HEAD')
+        fixture.write_text('import unittest\nclass MetadataTest(unittest.TestCase):\n'
+                           '    def test_complete_metadata(self): self.assertEqual(1, 1)\nunittest.main()\n')
+        git('add', '.')
+        git('commit', '-qm', 'repair fixture')
+        head = git('rev-parse', 'HEAD')
+        env = dict(os.environ)
+        env.pop('GITHUB_HEAD_REF', None)
+        env.pop('GITHUB_REF_NAME', None)
+        command = ['node', str(ROOT / 'tools/check-red-run.mjs'), base, head]
+        result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('TEST_ONLY_PROVEN 1 changed suites', result.stdout)
+        fixture.write_text(fixture.read_text().replace('self.assertEqual(1, 1)', 'self.assertEqual(1, 2)'))
+        git('add', '.')
+        git('commit', '-qm', 'broken fixture')
+        command[-1] = git('rev-parse', 'HEAD')
+        result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('does not pass on PR source', result.stderr)
+
+    def test_watch_completed_session_metadata_save_is_atomic(self):
+        write_text = Path.write_text
+        metadata = self.home / '.claude/sessions/4242.json'
+        partial_saves = []
+
+        def partial_write(path, text, *args, **kwargs):
+            if path.parent == metadata.parent and 'completed-session' in text:
+                with path.open('w') as output:
+                    output.write(text[:1])
+                    output.flush()
+                    partial_saves.append(json.loads(metadata.read_text())['sessionId'])
+                    output.write(text[1:])
+                return len(text)
+            return write_text(path, text, *args, **kwargs)
+
+        with patch.object(Path, 'write_text', partial_write):
+            self.test_watch_follows_completed_session_when_metadata_arrives_last()
+        self.assertEqual(partial_saves, ['sid'])
+        self.assertEqual(json.loads(metadata.read_text())['sessionId'], 'completed-session')
 
     def test_watch_delegates_pane_identity_to_the_transcript_owner_once(self):
         self.assertTrue(hasattr(reader, 'watch'), 'reader must provide a persistent watch')

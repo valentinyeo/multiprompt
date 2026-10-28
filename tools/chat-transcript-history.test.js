@@ -716,6 +716,49 @@ test('metadata retention oracle rejects the actual 708 identity and worker dispa
   assert.match(run.stderr, /TestExpectedEqual/);
 });
 
+test('IGSH-1040 live replies arrive between older pages without losing staged history', () => {
+  const cases = String.raw`
+test "cache-first switch-back live tail during older loading" {
+    const a = std.heap.page_allocator;
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", ""), .disk_loaded = true, .before = 200 };
+    defer one.history.deinit(a);
+    defer one.backfill.deinit(a);
+    try g_chat_histories.append(a, &one);
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    try one.history.apply(a, "@mp\t1\thistory\tok\tsid\t200\t300\t9\t0\tclaude\tterm-1\t0\t\ttail\t200\n{\"role\":\"assistant\",\"id\":\"third\",\"text\":\"third\"}\n@@MP_END@@\n", 1, one.key);
+    remote_pages = &.{
+        "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t0\t\tolder\t100\n{\"role\":\"assistant\",\"id\":\"second\",\"text\":\"second\"}\n@@MP_END@@\n",
+        "@mp\t3\thistory\tok\tsid\t300\t400\t9\t0\tclaude\tterm-1\t0\t\tdelta\t200\n{\"role\":\"assistant\",\"id\":\"fourth\",\"text\":\"fourth\"}\n@@MP_END@@\n",
+        "@mp\t4\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\t0\t\tolder\t0\n{\"role\":\"assistant\",\"id\":\"first\",\"text\":\"first\"}\n@@MP_END@@\n",
+    };
+    remote_calls = 0;
+    one.pending = true;
+    chatFileFetchThread(&one, one.key, 2, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 0), one.before);
+    try std.testing.expectEqual(@as(usize, 1), one.backfill.pages.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("third"), one.history.text.items);
+    chatFileFetchThread(&one, one.key, 3, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 100), one.before);
+    try std.testing.expectEqual(@as(usize, 1), one.backfill.pages.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("thirdfourth"), one.history.text.items);
+    chatFileFetchThread(&one, one.key, 4, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 0), one.before);
+    try std.testing.expectEqual(@as(u64, 400), one.history.offset);
+    try std.testing.expectEqual(ticks, one.next);
+    try std.testing.expectEqual(@as(usize, 0), one.backfill.pages.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstsecondthirdfourth"), one.history.text.items);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
+
 test('IGSH-815 snapshot deferral arms polling and stalled older pages stop continuing', () => {
   const cases = `
 test "cache-first switch-back IGSH-815 restart and continuation progress" {
@@ -768,4 +811,48 @@ test "cache-first switch-back IGSH-815 restart and continuation progress" {
   const run = runHarness(fn('chatDeferTranscriptLoad'), undefined, cases);
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
+});
+
+test('IGSH-1100 history resets reuse unchanged layout and invalidate edited text', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-reset-prefix-'));
+  try {
+    copyZig(['chat_history.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'reset-test.zig'), `
+const std = @import("std");
+const history = @import("chat_history.zig");
+const transcript = @import("chat_transcript.zig");
+test "reset prefix" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1100, 0, false, "term-1", "");
+    var h: history.History = .{};
+    defer h.deinit(a);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    try wire.appendSlice(a, "@mp\\t1\\thistory\\tok\\tsid\\t0\\t200000\\t9\\t0\\tclaude\\tterm-1\\t0\\t\\ttail\\t0\\n");
+    for (0..2000) |i| {
+        const row = try std.fmt.allocPrint(a, "{{\\"role\\":\\"assistant\\",\\"id\\":\\"msg-{d}\\",\\"text\\":\\"message {d}\\",\\"offset\\":{d},\\"end\\":{d}}}\\n", .{ i, i, i * 100, (i + 1) * 100 });
+        defer a.free(row);
+        try wire.appendSlice(a, row);
+    }
+    try wire.appendSlice(a, "@@MP_END@@\\n");
+    try h.apply(a, wire.items, 1, key);
+    const old_text = try a.dupe(u16, h.text.items);
+    defer a.free(old_text);
+    try h.apply(a, "@mp\\t2\\thistory\\tok\\tsid\\t0\\t100\\t10\\t0\\tclaude\\tterm-1\\t0\\t\\ttail\\t0\\n" ++
+        "{\\"role\\":\\"assistant\\",\\"id\\":\\"msg-1999\\",\\"text\\":\\"message 1999\\",\\"offset\\":0,\\"end\\":100}\\n@@MP_END@@\\n", 2, key);
+    try std.testing.expectEqual(@as(usize, 2000), h.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, old_text, h.text.items);
+    try std.testing.expectEqual(@as(usize, 1999), h.changed_from);
+    try h.apply(a, "@mp\\t3\\thistory\\tok\\tsid\\t0\\t100\\t11\\t0\\tclaude\\tterm-1\\t0\\t\\ttail\\t0\\n" ++
+        "{\\"role\\":\\"assistant\\",\\"id\\":\\"msg-0\\",\\"text\\":\\"changed 0\\",\\"offset\\":0,\\"end\\":100}\\n@@MP_END@@\\n", 3, key);
+    try std.testing.expectEqual(@as(usize, 2000), h.blocks.items.len);
+    try std.testing.expectEqual(@as(usize, 0), h.changed_from);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("changed 0"), h.text.items[0..9]);
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'reset-test.zig'), '--test-filter', 'reset prefix'], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}\nsignal=${result.signal} error=${result.error || ''}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

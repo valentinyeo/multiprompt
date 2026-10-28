@@ -1,5 +1,7 @@
 # Chat composer dictation
 
+Verify on: push
+
 ## Sub-features
 
 - Ctrl+D starts the existing dictation state; the microphone, left of the send button, visibly changes from the idle glyph to an accented glyph on a filled background.

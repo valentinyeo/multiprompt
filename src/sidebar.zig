@@ -1398,7 +1398,7 @@ pub fn materializeDisplayOrder() void {
 
 pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
     var count: u32 = 0;
-    var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight();
+    var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
         for (0..app_state.group_count) |gi| {
             const gid = app_state.groups[gi].id;
@@ -2155,6 +2155,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         paintSidebarUpdateCard(hdc, font_title, font_status_card);
 
         paintWorkspaceStrip(hdc, sidebar_bg);
+        @import("workspace_switcher.zig").paintHeader(hdc);
         paintSidebarStatusCardPopup(hdc, font_title, font_status_card);
     }
 
@@ -2548,7 +2549,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var snm_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, if (is_snippet_manage) L("delete") else L("Alt+;"), -1, &snm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-
                     } else if (is_snippet_back) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));

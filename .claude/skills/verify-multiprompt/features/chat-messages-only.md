@@ -1,5 +1,7 @@
 # Messages only
 
+Verify on: push
+
 ## Sub-features
 
 - Tool/activity blocks never paint ticks, summaries, details, diffs or images and reserve no height or surrounding gap.

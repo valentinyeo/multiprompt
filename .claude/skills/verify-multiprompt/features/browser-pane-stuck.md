@@ -1,5 +1,7 @@
 # Browser pane stuck opening
 
+Verify on: push
+
 Verify browser-pane close/reopen behavior and that a docked pane works without the extension.
 
 ## Sub-features
