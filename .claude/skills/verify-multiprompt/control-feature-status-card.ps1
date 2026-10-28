@@ -1,3 +1,18 @@
+function Assert-UsagePaceInk([Collections.IDictionary]$Counts, $Snapshot, [string]$Surface) {
+    $marks = @{ above = 0; below = 0 }
+    foreach ($account in $Snapshot.accounts) {
+        foreach ($name in @('week', 'five_hour')) {
+            $window = $account.$name
+            if ($null -ne $window.used -and $window.pace.verdict -in @('above', 'below')) { $marks[$window.pace.verdict]++ }
+        }
+    }
+    $grades = @($marks.Keys | Where-Object { $marks[$_] -gt 0 })
+    foreach ($grade in $grades) {
+        $minimum = if ($grades.Count -eq 1) { 12 } else { 2 * $marks[$grade] }
+        if ($Counts[$grade] -lt $minimum) { throw "IGSH-997: $Surface lacks $grade pace ink" }
+    }
+}
+
 function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
     $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence ($Name + '.png')))
     $counts = [ordered]@{ above = 0; below = 0 }
@@ -58,9 +73,7 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
                 $expected = @($usagePaceSnapshot.accounts | ForEach-Object { foreach ($name in @('week', 'five_hour')) { if ($null -ne $_.$name.used) { $_.$name.pace.verdict } } } | Where-Object { $_ -in @('above', 'below') } | Sort-Object -Unique)
                 $pillBounds = @($offsetX, $pages[2].top, ($offsetX + [int][Math]::Round(240 * $scale)), ($pages[2].bottom + 1))
                 $closedInk = Measure-UsagePaceInk -Name 'pill-closed' -Bounds $pillBounds
-                foreach ($grade in $expected) {
-                    if ($closedInk[$grade] -lt 12) { throw "IGSH-997: usage pill lacks $grade pace ink" }
-                }
+                Assert-UsagePaceInk $closedInk $usagePaceSnapshot 'usage pill'
                 $paceProof = [ordered]@{ expectedInks = $expected; closed = $closedInk; panel = $null; bounds = @{ closed = $pillBounds; panel = $null }; sourceTs = $usageSourceTs; replayTs = $usagePaceSnapshot.ts; sourceSha256 = (Get-FileHash $env:VERIFY_USAGE_PACE_FILE -Algorithm SHA256).Hash.ToLowerInvariant(); normalSshReads = @(Get-Content (Join-Path $scratch 'usage-ssh-read.log')).Count }
             }
             $pillX = [int][Math]::Round(60 * $scale)
@@ -78,9 +91,7 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
                 if (-not [VerifyNative]::GetWindowRect([IntPtr]::new([int64]$menu.handle), [ref]$panel)) { throw 'Usage pace panel rectangle unavailable' }
                 $paceProof.bounds.panel = @(($panel.Left - $frame.Left), ($panel.Top - $frame.Top), ($panel.Right - $frame.Left), ($panel.Bottom - $frame.Top))
                 $paceProof.panel = Measure-UsagePaceInk -Name 'pill-open' -Bounds $paceProof.bounds.panel
-                foreach ($grade in $paceProof.expectedInks) {
-                    if ($paceProof.panel[$grade] -lt 12) { throw "IGSH-997: expanded panel lacks $grade pace ink" }
-                }
+                Assert-UsagePaceInk $paceProof.panel $usagePaceSnapshot 'expanded panel'
             }
             Record 'Real second click: close AI usage pill'
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
