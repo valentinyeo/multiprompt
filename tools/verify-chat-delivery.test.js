@@ -1218,10 +1218,9 @@ test('native crash evidence retains the minidump beside its text report', () => 
 });
 
 
-test('live history copy uses the owned transcript shortcut without synthetic palette text', () => {
+test('live history copy reuses the owned native control instead of racing synthetic keys', () => {
   const live = read('tools/verify-chat-delivery/live-delivery.ps1');
-  assert.match(live, /\$viewHandle = \[IntPtr\]\$views\[0\]\.Current\.NativeWindowHandle/);
-  assert.match(live, /FocusOwnedWindow\(\$main, \$app\.Id, \$viewHandle\)/);
-  assert.match(live, /Press @\(0x11, 0x41\) 'Ctrl\+A: select live conversation'/);
-  assert.doesNotMatch(live, /\$query|ToCharArray/);
+  assert.match(live, /Add-Type -Path "\$PSScriptRoot\/chat-switch-observer\.cs"/);
+  assert.match(live, /Doctor \$true\s+\$actions\.Add[^]*?\[ChatSwitchObserver\]::CopyTranscript\(\$app\.Id, \$main\)/);
+  assert.doesNotMatch(live, /\$query|ToCharArray|Ctrl\+A: select live conversation/);
 });

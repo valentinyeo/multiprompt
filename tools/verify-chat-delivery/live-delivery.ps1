@@ -1,3 +1,4 @@
+Add-Type -Path "$PSScriptRoot/chat-switch-observer.cs"
 [void](Wait-For 'initial transcript read' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
 Bind-Transcript
 $observation.rounds = [Collections.Generic.List[object]]::new()
@@ -43,11 +44,9 @@ foreach ($round in 1..$roundCount) {
     if ($firstReplyMs -eq 0) { $firstReplyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
     $answer = "Live answer $round"
     [void](Wait-For 'fresh reply rendered without changing views' {
-        Bind-Transcript
-        $viewHandle = [IntPtr]$views[0].Current.NativeWindowHandle
-        if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $viewHandle)) { throw 'Owned transcript typing focus missing' }
-        Press @(0x11, 0x41) 'Ctrl+A: select live conversation'
-        Press @(0x11, 0x43) 'Ctrl+C: copy rendered live conversation'
+        Doctor $true
+        $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='copy owned rendered live conversation'})
+        [ChatSwitchObserver]::CopyTranscript($app.Id, $main)
         $script:liveCopied = [Windows.Forms.Clipboard]::GetText()
         $script:liveCopied.Contains($answer) -and @($messages | Where-Object { -not $script:liveCopied.Contains($_) }).Count -eq 0
     } 2)
