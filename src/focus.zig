@@ -211,6 +211,11 @@ pub noinline fn focusGuard(target: HANDLE) bool {
 }
 
 fn focusGuardAt(target: HANDLE, caller: usize, raise_container: bool) bool {
+    if (@import("settings_panel.zig").ownsForeground()) {
+        const inside = @import("settings_panel.zig").ownsWindow(target);
+        focusTrace(if (inside) .allowed else .blocked, target, caller);
+        return inside;
+    }
     focusGuardReadMouse();
     const now = GetTickCount64();
     if (focusGuardPasteAllows(target, app_state.g_focus_paste_target, app_state.g_main_hwnd)) {
@@ -740,6 +745,7 @@ pub fn browserPaneOwnsForegroundHwnd(fg: HANDLE, bh: HANDLE) bool {
 pub fn foregroundHwndIsOurs(fg: HANDLE) bool {
     if (fg == null or app_state.g_main_hwnd == null) return false;
     if (fg == app_state.g_main_hwnd) return true;
+    if (@import("settings_panel.zig").ownsWindow(fg)) return true;
     if (app_state.g_urlbar_hwnd) |ub| {
         if (fg == ub and IsWindow(ub) != 0) {
             const owner: LONG_PTR = @bitCast(@intFromPtr(app_state.g_main_hwnd));
