@@ -586,17 +586,17 @@ jobs:
         if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         run: zig build test-main --summary all
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         with:
           persist-credentials: false
           ref: 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f
           path: negative-source
       - name: Build the pre-fix commit 42cecfd3 negative control
-        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         working-directory: negative-source
         run: zig build
       - name: Require pre-fix 42cecfd3 to show activity rows with the identical journey
-        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -620,17 +620,17 @@ jobs:
           if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Negative control cleanup failed' }
           $global:LASTEXITCODE = 0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         with:
           persist-credentials: false
           ref: 9618091700e09f5958a48390449dc5067874d5dd
           path: negative-focus-source
       - name: Build IGSH-807 pre-fix focus-ring control
-        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         working-directory: negative-focus-source
         run: zig build
       - name: Require visible pre-fix focus rings with unchanged input cycling
-        if: github.event_name == 'workflow_dispatch' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'

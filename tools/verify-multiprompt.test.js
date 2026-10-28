@@ -2281,6 +2281,6 @@ test('IGSH-1033 shared tracked quarantine protects rollback and release executio
 test('IGSH-1033 historical controls stay outside master and release candidates', () => {
   for (const name of ['Build IGSH-807 pre-fix focus-ring control', 'Require visible pre-fix focus rings with unchanged input cycling', 'Build the pre-fix commit 42cecfd3 negative control', 'Require pre-fix 42cecfd3 to show activity rows with the identical journey']) {
     const step = workflow.slice(workflow.indexOf('      - name: ' + name)).split(/\n      - /)[0];
-    assert.match(step, /if: github.event_name == 'workflow_dispatch' &&/);
+    assert.match(step, /if: github.event_name == 'workflow_dispatch' && inputs.revision == '' &&/);
   }
 });
