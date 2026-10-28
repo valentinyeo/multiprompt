@@ -102,6 +102,12 @@ test "geometry is reused for opening, hovering, scrolling and selection" {
     if (@hasDecl(@This(), "resetChangelogLayout")) @field(@This(), "resetChangelogLayout")();
     _ = calcChangelogLayout();
     try std.testing.expect(measurements > 0 and measurements < CHANGELOG.len);
+    measurements = 0;
+    app_state.g_changelog_scroll = std.math.maxInt(i32);
+    window_width = 1200;
+    const resized = calcChangelogLayout();
+    try std.testing.expect(app_state.g_changelog_scroll <= resized.max_scroll);
+    try std.testing.expect(measurements > 0 and measurements < CHANGELOG.len);
 }
 `;
   try {

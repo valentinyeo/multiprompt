@@ -2617,6 +2617,7 @@ pub fn calcChangelogLayout() ChangelogLayout {
     var available_h: i32 = win_h - 80 - title_h - bottom_pad;
     const min_view_h = uiScaled(120);
     if (available_h < min_view_h) available_h = min_view_h;
+    app_state.g_changelog_scroll = std.math.clamp(app_state.g_changelog_scroll, 0, @max(0, changelogTotalContentHeight(summary_w) - available_h));
     measureVisibleChangelogRows(summary_w, available_h);
     const total_content_h = changelogTotalContentHeight(summary_w);
     const view_h: i32 = @min(total_content_h, available_h);
