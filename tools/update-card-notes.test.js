@@ -92,14 +92,14 @@ test('existing card uses the same growing rectangle for layout and hits, with th
     'IGSH-728 picks only versions between installed and offered, newest first',
     'IGSH-948 shows three lines then and N more, and the full list when expanded',
     'IGSH-948 keeps sixteen lines and counts the rest as more even when expanded',
-    'IGSH-948 groups quiet releases into one behind the scenes line and never shows filler',
+    'IGSH-1090 keeps real notes individual and maintenance releases quiet',
     'IGSH-728 skips ticket ids, file paths, file names and PR numbers',
   ]) assert.ok(notes.includes(`test "${name}"`));
   assert.match(notes, /lines: \[16\]\[512\]u8/);
   assert.match(notes, /!versionNewer\(installed, release.version\) or versionNewer\(offered, release.version\)/);
   assert.match(notes, /while \(at < result.count and !versionNewer\(versions\[at\], release.version\)\)/);
   assert.match(notes, /"and \{d\} more", \.\{rest\}/);
-  assert.match(notes, /pub const BEHIND_THE_SCENES = "Behind the scenes fixes\.";/);
+  assert.match(card, /if \(card_notes\.count == 0 or/);
 });
 
 test('master painter fails the exact card-note observability contract required by the new journey', () => {
@@ -125,6 +125,9 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(suite, /PrintWindow\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /\$bitmap.Save\(\(Join-Path \$Evidence 'update-card-notes.png'\)\)/);
   assert.match(suite, /Tampered notes accepted/);
+  assert.match(suite, /maintenance release waits without an update card/);
+  assert.match(suite, /update-card-quiet\.png/);
+  assert.match(suite, /Real product notes did not show again/);
   const journey = read('tools/update-release-journey.ps1');
   assert.match(journey, /update card shows aggregated plain notes/);
   assert.match(journey, /Missing update card screenshot/);
@@ -136,11 +139,17 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(fixture, /names.push\('release-notes.json'\)/);
 });
 
-test('quiet releases use the same behind the scenes line in the stamper and the card, never the old filler', async () => {
-  const { behindTheScenes } = await import('./version-stamp.mjs');
-  assert.equal(behindTheScenes, 'Behind the scenes fixes.');
-  assert.ok(read('src/update_notes.zig').includes(`BEHIND_THE_SCENES = "${behindTheScenes}"`));
-  assert.equal(read('tools/version-stamp.mjs').includes('latest improvements'), false);
+test('IGSH-1090 publication removes engineering notes and filler, not real product lines', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const source = `pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "1.1.0", .items = &.{
+        .{ .text = "Behind the scenes fixes.", .ticket = "" },
+        .{ .text = "Chat speed checks now ignore shared-machine pauses.", .ticket = "" },
+        .{ .text = "Dictation shortcuts keep working when keys queue up.", .ticket = "" },
+    } },
+};`;
+  assert.deepEqual(releaseNotes(source, 'v1.1.0').releases[0].changes, ['Dictation shortcuts keep working when keys queue up.']);
+  assert.doesNotMatch(read('tools/version-stamp.mjs'), /IGSH-834-maintenance|export const behindTheScenes/);
 });
 
 test('changed implementation is comment-free and leaves no error log', async () => {

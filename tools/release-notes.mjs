@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { plainChange } from './version-stamp.mjs';
+import { productChange } from './version-stamp.mjs';
 
 export function releaseNotes(source, tag) {
   const releases = [...source.matchAll(/\.\{ \.ver = "(\d+\.\d+\.\d+)",[^\n]*?\.items = &\.\{([\s\S]*?)\n    \}(?:, \.ticket = "(?:\\.|[^"\\])*")? \},/g)].map(match => ({
@@ -12,11 +12,10 @@ export function releaseNotes(source, tag) {
         return escape === "\\'" ? "'" : escape;
       });
       return JSON.parse(literal);
-    }).filter(plainChange),
+    }).filter(productChange),
   }));
   const version = tag.replace(/^v/, '');
   if (!releases.length || releases[0].version !== version) throw new Error('Release notes must start with the offered version');
-  if (!releases[0].changes.length) throw new Error('Offered release needs at least one plain product line');
   return { version, releases };
 }
 

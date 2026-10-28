@@ -8,7 +8,6 @@ const mainPath = 'src/main.zig';
 const changelogPath = 'src/changelog.zig';
 const versionLine = /^pub const APP_VERSION = (?:build_config\.app_version orelse )?"(\d+)\.(\d+)\.(\d+)";$/m;
 const changelogStart = /(?:pub const CHANGELOG|const SOURCE_CHANGELOG) = \[_\]ChangelogEntry\{/;
-export const behindTheScenes = 'Behind the scenes fixes.';
 export const fixHint = 'add changelog.d/<TICKET>-<slug>.md instead; the version is stamped after merge (node tools/version-stamp.mjs release)';
 
 export function autoRevertBranch(env = process.env) {
@@ -17,6 +16,10 @@ export function autoRevertBranch(env = process.env) {
 
 export function plainChange(line) {
   return !!line.trim() && !(/[A-Z]+-\d+|[\/\\`]|#\d+|\b(?:PR|pull request)\s*#?\s*\d+|\b[\w-]+\.[a-zA-Z][\w.-]*|[\x00-\x1f\x7f]/i.test(line));
+}
+
+export function productChange(line) {
+  return plainChange(line) && !(/behind the scenes|latest improvements|^(?:various improvements|bug fixes|maintenance|improvements|fixes)\.?$|\b(?:checks?|tests?|CI|proofs?|pipelines?|workflows?)\b/i.test(line));
 }
 
 export function fragmentLines(file, text) {
@@ -28,7 +31,10 @@ export function fragmentLines(file, text) {
 }
 
 export function checkFragments(base, head, changed) {
-  for (const file of Object.keys(head).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) fragmentLines(file, head[file]);
+  for (const file of Object.keys(head).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
+    const lines = fragmentLines(file, head[file]);
+    if (changed.includes(file) && lines.some(line => !productChange(line))) throw new Error(`${file}: write a specific user-visible change; omit notes for checks, tests or pipeline work`);
+  }
   if (changed.some(file => file.startsWith('src/')) && !changed.some(file => !(file in base) && file in head && file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
     throw new Error('App code changed: add changelog.d/<TICKET>-<slug>.md with at least one plain product line');
   }
@@ -36,7 +42,7 @@ export function checkFragments(base, head, changed) {
 
 export function stampTree(files, requestedVersion) {
   const removed = Object.keys(files).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md').sort();
-  if (!removed.length) return null;
+  if (!removed.length && !requestedVersion) return null;
   const current = files[mainPath]?.match(versionLine);
   if (!current) throw new Error('Expected one APP_VERSION line in src/main.zig');
   const version = requestedVersion ?? `${current[1]}.${current[2]}.${BigInt(current[3]) + 1n}`;
@@ -49,7 +55,7 @@ export function stampTree(files, requestedVersion) {
     if (!match) throw new Error(`Bad fragment filename: ${file}`);
     const lines = fragmentLines(file, files[file]);
     if (!tickets.includes(match[1])) tickets.push(match[1]);
-    bullets.push(...lines.map(text => `        .{ .text = "${escape(text)}", .ticket = "${match[1]}" },`));
+    bullets.push(...lines.filter(productChange).map(text => `        .{ .text = "${escape(text)}", .ticket = "${match[1]}" },`));
   }
   if (!changelogStart.test(files[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
   const result = { ...files };
@@ -97,7 +103,7 @@ export function buildChangelog(files, tag, history = []) {
     previous = fragmentFiles(step.files);
   }
   const added = addedSince(fragmentFiles(files), previous);
-  stamp(tag, Object.keys(added).length ? added : { 'changelog.d/IGSH-834-maintenance.md': `${behindTheScenes}\n` });
+  stamp(tag, added);
   return result[changelogPath];
 }
 
