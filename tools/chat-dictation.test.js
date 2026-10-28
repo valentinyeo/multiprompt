@@ -229,7 +229,7 @@ test('IGSH-812 registration is additive and existing contract checks remain on t
   assert.match(read(skill + 'coverage.md'), /\| IGSH-812 \|[^\n]*\| chat-dictation \| Windows proof recorded/);
 });
 
-test('IGSH-893 audit evidence serializes plain lines within five seconds on Windows PowerShell', { skip: process.platform !== 'win32' }, () => {
+test('IGSH-893 audit evidence serializes plain lines within five seconds after Windows PowerShell initialization', { skip: process.platform !== 'win32' }, () => {
   const { spawnSync } = require('node:child_process');
   const os = require('node:os');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'dictation-audit-'));

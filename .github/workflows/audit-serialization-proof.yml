@@ -1,6 +1,8 @@
 name: Audit serialization proof
 
 on:
+  push:
+    branches: [ceo/IGSH-1133]
   workflow_dispatch:
 
 permissions:
