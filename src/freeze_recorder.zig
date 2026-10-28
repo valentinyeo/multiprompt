@@ -2,6 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const win = @import("win32.zig");
 const crash = @import("crash_recorder.zig");
+const upload = @import("report_upload.zig");
+extern "user32" fn RegisterWindowMessageW([*:0]const u16) callconv(.winapi) u32;
 
 pub const NOTICE_TEXT = "Multiprompt froze last time, a report was saved";
 pub const THRESHOLD_MS = 5000;
@@ -57,6 +59,21 @@ var g_version: []const u8 = "";
 var g_sequence = std.atomic.Value(u32).init(0);
 var g_events: [EVENT_COUNT]std.atomic.Value(u64) = @splat(std.atomic.Value(u64).init(0));
 var g_last_event: u32 = 0;
+var g_message: u32 = 0;
+var g_ack = std.atomic.Value(u32).init(0);
+var g_blank_pending = std.atomic.Value(bool).init(false);
+var g_blank = false;
+
+pub fn heartbeat(message: u32, token: usize) bool {
+    if (g_message == 0 or message != g_message) return false;
+    g_ack.store(@truncate(token), .release);
+    return true;
+}
+
+pub fn blankChat(blank: bool) void {
+    if (blank and !g_blank) g_blank_pending.store(true, .release);
+    g_blank = blank;
+}
 
 fn awakeMillis() u64 {
     var ticks: u64 = 0;
@@ -77,6 +94,8 @@ pub fn note(message: u32, tab: usize, view: View) void {
 
 pub fn start(window: win.HANDLE, version: []const u8) void {
     if (g_worker != null) return;
+    g_message = RegisterWindowMessageW(std.unicode.utf8ToUtf16LeStringLiteral("Multiprompt.FreezeHeartbeat"));
+    if (g_message == 0) return;
     g_window = window;
     g_version = version;
     inline for (0..g_modules.len) |i| {
@@ -124,14 +143,20 @@ pub fn stop() void {
 
 fn worker(_: ?*anyopaque) callconv(.winapi) u32 {
     var detector: Detector = .{};
+    var token: u32 = 1;
+    var started = awakeMillis();
+    if (win.PostMessageW(g_window, g_message, token, 0) == 0) return 0;
     while (win.WaitForSingleObject(g_stop, 500) == 0x102) {
         if (win.IsWindow(g_window) == 0) break;
-        if (win.IsWindowVisible(g_window) == 0) continue;
-        const started = awakeMillis();
-        var reply: usize = 0;
-        const responsive = win.SendMessageTimeoutW(g_window, 0, 0, 0, 0x0001 | 0x0020, 1000, &reply) != 0;
-        if (win.WaitForSingleObject(g_stop, 0) == 0) break;
-        if (detector.probe(responsive, started, awakeMillis())) record(awakeMillis() -| detector.missed_since.?);
+        const now = awakeMillis();
+        const responsive = g_ack.load(.acquire) == token;
+        if (detector.probe(responsive, started, now)) record(.freeze, now -| detector.missed_since.?);
+        if (g_blank_pending.swap(false, .acq_rel)) record(.blank_chat, 0);
+        if (responsive) {
+            token +%= 1;
+            started = now;
+            if (win.PostMessageW(g_window, g_message, token, 0) == 0) break;
+        }
     }
     return 0;
 }
@@ -197,14 +222,14 @@ fn instruction(b: *crash.Buf, ip: usize) void {
     b.add("instruction: unavailable\n");
 }
 
-fn record(unresponsive_ms: u64) void {
+fn record(kind: upload.Kind, unresponsive_ms: u64) void {
     const location = capture();
     var memory: [8192]u8 = undefined;
     var b: crash.Buf = .{ .data = &memory };
     var time: std.os.windows.FILETIME = undefined;
     GetSystemTimeAsFileTime(&time);
     const timestamp = ((@as(u64, time.dwHighDateTime) << 32) | time.dwLowDateTime) / 10_000_000 - 11_644_473_600;
-    b.print("multiprompt freeze report\nversion: {s}\ntime_unix: {d}\nunresponsive_ms: {d}\nthread_context: {s}\n", .{ g_version, timestamp, unresponsive_ms, if (location.captured) "captured" else "unavailable" });
+    b.print("multiprompt {s} report\nversion: {s}\ntime_unix: {d}\nunresponsive_ms: {d}\nthread_context: {s}\n", .{ if (kind == .freeze) "freeze" else "blank chat", g_version, timestamp, unresponsive_ms, if (location.captured) "captured" else "unavailable" });
     instruction(&b, location.ip);
     b.add("stack_rvas:\n");
     for (location.rvas[0..location.count]) |rva| b.print("  0x{X}\n", .{rva});
@@ -216,8 +241,9 @@ fn record(unresponsive_ms: u64) void {
         b.print("  {d} 0x{X} {d} {s}\n", .{ event >> 32, event & 0xFFFF, (event >> 16) & 0x1FFF, @tagName(@as(View, @enumFromInt((event >> 29) & 7))) });
     }
     var name_buf: [96]u8 = undefined;
-    const name = std.fmt.bufPrint(&name_buf, "freeze-{d}-{d}-{d}.txt", .{ timestamp, win.GetCurrentProcessId(), win.GetTickCount64() }) catch return;
-    crash.writeFreezeReport(name, b.slice());
+    const name = std.fmt.bufPrint(&name_buf, "{s}-{d}-{d}-{d}.txt", .{ if (kind == .freeze) "freeze" else "blank-chat", timestamp, win.GetCurrentProcessId(), win.GetTickCount64() }) catch return;
+    crash.writeDiagnosticReport(name, b.slice(), kind == .freeze);
+    upload.queue(kind, g_version, @intCast(timestamp), 0, location.rvas[0..location.count]);
 }
 
 test "freeze threshold, one report per stall, recovery permits a later report" {

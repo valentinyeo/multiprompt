@@ -4,10 +4,11 @@ on:
     paths:
       - 'src/**'
       - 'build.zig'
+      - 'service/journey/**'
       - 'tools/freeze-recorder*'
       - '.github/workflows/freeze-recorder.yml'
   push:
-    branches: [master]
+    branches: [master, ceo/IGSH-970-reports]
   workflow_dispatch:
     inputs:
       tag:
@@ -63,9 +64,17 @@ jobs:
           if ($redCode -eq 0 -or ($red -join "`n") -notmatch 'Ten-second stall must write exactly one report; found 0') { throw "Pre-fix control failed for an unexpected reason: $red" }
           $global:LASTEXITCODE = 0
           Write-Host 'FREEZE_RED_CONTROL_OK'
+      - name: Build the existing account service fixture
+        working-directory: service
+        shell: pwsh
+        run: |
+          npm ci --no-audit --no-fund --prefer-offline
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+          npx wrangler deploy --dry-run --outdir .build
+          if ($LASTEXITCODE -ne 0) { throw 'Account fixture build failed' }
       - name: Force real main-thread stalls
         shell: pwsh
-        run: ./tools/freeze-recorder-journey.ps1 -Exe ./zig-out/bin/multiprompt.exe -Evidence ./freeze-evidence
+        run: ./tools/freeze-recorder-upload.ps1 -Exe ./zig-out/bin/multiprompt.exe -Evidence ./freeze-evidence
       - name: Validate saved reports
         run: |
           node tools/freeze-recorder-proof.mjs freeze-evidence

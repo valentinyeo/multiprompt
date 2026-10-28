@@ -455,6 +455,9 @@ pub fn paintChatView(hdc: HANDLE) void {
     defer canvas.deinit();
     if (!chatViewOwnsInput()) return;
     const layout = chatViewLayout();
+    @import("freeze_recorder.zig").blankChat(app_state.g_chat_block_count > 0 and
+        (app_state.g_chat_transcript_hwnd == null or IsWindowVisible(app_state.g_chat_transcript_hwnd) == 0 or
+            layout.transcript.right <= layout.transcript.left or layout.transcript.bottom <= layout.transcript.top));
     refreshChatBrushes();
     _ = SetBkMode(hdc, TRANSPARENT);
     const card_border = chatSurfaceBorderColor();
