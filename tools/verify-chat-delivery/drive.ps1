@@ -103,8 +103,8 @@ function Doctor([bool]$Chat = $false) {
     }
     $session = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
     $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1') { $expectedShells } else { 1 }
-    if (@($session.tabs).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 'tmux' }).Count -ne $expectedTmux -or
-        ($expectedShells -eq 2 -and @($published.shells | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
+    if (@($session.tabs).Count -ne $expectedShells -or @($session.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -ne $expectedTmux -or
+        ($expectedShells -eq 2 -and @($session.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
     if ($Chat) {
         $focus = [ChatDeliveryDesktop]::Focus($main)
         if ($focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Doctor: owned composer must have foreground typing focus' }
