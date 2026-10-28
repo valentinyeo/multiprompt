@@ -1842,7 +1842,9 @@ class HistoryReaderTest(unittest.TestCase):
                 following = pool.submit(next, events)
                 replacement.write_text(json.dumps(self.event('completed reply before metadata')) + '\n')
                 created_seen = discovered.wait(2)
-                metadata.write_text(json.dumps(dict(sessionId='completed-session')))
+                pending_metadata = metadata.with_suffix('.tmp')
+                pending_metadata.write_text(json.dumps(dict(sessionId='completed-session')))
+                pending_metadata.replace(metadata)
                 try:
                     current = following.result(timeout=2)
                 except TimeoutError:
