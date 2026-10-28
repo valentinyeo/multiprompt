@@ -108,6 +108,8 @@ try {
     $observer = [Diagnostics.Process]::GetCurrentProcess()
     $observer.Refresh()
     $observerCpuBefore = $observer.TotalProcessorTime.TotalMilliseconds
+    $app.Refresh()
+    $appCpuBefore = $app.TotalProcessorTime.TotalMilliseconds
     $idleTimer = [Diagnostics.Stopwatch]::StartNew()
     $warmupOffset = (Read-Log).Length
     [void](Wait-For 'ten warmup idle Chat View polls' { [regex]::Matches((Read-Log).Substring($warmupOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60 750)
@@ -119,6 +121,7 @@ try {
     $result.idleWallMs = $idleTimer.Elapsed.TotalMilliseconds
     $app.Refresh()
     $result.cpuMs = $app.TotalProcessorTime.TotalMilliseconds
+    $result.appIdleCpuMs = $result.cpuMs - $appCpuBefore
 } finally {
     if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$Evidence/session.json" }
     $bitmap = [Drawing.Bitmap]::new([ChatDeliveryDesktop]::GetSystemMetrics(0), [ChatDeliveryDesktop]::GetSystemMetrics(1))
