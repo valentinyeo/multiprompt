@@ -304,7 +304,7 @@ jobs:
       max-parallel: 6
       matrix:
         feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON(needs.journeys.outputs.full) || fromJSON(format('["{0}"]', inputs.feature)) }}
-        app-revision: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["8f98adf9727bf2006374bfaacb781732b245b8ff","{0}"]', github.sha)) || fromJSON('[""]') }}
+        app-revision: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["5d2a820355969173090f0fcd0c72a7b3bd222141","{0}"]', github.sha)) || fromJSON('[""]') }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
@@ -422,12 +422,14 @@ jobs:
           ref: ${{ matrix.app-revision }}
           path: app-source
           persist-credentials: false
+          fetch-depth: 0
       - name: Identify branch executable
         if: env.RELEASE_TAG == ''
         shell: pwsh
         run: |
           $revision = (git rev-parse HEAD).Trim()
-          $tag = (git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim()
+          if ($env:VERIFY_APP_REVISION) { $revision = (git -C app-source rev-parse HEAD).Trim() }
+          $tag = if ($env:VERIFY_APP_REVISION) { (git -C app-source describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim() } else { (git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim() }
           if ($LASTEXITCODE -ne 0 -or $tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Reachable release version not found' }
           $version = $Matches[1]
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
