@@ -44,7 +44,7 @@ try {
     }
     if ($text -match '\[update\] card note \d+=.*(behind the scenes|latest improvements)') { throw 'Released card showed filler' }
     Add-Type -AssemblyName System.Drawing
-    Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ReleaseCardProof { [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags); [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp); [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); }'
+    Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class ReleaseCardProof { [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int command); [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h); [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; } [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags); [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref Point p); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr wp, IntPtr lp); [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); }'
     $process.Refresh()
     $rectangle = New-Object ReleaseCardProof+Rect
     if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$rectangle)) { throw 'Released window unavailable' }
@@ -99,6 +99,10 @@ try {
             }
             if (-not [ReleaseCardProof]::SetWindowPos($process.MainWindowHandle, [IntPtr]::Zero, 0, 0, $Width, $Height, 0x0040)) { throw 'Card resize failed' }
             Wait-Card { $script:cardLog -match '\[update\] notes viewport=' -and $script:cardLog -match '\[update\] card remaining=' } 'Card did not expose wrapped note bounds'
+            $after = New-Object ReleaseCardProof+Rect
+            if (-not [ReleaseCardProof]::GetWindowRect($process.MainWindowHandle, [ref]$after)) { throw 'Card resized window unavailable' }
+            Write-Output ('WRAPPED_CARD_WINDOW=' + ($after.R - $after.L) + 'x' + ($after.B - $after.T))
+            if ($after.R - $after.L -ne $Width -or $after.B - $after.T -ne $Height -or [ReleaseCardProof]::IsZoomed($process.MainWindowHandle)) { throw 'Native card dimensions do not match requested proof size' }
         }
         function Toggle-Card([string]$View) {
             $click = Card-Click 'more row'
@@ -109,6 +113,9 @@ try {
             $null = [ReleaseCardProof]::PostMessage($process.MainWindowHandle, 0x202, [IntPtr]0, $lp)
             Wait-Card { $script:cardLog -match ('card view=' + $View) -and $script:cardLog -match '\[update\] card remaining=' } 'Card expansion control did not change view'
         }
+        Write-Output ('WRAPPED_CARD_WAS_MAXIMIZED=' + [ReleaseCardProof]::IsZoomed($process.MainWindowHandle))
+        $null = [ReleaseCardProof]::ShowWindow($process.MainWindowHandle, 9)
+        Wait-Card { -not [ReleaseCardProof]::IsZoomed($process.MainWindowHandle) } 'Card window did not restore before resizing'
         Resize-Card 1024 768
         $normal = Card-Bounds
         $heights = [regex]::Matches($script:cardLog, '\[update\] note height \d+=(\d+)')
