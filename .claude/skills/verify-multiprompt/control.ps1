@@ -6480,6 +6480,7 @@ try {
                             for ($tab = 0; $tab -lt $sessionCount; $tab++) {
                                 Press @(0x11, (0x31 + $tab)) 'Select a session to restore the browser-closed profile mode'
                                 Wait-Until { (Read-Session).active_tab -eq $tab } 'profile browser-close target selected'
+                                $script:browserShellId = $shellIds[$tab]
                                 Press-CloseBrowserPane 'Close this owned pane before the separate baseline profile'
                             }
                         }
