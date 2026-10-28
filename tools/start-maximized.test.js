@@ -1,6 +1,8 @@
 const test = require('node:test');
 
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -10,7 +12,7 @@ function featureMatrix(source) {
 }
 
 const root = path.resolve(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8'));
 
 function assertFirstShow(plan) {
   assert.match(plan, /pub fn firstShowCommand\(\) i32 \{\s*return 8;\s*\}/);

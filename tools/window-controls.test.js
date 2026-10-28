@@ -1,8 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
-const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
+const read = name => (name.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(__dirname, '..', name), 'utf8'));
 const base = '.claude/skills/verify-multiprompt/';
 const journey = read(base + 'window-controls.ps1');
 const native = read(base + 'window-controls-native.cs');

@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -134,7 +136,7 @@ test('font resets invalidate layout and paint visits only visible cached rows', 
 });
 
 test('existing command palette speed journey measures real input through changed screen pixels', () => {
-  const control = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
+  const control = readControlSource();
   const method = control.slice(control.indexOf('    public static double MeasureChangelogKey('), control.indexOf('    static void ReadPatch('));
   assert.match(method, /Stopwatch.StartNew\(\);\s+if \(SendInput\(2,/);
   assert.match(method, /ReadPatch\(x, y, pixels, graphics\);/);
