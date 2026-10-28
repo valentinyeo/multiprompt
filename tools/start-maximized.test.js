@@ -1,7 +1,13 @@
 const test = require('node:test');
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
 
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
@@ -104,7 +110,7 @@ function assertJourney(control, workflow, map) {
   assert.doesNotMatch(check, /Wait-Until|ShowWindow\(|MoveWindow\(|SetWindowPos\(/);
   assert.match(control, /\$owner -ne \$process.Id -or \[VerifyNative\]::Class\(\$script:window\) -ne 'ZigShell'/);
   assert.match(control, /"--single-window --no-window-restore"/);
-  assert.match(workflow, /github.event_name == 'pull_request' && fromJSON\('\["appearance"\]'\)/);
+  assert.ok(featureMatrix(workflow).pr.includes('appearance'));
   assert.match(workflow, /run: node --test [^\n]*tools\/start-maximized.test.js/);
   assert.match(workflow, /run: zig test src\/launch_plan.zig --test-filter IGSH-587/);
   assert.match(map, /`startup-maximized`/);

@@ -1,5 +1,7 @@
 # Group headlines
 
+Verify on: push
+
 ## Sub-features
 
 - Each expanded-sidebar group has a small, muted, capitalised, left-aligned headline in the subtitle font, with no fill, colored rail or chevron.

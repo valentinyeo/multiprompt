@@ -14,6 +14,8 @@ Read the matching feature before dispatching. [Recent changes coverage](../cover
 
 Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, chat-dictation, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, chat-focus, status-card, palette-order, browser-own-profile and remind-me; `tab-names` runs on request. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
+Automatic journey membership lives in each recipe: `Verify on: push` joins master and `feature=all`; add `, pull_request` to join PR smoke checks. A recipe without that line stays manual-only. The generator discovers recipes with the `Driving it with control.ps1` heading, so reconnect and diagnostic maps keep their separate workflows. Adding a recipe needs no workflow matrix or validation-list edit. The shared control driver remains a separate concern.
+
 Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Browser-pane-locked targets an ownership-checked empty browser strip with real mouse input; workspace-focus also clicks workspace pills.
 
 ## Proof and failure reporting

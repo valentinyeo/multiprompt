@@ -1,5 +1,7 @@
 # Favorites groups
 
+Verify on: push
+
 Group the same session independently in its home workspace and Favorites (Alt+1), using the existing group palette.
 
 ## Sub-features

@@ -1,8 +1,14 @@
 const { test } = require('node:test');
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 const skill = '.claude/skills/verify-multiprompt/';
@@ -205,8 +211,9 @@ test('IGSH-812 speech fixture is recorded, pinned, licensed, non-silent PCM with
 
 test('IGSH-812 registration is additive and existing contract checks remain on the Windows workflow', () => {
   assert.match(driver, /ValidateSet\([^\n]*'chat-dictation'/);
-  assert.match(workflow, /FEATURE -notin @\([^\n]*'chat-dictation'/);
-  assert.match(workflow, /feature:.*fromJSON\('\[[^\n]*"chat-dictation"/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-dictation'));
+  assert.ok(featureMatrix(workflow).full.includes('chat-dictation'));
   assert.match(workflow, /run: node --test [^\n]*tools\/chat-dictation.test.js/);
   assert.ok(workflow.includes('- tools/chat-dictation.test.js'));
   assert.ok(workflow.includes('- tools/fixtures/IGSH-812/**'));
