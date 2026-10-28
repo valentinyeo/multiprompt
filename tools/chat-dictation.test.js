@@ -360,3 +360,68 @@ test('IGSH-1072 executable resolver rejects stale revisions and wrong versions b
     }
   }
 });
+
+test('IGSH-1103 generated failure and update results retain verified executable identity', () => {
+  const retain = workflow.match(/name: Retain pre-launch failure result[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1];
+  const generated = retain.split('\n').filter(line => line.includes('@{ feature = '));
+  assert.equal(generated.length, 2);
+  for (const line of generated) {
+    assert.match(line, /version = \$env:VERIFY_VERSION;/);
+    assert.match(line, /sha256 = \$env:VERIFY_SHA256;/);
+  }
+});
+
+test('IGSH-1103 retained results preserve failure details and actual executable identity', { skip: process.platform !== 'win32' }, () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const script = workflow.match(/name: Retain pre-launch failure result[\s\S]*?run: \|\n([\s\S]*?)\n      - /)[1].replace(/^ {10}/gm, '');
+  const version = '1.2.3';
+  const sha256 = createHash('sha256').update('resolved executable').digest('hex');
+  const existing = { feature: 'appearance', status: 'failed', version, sha256, checks: [{ name: 'native-crash', passed: false }], error: 'original failure', cleanup: 'original cleanup' };
+  for (const [feature, result, update, resolved = true] of [
+    ['chat-messages-only', null, null],
+    ['chat-delivery', null, null],
+    ['appearance', existing, null],
+    ['appearance', { ...existing, status: 'passed' }, null],
+    ['safe-updates', null, { success: false, checks: [{ name: 'rollback', passed: false }], cleanup: 'fixture cleanup' }],
+    ['safe-updates', null, { success: true, checks: [{ name: 'rollback', passed: true }], cleanup: 'fixture cleanup' }],
+    ['appearance', null, null, false],
+  ]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-retained-identity-'));
+    try {
+      const evidence = path.join(directory, 'evidence');
+      fs.mkdirSync(evidence);
+      if (result) fs.writeFileSync(path.join(evidence, 'result.json'), JSON.stringify(result));
+      if (update) fs.writeFileSync(path.join(evidence, 'safe-updates.json'), JSON.stringify(update));
+      const run = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        cwd: directory,
+        env: { ...process.env, FEATURE: feature, VERIFY_VERSION: resolved ? version : '', VERIFY_SHA256: resolved ? sha256 : '' },
+        encoding: 'utf8',
+      });
+      assert.ifError(run.error);
+      assert.equal(run.status, 0, run.stdout + run.stderr);
+      const retained = JSON.parse(fs.readFileSync(path.join(evidence, 'result.json'), 'utf8').replace(/^\uFEFF/, ''));
+      if (result) {
+        assert.deepEqual(retained, result);
+      } else {
+        assert.equal(retained.feature, feature);
+        assert.equal(retained.version || '', resolved ? version : '');
+        assert.equal(retained.sha256 || '', resolved ? sha256 : '');
+        assert.equal(retained.status, update?.success ? 'passed' : 'failed');
+        if (update) {
+          assert.deepEqual(retained.checks, update.checks);
+          assert.equal(retained.cleanup, update.cleanup);
+        } else {
+          assert.match(retained.error, /Workflow failed before the harness produced a result/);
+          assert.match(retained.cleanup, /disposable runner teardown/);
+          if (feature === 'chat-delivery') {
+            assert.deepEqual(retained.cases.map(item => item.name), ['busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync', 'send-stays-gone']);
+            assert.ok(retained.cases.every(item => item.passed === false));
+          }
+        }
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
