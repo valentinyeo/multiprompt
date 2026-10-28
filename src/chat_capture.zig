@@ -1056,18 +1056,18 @@ pub fn pollChatStatus(shell_index: u32) void {
     if (shell.pid == 0) return;
     const snapshot = @import("console_snapshot.zig").poll(shell.pid, shell.shell_id) orelse return;
     @memcpy(app_state.g_chat_raw[0..snapshot.raw.len], snapshot.raw);
-    chatCaptureStatus(shell_index, snapshot.width, snapshot.raw.len, snapshot.rows);
+    chatCaptureStatus(shell_index, snapshot.width, @intCast(snapshot.raw.len), snapshot.rows);
     if (@import("diagnostics.zig").verboseLoggingEnabled()) {
         var message: [128]u8 = undefined;
         @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&message, "chat-status-snapshot: sid={d} rows={d} chars={d}", .{ shell.shell_id, snapshot.rows, snapshot.raw.len }) catch "chat-status-snapshot: error");
     }
 }
 
-fn chatCaptureStatus(shell_index: u32, width: usize, chars_read: usize, rows: usize) void {
+fn chatCaptureStatus(shell_index: u32, width: usize, chars_read: DWORD, rows: usize) void {
     app_state.g_chat_screen_status_len = 0;
     app_state.g_chat_raw_len = chars_read;
     app_state.g_chat_raw_sid = app_state.shells[shell_index].shell_id;
-    chatPermissionCaptureRows(shell_index, width, @intCast(chars_read), rows);
+    chatPermissionCaptureRows(shell_index, width, chars_read, rows);
     {
         var prompt_row: ?usize = null;
         var pr = rows;
