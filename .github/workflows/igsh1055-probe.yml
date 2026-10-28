@@ -1,0 +1,40 @@
+name: IGSH-1055 source rotation probe
+on:
+  push:
+    branches: [ceo/IGSH-1055-probe]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rotation:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Inspect the exact replacement operation
+        shell: pwsh
+        run: |
+          @'
+          import json, os, pathlib, shutil, subprocess, sys, tempfile
+          script = str(pathlib.Path('tools/verify-chat-delivery/boundary.py').resolve())
+          print('interpreters', sys.executable, shutil.which('python3'), flush=True)
+          for command in [sys.executable, 'python3']:
+              with tempfile.TemporaryDirectory() as directory:
+                  root = pathlib.Path(directory)
+                  source = root / 'source.jsonl'
+                  source.write_text(json.dumps({'message': {'id': 'remove'}}) + '\n' + json.dumps({'message': {'id': 'keep'}}) + '\n')
+                  (root / 'state.json').write_text(json.dumps({'name': 'messages-only', 'transcript': str(source)}))
+                  before = source.stat().st_ino
+                  result = subprocess.run([command, '-I', '-X', 'utf8', script, 'shell', 'forget-message', 'remove'], env=dict(os.environ, MP_VERIFY_STATE=directory), capture_output=True, text=True)
+                  print(json.dumps({'command': command, 'exit': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr, 'before': before, 'after': source.stat().st_ino, 'files': {p.name: p.read_text() for p in root.iterdir()}}), flush=True)
+          '@ | python -
+      - name: Require the real file-descriptor regression
+        run: node --test --test-name-pattern="IGSH-1055 removing" tools/verify-chat-delivery.test.js
