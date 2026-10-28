@@ -28,8 +28,7 @@ export function verifyResync(root) {
     lines('resync/stand-in/resync-rewrite.jsonl')[0], read('resync/debug.log'));
   const actions = json('actions.json').filter(row => row.case === 'resync');
   assert.ok(actions.some(row => row.input === 'Enter: open More Menu'));
-  assert.ok(actions.some(row => row.input === 'Down: choose Resync chat'));
-  assert.ok(actions.some(row => row.input === 'Enter: Resync chat'));
+  assert.ok(actions.some(row => row.input === 'real mouse click Resync chat' && Number.isFinite(row.x) && Number.isFinite(row.y)));
   const doctor = json('resync/doctor.json');
   assert.ok(doctor);
   const cleanup = json('cleanup.json');

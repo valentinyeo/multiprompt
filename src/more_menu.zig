@@ -298,6 +298,9 @@ pub fn open() void {
     g_bounds = .{ .left = 0, .top = 0, .right = width, .bottom = height };
     g_anchor = .{ .left = title.more.left - pane.left, .top = title.more.top - pane.top, .right = title.more.right - pane.left, .bottom = title.more.bottom - pane.top };
     g_open = true;
+    const resync = geometry(g_bounds, g_anchor).cells[@intFromEnum(Item.resync)];
+    var log_buf: [128]u8 = undefined;
+    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log_buf, "[chat] menu resync rect={d},{d},{d},{d}", .{ resync.left, resync.top, resync.right, resync.bottom }) catch "[chat] menu resync");
     _ = w.MoveWindow(g_hwnd, pane.left, pane.top, width, height, 0);
     _ = focus.SetWindowPos(g_hwnd, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
     _ = w.SetCapture(g_hwnd);

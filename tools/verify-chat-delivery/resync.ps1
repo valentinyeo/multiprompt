@@ -15,8 +15,19 @@ foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16]
 [void](Wait-For 'more menu command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=6466') })
 Press @(0x0D) 'Enter: open More Menu'
 Shot 'resync-menu'
-foreach ($index in 1..5) { Press @(0x28) 'Down: choose Resync chat' $true }
-Press @(0x0D) 'Enter: Resync chat' $true
+$menuRect = Wait-For 'actual painted Resync menu row' {
+    $rows = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chat\] menu resync rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
+    if ($rows.Count) { $rows[$rows.Count - 1].Groups }
+}
+$root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
+$condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'MultiPromptMoreMenu')
+$menus = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
+if ($menus.Count -ne 1) { throw 'Expected one owned visible chat menu' }
+$x = [int](([int]$menuRect[1].Value + [int]$menuRect[3].Value) / 2)
+$y = [int](([int]$menuRect[2].Value + [int]$menuRect[4].Value) / 2)
+Doctor
+$actions.Add(@{case=$plan.name; input='real mouse click Resync chat'; x=$x; y=$y})
+[ChatDeliveryDesktop]::PressClient([IntPtr]$menus[0].Current.NativeWindowHandle, $app.Id, $x, $y)
 [void](Wait-For 'source reload completes successfully' { (Read-Shared "$settings/debug.log").Substring($offset).Contains('[chat] resync completed') } 30)
 [void](Wait-For 'stale waiting label removed' { -not ([string](Queue-View)).Contains('queued:stale waiting message') } 10)
 $observation.waitingAfter = [string](Queue-View)
