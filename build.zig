@@ -245,7 +245,7 @@ pub fn build(b: *std.Build) void {
     if (b.graph.host.result.os.tag != .windows) b.step("test", "Run Linux server tests").dependOn(vps_test_step);
     test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/portable-paths.test.js" }).step);
     const version_stamp_tests = b.addSystemCommand(&.{ "node", "--test", "tools/version-stamp.test.mjs", "tools/release-version.test.mjs" });
-    const ci_admission_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ci-admission.test.js" });
+    const ci_admission_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ci-admission.test.js", "tools/automerge-admit-run.test.js" });
     test_step.dependOn(&ci_admission_tests.step);
     vps_test_step.dependOn(&ci_admission_tests.step);
     const automerge_admit_tests = b.addSystemCommand(&.{ "bash", "tools/automerge-admit.test.sh" });
