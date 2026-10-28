@@ -93,7 +93,7 @@ export function instrument(root, profile = false) {
     }
 ` + boundary);
     body = body.replace('    defer _ = FreeConsole();', '    defer _ = FreeConsole();\n    _ = @import("win32.zig").QueryPerformanceCounter(&profile_attach);');
-    body = body.replace('    app_state.g_chat_raw_len = chars_read;', '    _ = @import("win32.zig").QueryPerformanceCounter(&profile_read);\n    app_state.g_chat_raw_len = chars_read;');
+    body = body.replace('    chatCaptureStatus(shell_index, width, chars_read, rows);', '    _ = @import("win32.zig").QueryPerformanceCounter(&profile_read);\n    chatCaptureStatus(shell_index, width, chars_read, rows);');
     fs.writeFileSync(captureFile, capture.slice(0, from) + body);
   }
   fs.writeFileSync(file, source);
