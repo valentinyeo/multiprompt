@@ -56,6 +56,9 @@ jobs:
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Check the independent performance oracle
         run: node --test harness/tools/remote-switch-proof.test.mjs harness/tools/smooth-shapes.test.js
+      - name: Instrument diagnostic candidate timer stages
+        if: matrix.side == 'candidate'
+        run: node harness/tools/switch-performance.mjs instrument app --profile
       - name: Build the actual Windows application
         working-directory: app
         run: zig build

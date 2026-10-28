@@ -47,6 +47,7 @@ $observation.messages = $messages.Count
 $observation.switches = [Collections.Generic.List[object]]::new()
 function Measure-CPU([scriptblock]$Action, [int]$MinimumMs) {
     $app.Refresh()
+    $uiCpuStart = [RemoteSwitchFrames]::UiCpuMs($main, $app.Id)
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $cpuStart = $app.TotalProcessorTime.TotalMilliseconds
     & $Action
@@ -54,7 +55,8 @@ function Measure-CPU([scriptblock]$Action, [int]$MinimumMs) {
     $app.Refresh()
     $cpuMs = $app.TotalProcessorTime.TotalMilliseconds - $cpuStart
     $elapsed = $timer.Elapsed.TotalMilliseconds
-    @{elapsedMs=$elapsed; cpuMs=$cpuMs; cpuPercent=100 * $cpuMs / $elapsed}
+    $uiCpu = [RemoteSwitchFrames]::UiCpuMs($main, $app.Id) - $uiCpuStart
+    @{elapsedMs=$elapsed; cpuMs=$cpuMs; cpuPercent=100 * $cpuMs / $elapsed; uiCpuMs=$uiCpu}
 }
 function Measure-Frames([scriptblock]$Action, [int]$MinimumMs) {
     $view = [IntPtr]$views[0].Current.NativeWindowHandle
