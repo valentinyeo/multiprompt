@@ -68,7 +68,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 60)
 function Shot([string]$Name) {
     if ($Name -eq 'new-messages-visible') {
         [void](Wait-For 'unread badge reaches the screen' {
-            $bounds = Transcript-Viewport
+            $bounds = $views[0].Current.BoundingRectangle
             $probe = [Drawing.Bitmap]::new(60, 100)
             $draw = [Drawing.Graphics]::FromImage($probe)
             try {
@@ -167,13 +167,6 @@ function Queue-View {
     $labels = New-Object System.Collections.Generic.List[string]
     foreach ($item in $parsed) { $labels.Add([string]$item.state + ':' + [string]$item.text) }
     $labels -join '|'
-}
-function Transcript-Viewport {
-    $frames = [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] frame transcript (\d+),(\d+),(\d+),(\d+) edit')
-    if ($frames.Count -eq 0) { throw 'App-reported transcript viewport is missing' }
-    $frame = $frames[$frames.Count - 1].Groups
-    $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
-    New-Object Drawing.Rectangle(($origin.X + [int]$frame[1].Value), ($origin.Y + [int]$frame[2].Value), ([int]$frame[3].Value - [int]$frame[1].Value), ([int]$frame[4].Value - [int]$frame[2].Value))
 }
 function New-MessageState([int]$LogStart = 0) {
     $log = Read-Shared "$settings/debug.log"
@@ -730,43 +723,19 @@ foreach ($plan in $plans) {
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
             $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
             $todoStatus = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Static')
-            [void](Wait-For 'owned status row inside the transcript host once the todo is read' {
+            [void](Wait-For 'owned status row above the transcript once the todo is read' {
                 $viewRows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
                 if ($viewRows.Count -ne 1) { return $false }
                 $viewBounds = $viewRows[0].Current.BoundingRectangle
                 @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $todoStatus) | Where-Object {
                     $r = $_.Current.BoundingRectangle
-                    -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $viewBounds.Left -and $r.Width -eq $viewBounds.Width -and ($r.Bottom -eq $viewBounds.Top -or ($r.Top -ge $viewBounds.Top -and $r.Bottom -lt $viewBounds.Bottom)) -and $r.Height -gt 0
+                    -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $viewBounds.Left -and $r.Width -eq $viewBounds.Width -and $r.Bottom -eq $viewBounds.Top -and $r.Height -gt 0
                 }).Count -eq 1
             })
             $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
             if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
-            $hostBounds = $views[0].Current.BoundingRectangle
-            $statusRows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $todoStatus) | Where-Object {
-                $r = $_.Current.BoundingRectangle
-                -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $hostBounds.Left -and $r.Width -eq $hostBounds.Width -and ($r.Bottom -eq $hostBounds.Top -or ($r.Top -ge $hostBounds.Top -and $r.Bottom -lt $hostBounds.Bottom)) -and $r.Height -gt 0
-            })
-            if ($statusRows.Count -ne 1) { throw 'CLEAN chat proof requires one owned status/footer control' }
-            $statusBounds = $statusRows[0].Current.BoundingRectangle
-            $composerBounds = [System.Windows.Automation.AutomationElement]::FromHandle($composer).Current.BoundingRectangle
-            if ($statusBounds.Bottom -eq $hostBounds.Top) {
-                $bounds = $hostBounds
-                $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
-            } else {
-                $viewport = Transcript-Viewport
-                Save @{
-                    viewport=@{left=$viewport.Left; top=$viewport.Top; width=$viewport.Width; height=$viewport.Height}
-                    host=@{left=[int]$hostBounds.Left; top=[int]$hostBounds.Top; width=[int]$hostBounds.Width; height=[int]$hostBounds.Height}
-                    status=@{left=[int]$statusBounds.Left; top=[int]$statusBounds.Top; width=[int]$statusBounds.Width; height=[int]$statusBounds.Height}
-                    composer=@{left=[int]$composerBounds.Left; top=[int]$composerBounds.Top; width=[int]$composerBounds.Width; height=[int]$composerBounds.Height}
-                } "$caseDir/geometry-input.json"
-                $geometry = & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --geometry
-                if ($LASTEXITCODE -ne 0) { throw 'Owned transcript geometry was invalid' }
-                $geometry = $geometry | ConvertFrom-Json
-                $observation.transcript = $geometry.transcript
-                $observation.cleanChat = @{rows=$geometry.rows; working=$geometry.working}
-                $bounds = New-Object Drawing.Rectangle($geometry.transcript.left, $geometry.transcript.top, $geometry.transcript.width, $geometry.transcript.height)
-            }
+            $bounds = $views[0].Current.BoundingRectangle
+            $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
             Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript' $true
             Copy-Item $cache.FullName "$caseDir/app-cache-before.jsonl"
             Shot 'messages-only-before-tools'
@@ -800,8 +769,8 @@ foreach ($plan in $plans) {
             $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Shell-Input 'activity'
             [void](Wait-For 'all twelve completed tool calls in app-written cache' {
-                $completed = & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $cache.FullName --tool-count
-                $LASTEXITCODE -eq 0 -and [int]$completed -eq 12
+                $rows = (Read-Shared $cache.FullName) -split "`n" | Select-Object -Skip 1 | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }
+                @($rows | Where-Object { $_.role -eq 'tool' -and $_.status -eq 'ok' -and $_.detail.Contains('verified') }).Count -eq 12
             })
             Copy-Item $cache.FullName "$caseDir/app-cache.jsonl"
             if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Tool updates changed the composer' }
@@ -812,7 +781,22 @@ foreach ($plan in $plans) {
             Shot 'messages-only-after-tools'
             & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --tools-only
             if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
-            if (-not $observation.Contains('cleanChat')) { throw 'Complete CLEAN proof requires current measured layout' }
+            $statusCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Static')
+            $statusRows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $statusCondition) | Where-Object {
+                $r = $_.Current.BoundingRectangle
+                -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $bounds.Left -and $r.Width -eq $bounds.Width -and $r.Bottom -eq $bounds.Top -and $r.Height -gt 0
+            })
+            if ($statusRows.Count -ne 1) { throw 'CLEAN chat proof requires one owned painted status/footer row' }
+            $statusBounds = $statusRows[0].Current.BoundingRectangle
+            $composerBounds = [System.Windows.Automation.AutomationElement]::FromHandle($composer).Current.BoundingRectangle
+            $composerTopPad = [int][math]::Floor(12 * $statusBounds.Height / 28)
+            $workingHeight = [int]($composerBounds.Top - $composerTopPad - $bounds.Bottom)
+            $expectedGapHeight = [int][math]::Floor(14 * $statusBounds.Height / 28)
+            if ($workingHeight -ne $expectedGapHeight) { throw 'IGSH-849 removed working strip still reserves space' }
+            $observation.cleanChat = @{
+                rows=@{left=[int]$statusBounds.Left; top=[int]$statusBounds.Top; width=[int]$statusBounds.Width; height=[int]$statusBounds.Height}
+                working=@{left=[int]$bounds.Left; top=[int]$bounds.Bottom; width=[int]$bounds.Width; height=$workingHeight}
+            }
             foreach ($mode in @('on', 'off')) {
                 $paletteLogStart = (Read-Shared "$settings/debug.log").Length
                 Press @(0x11, 0x4B) 'Ctrl+K: open CLEAN chat palette' $true
@@ -850,7 +834,7 @@ foreach ($plan in $plans) {
             $arrivalLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'messages' '2'
             $pill = Require-NewMessages 2 1 1 'two new arrivals while reading' $arrivalLogStart
-            $bounds = Transcript-Viewport
+            $bounds = $views[0].Current.BoundingRectangle
             $pillOrigin = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.left, $pill.top)
             $pillEnd = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.right, $pill.bottom)
             if ($pill.bottom -le $pill.top -or $pill.left -ge $pill.right -or $pillOrigin.Y -lt $bounds.Bottom -or [math]::Abs(($pillOrigin.X + $pillEnd.X) / 2 - ($bounds.Left + $bounds.Right) / 2) -gt 2) { throw 'New-message pill overlaps the transcript or is not centered' }
@@ -915,12 +899,10 @@ foreach ($plan in $plans) {
             $actions.Add(@{case=$plan.name; input='pinned arrival'; state=$pinned})
             Shot 'pinned-after-arrival'
             $upLogStart = (Read-Shared "$settings/debug.log").Length
-            $visibleBounds = Transcript-Viewport
-            $visibleTop = [int]($visibleBounds.Top - $bounds.Top)
-            $viewH = [int]$visibleBounds.Height
+            $viewH = [int]$bounds.Height
             $dividerProof.reopened = Wait-For 'scroll up until the unread line is painted above the first unread message' {
                 $f = Divider-State $upLogStart
-                if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll + $visibleTop -and $f.y -lt $f.scroll + $visibleTop + $viewH - 40) { return $f }
+                if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll -and $f.y -lt $f.scroll + $viewH - 40) { return $f }
                 [void](Scroll-Transcript 120)
                 $null
             }

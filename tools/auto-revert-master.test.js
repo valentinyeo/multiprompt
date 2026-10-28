@@ -557,7 +557,7 @@ test('auto-revert workflow grants contents and pull-request writes with the exis
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
 });
 
-test('PR smoke and full master matrix stay wired without duplicate release-tag journeys', async () => {
+test('PR smoke and full master matrix stay wired without duplicate release-tag journeys', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
   const release = fs.readFileSync(`${__dirname}/../.github/workflows/release.yml`, 'utf8');
   assert.ok(featureMatrix(verify).pr.includes('appearance'));
@@ -570,16 +570,7 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   assert.ok(matrices[1].includes('chat-send-latency'));
   assert.ok(matrices[1].includes('remind-me'));
   assert.ok(matrices[1].includes('chat-first-paint'));
-  const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
-  verifyPushBranches(verify);
-  const expression = verify.match(/^        feature: \$\{\{ (.+) \}\}$/m)[1];
-  const targeted = vm.runInNewContext(expression, {
-    needs: { journeys: { outputs: { pr: JSON.stringify(matrices[0]), full: JSON.stringify(matrices[1]) } } },
-    github: { event_name: 'push', ref: 'refs/heads/ceo/IGSH-1055-hax2' }, inputs: {},
-    fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value),
-    startsWith: (value, prefix) => value.startsWith(prefix),
-  });
-  assert.deepEqual(JSON.parse(JSON.stringify(targeted)), ['browser-pane-stuck', 'chat-messages-only']);
+  assert.match(verify, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083, ceo\/IGSH-1079\]\n  workflow_dispatch:/m);
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
 });
 

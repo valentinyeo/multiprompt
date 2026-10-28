@@ -447,17 +447,11 @@ def shell():
             rows = transcript.read_bytes().splitlines(keepends=True)
             output.write(b"".join(rows if op == "retention-init" else rows[-count:]))
         return 0
-    if op == "retention-reset" or (op == "forget-message" and len(ARGS) == 2):
+    if op == "retention-reset":
         transcript = Path(state()["transcript"])
-        rows = transcript.read_bytes().splitlines(keepends=True)
-        if op == "forget-message":
-            kept = [row for row in rows if json.loads(row).get("message", {}).get("id") != ARGS[1]]
-            if len(kept) != len(rows) - 1:
-                raise ValueError("Expected one source message to disappear")
-        else:
-            kept = rows[-20:]
+        tail = b"".join(transcript.read_bytes().splitlines(keepends=True)[-20:])
         replacement = transcript.with_suffix(".replacement")
-        replacement.write_bytes(b"".join(kept))
+        replacement.write_bytes(tail)
         if os.name == "nt":
             class RenameInfo(ctypes.Structure):
                 _fields_ = [("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE),
@@ -476,7 +470,7 @@ def shell():
                 raise ctypes.WinError(ctypes.get_last_error())
             try:
                 filename = str(transcript.resolve()).encode("utf-16-le")
-                buffer = ctypes.create_string_buffer(RenameInfo.FileName.offset + len(filename) + ctypes.sizeof(wintypes.WCHAR))
+                buffer = ctypes.create_string_buffer(RenameInfo.FileName.offset + len(filename))
                 info = ctypes.cast(buffer, ctypes.POINTER(RenameInfo)).contents
                 info.Flags = 1 | 2
                 info.FileNameLength = len(filename)
@@ -508,6 +502,14 @@ def shell():
             identity = "history-" + str(i)
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo history"))]))
             fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * (40000 if state().get("longChatProof") else 12000), is_error=False)]))
+        return 0
+    if op == "forget-message" and len(ARGS) == 2:
+        transcript = Path(state()["transcript"])
+        rows = transcript.read_bytes().splitlines(keepends=True)
+        kept = [row for row in rows if json.loads(row).get("message", {}).get("id") != ARGS[1]]
+        if len(kept) != len(rows) - 1:
+            raise ValueError("Expected one source message to disappear")
+        transcript.write_bytes(b"".join(kept))
         return 0
     if op == "todo":
         fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id="activity-todo", name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))]))
