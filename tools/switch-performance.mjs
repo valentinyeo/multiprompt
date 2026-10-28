@@ -12,7 +12,7 @@ export function assess(data) {
   }
   if (targets.size !== 10 || [...targets.values()].some(count => count !== 5)) throw new Error('Every session must be visited five times');
   if (!Number.isInteger(data.idleShell) || !targets.has(data.idleShell)) throw new Error('Missing visited idle conversation');
-  if (!Array.isArray(data.idleUs) || data.idleUs.length < 10 || data.idleUs.some(us => !Number.isFinite(us) || us < 0)) throw new Error('Missing idle poll samples');
+  if (!Array.isArray(data.idleUs) || data.idleUs.length < 50 || data.idleUs.some(us => !Number.isFinite(us) || us < 0)) throw new Error('Missing idle poll samples');
   const sorted = data.switches.map(sample => sample.us / 1000).sort((a, b) => a - b);
   const p95Ms = sorted[Math.ceil(sorted.length * 0.95) - 1];
   const idle = data.idleUs.map(us => us / 1000).sort((a, b) => a - b);

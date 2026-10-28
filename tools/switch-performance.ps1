@@ -108,7 +108,7 @@ try {
     $warmupOffset = (Read-Log).Length
     [void](Wait-For 'ten warmup idle Chat View polls' { [regex]::Matches((Read-Log).Substring($warmupOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60)
     $idleOffset = (Read-Log).Length
-    [void](Wait-For 'ten unchanged idle Chat View polls' { [regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60)
+    [void](Wait-For 'fifty unchanged idle Chat View polls' { [regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)').Count -ge 50 } 60)
     $result.idleUs = @([regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)') | ForEach-Object { [long]$_.Groups[1].Value })
     $app.Refresh()
     $result.cpuMs = $app.TotalProcessorTime.TotalMilliseconds

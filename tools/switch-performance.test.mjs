@@ -11,7 +11,7 @@ async function oracle() {
   assert.ok(fs.existsSync(new URL('./switch-performance.mjs', import.meta.url)), 'The performance oracle must ship');
   return import('./switch-performance.mjs');
 }
-const workload = () => ({ sessionCount: 10, transcriptBytes: 250 * 1024 * 1024, idleShell: 1, switches: Array.from({ length: 50 }, (_, i) => ({ shell: i % 10, us: 1000, blocks: 2 })), idleUs: Array(10).fill(100) });
+const workload = () => ({ sessionCount: 10, transcriptBytes: 250 * 1024 * 1024, idleShell: 1, switches: Array.from({ length: 50 }, (_, i) => ({ shell: i % 10, us: 1000, blocks: 2 })), idleUs: Array(50).fill(100) });
 
 test('complete workload passes; injected 300 ms switching fails', async () => {
   const { assess } = await oracle();
@@ -35,7 +35,7 @@ test('nearest-rank p95 and idle median respect the requested boundaries', async 
 });
 test('no-op, incomplete and malformed workloads cannot pass', async () => {
   const { assess } = await oracle();
-  for (const change of [d => { d.sessionCount = 9; }, d => { d.transcriptBytes--; }, d => { delete d.transcriptBytes; }, d => { delete d.switches[0].blocks; }, d => d.switches.pop(), d => { d.switches[0].shell = 1; }, d => { d.switches[0].blocks = 0; }, d => { d.switches[0].us = NaN; }, d => { d.idleUs = []; }, d => { d.idleUs[0] = -1; }]) {
+  for (const change of [d => { d.sessionCount = 9; }, d => { d.transcriptBytes--; }, d => { delete d.transcriptBytes; }, d => { delete d.switches[0].blocks; }, d => d.switches.pop(), d => { d.switches[0].shell = 1; }, d => { d.switches[0].blocks = 0; }, d => { d.switches[0].us = NaN; }, d => { d.idleUs = Array(49).fill(100); }, d => { d.idleUs[0] = -1; }]) {
     const data = workload(); change(data);
     assert.throws(() => assess(data));
   }
@@ -185,13 +185,13 @@ test('performance cleanup stops its owned process tree without racing disposable
 test('settled idle median tolerates isolated scheduling outliers, never sustained slow polls', async () => {
   const { assess } = await oracle();
   const data = workload();
-  data.idleUs = [1000, 1000, 1000, 1000, 4000, 6000, 19000, 19000, 19000, 19000];
+  data.idleUs = [...Array(20).fill(1000), ...Array(5).fill(4000), ...Array(5).fill(6000), ...Array(20).fill(19000)];
   assert.equal(assess(data).idleMedianMs, 5);
   assert.equal(assess(data).idleMaxMs, 19);
   assert.equal(assess(data).pass, true);
-  data.idleUs[4] = 4002;
+  data.idleUs.fill(4002, 20, 25);
   assert.equal(assess(data).pass, false);
-  data.idleUs = [1000, 1000, 1000, 1000, 5000, 19000, 19000, 19000, 19000, 19000, 19000];
+  data.idleUs = [...Array(25).fill(1000), ...Array(26).fill(19000)];
   assert.equal(assess(data).idleMedianMs, 19);
   assert.equal(assess(data).pass, false);
 });
@@ -206,9 +206,11 @@ test('idle sampling discards ten warmup polls after painted selection before tak
   const painted = driver.indexOf("Wait-For 'loaded idle conversation painted'");
   const warmup = driver.indexOf("Wait-For 'ten warmup idle Chat View polls'", painted);
   const start = driver.indexOf('$idleOffset = (Read-Log).Length', warmup);
-  const measure = driver.indexOf("Wait-For 'ten unchanged idle Chat View polls'", start);
+  const measure = driver.indexOf("Wait-For 'fifty unchanged idle Chat View polls'", start);
   assert.ok(painted >= 0 && warmup > painted && start > warmup && measure > start);
   assert.match(driver.slice(warmup, start), /Count -ge 10/);
+  assert.match(driver.slice(measure), /Count -ge 50/);
+
 });
 
 
