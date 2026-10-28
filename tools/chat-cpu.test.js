@@ -192,6 +192,7 @@ var g_chat_last_len: usize = 1;
 var g_chat_layout_dirty = true;
 var g_chat_find_layout_open = false;
 const CHAT_FIND_TOP_H: i32 = 52;
+const CHAT_STATUS_H: i32 = 20;
 var g_chat_layout_width: i32 = 0;
 var g_chat_layout_scale: i32 = 0;
 var g_chat_layout_font_pt: i32 = 0;

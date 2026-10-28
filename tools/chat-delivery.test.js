@@ -42,6 +42,7 @@ const CHAT_OUTBOX_KEY_CAP = 256;
 const CHAT_OUTBOX_LOAD_LIMIT = 16 * 1024 * 1024;
 const CHAT_ECHO_PREFIX_CAP = 40;
 const CHAT_CONFIRMED_MAX_PER_KEY = 50;
+const CHAT_STATUS_H: i32 = 20;
 const ShellSendResult = enum { ok, write_failed, enter_failed };
 const ReconnectState = struct { phase: enum { connected, ended, closed } = .connected, fn ok(_: *@This()) void {} };
 const Shell = struct { chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
@@ -92,6 +93,7 @@ const ChatTmuxSendJob = struct {
     echo_id: u64,
     text: []u16,
     retry: bool = false,
+    held: bool = false,
     written: bool = true,
     rejected: bool = false,
     box_not_clear: bool = false,
