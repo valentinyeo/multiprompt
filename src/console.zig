@@ -2780,8 +2780,9 @@ pub fn switchToShell(idx: u32) void {
         writePaneSessionFileForShell(idx);
     }
     syncMouseHookForUrlClicks();
-    if (!defer_browser and defer_native_browser and app_state.g_browser_settle_ticks > 0) {
+    if (!defer_browser and defer_native_browser) {
         app_state.g_browser_switch_preparing = false;
+        armBrowserVisibilitySettle(12);
         _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_TIMER, @import("win32.zig").TIMER_BROWSER_SETTLE, 0);
     }
 }
