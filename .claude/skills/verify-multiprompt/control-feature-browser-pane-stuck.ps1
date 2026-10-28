@@ -41,21 +41,24 @@
             $ffmpeg = (Get-Command ffmpeg.exe -ErrorAction Stop).Source
             $video = Join-Path $Evidence 'immediate-toggle.mp4'
             $recorder = $job.Start($ffmpeg, $scratch, (Join-Path $Evidence 'video-out.log'), (Join-Path $Evidence 'video-error.log'), ('-y -f gdigrab -framerate 10 -i desktop -t 45 -vf scale=960:-2 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "' + $video + '"'))
-            $pairs = @()
+            $script:immediatePairs = @()
+            function Assert-ImmediateBrowserPairs([string]$Page) {
             for ($i = 0; $i -lt 20; $i++) {
                 Doctor
                 Wait-Foreground
-                Record "IGSH-1126 immediate Alt+A pair $i"
+                Record "IGSH-1126 $Page immediate Alt+A pair $i"
                 Assert-Foreground
                 $before = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count
                 $gap = [VerifyNative]::ImmediateBrowserTogglePair()
                 Wait-Until { @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count -eq $before + 2 } 'both physical key presses handled' -Seconds 5 -PollMilliseconds 10
                 $states = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=' | Select-Object -Last 2 | ForEach-Object { $_.Line })
                 if ($states[0] -notmatch 'enabled= 1$' -or $states[1] -notmatch 'enabled= 0$') { throw 'Immediate pair did not open then close' }
-                $closed = Assert-BrowserPane 'closed' ("immediate-$i")
-                $pairs += @{ pair = $i; gapMs = $gap; states = $states; closed = $closed.browser_state -eq 'closed' }
-                Save-Json $pairs 'immediate-toggle.json'
+                $closed = Assert-BrowserPane 'closed' ("immediate-$Page-$i")
+                $script:immediatePairs += @{ page = $Page; pair = $i; gapMs = $gap; states = $states; closed = $closed.browser_state -eq 'closed' }
+                Save-Json $script:immediatePairs 'immediate-toggle.json'
             }
+            }
+            Assert-ImmediateBrowserPairs 'blank'
             $slowPane = Open-BrowserPane 'slow-open'
             Press @(0x12, 0x4C) 'Alt+L: navigate browser pane'
             Type-Text "http://127.0.0.1:$port/slow"
@@ -67,6 +70,7 @@
             $closed = Assert-BrowserPane 'closed' 'slow-loading-close'
             if ((Get-Content $serverLog -Raw) -match 'SLOW_FINISHED') { throw 'Close waited for page completion' }
             Save-Json @{ loadingObserved = $true; closed = $closed.browser_state -eq 'closed'; finishedBeforeClose = $false } 'slow-toggle.json'
+            Assert-ImmediateBrowserPairs 'slow'
             Get-Content $debug | Where-Object { $_ -match 'shortcutToggle' } | Set-Content -Encoding UTF8 (Join-Path $Evidence 'toggle-keys.log')
             Snapshot 'immediate-after'
             if (-not $recorder.WaitForExit(60000) -or $recorder.ExitCode -ne 0 -or (Get-Item $video).Length -le 0) { throw 'Toggle screen recording failed' }

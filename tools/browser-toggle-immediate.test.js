@@ -60,7 +60,7 @@ test('IGSH-1126 pane loading never blocks a released shortcut', () => {
 
 test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', () => {
   const journey = read('.claude/skills/verify-multiprompt/control-feature-browser-pane-stuck.ps1');
-  for (const token of ['$i -lt 20', 'ImmediateBrowserTogglePair()', "$before + 2", 'SLOW_LOADING', 'SLOW_FINISHED', "'toggle-keys.log'", 'immediate-toggle.mp4']) assert.ok(journey.includes(token), token);
+  for (const token of ['$i -lt 20', 'ImmediateBrowserTogglePair()', "$before + 2", 'SLOW_LOADING', 'SLOW_FINISHED', "'toggle-keys.log'", 'immediate-toggle.mp4', "Assert-ImmediateBrowserPairs 'blank'", "Assert-ImmediateBrowserPairs 'slow'"]) assert.ok(journey.includes(token), token);
   const native = read('.claude/skills/verify-multiprompt/control-native.cs').split('public static double ImmediateBrowserTogglePair()')[1]?.split('public static void OpenAndCloseBrowserPane()')[0];
   assert.ok(native);
   assert.match(native, /chord\(\);[\s\S]*Thread\.Sleep\(100\);[\s\S]*chord\(\);/);
