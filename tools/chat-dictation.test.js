@@ -299,9 +299,12 @@ test('IGSH-1072 branch build identity is embedded and independently checked by t
   assert.match(workflow, /-Drevision="\$\{\{ env\.VERIFY_REVISION \}\}"/);
   assert.match(workflow, /\$embeddedRevision -cne \$revision -or -not \$binary\.Contains\("MPREVISION=\$revision;"\)/);
   assert.match(workflow, /if \(-not \$binary\.Contains\("MPVERSION=\$version;"\)\) \{ throw 'Executable version mismatch' \}/);
-  assert.match(read('src/main.zig'), /pub export const mp_revision_marker:[^\n]*"MPREVISION=" \+\+ build_config\.build_revision/);
-  for (const options of ['stable_opts', 'dev_opts']) {
-    assert.ok(read('build.zig').includes(`${options}.addOption([]const u8, "build_revision", build_revision orelse "")`));
+  const build = read('build.zig');
+  assert.match(build, /revision_marker = b\.fmt\("MPREVISION=\{s\};", \.\{build_revision orelse ""\}\)/);
+  assert.match(build, /pub export const mp_revision_marker:/);
+  assert.match(build, /std\.zig\.fmtString\(revision_marker\)/);
+  for (const executable of ['exe', 'dev_exe']) {
+    assert.ok(build.includes(`${executable}.root_module.addObject(revision_object)`));
   }
   assert.match(driver, /Executable build\/version marker mismatch/);
   assert.match(driver, /Doctor: wrong version in/);

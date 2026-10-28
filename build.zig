@@ -8,6 +8,16 @@ pub fn build(b: *std.Build) void {
     const stable_optimize: std.builtin.OptimizeMode = if (optimize == .Debug) .ReleaseSmall else optimize;
     const app_version = b.option([]const u8, "version", "Override the embedded app version");
     const build_revision = b.option([]const u8, "revision", "Embed the verified source revision");
+    const revision_marker = b.fmt("MPREVISION={s};", .{build_revision orelse ""});
+    const revision_source = b.addWriteFiles().add("revision.zig", b.fmt("pub export const mp_revision_marker: [{d}]u8 = \"{f}\".*;\n", .{ revision_marker.len, std.zig.fmtString(revision_marker) }));
+    const revision_object = b.addObject(.{
+        .name = "build-revision",
+        .root_module = b.createModule(.{
+            .root_source_file = revision_source,
+            .target = target,
+            .optimize = stable_optimize,
+        }),
+    });
     const release = b.option(bool, "release", "Build a publishable release with a configured signing public key") orelse false;
     if (release) {
         const encoded = std.mem.trim(u8, @embedFile("src/release_signing_public_key.txt"), " \r\n\t");
@@ -36,6 +46,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    exe.root_module.addObject(revision_object);
     exe.subsystem = .Windows;
     exe.stack_size = MAIN_STACK_SIZE;
     exe.root_module.addWin32ResourceFile(.{ .file = b.path("assets/zigshell.rc") });
@@ -53,7 +64,6 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("advapi32", .{});
     const stable_opts = b.addOptions();
     stable_opts.addOption(?[]const u8, "app_version", app_version);
-    stable_opts.addOption([]const u8, "build_revision", build_revision orelse "");
     stable_opts.addOption(bool, "is_dev", false);
     exe.root_module.addOptions("build_config", stable_opts);
 
@@ -83,6 +93,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    dev_exe.root_module.addObject(revision_object);
     dev_exe.subsystem = .Windows;
     dev_exe.stack_size = MAIN_STACK_SIZE;
     dev_exe.root_module.addWin32ResourceFile(.{ .file = b.path("assets/zigshell.rc") });
@@ -100,7 +111,6 @@ pub fn build(b: *std.Build) void {
     dev_exe.root_module.linkSystemLibrary("advapi32", .{});
     const dev_opts = b.addOptions();
     dev_opts.addOption(?[]const u8, "app_version", app_version);
-    dev_opts.addOption([]const u8, "build_revision", build_revision orelse "");
     dev_opts.addOption(bool, "is_dev", true);
     dev_exe.root_module.addOptions("build_config", dev_opts);
     b.installArtifact(dev_exe);
