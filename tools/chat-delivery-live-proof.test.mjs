@@ -93,3 +93,10 @@ test('short runs, long idle gaps and mid-proof view toggles cannot prove thirty 
     assert.throws(f.check, assert.AssertionError, broken);
   }
 });
+
+
+test('long delivery proof can be dispatched on the exact branch', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
+  const dispatch = workflow.split('  workflow_dispatch:')[1].split('  workflow_call:')[0];
+  assert.match(dispatch, /      long_chat_proof:\n(?:[^\n]*\n)*?        type: boolean/);
+});

@@ -100,6 +100,11 @@ on:
         required: false
         default: false
         type: boolean
+      long_chat_proof:
+        description: Sustain long-chat delivery for thirty minutes on a release
+        required: false
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       chat_reactions_proof:
