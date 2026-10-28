@@ -137,9 +137,9 @@ function git(args, cwd, timeout) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout });
 }
 
-function readTree(rev, cwd, remaining) {
+function readTree(rev, cwd, remaining, sourcePaths = []) {
   const read = args => git(args, cwd, remaining?.());
-  const names = read(['ls-tree', '-r', '--name-only', '-z', rev, '--', mainPath, changelogPath, 'changelog.d/']).split('\0').filter(Boolean);
+  const names = read(['ls-tree', '-r', '--name-only', '-z', rev, '--', mainPath, changelogPath, 'changelog.d/', ...sourcePaths]).split('\0').filter(Boolean);
   return Object.fromEntries(names.map(file => [file, read(['show', `${rev}:${file}`])]));
 }
 
@@ -167,9 +167,10 @@ function releaseHistory(tag, changelog) {
 }
 
 function check(baseRev, headRev) {
-  const base = readTree(baseRev);
-  const head = readTree(headRev);
   const changed = git(['diff', '--name-only', '-z', baseRev, headRev]).split('\0').filter(Boolean);
+  const sourcePaths = changed.filter(file => file.startsWith('src/') && file.endsWith('.zig'));
+  const base = readTree(baseRev, undefined, undefined, sourcePaths);
+  const head = readTree(headRev, undefined, undefined, sourcePaths);
   const kind = classifyTrees(base, head, changed);
   if (kind === 'HAND_EDIT') {
     const diff = git(['diff', '--no-ext-diff', '--unified=0', baseRev, headRev, '--', mainPath, changelogPath]);
@@ -177,14 +178,7 @@ function check(baseRev, headRev) {
     console.error(fixHint);
   }
   if (kind === 'CODE' && autoRevertBranch()) console.error('Changelog note not required on an auto-revert/ branch');
-  else if (kind === 'CODE') {
-    for (const file of changed.filter(file => file.startsWith('src/') && file.endsWith('.zig'))) {
-      for (const [tree, rev] of [[base, baseRev], [head, headRev]]) {
-        if (git(['ls-tree', '--name-only', rev, '--', file]).trim()) tree[file] = git(['show', `${rev}:${file}`]);
-      }
-    }
-    checkFragments(base, head, changed);
-  }
+  else if (kind === 'CODE') checkFragments(base, head, changed);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `kind=${kind}\n`);
   console.log(kind);
   return kind === 'HAND_EDIT' ? 1 : 0;
