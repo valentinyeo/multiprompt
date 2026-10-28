@@ -44,6 +44,8 @@ test('received messages use one below-message panel with real request IDs', () =
   assert.match(menu, /ReaderRaised/);
   assert.match(menu, /anchor.bottom \+ scaled\(6\)/);
   assert.match(menu, /0x0205 => return 0/);
+  assert.match(menu, /std\.meta\.eql\(previous, point\)/);
+  assert.match(menu, /stationary mouse messages preserve keyboard action selection/);
 });
 
 test('pull requests run reaction proof instead of the appearance shortcut', () => {

@@ -97,7 +97,7 @@ pub fn paint(dc: w.HANDLE, items: []const Item, hover: ?usize, light: bool) void
     }
 }
 
-const State = struct { items: []const Item, hover: ?usize = null, selected: u32 = 0, open: bool = true, close_message: w.UINT = 0, light: bool };
+const State = struct { items: []const Item, hover: ?usize = null, pointer: ?w.POINT = null, selected: u32 = 0, open: bool = true, close_message: w.UINT = 0, light: bool };
 var active: ?*State = null;
 var registered = false;
 
@@ -114,7 +114,12 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             return 0;
         },
         w.WM_MOUSEMOVE => {
-            const next = hit(geometry(state.items), startup.GET_X(lp), startup.GET_Y(lp));
+            const point = w.POINT{ .x = startup.GET_X(lp), .y = startup.GET_Y(lp) };
+            if (state.pointer) |previous| {
+                if (std.meta.eql(previous, point)) return 0;
+            }
+            state.pointer = point;
+            const next = hit(geometry(state.items), point.x, point.y);
             if (next != state.hover) {
                 state.hover = next;
                 _ = w.InvalidateRect(hwnd, null, 0);
@@ -158,6 +163,8 @@ pub fn track(owner: w.HANDLE, anchor: w.RECT, items: []const Item) u32 {
     if (region != null and w.SetWindowRgn(hwnd, region, 0) == 0) _ = w.DeleteObject(region);
     _ = @import("focus.zig").ShowWindow(hwnd, 4);
     _ = w.UpdateWindow(hwnd);
+    var pointer: w.POINT = undefined;
+    if (w.GetCursorPos(&pointer) != 0 and w.ScreenToClient(hwnd, &pointer) != 0) state.pointer = pointer;
     _ = w.SetCapture(hwnd);
     defer _ = w.ReleaseCapture();
     var message: w.MSG = std.mem.zeroes(w.MSG);
@@ -202,4 +209,15 @@ test "IGSH-1019 reactions share a row above separate reply copy and identity hit
     try std.testing.expect(g.cells[3].top > g.cells[2].bottom);
     for (g.cells[0..items.len], 0..) |rc, i| try std.testing.expectEqual(@as(?usize, i), hit(g, @divTrunc(rc.left + rc.right, 2), @divTrunc(rc.top + rc.bottom, 2)));
     try std.testing.expectEqual(@as(?usize, null), hit(g, -1, -1));
+}
+
+
+test "IGSH-1019 stationary mouse messages preserve keyboard action selection" {
+    const items = [_]Item{ .reaction_like, .reaction_dislike, .reaction_heart, .reply, .copy, .copy_request_id };
+    var state: State = .{ .items = &items, .hover = 5, .pointer = .{ .x = 20, .y = 20 }, .light = false };
+    active = &state;
+    defer active = null;
+    _ = wndProc(null, w.WM_MOUSEMOVE, 0, (20 << 16) | 20);
+    try std.testing.expectEqual(@as(?usize, 5), state.hover);
+    try std.testing.expect(state.open);
 }
