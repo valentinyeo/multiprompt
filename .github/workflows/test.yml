@@ -56,7 +56,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
             node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
@@ -192,7 +192,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
             node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
@@ -293,7 +293,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
             node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
@@ -370,7 +370,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
             node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
@@ -468,7 +468,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
             node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
@@ -530,7 +530,7 @@ jobs:
         with:
           node-version: 22
       - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref != 'refs/heads/master'))
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
@@ -542,7 +542,7 @@ jobs:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Restore Zig (PR)
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref != 'refs/heads/master'))
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
@@ -605,12 +605,83 @@ jobs:
   check-red-run:
     uses: ./.github/workflows/check-red-run.yml
     with:
-      base: ${{ github.event.pull_request.base.sha || github.event.before || format('{0}^', github.sha) }}
+      base: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && github.event.before) || 'origin/master' }}
       head: ${{ github.event.pull_request.head.sha || github.sha }}
+
+  switch-performance:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Reject PowerShell host name collisions
+        shell: pwsh
+        run: ./tools/check-powershell-host-names.ps1
+      - name: Test session speed oracle
+        run: node --test tools/switch-performance.test.mjs
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          tar -xf $zip -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Zig extraction failed' }
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build baseline and candidate
+        shell: pwsh
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && github.event.before) || 'origin/master' }}
+        run: |
+          $base = (git merge-base $env:BASE HEAD).Trim()
+          git worktree add --detach baseline $base
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline checkout failed' }
+          node tools/switch-performance.mjs instrument baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline timing instrumentation failed' }
+          node tools/switch-performance.mjs instrument .
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate timing instrumentation failed' }
+          Push-Location baseline
+          try { zig build; if ($LASTEXITCODE -ne 0) { throw 'Baseline build failed' } } finally { Pop-Location }
+          zig build
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate build failed' }
+          foreach ($root in @('baseline', '.')) {
+            zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o "$root/zig-out/bin/ssh.exe"
+            if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
+            zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o "$root/zig-out/bin/tmux.exe"
+            if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
+          }
+          "SPEED_HEAD=$((git rev-parse HEAD).Trim())" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "SPEED_BASE=$base" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Measure baseline session speed
+        shell: powershell
+        run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multiprompt.exe -Evidence evidence/base -Revision "$env:SPEED_BASE"
+      - name: Measure candidate session speed
+        shell: powershell
+        run: ./tools/switch-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence/head -Revision "$env:SPEED_HEAD"
+      - name: Require session speed limits
+        if: always()
+        run: node tools/switch-performance.mjs report evidence/base/samples.json evidence/head/samples.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: switch-performance-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 7
 
   test-result:
     name: test
-    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run]
+    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -623,6 +694,7 @@ jobs:
           UPDATE: ${{ needs.test-windows-update.result }}
           WORKER: ${{ needs.test-worker.result }}
           UPDATE_SOURCE: ${{ needs.test-update-source.result }}
+          SPEED: ${{ needs.switch-performance.result }}
           RED_RUN: ${{ needs.check-red-run.result }}
         run: |
           require_jobs() {
@@ -630,15 +702,16 @@ jobs:
               [ "$result" = success ] || return 1
             done
           }
-          require_jobs success success success success success success success
+          require_jobs success success success success success success success success
           for result in failure cancelled skipped; do
-            if require_jobs "$result" success success success success success success; then exit 1; fi
-            if require_jobs success "$result" success success success success success; then exit 1; fi
-            if require_jobs success success "$result" success success success success; then exit 1; fi
-            if require_jobs success success success "$result" success success success; then exit 1; fi
-            if require_jobs success success success success "$result" success success; then exit 1; fi
-            if require_jobs success success success success success "$result" success; then exit 1; fi
-            if require_jobs success success success success success success "$result"; then exit 1; fi
+            if require_jobs "$result" success success success success success success success; then exit 1; fi
+            if require_jobs success "$result" success success success success success success; then exit 1; fi
+            if require_jobs success success "$result" success success success success success; then exit 1; fi
+            if require_jobs success success success "$result" success success success success; then exit 1; fi
+            if require_jobs success success success success "$result" success success success; then exit 1; fi
+            if require_jobs success success success success success "$result" success success; then exit 1; fi
+            if require_jobs success success success success success success "$result" success; then exit 1; fi
+            if require_jobs success success success success success success success "$result"; then exit 1; fi
           done
           echo 'Aggregate routing controls passed'
-          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN"
+          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN" "$SPEED"

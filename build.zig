@@ -290,6 +290,7 @@ pub fn build(b: *std.Build) void {
     const chat_perf_clock_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-perf-clock.test.js" });
     test_step.dependOn(&chat_perf_clock_tests.step);
     vps_test_step.dependOn(&chat_perf_clock_tests.step);
+    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/switch-performance.test.mjs" }).step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
     test_step.dependOn(&chat_cpu_regression.step);
     const chat_backfill_fairness_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-backfill-fairness.test.js" });

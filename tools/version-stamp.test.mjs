@@ -167,9 +167,10 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
       const pathGuard = file === 'test.yml' ? "steps\\.paths\\.outputs\\.heavy == 'true' && " : '';
       const guard = windows?.includes(cache) || updateSource?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
       assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
-      assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == '`));
+      assert.match(cache, new RegExp(`if: ${pathGuard}${guard}\\(?github\\.event_name == '`));
       if (cache.includes('uses: actions/cache/restore@')) {
-        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'pull_request'\n`));
+        const event = windows?.includes(cache) ? "\\(github\\.event_name == 'pull_request' \\|\\| github\\.event_name == 'workflow_dispatch' \\|\\| \\(github\\.event_name == 'push' && github\\.ref != 'refs/heads/master'\\)\\)" : "github\\.event_name == 'pull_request'";
+        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}${event}\n`));
       } else {
         assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
       }
@@ -504,7 +505,10 @@ else if (args[1] === 'create') { fs.writeFileSync(stateFile, 'OPEN'); console.lo
 else if (args[1] === 'view') { if (state === 'OPEN') { git(['update-ref', 'refs/heads/master', 'refs/heads/release/0.28.736']); state = 'MERGED'; fs.writeFileSync(stateFile, state); } console.log(JSON.stringify({ state, statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] })); }
 else if (args[1] !== 'merge') process.exit(1);
 `, { mode: 0o755 });
-  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  const result = spawnSync(process.execPath, [tool, 'release'], { cwd: r.dir, encoding: 'utf8', detached: true, timeout: outcome === 'moved' ? 3000 : 20000, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, VERSION_STAMP_POLL_MS: '50', TEST_REMOTE: remote, GH_ATTEMPT: outcome, GH_HEAD: outcome === 'moved' ? 'moved-since-close' : leftBehind, GH_LOG: path.join(r.dir, 'gh-log'), GH_STATE: path.join(r.dir, 'gh-state') } });
+  if (result.error?.code === 'ETIMEDOUT') {
+    try { process.kill(-result.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+  }
   const requests = fs.readFileSync(path.join(r.dir, 'gh-log'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
   const created = requests.filter(args => args[1] === 'create').length;
   const remoteBranch = r.git('--git-dir', remote, 'rev-parse', 'refs/heads/release/0.28.736');
