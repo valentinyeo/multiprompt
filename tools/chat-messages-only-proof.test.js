@@ -225,6 +225,8 @@ test('IGSH-1055 unread measurements use the visible viewport, never the expanded
   const shot = source.slice(source.indexOf("if ($Name -eq 'new-messages-visible')"), source.indexOf('function Doctor('));
   assert.match(shot, /\$bounds = Transcript-Viewport/);
   assert.match(source, /\$bounds = Transcript-Viewport\s+\$pillOrigin =/);
+  assert.match(source, /\$visibleTop = \[int\]\(\$visibleBounds.Top - \$bounds.Top\)/);
+  assert.match(source, /\$f.y -ge \$f.scroll \+ \$visibleTop -and \$f.y -lt \$f.scroll \+ \$visibleTop \+ \$viewH - 40/);
 });
 
 test('IGSH-1055 viewport follows current app frames and maps native screen coordinates', { skip: process.platform !== 'win32' }, () => {
@@ -234,6 +236,8 @@ test('IGSH-1055 viewport follows current app frames and maps native screen coord
   const source = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/drive.ps1'), 'utf8');
   const helper = source.match(/function Transcript-Viewport \{[\s\S]*?\n\}/)?.[0];
   assert.ok(helper, 'visible viewport reader exists');
+  const guard = source.match(/if \(\$f -and \$f.count -eq 1 -and \$f.y -ge[^\n]+\{ return \$f \}/)?.[0];
+  assert.ok(guard && guard.includes('$visibleTop'));
   const script = `Add-Type -AssemblyName System.Drawing
 Add-Type 'public static class ChatDeliveryDesktop { public struct Point { public int X; public int Y; } public static Point ScreenPoint(System.IntPtr h, int x, int y) { return new Point { X=8, Y=31 }; } }'
 $settings='fixture'; $main=[IntPtr]1
@@ -245,6 +249,11 @@ if ($r.Left -ne 242 -or $r.Top -ne 93 -or $r.Right -ne 1014 -or $r.Bottom -ne 67
 $script:fixture += "\n[chat] frame transcript 234,62,1006,614 edit"
 $r=Transcript-Viewport
 if ($r.Bottom -ne 645 -or 616 + 31 -lt $r.Bottom) { throw 'pill compared with stale host bounds' }
+$visibleTop=44; $viewH=582
+function Visible-Divider($f) { ${guard}; return $null }
+if (Visible-Divider @{count=1;y=100;scroll=88}) { throw 'Divider hidden behind the session header was accepted' }
+if (-not (Visible-Divider @{count=1;y=100;scroll=50})) { throw 'Visible divider was rejected' }
+if (Visible-Divider @{count=1;y=700;scroll=50}) { throw 'Divider below the content was accepted' }
 Write-Host 'CURRENT_VIEWPORT_OK'`;
   const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
