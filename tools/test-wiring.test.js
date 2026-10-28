@@ -15,7 +15,11 @@ function testFiles(dirs) {
 function runners() {
   const workflows = path.join(root, '.github/workflows');
   const files = ['build.zig', ...fs.readdirSync(workflows).map((f) => `.github/workflows/${f}`)];
-  return files.map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
+  const text = files.map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
+  const discovery = path.join(root, 'tools/discover-tests.cjs');
+  const discovered = text.includes('"node", "tools/discover-tests.cjs"') && fs.existsSync(discovery)
+    ? require(discovery).discoverTests(root) : [];
+  return text + '\n' + discovered.join('\n') + '\n';
 }
 
 function unwired(files, text) {
@@ -24,7 +28,7 @@ function unwired(files, text) {
 
 test('every tools/, extension/ and service/test/ test file runs in build.zig or a workflow', () => {
   const missing = unwired(testFiles(['tools', 'extension', 'service/test']).filter(file => !localOnly.has(file)), runners());
-  assert.deepEqual(missing, [], `add these to a node --test step in build.zig (test-vps runs on every PR): ${missing.join(', ')}`);
+  assert.deepEqual(missing, [], `wire non-Node tests explicitly; conventional Node tests use automatic discovery: ${missing.join(', ')}`);
 });
 
 test('tools contains no copied test backups', () => {
