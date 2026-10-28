@@ -101,10 +101,10 @@ function Doctor([bool]$Chat = $false) {
         Save @{offscreen=$element.Current.IsOffscreen; pid=$element.Current.ProcessId; title=$title; hwnd=$main.ToInt64()} "$caseDir/doctor-window.json"
         throw 'Doctor: visible versioned UI Automation identity missing'
     }
-    $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
+    $session = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
     $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1') { $expectedShells } else { 1 }
-    if (@($published.shells).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 3 }).Count -ne $expectedTmux -or
-        ($expectedShells -eq 2 -and @($published.shells | Where-Object { $_.kind -eq 0 }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not published' }
+    if (@($session.tabs).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 'tmux' }).Count -ne $expectedTmux -or
+        ($expectedShells -eq 2 -and @($published.shells | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
     if ($Chat) {
         $focus = [ChatDeliveryDesktop]::Focus($main)
         if ($focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Doctor: owned composer must have foreground typing focus' }
@@ -970,7 +970,7 @@ foreach ($plan in $plans) {
             [void](Wait-For 'second tab saved and published' {
                 $tabs = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
                 $published = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
-                $tabs.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 3 }).Count -eq 1 -and @($published | Where-Object { $_.kind -eq 0 }).Count -eq 1
+                $tabs.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 'tmux' }).Count -eq 1 -and @($published | Where-Object { $_.kind -eq 'cmd' }).Count -eq 1
             })
             $expectedShells = 2
             $sendOffset = (Get-Item -LiteralPath $transcript).Length

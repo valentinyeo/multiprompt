@@ -97,7 +97,7 @@ pub fn paint(dc: w.HANDLE, items: []const Item, hover: ?usize, light: bool) void
     }
 }
 
-const State = struct { items: []const Item, hover: ?usize = null, pointer: ?w.POINT = null, selected: u32 = 0, open: bool = true, close_message: w.UINT = 0, light: bool };
+const State = struct { items: []const Item, hover: ?usize = null, pointer: ?w.POINT = null, selected: u32 = 0, open: bool = true, light: bool };
 var active: ?*State = null;
 var registered = false;
 
