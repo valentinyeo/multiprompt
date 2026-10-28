@@ -2773,9 +2773,10 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Measured-shape transcript seeding failed' }
             Copy-Item -LiteralPath $shapeFile (Join-Path $Evidence 'chat-shapes.json')
             Copy-Item -LiteralPath (Join-Path $remoteState 'chat-shape-manifest.json') (Join-Path $Evidence 'chat-shape-manifest.json')
+        } elseif ($Feature -eq 'chat-options') {
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 1
         } else {
-            $seedRounds = if ($Feature -eq 'chat-options') { 1 } else { 400 }
-            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many $seedRounds
+            & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 400
         }
         if ($LASTEXITCODE -ne 0) { throw 'Remote transcript seeding failed' }
         if ($Feature -eq 'chat-options') {
