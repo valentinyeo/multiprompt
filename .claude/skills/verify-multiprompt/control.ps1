@@ -6474,7 +6474,7 @@ try {
                     if ($shapeProfile) {
                         $gapCase.phase = 'separate-profile'
                         $allSamples = @($shapeResult.modes.browser_closed) + @($shapeResult.modes.browser_open)
-                        $slow = $allSamples | Sort-Object -Property shown_ms -Descending | Select-Object -First 1
+                        $slow = $allSamples | Sort-Object -Property @{ Expression = { [double]$_.shown_ms } } -Descending | Select-Object -First 1
                         $profileClosed = $slow.browser_mode -eq 'browser_closed'
                         if ($profileClosed) {
                             for ($tab = 0; $tab -lt $sessionCount; $tab++) {

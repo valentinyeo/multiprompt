@@ -81,6 +81,7 @@ test('IGSH-1040 profile capture refuses ambiguous recorder ownership and never c
   assert.throws(() => ownedProfile(profile.replace('if ($started)', 'if ($true)')));
   assert.throws(() => ownedProfile(profile + '\nwpr -cancel'));
   assert.ok(control.indexOf('Invoke-ChatSwitchProfile -TargetProcessId') > control.indexOf('$shapeResult.idle.after ='));
+  assert.ok(control.includes('$slow = $allSamples | Sort-Object -Property @{ Expression = { [double]$_.shown_ms } } -Descending | Select-Object -First 1'));
 });
 
 test('IGSH-1040 final evidence is checked after cleanup even when the measured budgets fail', () => {
