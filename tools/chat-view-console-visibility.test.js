@@ -343,6 +343,7 @@ fn activeShellHwndForFocusGuard() HANDLE { return shells[0].hwnd; }
 fn requestShellRefocus(_: u32, _: u32) void {}
 fn activateConsoleForeground(hwnd: HANDLE) i32 { return SetForegroundWindow(hwnd); }
 var foreground_unlocked = false;
+var activation_pending = false;
 fn unlockBrowserForeground() void { foreground_unlocked = true; }
 fn GetTickCount64() u64 { return 1000; }
 fn SetTimer(_: HANDLE, timer: usize, _: u32, _: ?usize) usize { if (timer == TIMER_CHAT_FOREGROUND_RETRY) { foreground_timer_armed = true; } return 1; }
@@ -365,6 +366,7 @@ fn GetWindowThreadProcessId(_: HANDLE, _: ?usize) u32 { return 2; }
 fn AttachThreadInput(_: u32, _: u32, attach: i32) i32 { attached = attach != 0; return 1; }
 fn SetForegroundWindow(hwnd: HANDLE) i32 {
     if (!focusGuard(hwnd)) return 0;
+    if (activation_pending) return 0;
     if (require_alt_unlock and !alt_unlocked) return 0;
     if (foreground != g_main_hwnd and (!attached or !foreground_unlocked) and !alt_unlocked) return 0;
     foreground = hwnd;
@@ -424,6 +426,21 @@ test "IGSH-1142 held Alt preserves the existing guarded foreground completion" {
     require_alt_unlock = false;
     alt_held = false;
 }
+test "IGSH-1028 pending console activation uses the existing composer foreground retry" {
+    foreground = 10;
+    focused = 10;
+    activation_pending = true;
+    foreground_timer_armed = false;
+    g_chat_foreground_retries = 0;
+    openChatView();
+    try std.testing.expect(hide_requested);
+    try std.testing.expect(foreground_timer_armed);
+    try std.testing.expect(g_chat_foreground_retries > 0);
+    activation_pending = false;
+    foreground = g_main_hwnd;
+    focusActiveShell();
+    try std.testing.expectEqual(g_chat_composer_hwnd, focused);
+}
 test "IGSH-955 background chat restore never takes another app's foreground" {
     foreground = 999;
     focused = 999;
@@ -454,7 +471,7 @@ test('IGSH-955 production chat handoff transfers cross-thread foreground before 
     fs.writeFileSync(file, chatHandoffHarness(source));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, JSON.stringify({ signal: result.signal, error: result.error, stdout: result.stdout, stderr: result.stderr }));
-    assert.match(result.stderr, /All 5 tests passed/);
+    assert.match(result.stderr, /All 6 tests passed/);
     console.log(result.stderr.trim());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
