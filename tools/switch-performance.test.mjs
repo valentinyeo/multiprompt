@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { copyZig } from './zig-copy.js';
 
 async function oracle() {
   assert.ok(fs.existsSync(new URL('./switch-performance.mjs', import.meta.url)), 'The performance oracle must ship');
@@ -45,7 +46,7 @@ test('performance builds add high-resolution idle timing without changing the sh
   try {
     fs.mkdirSync(path.join(directory, 'src'));
     const file = path.join(directory, 'src/main.zig');
-    fs.copyFileSync(new URL('../src/main.zig', import.meta.url), file);
+    copyZig(['main.zig'], path.join(directory, 'src'));
     instrument(directory);
     const source = fs.readFileSync(file, 'utf8');
     const poll = source.slice(source.indexOf('if (wp == TIMER_CHAT_REFRESH)'), source.indexOf('if (wp == TIMER_CHAT_REFRESH)') + 7000);
