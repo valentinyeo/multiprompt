@@ -39,6 +39,7 @@ function fixture(t) {
   let sequence = 0;
   const commit = (message, note = 'Your chats keep their saved order.') => {
     if (note) {
+      fs.mkdirSync(path.join(dir, 'changelog.d'), { recursive: true });
       fs.writeFileSync(path.join(dir, `changelog.d/DEMO-${++sequence}-chat.md`), note);
       git('add', 'changelog.d');
     }
@@ -352,7 +353,7 @@ test('the release tag is created through the git refs API and never pushed with 
 test('IGSH-1131 a quiet green candidate cannot publish an empty changelog', t => {
   const f = fixture(t);
   const quiet = f.commit('wait for maximized geometry before restore input', null);
-  const result = skipped(f, { PUBLISHED_TAG: f.green, TEST_RUNS: JSON.stringify({ [quiet]: f.success }) });
+  const result = skipped(f, { PUBLISHED_TAG: f.tip, TEST_RUNS: JSON.stringify({ [quiet]: f.success }) });
   assert.match(result.stderr, /no unpublished product notes/);
 });
 
