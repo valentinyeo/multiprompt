@@ -156,8 +156,8 @@ export function previousReleaseTag(tags, tag) {
   return tags.filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags).at(-1) ?? null;
 }
 
-function releaseHistory(tag, changelog) {
-  const older = git(['tag', '--list', 'v*']).split(/\r?\n/).filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags);
+function releaseHistory(tag, changelog, publishedTags) {
+  const older = publishedTags.filter(name => tagParts(name) && compareTags(name, tag) < 0).sort(compareTags);
   if (!older.length) {
     if (git(['rev-parse', '--is-shallow-repository']).trim() === 'true') throw new Error('Shallow checkout has no release tags; fetch tags before building');
     return [];
@@ -281,10 +281,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const [command, base, head, ...extra] = process.argv.slice(2);
     if (command === 'check' && base && head && !extra.length) process.exitCode = check(base, head);
-    else if (command === 'build' && base && !head) {
-      fs.writeFileSync(changelogPath, buildChangelog(readTree('HEAD'), base, releaseHistory(base, readTree('HEAD')[changelogPath])));
+    else if (command === 'build' && base && !extra.length) {
+      const publishedTags = JSON.parse(head ?? execFileSync('gh', ['api', '--paginate', '--slurp', 'repos/{owner}/{repo}/releases', '--jq', '[.[][] | select(.draft == false and .prerelease == false) | .tag_name]'], { encoding: 'utf8' }));
+      if (!Array.isArray(publishedTags) || publishedTags.some(tag => typeof tag !== 'string')) throw new Error('Expected an array of published release tags');
+      const files = readTree('HEAD');
+      fs.writeFileSync(changelogPath, buildChangelog(files, base, releaseHistory(base, files[changelogPath], publishedTags)));
     } else if (command === 'release' && !base) await release();
-    else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | build <tag> | release');
+    else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | build <tag> [published-tags-json] | release');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

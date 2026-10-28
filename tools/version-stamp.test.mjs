@@ -411,13 +411,13 @@ test('build changelog uses the tag and fragments without changing source default
   assert.match(buildChangelog({ ...files, 'src/changelog.zig': changelog.replace('pub const CHANGELOG', 'const SOURCE_CHANGELOG') }, 'v0.28.900'), /const SOURCE_CHANGELOG = \[_\]ChangelogEntry\{\n    \.\{ \.ver = "0\.28\.900"/);
   for (const invalid of ['0.28.900', 'v0.28.900;bad', 'v0.28.900\n', 'v00.28.900']) assert.throws(() => buildChangelog(files, invalid), /Invalid release tag/);
   const r = repo(t, files);
-  const result = spawnSync(process.execPath, [tool, 'build', 'v0.28.900'], { cwd: r.dir, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [tool, 'build', 'v0.28.900', '[]'], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), generated);
   assert.equal(fs.readFileSync(path.join(r.dir, 'src/main.zig'), 'utf8'), main);
   assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/DEMO-2-new.md'), 'utf8'), files['changelog.d/DEMO-2-new.md']);
   assert.equal(r.git('diff', '--name-only'), 'src/changelog.zig');
-  const again = spawnSync(process.execPath, [tool, 'build', 'v0.28.900'], { cwd: r.dir, encoding: 'utf8' });
+  const again = spawnSync(process.execPath, [tool, 'build', 'v0.28.900', '[]'], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(again.status, 0, again.stderr);
   assert.equal(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), generated);
 });
@@ -452,7 +452,7 @@ test('IGSH-889 a release lists only fragments added since the previous release',
   r.write({ 'changelog.d/DEMO-4-latest.md': 'Latest release change.\n' });
   r.commit();
   r.git('tag', 'v0.28.738');
-  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738'], { cwd: r.dir, encoding: 'utf8' });
+  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738', JSON.stringify(['v0.28.735', 'v0.28.736', 'v0.28.737'])], { cwd: r.dir, encoding: 'utf8' });
   assert.equal(built.status, 0, built.stderr);
   const written = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
   assert.doesNotMatch(written, /An old improvement/);
@@ -618,4 +618,25 @@ test('IGSH-1113 omits filtered historical releases while preserving current note
   assert.throws(() => buildChangelog({ ...files, 'changelog.d/DEMO-5-empty.md': ' \n' }, 'v0.28.900', history), /Fragment has no text/);
   const invalid = [...history, { tag: 'v0.28.899', files: { ...files, 'changelog.d/DEMO-6-empty.md': ' \n' } }];
   assert.throws(() => buildChangelog(files, 'v0.28.900', invalid), /Fragment has no text/);
+});
+
+test('IGSH-1115 failed tags cannot consume unpublished product notes', async t => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const r = repo(t);
+  r.git('tag', 'v0.28.735');
+  r.write({ 'changelog.d/DEMO-1115-recovered.md': 'Your chats keep their saved order.\n' });
+  r.commit();
+  r.git('tag', 'v0.28.736');
+  r.git('tag', 'v0.28.737');
+  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738', JSON.stringify(['v0.28.735'])], { cwd: r.dir, encoding: 'utf8' });
+  assert.equal(built.status, 0, built.stderr);
+  const written = fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8');
+  assert.deepEqual(releaseNotes(written, 'v0.28.738'), {
+    version: '0.28.738', releases: [
+      { version: '0.28.738', changes: ['Your chats keep their saved order.'] },
+      { version: '0.28.735', changes: ['Existing.'] },
+    ],
+  });
+  assert.doesNotMatch(written, /\.ver = "0\.28\.73[67]"/);
+  assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/DEMO-1115-recovered.md'), 'utf8'), 'Your chats keep their saved order.\n');
 });
