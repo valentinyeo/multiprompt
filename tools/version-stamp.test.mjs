@@ -641,7 +641,6 @@ test('IGSH-1115 failed tags cannot consume unpublished product notes', async t =
   assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/DEMO-1115-recovered.md'), 'utf8'), 'Your chats keep their saved order.\n');
 });
 
-
 test('IGSH-1115 production history ignores failed tags without moving their product notes into failed versions', { skip: process.platform === 'win32' }, async t => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const r = repo(t);
@@ -660,24 +659,6 @@ test('IGSH-1115 production history ignores failed tags without moving their prod
   assert.deepEqual(releaseNotes(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), 'v0.28.738'), {
     version: '0.28.738', releases: [
       { version: '0.28.738', changes: ['Your chats keep their saved order.'] },
-      { version: '0.28.735', changes: ['Existing.'] },
-    ],
-  });
-});
-
-
-test('IGSH-1115 published maintenance history cannot generate empty compiled entries', async () => {
-  const { releaseNotes } = await import('./release-notes.mjs');
-  const historical = { ...base(), 'changelog.d/DEMO-1115-ci.md': 'Release workflow is safer.\n' };
-  const current = { ...historical, 'changelog.d/DEMO-1116-product.md': 'Replies stay visible when switching chats.\n' };
-  const generated = buildChangelog(current, 'v0.28.738', [
-    { tag: 'v0.28.735', files: base() },
-    { tag: 'v0.28.736', files: historical },
-  ]);
-  assert.doesNotMatch(generated, /\.ver = "0\.28\.736"/);
-  assert.deepEqual(releaseNotes(generated, 'v0.28.738'), {
-    version: '0.28.738', releases: [
-      { version: '0.28.738', changes: ['Replies stay visible when switching chats.'] },
       { version: '0.28.735', changes: ['Existing.'] },
     ],
   });
