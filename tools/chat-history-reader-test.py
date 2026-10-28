@@ -1855,6 +1855,43 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertTrue(created_seen)
         self.assertEqual(current[2], replacement, 'completed reply stayed stale after session metadata changed')
 
+    def test_reader_fixture_repairs_are_checked_without_a_production_change(self):
+        repo = self.home / 'admission'
+        repo.mkdir()
+
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(repo), *args], text=True,
+                                           stderr=subprocess.PIPE).strip()
+
+        git('init', '-q')
+        git('config', 'user.name', 'Test')
+        git('config', 'user.email', 'test@example.invalid')
+        (repo / 'tools').mkdir()
+        fixture = repo / 'tools/metadata-test.py'
+        fixture.write_text('import unittest\nunittest.main()\n')
+        git('add', '.')
+        git('commit', '-qm', 'initial fixture')
+        base = git('rev-parse', 'HEAD')
+        fixture.write_text('import unittest\nclass MetadataTest(unittest.TestCase):\n'
+                           '    def test_complete_metadata(self): self.assertEqual(1, 1)\nunittest.main()\n')
+        git('add', '.')
+        git('commit', '-qm', 'repair fixture')
+        head = git('rev-parse', 'HEAD')
+        env = dict(os.environ)
+        env.pop('GITHUB_HEAD_REF', None)
+        env.pop('GITHUB_REF_NAME', None)
+        command = ['node', str(ROOT / 'tools/check-red-run.mjs'), base, head]
+        result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('TEST_ONLY_PROVEN 1 changed suites', result.stdout)
+        fixture.write_text(fixture.read_text().replace('self.assertEqual(1, 1)', 'self.assertEqual(1, 2)'))
+        git('add', '.')
+        git('commit', '-qm', 'broken fixture')
+        command[-1] = git('rev-parse', 'HEAD')
+        result = subprocess.run(command, cwd=repo, env=env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('does not pass on PR source', result.stderr)
+
     def test_watch_completed_session_metadata_save_is_atomic(self):
         write_text = Path.write_text
         metadata = self.home / '.claude/sessions/4242.json'
