@@ -61,6 +61,7 @@ test('IGSH-1126 pane loading never blocks a released shortcut', () => {
 test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', () => {
   const journey = read('.claude/skills/verify-multiprompt/control-feature-browser-pane-stuck.ps1');
   for (const token of ['$i -lt 20', 'ImmediateBrowserTogglePair()', "$before + 2", 'SLOW_LOADING', 'SLOW_FINISHED', "'toggle-keys.log'", 'immediate-toggle.mp4', "Assert-ImmediateBrowserPairs 'blank'", "Assert-ImmediateBrowserPairs 'slow'"]) assert.ok(journey.includes(token), token);
+  assert.match(read('.github/workflows/verify.yml'), /name: Install browser toggle recorder\n\s+if: env\.FEATURE == 'browser-pane-stuck'[\s\S]*choco install ffmpeg --version=7\.1\.1/);
   assert.doesNotMatch(journey, /\$job\.Start\(/);
   for (const token of ['$serverJob = New-Object VerifyJob', '$recordJob = New-Object VerifyJob', '$helper.Stop()', '$helper.Dispose()', 'toggle-helper-process-tree.json']) assert.ok(journey.includes(token), token);
   const native = read('.claude/skills/verify-multiprompt/control-native.cs').split('public static double ImmediateBrowserTogglePair()')[1]?.split('public static void OpenAndCloseBrowserPane()')[0];

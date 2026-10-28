@@ -360,6 +360,12 @@ jobs:
         run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs tools/chat-delivery-live-proof.test.mjs
       - name: Check workspace focus journey contract
         run: node tools/check-workspace-focus.mjs
+      - name: Install browser toggle recorder
+        if: env.FEATURE == 'browser-pane-stuck'
+        shell: pwsh
+        run: |
+          choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
       - name: Check browser recovery journey contract
         run: node tools/check-browser-pane-stuck.mjs
       - name: Check runner-note pixel oracle
