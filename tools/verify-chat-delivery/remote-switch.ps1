@@ -23,8 +23,8 @@ if ($messages.Count -ne 2000 -or $messages[0] -ne 'IGSH954 message 0000' -or $me
 Press @(0x1B) 'Esc: clear copied conversation'
 Switch-Palette 'new cmd'
 [void](Wait-For 'local and second-host tabs published' {
-    $published = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
-    $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 0 }).Count -eq 1
+    $published = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
+    $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 'cmd' }).Count -eq 1
 })
 $expectedShells = 2
 Switch-Palette 'chat view on everywhere'
@@ -110,8 +110,8 @@ $expectedShells = 2
 [void](Wait-For 'two distinct saved workspaces' {
     $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
     $slots = @($saved.tabs | ForEach-Object { if ($_.PSObject.Properties['workspace']) { [int]$_.workspace } else { 0 } } | Select-Object -Unique)
-    $published = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
-    $saved.workspace_count -eq 2 -and @($saved.tabs).Count -eq 2 -and $slots.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 0 }).Count -eq 1
+    $published = @($saved.tabs)
+    $saved.workspace_count -eq 2 -and @($saved.tabs).Count -eq 2 -and $slots.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 'cmd' }).Count -eq 1
 })
 Switch-Palette 'chat view on everywhere'
 Bind-Transcript
@@ -132,7 +132,7 @@ Press @(0x12, 0x25) 'Alt+Left: capture the proved remote conversation'
 Bind-Transcript
 Switch-Palette 'new cmd'
 $expectedShells = 3
-[void](Wait-For 'three sessions published for idle proof' { @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count -eq 3 })
+[void](Wait-For 'three sessions published for idle proof' { @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs).Count -eq 3 })
 Switch-Palette 'Verify agent'
 [void](Wait-For 'long remote chat selected with two background sessions' {
     $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
@@ -141,8 +141,8 @@ Switch-Palette 'Verify agent'
 })
 Bind-Transcript
 $observation.idleThree = Measure-CPU {} 2000
-$observation.idleThree.sessions = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count
 $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+$observation.idleThree.sessions = @($saved.tabs).Count
 $observation.idleThree.shell = $saved.tabs[$saved.active_tab].shell_id
 Shot 'remote-switch-complete'
 Save $observation "$caseDir/observation.json"

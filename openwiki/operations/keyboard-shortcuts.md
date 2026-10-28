@@ -283,6 +283,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K → Browser: Insert Agent Instructions | Paste the multiprompt-browser guide into the active shell |
 | URL bar (click strip above pane) | Type a URL and press Enter to navigate the docked pane |
 | Ctrl+Click URL in shell | Open link in the docked browser pane (was: default browser) |
+| Ctrl+, / Ctrl+K -&gt; Settings | Open Settings; Escape closes the panel |
 | Ctrl+K -&gt; Changelog | what changed in each version |
 | (agent-reported) Session ETA countdown | Sidebar row shows time left + a progress line; toggle either from Ctrl+K → ETA Countdown Numbers / ETA Progress Line |
 | Ctrl+K → Estimate Accuracy | See how each agent's time estimates compare to how long tasks actually took |

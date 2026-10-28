@@ -6,3 +6,4 @@ pub const ReaderOutline: u32 = 0x2E2E2E;
 pub const ReaderRaised: u32 = 0x353535;
 pub const ReaderForeground: u32 = 0xF2F2F2;
 pub const ReaderHint: u32 = 0x8A8A8A;
+pub const ReaderPanel: u32 = 0x181818;

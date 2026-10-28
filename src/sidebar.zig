@@ -1,3 +1,4 @@
+const SEARCH_SETTINGS_OFFSET = @import("app_state.zig").SEARCH_SETTINGS_OFFSET;
 const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
@@ -4034,6 +4035,14 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var back_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("main"), -1, &back_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_SETTINGS_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var settings_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Settings"), -1, &settings_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
+                        var hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Ctrl+,"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_theme_menu) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));

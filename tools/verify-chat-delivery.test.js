@@ -1119,3 +1119,13 @@ test('failed window identity retains observed fields and crash reports without w
   assert.match(doctor, /\$app.HasExited -or \$app.Path -ne \$Exe -or \(Get-FileHash \$Exe -Algorithm SHA256\).Hash -ne \$ExpectedHash/);
   assert.match(drive, /if \(Test-Path "\$settings\/crashes"\) \{/);
 });
+
+
+test('Doctor checks owned tabs through saved session state, not a delayed inbox index', () => {
+  const doctor = drive.slice(drive.indexOf('function Doctor('), drive.indexOf('function Press('));
+  assert.match(doctor, /Get-Content "\$settings\/session\.json"/);
+  assert.doesNotMatch(doctor, /inbox-default/);
+  assert.match(doctor, /\$session\.tabs\)\.Count -ne \$expectedShells/);
+  assert.match(doctor, /\$_.kind -eq 'tmux'/);
+  assert.match(doctor, /\$_.kind -eq 'cmd'/);
+});

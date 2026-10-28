@@ -46,6 +46,30 @@ pub fn setWideAscii(out: *[64]u16, value: []const u8) void {
     }
 }
 
+pub const Choice = enum { system, dark, mid, light, amoled, edge_gray, multiprompt };
+
+pub fn choose(choice: Choice) void {
+    app_state.g_system_theme = choice == .system;
+    app_state.g_dev_theme_active = false;
+    app_state.g_multiprompt_theme = choice == .multiprompt;
+    if (app_state.g_system_theme) {
+        resolveSystemThemeFlags();
+    } else {
+        app_state.g_light_theme = choice == .light;
+        app_state.g_mid_theme = choice == .mid;
+        app_state.g_edge_gray_theme = choice == .edge_gray;
+        app_state.g_amoled_theme = choice == .amoled;
+    }
+    resetFontCache();
+    applyTitleBarTheme();
+    applyConsoleThemeToAllShells();
+    repositionActive();
+    refreshBrowserEdgeMasks();
+    if (choice == .multiprompt) @import("clipboard.zig").startSpinnerTimerIfNeeded();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    saveGlobalTheme();
+}
+
 fn resetDevThemeDefaults() void {
     app_state.g_dev_theme = std.mem.zeroes(DevTheme);
     setWideAscii(&app_state.g_dev_theme.title_font, @import("fonts.zig").UI_FACE);

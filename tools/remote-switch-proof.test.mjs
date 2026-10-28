@@ -70,6 +70,6 @@ test('fixture closure reads saved tabs rather than delayed inbox publication', (
   const driver = fs.readFileSync(new URL('./verify-chat-delivery/remote-switch.ps1', import.meta.url), 'utf8');
   const closure = driver.slice(driver.indexOf("Wait-For 'local fixture tab closed'"), driver.indexOf("Press @(0x11, 0x4E)"));
   assert.match(closure, /Get-Content "\$settings\/session\.json"/);
-  assert.doesNotMatch(closure, /inbox-default/);
+  assert.doesNotMatch(driver, /inbox-default/);
   assert.match(closure, /\$remaining\.Count -eq 1 -and \$remaining\[0\]\.kind -eq 'tmux' -and \$remaining\[0\]\.tmux_host -eq 2/);
 });
