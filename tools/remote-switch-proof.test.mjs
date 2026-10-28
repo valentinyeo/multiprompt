@@ -123,3 +123,36 @@ test('remote profiling repeats real workspace switches only after acceptance sam
   assert.match(driver, /Switch-Sample @\(0x12, 0x27\) \$true \$false/);
   assert.match(driver, /Switch-Sample @\(0x12, 0x25\) \$true \$false/);
 });
+
+test('history readiness retains a paint emitted between polling attempts', async () => {
+  const source = fs.readFileSync(new URL('./verify-chat-delivery/remote-switch.ps1', import.meta.url), 'utf8');
+  const start = source.indexOf("[void](Wait-For 'complete long remote conversation loaded'");
+  const before = source.slice(0, start);
+  const wait = source.slice(start, source.indexOf('\nBind-Transcript', start));
+  const offset = before.match(/^\$offset = \(Read-Shared "\$settings\/debug.log"\)\.Length$/m);
+  assert.ok(offset, 'observation starts before polling, not inside each attempt');
+  assert.doesNotMatch(wait, /\$offset\s*=/);
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = await import('node:child_process');
+  const script = `
+$ErrorActionPreference = 'Stop'
+$settings = 'fixture'
+$script:log = ''
+function Read-Shared($Path) { return $script:log }
+function Press($Keys, $Label) { $script:pending = '[chatfont] pt=14 blocks=4002 content_h=680156' }
+function Wait-For($Description, [scriptblock]$Check, $Seconds) {
+  for ($attempt = 0; $attempt -lt 3; $attempt++) {
+    if (& $Check) { return $true }
+    $script:log += $script:pending
+  }
+  throw 'Lost a paint emitted between attempts'
+}
+${offset[0]}
+${wait}
+if ($script:switchInitialBlocks -ne 4002) { throw 'Wrong loaded message count' }
+Write-Host 'ASYNC_HISTORY_PAINT_OBSERVED'
+`;
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /ASYNC_HISTORY_PAINT_OBSERVED/);
+});

@@ -7,8 +7,8 @@ function Switch-Palette([string]$Query) {
     [void](Wait-For 'switch proof command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $Query.Length + ' count=1 target=\d+') })
     Press @(0x0D) 'Enter: run switch proof command'
 }
+$offset = (Read-Shared "$settings/debug.log").Length
 [void](Wait-For 'complete long remote conversation loaded' {
-    $offset = (Read-Shared "$settings/debug.log").Length
     Press @(0x11, 0x30) 'Ctrl+0: measure loaded remote history'
     $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
     if ($m.Count -gt 0 -and [int]$m[$m.Count - 1].Groups[1].Value -ge 2002) { $script:switchInitialBlocks = [int]$m[$m.Count - 1].Groups[1].Value; $true }

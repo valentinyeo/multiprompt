@@ -70,7 +70,7 @@ Write-Host 'CACHE_REPLACEMENT_WHILE_READING_OK'
   try {
     const red = run('[IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)');
     assert.notEqual(red.status, 0, red.stdout + red.stderr);
-    assert.match(red.stderr, /being used by another process/);
+    assert.match(red.stderr, /being used by\s+another process/);
     const green = run(open);
     assert.equal(green.status, 0, green.stdout + green.stderr);
     assert.match(green.stdout, /CACHE_REPLACEMENT_WHILE_READING_OK/);
