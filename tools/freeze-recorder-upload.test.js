@@ -46,6 +46,7 @@ var tick: u64 = 0;
 var records: usize = 0;
 var posts: usize = 0;
 var healthy = false;
+const PostMessageW = win.PostMessageW;
 fn awakeMillis() u64 { return tick; }
 ${source.includes("record(.freeze,") ? "fn record(_: upload.Kind, _: u64) void" : "fn record(_: u64) void"} { records += 1; }
 const win = struct {
