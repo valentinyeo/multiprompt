@@ -158,7 +158,7 @@ test('changed implementation is comment-free and leaves no error log', async () 
     'src/update_notes.zig', 'src/update_card.zig', 'src/update_release.zig', 'src/update_release.ps1',
     'tools/release-notes.mjs', 'tools/version-stamp.mjs', 'tools/update-release-fixtures.mjs',
     'tools/update-release.test.ps1', 'tools/update-release-journey.ps1',
-    'tools/update-card-notes.test.js', 'tools/changelog-fragments.test.js',
+    'tools/update-card-notes.test.js', 'tools/update-card-release-proof.ps1', 'tools/changelog-fragments.test.js',
     'tools/changelog-entry.test.js', 'tools/version-stamp.test.mjs',
     'tools/fixtures/IGSH-728/master-update-card.zig',
     '.github/workflows/release.yml', '.github/workflows/test.yml',
@@ -166,4 +166,43 @@ test('changed implementation is comment-free and leaves no error log', async () 
   const files = fs.readdirSync(root, { recursive: true, withFileTypes: true });
   assert.equal(files.some(file => file.isFile() && file.name === 'error.log'), false);
   assert.match(read('changelog.d/README.md'), /No ticket ids, file names, paths, code names or PR numbers/);
+});
+
+
+test('IGSH-1090 published executable paints its own published notes, with no binary edits', {
+  skip: process.platform !== 'win32' || process.env.GITHUB_WORKFLOW !== 'Test repeat',
+  timeout: 180000,
+}, async t => {
+  const os = require('node:os');
+  const { createHash } = require('node:crypto');
+  const { spawnSync } = require('node:child_process');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'released-card-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const response = await fetch('https://api.github.com/repos/valentinyeo/multiprompt/releases/latest');
+  assert.equal(response.status, 200);
+  const release = await response.json();
+  assert.match(release.tag_name, /^v\d+\.\d+\.\d+$/);
+  const assets = {};
+  for (const name of ['multiprompt-x64.exe', 'release-notes.json']) {
+    const asset = release.assets.find(asset => asset.name === name);
+    assert.ok(asset, name);
+    assert.match(asset.browser_download_url, /^https:\/\/github\.com\/valentinyeo\/multiprompt\/releases\/download\//);
+    const download = await fetch(asset.browser_download_url);
+    assert.equal(download.status, 200);
+    const bytes = Buffer.from(await download.arrayBuffer());
+    assert.equal(`sha256:${createHash('sha256').update(bytes).digest('hex')}`, asset.digest);
+    assets[name] = path.join(directory, name);
+    fs.writeFileSync(assets[name], bytes);
+  }
+  const notes = JSON.parse(fs.readFileSync(assets['release-notes.json'], 'utf8'));
+  assert.equal(notes.version, release.tag_name.slice(1));
+  assert.ok(notes.releases[0].changes.includes('Update cards explain each change, without generic messages.'));
+  const proof = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', assets['multiprompt-x64.exe'],
+    '-Notes', assets['release-notes.json'], '-Evidence', path.join(directory, 'proof')],
+  { encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
+  assert.equal(proof.status, 0, proof.stdout + proof.stderr);
+  assert.match(proof.stdout, /RELEASE_CARD_RECEIPT=/);
+  assert.match(proof.stdout, /RELEASE_CARD_PNG=/);
+  console.log(proof.stdout);
 });
