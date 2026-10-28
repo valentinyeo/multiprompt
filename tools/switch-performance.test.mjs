@@ -208,8 +208,8 @@ test('idle sampling discards ten warmup polls after painted selection before tak
   const start = driver.indexOf('$idleOffset = (Read-Log).Length', warmup);
   const measure = driver.indexOf("Wait-For 'fifty unchanged idle Chat View polls'", start);
   assert.ok(painted >= 0 && warmup > painted && start > warmup && measure > start);
-  assert.match(driver.slice(warmup, start), /Count -ge 10/);
-  assert.match(driver.slice(measure), /Count -ge 50/);
+  assert.match(driver.slice(warmup, start), /Count -ge 10 \} 60 750\)/);
+  assert.match(driver.slice(measure), /Count -ge 50 \} 60 750\)/);
 
 });
 

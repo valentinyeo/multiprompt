@@ -30,13 +30,13 @@ function Read-Log {
     $reader = [IO.StreamReader]::new($stream)
     try { $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
-function Wait-For([string]$Name, [scriptblock]$Check, [int]$Seconds = 120) {
+function Wait-For([string]$Name, [scriptblock]$Check, [int]$Seconds = 120, [int]$PollMs = 25) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
         if ($null -ne $app -and $app.HasExited) { throw "App exited during $Name" }
         $value = & $Check
         if ($value) { return $value }
-        Start-Sleep -Milliseconds 25
+        Start-Sleep -Milliseconds $PollMs
     } while ($timer.Elapsed.TotalSeconds -lt $Seconds)
     throw "Timed out: $Name"
 }
@@ -105,11 +105,18 @@ try {
     $idleShellId = (Session).tabs[$idleTarget].shell_id
     [void](Wait-For 'loaded idle conversation painted' { (Read-Log).Substring($offset) -match ('\[switch\] chat content shown shell=' + $idleShellId + ' blocks=[1-9]') })
     $result.idleShell = $idleTarget
+    $observer = [Diagnostics.Process]::GetCurrentProcess()
+    $observer.Refresh()
+    $observerCpuBefore = $observer.TotalProcessorTime.TotalMilliseconds
+    $idleTimer = [Diagnostics.Stopwatch]::StartNew()
     $warmupOffset = (Read-Log).Length
-    [void](Wait-For 'ten warmup idle Chat View polls' { [regex]::Matches((Read-Log).Substring($warmupOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60)
+    [void](Wait-For 'ten warmup idle Chat View polls' { [regex]::Matches((Read-Log).Substring($warmupOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60 750)
     $idleOffset = (Read-Log).Length
-    [void](Wait-For 'fifty unchanged idle Chat View polls' { [regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)').Count -ge 50 } 60)
+    [void](Wait-For 'fifty unchanged idle Chat View polls' { [regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)').Count -ge 50 } 60 750)
     $result.idleUs = @([regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)') | ForEach-Object { [long]$_.Groups[1].Value })
+    $observer.Refresh()
+    $result.observerIdleCpuMs = $observer.TotalProcessorTime.TotalMilliseconds - $observerCpuBefore
+    $result.idleWallMs = $idleTimer.Elapsed.TotalMilliseconds
     $app.Refresh()
     $result.cpuMs = $app.TotalProcessorTime.TotalMilliseconds
 } finally {
