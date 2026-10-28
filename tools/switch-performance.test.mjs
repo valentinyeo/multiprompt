@@ -184,6 +184,9 @@ test('idle sampling discards ten warmup polls after painted selection before tak
   const file = new URL('./switch-performance.ps1', import.meta.url);
   assert.ok(fs.existsSync(file), 'The real-window performance driver must ship');
   const driver = fs.readFileSync(file, 'utf8');
+  const snapshot = driver.indexOf("Wait-For 'session snapshot written'");
+  const restored = driver.indexOf("Wait-For 'ten restored Chat View sessions'");
+  assert.ok(snapshot >= 0 && snapshot < restored, 'Startup waits for the real persisted session before reading it');
   const painted = driver.indexOf("Wait-For 'loaded idle conversation painted'");
   const warmup = driver.indexOf("Wait-For 'ten warmup idle Chat View polls'", painted);
   const start = driver.indexOf('$idleOffset = (Read-Log).Length', warmup);

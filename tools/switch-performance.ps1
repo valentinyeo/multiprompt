@@ -53,6 +53,7 @@ try {
     $job = [VerifyJob]::new()
     $app = $job.Start($Exe, $profile, "$Evidence/stdout.log", "$Evidence/stderr.log", '--single-window --no-window-restore')
     $main = Wait-For 'owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void](Wait-For 'session snapshot written' { Test-Path "$settings/session.json" })
     [void](Wait-For 'ten restored Chat View sessions' {
         $s = Session
         (Read-Log) -match 'launch step=browser' -and @($s.tabs).Count -eq 10 -and @($s.tabs | Where-Object { -not $_.cv }).Count -eq 0
