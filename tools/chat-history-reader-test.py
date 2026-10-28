@@ -51,6 +51,7 @@ class HistoryReaderTest(unittest.TestCase):
         return fields, [json.loads(line) for line in lines[1:-1]]
 
     def test_held_queue_rejects_unbound_workspace_neighbour(self):
+        self.assertTrue(callable(getattr(reader, 'enqueue_response', None)), 'safe held-send boundary is missing')
         self.write(self.event('unrelated completed turn'))
         with patch.object(reader, 'subprocess') as processes, \
                 patch.object(reader, 'process_table', return_value={99: (1, ['claude'])}), \
@@ -2752,6 +2753,7 @@ class SharedQueueDraftTest(unittest.TestCase):
 
 class HeldQueueTest(unittest.TestCase):
     def setUp(self):
+        self.assertTrue(callable(getattr(reader, 'enqueue_response', None)), 'safe held-send boundary is missing')
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)

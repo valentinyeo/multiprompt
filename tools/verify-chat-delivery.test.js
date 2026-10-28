@@ -1191,6 +1191,7 @@ print('NATIVE_WINDOWS_WATCH_ROOT_OK')
 });
 
 test('held cancellation evidence rejects terminal delivery and unrelated removal', () => {
+  assert.ok(fs.existsSync(path.join(root, 'tools/chat-cancel-proof.cjs')), 'native held-cancellation verifier must accompany its journey');
   const { evaluate } = require('./chat-cancel-proof.cjs');
   const texts = ['cancel keep one', 'cancel target two', 'cancel keep three'];
   const steps = ['transcript-loaded', 'three-messages-held', 'middle-message-offers-cancel', 'middle-message-cancelled',
