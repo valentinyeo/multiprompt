@@ -405,7 +405,7 @@ test('build changelog uses the tag and fragments without changing source default
   assert.match(generated, /A useful improvement/);
   assert.deepEqual(files, saved);
   assert.equal(buildChangelog(files, 'v0.28.735'), changelog);
-  assert.match(buildChangelog(base(), 'v0.28.900'), /Behind the scenes fixes\./);
+  assert.doesNotMatch(buildChangelog(base(), 'v0.28.900'), /Behind the scenes fixes\./);
   assert.doesNotMatch(buildChangelog(base(), 'v0.28.900'), /latest improvements/);
   assert.match(buildChangelog({ ...files, 'src/changelog.zig': changelog.replace('pub const CHANGELOG', 'const SOURCE_CHANGELOG') }, 'v0.28.900'), /const SOURCE_CHANGELOG = \[_\]ChangelogEntry\{\n    \.\{ \.ver = "0\.28\.900"/);
   for (const invalid of ['0.28.900', 'v0.28.900;bad', 'v0.28.900\n', 'v00.28.900']) assert.throws(() => buildChangelog(files, invalid), /Invalid release tag/);
@@ -436,7 +436,7 @@ test('IGSH-889 a release lists only fragments added since the previous release',
   assert.match(generated, /A new improvement/);
   assert.doesNotMatch(generated, /An old improvement/);
   const quiet = buildChangelog({ ...base(), ...old }, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
-  assert.match(quiet, /Behind the scenes fixes\./);
+  assert.doesNotMatch(quiet, /Behind the scenes fixes\./);
   assert.doesNotMatch(quiet, /latest improvements/);
   assert.doesNotMatch(quiet, /An old improvement/);
 
@@ -523,4 +523,36 @@ else if (args[1] !== 'merge') process.exit(1);
   assert.equal(r.git('worktree', 'list', '--porcelain').match(/^worktree /gm).length, 1);
   assert.equal(created, outcome === 'closed' ? 1 : 0);
   if (outcome === 'open') assert.equal(remoteBranch, leftBehind);
+});
+
+
+test('IGSH-1090 maintenance releases carry no invented note, preserving real prior notes', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const generated = buildChangelog(base(), 'v0.28.900');
+  assert.deepEqual(releaseNotes(generated, 'v0.28.900'), {
+    version: '0.28.900', releases: [
+      { version: '0.28.900', changes: [] },
+      { version: '0.28.735', changes: ['Existing.'] },
+    ],
+  });
+});
+
+test('IGSH-1090 fragment gate rejects filler and engineering notes, not specific product changes', async () => {
+  const { checkFragments } = await import('./version-stamp.mjs');
+  const name = 'changelog.d/DEMO-1-update.md';
+  for (const line of [
+    'Behind the scenes fixes.', 'Plus 2 behind the scenes fixes.',
+    'Updates include the latest improvements.', 'Various improvements.', 'Bug fixes.',
+    'Chat speed checks now ignore shared-machine pauses.',
+    'Session switching checks now preserve slow and stale replies for diagnosis.',
+    'Fixed a test so releases stop getting stuck.', 'CI now finishes sooner.',
+    'Release workflow is safer.', 'Pipeline changes.', 'Added proof for chat replies.',
+  ]) {
+    assert.throws(() => checkFragments({}, { [name]: line }, [name]), /specific user-visible change/, line);
+  }
+  for (const line of [
+    'Switching chats is faster.', 'Dictation shortcuts keep working when keys queue up.',
+    'Image captions no longer hide replies.', 'Dialogs match your chosen colors.',
+    'The update card explains each change.',
+  ]) assert.doesNotThrow(() => checkFragments({}, { [name]: line }, ['src/example.zig', name]));
 });
