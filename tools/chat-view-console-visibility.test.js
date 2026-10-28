@@ -342,6 +342,8 @@ fn activeBrowserHasForegroundFocus() bool { return foreground == 20; }
 fn activeShellHwndForFocusGuard() HANDLE { return shells[0].hwnd; }
 fn requestShellRefocus(_: u32, _: u32) void {}
 fn activateConsoleForeground(hwnd: HANDLE) i32 { return SetForegroundWindow(hwnd); }
+var foreground_unlocked = false;
+fn unlockBrowserForeground() void { foreground_unlocked = true; }
 fn GetTickCount64() u64 { return 1000; }
 fn SetTimer(_: HANDLE, timer: usize, _: u32, _: ?usize) usize { if (timer == TIMER_CHAT_FOREGROUND_RETRY) { foreground_timer_armed = true; } return 1; }
 fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) i32 { return 1; }
@@ -364,7 +366,7 @@ fn AttachThreadInput(_: u32, _: u32, attach: i32) i32 { attached = attach != 0; 
 fn SetForegroundWindow(hwnd: HANDLE) i32 {
     if (!focusGuard(hwnd)) return 0;
     if (require_alt_unlock and !alt_unlocked) return 0;
-    if (foreground != g_main_hwnd and !attached and !alt_unlocked) return 0;
+    if (foreground != g_main_hwnd and (!attached or !foreground_unlocked) and !alt_unlocked) return 0;
     foreground = hwnd;
     return 1;
 }
@@ -385,6 +387,7 @@ test "IGSH-955 chat takes foreground before asynchronously hiding the console" {
         focused = initial;
         hide_requested = false;
         hidden_while_foreground = false;
+        foreground_unlocked = false;
         openChatView();
         try std.testing.expect(hide_requested);
         try std.testing.expect(!hidden_while_foreground);
@@ -424,9 +427,11 @@ test "IGSH-1142 held Alt preserves the existing guarded foreground completion" {
 test "IGSH-955 background chat restore never takes another app's foreground" {
     foreground = 999;
     focused = 999;
+    foreground_unlocked = false;
     openChatView();
     try std.testing.expectEqual(@as(HANDLE, 999), foreground);
     try std.testing.expectEqual(@as(HANDLE, 999), focused);
+    try std.testing.expect(!foreground_unlocked);
     try std.testing.expect(!attached);
 }
 test "IGSH-955 failed chat control creation leaves console focus intact" {
