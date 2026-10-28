@@ -255,8 +255,9 @@ function evaluateEvidence(root) {
       const captures = lines(`${name}/stand-in/capture.jsonl`);
       assert.ok(captures.length > 0, 'production reader inspected fake tmux screen');
       if (name === 'wrapped-leftover' || name === 'idle-suggestion') {
-        assert.equal(captures[0].screen, ready.screen, 'first capture is the seeded box');
-        assert.ok(captures.every(row => row.case === name && row.screen.startsWith('Claude Code\n\n') && /\n\u276f [^\n]*\n(?:  [^\n]*\n)*\u2500+\n$/.test(row.screen)), 'captures render the stateful box like Claude');
+        const screens = captures.map(row => row.screen.replace(/\u001b\[[\d;]*m/g, ''));
+        assert.equal(screens[0], ready.screen, 'first capture is the seeded box');
+        assert.ok(captures.every(row => row.case === name) && screens.every(screen => screen.startsWith('Claude Code\n\n') && /\n\u276f [^\n]*\n(?:  [^\n]*\n)*\u2500+\n$/.test(screen)), 'captures render the stateful box like Claude');
       } else assert.ok(captures.every(row => row.screen === ready.screen && row.case === name));
       const invocations = lines(`${name}/stand-in/invocations.jsonl`);
       assert.ok(invocations.some(row => row.kind === 'attach' && row.session === 'verify-agent'));
