@@ -1582,6 +1582,23 @@ def response(q, source=None, as_owner=False, resolved=None):
         status = status_header(source, info.st_size, agent, captured)
         if q.get("live") is True and agent == "claude" and tmux and mode != "older":
             status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux, q.get("watch_screen"), sid))
+        if q.get("held") is True and agent == "claude" and tmux and held_queue_path(tmux).exists():
+            from contextlib import closing
+            with closing(held_queue_db(tmux)) as db:
+                pending = db.execute("SELECT key,text,queued_at,state,origin,source_inode FROM messages WHERE sid=? AND state IN ('queued','submitted') ORDER BY created", (sid,)).fetchall()
+            status = dict(status or dict(role="status"), held=[dict(id=item[0], text=item[1], queued_at=item[2], state=item[3], offset=item[4], inode=item[5], sid=sid) for item in pending])
+        if q.get("delivery_ids") and agent == "claude" and tmux:
+            ids = q["delivery_ids"]
+            if not isinstance(ids, list) or any(not isinstance(token, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,80}", token) is None for token in ids):
+                raise ValueError("invalid message identities")
+            from contextlib import closing
+            with closing(held_queue_db(tmux)) as db:
+                deliveries = []
+                for token in ids:
+                    held = db.execute("SELECT state FROM messages WHERE key=? AND sid=?", (token, sid)).fetchone()
+                    if held:
+                        deliveries.append(dict(id=token, state=held[0]))
+            status = dict(status or dict(role="status"), deliveries=deliveries)
         more = scan_more or page_more
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
@@ -1752,7 +1769,7 @@ def drain_held_queue(tmux, sid, transcript):
             for raw in data[:complete].splitlines(keepends=True):
                 event = load_line(raw)
                 consumed += len(raw)
-                if isinstance(event, dict) and event.get("type") == "user" and not event.get("isSidechain"):
+                if isinstance(event, dict) and event.get("type") in ("user", "attachment") and not event.get("isSidechain"):
                     if any(row["role"] == "user" and row["text"].replace("\r", "") == text.replace("\r", "") for row in conversation_rows(event, "claude", consumed - len(raw))):
                         receipt = event.get("timestamp", "")
                         break

@@ -2865,5 +2865,17 @@ class HeldQueueTest(unittest.TestCase):
         self.send.assert_called_once()
 
 
+    def test_queue_removal_not_receipt_but_queued_command_is(self):
+        self.ready.return_value = True
+        self.enqueue('target', 1)
+        self.path.write_text(json.dumps(dict(type='queue-operation', operation='remove', content='target')) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [])
+        with self.path.open('a') as source:
+            source.write(json.dumps(dict(type='attachment', attachment=dict(type='queued_command', prompt='target'), timestamp='2026-10-28T20:00:00Z')) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['target'])
+
+
 if __name__ == '__main__':
     unittest.main()

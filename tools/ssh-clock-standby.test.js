@@ -297,7 +297,7 @@ fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const chat_echo = @import("chat_echo.zig");
 const Entry = struct {
-    state: chat_echo.OutboxState = .delivered, id: u64 = 1, channel_pending: bool = false,
+    state: chat_echo.OutboxState = .delivered, host_held: bool = false, id: u64 = 1, channel_pending: bool = false,
     transcript_queued: bool = false, retryable: bool = false, left_box_ms: u64 = 0,
     key: [1]u8 = .{0}, key_len: usize = 0, delivery_watch: chat_echo.DeliveryWatch = .{},
     anchor: chat_echo.Anchor = .{ .sent_ms = 8_000_000 }, sent_tick_ms: i64 = 100_000,

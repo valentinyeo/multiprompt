@@ -1189,3 +1189,30 @@ print('NATIVE_WINDOWS_WATCH_ROOT_OK')
 `;
   assert.match(execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { encoding: 'utf8', timeout: 10000 }), /NATIVE_WINDOWS_WATCH_ROOT_OK/);
 });
+
+test('held cancellation evidence rejects terminal delivery and unrelated removal', () => {
+  const { evaluate } = require('./chat-cancel-proof.cjs');
+  const texts = ['cancel keep one', 'cancel target two', 'cancel keep three'];
+  const steps = ['transcript-loaded', 'three-messages-held', 'middle-message-offers-cancel', 'middle-message-cancelled',
+    'other-messages-still-held', 'survivors-received-in-order', 'survivor-echoes-settled', 'delivered-message-has-no-cancel'];
+  const data = {
+    'cancel-held/observation.json': { error: null, steps: steps.map(name => ({ name, ok: true })) },
+    'cancel-held/outbox-held.json': { queues: [{ messages: texts.map(t => ({ t, s: 3 })) }] },
+    'cancel-held/outbox-cancelled.json': { queues: [{ messages: texts.map((t, i) => ({ t, s: i === 1 ? 4 : 3 })) }] },
+    'cancel-held/outbox-final.json': { queues: [{ messages: [{ t: texts[1], s: 4 }] }] },
+    'cancel-held/transcript.jsonl': [texts[0], texts[2]].map(content => ({ type: 'user', message: { content } })),
+    'cancel-held/stand-in/agent-buffer.jsonl': [texts[0], texts[2]].map(text => ({ argv: ['send-keys', '-l', '--', text] })),
+    'cleanup.json': { remaining_owned_processes: 0, scratch_removed: true },
+  };
+  const check = values => evaluate(file => values[file]);
+  assert.equal(check(data).cancelled, texts[1]);
+  const bad = structuredClone(data);
+  bad['cancel-held/transcript.jsonl'].push({ type: 'user', message: { content: texts[1] } });
+  assert.throws(() => check(bad));
+  const recall = structuredClone(data);
+  recall['cancel-held/stand-in/agent-buffer.jsonl'].push({ argv: ['send-keys', 'Up'] });
+  assert.throws(() => check(recall));
+  const lost = structuredClone(data);
+  lost['cancel-held/outbox-cancelled.json'].queues[0].messages.pop();
+  assert.throws(() => check(lost));
+});
