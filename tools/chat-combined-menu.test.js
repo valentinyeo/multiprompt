@@ -17,7 +17,7 @@ test('assistant message entry points share a below-message menu with stable requ
   const menu = fs.readFileSync(path.join(root, 'src/chat_message_menu.zig'), 'utf8');
   assert.match(menu, /copy_request_id = 11/);
   assert.match(render, /run\.last\]\.bottom - app_state\.g_chat_scroll_y \+ uiScaled\(6\)/);
-  assert.match(render, /bubble_rc\.bottom \+= reaction_height/);
+  assert.match(render, /chatPaintBlock\(mem_dc, buf, app_state\.g_chat_blocks\[i\], app_state\.g_chat_bubble_pos\[i\], rc\)/);
   if (!process.env.ZIG) return;
   const start = menu.indexOf('pub const Action');
   const end = menu.indexOf('\nconst State');

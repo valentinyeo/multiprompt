@@ -1308,7 +1308,7 @@ test "IGSH-376 expanded received Markdown keeps layout selection and copied text
     const brush = CreateSolidBrush(themeConsoleBg());
     defer _ = DeleteObject(brush);
     _ = FillRect(dc, &background, brush);
-    chatPaintBlock(dc, text, blocks[0], .single, rc, 0);
+    chatPaintBlock(dc, text, blocks[0], .single, rc);
     const area = RECT{ .left = 0, .top = 0, .right = rc.right - rc.left - 2 * uiScaled(CHAT_BUBBLE_PAD), .bottom = height };
     var caret: usize = text.len;
     _ = chatFlowBlock(dc, text, blocks[0], area, false, .{ .x = 0, .y = 1, .char = &caret }, 0, null);
@@ -1340,7 +1340,7 @@ test "IGSH-376 expanded received Markdown keeps layout selection and copied text
         received.len = short.len;
         const short_rc = chatMeasureBlockRect(dc, short, received, .single, width - 24, short_y, null);
         short_rect.* = short_rc;
-        chatPaintBlock(dc, short, received, .single, short_rc, 0);
+        chatPaintBlock(dc, short, received, .single, short_rc);
         try std.testing.expect(short_rc.bottom < height - 12);
         short_y = short_rc.bottom + 12;
     }
@@ -1378,11 +1378,11 @@ test "IGSH-376 expanded received Markdown keeps layout selection and copied text
         try std.testing.expect(w.QueryPerformanceCounter(&start) != 0);
         for (0..repaint_count) |_| {
             _ = FillRect(dc, &background, brush);
-            chatPaintBlock(dc, text, blocks[0], .single, rc, 0);
+            chatPaintBlock(dc, text, blocks[0], .single, rc);
             for (shorts, short_rects) |short, short_rc| {
                 var received = blocks[0];
                 received.len = short.len;
-                chatPaintBlock(dc, short, received, .single, short_rc, 0);
+                chatPaintBlock(dc, short, received, .single, short_rc);
             }
         }
         _ = Proof.GdiFlush();
@@ -1467,10 +1467,10 @@ test "IGSH-678 Chat View code is Nordwand Mono two points smaller and overflowin
     try std.testing.expect(code_rc.bottom < height);
     const before_painted = dwrite.painted_runs;
     const before_fallback = dwrite.fallback_runs;
-    chatPaintBlock(dc, &text, tool, .single, tool_rc, 0);
+    chatPaintBlock(dc, &text, tool, .single, tool_rc);
     const diff_painted = dwrite.painted_runs - before_painted;
     const diff_fallback = dwrite.fallback_runs - before_fallback;
-    chatPaintBlock(dc, &text, code_block, .single, code_rc, 0);
+    chatPaintBlock(dc, &text, code_block, .single, code_rc);
     const code_painted = dwrite.painted_runs - before_painted - diff_painted;
     const code_fallback = dwrite.fallback_runs - before_fallback - diff_fallback;
     if (dwrite.enabled()) {
@@ -3485,12 +3485,10 @@ fn chatNoteBodyRect(rc: RECT) RECT {
     return .{ .left = rc.left + pad, .top = rc.top + uiScaled(28) + pad, .right = rc.right - pad, .bottom = rc.bottom - pad };
 }
 
-fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_style.BubblePos, source_rc: RECT, reaction_height: i32) void {
+fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_style.BubblePos, source_rc: RECT) void {
     if (app_state.clean_chat and block.role == .tool) return;
     _ = SetBkMode(hdc, TRANSPARENT);
     const rc = source_rc;
-    var bubble_rc = rc;
-    bubble_rc.bottom += reaction_height;
     const disp = chatBlockDisplayRange(buf, block);
     const text = buf[disp.start .. disp.start + disp.len];
     const text_color = customColorOr("text", themeConsoleFg());
@@ -3513,7 +3511,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
         return;
     }
     if (block.kind == .table) {
-        fillBubbleStyled(hdc, bubble_rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), true, true);
+        fillBubbleStyled(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), true, true);
         const pad = uiScaled(CHAT_CODE_PAD);
         const text_rc = RECT{ .left = rc.left + pad, .top = rc.top + pad, .right = rc.right - pad, .bottom = rc.bottom - pad };
         _ = chatFlowBlock(hdc, text, block, text_rc, true, null, disp.start, null);
@@ -3533,7 +3531,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
             _ = chatFlowBlock(hdc, text[start..], block, text_rc, true, null, disp.start + start, null);
         },
         .prose => {
-            fillBubbleStyled(hdc, bubble_rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
+            fillBubbleStyled(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatAgentBubbleColor(), chat_style.roundTop(pos), chat_style.roundBottom(pos));
             const text_rc = RECT{ .left = rc.left + uiScaled(CHAT_AGENT_PAD_X), .top = rc.top + chat_style.topInset(pos, uiScaled(CHAT_AGENT_PAD_Y), uiScaled(CHAT_PARA_GAP)), .right = rc.right - uiScaled(CHAT_AGENT_PAD_X), .bottom = rc.bottom - chat_style.bottomInset(pos, uiScaled(CHAT_AGENT_PAD_Y)) };
             _ = SelectObject(hdc, ensureChatFont());
             _ = SetTextColor(hdc, text_color);
@@ -3588,7 +3586,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
             }
         },
         .code => {
-            fillRoundRectAA(hdc, bubble_rc, uiScaled(CHAT_BUBBLE_RADIUS), chatCodePanelColor());
+            fillRoundRectAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatCodePanelColor());
             chatPaintCodeHeader(hdc, rc, block);
             const text_rc = RECT{ .left = rc.left + uiScaled(CHAT_CODE_PAD), .top = rc.top + uiScaled(CHAT_CODE_PAD + CHAT_CODE_HEADER), .right = rc.right - uiScaled(CHAT_CODE_PAD), .bottom = rc.bottom - uiScaled(CHAT_CODE_PAD) };
             _ = SelectObject(hdc, ensureChatCodeFont());
@@ -4857,7 +4855,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
             var body_rc = rc;
             if (g_reaction_view.mask(i) != 0) body_rc.bottom -= uiScaled(28);
             g_bubble_span = bubbleRunSpan(i);
-            chatPaintBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], body_rc, if (g_reaction_view.mask(i) != 0) uiScaled(28) else 0);
+            chatPaintBlock(mem_dc, buf, app_state.g_chat_blocks[i], app_state.g_chat_bubble_pos[i], rc);
             g_bubble_span = null;
             chatPaintBlockImages(mem_dc, i, body_rc);
             chatPaintReactions(mem_dc, g_reaction_view.mask(i), rc);
@@ -5342,13 +5340,13 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return 0;
         },
         WM_MOUSEMOVE => {
+            if (chatTableMouseMove(hwnd, GET_X(lp))) return 0;
+            if (chatScrollUiMouseMove(GET_Y(lp))) return 0;
             const message_hover = chatMessageHoverAt(GET_Y(lp));
             if (message_hover != g_hover_message) {
                 g_hover_message = message_hover;
                 _ = InvalidateRect(hwnd, null, 0);
             }
-            if (chatTableMouseMove(hwnd, GET_X(lp))) return 0;
-            if (chatScrollUiMouseMove(GET_Y(lp))) return 0;
             var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
             _ = TrackMouseEvent(&tracking);
             if (app_state.g_chat_sel_dragging) {
@@ -6295,7 +6293,7 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
         .confirmed_bubble, .queued_bubble, .accepted_bubble, .sending_bubble, .shell_bubble => {
             const rc = chatMeasureEchoRect(dc, text, width, 0, false);
             if (scene == .confirmed_bubble) {
-                chatPaintBlock(dc, text, block, .single, rc, 0);
+                chatPaintBlock(dc, text, block, .single, rc);
             } else if (scene == .shell_bubble) {
                 var row: chat_shell_sync.Row = .{ .len = text.len };
                 @memcpy(row.text[0..text.len], text);
@@ -6359,7 +6357,7 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
                 crop.top = uiScaled(28);
             }
             const rc = chatMeasureBlockRect(dc, text, block, .single, width, 0, null);
-            chatPaintBlock(dc, text, block, .single, rc, 0);
+            chatPaintBlock(dc, text, block, .single, rc);
         },
         .user_read => {
             app_state.shells[0].chat_id = 1;
@@ -6380,7 +6378,7 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             try std.testing.expect(!chatEchoBlockConfirmed(text, unconfirmed));
             const plain = chatMeasureBlockRect(dc, text, unconfirmed, .single, width, 0, null);
             try std.testing.expectEqual(plain.bottom - plain.top, rc.bottom - rc.top);
-            chatPaintBlock(dc, text, block, .single, rc, 0);
+            chatPaintBlock(dc, text, block, .single, rc);
         },
         .user, .injected, .prose, .code, .table => {
             block.role = switch (scene) {
@@ -6394,7 +6392,7 @@ fn cleanChatPixels(scene: CleanChatScene, clean: bool) ![]u32 {
             block.len = shown.len;
             if (scene == .table) block.kind = .table;
             const rc = chatMeasureBlockRect(dc, shown, block, .single, width, 0, null);
-            chatPaintBlock(dc, shown, block, .single, rc, 0);
+            chatPaintBlock(dc, shown, block, .single, rc);
         },
     }
     canvas.deinit();
