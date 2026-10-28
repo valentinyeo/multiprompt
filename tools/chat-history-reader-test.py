@@ -2905,6 +2905,22 @@ class HeldQueueTest(unittest.TestCase):
         self.send.assert_not_called()
 
 
+    def test_worker_lock_never_strands_a_new_session(self):
+        import fcntl
+        import hashlib
+        self.enqueue('old target', 1)
+        lock_path = reader.held_queue_path('term-1').with_suffix('.' + hashlib.sha256(b'sid').hexdigest() + '.worker')
+        with lock_path.open('a') as lock, reader.held_queue_path('term-1').with_suffix('.worker').open('a') as shared, patch.object(reader.subprocess, 'Popen') as spawn:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(shared, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            reader.start_held_worker('term-1', 'sid', self.path, 'pass')
+            spawn.assert_not_called()
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('new-sid', self.path)):
+                self.enqueue('new target', 2)
+            reader.start_held_worker('term-1', 'new-sid', self.path, 'pass')
+            spawn.assert_called_once()
+            self.assertEqual(spawn.call_args.args[0][-2], 'new-sid')
+
     def test_held_send_ignores_a_dim_prompt_suggestion(self):
         shown = 'Claude Code\nReady\n❯ \x1b[2mTry a suggestion\x1b[0m\n' + '─' * 40 + '\n'
         with patch.object(reader.subprocess, 'run', return_value=types.SimpleNamespace(stdout=shown, returncode=0)):
