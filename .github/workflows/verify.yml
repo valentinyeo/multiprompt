@@ -149,6 +149,8 @@ on:
       - tools/auto-revert-master.js
       - tools/auto-revert-master.test.js
       - tools/verify-multiprompt.test.js
+      - tools/test-workflow-structure.test.mjs
+      - tools/verify-workflow-branches.mjs
       - tools/chat-sync-audit.py
       - tools/chat-sync-audit.test.py
       - tools/chat-focus.test.js
