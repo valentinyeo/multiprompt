@@ -640,3 +640,27 @@ test('IGSH-1115 failed tags cannot consume unpublished product notes', async t =
   assert.doesNotMatch(written, /\.ver = "0\.28\.73[67]"/);
   assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/DEMO-1115-recovered.md'), 'utf8'), 'Your chats keep their saved order.\n');
 });
+
+
+test('IGSH-1115 production history ignores failed tags without moving their product notes into failed versions', { skip: process.platform === 'win32' }, async t => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const r = repo(t);
+  r.git('tag', 'v0.28.735');
+  r.write({ 'changelog.d/DEMO-1115-recovered.md': 'Your chats keep their saved order.\n' });
+  r.commit();
+  r.git('tag', 'v0.28.736');
+  r.git('tag', 'v0.28.737');
+  const bin = path.join(r.dir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'gh'), '#!/usr/bin/env node\nprocess.stdout.write("v0.28.735\\n");\n', { mode: 0o755 });
+  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738'], {
+    cwd: r.dir, encoding: 'utf8', env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH },
+  });
+  assert.equal(built.status, 0, built.stderr);
+  assert.deepEqual(releaseNotes(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), 'v0.28.738'), {
+    version: '0.28.738', releases: [
+      { version: '0.28.738', changes: ['Your chats keep their saved order.'] },
+      { version: '0.28.735', changes: ['Existing.'] },
+    ],
+  });
+});
