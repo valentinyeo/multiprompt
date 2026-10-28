@@ -43,7 +43,7 @@ const CHAT_ECHO_PREFIX_CAP = 40;
 const CHAT_CONFIRMED_MAX_PER_KEY = 50;
 const ShellSendResult = enum { ok, write_failed, enter_failed };
 const ReconnectState = struct { phase: enum { connected, ended, closed } = .connected, fn ok(_: *@This()) void {} };
-const Shell = struct { shell_id: u32 = 1, kind: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
+const Shell = struct { chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
 const g_main_hwnd: ?*anyopaque = null;
 const g_chat_transcript_hwnd: ?*anyopaque = @ptrFromInt(2);
 const send_latency = struct {
@@ -76,6 +76,16 @@ fn chatReadMark(bottom: bool) bool {
     return false;
 }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
+var question_sends: usize = 0;
+var question_text: []const u16 = &.{};
+var question_send_ok = true;
+fn chatShellDraftNoteSend() void {}
+fn chatShellOp(_: u32, op: []const u8, text: ?[]const u16, _: ?*std.atomic.Value(bool)) bool {
+    std.debug.assert(std.mem.eql(u8, op, "question_text"));
+    question_sends += 1;
+    question_text = text.?;
+    return question_send_ok;
+}
 const ChatTmuxSendJob = struct {
     key: struct { shell_id: u32 = 1 } = .{},
     echo_id: u64,
@@ -252,6 +262,11 @@ fn clear() void {
     read_marks = 0;
     persist_ok = true;
     paste_ok = true;
+    shells[0].chat_question_other = false;
+    shells[0].chat_question_other_sent = false;
+    question_sends = 0;
+    question_send_ok = true;
+    question_text = &.{};
     shells[0].activity = .idle;
     shells[0].disconnected = false;
     test_outbox_key = "test";
@@ -339,6 +354,32 @@ fn transcript(text: []const u16, stamp: i64) void {
     g_chat_last_len = text.len;
     g_chat_blocks[0] = .{ .role = .user, .start = 0, .len = text.len, .stamp_ms = stamp };
     g_chat_block_count = 1;
+}
+test "delivery: IGSH-1063 Other keeps the typed answer until provider progress without an ordinary outbox message" {
+    defer clear();
+    shells[0].chat_question_other = true;
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("Purple");
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), question_sends);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Purple"), question_text);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Purple"), composer_text);
+    sendChatPrompt();
+    try std.testing.expectEqual(@as(usize, 1), question_sends);
+    chatQuestionOtherFinish(0);
+    try std.testing.expectEqual(@as(usize, 0), composer_text.len);
+    shells[0].chat_question_other = true;
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("Orange");
+    sendChatPrompt();
+    composer_text = std.unicode.utf8ToUtf16LeStringLiteral("next draft");
+    chatQuestionOtherFinish(0);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("next draft"), composer_text);
+    shells[0].chat_question_other = true;
+    question_send_ok = false;
+    sendChatPrompt();
+    try std.testing.expect(!shells[0].chat_question_other_sent);
+    try std.testing.expectEqual(@as(usize, 0), g_chat_outbox.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("next draft"), composer_text);
 }
 test "delivery: IGSH-442 busy channel waits past both budgets without retransmission then confirms" {
     defer clear();
@@ -1327,7 +1368,7 @@ test "IGSH-975 popup snapshot sends the clicked reply after live blocks change" 
 }
 
 `;
-const names = ['chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatTmuxSendFinish', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry'];
+const names = ['chatSendQuestionText', 'chatQuestionOtherFinish', 'chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatTmuxSendFinish', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry'];
 const sourceOutboxTests = ['Chat View outbox is FIFO and capped per key', 'Chat View outbox flush skips unconfirmed entries and keeps FIFO order', 'ISSUE-460 session queued evidence cannot release the next outbox entry', 'IGSH-564 busy tmux session still gets the queued message typed'].map(name => {
   const start = source.indexOf(`test "${name}" {`);
   assert.ok(start >= 0, name);
@@ -1348,8 +1389,12 @@ function runHarness(control = false) {
       .replaceAll('@import("inbox.zig").stampSessionUse', 'stampSessionUse')
       .replaceAll('@import("chat_composer.zig").clearChatReply', 'clearChatReply')
       .replaceAll('@import("chat_composer.zig").chatAcAgent', 'chatAcAgent')
+      .replaceAll('@import("chat_composer.zig").chatShellDraftNoteSend', 'chatShellDraftNoteSend')
       .replaceAll('@import("chat_send.zig").sendChatMessage', 'sendChatMessage');
     functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk').replaceAll('@import("console.zig").showReconnectedConsole', 'showReconnectedConsole').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent') : 'fn sshReconnectOk(_: u32) void {}');
+    if (control === 'question-old') {
+      functions = functions.replace('    if (chatSendQuestionText(send_text)) return;', '');
+    }
     if (control === 'steer-before') {
       functions = functions.replace('    chatEchoPushQueuedForShell(idx);', '    _ = idx;');
     }
@@ -1371,7 +1416,7 @@ function runHarness(control = false) {
       functions = functions.replace(body('chatEchoMatchActive'), oldBody('chatEchoMatchActive').replaceAll(', now_ms, loaded_ms)', ', now_ms)').replace('    const loaded_ms = chatEchoLoadedMs();\n', '')) + '\n' + oldBody('chatEchoRepresentedBlock');
     }
     fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + ['ChatOutboxEntry', 'ChatConfirmedEcho', 'ChatEchoAssignment'].map(declaration).join('\n') + functions + pendingLayout + acceptance + sourceOutboxTests).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'reaction-index' ? 'IGSH-975 popup snapshot' : control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
+    return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', control === 'question-old' ? 'IGSH-1063' : control === 'reaction-index' ? 'IGSH-975 popup snapshot' : control === 'settlement' ? 'delivery: refused real' : control === 'repeats' ? 'delivery: repeats' : control === 'unreadable' ? 'delivery: aged unconfirmed' : control === 'steer-before' ? 'IGSH-564 steer busy tmux' : control === 'steer-empty-before' ? 'IGSH-564 steer empty composer' : process.env.ISSUE_460_FILTER || (control === 'issue501' ? 'ISSUE-501' : control === 'igsh564' ? 'IGSH-564' : control === 'issue460' ? 'ISSUE-460' : control === 'outbox' ? 'Chat View outbox' : 'delivery:')], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 test('correctness repeats and unreadable: executed production outbox, write reservation and matching handle restart, busy/idle, repeated text and cache reload', () => {
@@ -1468,4 +1513,10 @@ test('IGSH-975 clicked-target oracle rejects a live-index lookup after a popup s
   const result = runHarness('reaction-index');
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /FAIL \(TestExpectedEqual\)/);
+});
+
+test('IGSH-1063 Other oracle rejects the previous ordinary-message route', () => {
+  const result = runHarness('question-old');
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /expected 1, found 0/);
 });

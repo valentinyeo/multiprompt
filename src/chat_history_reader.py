@@ -778,6 +778,9 @@ def status_header(source, size, agent, captured=()):
             if source.read(probe_bytes) != previous[5]:
                 previous = None
     model = usage = todos = None
+    question = None
+    question_known = False
+    completed_questions = set()
     window = 200000
     end = size
     lower = previous[0] if previous is not None else 0
@@ -787,7 +790,7 @@ def status_header(source, size, agent, captured=()):
     pending = b""
     first = True
     extra_budget = max(0, QUESTION_SCAN_BYTES - probe_bytes - sum(len(data) for _, data in captured))
-    while end > lower and remaining and (model is None or usage is None or todos is None):
+    while end > lower and remaining and (model is None or usage is None or todos is None or not question_known):
         count = min(TAIL_BYTES, end - lower, remaining)
         cached = next(((start, data) for start, data in captured if start < end <= start + len(data)), None)
         if cached is not None:
@@ -817,7 +820,8 @@ def status_header(source, size, agent, captured=()):
         for raw in reversed(parts):
             markers = (((b'"model"',) if model is None else ()) +
                        ((b'"usage"', b'token_count') if usage is None else ()) +
-                       ((b'TodoWrite', b'update_plan') if todos is None else ()))
+                       ((b'TodoWrite', b'update_plan') if todos is None else ()) +
+                       ((b'AskUserQuestion', b'request_user_input', b'tool_result', b'function_call_output') if not question_known else ()))
             if not any(marker in raw for marker in markers):
                 continue
             try:
@@ -826,6 +830,37 @@ def status_header(source, size, agent, captured=()):
                 continue
             if not isinstance(event, dict) or event.get("isSidechain"):
                 continue
+            if not question_known:
+                if agent == "claude":
+                    message = event.get("message")
+                    parts = message.get("content", []) if isinstance(message, dict) and event.get("type") in ("assistant", "user") and not any(event.get(key) for key in ("isMeta", "isCompactSummary", "isVisibleInTranscriptOnly")) else []
+                    parts = parts if isinstance(parts, list) else []
+                else:
+                    parts = [event.get("payload")] if event.get("type") == "response_item" else []
+                for part in reversed(parts):
+                    if not isinstance(part, dict):
+                        continue
+                    kind = part.get("type")
+                    if kind in ("tool_result", "function_call_output"):
+                        identity = part.get("tool_use_id") if agent == "claude" else part.get("call_id")
+                        if isinstance(identity, str):
+                            completed_questions.add(identity)
+                    elif ((agent == "claude" and kind == "tool_use" and part.get("name") == "AskUserQuestion") or
+                          (agent != "claude" and kind == "function_call" and part.get("name") == "request_user_input")):
+                        identity = part.get("id") if agent == "claude" else part.get("call_id")
+                        value = part.get("input") if agent == "claude" else part.get("arguments")
+                        if isinstance(value, str):
+                            try:
+                                value = json.loads(value)
+                            except ValueError:
+                                value = None
+                        questions = value.get("questions") if isinstance(value, dict) else None
+                        if isinstance(identity, str) and isinstance(questions, list) and questions:
+                            question = dict(id=identity, questions=questions) if identity not in completed_questions else None
+                            if question is not None and agent != "claude":
+                                question["provider"] = "codex"
+                            question_known = True
+                            break
             if agent == "claude":
                 if event.get("type") != "assistant":
                     continue
@@ -871,17 +906,23 @@ def status_header(source, size, agent, captured=()):
                         continue
                     if isinstance(value, dict) and isinstance(value.get("plan"), list):
                         todos = value["plan"]
-            if model is not None and usage is not None and todos is not None:
+            if model is not None and usage is not None and todos is not None and question_known:
                 break
     if previous is not None:
         model = previous[1] if model is None else model
         if usage is None:
             usage, window = previous[2:4]
         todos = previous[4] if todos is None else todos
-    STATUS_CACHE[key] = (scanned_end, model, usage, window, todos[:50] if todos is not None else None, probe)
+        if not question_known:
+            question = previous[6]
+            if question is not None and question["id"] in completed_questions:
+                question = None
+    STATUS_CACHE[key] = (scanned_end, model, usage, window, todos[:50] if todos is not None else None, probe, question)
     if len(STATUS_CACHE) > 256:
         del STATUS_CACHE[next(iter(STATUS_CACHE))]
     result = {"role": "status"}
+    if question is not None or previous is not None and previous[6] is not None:
+        result["question"] = question
     if model:
         display = model.removeprefix("claude-")
         match = re.match(r"(opus|sonnet|fable|haiku)-(\d+)-(\d+)", display)
@@ -1500,14 +1541,22 @@ def stop_response(q):
     op = q.get("op", "stop")
     digit = q.get("digit")
     key = chr(digit) if op == "permission" and type(digit) is int and 49 <= digit <= 57 else "Escape"
+    keys = None
     reason = None
-    if op == "permission" and key == "Escape":
+    if op == "question":
+        values = q.get("keys")
+        if not isinstance(values, list) or not values or any(type(value) is not int or value not in (9, 13) and not 49 <= value <= 57 for value in values):
+            reason = "invalid_question_keys"
+        else:
+            keys = [key for value in values for key in (["Up", "Tab"] if value == 9 else ["Enter"] if value == 13 else [chr(value)])]
+    elif op == "permission" and key == "Escape":
         reason = "invalid_permission_digit"
-    elif not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
         reason = "invalid_tmux_name"
-    else:
+    if reason is None:
         try:
-            keys = ["C-x", "C-s"] if op == "send_queued" else ["Up"] if op == "edit_queued" else [key]
+            if keys is None:
+                keys = ["C-x", "C-s"] if op == "send_queued" else ["Up"] if op == "edit_queued" else [key]
             subprocess.run(["tmux", "send-keys", "-t", "=" + name + ":", *keys], check=True, capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             reason = "tmux_stop_failed"
@@ -1579,7 +1628,8 @@ def send_response(q):
         except (OSError, subprocess.SubprocessError, UnicodeError):
             reason = "tmux_send_failed"
     status = "error" if reason else "ok"
-    return f"@mp\t{rid}\tsend\t{status}\t{reason or '-'}\t0\n{END}\n"
+    op = "question_text" if q.get("op") == "question_text" else "send"
+    return f"@mp\t{rid}\t{op}\t{status}\t{reason or '-'}\t0\n{END}\n"
 
 
 def type_into_box(target, text, rid):
@@ -1866,11 +1916,11 @@ def serve(source):
             if type(rid) is not int or rid < 0:
                 rid = 0
                 raise ValueError("invalid request id")
-            if query.get("op") == "send":
+            if query.get("op") in ("send", "question_text"):
                 wire = send_response(query)
             elif query.get("op") == "draft":
                 wire = draft_response(query)
-            elif query.get("op") in ("stop", "permission", "send_queued", "edit_queued"):
+            elif query.get("op") in ("stop", "permission", "question", "send_queued", "edit_queued"):
                 wire = stop_response(query)
             elif query.get("op") == "settle":
                 wire = settle_response(query, source)

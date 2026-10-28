@@ -420,6 +420,7 @@ pub fn sendChatPrompt() void {
         return;
     }
     var send_text: []const u16 = chatPromptNormalizeLineEndings(text_buf[0..text_len]);
+    if (chatSendQuestionText(send_text)) return;
     var composed_utf8: ?[]u8 = null;
     defer if (composed_utf8) |bytes| std.heap.page_allocator.free(bytes);
     if (app_state.g_chat_reply_len > 0) {
@@ -2632,13 +2633,66 @@ pub fn chatPermissionAnswer(shell_index: u32, action: @import("chat_permission.z
     return true;
 }
 
-pub fn chatQuestionAnswer(shell_index: u32, digit: u8, question_hash: u64) bool {
+fn chatSendQuestionText(text: []const u16) bool {
+    const shell = &app_state.shells[app_state.active_shell];
+    if (!shell.chat_question_other) return false;
+    if (shell.chat_question_other_sent) return true;
+    if (chatShellOp(app_state.active_shell, "question_text", text, null)) {
+        shell.chat_question_other_hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(text));
+        shell.chat_question_other_sent = true;
+        @import("chat_composer.zig").chatShellDraftNoteSend();
+    }
+    return true;
+}
+
+pub fn chatQuestionOtherFinish(shell_index: u32) void {
+    const shell = &app_state.shells[shell_index];
+    if (shell.chat_question_other_sent and shell_index == app_state.active_shell and app_state.g_chat_composer_hwnd != null) {
+        var text: [16384]u16 = undefined;
+        const len: usize = @intCast(@max(0, GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len)));
+        if (std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(chatPromptNormalizeLineEndings(text[0..len]))) == shell.chat_question_other_hash) {
+            _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+            app_state.g_chat_draft_dirty = true;
+            chatDraftFlush();
+        }
+    }
+    shell.chat_question_other_sent = false;
+    shell.chat_question_other = false;
+}
+
+pub fn chatQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_hash: u64) bool {
     if (!app_state.g_chat_active or shell_index != app_state.active_shell or shell_index >= app_state.shell_count) return false;
     var scratch: [2]u16 = undefined;
     if (@import("chat_capture.zig").captureChatTranscript(shell_index, &scratch, true) == null) return false;
     const shell = &app_state.shells[shell_index];
-    if (app_state.g_chat_question_sid != shell.shell_id or app_state.g_chat_question.count == 0 or app_state.g_chat_question.hash() != question_hash) return false;
-    return chatAgentKey(shell_index, digit);
+    const session = @import("chat_session.zig");
+    const entry = session.chatHistoryEntry(session.chatFileIdentity()) orelse return false;
+    const prompt = &entry.history.status.question;
+    if (shell.chat_question_index >= prompt.count or prompt.groups[shell.chat_question_index].hash() != question_hash) return false;
+    const group = &prompt.groups[shell.chat_question_index];
+    var keys: [@import("chat_options.zig").MAX_OPTIONS + 1]u8 = undefined;
+    const sequence = group.answerKeys(digit, selected, &keys) orelse return false;
+    const key = session.chatFileIdentity();
+    if (key.tmux[0] == 0) return false;
+    const thread = std.Thread.spawn(.{}, chatQuestionTmuxThread, .{ key, keys, sequence.len }) catch return false;
+    thread.detach();
+    return true;
+}
+
+fn chatQuestionTmuxThread(key: @import("chat_transcript.zig").Identity, keys: [@import("chat_options.zig").MAX_OPTIONS + 1]u8, count: usize) void {
+    const a = std.heap.page_allocator;
+    var values: [@import("chat_options.zig").MAX_OPTIONS + 1]u32 = undefined;
+    for (keys[0..count], 0..) |key_value, index| values[index] = key_value;
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = "question", .keys = values[0..count], .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0) }, .{}) catch return;
+    defer a.free(query);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, "\tquestion\tok\t") == null) {
+        app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
+        debugLog("[chat] question failed via=tmux");
+        return;
+    }
+    debugLog("[chat] question sent via=tmux");
 }
 
 fn chatAgentKey(shell_index: u32, digit: u8) bool {
@@ -2737,6 +2791,7 @@ fn chatShellOpThread(key: @import("chat_transcript.zig").Identity, op: []const u
     const want = std.fmt.bufPrint(&needle, "\t{s}\tok\t", .{op}) catch return;
     var log: [96]u8 = undefined;
     if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, want) == null) {
+        if (std.mem.eql(u8, op, "question_text")) app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
         debugLog(std.fmt.bufPrint(&log, "[chat] {s} failed via=tmux", .{op}) catch "");
         return;
     }

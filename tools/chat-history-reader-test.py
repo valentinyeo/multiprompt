@@ -50,6 +50,73 @@ class HistoryReaderTest(unittest.TestCase):
         self.query.pop('before', None)
         return fields, [json.loads(line) for line in lines[1:-1]]
 
+    def test_igsh1063_only_structured_pending_questions(self):
+        questions = [dict(question="Which colour?", header="Accent", multiSelect=False,
+                          options=[dict(label="Lime", description="Bright contrast"),
+                                   dict(label="Orange", description="Warm contrast")]),
+                     dict(question="Which devices?", header="Devices", multiSelect=True,
+                          options=[dict(label="Desktop", description="Windows"),
+                                   dict(label="Phone", description="Android")])]
+        prose = self.event("I need three answers from you:\n1. Figma team\n2. Figma login\n3. QA tickets")
+        self.write(prose)
+        self.assertFalse(any(row.get("question") for row in self.read()[1]))
+        call = self.tool_call("AskUserQuestion", dict(questions=questions))
+        self.write(prose, call)
+        status = next((row for row in self.read()[1] if row["role"] == "status"), None)
+        self.assertIsNotNone(status, "pending structured question must reach the client")
+        self.assertEqual(status["question"], dict(id="call-263", questions=questions))
+        self.assertEqual(next(row for row in self.read()[1] if row["role"] == "status")["question"], status["question"])
+        with self.path.open("a") as target:
+            target.write(json.dumps(self.tool_result("answered")) + "\n")
+        self.assertIsNone(next(row for row in self.read()[1] if row["role"] == "status")["question"])
+
+    def test_igsh1063_codex_structured_questions_complete(self):
+        self.query["codex"] = True
+        self.path = self.home / ".codex/sessions/rollout-2026-sid.jsonl"
+        self.path.parent.mkdir(parents=True)
+        question = dict(id="colour", question="Which colour?", header="Accent",
+                        options=[dict(label="Lime", description="Bright contrast"),
+                                 dict(label="Orange", description="Warm contrast")])
+        self.write(dict(type="response_item", payload=dict(type="function_call", call_id="q1",
+                   name="request_user_input", arguments=json.dumps(dict(questions=[question])))))
+        status = next((row for row in self.read()[1] if row["role"] == "status"), None)
+        self.assertIsNotNone(status, "pending Codex question must reach the client")
+        self.assertEqual(status["question"]["id"], "q1")
+        self.assertEqual(status["question"]["provider"], "codex")
+        self.assertEqual(status["question"]["questions"], [question])
+        with self.path.open("a") as target:
+            target.write(json.dumps(dict(type="response_item", payload=dict(type="function_call_output", call_id="q1", output="done"))) + "\n")
+        self.assertIsNone(next(row for row in self.read()[1] if row["role"] == "status")["question"])
+
+    def test_igsh1063_answered_sidechain_and_embedded_question_text_not_pending(self):
+        question = dict(question="Real question?", header="Pick", options=[dict(label="A"), dict(label="B")])
+        self.write(self.tool_call("AskUserQuestion", dict(questions=[question])), self.tool_result("done"),
+                   self.event('AskUserQuestion {"questions": []}'),
+                   dict(self.tool_call("AskUserQuestion", dict(questions=[question])), isSidechain=True))
+        self.assertFalse(any(row.get("question") for row in self.read()[1]))
+
+    def test_igsh1063_question_keys_keep_order_and_permission_boundaries(self):
+        for keys, expected in (([49], ["1"]), ([50], ["2"]), ([49, 50, 13], ["1", "2", "Enter"]), ([9], ["Up", "Tab"])):
+            with patch.object(reader.subprocess, "run") as run:
+                wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", keys=keys))
+            self.assertIn("\tquestion\tok\t", wire)
+            self.assertEqual(run.call_args.args[0], ["tmux", "send-keys", "-t", "=term-1:", *expected])
+        for keys in ([], [27], [10], [True], [49, 50, "Enter"], None):
+            with patch.object(reader.subprocess, "run") as run:
+                wire = reader.stop_response(dict(op="question", id=7, tmux="term-1", keys=keys))
+            self.assertIn("\tquestion\terror\t", wire)
+            run.assert_not_called()
+        with patch.object(reader.subprocess, "run") as run:
+            self.assertIn("\tpermission\terror\t", reader.stop_response(dict(op="permission", id=7, tmux="term-1", digit=13)))
+        run.assert_not_called()
+
+    def test_igsh1063_other_text_keeps_question_reply_operation(self):
+        with patch.object(reader, "prompt_box_text", return_value=""), patch.object(reader, "clear_prompt_box", return_value=("", False)), patch.object(reader.time, "sleep"), patch.object(reader.subprocess, "run") as run:
+            wire = reader.send_response(dict(op="question_text", id=7, tmux="term-1", text="Purple"))
+        self.assertIn("\tquestion_text\tok\t", wire)
+        self.assertEqual(run.call_args_list[0].args[0], ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "Purple"])
+        self.assertEqual(run.call_args_list[1].args[0], ["tmux", "send-keys", "-t", "=term-1:", "Enter"])
+
     def test_claude_status_header(self):
         todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]
         old = self.tool_call("TodoWrite", dict(todos=[dict(content="old", status="pending")]))

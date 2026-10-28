@@ -48,6 +48,7 @@ pub const QueueItem = struct {
     sender: [64]u16 = @splat(0),
 };
 pub const Status = struct {
+    question: @import("chat_options.zig").Prompt = .{},
     queue: [QUEUE_MAX]QueueItem = @splat(.{}),
     queue_len: usize = 0,
     live_known: bool = false,
@@ -149,12 +150,13 @@ fn fillQueue(result: *Status, items: ?[]const std.json.Value, sent: bool) void {
 pub fn parseStatus(line: []const u8) ?Parsed {
     if (std.mem.indexOf(u8, line, "\"status\"") == null) return null;
     const WireTodo = struct { text: []const u8 = "", status: []const u8 = "pending" };
-    const WireStatus = struct { role: []const u8, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const std.json.Value = null, sent: ?[]const std.json.Value = null, draft: ?[]const u8 = null };
+    const WireStatus = struct { role: []const u8, question: ?@import("chat_options.zig").WirePrompt = null, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const std.json.Value = null, sent: ?[]const std.json.Value = null, draft: ?[]const u8 = null };
     const parsed = std.json.parseFromSlice(WireStatus, std.heap.page_allocator, line, .{ .ignore_unknown_fields = true }) catch return null;
     defer parsed.deinit();
     const value = parsed.value;
     if (!std.mem.eql(u8, value.role, "status")) return null;
     var result: Status = .{};
+    if (value.question) |question| result.question = @import("chat_options.zig").Prompt.fromWire(question);
     result.model_len = statusText(&result.model, value.model);
     result.percent_left = if (value.percent_left) |left| @min(left, 100) else null;
     if (value.queue != null or value.sent != null) {

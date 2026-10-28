@@ -28,7 +28,16 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  red-control:
+    if: github.ref != 'refs/heads/master'
+    uses: ./.github/workflows/check-red-run.yml
+    with:
+      base: ${{ github.event.pull_request.base.sha || 'origin/master' }}
+      head: ${{ github.sha }}
+
   palette-dialog-design:
+    needs: red-control
+    if: ${{ !cancelled() && (needs.red-control.result == 'success' || needs.red-control.result == 'skipped') }}
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
@@ -46,13 +55,6 @@ jobs:
           if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
           Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - name: Prove old palette source fails
-        if: github.ref != 'refs/heads/master'
-        shell: bash
-        run: |
-          base=$(git merge-base origin/master HEAD)
-          set -o pipefail
-          node tools/check-red-run.mjs "$base" HEAD | tee palette-red.log
       - name: Require current design contracts
         run: node --test tools/palette-dialog-design.test.js
       - name: Build real app

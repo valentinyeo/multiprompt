@@ -1053,3 +1053,51 @@ test('remote appended-message receipt keeps the request window across delayed fo
   assert.match(source.slice(0, start), /\$appendLogStart = \(Read-Shared "\$settings\/debug.log"\).Length/);
   assert.match(wait, /Substring\(\$appendLogStart\)/);
 });
+
+test('IGSH-1063 question boundary records single, multiple and Other answers exactly', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'structured-question-'));
+  try {
+    const transcript = path.join(dir, 'home/.claude/projects/C--verify-work/sid.jsonl');
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+      name: 'chat-options', mode: 'busy', suggestion: '', fake: true, sid: 'sid', cwd: 'C:/verify/work', panePid: 4242,
+      transcript, meta: path.join(dir, 'home/.claude/sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
+    }));
+    const run = (mode, ...args) => {
+      const result = require('node:child_process').spawnSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), mode, ...args], { env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      return result.stdout;
+    };
+    const key = (...keys) => run('tmux', 'send-keys', '-t', '=verify-agent:', ...keys);
+    run('shell', 'init');
+    run('shell', 'plain-list');
+    run('shell', 'question', path.join(root, 'tools/fixtures/IGSH-1063/questions.json'));
+    assert.match(run('tmux', 'capture-pane', '-p', '-J'), /Which colour should we use\?/);
+    key('2');
+    key('1', '2', 'Enter');
+    let answers = fs.readFileSync(path.join(dir, 'question-answers.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(answers.map(answer => answer.labels), [['Orange'], ['Desktop', 'Phone']]);
+    assert.equal(JSON.parse(run('shell', 'show')).question, null);
+    run('shell', 'question', path.join(root, 'tools/fixtures/IGSH-1063/questions.json'));
+    key('3');
+    run('tmux', 'send-keys', '-t', '=verify-agent:', '-l', '--', 'Purple');
+    key('Enter');
+    answers = fs.readFileSync(path.join(dir, 'question-answers.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(answers[2].labels, ['Purple']);
+    assert.match(run('tmux', 'capture-pane', '-p', '-J'), /Which devices should we check\?/);
+    const events = fs.readFileSync(transcript, 'utf8').trim().split('\n').map(JSON.parse);
+    const calls = events.filter(event => event.message?.content?.[0]?.name === 'AskUserQuestion');
+    assert.equal(calls.length, 2);
+    assert.equal(events.filter(event => event.message?.content?.[0]?.tool_use_id === calls[0].message.content[0].id).length, 1);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test('IGSH-1063 question proof selects the saved AMOLED theme and supports published assets', () => {
+  const journey = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/chat-options.ps1'), 'utf8');
+  assert.match(journey, /Select-Theme 'amoled' 'theme-amoled'/);
+  assert.doesNotMatch(journey, /Palette '(?:theme )?amoled'/);
+  const adapter = fs.readFileSync(path.join(root, '.github/workflows/question-journey.yml'), 'utf8');
+  assert.match(adapter, /types: \[structured-question-proof\]/);
+  assert.match(adapter, /feature: chat-options/);
+  assert.match(adapter, /tag: \$\{\{ github\.event\.client_payload\.tag \|\| '' \}\}/);
+});
