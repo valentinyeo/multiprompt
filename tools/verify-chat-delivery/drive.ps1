@@ -134,7 +134,7 @@ function Press([int[]]$Keys, [string]$Label, [bool]$Chat = $false) {
 }
 function Read-Shared([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return '' }
-    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
     try {
         $reader = [IO.StreamReader]::new($stream)
         try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
