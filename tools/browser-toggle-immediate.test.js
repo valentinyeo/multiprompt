@@ -69,3 +69,38 @@ test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', 
   assert.match(native, /chord\(\);[\s\S]*Thread\.Sleep\(100\);[\s\S]*chord\(\);/);
   assert.match(native, /gap > 300/);
 });
+
+test('IGSH-1126 a launch-owned browser belongs to the app before adoption', () => {
+  const production = fn(read('src/focus.zig'), 'foregroundHwndIsOurs').replace('@import("settings_panel.zig").ownsWindow(fg)', 'settingsOwnsWindow(fg)');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opening-owner-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'owner.zig'), `const std = @import("std");
+const HANDLE = ?usize;
+const LONG_PTR = isize;
+const GA_ROOTOWNER = 3;
+const GWLP_HWNDPARENT = -8;
+const app_state = @This();
+var g_main_hwnd: HANDLE = 10;
+var g_urlbar_hwnd: HANDLE = null;
+const shell_count = 0;
+const shells = [_]struct { hwnd: HANDLE, browser_hwnd: HANDLE }{};
+fn GetAncestor(hwnd: HANDLE, _: u32) HANDLE { return if (hwnd == 20) 10 else hwnd; }
+fn settingsOwnsWindow(_: HANDLE) bool { return false; }
+fn IsWindow(_: HANDLE) i32 { return 1; }
+fn GetWindowLongPtrW(_: HANDLE, _: i32) isize { return 0; }
+fn GetParent(_: HANDLE) HANDLE { return null; }
+fn browserPaneOwnsForegroundHwnd(_: HANDLE, _: HANDLE) bool { return false; }
+${production}
+test "opening pane owner is authoritative before shell browser_hwnd is populated" {
+    try std.testing.expect(foregroundHwndIsOurs(20));
+    try std.testing.expect(foregroundHwndIsOurs(10));
+    try std.testing.expect(!foregroundHwndIsOurs(30));
+    try std.testing.expect(!foregroundHwndIsOurs(null));
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'owner.zig')], { cwd: dir, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
