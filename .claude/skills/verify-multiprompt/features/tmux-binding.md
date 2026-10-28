@@ -1,5 +1,7 @@
 # Saved terminal binding
 
+Verify on: push
+
 ## Sub-features
 
 - A bare SSH tab adopts a confirmed named terminal session.

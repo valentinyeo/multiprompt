@@ -107,7 +107,7 @@ pub fn stopUpdateCardWatch() void {
 }
 
 pub fn updateCardVisible() bool {
-    if (app_state.g_update_ver_len == 0 or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed or app_state.g_update_relaunching) return false;
+    if (card_notes.count == 0 or app_state.g_update_ver_len == 0 or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed or app_state.g_update_relaunching) return false;
     const cur = app_state.g_update_ver[0..app_state.g_update_ver_len];
     return !std.mem.eql(u8, cur, app_state.g_update_dismissed[0..app_state.g_update_dismissed_len]);
 }
@@ -115,19 +115,59 @@ pub fn updateCardVisible() bool {
 var card_notes: @import("update_notes.zig").Notes = .{};
 var card_notes_logged = false;
 var card_expanded = false;
+var card_scroll: i32 = 0;
+var measured_width: i32 = 0;
+var measured_font: HANDLE = null;
+var measured_scale: i32 = 0;
+var measured_font_gen: u32 = 0;
+var measured_shown: usize = 0;
+var note_heights: [16]i32 = @splat(0);
+var notes_height: i32 = 0;
+var last_notes_rect: RECT = std.mem.zeroes(RECT);
+
+fn measureNotes() void {
+    const sticky = sidebarStickyCardRect();
+    const width = @max(1, sticky.right - sticky.left - uiScaled(20));
+    const font = @import("drawing.zig").uiFontStatusCard();
+    const shown = card_notes.shown(card_expanded);
+    if (measured_width == width and measured_font == font and measured_scale == uiScaled(18) and measured_shown == shown and measured_font_gen == app_state.g_font_gen) return;
+    const dc = @import("win32.zig").GetDC(app_state.g_main_hwnd);
+    if (dc == null) return;
+    defer _ = @import("win32.zig").ReleaseDC(app_state.g_main_hwnd, dc);
+    const old_font = SelectObject(dc, font);
+    defer _ = SelectObject(dc, old_font);
+    notes_height = 0;
+    for (0..shown) |i| {
+        var wide: [512]u16 = undefined;
+        const n = std.unicode.utf8ToUtf16Le(&wide, card_notes.line(i)) catch continue;
+        var rect = RECT{ .left = 0, .top = 0, .right = width, .bottom = 0 };
+        _ = @import("win32.zig").DrawTextW(dc, &wide, @intCast(n), &rect, DT_WORDBREAK | DT_NOPREFIX | @import("win32.zig").DT_CALCRECT);
+        note_heights[i] = @max(uiScaled(14), rect.bottom) + uiScaled(4);
+        notes_height += note_heights[i];
+    }
+    measured_width = width;
+    measured_font = font;
+    measured_scale = uiScaled(18);
+    measured_shown = shown;
+    measured_font_gen = app_state.g_font_gen;
+    card_notes_logged = false;
+}
 
 fn cardHasToggle() bool {
     return card_notes.total > @import("update_notes.zig").COLLAPSED_LINES;
 }
 
 fn updateCardHeight() i32 {
-    const rows = card_notes.shown(card_expanded) + @intFromBool(cardHasToggle());
-    return uiScaled(UPDATE_CARD_H) + @as(i32, @intCast(rows)) * uiScaled(18);
+    measureNotes();
+    const desired = uiScaled(UPDATE_CARD_H) + notes_height + (if (cardHasToggle()) uiScaled(18) else @as(i32, 0));
+    const available = sidebarStickyCardRect().top - @import("window_layout.zig").paneGap() - uiScaled(48);
+    return @min(desired, @max(uiScaled(UPDATE_CARD_H + 36), available));
 }
 
 pub fn updateCardToggleNotes() void {
     if (!cardHasToggle()) return;
     card_expanded = !card_expanded;
+    card_scroll = 0;
     card_notes_logged = false;
     if (app_state.g_main_hwnd != null) clampSidebarScroll();
 }
@@ -156,8 +196,24 @@ fn updateCardCloseRect(card: RECT) RECT {
 }
 
 fn updateCardMoreRect(card: RECT) RECT {
-    const top = card.top + uiScaled(46) + @as(i32, @intCast(card_notes.shown(card_expanded))) * uiScaled(18);
-    return .{ .left = card.left + uiScaled(10), .top = top, .right = card.right - uiScaled(10), .bottom = top + uiScaled(18) };
+    const bottom = card.bottom - uiScaled(30);
+    return .{ .left = card.left + uiScaled(10), .top = bottom - uiScaled(18), .right = card.right - uiScaled(10), .bottom = bottom };
+}
+
+fn updateCardNotesRect(card: RECT) RECT {
+    return .{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(46), .right = card.right - uiScaled(10), .bottom = if (cardHasToggle()) updateCardMoreRect(card).top else card.bottom - uiScaled(30) };
+}
+
+pub fn updateCardScroll(x: i32, y: i32, delta: i16) bool {
+    if (!updateCardVisible()) return false;
+    const card = updateCardRect();
+    if (!ptInRect(card, x, y)) return false;
+    const notes = updateCardNotesRect(card);
+    const limit = @max(0, notes_height - (notes.bottom - notes.top));
+    card_scroll = std.math.clamp(card_scroll - @divTrunc(@as(i32, delta) * uiScaled(54), 120), 0, limit);
+    card_notes_logged = false;
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    return true;
 }
 
 fn ptInRect(r: RECT, x: i32, y: i32) bool {
@@ -182,8 +238,11 @@ pub fn updateCardPoll() void {
     if (update_release.poll()) |version| {
         if (!release_ready or !std.mem.eql(u8, version, app_state.g_update_ver[0..app_state.g_update_ver_len])) {
             card_notes = update_release.cardNotes(version);
+            if (card_notes.count == 0) debugLog2("[update] quiet release waiting ", version);
             card_notes_logged = false;
             card_expanded = false;
+            card_scroll = 0;
+            measured_width = 0;
             restart_status = "";
         }
         release_ready = true;
@@ -224,6 +283,8 @@ pub fn updateCardPoll() void {
     card_notes = update_release.cardNotes(found);
     card_notes_logged = false;
     card_expanded = false;
+    card_scroll = 0;
+    measured_width = 0;
     @memcpy(app_state.g_update_ver[0..found.len], found);
     app_state.g_update_ver_len = found.len;
     debugLog2("update-card: new version ready ", found);
@@ -323,11 +384,33 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
 
     _ = SetTextColor(hdc, dim);
     const shown = card_notes.shown(card_expanded);
-    for (0..shown) |i| {
-        var note_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(46) + @as(i32, @intCast(i)) * uiScaled(18), .right = card.right - uiScaled(10), .bottom = card.top + uiScaled(46) + @as(i32, @intCast(i + 1)) * uiScaled(18) };
-        var wide: [512]u16 = undefined;
-        const n = std.unicode.utf8ToUtf16Le(&wide, card_notes.line(i)) catch continue;
-        _ = @import("win32.zig").DrawTextW(hdc, &wide, @intCast(n), &note_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    const notes_rect = updateCardNotesRect(card);
+    const viewport_height = @max(0, notes_rect.bottom - notes_rect.top);
+    if (!std.meta.eql(last_notes_rect, notes_rect)) {
+        last_notes_rect = notes_rect;
+        card_notes_logged = false;
+    }
+    card_scroll = std.math.clamp(card_scroll, 0, @max(0, notes_height - viewport_height));
+    const saved_dc = @import("win32.zig").SaveDC(hdc);
+    if (saved_dc != 0) {
+        _ = @import("win32.zig").IntersectClipRect(hdc, notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom);
+        var top = notes_rect.top - card_scroll;
+        for (0..shown) |i| {
+            var note_rc = RECT{ .left = notes_rect.left, .top = top, .right = notes_rect.right, .bottom = top + note_heights[i] - uiScaled(4) };
+            var wide: [512]u16 = undefined;
+            const n = std.unicode.utf8ToUtf16Le(&wide, card_notes.line(i)) catch continue;
+            _ = @import("win32.zig").DrawTextW(hdc, &wide, @intCast(n), &note_rc, DT_WORDBREAK | DT_NOPREFIX);
+            top += note_heights[i];
+        }
+        _ = @import("win32.zig").RestoreDC(hdc, saved_dc);
+    }
+    if (notes_height > viewport_height and viewport_height > 0) {
+        const thumb_h = @max(uiScaled(8), @divTrunc(viewport_height * viewport_height, notes_height));
+        const thumb_top = notes_rect.top + @divTrunc(card_scroll * (viewport_height - thumb_h), notes_height - viewport_height);
+        var thumb = RECT{ .left = card.right - uiScaled(5), .top = thumb_top, .right = card.right - uiScaled(3), .bottom = thumb_top + thumb_h };
+        const brush = CreateSolidBrush(dim);
+        _ = @import("win32.zig").FillRect(hdc, &thumb, brush);
+        _ = DeleteObject(brush);
     }
     var more_buf: [32]u8 = undefined;
     const more_text: []const u8 = if (card_expanded) "Show less" else card_notes.more(&more_buf, false);
@@ -339,6 +422,8 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     if (!card_notes_logged) {
         card_notes_logged = true;
         var log_buf: [640]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log_buf, "[update] notes viewport={d},{d},{d},{d} content={d} scroll={d}", .{ notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom, notes_height, card_scroll }) catch "[update] notes viewport unavailable");
+        for (0..shown) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] note height {d}={d}", .{ i, note_heights[i] }) catch continue);
         const restart_button = updateCardButtonRect(card);
         debugLog(std.fmt.bufPrint(&log_buf, "[update] restart button={d},{d}", .{ @divTrunc(restart_button.left + restart_button.right, 2), @divTrunc(restart_button.top + restart_button.bottom, 2) }) catch "[update] restart button unavailable");
         if (cardHasToggle()) {

@@ -259,3 +259,48 @@ test "stale timer cannot release a newer target early or a different active shel
     assert.match(baseline.stderr, /missing paint releases through the production timer exactly once[^]*FAIL/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+test('IGSH-1040 cached switch presents its final target before returning to queued browser work', () => {
+  const os = require('node:os'), path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const switching = body('switchToShell');
+  const start = switching.lastIndexOf('    g_chat_switch_preparing = false;');
+  const end = switching.indexOf('    _ = InvalidateRect(g_main_hwnd, null, 0);', start);
+  assert.ok(start >= 0 && end > start);
+  const finish = switching.slice(start, end).replaceAll('@import("win32.zig").', '');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-switch-present-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'test.zig'), `
+const std = @import("std");
+var g_chat_switch_preparing = true;
+var defer_browser = true;
+var g_chat_transcript_hwnd: ?usize = 2;
+var invalidated = false;
+var painted: usize = 0;
+fn InvalidateRect(_: ?usize, _: ?usize, _: i32) i32 { invalidated = true; return 1; }
+fn UpdateWindow(_: ?usize) i32 {
+    std.debug.assert(!g_chat_switch_preparing and invalidated);
+    painted += 1;
+    return 1;
+}
+fn finishSwitch() void {
+${finish}
+}
+test "cached target is presented before queued browser work, never for a terminal or missing control" {
+    finishSwitch();
+    try std.testing.expectEqual(@as(usize, 1), painted);
+    defer_browser = false;
+    finishSwitch();
+    try std.testing.expectEqual(@as(usize, 1), painted);
+    defer_browser = true;
+    g_chat_transcript_hwnd = null;
+    finishSwitch();
+    try std.testing.expectEqual(@as(usize, 1), painted);
+}
+`);
+    const run = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.match(run.stderr, /All 1 tests passed/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

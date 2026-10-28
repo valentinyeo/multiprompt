@@ -4,8 +4,6 @@ const versionNewer = @import("update_check.zig").versionNewer;
 pub const Release = struct { version: []const u8, changes: []const []const u8 };
 pub const Document = struct { version: []const u8, releases: []const Release };
 pub const COLLAPSED_LINES = 3;
-pub const BEHIND_THE_SCENES = "Behind the scenes fixes.";
-const LEGACY_FILLER = "Updates include the latest improvements.";
 
 pub const Notes = struct {
     lines: [16][512]u8 = @splat(@splat(0)),
@@ -50,34 +48,29 @@ pub fn plain(text: []const u8) bool {
         }
         if (c == '.' and i > 0 and i + 1 < text.len and std.ascii.isAlphanumeric(text[i - 1]) and std.ascii.isAlphabetic(text[i + 1])) return false;
     }
+    for ([_][]const u8{ "behind the scenes", "latest improvements" }) |filler| {
+        if (std.ascii.indexOfIgnoreCase(text, filler) != null) return false;
+    }
+    for ([_][]const u8{ "Various improvements.", "Bug fixes.", "Maintenance.", "Improvements.", "Fixes." }) |filler| {
+        if (std.ascii.eqlIgnoreCase(text, filler)) return false;
+    }
+    var words = std.mem.tokenizeAny(u8, text, " .,;:!?()-");
+    while (words.next()) |word| {
+        for ([_][]const u8{ "check", "checks", "test", "tests", "CI", "proof", "proofs", "pipeline", "pipelines", "workflow", "workflows" }) |internal| {
+            if (std.ascii.eqlIgnoreCase(word, internal)) return false;
+        }
+    }
     return true;
-}
-
-fn behindTheScenes(text: []const u8) bool {
-    return std.mem.eql(u8, text, BEHIND_THE_SCENES) or std.mem.eql(u8, text, LEGACY_FILLER);
-}
-
-fn append(result: *Notes, text: []const u8) void {
-    result.total += 1;
-    if (result.count == result.lines.len) return;
-    @memcpy(result.lines[result.count][0..text.len], text);
-    result.lengths[result.count] = text.len;
-    result.count += 1;
 }
 
 pub fn pick(releases: []const Release, installed: []const u8, offered: []const u8) Notes {
     var result = Notes{};
     var versions: [16][]const u8 = undefined;
-    var internal: usize = 0;
     for (releases) |release| {
         if (!versionNewer(installed, release.version) or versionNewer(offered, release.version)) continue;
         for (release.changes) |raw| {
             const text = std.mem.trim(u8, raw, " \t\r\n");
             if (!plain(text)) continue;
-            if (behindTheScenes(text)) {
-                internal += 1;
-                continue;
-            }
             result.total += 1;
             var at: usize = 0;
             while (at < result.count and !versionNewer(versions[at], release.version)) at += 1;
@@ -93,16 +86,6 @@ pub fn pick(releases: []const Release, installed: []const u8, offered: []const u
             versions[at] = release.version;
             result.count = @min(result.count + 1, result.lines.len);
         }
-    }
-    if (internal > 0) {
-        var buf: [64]u8 = undefined;
-        const text: []const u8 = if (result.total == 0)
-            (if (internal == 1) BEHIND_THE_SCENES else std.fmt.bufPrint(&buf, "{d} behind the scenes fixes.", .{internal}) catch BEHIND_THE_SCENES)
-        else if (internal == 1)
-            "Plus 1 behind the scenes fix."
-        else
-            std.fmt.bufPrint(&buf, "Plus {d} behind the scenes fixes.", .{internal}) catch "Plus behind the scenes fixes.";
-        append(&result, text);
     }
     return result;
 }
@@ -144,23 +127,23 @@ test "IGSH-948 keeps sixteen lines and counts the rest as more even when expande
     try std.testing.expectEqualStrings("and 2 more", notes.more(&buf, true));
 }
 
-test "IGSH-948 groups quiet releases into one behind the scenes line and never shows filler" {
+test "IGSH-1090 keeps real notes individual and maintenance releases quiet" {
     const releases = [_]Release{
         .{ .version = "1.1.0", .changes = &.{"Typing feels faster."} },
         .{ .version = "1.2.0", .changes = &.{"Updates include the latest improvements."} },
-        .{ .version = "1.3.0", .changes = &.{BEHIND_THE_SCENES} },
+        .{ .version = "1.3.0", .changes = &.{ "Behind the scenes fixes.", "Chat speed checks now ignore shared-machine pauses." } },
+        .{ .version = "1.4.0", .changes = &.{} },
+        .{ .version = "1.5.0", .changes = &.{"Dictation shortcuts keep working when keys queue up."} },
     };
-    const notes = pick(&releases, "1.0.0", "1.3.0");
+    const notes = pick(&releases, "1.0.0", "1.5.0");
     try std.testing.expectEqual(@as(usize, 2), notes.count);
-    try std.testing.expectEqualStrings("Typing feels faster.", notes.line(0));
-    try std.testing.expectEqualStrings("Plus 2 behind the scenes fixes.", notes.line(1));
-    const quiet = pick(releases[2..], "1.2.0", "1.3.0");
-    try std.testing.expectEqual(@as(usize, 1), quiet.count);
-    try std.testing.expectEqualStrings("Behind the scenes fixes.", quiet.line(0));
-    const single = pick(&releases, "1.1.0", "1.2.0");
-    try std.testing.expectEqualStrings("Behind the scenes fixes.", single.line(0));
-    const mixed = pick(releases[0..2], "1.0.0", "1.2.0");
-    try std.testing.expectEqualStrings("Plus 1 behind the scenes fix.", mixed.line(1));
+    try std.testing.expectEqualStrings("Dictation shortcuts keep working when keys queue up.", notes.line(0));
+    try std.testing.expectEqualStrings("Typing feels faster.", notes.line(1));
+    const quiet = pick(&releases, "1.1.0", "1.4.0");
+    try std.testing.expectEqual(@as(usize, 0), quiet.count);
+    try std.testing.expectEqual(@as(usize, 0), quiet.total);
+    const waiting = pick(&releases, "1.0.0", "1.4.0");
+    try std.testing.expectEqualStrings("Typing feels faster.", waiting.line(0));
 }
 
 test "IGSH-728 skips ticket ids, file paths, file names and PR numbers" {

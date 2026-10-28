@@ -1,11 +1,19 @@
 const test = require('node:test');
+
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
 const { readChangelogEntry } = require('./changelog-entry');
 
 const root = path.resolve(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8')).replace(/\r\n/g, '\n');
 const directory = '.claude/skills/verify-multiprompt';
 const pane = read('src/browser_pane.zig');
 const main = read('src/main.zig');
@@ -439,9 +447,10 @@ test('real-input journey requires exact dock geometry after drag and each maximi
 test('pane-lock journey is mapped, indexed, allowed and included in the pull-request matrix', () => {
   assert.match(driver, /ValidateSet\([^\n]*'browser-pane-locked'/);
   assert.match(driver, /if \(\$Feature -in @\('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls'\)\)/);
-  const features = JSON.parse(workflow.match(/feature:.*github\.event_name == 'pull_request'.*fromJSON\('(\[[^']+\])'\)/)[1]);
+  const features = featureMatrix(workflow).full;
   for (const feature of ['appearance', 'workspace-focus', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'pane-layout']) assert.ok(features.includes(feature));
-  assert.match(workflow, /\$env:FEATURE -notin @\([^\n]*'browser-pane-locked'/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('browser-pane-locked'));
   assert.ok(workflow.includes('tools/check-browser-pane-locked.test.js'));
   assert.match(workflow, /RELEASE_TAG: \$\{\{ inputs\.tag \|\| '' \}\}/);
   assert.match(workflow, /name: Build branch executable\s+if: env\.RELEASE_TAG == ''\s+run: zig build/);

@@ -35,7 +35,7 @@ function fairContract(source) {
   const release = body(source, 'chatFetchRelease');
   assert.ok(release.indexOf('ReleaseMutex') < release.indexOf('PostMessageW'));
   assert.match(release, /PostMessageW\(turn.hwnd, WM_TIMER, TIMER_CHAT_REFRESH, 0\)/);
-  assert.match(body(source, 'chatFileRequestForDelivery'), /if \(!load_disk and !chatFetchAcquire\(\)\) return/);
+  assert.match(body(source, 'chatFileRequestForDelivery'), /if \(!load_disk and pushed == null and !chatFetchAcquire\(\)\) return/);
 }
 
 function stagingContract(source, model) {
@@ -45,7 +45,7 @@ function stagingContract(source, model) {
   assert.match(worker, /entry.backfill.stage\(a, &history\)/);
   assert.match(worker, /entry.backfill.start == 0 or entry.show_older/);
   assert.match(worker, /const publish_staged = entry.show_older and entry.backfill.pages.items.len > 0/);
-  assert.match(worker, /var ok = publish_staged or chatHistoryFetch/);
+  assert.match(worker, /var ok = publish_staged or pushed != null or chatHistoryFetch/);
   assert.match(worker, /if \(!entry.staged and entry.cache_dirty/);
   assert.match(model, /if \(!self.defer_render\) try next.render\(a\)/);
   const stage = model.slice(model.indexOf('    pub fn stage('), model.indexOf('    pub fn finish('));
@@ -62,15 +62,15 @@ function stagingContract(source, model) {
   assert.doesNotMatch(finish, /TAIL_BYTES|MAX_CACHE_BYTES|@min|break;/);
   const ready = body(source, 'chatFileOnReady');
   const staged = ready.slice(ready.indexOf('if (entry.staged) {'), ready.indexOf('const added ='));
-  assert.match(staged, /entry.before = history.start/);
+  assert.match(staged, /entry.before = 0/);
   assert.match(staged, /chatFileRequest\(entry.key\);\s*}\s*continue;/);
   assert.ok(staged.indexOf('UpdateWindow') < staged.indexOf('chatFileRequest'));
   assert.match(staged, /UpdateWindow\(app_state.g_chat_transcript_hwnd\)/);
   assert.doesNotMatch(staged, /layoutChatControls|refreshChatTranscript|g_chat_switch_loading/);
   assert.doesNotMatch(ready, /\.render\(|\.apply\(|\.decode\(/);
-  assert.match(ready, /const before = if \(entry.stalled\) 0 else if \(disk or history.start < entry.history.start/);
+  assert.match(ready, /const before = if \(entry.stalled\) 0 else if \(entry.backfill.pages.items.len > 0\) entry.backfill.start else if \(disk or history.start < entry.history.start/);
   assert.match(ready, /entry.before = entry.history.start;\s*entry.missing_message = entry.result_missing/);
-  assert.match(body(source, 'chatFileRequestForDelivery'), /if \(entry.backfill.pages.items.len > 0\) entry.before = entry.backfill.start/);
+  assert.doesNotMatch(body(source, 'chatFileRequestForDelivery'), /entry.before = entry.backfill.start/);
   assert.match(body(source, 'chatHistoryForget'), /entry.backfill.deinit/);
   assert.match(ready, /if \(entry.retired\)[^]*entry.backfill.deinit/);
   assert.match(model, /IGSH-815 staged older pages keep the visible tail stable and materialize every message across cache restore/);
@@ -128,10 +128,10 @@ test('staging-order model: all fifty messages survive page staging and one publi
 
 test('full-history continuation stays automatic across disk restore without a cap or new loading gate', () => {
   const ready = body(session, 'chatFileOnReady');
-  assert.match(ready, /const before = if \(entry.stalled\) 0 else if \(disk or history.start < entry.history.start/);
+  assert.match(ready, /const before = if \(entry.stalled\) 0 else if \(entry.backfill.pages.items.len > 0\) entry.backfill.start else if \(disk or history.start < entry.history.start/);
   assert.match(ready, /entry.before = before/);
   assert.match(ready, /if \(!disk and !history.more and history.start == 0\) entry.loaded_ms/);
-  assert.match(ready, /if \(disk or entry.before > 0\) @as\(u64, 0\)/);
+  assert.match(ready, /if \(disk or entry.prepended or entry.before > 0\) @as\(u64, 0\)/);
   assert.match(body(session, 'chatFileFetchThread'), /chat_history.History.decode/);
   assert.match(history, /try std.testing.expectEqual\(@as\(usize, 50\), restored.blocks.items.len\)/);
   const changelog = readChangelogEntry('IGSH-815').trim();

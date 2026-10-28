@@ -1,5 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const src = require('./app-source').readAppSource();
 const build = fs.readFileSync('build.zig', 'utf8');
@@ -43,7 +45,6 @@ test('role paint and hit testing omit sender headers and timestamps', () => {
   assert.match(body('chatMeasureBlockRect'), /chat_style\.headerHeight/);
   assert.match(body('chatMeasureBlockRect'), /chat_style\.bubbleWidth/);
   assert.doesNotMatch(body('chatPaintBlock'), /chatPaintAgentHeader/);
-  assert.match(body('chatPaintBlock'), /chatPaintTime/);
   assert.match(body('chatTranscriptLinkAt'), /chat_style\.headerHeight/);
   assert.match(body('refreshChatBlockCache'), /chat_style\.markScreenMessages/);
   assert.match(body('chatUserBubbleColor'), /chat_style\.bubbleColors/);
@@ -122,7 +123,10 @@ test('file attachment and inline image previews ship on every surface (issue)', 
 
 
 test('tool lines toggle before links and selection and expose all palette surfaces', () => {
-  assert.match(body('chatTranscriptWndProc'), /WM_LBUTTONDOWN => \{\s*(?:if \((?:app_state\.)?g_chat_find_open and GET_Y\(lp\) < uiScaled\((?:app_state\.)?CHAT_FIND_TOP_H\)\) return 0;\s*)?(?:if \(chatScrollUiMouseDown\(hwnd, GET_X\(lp\), GET_Y\(lp\)\)\) return 0;\s*)?if \(chatToolAt[^]*?tool_open = ![^]*?chatImageReady\(\);\s*return 0;/);
+  const click = body('chatTranscriptWndProc').split('WM_LBUTTONDOWN => {')[1].split('WM_LBUTTONUP => {')[0];
+  assert.match(click, /if \(chatToolAt[^]*?tool_open = ![^]*?chatImageReady\(\);\s*return 0;/);
+  assert.ok(click.indexOf('chatToolAt(') < click.indexOf('chatTranscriptLinkAt('));
+  assert.ok(click.indexOf('chatToolAt(') < click.indexOf('chatTranscriptMouseDown('));
   assert.match(body('chatToolAt'), /role != \.tool/);
   assert.match(body('chatToggleAllTools'), /block\.role == \.tool[^]*?block\.tool_open = open/);
   assert.match(body('refreshChatBlockCache'), /open_tools\.contains\(block\.tool_id\)/);
@@ -181,7 +185,7 @@ test('IGSH-567 pending bubbles share transcript ranges, hit testing, highlightin
   assert.match(body('chatTranscriptCharAt'), /chatSelectionRect/);
   assert.match(body('chatTranscriptCharAt'), /chatFlowBlock/);
   assert.match(body('chatTranscriptMouseDown'), /chatWordRangeAt\(display\.text/);
-  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, e\.text, text_rc, false, true, null, offset,/);
+  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, e\.text\[start\.\.\], text_rc, false, true, null, offset \+ start,/);
   assert.match(body('chatPaintTranscriptContent'), /chatPaintEcho\([^;]*display\.start\)/);
   assert.match(body('chatSelectionToClipboard'), /chatCopyPlainText\([^;]*display\.text/);
   assert.match(body('chatCopyTextAlloc'), /g_chat_block_count \+ g_chat_echo_layout_count/);
@@ -207,7 +211,7 @@ test('IGSH-717 queued-message clicks do not swallow selection mouse-down', () =>
 });
 
 test('IGSH-717 driver proves painted selection before Enter and retains strict quote checks', () => {
-  const control = fs.readFileSync('.claude/skills/verify-multiprompt/control.ps1', 'utf8');
+  const control = readControlSource();
   const pixels = control.slice(control.indexOf('public static int TranscriptSelectionPixels('), control.indexOf('public static List<int[]> GreyButtonPixels('));
   const expression = pixels.match(/if \((\(c.R ==[^]*?)\) count\+\+;/)?.[1];
   assert.ok(expression);

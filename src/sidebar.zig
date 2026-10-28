@@ -1,3 +1,4 @@
+const SEARCH_SETTINGS_OFFSET = @import("app_state.zig").SEARCH_SETTINGS_OFFSET;
 const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
@@ -85,7 +86,6 @@ const tmuxHostTagLabel = @import("capacity.zig").tmuxHostTagLabel;
 const sidebarStickyCardSpan = @import("capacity.zig").sidebarStickyCardSpan;
 const paintSidebarUpdateCard = @import("update_card.zig").paintSidebarUpdateCard;
 const DI_NORMAL = @import("app_state.zig").DI_NORMAL;
-const SEARCH_VISIBLE_ROWS = @import("app_state.zig").SEARCH_VISIBLE_ROWS;
 const SEARCH_TMUX_OFFSET = @import("app_state.zig").SEARCH_TMUX_OFFSET;
 const SEARCH_NEW_OFFSET = @import("app_state.zig").SEARCH_NEW_OFFSET;
 const SEARCH_SOUND_OFFSET = @import("app_state.zig").SEARCH_SOUND_OFFSET;
@@ -250,6 +250,7 @@ const SEARCH_VOICE_REPLAY_OFFSET = @import("app_state.zig").SEARCH_VOICE_REPLAY_
 const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
 const SEARCH_SNIPPETS_MENU_OFFSET = @import("app_state.zig").SEARCH_SNIPPETS_MENU_OFFSET;
+const SEARCH_SNIPPET_MANAGE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_MANAGE_OFFSET;
 const SEARCH_SNIPPET_CREATE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_CREATE_OFFSET;
 const SEARCH_SNIPPET_BACK_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_BACK_OFFSET;
 const SEARCH_SNIPPET_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_OFFSET;
@@ -355,6 +356,8 @@ const searchRowH = @import("drawing.zig").searchRowH;
 const searchInputH = @import("drawing.zig").searchInputH;
 const searchOverlayW = @import("drawing.zig").searchOverlayW;
 const searchOverlayOx = @import("drawing.zig").searchOverlayOx;
+const CreateFontW = @import("fonts.zig").create;
+const paletteDrawText = @import("palette_text.zig").draw;
 const uiFontTitle = @import("drawing.zig").uiFontTitle;
 const uiFontShellTabTitle = @import("drawing.zig").uiFontShellTabTitle;
 const uiFontSubtitle = @import("drawing.zig").uiFontSubtitle;
@@ -1396,7 +1399,7 @@ pub fn materializeDisplayOrder() void {
 
 pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
     var count: u32 = 0;
-    var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight();
+    var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
         for (0..app_state.group_count) |gi| {
             const gid = app_state.groups[gi].id;
@@ -2153,6 +2156,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         paintSidebarUpdateCard(hdc, font_title, font_status_card);
 
         paintWorkspaceStrip(hdc, sidebar_bg);
+        @import("workspace_switcher.zig").paintHeader(hdc);
         paintSidebarStatusCardPopup(hdc, font_title, font_status_card);
     }
 
@@ -2162,21 +2166,30 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const win_w = win_rc.right - win_rc.left;
         const win_h = win_rc.bottom - win_rc.top;
 
+        const palette_font = CreateFontW(-uiScaled(14), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L(@import("fonts.zig").UI_FACE));
+        const palette_hint_font = CreateFontW(-uiScaled(12), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L(@import("fonts.zig").UI_FACE));
+        const palette_old_font = SelectObject(hdc, palette_font);
+        defer {
+            _ = SelectObject(hdc, palette_old_font);
+            _ = DeleteObject(palette_font);
+            _ = DeleteObject(palette_hint_font);
+        }
         const overlay_w: i32 = searchOverlayW();
         const row_h: i32 = searchRowH();
         const input_h: i32 = searchInputH();
-        const visible_capacity: u32 = @min(app_state.g_search_result_count, SEARCH_VISIBLE_ROWS);
-        const overlay_h: i32 = input_h + if (app_state.g_search_rename_input_mode)
+        const visible_capacity: u32 = @min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows());
+        const overlay_h: i32 = @import("drawing.zig").searchFooterH() + input_h + if (app_state.g_search_rename_input_mode)
             row_h
         else
             @as(i32, @intCast(visible_capacity)) * row_h + if (!app_state.g_browser_url_mode and !app_state.g_search_remind_input_mode and app_state.g_search_result_count == 0 and app_state.g_search_len > 0) row_h else 0;
         const ox = searchOverlayOx(win_w, overlay_w);
-        const oy = @divFloor(win_h - overlay_h, 3);
-        const overlay_radius: i32 = 14;
+        const oy = @import("drawing.zig").searchOverlayOy(win_h, overlay_h);
+        const overlay_radius: i32 = uiScaled(32);
+        @import("dialog.zig").dim(hdc, win_w, win_h);
 
         drawModalShadow(hdc, ox, oy, overlay_w, overlay_h, overlay_radius);
 
-        const overlay_border_col = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
+        const overlay_border_col = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(200, 200, 200) else RGB(0x2E, 0x2E, 0x2E));
         const border_br = CreateSolidBrush(overlay_border_col);
         const border_pen = CreatePen(0, 1, overlay_border_col);
         const old_brush_b = SelectObject(hdc, border_br);
@@ -2187,7 +2200,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         _ = DeleteObject(border_br);
         _ = DeleteObject(border_pen);
 
-        const overlay_bg_col = customColorOr("overlay_bg", if (app_state.g_light_theme) RGB(249, 249, 249) else if (app_state.g_edge_gray_theme) RGB(51, 51, 51) else if (app_state.g_mid_theme) RGB(68, 68, 68) else RGB(40, 40, 40));
+        const overlay_bg_col = customColorOr("overlay_bg", if (app_state.g_light_theme) RGB(249, 249, 249) else RGB(0x18, 0x18, 0x18));
         const bg_br = CreateSolidBrush(overlay_bg_col);
         const bg_pen = CreatePen(0, 1, overlay_bg_col);
         const old_brush_i = SelectObject(hdc, bg_br);
@@ -2198,13 +2211,16 @@ pub fn paintSidebar(hdc: HANDLE) void {
         _ = DeleteObject(bg_br);
         _ = DeleteObject(bg_pen);
 
-        var input_bg_rc = RECT{ .left = ox + 1, .top = oy + 1, .right = ox + overlay_w - 1, .bottom = oy + input_h - 1 };
-        const input_br = CreateSolidBrush(customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(255, 255, 255) else if (app_state.g_edge_gray_theme) RGB(43, 43, 43) else if (app_state.g_mid_theme) RGB(52, 52, 52) else RGB(30, 30, 30)));
-        _ = FillRect(hdc, &input_bg_rc, input_br);
-        _ = DeleteObject(input_br);
+        var input_bg_rc = RECT{ .left = ox + uiScaled(16), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(16), .bottom = oy + uiScaled(56) };
+        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(20), if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
+        input_bg_rc.left += 1;
+        input_bg_rc.top += 1;
+        input_bg_rc.right -= 1;
+        input_bg_rc.bottom -= 1;
+        @import("smooth.zig").fillRoundRect(hdc, input_bg_rc, uiScaled(20), if (app_state.g_light_theme) RGB(240, 240, 240) else RGB(0x1F, 0x1F, 0x1F));
 
-        _ = SelectObject(hdc, font_title);
-        var input_text_rc = RECT{ .left = ox + 12, .top = oy + 4, .right = ox + overlay_w - 12, .bottom = oy + input_h - 4 };
+        _ = SelectObject(hdc, palette_font);
+        var input_text_rc = RECT{ .left = ox + uiScaled(32), .top = oy + uiScaled(16), .right = ox + overlay_w - uiScaled(64), .bottom = oy + uiScaled(56) };
         if (app_state.g_search_len == 0) {
             _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(160, 160, 160) else RGB(100, 100, 100)));
             const placeholder = if (app_state.g_search_ws_sort_mode)
@@ -2234,7 +2250,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             else if (app_state.g_search_tabctx_mode)
                 L("Tab actions...")
             else if (app_state.g_search_snippet_mode)
-                L("Search snippets...")
+                if (app_state.g_search_snippet_manage_mode) L("Manage Snippets: choose one to delete") else L("Search snippets...")
             else if (app_state.g_search_theme_mode)
                 L("Search themes...")
             else if (app_state.g_search_workspace_delete_mode)
@@ -2242,7 +2258,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             else if (app_state.g_search_workspace_mode)
                 L("Search workspaces to open...")
             else
-                L("Switch to tab...");
+                L("Search sessions and commands");
             _ = DrawTextW(hdc, placeholder, -1, &input_text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
         } else {
             if (app_state.g_search_rename_input_mode and app_state.g_search_rename_select_all) {
@@ -2256,22 +2272,35 @@ pub fn paintSidebar(hdc: HANDLE) void {
             _ = DrawTextW(hdc, @ptrCast(&app_state.g_search_buf), @intCast(app_state.g_search_len), &input_text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
         }
 
-        var div_rc = RECT{ .left = ox, .top = oy + input_h - 1, .right = ox + overlay_w, .bottom = oy + input_h };
-        const div_br = CreateSolidBrush(customColorOr("overlay_divider", if (app_state.g_light_theme) RGB(220, 220, 220) else if (app_state.g_edge_gray_theme) RGB(72, 72, 72) else if (app_state.g_mid_theme) RGB(85, 85, 85) else RGB(60, 60, 60)));
-        _ = FillRect(hdc, &div_rc, div_br);
-        _ = DeleteObject(div_br);
+        if (input_h == uiScaled(96)) {
+            _ = SelectObject(hdc, palette_hint_font);
+            _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(0x8A, 0x8A, 0x8A));
+            var recent_rc = RECT{ .left = ox + uiScaled(28), .top = oy + uiScaled(64), .right = ox + overlay_w - uiScaled(24), .bottom = oy + input_h };
+            _ = DrawTextW(hdc, L("RECENT SESSIONS"), -1, &recent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        }
+        var esc_rc = RECT{ .left = ox + overlay_w - uiScaled(56), .top = oy + uiScaled(24), .right = ox + overlay_w - uiScaled(24), .bottom = oy + uiScaled(48) };
+        @import("palette_text.zig").keycap(hdc, L("Esc"), &esc_rc);
+        const footer_y = oy + overlay_h - @import("drawing.zig").searchFooterH();
+        const divider = RECT{ .left = ox + uiScaled(16), .top = footer_y, .right = ox + overlay_w - uiScaled(16), .bottom = footer_y + 1 };
+        const divider_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(220, 220, 220) else RGB(0x2E, 0x2E, 0x2E));
+        _ = FillRect(hdc, &divider, divider_br);
+        _ = DeleteObject(divider_br);
+        _ = SelectObject(hdc, palette_hint_font);
+        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(0x8A, 0x8A, 0x8A));
+        var footer_rc = RECT{ .left = ox + uiScaled(24), .top = footer_y + 1, .right = ox + overlay_w - uiScaled(24), .bottom = oy + overlay_h };
+        @import("palette_text.zig").footer(hdc, &footer_rc);
 
         {
             if (app_state.g_search_rename_input_mode) {
                 _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(95, 95, 95) else RGB(155, 155, 155)));
-                _ = SelectObject(hdc, font_subtitle);
+                _ = SelectObject(hdc, palette_hint_font);
                 var rename_hint_rc = RECT{ .left = ox + 12, .top = oy + input_h, .right = ox + overlay_w - 12, .bottom = oy + input_h + row_h };
-                _ = DrawTextW(hdc, L("Ctrl+A selects all  ·  Enter saves  ·  Esc cancels  ·  syncs multiprompt, tmux, and agent"), -1, &rename_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                _ = paletteDrawText(hdc, L("Ctrl+A selects all  ·  Enter saves  ·  Esc cancels  ·  syncs multiprompt, tmux, and agent"), -1, &rename_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
             } else if (!app_state.g_browser_url_mode and !app_state.g_search_remind_input_mode and app_state.g_search_result_count == 0 and app_state.g_search_len > 0) {
                 _ = SetTextColor(hdc, customColorOr("hint", RGB(100, 100, 100)));
-                _ = SelectObject(hdc, font_subtitle);
+                _ = SelectObject(hdc, palette_hint_font);
                 var no_rc = RECT{ .left = ox + 12, .top = oy + input_h, .right = ox + overlay_w - 12, .bottom = oy + input_h + row_h };
-                _ = DrawTextW(hdc, L("No matches"), -1, &no_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                _ = paletteDrawText(hdc, L("No matches"), -1, &no_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
             } else if (!app_state.g_browser_url_mode) {
                 const visible_rows: u32 = @min(app_state.g_search_result_count -| app_state.g_search_scroll, visible_capacity);
                 for (0..visible_rows) |vi| {
@@ -2430,7 +2459,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_ws_snoozed_row = result_idx >= SEARCH_WS_SNOOZED_ROW_OFFSET and result_idx < SEARCH_WS_SNOOZED_ROW_OFFSET + MAX_REMINDERS;
                     const is_remind_preset = result_idx >= SEARCH_REMIND_PRESET_OFFSET and result_idx < SEARCH_REMIND_PRESET_OFFSET + REMIND_PRESET_COUNT;
                     const is_codex_tmux = result_idx == SEARCH_CODEX_TMUX_OFFSET;
-                    const is_snippets_menu = result_idx == SEARCH_SNIPPETS_MENU_OFFSET;
+                    const is_snippet_manage = result_idx == SEARCH_SNIPPET_MANAGE_OFFSET;
+                    const is_snippets_menu = result_idx == SEARCH_SNIPPETS_MENU_OFFSET or is_snippet_manage;
                     const is_snippet_create = result_idx == SEARCH_SNIPPET_CREATE_OFFSET;
                     const is_snippet_back = result_idx == SEARCH_SNIPPET_BACK_OFFSET;
                     const is_snippet = result_idx >= SEARCH_SNIPPET_OFFSET and result_idx < SEARCH_SNIPPET_OFFSET + MAX_SNIPPETS;
@@ -2452,14 +2482,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const ry = oy + input_h + @as(i32, @intCast(vi)) * row_h;
 
                     if (ri == app_state.g_search_sel) {
-                        var sel_rc = RECT{ .left = ox + 1, .top = ry, .right = ox + overlay_w - 1, .bottom = ry + row_h };
-                        const sel_br = CreateSolidBrush(customColorOr("selected_bg", RGB(0, 122, 204)));
-                        _ = FillRect(hdc, &sel_rc, sel_br);
-                        _ = DeleteObject(sel_br);
+                        const sel_rc = RECT{ .left = ox + uiScaled(16), .top = ry, .right = ox + overlay_w - uiScaled(16), .bottom = ry + row_h };
+                        @import("smooth.zig").fillRoundRect(hdc, sel_rc, uiScaled(10), if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(0x35, 0x35, 0x35));
                     }
 
                     if (paletteHeaderIndex(result_idx)) |header| {
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(120, 120, 120) else RGB(140, 140, 140)));
                         const header_label: [*:0]const u16 = switch (header) {
                             0 => L("MOST USED"),
@@ -2472,141 +2500,141 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             7 => L("ACCOUNT AND USAGE"),
                             else => L("CHAT VIEW"),
                         };
-                        var header_rc = RECT{ .left = ox + 12, .top = ry + @divTrunc(row_h, 3), .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        var header_rc = RECT{ .left = ox + uiScaled(28), .top = ry + @divTrunc(row_h, 3), .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, header_label, -1, &header_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (result_idx >= app_state.SEARCH_GROUPCTX_BASE and result_idx < app_state.SEARCH_GROUPCTX_BASE + app_state.SEARCH_GROUPCTX_COUNT) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180)));
                         var label: [192]u16 = undefined;
                         const len = @import("rename.zig").groupPaletteLabel(result_idx - app_state.SEARCH_GROUPCTX_BASE, &label);
-                        var text_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        var text_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, &label, @intCast(len), &text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_session_overview_menu) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var som_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Show All Sessions..."), -1, &som_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var som_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Show All Sessions..."), -1, &som_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var som_hint_rc = RECT{ .left = ox + overlay_w - 110, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("repo"), -1, &som_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("repo"), -1, &som_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_session_overview_row) {
                         const so_idx = result_idx - SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
                         if (so_idx < app_state.g_session_overview_count) {
                             const row = &app_state.g_session_overview_rows.items[so_idx];
-                            _ = SelectObject(hdc, font_title);
+                            _ = SelectObject(hdc, palette_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(220, 220, 220));
-                            var sorc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 126, .bottom = ry + row_h };
+                            var sorc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 126, .bottom = ry + row_h };
                             const label = if (row.name_len > 0) row.name[0..row.name_len] else row.session[0..row.session_len];
                             drawAscii(hdc, label, &sorc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(170, 210, 170) else RGB(100, 140, 170));
                             var status_rc = RECT{ .left = ox + overlay_w - 126, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                             drawAscii(hdc, sessionOverviewKindLabel(row.kind), &status_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (is_archived_view) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var av_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Archived Sessions"), -1, &av_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var av_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Archived Sessions"), -1, &av_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var av_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("choose one"), -1, &av_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("choose one"), -1, &av_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_snippets_menu) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var snm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Use Snippets..."), -1, &snm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var snm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, if (is_snippet_manage) L("Manage Snippets") else L("Use Snippets..."), -1, &snm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var snm_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+;"), -1, &snm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, if (is_snippet_manage) L("delete") else L("Alt+;"), -1, &snm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_snippet_back) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var snb_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Back"), -1, &snb_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var snb_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Back"), -1, &snb_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var snb_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("main"), -1, &snb_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("main"), -1, &snb_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_snippet_create) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var snc_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Create Snippet"), -1, &snc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var snc_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Create Snippet"), -1, &snc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var snc_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("new"), -1, &snc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("new"), -1, &snc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_snippet) {
                         const sn_idx = result_idx - SEARCH_SNIPPET_OFFSET;
                         if (sn_idx < app_state.g_snippet_count) {
                             const s = &app_state.g_snippets[sn_idx];
                             const confirming_delete = if (app_state.g_search_snippet_delete_confirm) |confirm_idx| confirm_idx == sn_idx else false;
-                            _ = SelectObject(hdc, font_title);
+                            _ = SelectObject(hdc, palette_font);
                             _ = SetTextColor(hdc, if (confirming_delete) RGB(255, 205, 205) else if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(220, 220, 220));
-                            var sn_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                            var sn_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&s.name), @intCast(s.name_len), &sn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (confirming_delete) RGB(255, 180, 180) else if (ri == app_state.g_search_sel) RGB(170, 210, 170) else RGB(90, 150, 90));
                             var sn_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            const sn_hint = if (confirming_delete) L("Del again") else if (ri == app_state.g_search_sel) L("Del delete") else L("paste");
+                            const sn_hint = if (confirming_delete) (if (app_state.g_search_snippet_manage_mode) L("Confirm delete") else L("Del again")) else if (app_state.g_search_snippet_manage_mode) L("delete") else if (ri == app_state.g_search_sel) L("Del delete") else L("paste");
                             _ = DrawTextW(hdc, sn_hint, -1, &sn_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (is_addfavicon) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(30, 90, 180) else RGB(100, 160, 240));
-                        var af_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        var af_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         const af_label = if (app_state.g_favicon_fetching) L("Add Favicon (fetching...)") else L("Add Favicon from VPS");
                         _ = DrawTextW(hdc, af_label, -1, &af_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_mobile_toggle) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
                         const mob_label = if (app_state.g_mobile_mode) L("Mobile Latency Mode: On") else L("Mobile Latency Mode: Off");
-                        var mob_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        var mob_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, mob_label, -1, &mob_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_workspace_back) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var back_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("← Back"), -1, &back_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var back_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("← Back"), -1, &back_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var back_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("main"), -1, &back_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("main"), -1, &back_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_workspaces_menu) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var wm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Open Workspace…"), -1, &wm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var wm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Open Workspace…"), -1, &wm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var wm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("list"), -1, &wm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("list"), -1, &wm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_workspace_delete_menu) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(130, 45, 45) else RGB(230, 135, 135));
-                        var dm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Delete Workspace…"), -1, &dm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var dm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Delete Workspace…"), -1, &dm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var dm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("old"), -1, &dm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("old"), -1, &dm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_quit) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(130, 45, 45) else RGB(230, 135, 135));
-                        var q_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Quit multiprompt"), -1, &q_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var q_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Quit multiprompt"), -1, &q_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var q_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("restore"), -1, &q_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("restore"), -1, &q_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_restart) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(200, 200, 200));
-                        var rs_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        var rs_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         if (result_idx == SEARCH_UPDATE_OFFSET) {
                             var ub: [64]u8 = undefined;
                             const ut = if (app_state.g_update_ver_len > 0)
@@ -2617,133 +2645,133 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                 "Restart to update (no update ready)";
                             drawAscii(hdc, ut, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         } else {
-                            _ = DrawTextW(hdc, L("Restart multiprompt"), -1, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                            _ = paletteDrawText(hdc, L("Restart multiprompt"), -1, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         }
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var rs_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("relaunch"), -1, &rs_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("relaunch"), -1, &rs_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_fullwidth) {
                         const fw_on = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].full_width;
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var fw_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var fw_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (fw_on) L("Full-Width: ON") else L("Full-Width: OFF"), -1, &fw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var fw_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+Shift+F"), -1, &fw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+Shift+F"), -1, &fw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_shortcuts) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var sc_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Keyboard Shortcuts"), -1, &sc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var sc_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Keyboard Shortcuts"), -1, &sc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sc_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("F1"), -1, &sc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("F1"), -1, &sc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_changelog) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var cl_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Changelog"), -1, &cl_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var cl_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Changelog"), -1, &cl_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var cl_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("versions"), -1, &cl_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("versions"), -1, &cl_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_closewin) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(130, 45, 45) else RGB(230, 135, 135));
-                        var cw_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Close Workspace"), -1, &cw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var cw_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Close Workspace"), -1, &cw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var cw_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("this workspace"), -1, &cw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("this workspace"), -1, &cw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_reconnect) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var rc_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Reconnect Tab"), -1, &rc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var rc_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Reattach Tab"), -1, &rc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var rc_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+Shift+R"), -1, &rc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+Shift+R"), -1, &rc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_singlewin) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var sw_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var sw_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_single_window) L("Single-Window Mode: ON") else L("Single-Window Mode: OFF"), -1, &sw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sw_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_single_window) L("\u{2192} multi") else L("\u{2192} single"), -1, &sw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_installhook) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ih_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Install Blue Dot Hook"), -1, &ih_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ih_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Install Blue Dot Hook"), -1, &ih_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ih_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("copy"), -1, &ih_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("copy"), -1, &ih_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_SHOW_FREQUENT_OFFSET) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var setting_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var setting_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).frequent) L("Show Frequent split: ON") else L("Show Frequent split: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_FREQUENT_FIRST_OFFSET) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var setting_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var setting_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).frequent_first) L("Frequent as first tab: ON") else L("Frequent as first tab: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_SHOW_FAVORITES_OFFSET) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var setting_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var setting_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).favorites) L("Show Favorites split: ON") else L("Show Favorites split: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_SHOW_ALL_OFFSET) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var setting_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var setting_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).all) L("Show All split: ON") else L("Show All split: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_INBOX_FREQUENT_OFFSET) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var frequent_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Inbox: Frequent"), -1, &frequent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var frequent_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Inbox: Frequent"), -1, &frequent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_STARRED_OFFSET) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var starred_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Go to Starred workspace"), -1, &starred_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var starred_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Go to Starred workspace"), -1, &starred_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         var hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+1"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+1"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_goinbox) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var gi_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Go to Inbox"), -1, &gi_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var gi_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Go to Inbox"), -1, &gi_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var gi_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+I"), -1, &gi_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+I"), -1, &gi_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_wssort_menu) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var sm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Sort Workspaces…"), -1, &sm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var sm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Sort Workspaces…"), -1, &sm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("drag"), -1, &sm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("drag"), -1, &sm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_wssort) {
                         const slot: u8 = @intCast(result_idx - SEARCH_WSSORT_OFFSET);
                         const dragging_this = app_state.g_wssort_dragging and slot == app_state.g_wssort_drag_slot;
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (dragging_this) RGB(255, 255, 255) else if (ri == app_state.g_search_sel) RGB(200, 215, 235) else RGB(110, 110, 120));
-                        var sh_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + 34, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("≡"), -1, &sh_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        var sh_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + 34, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("≡"), -1, &sh_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (slot == app_state.g_active_workspace) RGB(120, 120, 130) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var snbuf: [32]u8 = undefined;
                         const snm = workspaceDisplayName(slot, &snbuf);
@@ -2756,7 +2784,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         }
                         var sw_rc = RECT{ .left = ox + 38, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&sw_buf), @intCast(swl), &sw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sh_hint: [8]u16 = undefined;
                         var shl: usize = 0;
@@ -2776,22 +2804,22 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         var sw_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&sh_hint), @intCast(shl), &sw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_groupmove_menu) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var gm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Move to Group\u{2026}"), -1, &gm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var gm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Move to Group\u{2026}"), -1, &gm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var gm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("move"), -1, &gm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("move"), -1, &gm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_groupmove_back or is_groupmove_new or is_groupmove_none) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ga_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ga_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         const ga_label: [*:0]const u16 = if (is_groupmove_back) L("Back") else if (is_groupmove_new) L("New group") else L("No group");
                         _ = DrawTextW(hdc, ga_label, -1, &ga_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         if (is_groupmove_back or is_groupmove_new) {
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                             var ga_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, if (is_groupmove_back) L("Esc") else L("new"), -1, &ga_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
@@ -2800,34 +2828,34 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const gi = result_idx - SEARCH_GROUPMOVE_GROUP_OFFSET;
                         if (gi < app_state.group_count) {
                             const current_gid: u32 = if (selectedTabCount() > 0) 0 else if (findShellById(app_state.g_groupmove_tab_sid)) |ti| tabGroupId(ti) else 0;
-                            _ = SelectObject(hdc, font_title);
+                            _ = SelectObject(hdc, palette_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.groups[gi].id == current_gid) RGB(120, 120, 130) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                            var gg_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                            var gg_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                             if (app_state.groups[gi].name_len > 0) {
                                 _ = DrawTextW(hdc, @ptrCast(&app_state.groups[gi].name), @intCast(app_state.groups[gi].name_len), &gg_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             } else {
-                                _ = DrawTextW(hdc, L("(unnamed)"), -1, &gg_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                                _ = paletteDrawText(hdc, L("(unnamed)"), -1, &gg_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             }
                             if (app_state.groups[gi].id == current_gid) {
-                                _ = SelectObject(hdc, font_subtitle);
+                                _ = SelectObject(hdc, palette_hint_font);
                                 _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                                 var gg_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                                _ = DrawTextW(hdc, L("current"), -1, &gg_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                                _ = paletteDrawText(hdc, L("current"), -1, &gg_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                             }
                         }
                     } else if (is_wsmove_menu) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var mm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Move to Workspace…"), -1, &mm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var mm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Move to Workspace…"), -1, &mm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var mm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("move"), -1, &mm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("move"), -1, &mm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_wsmove) {
                         const mslot: u8 = @intCast(result_idx - SEARCH_WSMOVE_OFFSET);
                         const active_ws: u8 = if (findShellById(app_state.g_wsmove_tab_sid)) |ti| app_state.shells[ti].workspace else if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].workspace else 0xFF;
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (mslot == active_ws) RGB(120, 120, 130) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
                         var mnbuf: [32]u8 = undefined;
                         const mnm = workspaceDisplayName(mslot, &mnbuf);
@@ -2838,9 +2866,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             mw_buf[mwl] = c;
                             mwl += 1;
                         }
-                        var mw_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        var mw_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&mw_buf), @intCast(mwl), &mw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var mh_hint: [8]u16 = undefined;
                         var mhl: usize = 0;
@@ -2863,8 +2891,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const workspace_idx = result_idx - SEARCH_WORKSPACE_OFFSET;
                         if (workspace_idx < app_state.g_workspace_count) {
                             const e = &app_state.g_workspaces[workspace_idx];
-                            _ = SelectObject(hdc, font_title);
-                            _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                            _ = SelectObject(hdc, palette_font);
+                            _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
                             var cw_buf: [96]u16 = undefined;
                             var cwl: usize = 0;
                             for (0..e.name_len) |ni| {
@@ -2879,62 +2907,62 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                     cwl += 1;
                                 }
                             }
-                            var cw_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                            var cw_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&cw_buf), @intCast(cwl), &cw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                             var cw_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            _ = DrawTextW(hdc, L("closed"), -1, &cw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                            _ = paletteDrawText(hdc, L("closed"), -1, &cw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (is_wsmove_new) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var mn_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Move to NEW workspace"), -1, &mn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var mn_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Move to NEW workspace"), -1, &mn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var mn_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("new"), -1, &mn_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("new"), -1, &mn_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_hidesidebar) {
                         const sb_open = !app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed;
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var hs_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Sidebar: Expand"), -1, &hs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var hs_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Sidebar: Expand"), -1, &hs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var hs_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (sb_open) L("current") else L("open"), -1, &hs_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_sidebarcollapse) {
                         const sb_collapsed = !app_state.g_hide_sidebar and app_state.g_sidebar_collapsed;
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var sc_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Sidebar: Collapse"), -1, &sc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var sc_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Sidebar: Collapse"), -1, &sc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sc_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (sb_collapsed) L("current") else L("narrow"), -1, &sc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_sidebarhide) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var sh_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Sidebar: Hide"), -1, &sh_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var sh_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Sidebar: Hide"), -1, &sh_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sh_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_hide_sidebar) L("current") else L("focus"), -1, &sh_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_hidepills) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var hp_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var hp_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_hide_pills) L("Show Workspace Switcher") else L("Hide Workspace Switcher"), -1, &hp_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var hp_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_hide_pills) L("switcher") else L("current"), -1, &hp_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_nextunread) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         const nu_blue = customColorOr("attention", RGB(60, 120, 220));
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else nu_blue);
                         var nu_buf: [96]u16 = undefined;
@@ -2948,9 +2976,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             nu_buf[nul] = c;
                             nul += 1;
                         }
-                        var nu_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        var nu_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&nu_buf), @intCast(nul), &nu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var nu_cnt: [12]u8 = undefined;
                         const nu_hint = std.fmt.bufPrint(&nu_cnt, "{d} unread", .{app_state.g_nextunread_count}) catch "unread";
@@ -2964,47 +2992,47 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         var nu_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&nh_buf), @intCast(nhl), &nu_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_tabsort_inbox) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ti_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Tab Order: Auto"), -1, &ti_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ti_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Tab Order: Auto"), -1, &ti_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ti_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_tab_sort_auto) L("current") else L(""), -1, &ti_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_tabsort_manual) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var tm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Tab Order: Manual"), -1, &tm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var tm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Tab Order: Manual"), -1, &tm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var tm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (!app_state.g_tab_sort_auto) L("current") else L(""), -1, &tm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_power_auto or is_power_always or is_power_off) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var pw_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var pw_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         const pw_label = if (is_power_auto) L("Power Saver: Auto") else if (is_power_always) L("Power Saver: Always") else L("Power Saver: Off");
                         _ = DrawTextW(hdc, pw_label, -1, &pw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var pw_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         const pw_current = (is_power_auto and app_state.g_power_profile == .auto) or (is_power_always and app_state.g_power_profile == .always) or (is_power_off and app_state.g_power_profile == .off);
                         _ = DrawTextW(hdc, if (pw_current) L("current") else L(""), -1, &pw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_voice_always_on or is_voice_always_off) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var val_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var val_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_voice_always_on) L("Voice: Always Listening On") else L("Voice: Always Listening Off"), -1, &val_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var val_hint = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_voice_always_listen == is_voice_always_on) L("current") else L(""), -1, &val_hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_ladder) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var tl_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var tl_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         const tl_label = switch (result_idx) {
                             SEARCH_LADDER_AUTO_OFFSET => L("Token Ladder: Auto"),
                             SEARCH_LADDER_CLAUDE_OFFSET => L("Token Ladder: Burn Claude"),
@@ -3012,7 +3040,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             else => L("Token Ladder: Open Dashboard"),
                         };
                         _ = DrawTextW(hdc, tl_label, -1, &tl_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var tl_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         const tl_current = app_state.g_ai_pace.from_ladder and ((result_idx == SEARCH_LADDER_AUTO_OFFSET and app_state.g_ai_pace.ladder_override == 0) or
@@ -3020,163 +3048,163 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             (result_idx == SEARCH_LADDER_CODEX_OFFSET and app_state.g_ai_pace.ladder_override == 2));
                         _ = DrawTextW(hdc, if (tl_current) L("current") else L(""), -1, &tl_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_voice_mode_on or is_voice_mode_off) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var vm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var vm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_voice_mode_on) L("Voice Mode: On") else L("Voice Mode: Off"), -1, &vm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var vm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         const vm_current = (is_voice_mode_on and app_state.g_voice_mode_active) or (is_voice_mode_off and !app_state.g_voice_mode_active);
                         _ = DrawTextW(hdc, if (vm_current) L("current") else L(""), -1, &vm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_voice_stop) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var stop_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Voice: Stop Speaking"), -1, &stop_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var stop_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Voice: Stop Speaking"), -1, &stop_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var stop_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+V"), -1, &stop_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+V"), -1, &stop_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_voice_speed_100 or is_voice_speed_125 or is_voice_speed_140 or is_voice_speed_150) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var vsp_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var vsp_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         const vsp_speed: VoiceSpeed = if (is_voice_speed_100) .s100 else if (is_voice_speed_125) .s125 else if (is_voice_speed_140) .s140 else .s150;
                         var vsp_label_buf: [32]u8 = undefined;
                         const vsp_label = std.fmt.bufPrint(&vsp_label_buf, "Voice Speed: {s}", .{voiceSpeedLabel(vsp_speed)}) catch "Voice Speed";
                         var vsp_label_wide: [40]u16 = undefined;
                         const vsp_label_z = asciiToWideZ(vsp_label, &vsp_label_wide) orelse L("Voice Speed");
                         _ = DrawTextW(hdc, vsp_label_z, -1, &vsp_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var vsp_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_voice_speed == vsp_speed) L("current") else L(""), -1, &vsp_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_voice_replay or is_voice_previous or is_voice_next) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var vrp_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var vrp_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_voice_previous) L("Voice: Read Previous Reply") else if (is_voice_next) L("Voice: Read Next Reply") else L("Voice: Read Last Reply"), -1, &vrp_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var vrp_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_voice_previous) L("Alt+[") else if (is_voice_next) L("Alt+]") else L("Alt+R"), -1, &vrp_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_unreadonly) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var uo_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Toggle Unread Only"), -1, &uo_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var uo_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Toggle Unread Only"), -1, &uo_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var uo_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_unread_only) L("on") else L("off"), -1, &uo_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_eta_numbers or is_eta_progress) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var etn_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var etn_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_eta_numbers) L("ETA Countdown Numbers") else L("ETA Progress Line"), -1, &etn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var etn_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         const etn_on = if (is_eta_numbers) app_state.g_eta_numbers_on else app_state.g_eta_progress_on;
                         _ = DrawTextW(hdc, if (etn_on) L("on") else L("off"), -1, &etn_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_eta_accuracy) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var eac_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Estimate Accuracy"), -1, &eac_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var eac_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Estimate Accuracy"), -1, &eac_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_chat_view_mode_everywhere or is_chat_view_mode_nowhere) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var cvm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var cvm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         const cvm_label = if (is_chat_view_mode_everywhere) L("Chat View: On Everywhere") else L("Chat View: Off Everywhere");
                         _ = DrawTextW(hdc, cvm_label, -1, &cvm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_threadtitle) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var tt_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var tt_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_thread_title) L("Hide Thread Title") else L("Show Thread Title"), -1, &tt_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var tt_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_thread_title) L("on") else L("off"), -1, &tt_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_font_bigger) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var fb_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Console Font Bigger"), -1, &fb_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var fb_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Console Font Bigger"), -1, &fb_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var fb_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl++"), -1, &fb_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl++"), -1, &fb_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_font_smaller) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var fs_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Console Font Smaller"), -1, &fs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var fs_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Console Font Smaller"), -1, &fs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var fs_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+-"), -1, &fs_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+-"), -1, &fs_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_font_reset) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var fr_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Console Font Reset"), -1, &fr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var fr_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Console Font Reset"), -1, &fr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var fr_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+0"), -1, &fr_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+0"), -1, &fr_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_customcmd_edit) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ce_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Commands: Edit commands.json"), -1, &ce_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ce_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Commands: Edit commands.json"), -1, &ce_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ce_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("notepad"), -1, &ce_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("notepad"), -1, &ce_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_customcmd_reload) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var cr_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Commands: Reload"), -1, &cr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var cr_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Commands: Reload"), -1, &cr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var cr_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("reload"), -1, &cr_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("reload"), -1, &cr_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_archive) {
                         const archive_has_tmux = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].tmux_session_len > 0;
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ar_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ar_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (archive_has_tmux) L("Archive Session") else L("Close Session"), -1, &ar_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ar_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+X"), -1, &ar_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+X"), -1, &ar_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_unarchive_hidden) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ua_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Restore Workspace Waiting Sessions"), -1, &ua_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ua_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Restore Workspace Waiting Sessions"), -1, &ua_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ua_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("reveal"), -1, &ua_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("reveal"), -1, &ua_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_unarchive_unattached) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var uu_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Restore Disconnected Workspace Sessions"), -1, &uu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var uu_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Restore Disconnected Workspace Sessions"), -1, &uu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var uu_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("sequential"), -1, &uu_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("sequential"), -1, &uu_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_queue_send or is_chat_queue_clear or is_chat_reset or is_chat_retry_unsent or is_chat_discard_unsent or is_chat_push_queued or is_chat_edit_queued) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
-                        var queue_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
+                        var queue_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
                         const queue_label: [*:0]const u16 = if (is_chat_queue_send)
                             L("Chat View: Send Queued Messages Now")
                         else if (is_chat_reset)
@@ -3193,82 +3221,82 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             L("Chat View: Discard Unsent Messages");
                         _ = DrawTextW(hdc, queue_label, -1, &queue_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_tab_url) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
-                        var url_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Insert browser tab URL"), -1, &url_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var url_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Insert browser tab URL"), -1, &url_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = SelectObject(hdc, palette_hint_font);
                         var url_hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+Shift+X"), -1, &url_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+Shift+X"), -1, &url_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_reply) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
-                        var reply_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Reply to latest agent message"), -1, &reply_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        var reply_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Reply to latest agent message"), -1, &reply_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_find) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
-                        var find_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        var find_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
-                        var tools_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        var tools_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_more_menu) L("Chat View: More Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
-                        var copy_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Copy Latest Code Block"), -1, &copy_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var copy_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Copy Latest Code Block"), -1, &copy_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = SelectObject(hdc, palette_hint_font);
                         var hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+Shift+D"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+Shift+D"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_attach) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
-                        var attach_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
+                        var attach_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (result_idx == SEARCH_CHAT_DICTATION_OFFSET) L("Chat View: Toggle Dictation") else L("Chat View: Attach File"), -1, &attach_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         var attach_hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (result_idx == SEARCH_CHAT_DICTATION_OFFSET) L("Ctrl+D") else L("Ctrl+V"), -1, &attach_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_copy_sel) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
-                        var cs_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Copy Selection"), -1, &cs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var cs_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Copy Selection"), -1, &cs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = SelectObject(hdc, palette_hint_font);
                         var cs_hint = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+C"), -1, &cs_hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+C"), -1, &cs_hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_focus_messages) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
-                        var fm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Focus Messages"), -1, &fm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var fm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Focus Messages"), -1, &fm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = SelectObject(hdc, palette_hint_font);
                         var fm_hint = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Up"), -1, &fm_hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Up"), -1, &fm_hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_select_all) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
-                        var sa_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Select All Text"), -1, &sa_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var sa_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Select All Text"), -1, &sa_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = SelectObject(hdc, palette_hint_font);
                         var sa_hint = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+A"), -1, &sa_hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+A"), -1, &sa_hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_ac) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ac_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Insert Command or Skill..."), -1, &ac_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                        _ = SelectObject(hdc, font_subtitle);
-                        var key_rc = RECT{ .left = ox + overlay_w - 115, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+/"), -1, &key_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ac_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Insert Command or Skill..."), -1, &ac_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = SelectObject(hdc, palette_hint_font);
+                        var key_rc = RECT{ .left = ox + overlay_w - 24, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Ctrl+/"), -1, &key_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_skills_menu or is_skills_back) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var skills_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var skills_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_skills_back) L("Back") else L("Skills..."), -1, &skills_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var skills_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_skills_back) L("main") else L("Chat View"), -1, &skills_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
@@ -3278,55 +3306,55 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const skill = app_state.g_palette_skills[skill_idx];
                             var skill_label: [192]u8 = undefined;
                             const label = std.fmt.bufPrint(&skill_label, "/{s}", .{skill.name}) catch skill.name;
-                            _ = SelectObject(hdc, font_title);
-                            _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                            var skill_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 175, .bottom = ry + row_h };
+                            _ = SelectObject(hdc, palette_font);
+                            _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                            var skill_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 175, .bottom = ry + row_h };
                             drawAscii(hdc, label, &skill_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                             var skill_hint_rc = RECT{ .left = ox + overlay_w - 175, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, if (skill.source == .multiprompt) L("multiprompt skills") else L("coding harness"), -1, &skill_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (is_multiprompt_login) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var sync_login_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Sign in to multiprompt"), -1, &sync_login_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var sync_login_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Sign in to multiprompt"), -1, &sync_login_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sync_login_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_multiprompt_logged_in) L("signed in") else L("desktop sync"), -1, &sync_login_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_sync_signout or is_sync_status) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var sync_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var sync_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (result_idx == SEARCH_REMOVE_SERVER_1_OFFSET) L("Account: Remove server 1") else if (result_idx == SEARCH_REMOVE_SERVER_2_OFFSET) L("Account: Remove server 2") else if (result_idx == SEARCH_REMOVE_SERVER_3_OFFSET) L("Account: Remove server 3") else if (is_approve_devices) L("Account: Approve devices") else if (is_layout_pull) L("Sync: Pull Now") else if (is_sync_signout) L("Account: Sign Out") else L("Account: Devices"), -1, &sync_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sync_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("desktop sync"), -1, &sync_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("desktop sync"), -1, &sync_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_usage_login) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var login_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 150, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var login_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 150, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_usage_login_primary) L("Usage: Sign In to Primary Claude Account") else L("Usage: Sign In to Secondary Claude Account"), -1, &login_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var login_hint_rc = RECT{ .left = ox + overlay_w - 150, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_usage_login_primary) L("owner@example.com") else L("secondary@example.com"), -1, &login_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_endtmux) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(130, 45, 45) else RGB(230, 135, 135));
-                        var et_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("End tmux session"), -1, &et_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var et_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("End tmux session"), -1, &et_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var et_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+Shift+W"), -1, &et_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+Shift+W"), -1, &et_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_ws_snooze or is_ws_snoozed or is_ws_snoozed_row) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         if (is_ws_snoozed_row) {
                             const e = &app_state.g_reminders[result_idx - SEARCH_WS_SNOOZED_ROW_OFFSET];
                             var label_buf: [100]u8 = undefined;
@@ -3335,28 +3363,28 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         } else {
                             _ = DrawTextW(hdc, if (is_ws_snooze) L("Workspace: Snooze...") else if (is_ws_bringback) L("Workspace: Bring Back All Sessions") else L("Workspace: Snoozed..."), -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         }
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(190, 235, 190) else RGB(110, 180, 110));
                         var hint_buf: [32]u8 = undefined;
                         const hint = if (is_ws_snoozed_row) workspaceWakeLabel(app_state.g_reminders[result_idx - SEARCH_WS_SNOOZED_ROW_OFFSET].due_at, &hint_buf) else if (is_ws_snooze) "Ctrl+Shift+Y" else if (is_ws_bringback) "reattach all" else "wake now";
                         var hint_rc = RECT{ .left = ox + overlay_w - 128, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         drawAscii(hdc, hint, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_remind_me) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var rm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Remind Me..."), -1, &rm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var rm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Remind Me..."), -1, &rm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var rm_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+H"), -1, &rm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+H"), -1, &rm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_reminders_menu) {
                         loadRemindersIfNeeded();
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var rl_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Reminders"), -1, &rl_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var rl_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Reminders"), -1, &rl_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var count_buf: [16]u8 = undefined;
                         const count_s = std.fmt.bufPrint(&count_buf, "{d}", .{app_state.g_reminder_count}) catch "list";
@@ -3366,246 +3394,246 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = DrawTextW(hdc, @ptrCast(&count_w), @intCast(count_s.len), &rl_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_remind_preset) {
                         const preset_i = result_idx - SEARCH_REMIND_PRESET_OFFSET;
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var rp_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var rp_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         drawAscii(hdc, remindPresetLabel(preset_i), &rp_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var rp_hint_buf: [24]u8 = undefined;
                         const rp_hint = remindPresetHint(preset_i, &rp_hint_buf);
                         var rp_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         drawAscii(hdc, rp_hint, &rp_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_reopen) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ro_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Reopen Closed Tab"), -1, &ro_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ro_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Reopen Closed Tab"), -1, &ro_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ro_hint_rc = RECT{ .left = ox + overlay_w - 110, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+Shift+T"), -1, &ro_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+Shift+T"), -1, &ro_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_urlpick) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var up_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Open URL from Screen"), -1, &up_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var up_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Open URL from Screen"), -1, &up_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var up_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+W"), -1, &up_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+W"), -1, &up_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_closetab) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ct_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Close Tab"), -1, &ct_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ct_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Close Tab"), -1, &ct_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ct_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+W"), -1, &ct_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+W"), -1, &ct_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_inbox_exclude) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ix_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ix_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].inbox_excluded) L("Inbox: Show This Session Again") else L("Inbox: Never Show This Session"), -1, &ix_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_favorite) {
                         const favorite = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].favorite;
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var favorite_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 150, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Favorite: Toggle"), -1, &favorite_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var favorite_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 150, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Favorite: Toggle"), -1, &favorite_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         var hint_rc = RECT{ .left = ox + overlay_w - 150, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (favorite) L("on  Alt+S") else L("off  Alt+S"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_mutetab) {
                         const mt_muted = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].muted;
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var mt_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var mt_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (mt_muted) L("Unmute Tab") else L("Mute Tab"), -1, &mt_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var mt_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (mt_muted) L("on") else L("off"), -1, &mt_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_keepalive) {
                         const ka_on = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].keep_alive;
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ka_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ka_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (ka_on) L("Keep Alive: On") else L("Keep Alive: Off"), -1, &ka_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ka_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("persist"), -1, &ka_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("persist"), -1, &ka_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_pin_top) {
                         const pin_on = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].pinned_top;
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var pt_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var pt_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (pin_on) L("Unpin from Top") else L("Pin to Top"), -1, &pt_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var pt_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (pin_on) L("on") else L("off"), -1, &pt_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_view) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var chat_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var chat_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_chat_active) L("Return to Terminal") else L("Open Chat View"), -1, &chat_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var chat_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+C"), -1, &chat_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+C"), -1, &chat_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_allow) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var permission_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Allow"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var permission_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Allow"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         permission_rc.left = ox + overlay_w - 100;
                         permission_rc.right = ox + overlay_w - 8;
-                        _ = DrawTextW(hdc, L("Alt+Y"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+Y"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_always) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var permission_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Always allow"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var permission_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Always allow"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         permission_rc.left = ox + overlay_w - 100;
                         permission_rc.right = ox + overlay_w - 8;
-                        _ = DrawTextW(hdc, L("Alt+O"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+O"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_deny) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var permission_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Chat View: Deny"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var permission_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Chat View: Deny"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         permission_rc.left = ox + overlay_w - 100;
                         permission_rc.right = ox + overlay_w - 8;
-                        _ = DrawTextW(hdc, L("Alt+D"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+D"), -1, &permission_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_chat_stop) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(130, 45, 45) else RGB(230, 135, 135));
-                        var stop_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        var stop_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, (if (app_state.ISSUE_265_WORKING_BAR) L("Chat View: Stop the agent") else L("Stop Agent")), -1, &stop_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var stop_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, (if (app_state.ISSUE_265_WORKING_BAR) L("Esc") else L("Ctrl+C")), -1, &stop_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_toggle) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var bt_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var bt_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) L("Retry Browser Pane") else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_launch_tick != 0) L("Close Browser Pane") else L("Open Browser Pane"), -1, &bt_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bt_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) L("Alt+Shift+A") else L("Alt+A"), -1, &bt_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_url) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var bu_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Browser: Open URL..."), -1, &bu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var bu_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Browser: Open URL..."), -1, &bu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bu_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("url"), -1, &bu_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("url"), -1, &bu_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_shoturl) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var bsurl_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Browser: Screenshot \u{2192} Chat View / Shell"), -1, &bsurl_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var bsurl_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Browser: Screenshot \u{2192} Chat View / Shell"), -1, &bsurl_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bsurl_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+Shift+S"), -1, &bsurl_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+Shift+S"), -1, &bsurl_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_history) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var bh_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var bh_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_browser_forward) L("Browser: Forward") else L("Browser: Back"), -1, &bh_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bh_hint_rc = RECT{ .left = ox + overlay_w - 110, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_browser_forward) L("Alt+Right") else L("Alt+Left"), -1, &bh_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_focus_url) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var bf_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Browser: Focus Address Bar"), -1, &bf_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var bf_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Browser: Focus Address Bar"), -1, &bf_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bf_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Ctrl+Shift+L"), -1, &bf_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Ctrl+Shift+L"), -1, &bf_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_focus_toggle) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var bj_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Browser: Switch Focus Between Terminal and Pane"), -1, &bj_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var bj_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Browser: Switch Focus Between Terminal and Pane"), -1, &bj_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bj_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+Q"), -1, &bj_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+Q"), -1, &bj_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_engine) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
                         const be_label = if (app_state.g_browser_engine == .edge)
                             L("Browser: Switch All Panes to Chrome")
                         else
                             L("Browser: Switch All Panes to Edge");
-                        var be_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        var be_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, be_label, -1, &be_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_browser_mode) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
                         const bm_label = if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_native)
                             L("Browser: Use App Address Bar")
                         else
                             L("Browser: Use Browser Address Bar and Tabs");
-                        var bm_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        var bm_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, bm_label, -1, &bm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_zsb_rebind) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var zr_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Browser: Repair Agent Connection"), -1, &zr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var zr_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Browser: Repair Agent Connection"), -1, &zr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var zr_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("force"), -1, &zr_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("force"), -1, &zr_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_shell_diag) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var sd_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Copy Session Diagnostics"), -1, &sd_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var sd_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Copy Session Diagnostics"), -1, &sd_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sd_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("copy"), -1, &sd_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("copy"), -1, &sd_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_sync_name or is_rename_sync) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var sn_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var sn_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_sync_name) L("Use Agent or Terminal Session Name") else L("Rename Session"), -1, &sn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sn_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_sync_name) L("/rename") else L("edit"), -1, &sn_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_external_browser_links) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var links_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 60, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("External Browser Links When Pane Off"), -1, &links_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var links_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 60, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("External Browser Links When Pane Off"), -1, &links_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         links_rc.left = ox + overlay_w - 60;
                         links_rc.right = ox + overlay_w - 8;
                         _ = DrawTextW(hdc, if (app_state.g_external_browser_links) L("on") else L("off"), -1, &links_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_browser_autosuspend) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var bs_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var bs_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_browser_autosuspend) L("Browser: Auto-Suspend Idle Panes: On") else L("Browser: Auto-Suspend Idle Panes: Off"), -1, &bs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bs_hint_buf: [16]u8 = undefined;
                         const bs_hint_s: []const u8 = if (app_state.g_browser_autosuspend) std.fmt.bufPrint(&bs_hint_buf, "{d} min", .{app_state.g_browser_suspend_min}) catch bs_hint_buf[0..0] else "off";
@@ -3615,39 +3643,39 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = DrawTextW(hdc, @ptrCast(&bs_hint), @intCast(bs_hint_s.len), &bs_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_keepawake) {
                         const kaw_on = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].keep_awake;
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var kaw_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var kaw_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (kaw_on) L("Keep Tab Awake: On") else L("Keep Tab Awake: Off"), -1, &kaw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var kaw_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Alt+P"), -1, &kaw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Alt+P"), -1, &kaw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_crash_cmd) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var crash_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var crash_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (result_idx == SEARCH_CRASH_NOW_OFFSET) L("Debug: Crash Now") else L("Crash Reports: Open Folder"), -1, &crash_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_hibernate_now or is_close_all_browser_panes) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var hib_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var hib_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (is_close_all_browser_panes) L("Close All Browser Panes") else L("Hibernate Browser Panes Now"), -1, &hib_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_browser_instruct) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var bi_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Browser: Insert Agent Instructions"), -1, &bi_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var bi_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Browser: Insert Agent Instructions"), -1, &bi_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var bi_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("paste"), -1, &bi_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("paste"), -1, &bi_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_ui_bigger) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ub_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("UI Size: Increase"), -1, &ub_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ub_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("UI Size: Increase"), -1, &ub_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ub_hint_buf: [8]u8 = undefined;
                         var ub_hint: [8]u16 = undefined;
@@ -3656,11 +3684,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         var ub_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&ub_hint), @intCast(ub_s.len), &ub_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_ui_smaller) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var us_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("UI Size: Decrease"), -1, &us_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var us_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("UI Size: Decrease"), -1, &us_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var us_hint_buf: [8]u8 = undefined;
                         var us_hint: [8]u16 = undefined;
@@ -3669,19 +3697,19 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         var us_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&us_hint), @intCast(us_s.len), &us_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_ui_reset) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var ur_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("UI Size: Reset"), -1, &ur_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var ur_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("UI Size: Reset"), -1, &ur_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ur_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("100%"), -1, &ur_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("100%"), -1, &ur_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_workspace_delete) {
                         const workspace_idx = result_idx - SEARCH_WORKSPACE_DELETE_OFFSET;
                         if (workspace_idx < app_state.g_workspace_count) {
                             const e = &app_state.g_workspaces[workspace_idx];
-                            _ = SelectObject(hdc, font_title);
+                            _ = SelectObject(hdc, palette_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(130, 45, 45) else RGB(230, 135, 135));
                             var ws_buf: [112]u16 = undefined;
                             var wsl: usize = 0;
@@ -3696,9 +3724,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                 ws_buf[wsl] = @intCast(e.name[ni]);
                                 wsl += 1;
                             }
-                            var ws_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                            var ws_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&ws_buf), @intCast(wsl), &ws_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                             var ws_hint: [64]u16 = undefined;
                             const hint: []const u8 = if (confirming) "confirm" else if (workspaceIsLiveAnywhere(e.id[0..e.id_len])) "open" else e.id[0..e.id_len];
@@ -3711,7 +3739,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const workspace_idx = result_idx - SEARCH_WORKSPACE_OFFSET;
                         if (workspace_idx < app_state.g_workspace_count) {
                             const e = &app_state.g_workspaces[workspace_idx];
-                            _ = SelectObject(hdc, font_title);
+                            _ = SelectObject(hdc, palette_font);
                             const id = e.id[0..e.id_len];
                             var is_current = std.mem.eql(u8, id, getInstanceName());
                             if (!is_current and app_state.g_single_window) {
@@ -3731,9 +3759,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                 ws_buf[wsl] = @intCast(e.name[ni]);
                                 wsl += 1;
                             }
-                            var ws_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                            var ws_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&ws_buf), @intCast(wsl), &ws_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                             var ws_hint: [64]u16 = undefined;
                             const hint: []const u8 = if (is_current) "current" else if (is_live) "open" else id;
@@ -3747,7 +3775,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         loadArchiveIfNeeded();
                         if (ar_idx < app_state.g_archived_count) {
                             const ar = &app_state.g_archived.items[ar_idx];
-                            _ = SelectObject(hdc, font_title);
+                            _ = SelectObject(hdc, palette_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(30, 90, 180) else RGB(100, 160, 240));
                             var ar_buf: [96]u16 = undefined;
                             var arl: usize = 0;
@@ -3761,9 +3789,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                 ar_buf[arl] = @intCast(ar.name[j]);
                                 arl += 1;
                             }
-                            var ar_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 60, .bottom = ry + row_h };
+                            var ar_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 60, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&ar_buf), @intCast(arl), &ar_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(190, 235, 190) else RGB(110, 180, 110));
                             const host_hint: [*:0]const u16 = switch (ar.tmux_host) {
                                 TMUX_HOST_UK => L("UK"),
@@ -3778,7 +3806,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         loadRemindersIfNeeded();
                         if (rem_idx < app_state.g_reminder_count) {
                             const rem = &app_state.g_reminders[rem_idx];
-                            _ = SelectObject(hdc, font_title);
+                            _ = SelectObject(hdc, palette_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(30, 90, 180) else RGB(100, 160, 240));
                             var rem_buf: [112]u16 = undefined;
                             var rml: usize = 0;
@@ -3792,9 +3820,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                 rem_buf[rml] = @intCast(ch);
                                 rml += 1;
                             }
-                            var rem_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                            var rem_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&rem_buf), @intCast(rml), &rem_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(190, 235, 190) else RGB(110, 180, 110));
                             var due_buf: [32]u8 = undefined;
                             const due_s = reminderDueLabel(rem.due_at, &due_buf);
@@ -3825,7 +3853,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const cc_idx = result_idx - SEARCH_CUSTOMCMD_OFFSET;
                         if (cc_idx < app_state.g_custom_cmds_count) {
                             const cc = &app_state.g_custom_cmds[cc_idx];
-                            _ = SelectObject(hdc, font_title);
+                            _ = SelectObject(hdc, palette_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(30, 90, 180) else RGB(100, 160, 240));
                             var cc_buf: [96]u16 = undefined;
                             var ccl: usize = 0;
@@ -3838,9 +3866,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                 cc_buf[ccl] = @intCast(cc.label[j]);
                                 ccl += 1;
                             }
-                            var cc_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
+                            var cc_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&cc_buf), @intCast(ccl), &cc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(190, 235, 190) else RGB(110, 180, 110));
                             var cc_hint: [24]u16 = undefined;
                             var chl: usize = 0;
@@ -3858,9 +3886,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = DrawTextW(hdc, @ptrCast(&cc_hint), @intCast(chl), &cc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (is_tabctx) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var tc_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var tc_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
                         if (result_idx >= SEARCH_TABCTX_GROUP_ADD_OFFSET and result_idx < SEARCH_TABCTX_GROUP_ADD_OFFSET + MAX_GROUPS) {
                             const gi = result_idx - SEARCH_TABCTX_GROUP_ADD_OFFSET;
                             var gal_buf: [96]u16 = std.mem.zeroes([96]u16);
@@ -3894,41 +3922,41 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_kaw = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].keep_awake else false;
                             const tc_browser_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].browser_enabled else false;
                             const tc_has_tmux = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].tmux_session_len > 0 else false;
-                            const tc_label: [*:0]const u16 = if (result_idx == SEARCH_TABCTX_START_SESSION) L("Start new session") else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L("Unfavorite") else L("Favorite")) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L("Chat View: Allow") else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L("Chat View: Always allow") else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L("Chat View: Deny") else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L("Chat View: Stop the agent") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Chat View: Insert browser tab URL") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L("Chat View: Reset this chat") else if (result_idx == SEARCH_TABCTX_BACK) L("Back") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Reconnect Tab") else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L("Inbox: Show This Session Again") else L("Inbox: Never Show This Session")) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L("Unmute Tab") else L("Mute Tab")) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L("Keep Alive: On") else L("Keep Alive: Off")) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L("Unpin from Top") else L("Pin to Top")) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L("Keep Tab Awake: On") else L("Keep Tab Awake: Off")) else if (result_idx == SEARCH_TABCTX_WSMOVE) L("Move to Workspace\u{2026}") else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L("Add to new group") else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L("Remove from group") else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L("New tab in group") else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L("Move to NEW workspace") else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L("Clear tab selection") else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L("Archive Session") else L("Close Session")) else if (result_idx == SEARCH_TABCTX_END_TMUX) L("End tmux session") else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_browser_on) L("Close Browser Pane") else L("Open Browser Pane")) else L("Tab action");
+                            const tc_label: [*:0]const u16 = if (result_idx == SEARCH_TABCTX_START_SESSION) L("Start new session") else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L("Unfavorite") else L("Favorite")) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L("Chat View: Allow") else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L("Chat View: Always allow") else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L("Chat View: Deny") else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L("Chat View: Stop the agent") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Chat View: Insert browser tab URL") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L("Chat View: Reset this chat") else if (result_idx == SEARCH_TABCTX_BACK) L("Back") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Reattach Tab") else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L("Inbox: Show This Session Again") else L("Inbox: Never Show This Session")) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L("Unmute Tab") else L("Mute Tab")) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L("Keep Alive: On") else L("Keep Alive: Off")) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L("Unpin from Top") else L("Pin to Top")) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L("Keep Tab Awake: On") else L("Keep Tab Awake: Off")) else if (result_idx == SEARCH_TABCTX_WSMOVE) L("Move to Workspace\u{2026}") else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L("Add to new group") else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L("Remove from group") else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L("New tab in group") else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L("Move to NEW workspace") else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L("Clear tab selection") else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L("Archive Session") else L("Close Session")) else if (result_idx == SEARCH_TABCTX_END_TMUX) L("End tmux session") else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_browser_on) L("Close Browser Pane") else L("Open Browser Pane")) else L("Tab action");
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Ctrl+Shift+X") else if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_ARCHIVE) L("Alt+X") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
                             if (tc_shortcut) |tc_hint| {
-                                _ = SelectObject(hdc, font_subtitle);
+                                _ = SelectObject(hdc, palette_hint_font);
                                 _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                                 var tc_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                                 _ = DrawTextW(hdc, tc_hint, -1, &tc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                             } else if (result_idx == SEARCH_TABCTX_WSMOVE) {
-                                _ = SelectObject(hdc, font_subtitle);
+                                _ = SelectObject(hdc, palette_hint_font);
                                 _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                                 var tc_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                                _ = DrawTextW(hdc, L("move"), -1, &tc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                                _ = paletteDrawText(hdc, L("move"), -1, &tc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                             }
                         }
                     } else if (is_renamewin) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var rw_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Rename Workspace"), -1, &rw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var rw_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Rename Workspace"), -1, &rw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var rw_hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&app_state.g_window_display_name), @intCast(app_state.g_window_display_name_len), &rw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_codex_tmux) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(30, 90, 180) else RGB(100, 160, 240));
-                        var cx_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("New Codex Session in This Folder"), -1, &cx_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        var cx_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("New Codex Session in This Folder"), -1, &cx_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
 
                         var host: u8 = 0;
                         var cwd_buf: [256]u8 = undefined;
                         var cwd_len: u32 = 0;
                         _ = activeRemoteContextForCodexTmux(&host, &cwd_buf, &cwd_len);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(190, 235, 190) else RGB(110, 180, 110));
                         const host_hint: [*:0]const u16 = switch (host) {
                             TMUX_HOST_UK => L("UK tmux"),
@@ -3939,21 +3967,21 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = DrawTextW(hdc, host_hint, -1, &cx_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_newwin) {
                         const is_createws = (result_idx == SEARCH_CREATEWS_OFFSET);
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var nw_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var nw_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                         const newwin_label = if (is_createws) L("Create Workspace") else if (app_state.g_search_workspace_mode) L("New Workspace") else L("New Window");
                         _ = DrawTextW(hdc, newwin_label, -1, &nw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         if (!is_createws) {
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                             var nw_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            _ = DrawTextW(hdc, L("Ctrl+N"), -1, &nw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                            _ = paletteDrawText(hdc, L("Ctrl+N"), -1, &nw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (is_openall) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(30, 120, 30) else RGB(100, 180, 100));
-                        var openall_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        var openall_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         const openall_label = switch (result_idx) {
                             SEARCH_RECOVER_REPO_OFFSET => L("Recover workspace tmux sessions"),
                             SEARCH_OPENFOLDER_OFFSET => L("Open sessions in this folder"),
@@ -3965,26 +3993,34 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         };
                         _ = DrawTextW(hdc, openall_label, -1, &openall_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_theme_back) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var back_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Back"), -1, &back_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var back_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Back"), -1, &back_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var back_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("main"), -1, &back_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("main"), -1, &back_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_SETTINGS_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var settings_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Settings"), -1, &settings_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
+                        var hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Ctrl+,"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_theme_menu) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var theme_menu_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Themes..."), -1, &theme_menu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var theme_menu_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Themes..."), -1, &theme_menu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         const current_theme = if (app_state.g_system_theme) (if (app_state.g_light_theme) L("System Light") else L("System Dark")) else if (app_state.g_multiprompt_theme) L("multiprompt") else if (app_state.g_dev_theme_active) L("Dev Blue") else if (app_state.g_light_theme) L("Light") else if (app_state.g_edge_gray_theme) L("Edge Grey") else if (app_state.g_mid_theme) L("Mid") else if (app_state.g_amoled_theme) L("AMOLED") else L("Dark");
                         var theme_menu_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, current_theme, -1, &theme_menu_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_theme_choice) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         const theme_current = switch (result_idx) {
                             SEARCH_THEME_SYSTEM_OFFSET => app_state.g_system_theme,
                             SEARCH_THEME_DARK_OFFSET => !app_state.g_system_theme and !app_state.g_multiprompt_theme and !app_state.g_dev_theme_active and !app_state.g_light_theme and !app_state.g_mid_theme and !app_state.g_edge_gray_theme and !app_state.g_amoled_theme,
@@ -4008,37 +4044,37 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             SEARCH_THEME_MULTIPROMPT_OFFSET => L("multiprompt"),
                             else => L("Theme"),
                         };
-                        var theme_choice_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        var theme_choice_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, theme_choice_label, -1, &theme_choice_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         if (theme_current) {
-                            _ = SelectObject(hdc, font_subtitle);
+                            _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 190, 220) else customColorOr("hint", RGB(100, 100, 110)));
                             var current_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            _ = DrawTextW(hdc, L("current"), -1, &current_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                            _ = paletteDrawText(hdc, L("current"), -1, &current_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (is_theme_dev_edit) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text_inactive", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180)));
-                        var edit_theme_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Edit Dev Theme JSON"), -1, &edit_theme_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var edit_theme_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Edit Dev Theme JSON"), -1, &edit_theme_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 190, 220) else customColorOr("hint", RGB(100, 100, 110)));
                         var edit_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("colors/fonts"), -1, &edit_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("colors/fonts"), -1, &edit_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_theme_dev_reload) {
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text_inactive", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180)));
-                        var reload_theme_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("Reload Dev Theme"), -1, &reload_theme_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-                        _ = SelectObject(hdc, font_subtitle);
+                        var reload_theme_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Reload Dev Theme"), -1, &reload_theme_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 190, 220) else customColorOr("hint", RGB(100, 100, 110)));
                         var reload_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("apply"), -1, &reload_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("apply"), -1, &reload_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_sound_toggle) {
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
                         const snd_label = if (app_state.g_sound_enabled) L("Notification Sounds: On") else L("Notification Sounds: Off");
-                        var snd_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
+                        var snd_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, snd_label, -1, &snd_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_new_shell) {
                         const kind_idx = result_idx - SEARCH_NEW_OFFSET;
@@ -4053,37 +4089,37 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             L("New Git Bash Shell"),
                         };
 
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180));
-                        var new_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, new_display[kind_idx], -1, &new_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var new_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, new_display[kind_idx], -1, &new_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
 
-                        _ = SelectObject(hdc, font_subtitle);
+                        _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         const new_hints = [NUM_BUTTONS]LPCWSTR{ L("C-S-1"), L("C-S-2"), L("C-S-3"), L("C-S-4"), L("C-S-5"), L("C-S-6"), L("C-S-7"), L("C-S-8") };
                         var ntag_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, new_hints[kind_idx], -1, &ntag_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, new_hints[kind_idx], -1, &ntag_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_tmux_inactive) {
                         const cache_idx = result_idx - SEARCH_TMUX_OFFSET;
                         const sess = app_state.g_tmux_cache[cache_idx];
                         const sname = sess.name[0..sess.name_len];
 
-                        _ = SelectObject(hdc, font_title);
+                        _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(220, 220, 220) else RGB(160, 160, 160));
                         if (sess.title_len > 0) {
                             var title_w: [80]u16 = undefined;
                             for (sess.title[0..sess.title_len], 0..) |c, ti| title_w[ti] = @intCast(c);
-                            var tmx_title_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 160, .bottom = ry + row_h };
+                            var tmx_title_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 160, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&title_w), @intCast(sess.title_len), &tmx_title_rc, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
                         } else {
                             var tmx_name_w: [64]u16 = undefined;
                             for (sname, 0..) |c, ci| tmx_name_w[ci] = @intCast(c);
-                            var tmx_name_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
+                            var tmx_name_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&tmx_name_w), @intCast(sess.name_len), &tmx_name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         }
 
-                        _ = SelectObject(hdc, font_subtitle);
-                        _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(140, 210, 140) else RGB(70, 140, 70));
+                        _ = SelectObject(hdc, palette_hint_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(0x8A, 0x8A, 0x8A));
                         var tag_buf2: [80]u16 = undefined;
                         var tbi2: usize = 0;
                         if (sess.title_len > 0) {
@@ -4103,41 +4139,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             tag_buf2[tbi2] = c;
                             tbi2 += 1;
                         }
-                        if (sess.ram_mb > 0) {
-                            tag_buf2[tbi2] = ' ';
-                            tbi2 += 1;
-                            if (sess.ram_mb >= 1024) {
-                                const gb = sess.ram_mb / 1024;
-                                const frac = (sess.ram_mb % 1024) * 10 / 1024;
-                                tag_buf2[tbi2] = @intCast(gb % 10 + '0');
-                                tbi2 += 1;
-                                tag_buf2[tbi2] = '.';
-                                tbi2 += 1;
-                                tag_buf2[tbi2] = @intCast(frac + '0');
-                                tbi2 += 1;
-                                tag_buf2[tbi2] = 'G';
-                                tbi2 += 1;
-                            } else {
-                                var rv = sess.ram_mb;
-                                var rd: [6]u8 = undefined;
-                                var rdi2: usize = 0;
-                                while (rv > 0) : (rdi2 += 1) {
-                                    rd[rdi2] = @intCast(rv % 10 + '0');
-                                    rv /= 10;
-                                }
-                                if (rdi2 == 0) {
-                                    rd[0] = '0';
-                                    rdi2 = 1;
-                                }
-                                while (rdi2 > 0) {
-                                    rdi2 -= 1;
-                                    tag_buf2[tbi2] = rd[rdi2];
-                                    tbi2 += 1;
-                                }
-                                tag_buf2[tbi2] = 'M';
-                                tbi2 += 1;
-                            }
-                        }
+
                         const hint_w: i32 = if (sess.title_len > 0) 160 else 90;
                         var rtag_rc = RECT{ .left = ox + overlay_w - hint_w, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&tag_buf2), @intCast(tbi2), &rtag_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
@@ -4149,83 +4151,24 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             continue;
                         }
 
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (app_state.g_light_theme and ri != app_state.g_search_sel) RGB(25, 25, 25) else RGB(255, 255, 255));
-                        const show_ws_label = app_state.g_single_window and app_state.g_lws_count > 1;
-                        var name_rc = RECT{ .left = ox + 12, .top = ry, .right = ox + overlay_w - (if (show_ws_label) @as(i32, 260) else 110), .bottom = ry + row_h };
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        const show_ws_label = true;
+                        var name_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - @as(i32, 180), .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&app_state.shells[shell_idx].name), @intCast(app_state.shells[shell_idx].name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | (if (show_ws_label) DT_END_ELLIPSIS else 0));
                         if (show_ws_label) {
-                            _ = SelectObject(hdc, font_subtitle);
-                            _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(140, 160, 200) else RGB(100, 110, 130));
+                            _ = SelectObject(hdc, palette_hint_font);
+                            _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(0x8A, 0x8A, 0x8A));
                             var wsl_buf: [32]u8 = undefined;
                             const wsl = workspaceDisplayName(app_state.shells[shell_idx].workspace, &wsl_buf);
                             var wsl_w: [32]u16 = undefined;
                             for (wsl, 0..) |c, wi| wsl_w[wi] = c;
-                            var wsl_rc = RECT{ .left = ox + overlay_w - 255, .top = ry, .right = ox + overlay_w - 115, .bottom = ry + row_h };
+                            var wsl_rc = RECT{ .left = ox + overlay_w - 180, .top = ry, .right = ox + overlay_w - 24, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&wsl_w), @intCast(wsl.len), &wsl_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
                         }
-
-                        if (shell_idx < 9) {
-                            _ = SelectObject(hdc, font_subtitle);
-                            _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(140, 160, 200) else RGB(70, 80, 100));
-                            var kb_hint: [6]u16 = undefined;
-                            kb_hint[0] = 'C';
-                            kb_hint[1] = '-';
-                            kb_hint[2] = @intCast('1' + shell_idx);
-                            var kb_rc = RECT{ .left = ox + overlay_w - 110, .top = ry, .right = ox + overlay_w - 75, .bottom = ry + row_h };
-                            _ = DrawTextW(hdc, @ptrCast(&kb_hint), 3, &kb_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-                        }
-
-                        _ = SelectObject(hdc, font_subtitle);
-                        const tag_color2 = if (app_state.shells[shell_idx].kind == .tmux)
-                            (if (ri == app_state.g_search_sel) RGB(140, 210, 140) else RGB(70, 140, 70))
-                        else if (app_state.shells[shell_idx].keep_alive)
-                            (if (ri == app_state.g_search_sel) RGB(140, 190, 255) else RGB(70, 120, 190))
-                        else
-                            (if (ri == app_state.g_search_sel) RGB(180, 180, 190) else RGB(100, 100, 110));
-                        _ = SetTextColor(hdc, tag_color2);
-                        var tag_buf2: [20]u16 = undefined;
-                        var tbi2: usize = 0;
-                        const kind_str2: []const u8 = switch (app_state.shells[shell_idx].kind) {
-                            .cmd => "CMD",
-                            .pwsh => "PWS",
-                            .vps => "VPS",
-                            .tmux => "TMX",
-                            .vps2 => "VPS",
-                            .bash => "BSH",
-                            .gitbash => "GIT",
-                        };
-                        for (kind_str2) |c| {
-                            tag_buf2[tbi2] = c;
-                            tbi2 += 1;
-                        }
-                        if (app_state.shells[shell_idx].ram_mb > 0) {
-                            tag_buf2[tbi2] = ' ';
-                            tbi2 += 1;
-                            var rv = app_state.shells[shell_idx].ram_mb;
-                            var rd: [6]u8 = undefined;
-                            var rdi2: usize = 0;
-                            while (rv > 0) : (rdi2 += 1) {
-                                rd[rdi2] = @intCast(rv % 10 + '0');
-                                rv /= 10;
-                            }
-                            if (rdi2 == 0) {
-                                rd[0] = '0';
-                                rdi2 = 1;
-                            }
-                            while (rdi2 > 0) {
-                                rdi2 -= 1;
-                                tag_buf2[tbi2] = rd[rdi2];
-                                tbi2 += 1;
-                            }
-                            tag_buf2[tbi2] = 'M';
-                            tbi2 += 1;
-                        }
-                        var rtag_rc = RECT{ .left = ox + overlay_w - 70, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, @ptrCast(&tag_buf2), @intCast(tbi2), &rtag_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     }
                 }
-                if (app_state.g_search_result_count > SEARCH_VISIBLE_ROWS) {
+                if (app_state.g_search_result_count > @import("drawing.zig").searchVisibleRows()) {
                     const track_top = oy + input_h + 5;
                     const track_bottom = oy + input_h + @as(i32, @intCast(visible_capacity)) * row_h - 5;
                     const track_h = track_bottom - track_top;

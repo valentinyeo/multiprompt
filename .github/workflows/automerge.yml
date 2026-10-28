@@ -2,11 +2,20 @@ name: automerge
 
 on:
   workflow_run:
-    workflows: [Tests, Verify desktop, PR checks, Gitleaks, Ledger guard, check-red-run, Chat table bench, Chat bench A/B, docs-site, Verify SSH reconnect]
+    workflows: [Tests, Verify desktop, PR checks, Gitleaks, Ledger guard, check-red-run]
     types: [completed]
-  schedule:
-    - cron: '*/15 * * * *'
+    branches-ignore: [master]
   workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Pull request number
+        required: true
+        type: string
+      dry_run:
+        description: Inspect without merging or dispatching checks
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -15,53 +24,34 @@ permissions:
   checks: read
   statuses: read
 
-concurrency:
-  group: automerge
-  cancel-in-progress: false
-
 jobs:
   automerge:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       toJSON(github.event.workflow_run.pull_requests) != 'null' &&
+       github.event.workflow_run.pull_requests[0].number != null &&
+       github.event.workflow_run.pull_requests[1] == null)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: master
-          sparse-checkout: tools
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Merge admitted heads and start master checks
+      - name: Record checked out head
+        run: git rev-parse HEAD
+      - name: Prove regression on merge-base source
+        if: github.event_name == 'workflow_dispatch' && github.ref_name != github.event.repository.default_branch
+        run: node tools/check-red-run.mjs origin/master HEAD
+      - name: Check admission regressions before manual inspection
+        if: github.event_name == 'workflow_dispatch'
+        run: node --test tools/automerge-admit-run.test.js tools/ci-admission.test.js && bash tools/automerge-admit.test.sh
+      - name: Inspect one PR and start master checks only after merging
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          REPO_OWNER: ${{ github.repository_owner }}
         run: |
-          set -euo pipefail
-          for pr in $(gh pr list -R "$REPO" --base master --state open --limit 1000 --json number -q '.[].number'); do
-            info=$(gh pr view "$pr" -R "$REPO" --json isDraft,labels,mergeable,statusCheckRollup,headRefOid,isCrossRepository,author,baseRefName,changedFiles) || { echo "#$pr: could not read PR"; continue; }
-            head_oid=$(jq -er '.headRefOid | select(test("^[0-9a-f]{40}$"))' <<< "$info") || { echo "#$pr: invalid head"; continue; }
-            behind_by=$(gh api "repos/$REPO/compare/master...$head_oid" --jq .behind_by) || behind_by=''
-            file_info=$(gh api "repos/$REPO/pulls/$pr/files?per_page=100" --paginate --slurp) || { echo "#$pr: could not list files"; continue; }
-            if ! jq -e --argjson count "$(jq '.changedFiles' <<< "$info")" 'add | length == $count' <<< "$file_info" >/dev/null; then
-              echo "#$pr: incomplete PR file list"
-              continue
-            fi
-            files=$(jq '[.[][] | .filename, (.previous_filename // empty)]' <<< "$file_info")
-            printf '%s' "$info" > "$RUNNER_TEMP/pr-info.json"
-            printf '%s' "$files" > "$RUNNER_TEMP/pr-files.json"
-            verdict=$(bash tools/automerge-admit.sh "$RUNNER_TEMP/pr-info.json" "$RUNNER_TEMP/pr-files.json" "$behind_by" "$REPO_OWNER") || verdict='skip (admission script failed)'
-            echo "#$pr: $verdict"
-            if [ "$verdict" != merge ]; then continue; fi
-            if gh pr merge "$pr" -R "$REPO" --squash --delete-branch --match-head-commit "$head_oid"; then
-              for workflow in test.yml no-comments.yml gitleaks.yml; do
-                gh workflow run "$workflow" -R "$REPO" --ref master
-              done
-            fi
-          done
-          head_oid=$(gh api "repos/$REPO/commits/master" --jq .sha)
-          for workflow in test.yml no-comments.yml gitleaks.yml; do
-            count=$(gh run list -R "$REPO" -w "$workflow" -b master --commit "$head_oid" --event workflow_dispatch --json databaseId -q length)
-            push_count=$(gh run list -R "$REPO" -w "$workflow" -b master --commit "$head_oid" --event push --json databaseId -q length)
-            if [ "$count" -eq 0 ] && [ "$push_count" -eq 0 ]; then
-              gh workflow run "$workflow" -R "$REPO" --ref master
-            fi
-          done
+          node tools/automerge-admit-run.js

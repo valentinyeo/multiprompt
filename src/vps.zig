@@ -1123,6 +1123,8 @@ pub fn buildFilteredTmux() void {
     var ti: u32 = 0;
     while (ti < app_state.g_tmux_cache_count) : (ti += 1) {
         if (tmuxCacheEntryAlreadyOpen(&app_state.g_tmux_cache[ti])) continue;
+        const entry = &app_state.g_tmux_cache[ti];
+        if (app_state.g_tmux_closed.contains(entry.host, entry.name[0..entry.name_len])) continue;
 
         if (app_state.g_inactive_filtered_count < app_state.g_inactive_filtered.len) {
             app_state.g_inactive_filtered[app_state.g_inactive_filtered_count] = ti;

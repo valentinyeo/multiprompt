@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
@@ -105,7 +107,7 @@ function auditWorkspaceFocusJourney(source) {
 }
 
 test('workspace focus journey reads cross-process Edit text with a bounded read-only message and keeps no-click assertions', () => {
-  const source = fs.readFileSync(path.resolve(__dirname, '..', '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
+  const source = readControlSource();
   auditWorkspaceFocusJourney(source);
   for (const [before, after] of [
     ['SendMessageTimeout(hwnd, 0x000D,', 'GetWindowText(hwnd,'],

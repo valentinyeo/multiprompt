@@ -5,6 +5,12 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 const test = require('node:test');
 
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
+
 const root = path.resolve(__dirname, '..');
 const oldCheck = `set -euo pipefail
 sha=$(git rev-parse HEAD)
@@ -25,10 +31,18 @@ function fixture(t) {
   git('config', 'tag.gpgsign', 'false');
   git('config', 'core.autocrlf', 'false');
   fs.mkdirSync(path.join(dir, 'tools'));
-  fs.copyFileSync(path.join(root, 'tools/release-version.mjs'), path.join(dir, 'tools/release-version.mjs'));
+  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  fs.mkdirSync(path.join(dir, 'changelog.d'));
+  git('add', 'tools');
   git('commit', '--allow-empty', '-m', 'previous release');
   git('tag', 'v0.0.1');
-  const commit = message => {
+  let sequence = 0;
+  const commit = (message, note = 'Your chats keep their saved order.') => {
+    if (note) {
+      fs.mkdirSync(path.join(dir, 'changelog.d'), { recursive: true });
+      fs.writeFileSync(path.join(dir, `changelog.d/DEMO-${++sequence}-chat.md`), note);
+      git('add', 'changelog.d');
+    }
     git('commit', '--allow-empty', '-m', message);
     return git('rev-parse', 'HEAD');
   };
@@ -44,12 +58,17 @@ function fixture(t) {
   fs.writeFileSync(log, '');
   fs.writeFileSync(path.join(bin, 'gh'), `#!${process.execPath}
 const fs = require('node:fs');
+
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GH_LOG, JSON.stringify(args) + '\\n');
 if (process.env.GH_FAIL === 'true') process.exit(1);
 if (args[0] === 'run' && args[1] === 'view') {
   const jobs = JSON.parse(process.env.VERIFY_JOBS || '{}')[args[2]];
   console.log(JSON.stringify(jobs || { jobs: [{ name: 'verify (relaunch-saved-sessions)', conclusion: 'success' }, { name: 'verify (appearance)', conclusion: 'failure' }] }));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1].endsWith('/releases/latest')) {
+  console.log(process.env.PUBLISHED_TAG || 'v0.0.1');
   process.exit(0);
 }
 if (args[0] === 'api') {
@@ -111,6 +130,7 @@ test('HEAD moved past green commits: publishes newest green SHA, not HEAD, and n
     '--commit', sha, '--limit', '100', '--json', 'databaseId,event,status,conclusion',
   ];
   assert.deepEqual(f.calls(), [
+    ['api', 'repos/example/multiprompt/releases/latest', '--jq', '.tag_name'],
     list('test.yml', f.tip),
     list('test.yml', f.green),
     list('release-gate.yml', f.green),
@@ -124,7 +144,7 @@ test('HEAD moved past green commits: publishes newest green SHA, not HEAD, and n
 test('no green commit since release: exits successfully without tagging', t => {
   const f = fixture(t);
   skipped(f, { TEST_RUNS: '{}' });
-  assert.equal(f.calls().length, 3);
+  assert.equal(f.calls().filter(args => args[0] === 'run').length, 3);
   assert.ok(f.calls().every(args => args[args.indexOf('--commit') + 1] !== f.git('rev-parse', 'v0.0.1')));
 });
 
@@ -132,7 +152,7 @@ test('newest green already released: never selects an older commit', t => {
   const f = fixture(t);
   f.git('tag', '-a', 'v0.0.2', f.green, '-m', 'already released');
   skipped(f);
-  assert.deepEqual(f.calls().map(args => args[args.indexOf('--commit') + 1]), [f.tip]);
+  assert.deepEqual(f.calls().filter(args => args[0] === 'run').map(args => args[args.indexOf('--commit') + 1]), [f.tip]);
 });
 
 test('a non-release tag on newest green makes selection keep walking', t => {
@@ -277,7 +297,7 @@ test('the admit script names the journey the verify workflow runs on every maste
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   const autoRelease = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
   assert.match(admit, /RELEASE_JOURNEY=relaunch-saved-sessions/);
-  assert.match(workflow, /fromJSON\('\["appearance", "chat-dictation", "relaunch-saved-sessions", [^\n]*\]'\)/);
+  assert.ok(featureMatrix(workflow).full.includes('relaunch-saved-sessions'));
   assert.match(autoRelease, /workflows: \[Tests, Verify desktop, Release gate\]/);
   assert.match(autoRelease, /workflow_run\.name == 'Release gate'/);
 });
@@ -327,4 +347,21 @@ test('the release tag is created through the git refs API and never pushed with 
   const script = fs.readFileSync(path.join(root, 'tools/auto-release-admit.sh'), 'utf8');
   assert.match(script, /gh api -X POST "repos\/\$GITHUB_REPOSITORY\/git\/refs" -f "ref=refs\/tags\/\$release_tag" -f "sha=\$sha"/);
   assert.doesNotMatch(script, /git push/);
+});
+
+
+test('IGSH-1131 a quiet green candidate cannot publish an empty changelog', t => {
+  const f = fixture(t);
+  const quiet = f.commit('wait for maximized geometry before restore input', null);
+  const result = skipped(f, { PUBLISHED_TAG: f.tip, TEST_RUNS: JSON.stringify({ [quiet]: f.success }) });
+  assert.match(result.stderr, /no unpublished product notes/);
+});
+
+test('IGSH-1131 failed tags do not consume unpublished product notes', t => {
+  const f = fixture(t);
+  f.git('tag', 'v0.0.2', f.green);
+  const quiet = f.commit('maintenance after failed release', null);
+  const result = f.admit(['--dry-run'], { TEST_RUNS: JSON.stringify({ [quiet]: f.success }) });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(result.stdout, `tag=v0.0.3\nsha=${quiet}\n`);
 });

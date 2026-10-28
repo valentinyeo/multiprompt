@@ -68,6 +68,12 @@ export function verifyRemoteSwitch(root) {
   const after = cpuSample(value.idleAfter);
   assert.ok(value.idleAfter.elapsedMs >= 2000 && value.idleAfter.elapsedMs < 2400, 'first two seconds after switches sampled');
   assert.ok(after <= Math.max(5, before + 2), 'CPU returns to idle within two seconds');
+  assert.equal(finalTabs.length, 3, 'three sessions remain open');
+  assert.equal(value.idleThree.sessions, 3, 'three-session idle sample');
+  assert.equal(value.idleThree.shell, remote.shell_id, 'long remote chat stays visible during idle sample');
+  assert.ok(value.idleThree.elapsedMs >= 2000, 'three-session idle interval');
+  const threeSessionCpu = cpuSample(value.idleThree);
+  assert.ok(threeSessionCpu < 3, `three-session idle CPU ${threeSessionCpu.toFixed(2)}% exceeds 3%`);
   const cleanup = JSON.parse(read('cleanup.json'));
   assert.equal(cleanup.remaining_owned_processes, 0);
   assert.equal(cleanup.scratch_removed, true);
@@ -79,7 +85,7 @@ export function verifyRemoteSwitch(root) {
     maxSwitchMs: Math.max(...value.switches.flatMap(sample => [sample.switchMs, sample.return.switchMs, sample.probe.switchMs])),
     maxFrameGapMs: Math.max(...value.switches.flatMap(sample => sample.probe.frames.map(frame => frame.gapMs))),
     maxCpuPercent: Math.max(...value.switches.flatMap(sample => [100 * sample.cpuMs / sample.elapsedMs, 100 * sample.return.cpuMs / sample.return.elapsedMs])),
-    idleBeforePercent: before, idleAfterPercent: after,
+    idleBeforePercent: before, idleAfterPercent: after, idleThreeSessionPercent: threeSessionCpu,
     boundary: 'Real Windows app and native transcript paints; synthetic second SSH host and alternate remote home. CPU is one-core process time, not divided by logical cores. CPU windows contain no forced repaint observer. Matching separate probe switches request native paints every 16 ms; their CPU is recorded separately and not presented as ordinary switch CPU. Paints are application frames, not compositor presentation.' };
 }
 

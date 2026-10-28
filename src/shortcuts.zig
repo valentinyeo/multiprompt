@@ -265,6 +265,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+G", .b = "Collapse / expand tab group", .header = false },
     .{ .a = "Alt+; / Ctrl+;", .b = "Use snippets", .header = false },
     .{ .a = "Ctrl+K -> Create Snippet", .b = "Save a named paste block", .header = false },
+    .{ .a = "Ctrl+K -> Manage Snippets", .b = "Delete saved snippets; Esc cancels", .header = false },
     .{ .a = "Delete twice in snippets", .b = "Delete the selected saved snippet", .header = false },
     .{ .a = "F2 / double-click", .b = "Rename tab or selected Inbox session", .header = false },
     .{ .a = "Workspaces (single-window)", .b = "", .header = true },
@@ -291,7 +292,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K Thread Title", .b = "[DEV] Subject header above the console (toggle)", .header = false },
     .{ .a = "Ctrl++ / Ctrl+- / Ctrl+0", .b = "Terminal font only (Chat View text size when Chat View is active)", .header = false },
     .{ .a = "Ctrl+K UI Size", .b = "App/sidebar only, layered over native monitor DPI", .header = false },
-    .{ .a = "Ctrl+Shift+R", .b = "Reconnect active SSH/tmux tab", .header = false },
+    .{ .a = "Ctrl+Shift+R", .b = "Reattach active SSH/tmux tab", .header = false },
     .{ .a = "Ctrl+K \u{2192} Start new session", .b = "Restart an ended server session with the same name (also in tab actions)", .header = false },
     .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },
@@ -335,7 +336,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Drag tab: Pinned / Recents", .b = "Change its order inside the group or ungrouped list", .header = false },
     .{ .a = "Click tier heading", .b = "Collapse / expand ungrouped Pinned or Recents", .header = false },
     .{ .a = "Right-click group / Ctrl+K", .b = "Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs", .header = false },
-    .{ .a = "Right-click tab", .b = "Tab actions palette (pin / reconnect / mute / close / move / group)", .header = false },
+    .{ .a = "Right-click tab", .b = "Tab actions palette (pin / reattach / mute / close / move / group)", .header = false },
     .{ .a = "Ctrl+F in Chat View", .b = "Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes", .header = false },
     .{ .a = "End / Ctrl+K \"Chat View: Scroll to newest message\"", .b = "Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch", .header = false },
     .{ .a = "Double-click empty space", .b = "Switch between Chat View and the shell (without selecting text)", .header = false },
@@ -398,6 +399,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \u{2192} Browser: Insert Agent Instructions", .b = "Paste the multiprompt-browser guide into the active shell", .header = false },
     .{ .a = "URL bar (click strip above pane)", .b = "Type a URL and press Enter to navigate the docked pane", .header = false },
     .{ .a = "Ctrl+Click URL in shell", .b = "Open link in the docked browser pane (was: default browser)", .header = false },
+    .{ .a = "Ctrl+, / Ctrl+K -> Settings", .b = "Open Settings; Escape closes the panel", .header = false },
     .{ .a = "Ctrl+K -> Changelog", .b = "what changed in each version", .header = false },
     .{ .a = "(agent-reported) Session ETA countdown", .b = "Sidebar row shows time left + a progress line; toggle either from Ctrl+K \u{2192} ETA Countdown Numbers / ETA Progress Line", .header = false },
     .{ .a = "Ctrl+K \u{2192} Estimate Accuracy", .b = "See how each agent's time estimates compare to how long tasks actually took", .header = false },
@@ -623,15 +625,6 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         }
         const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
         app_state.g_last_main_keyboard_event_time.store(kb.time, .release);
-        if (kb.vkCode == 0x1B and app_state.g_dictation_escape_held) {
-            if (wp == WM_KEYUP or wp == WM_SYSKEYUP) app_state.g_dictation_escape_held = false;
-            return 1;
-        }
-        if (kb.vkCode == 0x1B and wp == WM_KEYDOWN and !app_state.g_win_held and (kb.flags & 0x20) == 0 and !isCtrlDown() and
-            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and foregroundIsOurs() and queueDictationCancelFromEscape())
-        {
-            return 1;
-        }
         const prior_focus_action = app_state.g_focus_user_action_tick;
         defer app_state.g_focus_user_action_tick = prior_focus_action;
         app_state.g_focus_user_action_tick = 0;
@@ -649,6 +642,21 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_focus_browser_shell_id = 0;
             app_state.g_focus_user_action_tick = GetTickCount64();
         }
+
+        if (@import("settings_panel.zig").ownsForeground()) {
+            if (kb.vkCode == 0x5B or kb.vkCode == 0x5C) app_state.g_win_held = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
+            return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+        }
+        if (kb.vkCode == 0x1B and app_state.g_dictation_escape_held) {
+            if (wp == WM_KEYUP or wp == WM_SYSKEYUP) app_state.g_dictation_escape_held = false;
+            return 1;
+        }
+        if (kb.vkCode == 0x1B and wp == WM_KEYDOWN and !app_state.g_win_held and (kb.flags & 0x20) == 0 and !isCtrlDown() and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and foregroundIsOurs() and queueDictationCancelFromEscape())
+        {
+            return 1;
+        }
+        if (@import("settings_panel.zig").windowKey(@intCast(wp), kb.vkCode, true)) return 1;
 
         if (kb.vkCode == 0x0D and wp == WM_KEYDOWN and isCtrlDown() and
             (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and

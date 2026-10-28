@@ -284,6 +284,7 @@ pub const WM_APP_CHAT_TAB_URL: u32 = WM_APP + 205;
 pub const WM_APP_BROWSER_DOCK_GUARD: u32 = WM_APP + 207;
 pub const WM_APP_BROWSER_LIFECYCLE_DONE: u32 = WM_APP + 208;
 pub const WM_APP_MORE_MENU_ACTION: u32 = WM_APP + 209;
+pub const WM_APP_SETTINGS_OPEN: u32 = WM_APP + 210;
 pub const WM_COPYDATA: u32 = 0x004A;
 pub const WM_ERASEBKGND: u32 = 0x0014;
 pub const WM_TIMER: u32 = 0x0113;
@@ -592,6 +593,7 @@ pub extern "user32" fn InternalGetWindowText(HANDLE, [*]u16, i32) callconv(WINAP
 pub extern "user32" fn GetWindowTextLengthW(HANDLE) callconv(WINAPI) i32;
 pub extern "user32" fn SetWindowTextW(HANDLE, LPCWSTR) callconv(WINAPI) BOOL;
 pub extern "user32" fn GetForegroundWindow() callconv(WINAPI) HANDLE;
+pub extern "user32" fn GetKeyState(i32) callconv(WINAPI) i16;
 pub extern "user32" fn GetAsyncKeyState(i32) callconv(WINAPI) i16;
 pub extern "user32" fn mouse_event(DWORD, DWORD, DWORD, DWORD, usize) callconv(WINAPI) void;
 pub extern "user32" fn SetWindowsHookExW(i32, HOOKPROC, HANDLE, DWORD) callconv(WINAPI) HANDLE;

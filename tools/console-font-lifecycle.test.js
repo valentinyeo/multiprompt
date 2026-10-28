@@ -94,6 +94,7 @@ function harness() {
     fn(workspace, 'pickWorkspaceTarget').replace(/\bshells\b/g, 'candidates') + '\n' +
     handler('WM_APP_TOGGLE_FULLWIDTH', 'WM_APP_RECONNECT', 'toggleFullWidth(hwnd: HANDLE) i32') + '\n' +
     handler('WM_DPICHANGED', 'WM_MOVE', 'dpiChanged(hwnd: HANDLE, wp: usize, lp: isize) i32') + '\n' +
+    fn(main, 'setChatFontPoint') + '\n' +
     handler('WM_APP_FONT_BIGGER', 'WM_APP_FONT_SMALLER', 'zoomBigger(hwnd: HANDLE) i32') + '\n' +
     handler('WM_APP_FONT_SMALLER', 'WM_APP_FONT_RESET', 'zoomSmaller(hwnd: HANDLE) i32') + '\n' +
     handler('WM_APP_FONT_RESET', 'WM_APP_NEW_TAB_DEFAULT', 'zoomReset(hwnd: HANDLE) i32') + `
@@ -114,7 +115,7 @@ fn pollFonts() void {
 `).replaceAll('@import("fonts.zig")', 'font_policy')
     .replaceAll('@import("win32.zig")', 'win32')
     .replaceAll('@import("chat_find_ui.zig").close', 'closeFind')
-    .replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
+    .replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark')
     .replaceAll('@import("window_layout.zig").chatWorkingIndicatorSync', 'syncWorking')
     .replaceAll('@import("console.zig").', '').replaceAll('@import("chat_send.zig").sshRequestSessionProbe', 'sshRequestSessionProbe')
     .replaceAll('@import("inbox.zig").', '')
@@ -240,7 +241,7 @@ var g_voice_mode_active = false;
 var g_chat_status_hwnd: HANDLE = null;
 var g_chat_transcript_hwnd: HANDLE = null;
 var g_chat_composer_hwnd: HANDLE = null;
-var g_chat_font_pt: u32 = 16;
+var g_chat_font_pt: i32 = 16;
 var g_chat_browser_swap: struct { shell_id: u32 = 0, fn cancel(_: *@This()) void {} } = .{};
 var g_browser_focus_mode = false;
 var g_single_window = true;
@@ -398,6 +399,7 @@ fn closeFind(_: bool) void {}
 fn chatAcClose() void {}
 fn chatDraftFlush() void {}
 fn chatReadMark(_: bool) bool { return false; }
+fn chatHistoryStreamsKeep(_: u32) void {}
 fn syncWorking() void {}
 fn chatSelectionClear() void {}
 fn updateBrowserVisibility() void {}
@@ -630,6 +632,7 @@ test "registration failure cannot masquerade as the shell font and mintty bypass
 `;
 
 test('IGSH-457 console lifecycle harness includes Starred workspace dependencies', () => {
+  assert.match(fn(chat, 'closeChatView'), /chatHistoryStreamsKeep\(0\)/);
   const source = harness();
   for (const name of ['starredShellVisible', 'refreshStarredWorkspace', 'inboxPublishesShell', 'loadInboxModel', 'allocateShellId', 'allocateShellIdFrom']) {
     assert.ok(source.includes(`fn ${name}(`), name);
@@ -656,7 +659,7 @@ test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold aft
     fs.cpSync(path.join(root, 'src/fonts'), path.join(dir, 'fonts'), { recursive: true });
     copyZig(['workspace_view.zig', 'chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], {
       encoding: 'utf8', timeout: 120000,
     });

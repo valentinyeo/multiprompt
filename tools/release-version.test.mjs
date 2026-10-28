@@ -29,7 +29,7 @@ function fixture(t) {
   fs.mkdirSync(path.join(dir, 'src'));
   fs.mkdirSync(path.join(dir, 'tools'));
   fs.writeFileSync(path.join(dir, 'src/changelog.zig'), changelog);
-  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'auto-release-admit.sh']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'auto-release-admit.sh']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
   fs.writeFileSync(path.join(dir, 'src/main.zig'), 'pub const APP_VERSION = build_config.app_version orelse "1.2.3";\n');
   git('add', '.');
   git('commit', '-m', 'fixture');
@@ -62,6 +62,10 @@ if (args[0] === 'run' && args.includes('verify.yml')) {
 if (args[0] === 'run') {
   const sha = args[args.indexOf('--commit') + 1];
   console.log(JSON.stringify(sha === process.env.TESTED_SHA ? [{ databaseId: 1, event: 'push', status: 'completed', conclusion: process.env.TEST_CONCLUSION || 'success' }] : []));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1].endsWith('/releases/latest')) {
+  console.log('v1.2.8');
   process.exit(0);
 }
 if (args[0] === 'api') {
@@ -140,23 +144,23 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
-  assert.match(tests, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source\]/);
+  assert.match(tests, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance\]/);
   assert.match(tests, /BUILD: \$\{\{ needs\.build-windows\.result \}\}/);
 });
 
 test('aggregate routing requires every test job and rejects every unsuccessful dependency', () => {
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   const aggregate = tests.split('\n  test-result:\n')[1];
-  assert.match(aggregate, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source\]/);
-  for (const [variable, job] of Object.entries({ WINDOWS: 'test', VPS: 'test-vps', BUILD: 'build-windows', UPDATE: 'test-windows-update', WORKER: 'test-worker', UPDATE_SOURCE: 'test-update-source' })) {
+  assert.match(aggregate, /needs: \[test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance\]/);
+  for (const [variable, job] of Object.entries({ WINDOWS: 'test', VPS: 'test-vps', BUILD: 'build-windows', UPDATE: 'test-windows-update', WORKER: 'test-worker', UPDATE_SOURCE: 'test-update-source', RED_RUN: 'check-red-run', SPEED: 'switch-performance' })) {
     assert.ok(aggregate.includes(`${variable}: $` + `{{ needs.${job}.result }}`));
   }
   assert.match(aggregate, /for result in "\$@"; do\n              \[ "\$result" = success \] \|\| return 1/);
   assert.match(aggregate, /for result in failure cancelled skipped; do/);
-  assert.match(aggregate, /require_jobs "\$WINDOWS" "\$VPS" "\$BUILD" "\$UPDATE" "\$WORKER" "\$UPDATE_SOURCE"/);
+  assert.match(aggregate, /require_jobs "\$WINDOWS" "\$VPS" "\$BUILD" "\$UPDATE" "\$WORKER" "\$UPDATE_SOURCE" "\$RED_RUN"/);
   assert.doesNotMatch(aggregate, /CHANGES|HEAVY|needs\.changes/);
   const script = aggregate.split('        run: |\n')[1].split('\n').map(line => line.slice(10)).join('\n');
-  const success = { WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success' };
+  const success = { WINDOWS: 'success', VPS: 'success', BUILD: 'success', UPDATE: 'success', WORKER: 'success', UPDATE_SOURCE: 'success', RED_RUN: 'success', SPEED: 'success' };
   const run = env => spawnSync('bash', ['-e', '-c', script], { encoding: 'utf8', env: { ...process.env, ...success, ...env } });
   const result = run({});
   assert.equal(result.status, 0, result.stderr);
@@ -208,7 +212,7 @@ test('lightweight workflows cancel superseded PRs, a running master verify is ne
   }
   const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   assert.match(verify, /^  pull_request:/m);
-  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\$\{\{ inputs\.feature && github\.event_name == 'push' && format\('-gate-\{0\}', github\.sha\) \|\| '' \}\}\$\{\{ github\.run_attempt != '1' && format\('-rerun-\{0\}', github\.sha\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m);
+  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ inputs\.chat_reply_proof && format\('-reply-\{0\}', inputs\.tag \|\| 'candidate'\) \|\| '' \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\$\{\{ inputs\.feature && github\.event_name == 'push' && format\('-gate-\{0\}', github\.sha\) \|\| '' \}\}\$\{\{ github\.run_attempt != '1' && format\('-rerun-\{0\}', github\.sha\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m);
   const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
   assert.match(scan, /^  push:\n    branches: \[master\]\n  pull_request:/m);
   assert.match(scan, /^  schedule:/m);
@@ -371,7 +375,10 @@ test('release builds inject the tag, stage matching notes and reject wrong embed
 test('auto-release creates only a tag ref on the tested commit under a branch-rejecting remote', { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   f.git('tag', 'v1.2.8');
-  f.git('commit', '--allow-empty', '-m', 'tested improvement');
+  fs.mkdirSync(path.join(f.dir, 'changelog.d'));
+  fs.writeFileSync(path.join(f.dir, 'changelog.d/DEMO-1-chat.md'), 'Your chats keep their saved order.\n');
+  f.git('add', 'changelog.d');
+  f.git('commit', '-m', 'tested improvement');
   const tested = f.git('rev-parse', 'HEAD');
   f.git('push', 'origin', 'master');
   fs.writeFileSync(path.join(f.remote, 'hooks/update'), '#!/bin/sh\ncase "$1" in refs/heads/*) exit 1;; esac\n', { mode: 0o755 });
@@ -383,6 +390,7 @@ test('auto-release creates only a tag ref on the tested commit under a branch-re
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'master'), tested);
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v1.2.9'), tested);
   assert.deepEqual(f.calls(), [
+    ['api', 'repos/example/multiprompt/releases/latest', '--jq', '.tag_name'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'test.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'release-gate.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'verify.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
@@ -398,7 +406,10 @@ test('auto-release creates only a tag ref on the tested commit under a branch-re
 for (const reason of ['skip', 'red', 'green']) test(`auto-release admission: ${reason}`, { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   f.git('tag', 'v1.2.8');
-  f.git('commit', '--allow-empty', '-m', reason === 'skip' ? 'maintenance [skip release]' : 'release candidate');
+  fs.mkdirSync(path.join(f.dir, 'changelog.d'));
+  fs.writeFileSync(path.join(f.dir, 'changelog.d/DEMO-1-chat.md'), 'Your chats keep their saved order.\n');
+  f.git('add', 'changelog.d');
+  f.git('commit', '-m', reason === 'skip' ? 'maintenance [skip release]' : 'release candidate');
   const tested = f.git('rev-parse', 'HEAD');
   f.git('push', 'origin', 'master');
   const result = f.admit({ TEST_CONCLUSION: reason === 'red' ? 'failure' : 'success' });
@@ -411,4 +422,17 @@ for (const reason of ['skip', 'red', 'green']) test(`auto-release admission: ${r
     assert.equal(f.git('tag', '--list', 'v1.2.9'), '');
     assert.equal(f.git('--git-dir', f.remote, 'tag', '--list', 'v1.2.9'), '');
   }
+});
+
+
+test('IGSH-1115 release proof builds both architectures without publishing and authenticates history reads', () => {
+  const prepare = workflow.split('\n  prepare:\n')[1].split('\n  build:\n')[0];
+  const build = workflow.split('\n  build:\n')[1].split('\n  release:\n')[0];
+  const release = workflow.split('\n  release:\n')[1];
+  assert.match(workflow, /proof:\n        description: Build both architectures without publishing\n        type: boolean\n        default: false/);
+  assert.match(prepare, /if: inputs\.proof\n        run: node --test tools\/version-stamp\.test\.mjs tools\/release-version\.test\.mjs/);
+  assert.match(build, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+  assert.match(release, /if: github\.event_name != 'pull_request' && !inputs\.proof/);
+  const notes = release.split('      - name: Publish plain versioned update notes\n')[1].split('      - name: Package extension')[0];
+  assert.match(notes, /GH_TOKEN: \$\{\{ github\.token \}\}/);
 });

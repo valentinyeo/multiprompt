@@ -4,14 +4,19 @@ on:
     paths:
       - 'src/**'
       - 'build.zig'
+      - 'service/journey/**'
       - 'tools/freeze-recorder*'
       - '.github/workflows/freeze-recorder.yml'
   push:
-    branches: [master]
+    branches: [master, ceo/IGSH-970-reports]
   workflow_dispatch:
     inputs:
       tag:
         description: Optional published release to verify instead of a branch build
+        required: false
+        type: string
+      credential_url:
+        description: Optional encrypted disposable credential rendezvous for live release proof
         required: false
         type: string
 permissions:
@@ -22,7 +27,7 @@ concurrency:
 jobs:
   journey:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -63,9 +68,61 @@ jobs:
           if ($redCode -eq 0 -or ($red -join "`n") -notmatch 'Ten-second stall must write exactly one report; found 0') { throw "Pre-fix control failed for an unexpected reason: $red" }
           $global:LASTEXITCODE = 0
           Write-Host 'FREEZE_RED_CONTROL_OK'
-      - name: Force real main-thread stalls
+      - name: Create ephemeral encryption key for live proof
+        if: inputs.credential_url != ''
         shell: pwsh
-        run: ./tools/freeze-recorder-journey.ps1 -Exe ./zig-out/bin/multiprompt.exe -Evidence ./freeze-evidence
+        run: |
+          $rsa = [Security.Cryptography.RSA]::Create(3072)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP/report-key.der", $rsa.ExportPkcs8PrivateKey())
+          New-Item -ItemType Directory -Force freeze-public-key | Out-Null
+          [IO.File]::WriteAllText("$PWD/freeze-public-key/public.pem", $rsa.ExportSubjectPublicKeyInfoPem())
+          $rsa.Dispose()
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.credential_url != ''
+        with:
+          name: freeze-public-key
+          path: freeze-public-key/public.pem
+          retention-days: 1
+      - name: Receive encrypted disposable credential
+        if: inputs.credential_url != ''
+        shell: pwsh
+        env:
+          CREDENTIAL_URL: ${{ inputs.credential_url }}
+        run: |
+          if ($env:CREDENTIAL_URL -notmatch '^https://[a-z0-9.-]+\.workers\.dev/[a-z0-9-]+$') { throw 'Invalid rendezvous URL' }
+          $deadline = [DateTime]::UtcNow.AddMinutes(10)
+          $envelope = $null
+          do {
+            try { $envelope = (Invoke-RestMethod $env:CREDENTIAL_URL).envelope } catch { Start-Sleep -Seconds 10 }
+          } while (!$envelope -and [DateTime]::UtcNow -lt $deadline)
+          if (!$envelope) { throw 'No encrypted live credential received' }
+          $rsa = [Security.Cryptography.RSA]::Create()
+          $read = 0
+          $rsa.ImportPkcs8PrivateKey([IO.File]::ReadAllBytes("$env:RUNNER_TEMP/report-key.der"), [ref]$read)
+          $plain = $rsa.Decrypt([Convert]::FromBase64String($envelope), [Security.Cryptography.RSAEncryptionPadding]::OaepSHA256)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP/report-account.json", $plain)
+          [Array]::Clear($plain)
+          $rsa.Dispose()
+          Remove-Item "$env:RUNNER_TEMP/report-key.der"
+      - name: Build the existing account service fixture
+        if: inputs.credential_url == ''
+        working-directory: service
+        shell: pwsh
+        run: |
+          npm ci --no-audit --no-fund --prefer-offline
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+          npx wrangler deploy --dry-run --outdir .build
+          if ($LASTEXITCODE -ne 0) { throw 'Account fixture build failed' }
+      - name: Force real main-thread stalls
+        if: inputs.credential_url == ''
+        shell: pwsh
+        run: ./tools/freeze-recorder-upload.ps1 -Exe ./zig-out/bin/multiprompt.exe -Evidence ./freeze-evidence
+      - name: Force released app to upload to the live service
+        if: inputs.credential_url != ''
+        shell: pwsh
+        run: |
+          try { ./tools/freeze-recorder-journey.ps1 -Exe ./zig-out/bin/multiprompt.exe -Evidence ./freeze-evidence -AccountState "$env:RUNNER_TEMP/report-account.json" }
+          finally { Remove-Item "$env:RUNNER_TEMP/report-account.json" -ErrorAction SilentlyContinue }
       - name: Validate saved reports
         run: |
           node tools/freeze-recorder-proof.mjs freeze-evidence

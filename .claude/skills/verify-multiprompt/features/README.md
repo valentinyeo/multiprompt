@@ -14,6 +14,8 @@ Read the matching feature before dispatching. [Recent changes coverage](../cover
 
 Dispatch `gh workflow run verify.yml -f feature=<stem>`, identify the matching revision/event, run `gh run watch <id> --interval 60`, then `gh run download <id>`. Development branches use `--ref <branch>`; the PR trigger runs appearance, chat-dictation, workspace-focus, favorites-groups, browser-pane-stuck, browser-pane-locked, group-rail, pane-layout, chat-view-everywhere, chat-focus, status-card, palette-order, browser-own-profile and remind-me; `tab-names` runs on request. See [SKILL.md](../SKILL.md) for the exact Windows helper invocation and release selection.
 
+Automatic journey membership lives in each recipe: `Verify on: push` joins master and `feature=all`; add `, pull_request` to join PR smoke checks. A recipe without that line stays manual-only. The generator discovers recipes with the `Driving it with control.ps1` heading, so reconnect and diagnostic maps keep their separate workflows. Adding a recipe needs no workflow matrix or validation-list edit. The shared control driver remains a separate concern.
+
 Every baseline recipe below is implemented by `control.ps1 -Feature <stem>` with the remaining identity/evidence arguments supplied by the workflow. Named keys mean actual SendInput key down/up events, not posted app messages. Query text is typed through the same input path. Search plus arrow navigation is necessary because the app paints its own palette rows. Browser-pane-locked targets an ownership-checked empty browser strip with real mouse input; workspace-focus also clicks workspace pills.
 
 ## Proof and failure reporting
@@ -32,6 +34,10 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Features
 
+- [App icon](app-icon.md): approved robot artwork in the Windows taskbar, window and executable; the previous release is the red control.
+
+- [Settings panel](settings-panel.md): keyboard and palette entry, existing settings persistence, centred native panel and focus-safe dismissal.
+
 - [Inline working dots](chat-working.md): screenshot pixels prove three animated dots in the next reply slot and their disappearance after the reply.
 
 - [Chat dictation](chat-dictation.md): Ctrl+D, all three stop methods, visible microphone state, immediate native draft insertion and typing while listening, with recorded audio and offline provider-response replay.
@@ -42,7 +48,7 @@ A passing selected journey does not cover all listed entry points or every sub-f
 - [Safe updates](safe-updates.md): dedicated signed local-release swap journey, including responsive sign-in, consecutive app/bridge updates and rollback; uses the update driver rather than baseline offline sessions.
 - [Chat tables](chat-tables.md): format a real console table and retain it across a tab switch.
 - [Skill pills](chat-skill-pill.md): known skills stand out in the composer and sent history on dark and light themes; ordinary messages and unknown slash text stay plain.
-- [Chat options](chat-options.md): lettered or numbered options in the latest reply, and a terminal single-select prompt, become cards; a click sends the answer or the option number.
+- [Chat options](chat-options.md): only structured provider questions become cards, with multiple selection and Other; ordinary reply lists stay text.
 - [Chat composer text](chat-composer-text.md): real typed message-box text is measured with system smoothing OFF; native production-painter evidence spans three UI scales and three DPIs, with v0.28.858 as the live red control.
 - [Chat code font](chat-code-font.md): a real console fenced code block draws Nordwand Mono cells 2 pt smaller than before, the app logs the selected code face, and the branch painter proves overflowing diff rows stay smooth on DirectWrite.
 - [Browser emulation](browser-emulation.md): drive the real native zsb CLI and unpacked extension in isolated Chrome for Testing; prove mobile viewport, UA and touch across navigation and restore desktop with off. This is an extension journey, not embedded-pane verification.

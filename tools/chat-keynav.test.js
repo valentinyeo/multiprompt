@@ -66,3 +66,36 @@ test('IGSH-992 shortcut, Ctrl+K entry and doc row ship together', () => {
   assert.match(read('src/main.zig'), /SEARCH_CHAT_FOCUS_MESSAGES_OFFSET[^]*chatNavStart\(\)/);
   assert.match(read('src/sidebar.zig'), /is_chat_focus_messages/);
 });
+
+test('IGSH-990 focused source survives native text-length queries without recursive messages', () => {
+  const sub = fn(read('src/chat_composer.zig'), 'chatComposerSubclassProc');
+  const expression = sub.match(/if \((app_state\.g_chat_nav_active[^\n]+)\) @import\("chat_render\.zig"\)\.chatNavClear\(\);/)[1]
+    .replace(/\band\b/g, '&&').replace(/\bor\b/g, '||');
+  const shouldClear = new Function('app_state', 'msg', 'hwnd', 'GetWindowTextLengthW', 'CallWindowProcW', `return ${expression};`);
+  for (const length of [0, 3]) {
+    const state = { g_chat_nav_active: true, g_chat_composer_orig_proc: 7 };
+    let depth = 0;
+    let queries = 0;
+    const original = (procedure, hwnd, message, wp, lp) => {
+      assert.deepEqual([procedure, hwnd, message, wp, lp], [7, 1, 0x000E, 0, 0]);
+      queries++;
+      return length;
+    };
+    const dispatch = message => {
+      assert.ok(++depth <= 8, 'text-length query recursively reentered the composer');
+      try {
+        const clear = shouldClear(state, message, 1, () => dispatch(0x000E), original);
+        if (clear) state.g_chat_nav_active = false;
+        return length;
+      } finally { depth--; }
+    };
+    dispatch(0x000E);
+    assert.equal(state.g_chat_nav_active, length === 0);
+    assert.equal(queries, 1);
+    state.g_chat_nav_active = true;
+    queries = 0;
+    dispatch(0x0201);
+    assert.equal(state.g_chat_nav_active, false, 'clicking returns focus to the composer');
+    assert.equal(queries, 0);
+  }
+});

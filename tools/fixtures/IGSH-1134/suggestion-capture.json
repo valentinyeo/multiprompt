@@ -1,0 +1,6 @@
+{
+  "source": "https://github.com/valentinyeo/multiprompt/actions/runs/40688913514",
+  "suggestion": "Try asking about the next step",
+  "ready": "Claude Code\n\nReady\n\n❯ Try asking about the next step\n──────────────────────────────────────────────────\n",
+  "capture": "Claude Code\n\nReady\n\n❯ \u001b[2mTry asking about the next step\u001b[0m\n──────────────────────────────────────────────────\n"
+}

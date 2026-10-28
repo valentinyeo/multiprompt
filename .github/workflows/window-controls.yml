@@ -9,6 +9,8 @@ on:
       - src/chat_float.zig
       - .claude/skills/verify-multiprompt/window-controls*
       - .claude/skills/verify-multiprompt/control.ps1
+      - .claude/skills/verify-multiprompt/control-library.ps1
+      - .claude/skills/verify-multiprompt/control-native.cs
       - .github/workflows/window-controls.yml
   push:
     branches: [master]
@@ -19,6 +21,8 @@ on:
       - src/chat_float.zig
       - .claude/skills/verify-multiprompt/window-controls*
       - .claude/skills/verify-multiprompt/control.ps1
+      - .claude/skills/verify-multiprompt/control-library.ps1
+      - .claude/skills/verify-multiprompt/control-native.cs
       - .github/workflows/window-controls.yml
   workflow_dispatch:
 

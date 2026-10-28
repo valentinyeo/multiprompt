@@ -1,0 +1,25 @@
+name: Runner message parity
+
+on:
+  pull_request:
+    paths:
+      - 'src/chat_transcript.zig'
+      - 'src/chat_markdown.zig'
+      - 'src/chat_session.zig'
+      - 'src/chat_render.zig'
+      - 'src/chat_find_ui.zig'
+      - 'tools/chat-notes-proof*'
+      - 'tools/verify-chat-delivery/**'
+      - '.github/workflows/session-notes.yml'
+      - '.github/workflows/verify.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notes:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_notes_proof: true
