@@ -185,6 +185,10 @@ test('IGSH-1040 selected transcript copy queues confirmation and copy without re
   const copy = receipt.indexOf('[VerifyNative]::KeyDown(0x43)');
   assert.ok(enter > 0 && copy > enter);
   assert.doesNotMatch(receipt.slice(enter, copy), /Press |Sleep|Wait-|Doctor/);
-  assert.ok(receipt.includes("'native transcript copy completed'"));
+  const copied = receipt.indexOf("'native transcript copy completed'");
+  assert.ok(copied > copy);
+  assert.ok(receipt.indexOf('[VerifyNative]::KeyUp(0x43)') > copied);
+  assert.ok(receipt.indexOf('[VerifyNative]::KeyUp(0x11)') > copied);
+  assert.match(receipt, /finally \{\s+\[VerifyNative\]::KeyUp\(0x43\)/);
   assert.ok(receipt.includes("if (-not $last.Success) { throw 'Copied target transcript belongs to a different seeded session' }"));
 });

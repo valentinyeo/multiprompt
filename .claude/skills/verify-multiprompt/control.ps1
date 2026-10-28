@@ -6247,10 +6247,13 @@ try {
                 [VerifyNative]::KeyDown(0x0D)
                 [VerifyNative]::KeyUp(0x0D)
                 [VerifyNative]::KeyDown(0x11)
-                [VerifyNative]::KeyDown(0x43)
-                [VerifyNative]::KeyUp(0x43)
-                [VerifyNative]::KeyUp(0x11)
-                Wait-Until { [Windows.Forms.Clipboard]::ContainsText() } 'native transcript copy completed' 10
+                try {
+                    [VerifyNative]::KeyDown(0x43)
+                    Wait-Until { [Windows.Forms.Clipboard]::ContainsText() } 'native transcript copy completed' 10
+                } finally {
+                    [VerifyNative]::KeyUp(0x43)
+                    [VerifyNative]::KeyUp(0x11)
+                }
                 $copied = [Windows.Forms.Clipboard]::GetText()
                 $latest = [regex]::Match($copied, [regex]::Escape($Expected))
                 $last = [regex]::Match($copied, [regex]::Escape($Marker))
