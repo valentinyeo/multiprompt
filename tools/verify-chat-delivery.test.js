@@ -1163,3 +1163,18 @@ test('native runner-session journeys run automatically for candidates and publis
   assert.match(released, /  runner-sessions:\n    needs: \[prepare, release\]/);
   assert.match(released, /feature: chat-delivery\n      hax_sessions_proof: true\n      tag: \$\{\{ needs\.prepare\.outputs\.tag \}\}/);
 });
+
+test('native runner file descriptors share one Windows notification root with their fixture state', () => {
+  const script = String.raw`
+import ast, ntpath, pathlib, sys, types
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+watch = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'watch_reader')
+assignment = next(node for node in ast.walk(watch) if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'watch_root' for target in node.targets))
+expression = compile(ast.Expression(assignment.value), '<notification-root>', 'eval')
+for transcript in [r'D:\verify\profile\home\native.jsonl', r'\\?\D:\verify\profile\home\native.jsonl']:
+    scope = dict(os=types.SimpleNamespace(path=ntpath), ROOT=pathlib.PureWindowsPath(r'D:\verify\profile\state'), resolved=(None, None, pathlib.PureWindowsPath(transcript)))
+    assert eval(expression, scope) == r'D:\verify\profile'
+print('NATIVE_WINDOWS_WATCH_ROOT_OK')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { encoding: 'utf8', timeout: 10000 }), /NATIVE_WINDOWS_WATCH_ROOT_OK/);
+});

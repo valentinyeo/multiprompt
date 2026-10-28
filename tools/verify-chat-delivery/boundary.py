@@ -862,7 +862,7 @@ def watch_reader():
         kernel.FindNextChangeNotification.argtypes = [wintypes.HANDLE]
         kernel.FindCloseChangeNotification.argtypes = [wintypes.HANDLE]
         kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-        watch_root = os.path.commonpath([str(ROOT), str(resolved[2].parent)])
+        watch_root = os.path.commonpath([str(ROOT), str(resolved[2].parent).removeprefix("\\\\?\\")])
         notification = kernel.FindFirstChangeNotificationW(watch_root, True, 0x13)
         if notification == ctypes.c_void_p(-1).value:
             raise ctypes.WinError(ctypes.get_last_error())
@@ -938,7 +938,12 @@ def ssh():
             value = state()
             if value.get("remoteHome"):
                 os.environ.update(HOME=value["remoteHome"], USERPROFILE=value["remoteHome"])
-            return watch_reader()
+            try:
+                return watch_reader()
+            except Exception:
+                import traceback
+                (ROOT / f"reader-{os.getpid()}.stderr.log").write_text(traceback.format_exc(), encoding="utf-8")
+                raise
         env = os.environ.copy()
         if os.name == "nt":
             env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
