@@ -520,6 +520,11 @@ pub fn findLocalTmuxTab(host: u8, session: []const u8) ?u32 {
 pub fn findZsbPaneTarget(session: []const u8) ?u32 {
     const token = zsbPrimarySessionToken(session);
     if (token.len == 0) return null;
+    if (token[0] == '@') {
+        const separator = std.mem.indexOfScalar(u8, token, '/') orelse return null;
+        const host = std.fmt.parseInt(u8, token[1..separator], 10) catch return null;
+        return findLocalTmuxTab(host, token[separator + 1 ..]);
+    }
     var best: ?u32 = null;
     for (0..app_state.shell_count) |i| {
         if (!shellMatchesZsbPaneTarget(i, token)) continue;

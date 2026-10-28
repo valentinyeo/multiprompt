@@ -1345,7 +1345,7 @@ fn probeTunnelRelay(host: u8) void {
         app_state.g_tunnel_relay_mode[host].store(0, .release);
         return;
     }
-    const tail = std.fmt.bufPrint(cmd_buf[exe_len..], "-o BatchMode=yes -o ConnectTimeout=10 {s} \"if test -f ~/.local/state/multiprompt/relay-v1; then mkdir -p -m 700 /tmp/mp-notify-$(id -u) && rm -f /tmp/mp-notify-$(id -u)/{s}.sock && printf MP_RELAY_UID: && id -u; else echo MP_RELAY_LEGACY; fi\"", .{ tmuxSshTarget(host), id }) catch {
+    const tail = std.fmt.bufPrint(cmd_buf[exe_len..], "-o BatchMode=yes -o ConnectTimeout=10 {s} \"if test -f ~/.local/state/multiprompt/relay-v1 || test -f ~/.local/state/multiprompt/browser-v1; then mkdir -p -m 700 /tmp/mp-notify-$(id -u) && rm -f /tmp/mp-notify-$(id -u)/{s}.sock /tmp/mp-notify-$(id -u)/{s}.browser && printf MP_RELAY_UID: && id -u; else echo MP_RELAY_LEGACY; fi\"", .{ tmuxSshTarget(host), id, id }) catch {
         app_state.g_tunnel_relay_mode[host].store(0, .release);
         return;
     };
@@ -1454,7 +1454,20 @@ fn maintainTunnelKeeper(host: u8) void {
     } else {
         if (!appendWideAscii(&cmd, &pos, "-R 19548:127.0.0.1:")) return;
     }
-    if (!appendWideDecimal(&cmd, &pos, app_state.g_tunnel_inbound_port)) return;
+    const browser_port = @import("browser_bridge.zig").scopedBrowserPort(host);
+    if (browser_port == 0) return;
+    const inbound_port = if (host == TMUX_HOST_INNE) browser_port else app_state.g_tunnel_inbound_port;
+    if (!appendWideDecimal(&cmd, &pos, inbound_port)) return;
+    if (mode >= 3) {
+        var id_buf: [80]u8 = undefined;
+        const id = tunnelSocketId(&id_buf) orelse return;
+        if (!appendWideAscii(&cmd, &pos, " -R /tmp/mp-notify-")) return;
+        if (!appendWideDecimal(&cmd, &pos, mode - 3)) return;
+        if (!appendWideAscii(&cmd, &pos, "/")) return;
+        if (!appendWideAscii(&cmd, &pos, id)) return;
+        if (!appendWideAscii(&cmd, &pos, ".browser:127.0.0.1:")) return;
+        if (!appendWideDecimal(&cmd, &pos, browser_port)) return;
+    }
     if (!appendWideAscii(&cmd, &pos, " ")) return;
     if (!appendWideAscii(&cmd, &pos, tmuxSshTarget(host))) return;
     cmd[pos] = 0;

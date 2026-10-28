@@ -211,3 +211,49 @@ test('private user socket controls its own pane without a vault token', { skip: 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a shared socket is refused instead of using another user or TCP credentials', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-shared-'));
+  fs.chmodSync(dir, 0o700);
+  const endpoint = path.join(dir, 'browser');
+  const server = net.createServer(() => assert.fail('insecure socket received control'));
+  await new Promise(resolve => server.listen(endpoint, resolve));
+  fs.chmodSync(endpoint, 0o666);
+  try {
+    const result = await run(['status'], () => assert.fail('fell back to TCP'), wrapper, { ZSB_SOCKET: endpoint });
+    assert.equal(result.code, 1, result.stdout + result.stderr);
+    assert.equal(JSON.parse(result.stdout).error, 'unsafe_socket');
+    assert.doesNotMatch(result.stdout + result.stderr, /relay-test-token/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a missing private tunnel never falls back to shared TCP control', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-missing-'));
+  fs.chmodSync(dir, 0o700);
+  try {
+    const result = await run(['status'], () => assert.fail('fell back to TCP'), wrapper, { ZSB_SOCKET: path.join(dir, 'missing') });
+    assert.equal(result.code, 1);
+    assert.equal(JSON.parse(result.stdout).error, 'tunnel_down');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('user browser installation is repeatable and requests no vault access', { skip: process.platform === 'win32' }, async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-install-'));
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const child = spawn('bash', [path.join(__dirname, 'install-user-browser.sh')], { env: { ...process.env, HOME: home } });
+      let output = '';
+      child.stdout.on('data', data => output += data);
+      child.stderr.on('data', data => output += data);
+      const code = await new Promise(resolve => child.on('close', resolve));
+      assert.equal(code, 0, output);
+      assert.match(output, /Own browser access installed/);
+      assert.equal(fs.readFileSync(path.join(home, '.local/state/multiprompt/browser-v1'), 'utf8'), '1\n');
+      assert.equal(fs.readFileSync(path.join(home, '.local/bin/multiprompt-browser'), 'utf8'), fs.readFileSync(wrapper, 'utf8'));
+      assert.equal(fs.existsSync(path.join(home, '.local/bin/yeo-key')), false);
+    }
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
+});

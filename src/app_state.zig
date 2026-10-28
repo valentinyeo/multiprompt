@@ -111,6 +111,7 @@ pub const PowerTimerMode = enum { normal, saving, deep_idle };
 pub const NOTIFY_PORTS = @import("notify_ports.zig").NOTIFY_PORTS;
 
 pub var g_tunnel_inbound_port: u16 = 0;
+pub var g_browser_host_ports: [3]u16 = .{0} ** 3;
 pub var g_notify_bound_port: u16 = 0;
 
 pub const MonitorSlot = struct { mon: HANDLE, bounds: RECT, work: RECT };
@@ -3436,6 +3437,7 @@ pub const ZSB_OPEN_REPLY_CAP: usize = 4 * 1024;
 
 pub const ZsbWorkerCtx = struct {
     client: SOCKET,
+    host: ?u8 = null,
     req: [ZSB_WIRE_CAP]u8,
     req_len: usize,
 };
@@ -3453,6 +3455,7 @@ pub var g_zsb_who_mutex: SpinMutex = .{};
 pub var g_zsb_who_pending = false;
 pub var g_zsb_who_done = false;
 pub var g_zsb_who_has_tab = false;
+pub var g_zsb_who_host: ?u8 = null;
 pub var g_zsb_who_session: [64]u8 = undefined;
 pub var g_zsb_who_session_len: usize = 0;
 
@@ -3460,7 +3463,7 @@ pub var g_zsb_open_mutex: SpinMutex = .{};
 pub var g_zsb_open_pending: bool = false;
 pub var g_zsb_open_done: bool = false;
 pub var g_zsb_open_found: bool = false;
-pub var g_zsb_open_session: [64]u8 = std.mem.zeroes([64]u8);
+pub var g_zsb_open_session: [80]u8 = std.mem.zeroes([80]u8);
 pub var g_zsb_open_session_len: u32 = 0;
 pub var g_zsb_open_url: [ZSB_URL_CAP]u8 = std.mem.zeroes([ZSB_URL_CAP]u8);
 pub var g_zsb_open_url_len: u32 = 0;
@@ -3469,7 +3472,7 @@ pub var g_zsb_sidebar_mutex: SpinMutex = .{};
 pub var g_zsb_sidebar_pending: bool = false;
 pub var g_zsb_sidebar_done: bool = false;
 pub var g_zsb_sidebar_found: bool = false;
-pub var g_zsb_sidebar_session: [64]u8 = std.mem.zeroes([64]u8);
+pub var g_zsb_sidebar_session: [80]u8 = std.mem.zeroes([80]u8);
 pub var g_zsb_sidebar_session_len: u32 = 0;
 
 pub const ZsbPaneInfo = struct {
@@ -3488,7 +3491,7 @@ pub var g_zsb_bind_pending: bool = false;
 pub var g_zsb_bind_done: bool = false;
 pub var g_zsb_bind_found: bool = false;
 pub var g_zsb_bind_force: bool = false;
-pub var g_zsb_bind_session: [64]u8 = std.mem.zeroes([64]u8);
+pub var g_zsb_bind_session: [80]u8 = std.mem.zeroes([80]u8);
 pub var g_zsb_bind_session_len: u32 = 0;
 
 pub var g_zsb_touch_mutex: SpinMutex = .{};

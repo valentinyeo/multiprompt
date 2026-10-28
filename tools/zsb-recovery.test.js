@@ -80,7 +80,7 @@ fn appendJsonString(out: *std.array_list.Managed(u8), text: []const u8) !void {
 ` + section(bridge, 'fn getBool(', 'fn getI64(') +
       section(bridge, 'fn requestBrowserWithRetry(', 'fn requestBrowser(') +
       section(app, 'fn zsbLooksLikeStaleBindingError(', "fn zsbUrlIsBeacon(url: []const u8) bool {") +
-      section(app, 'fn zsbRetryAfterStaleBinding(', "fn tunnelInboundThread(srv_usize: usize) void {") + String.raw`
+      section(app, 'fn zsbRetryAfterStaleBinding(', "fn tunnelInboundThread(srv_usize: usize, host: ?u8) void {") + String.raw`
 const empty = "{\"ok\":true,\"result\":{\"tabs\":[]}}";
 const valid = "{\"ok\":true,\"extensionVersion\":\"1.0.54\",\"result\":{\"tabs\":[{\"id\":1},{\"id\":2},{\"id\":3},{\"id\":4}]}}";
 test "legacy empty replies retry identical scope and report reload after exhaustion" {

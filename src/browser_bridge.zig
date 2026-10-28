@@ -132,6 +132,7 @@ pub fn handleZsbWhoRequest() void {
     const session = app_state.g_zsb_who_session[0..app_state.g_zsb_who_session_len];
     app_state.g_zsb_who_has_tab = false;
     for ([_]u8{ TMUX_HOST_DE, TMUX_HOST_UK, TMUX_HOST_INNE }) |host| {
+        if (app_state.g_zsb_who_host != null and app_state.g_zsb_who_host.? != host) continue;
         if (findLocalTmuxTab(host, session) != null) {
             app_state.g_zsb_who_has_tab = true;
             break;
@@ -141,13 +142,14 @@ pub fn handleZsbWhoRequest() void {
     app_state.g_zsb_who_done = true;
 }
 
-fn sendZsbWhoResponse(client: SOCKET, session_hex: []const u8) void {
+fn sendZsbWhoResponse(client: SOCKET, session_hex: []const u8, scope: ?u8) void {
     var session_buf: [64]u8 = undefined;
     if (session_hex.len == 0 or session_hex.len > session_buf.len * 2 or session_hex.len % 2 != 0) return;
     const session = std.fmt.hexToBytes(&session_buf, session_hex) catch return;
     while (!app_state.g_zsb_who_mutex.tryLock()) Sleep(0);
     @memcpy(app_state.g_zsb_who_session[0..session.len], session);
     app_state.g_zsb_who_session_len = session.len;
+    app_state.g_zsb_who_host = scope;
     app_state.g_zsb_who_pending = true;
     app_state.g_zsb_who_done = false;
     app_state.g_zsb_who_mutex.unlock();
@@ -651,7 +653,7 @@ fn finishZsbOpenRequest(found: bool) void {
 }
 
 pub fn handleZsbOpenRequest() void {
-    var session_buf: [64]u8 = std.mem.zeroes([64]u8);
+    var session_buf: [80]u8 = std.mem.zeroes([80]u8);
     var url_buf: [ZSB_URL_CAP]u8 = std.mem.zeroes([ZSB_URL_CAP]u8);
     var session_len: usize = 0;
     var url_len: usize = 0;
@@ -761,7 +763,7 @@ pub fn handleShowSidebarRequest(hwnd: HANDLE, direct: bool) void {
         return;
     }
 
-    var session_buf: [64]u8 = std.mem.zeroes([64]u8);
+    var session_buf: [80]u8 = std.mem.zeroes([80]u8);
     var session_len: usize = 0;
 
     while (!app_state.g_zsb_sidebar_mutex.tryLock()) Sleep(0);
@@ -900,7 +902,7 @@ pub fn forceRebindZsbForShell(idx: u32) bool {
 }
 
 pub fn handleZsbBindRequest() void {
-    var session_buf: [64]u8 = std.mem.zeroes([64]u8);
+    var session_buf: [80]u8 = std.mem.zeroes([80]u8);
     var session_len: usize = 0;
     var force = false;
     var info_only = false;
@@ -1071,6 +1073,7 @@ fn zsbReadPaneWindowIdForTokenSilent(token_raw: []const u8) ?i64 {
 }
 
 fn zsbFindPaneWindowIdSilent(session: []const u8) ?i64 {
+    if (std.mem.startsWith(u8, session, "@")) return null;
     const token = zsbPrimarySessionToken(session);
     return if (token.len > 0) zsbReadPaneWindowIdForTokenSilent(token) else null;
 }
@@ -1222,6 +1225,20 @@ test "issue: remote zsb navigate --activate is degraded to a background tab" {
     try std.testing.expectEqualStrings("--target-only", act[2]);
 }
 
+fn zsbScopedCommandAllowed(argv: []const []const u8) bool {
+    if (argv.len == 0) return false;
+    const allowed = [_][]const u8{
+        "activate", "active-tab", "back", "click", "close-tab", "console", "cursor",
+        "doctor", "emulate", "eval", "find", "forward", "frames", "get-text", "insert",
+        "key", "links", "navigate", "open", "pane-info", "reload", "screenshot",
+        "shoturl", "snapshot", "status", "tab", "tabs", "text", "type", "url", "version",
+    };
+    for (allowed) |verb| {
+        if (std.mem.eql(u8, argv[0], verb)) return true;
+    }
+    return false;
+}
+
 fn zsbWorkerThread(ctx_ptr: usize) void {
     crash_recorder.guardThread();
     const ctx: *ZsbWorkerCtx = @ptrFromInt(ctx_ptr);
@@ -1241,7 +1258,15 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         zsbSendError(client, "multiprompt-browser: missing session:b64 separator\n");
         return;
     };
-    const session = after_prefix[0..sep_idx];
+    var scoped_session: [80]u8 = undefined;
+    const raw_session = after_prefix[0..sep_idx];
+    const session = if (ctx.host) |host|
+        std.fmt.bufPrint(&scoped_session, "@{d}/{s}", .{ host, raw_session }) catch {
+            zsbSendJsonError(client, "bad_args", "session name too long", raw_session, null);
+            return;
+        }
+    else
+        raw_session;
     const b64 = after_prefix[sep_idx + 1 ..];
     if (session.len == 0) {
         zsbSendError(client, "multiprompt-browser: empty session name\n");
@@ -1329,6 +1354,10 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
         }
     }
 
+    if (ctx.host != null and !zsbScopedCommandAllowed(argv[0..argc])) {
+        zsbSendJsonError(client, "scope_denied", "command exceeds this user's browser pane access", raw_session, null);
+        return;
+    }
     if (std.mem.eql(u8, argv[0], "workspace-list") or std.mem.eql(u8, argv[0], "session-open") or std.mem.eql(u8, argv[0], "session-status") or zsbIsTabVerb(argv[0])) {
         sendZsbWorkspaceResponse(client, argv[0..argc]);
         return;
@@ -1803,7 +1832,7 @@ fn zsbRetryAfterStaleBinding(
     }
 }
 
-fn tunnelInboundThread(srv_usize: usize) void {
+fn tunnelInboundThread(srv_usize: usize, host: ?u8) void {
     crash_recorder.guardThread();
     const srv: SOCKET = srv_usize;
     while (true) {
@@ -1855,7 +1884,7 @@ fn tunnelInboundThread(srv_usize: usize) void {
         }
 
         if (std.mem.startsWith(u8, trimmed, "ZSBWHO:")) {
-            sendZsbWhoResponse(client, trimmed[7..]);
+            sendZsbWhoResponse(client, trimmed[7..], host);
             _ = closesocket(client);
             continue;
         }
@@ -1867,6 +1896,7 @@ fn tunnelInboundThread(srv_usize: usize) void {
                 continue;
             };
             ctx.client = client;
+            ctx.host = host;
             const copy_len = @min(trimmed.len, ctx.req.len);
             @memcpy(ctx.req[0..copy_len], trimmed[0..copy_len]);
             ctx.req_len = copy_len;
@@ -1887,11 +1917,20 @@ fn tunnelInboundThread(srv_usize: usize) void {
 }
 
 pub fn startTunnelInboundListener() void {
-    if (app_state.g_tunnel_inbound_port != 0) return;
+    if (app_state.g_tunnel_inbound_port == 0) app_state.g_tunnel_inbound_port = createTunnelInboundListener(null);
+}
+
+pub fn scopedBrowserPort(host: u8) u16 {
+    if (host >= app_state.g_browser_host_ports.len) return 0;
+    if (app_state.g_browser_host_ports[host] == 0) app_state.g_browser_host_ports[host] = createTunnelInboundListener(host);
+    return app_state.g_browser_host_ports[host];
+}
+
+fn createTunnelInboundListener(host: ?u8) u16 {
     var wsa: WSADATA = undefined;
-    if (WSAStartup(0x0202, &wsa) != 0) return;
+    if (WSAStartup(0x0202, &wsa) != 0) return 0;
     const srv = socket(AF_INET, SOCK_STREAM, 0);
-    if (srv == INVALID_SOCKET) return;
+    if (srv == INVALID_SOCKET) return 0;
     const yes: i32 = 1;
     _ = setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, @ptrCast(&yes), @sizeOf(i32));
     var addr = SOCKADDR_IN{
@@ -1902,26 +1941,27 @@ pub fn startTunnelInboundListener() void {
     };
     if (bind(srv, &addr, @sizeOf(SOCKADDR_IN)) != 0) {
         _ = closesocket(srv);
-        return;
+        return 0;
     }
     var bound: SOCKADDR_IN = std.mem.zeroes(SOCKADDR_IN);
     var blen: i32 = @sizeOf(SOCKADDR_IN);
     if (getsockname(srv, &bound, &blen) != 0) {
         _ = closesocket(srv);
-        return;
+        return 0;
     }
     if (listen(srv, 5) != 0) {
         _ = closesocket(srv);
-        return;
+        return 0;
     }
-    app_state.g_tunnel_inbound_port = htons(bound.sin_port);
-    if (std.Thread.spawn(.{}, tunnelInboundThread, .{@as(usize, srv)})) |t| {
+    const port = htons(bound.sin_port);
+    if (std.Thread.spawn(.{}, tunnelInboundThread, .{ @as(usize, srv), host })) |t| {
         t.detach();
-        logNotifyListenerStatus("tunnel-inbound listening", app_state.g_tunnel_inbound_port, 0);
+        logNotifyListenerStatus("tunnel-inbound listening", port, 0);
+        return port;
     } else |_| {
-        app_state.g_tunnel_inbound_port = 0;
         _ = closesocket(srv);
     }
+    return 0;
 }
 
 const ZsbSessionOpenArgs = struct {
@@ -3031,4 +3071,33 @@ test "session-rebind points a tab at another session and refuses duplicates lock
     app_state.g_account_locked = true;
     try std.testing.expectEqualStrings("{\"ok\":false,\"error\":\"account_locked\"}\n", zsbTabTestRun(&.{ "session-rebind", "--tab", "43", "--tmux", "runner-10" }, &out));
     try std.testing.expectEqual(active, app_state.active_shell);
+}
+
+test "scoped browser channels reject application-wide and browser-wide commands" {
+    for ([_][]const u8{ "open", "text", "click", "screenshot", "eval", "tabs", "pane-info" }) |verb| {
+        try std.testing.expect(zsbScopedCommandAllowed(&.{verb}));
+    }
+    for ([_][]const u8{ "workspace-list", "session-open", "session-close", "session-rebind", "session-move", "session-rename", "session-status", "resolve-window", "routing-audit", "extension-reload", "reset", "cdp", "script", "sidebar", "browser-drop-gesture" }) |verb| {
+        try std.testing.expect(!zsbScopedCommandAllowed(&.{verb}));
+    }
+    try std.testing.expect(!zsbScopedCommandAllowed(&.{}));
+}
+
+test "scoped browser session resolves only the SSH host even with duplicate names" {
+    const saved = try ZsbWorkspaceTest.init();
+    defer saved.deinit();
+    app_state.shell_count = 2;
+    for (0..2) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].tmux_host = if (i == 0) TMUX_HOST_DE else TMUX_HOST_INNE;
+        @memcpy(app_state.shells[i].tmux_session[0..6], "shared");
+        app_state.shells[i].tmux_session_len = 6;
+    }
+    try std.testing.expectEqual(@as(?u32, 1), findZsbPaneTarget("@2/shared"));
+    try std.testing.expectEqual(@as(?u32, 0), findZsbPaneTarget("@0/shared"));
+    try std.testing.expectEqual(@as(?u32, null), findZsbPaneTarget("@1/shared"));
+    try std.testing.expectEqual(@as(?u32, null), findZsbPaneTarget("@2/@0/shared"));
+    app_state.shells[0].tmux_session_len = 4;
+    @memcpy(app_state.shells[0].tmux_session[0..4], "mine");
+    try std.testing.expectEqual(@as(?u32, null), findZsbPaneTarget("@2/mine"));
 }

@@ -16,7 +16,7 @@ function section(start, end) {
 test("tunnel listener answers ZSBWHO before notification handling, without reading shells", () => {
   const listener = section("fn tunnelInboundThread(", "fn startTunnelInboundListener(");
   assert.match(listener, /startsWith\(u8, trimmed, "ZSBWHO:"\)/);
-  assert.match(listener, /sendZsbWhoResponse\(client, trimmed\[7\.\.\]\);\s+_ = closesocket\(client\);\s+continue;/);
+  assert.match(listener, /sendZsbWhoResponse\(client, trimmed\[7\.\.\], host\);\s+_ = closesocket\(client\);\s+continue;/);
   assert.doesNotMatch(listener, /shells\[/);
   const responder = section("fn sendZsbWhoResponse(", "var g_zsb_open_mutex:");
   assert.doesNotMatch(responder.replace(/\/\/[^\n]*/g, ""), /shells\[|findLocalTmuxTab\(/);
@@ -133,49 +133,59 @@ test "ownership on each tmux host and missing session" {
     for ([_]u8{ 0, 1, 2 }) |host| {
         reset();
         owner_host = host;
-        sendZsbWhoResponse(1, "6167656e742d31");
+        sendZsbWhoResponse(1, "6167656e742d31", null);
         try checkReply(true, 10);
     }
     reset();
-    sendZsbWhoResponse(1, "6f74686572");
+    sendZsbWhoResponse(1, "6f74686572", null);
     try checkReply(false, 10);
+}
+test "host-bound probes cannot claim the same session on another host" {
+    reset();
+    owner_host = 0;
+    sendZsbWhoResponse(1, "6167656e742d31", 2);
+    try checkReply(false, 10);
+    reset();
+    owner_host = 2;
+    sendZsbWhoResponse(1, "6167656e742d31", 2);
+    try checkReply(true, 10);
 }
 test "idle wraps at 32 bits and input failure ranks last" {
     reset();
     tick = 0x100000010;
     last_input = 0xfffffff0;
-    sendZsbWhoResponse(1, "6167656e742d31");
+    sendZsbWhoResponse(1, "6167656e742d31", null);
     try checkReply(true, 32);
     reset();
     input_ok = false;
-    sendZsbWhoResponse(1, "6167656e742d31");
+    sendZsbWhoResponse(1, "6167656e742d31", null);
     try checkReply(true, std.math.maxInt(u32));
 }
 test "timeout cancels mailbox and late UI dispatch cannot poison next probe" {
     reset();
     post_mode = .delayed;
-    sendZsbWhoResponse(1, "6167656e742d31");
+    sendZsbWhoResponse(1, "6167656e742d31", null);
     try std.testing.expectEqual(@as(usize, 0), sent_len);
     try std.testing.expect(tick <= 301);
     try std.testing.expect(!g_zsb_who_pending);
     handleZsbWhoRequest();
     try std.testing.expect(!g_zsb_who_done);
     post_mode = .immediate;
-    sendZsbWhoResponse(1, "6f74686572");
+    sendZsbWhoResponse(1, "6f74686572", null);
     try checkReply(false, @intCast(tick - last_input));
 }
 test "failed post and invalid session do not fabricate ownership" {
     reset();
     post_mode = .failed;
-    sendZsbWhoResponse(1, "6167656e742d31");
+    sendZsbWhoResponse(1, "6167656e742d31", null);
     try std.testing.expect(!g_zsb_who_pending);
     try std.testing.expectEqual(@as(usize, 0), sent_len);
     reset();
-    sendZsbWhoResponse(1, "");
-    sendZsbWhoResponse(1, &([_]u8{'0'} ** 130));
-    sendZsbWhoResponse(1, "6");
-    sendZsbWhoResponse(1, "zz");
-    sendZsbWhoResponse(1, "agent-1");
+    sendZsbWhoResponse(1, "", null);
+    sendZsbWhoResponse(1, &([_]u8{'0'} ** 130), null);
+    sendZsbWhoResponse(1, "6", null);
+    sendZsbWhoResponse(1, "zz", null);
+    sendZsbWhoResponse(1, "agent-1", null);
     try std.testing.expectEqual(@as(usize, 0), sent_len);
 }
 `).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));

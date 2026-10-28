@@ -609,14 +609,33 @@ if "ZSB_TIMEOUT" not in os.environ and "ZSB_TIMEOUT_SECONDS" in os.environ:
             raise ValueError()
     except ValueError:
         fail("bad_timeout", "ZSB_TIMEOUT_SECONDS must be greater than 0 and at most 300")
-try:
-    token = os.environ.get("MULTIPROMP_NOTIFY_RELAY_TOKEN")
-    if not token:
-        token = subprocess.run([str(pathlib.Path.home() / ".local/bin/yeo-key"), "Multiprompt Notify Relay Token", "MULTIPROMP_NOTIFY_RELAY_TOKEN"], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout.rstrip("\n")
-    if not token:
-        raise ValueError()
-except (OSError, subprocess.SubprocessError, ValueError):
-    fail("notify_token_unavailable", "Notify relay token unavailable; set MULTIPROMP_NOTIFY_RELAY_TOKEN or unlock the Multiprompt Notify Relay Token item in Yeo UX Agents.")
+endpoint = os.environ.get("ZSB_SOCKET")
+uid = os.getuid() if hasattr(os, "getuid") else None
+paths = [pathlib.Path(endpoint)] if endpoint else [] if uid is None else sorted(
+    pathlib.Path(f"/tmp/mp-notify-{uid}").glob("*.browser"),
+    key=lambda path: path.lstat().st_mtime_ns, reverse=True)
+for path in paths:
+    try:
+        import stat
+        parent = path.parent.lstat()
+        info = path.lstat()
+        if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != uid
+                or stat.S_IMODE(parent.st_mode) != 0o700
+                or not stat.S_ISSOCK(info.st_mode) or info.st_uid != uid
+                or stat.S_IMODE(info.st_mode) != 0o600):
+            fail("unsafe_socket", "Browser control socket must be private and owned by this user.")
+    except OSError:
+        fail("tunnel_down", "Own browser tunnel not reachable. Reconnect this SSH session.")
+token = None
+if not paths:
+    try:
+        token = os.environ.get("MULTIPROMP_NOTIFY_RELAY_TOKEN")
+        if not token:
+            token = subprocess.run([str(pathlib.Path.home() / ".local/bin/yeo-key"), "Multiprompt Notify Relay Token", "MULTIPROMP_NOTIFY_RELAY_TOKEN"], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout.rstrip("\n")
+        if not token:
+            raise ValueError()
+    except (OSError, subprocess.SubprocessError, ValueError):
+        fail("notify_token_unavailable", "Notify relay token unavailable; reconnect this user's own browser tunnel instead of sharing the owner's token.")
 
 started = time.monotonic()
 deadline = started + timeout
@@ -624,13 +643,39 @@ payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
 if script_mode and len(payload) + len(session.encode()) + 6 > 64 * 1024:
     fail("bad_args", "CDP script exceeds the remote command transport limit (64 KiB encoded)")
 try:
-    sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
+    if paths:
+        if len(paths) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            def ownership(path):
+                try:
+                    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                        probe.settimeout(min(0.4, max(0.001, deadline - time.monotonic())))
+                        probe.connect(str(path))
+                        probe.sendall(b"ZSBWHO:" + session.encode().hex().encode() + b"\n")
+                        reply = b""
+                        while b"\n" not in reply and len(reply) < 4096:
+                            chunk = probe.recv(4096 - len(reply))
+                            if not chunk:
+                                break
+                            reply += chunk
+                        value = json.loads(reply)
+                        return (value.get("has_tab") is not True, value.get("idle_ms", 4294967295))
+                except (OSError, ValueError, AttributeError):
+                    return (True, 4294967295)
+            with ThreadPoolExecutor(max_workers=len(paths)) as pool:
+                ranked = list(zip(paths, pool.map(ownership, paths)))
+            paths = [path for path, _ in sorted(ranked, key=lambda item: item[1])]
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(min(5, max(0.001, deadline - time.monotonic())))
+        sock.connect(str(paths[0]))
+    else:
+        sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
 except OSError:
     fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
 try:
     with sock:
         sock.settimeout(max(0.001, deadline - time.monotonic()))
-        sock.sendall(f"AUTH:{token}:ZSB:{session}:{payload}\n".encode())
+        sock.sendall(((f"AUTH:{token}:" if token is not None else "") + f"ZSB:{session}:{payload}\n").encode())
         chunks, size = [], 0
         while True:
             remaining = deadline - time.monotonic()
