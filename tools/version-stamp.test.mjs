@@ -406,8 +406,7 @@ test('build changelog uses the tag and fragments without changing source default
   assert.match(generated, /A useful improvement/);
   assert.deepEqual(files, saved);
   assert.equal(buildChangelog(files, 'v0.28.735'), changelog);
-  assert.doesNotMatch(buildChangelog(base(), 'v0.28.900'), /Behind the scenes fixes\./);
-  assert.doesNotMatch(buildChangelog(base(), 'v0.28.900'), /latest improvements/);
+  assert.throws(() => buildChangelog(base(), 'v0.28.900'), /No unpublished product changes/);
   assert.match(buildChangelog({ ...files, 'src/changelog.zig': changelog.replace('pub const CHANGELOG', 'const SOURCE_CHANGELOG') }, 'v0.28.900'), /const SOURCE_CHANGELOG = \[_\]ChangelogEntry\{\n    \.\{ \.ver = "0\.28\.900"/);
   for (const invalid of ['0.28.900', 'v0.28.900;bad', 'v0.28.900\n', 'v00.28.900']) assert.throws(() => buildChangelog(files, invalid), /Invalid release tag/);
   const r = repo(t, files);
@@ -436,10 +435,7 @@ test('IGSH-889 a release lists only fragments added since the previous release',
   const generated = buildChangelog(fresh, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
   assert.match(generated, /A new improvement/);
   assert.doesNotMatch(generated, /An old improvement/);
-  const quiet = buildChangelog({ ...base(), ...old }, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]);
-  assert.doesNotMatch(quiet, /Behind the scenes fixes\./);
-  assert.doesNotMatch(quiet, /latest improvements/);
-  assert.doesNotMatch(quiet, /An old improvement/);
+  assert.throws(() => buildChangelog({ ...base(), ...old }, 'v0.28.900', [{ tag: 'v0.28.899', files: { ...base(), ...old } }]), /No unpublished product changes/);
 
   const r = repo(t, { ...base(), ...old });
   r.git('tag', 'v0.28.735');
@@ -530,15 +526,8 @@ else if (args[1] !== 'merge') process.exit(1);
 });
 
 
-test('IGSH-1090 maintenance releases carry no invented note, preserving real prior notes', async () => {
-  const { releaseNotes } = await import('./release-notes.mjs');
-  const generated = buildChangelog(base(), 'v0.28.900');
-  assert.deepEqual(releaseNotes(generated, 'v0.28.900'), {
-    version: '0.28.900', releases: [
-      { version: '0.28.900', changes: [] },
-      { version: '0.28.735', changes: ['Existing.'] },
-    ],
-  });
+test('IGSH-1090 maintenance releases wait instead of inventing a note', () => {
+  assert.throws(() => buildChangelog(base(), 'v0.28.900'), /No unpublished product changes/);
 });
 
 test('IGSH-1090 fragment gate rejects filler and engineering notes, not specific product changes', async () => {
@@ -613,8 +602,7 @@ test('IGSH-1113 omits filtered historical releases while preserving current note
     ],
   });
   assert.deepEqual({ files, history }, saved);
-  const quiet = buildChangelog(history.at(-1).files, 'v0.28.900', history);
-  assert.deepEqual(releaseNotes(quiet, 'v0.28.900').releases[0], { version: '0.28.900', changes: [] });
+  assert.throws(() => buildChangelog(history.at(-1).files, 'v0.28.900', history), /No unpublished product changes/);
   assert.throws(() => buildChangelog({ ...files, 'changelog.d/DEMO-5-empty.md': ' \n' }, 'v0.28.900', history), /Fragment has no text/);
   const invalid = [...history, { tag: 'v0.28.899', files: { ...files, 'changelog.d/DEMO-6-empty.md': ' \n' } }];
   assert.throws(() => buildChangelog(files, 'v0.28.900', invalid), /Fragment has no text/);
@@ -662,4 +650,29 @@ test('IGSH-1115 production history ignores failed tags without moving their prod
       { version: '0.28.735', changes: ['Existing.'] },
     ],
   });
+});
+
+
+test('IGSH-1131 refuses an empty release before writing invalid Zig', () => {
+  for (const extra of [{}, { 'changelog.d/DEMO-1131-check.md': 'Fixed a test so releases stop getting stuck.\n' }]) {
+    assert.throws(() => stampTree({ ...base(), ...extra }, '0.28.986'), /No unpublished product changes/);
+  }
+});
+
+test('IGSH-1131 pending notes include only changed unpublished product fragments', t => {
+  const r = repo(t);
+  r.git('tag', 'v0.28.735');
+  r.write({ 'changelog.d/DEMO-1131-chat.md': 'Your chats keep their saved order.\n' });
+  const product = r.commit();
+  const pending = rev => spawnSync(process.execPath, [tool, 'pending', 'v0.28.735', rev], { cwd: r.dir, encoding: 'utf8' });
+  const result = pending(product);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), 'Your chats keep their saved order.');
+  r.git('tag', 'v0.28.736');
+  r.write({ 'changelog.d/DEMO-1132-check.md': 'Fixed a test so releases stop getting stuck.\n' });
+  const maintenance = r.commit();
+  const quiet = spawnSync(process.execPath, [tool, 'pending', 'v0.28.736', maintenance], { cwd: r.dir, encoding: 'utf8' });
+  assert.equal(quiet.status, 0, quiet.stderr);
+  assert.equal(quiet.stdout, '');
+  assert.equal(pending(maintenance).stdout.trim(), 'Your chats keep their saved order.');
 });

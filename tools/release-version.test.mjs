@@ -29,7 +29,7 @@ function fixture(t) {
   fs.mkdirSync(path.join(dir, 'src'));
   fs.mkdirSync(path.join(dir, 'tools'));
   fs.writeFileSync(path.join(dir, 'src/changelog.zig'), changelog);
-  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'auto-release-admit.sh']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'auto-release-admit.sh']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
   fs.writeFileSync(path.join(dir, 'src/main.zig'), 'pub const APP_VERSION = build_config.app_version orelse "1.2.3";\n');
   git('add', '.');
   git('commit', '-m', 'fixture');
@@ -62,6 +62,10 @@ if (args[0] === 'run' && args.includes('verify.yml')) {
 if (args[0] === 'run') {
   const sha = args[args.indexOf('--commit') + 1];
   console.log(JSON.stringify(sha === process.env.TESTED_SHA ? [{ databaseId: 1, event: 'push', status: 'completed', conclusion: process.env.TEST_CONCLUSION || 'success' }] : []));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1].endsWith('/releases/latest')) {
+  console.log('v1.2.8');
   process.exit(0);
 }
 if (args[0] === 'api') {
@@ -371,7 +375,10 @@ test('release builds inject the tag, stage matching notes and reject wrong embed
 test('auto-release creates only a tag ref on the tested commit under a branch-rejecting remote', { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   f.git('tag', 'v1.2.8');
-  f.git('commit', '--allow-empty', '-m', 'tested improvement');
+  fs.mkdirSync(path.join(f.dir, 'changelog.d'));
+  fs.writeFileSync(path.join(f.dir, 'changelog.d/DEMO-1-chat.md'), 'Your chats keep their saved order.\n');
+  f.git('add', 'changelog.d');
+  f.git('commit', '-m', 'tested improvement');
   const tested = f.git('rev-parse', 'HEAD');
   f.git('push', 'origin', 'master');
   fs.writeFileSync(path.join(f.remote, 'hooks/update'), '#!/bin/sh\ncase "$1" in refs/heads/*) exit 1;; esac\n', { mode: 0o755 });
@@ -383,6 +390,7 @@ test('auto-release creates only a tag ref on the tested commit under a branch-re
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'master'), tested);
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v1.2.9'), tested);
   assert.deepEqual(f.calls(), [
+    ['api', 'repos/example/multiprompt/releases/latest', '--jq', '.tag_name'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'test.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'release-gate.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'verify.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
@@ -398,7 +406,10 @@ test('auto-release creates only a tag ref on the tested commit under a branch-re
 for (const reason of ['skip', 'red', 'green']) test(`auto-release admission: ${reason}`, { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   f.git('tag', 'v1.2.8');
-  f.git('commit', '--allow-empty', '-m', reason === 'skip' ? 'maintenance [skip release]' : 'release candidate');
+  fs.mkdirSync(path.join(f.dir, 'changelog.d'));
+  fs.writeFileSync(path.join(f.dir, 'changelog.d/DEMO-1-chat.md'), 'Your chats keep their saved order.\n');
+  f.git('add', 'changelog.d');
+  f.git('commit', '-m', reason === 'skip' ? 'maintenance [skip release]' : 'release candidate');
   const tested = f.git('rev-parse', 'HEAD');
   f.git('push', 'origin', 'master');
   const result = f.admit({ TEST_CONCLUSION: reason === 'red' ? 'failure' : 'success' });
