@@ -1,4 +1,4 @@
-Add-Type -Path "$PSScriptRoot/chat-switch-observer.cs"
+Add-Type -Path "$PSScriptRoot/chat-switch-observer.cs" -ReferencedAssemblies System.Drawing
 [void](Wait-For 'initial transcript read' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
 Bind-Transcript
 $observation.rounds = [Collections.Generic.List[object]]::new()

@@ -1220,7 +1220,7 @@ test('native crash evidence retains the minidump beside its text report', () => 
 
 test('live history copy reuses the owned native control instead of racing synthetic keys', () => {
   const live = read('tools/verify-chat-delivery/live-delivery.ps1');
-  assert.match(live, /Add-Type -Path "\$PSScriptRoot\/chat-switch-observer\.cs"/);
+  assert.match(live, /Add-Type -Path "\$PSScriptRoot\/chat-switch-observer\.cs" -ReferencedAssemblies System\.Drawing/);
   assert.match(live, /Doctor \$true\s+\$actions\.Add[^]*?\[ChatSwitchObserver\]::CopyTranscript\(\$app\.Id, \$main\)/);
   assert.doesNotMatch(live, /\$query|ToCharArray|Ctrl\+A: select live conversation/);
 });
