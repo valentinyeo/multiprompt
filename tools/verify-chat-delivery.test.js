@@ -1218,12 +1218,9 @@ test('native crash evidence retains the minidump beside its text report', () => 
 });
 
 
-test('live palette queries use one ordered Unicode input batch instead of racing translated keys', () => {
-  const desktop = read('tools/verify-chat-delivery/desktop.cs');
+test('live history copy uses the owned transcript shortcut without synthetic palette text', () => {
   const live = read('tools/verify-chat-delivery/live-delivery.ps1');
-  assert.match(desktop, /public static void Text\(string text\)/);
-  assert.match(desktop, /inputs\[2 \* i\]\.Data\.Keyboard\.Scan = text\[i\]/);
-  assert.match(desktop, /inputs\[2 \* i \+ 1\]\.Data\.Keyboard\.Flags = 6/);
-  assert.match(live, /\[ChatDeliveryDesktop\]::Text\(\$query\)/);
-  assert.doesNotMatch(live, /foreach \(\$letter in \$query\.ToCharArray\(\)\)/);
+  assert.match(live, /FocusOwnedWindow\(\$main, \$app\.Id, \$transcript\)/);
+  assert.match(live, /Press @\(0x11, 0x41\) 'Ctrl\+A: select live conversation'/);
+  assert.doesNotMatch(live, /\$query|ToCharArray/);
 });

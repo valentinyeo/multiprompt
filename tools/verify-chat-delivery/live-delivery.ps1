@@ -43,13 +43,9 @@ foreach ($round in 1..$roundCount) {
     if ($firstReplyMs -eq 0) { $firstReplyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
     $answer = "Live answer $round"
     [void](Wait-For 'fresh reply rendered without changing views' {
-        $paletteStart = (Read-Shared "$settings/debug.log").Length
-        Press @(0x11, 0x4B) 'Ctrl+K: select live conversation'
-        [void](Wait-For 'live palette ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-        $query = 'chat view select all'
-        [ChatDeliveryDesktop]::Text($query)
-        [void](Wait-For 'live select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=\d+ target=6364(?:\s|$)') })
-        Press @(0x0D) 'Enter: select live conversation'
+        Bind-Transcript
+        if (-not [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $transcript)) { throw 'Owned transcript typing focus missing' }
+        Press @(0x11, 0x41) 'Ctrl+A: select live conversation'
         Press @(0x11, 0x43) 'Ctrl+C: copy rendered live conversation'
         $script:liveCopied = [Windows.Forms.Clipboard]::GetText()
         $script:liveCopied.Contains($answer) -and @($messages | Where-Object { -not $script:liveCopied.Contains($_) }).Count -eq 0
