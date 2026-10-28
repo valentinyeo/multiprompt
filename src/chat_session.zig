@@ -108,6 +108,7 @@ const chatApplyDisplayGlyphs = @import("chat_capture.zig").chatApplyDisplayGlyph
 const chatClassifyBlocks = @import("chat_capture.zig").chatClassifyBlocks;
 const chatBlockDisplayRange = @import("chat_capture.zig").chatBlockDisplayRange;
 const captureChatTranscript = @import("chat_capture.zig").captureChatTranscript;
+const pollChatStatus = @import("chat_capture.zig").pollChatStatus;
 const ChatHistoryEntry = @import("app_state.zig").ChatHistoryEntry;
 const ChatHistoryChannel = @import("app_state.zig").ChatHistoryChannel;
 const ChatHistoryStream = @import("app_state.zig").ChatHistoryStream;
@@ -1215,7 +1216,7 @@ fn refreshChatBlockCache(force: bool) bool {
     const keyed = key.shell_id != 0 and app_state.g_chat_active;
     const show_screen = chat_history.showScreen(keyed);
     const screen_len = if (show_screen) captureChatTranscript(app_state.active_shell, &app_state.g_chat_screen, false) else blk: {
-        if (!force) _ = captureChatTranscript(app_state.active_shell, &app_state.g_chat_screen, true);
+        if (!force) pollChatStatus(app_state.active_shell);
         break :blk null;
     };
     if (!from_file and (screen_len == null or screen_len.? == 0) and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id) return false;

@@ -112,7 +112,7 @@ fn readExact(handle: win.HANDLE, bytes: []u8) bool {
 
 pub fn runIfRequested(args: []const []const u8) bool {
     if (args.len != 2 or !std.mem.eql(u8, args[1], "--console-snapshot")) return false;
-    const source = win.GetStdHandle(win.STD_INPUT_HANDLE);
+    const source = win.GetStdHandle(@bitCast(@as(i32, -10)));
     const destination = win.GetStdHandle(win.STD_OUTPUT_HANDLE);
     var request: Request = undefined;
     while (readExact(source, std.mem.asBytes(&request))) {

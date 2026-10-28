@@ -250,9 +250,9 @@ test('repeated observer proof rejects dropped runs, changed executables and sust
   const { assessRepeated } = await oracle();
   assert.equal(typeof assessRepeated, 'function', 'Repeated observer accounting must ship');
   const sample = poll => ({ ...workload(), sha256: 'a'.repeat(64), observerPollMs: poll, observerIdleCpuMs: poll === 25 ? 1000 : 50, appIdleCpuMs: 100, idleWallMs: 45000 });
-  const pairs = () => Array.from({ length: 5 }, () => ({ base: sample(750), head: { ...sample(750), sha256: 'b'.repeat(64) } }));
+  const pairs = () => Array.from({ length: 5 }, () => ({ base: sample(750), head: { ...sample(750), sha256: 'b'.repeat(64), idleStatusReads: 50 } }));
   assert.equal(assessRepeated(pairs()).length, 5);
-  for (const mutate of [p => p.pop(), p => { p[1].head.sha256 = 'c'.repeat(64); }, p => { delete p[0].base.observerIdleCpuMs; }, p => { p[0].head.observerPollMs = 25; }, p => { p[3].head.idleUs.fill(5001); }, p => { p[3].head.switches.pop(); }]) {
+  for (const mutate of [p => p.pop(), p => { p[1].head.sha256 = 'c'.repeat(64); }, p => { delete p[0].base.observerIdleCpuMs; }, p => { p[0].head.observerPollMs = 25; }, p => { p[3].head.idleUs.fill(5001); }, p => { p[3].head.switches.pop(); }, p => { p[2].head.idleStatusReads = 0; }]) {
     const data = pairs();
     mutate(data);
     assert.throws(() => assessRepeated(data));
@@ -283,7 +283,7 @@ test('diagnostic instrumentation qualifies capture logging and keeps ordinary bu
 
 test('status polling uses isolated snapshots without attaching the UI console', () => {
   const capture = fs.readFileSync(new URL('../src/chat_capture.zig', import.meta.url), 'utf8');
-  assert.match(capture, /if \(status_only\) @import\("console_snapshot.zig"\)\.poll\(pid, app_state\.shells\[shell_index\]\.shell_id\) orelse return null else null/);
+  assert.match(capture, /@import\("console_snapshot.zig"\)\.poll\(shell.pid, shell.shell_id\) orelse return/);
   const file = new URL('../src/console_snapshot.zig', import.meta.url);
   assert.ok(fs.existsSync(file), 'Console snapshot worker must ship');
   const source = fs.readFileSync(file, 'utf8');

@@ -30,6 +30,7 @@ export function assessRepeated(pairs) {
     for (const [sample, side] of [[base, 'base'], [head, 'head']]) {
       if (sample.sha256 !== hashes[side] || sample.observerPollMs !== 750 || !Number.isFinite(sample.observerIdleCpuMs) || sample.observerIdleCpuMs < 0 || !Number.isFinite(sample.appIdleCpuMs) || sample.appIdleCpuMs < 0 || !Number.isFinite(sample.idleWallMs) || sample.idleWallMs <= 0) throw new Error('Invalid alternating-build accounting');
     }
+    if (!Number.isInteger(head.idleStatusReads) || head.idleStatusReads < 49) throw new Error("Missing live status acquisition during idle polls");
     const baseline = assess(base);
     const candidate = assess(head);
     if (!candidate.pass) throw new Error('A candidate run exceeded unchanged session speed limits');

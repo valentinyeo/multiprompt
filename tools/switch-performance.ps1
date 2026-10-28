@@ -115,6 +115,7 @@ try {
     [void](Wait-For 'ten warmup idle Chat View polls' { [regex]::Matches((Read-Log).Substring($warmupOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60 $IdleObserverPollMs)
     $idleOffset = (Read-Log).Length
     [void](Wait-For 'fifty unchanged idle Chat View polls' { [regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)').Count -ge 50 } 60 $IdleObserverPollMs)
+    $result.idleStatusReads = [regex]::Matches((Read-Log).Substring($idleOffset), ('chat-status-snapshot: sid=' + $idleShellId + ' rows=[1-9]')).Count
     $result.idleUs = @([regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)') | ForEach-Object { [long]$_.Groups[1].Value })
     $observer.Refresh()
     $result.observerIdleCpuMs = $observer.TotalProcessorTime.TotalMilliseconds - $observerCpuBefore
