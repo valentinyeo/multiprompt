@@ -51,6 +51,8 @@ test('IGSH-1040 ordinary CPU windows do not request paints or capture images', (
   assert.ok(observer.indexOf('graphics.CopyFromScreen') < observer.indexOf('double captured = clock.Elapsed.TotalMilliseconds;'));
   assert.ok(observer.indexOf('double captured = clock.Elapsed.TotalMilliseconds;') < observer.indexOf('bitmap.Save(path'));
   assert.ok(observer.includes('{ "capture_pixels_ms", capturePixels }'));
+  assert.ok(control.includes('ended - Math.Max(started, probeWindowStarted)'));
+  assert.match(control, /ResetHangProbe\(\)[^\n]*probeWindowStarted = System.Diagnostics.Stopwatch.GetTimestamp\(\)/);
 });
 
 test('IGSH-1040 replay and copied receipt stay outside the ordinary measurement call', () => {
@@ -99,8 +101,10 @@ test('IGSH-1040 every direct observer call restores the exact owned foreground b
   const calls = [...journey.matchAll(/\[ChatSwitchObserver\]::Measure\(/g)];
   assert.equal(calls.length, 5);
   for (const call of calls) {
-    assert.match(journey.slice(0, call.index).split('\n').slice(-2, -1).join(''), /^\s*Wait-SwitchForeground$/);
+    const before = journey.slice(0, call.index).replace(/^\s*\[VerifyNative\]::ResetHangProbe\(\)\r?\n/gm, '');
+    assert.match(before.split('\n').slice(-2, -1).join(''), /^\s*Wait-SwitchForeground$/);
   }
+  assert.match(journey, /Wait-SwitchForeground\s+\[VerifyNative\]::ResetHangProbe\(\)\s+\$shapeSample = \[ChatSwitchObserver\]::Measure/);
   const helper = journey.slice(journey.indexOf('function Wait-SwitchForeground {'), journey.indexOf('function Test-TabChat('));
   assert.match(helper, /Doctor[\s\S]*Wait-Until/);
   assert.match(helper, /if \(\[VerifyNative\]::GetForegroundWindow\(\) -ne \$script:window\) \{[\s\S]*\[VerifyNative\]::BringToForeground\(\$script:window\)/);
@@ -206,6 +210,8 @@ test('IGSH-1040 shape timing clicks the owned sidebar row instead of a keyboard 
   assert.ok(observer.includes('new Mouse { Flags = 2 }'));
   assert.ok(observer.includes('new Mouse { Flags = 4 }'));
   assert.doesNotMatch(observer.slice(observer.indexOf('if (target >= 0) {'), observer.indexOf('long position = offset;')), /Keyboard =/);
+  assert.ok(observer.indexOf('!SetCursorPos(point.X, point.Y)') < observer.indexOf('double appStart ='));
+  assert.ok(observer.indexOf('var clock = Stopwatch.StartNew();') < observer.indexOf('if (SendInput('));
   assert.ok(control.includes('Sidebar timing requires the default ungrouped five-row fixture at 96 DPI'));
   assert.ok(control.includes("[ChatSwitchObserver]::SidebarHeaderHeight = if ($env:RELEASE_TAG -eq 'v0.28.946') { 0 } else { 52 }"));
   assert.match(read('src/workspace_switcher.zig'), /pub fn headerHeight\(\)[^]*?scale\(52\)/);

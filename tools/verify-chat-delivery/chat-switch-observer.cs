@@ -79,6 +79,15 @@ public static class ChatSwitchObserver {
             throw new InvalidOperationException("Switch observation requires its owned foreground window");
         bool images = !String.IsNullOrEmpty(imagePrefix);
         if (images && target < 0) throw new InvalidOperationException("Image replay needs a real target");
+        Input[] inputs = target >= 0 ? new Input[2] : null;
+        if (target >= 0) {
+            if (GetDpiForWindow(owner) != 96) throw new InvalidOperationException("Sidebar fixture requires 96 DPI");
+            var point = new Point { X = 100, Y = 8 + SidebarHeaderHeight + 24 + 38 * target + 19 };
+            if (!ClientToScreen(owner, ref point) || WindowFromPoint(point) != owner || !SetCursorPos(point.X, point.Y))
+                throw new InvalidOperationException("Sidebar row is not in the owned foreground window");
+            inputs[0].Data.Mouse = new Mouse { Flags = 2 };
+            inputs[1].Data.Mouse = new Mouse { Flags = 4 };
+        }
         var points = new List<Dictionary<string, object>>();
         using (var app = Process.GetProcessById(pid))
         using (var observer = Process.GetCurrentProcess()) {
@@ -89,13 +98,6 @@ public static class ChatSwitchObserver {
             var clock = Stopwatch.StartNew();
             points.Add(new Dictionary<string, object> { { "elapsed_ms", 0.0 }, { "cpu_ms", 0.0 } });
             if (target >= 0) {
-                if (GetDpiForWindow(owner) != 96) throw new InvalidOperationException("Sidebar fixture requires 96 DPI");
-                var point = new Point { X = 100, Y = 8 + SidebarHeaderHeight + 24 + 38 * target + 19 };
-                if (!ClientToScreen(owner, ref point) || WindowFromPoint(point) != owner || !SetCursorPos(point.X, point.Y))
-                    throw new InvalidOperationException("Sidebar row is not in the owned foreground window");
-                var inputs = new Input[2];
-                inputs[0].Data.Mouse = new Mouse { Flags = 2 };
-                inputs[1].Data.Mouse = new Mouse { Flags = 4 };
                 if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
                     throw new InvalidOperationException("Observed sidebar click SendInput failed");
             }

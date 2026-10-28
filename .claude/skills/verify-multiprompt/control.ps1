@@ -245,24 +245,27 @@ public static class VerifyNative {
     static Thread probeThread;
     static volatile bool probeRun;
     static double probeMax;
+    static long probeWindowStarted;
     static readonly object probeLock = new object();
     public static void StartHangProbe(IntPtr owner) {
         probeRun = true;
         probeThread = new Thread(() => {
-            var timer = new System.Diagnostics.Stopwatch();
             while (probeRun) {
                 UIntPtr result;
-                timer.Restart();
+                long started = System.Diagnostics.Stopwatch.GetTimestamp();
                 SendMessageTimeout(owner, 0, UIntPtr.Zero, IntPtr.Zero, 2, 5000, out result);
-                double elapsed = timer.Elapsed.TotalMilliseconds;
-                lock (probeLock) { if (elapsed > probeMax) probeMax = elapsed; }
+                long ended = System.Diagnostics.Stopwatch.GetTimestamp();
+                lock (probeLock) {
+                    double elapsed = Math.Max(0, ended - Math.Max(started, probeWindowStarted)) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                    if (elapsed > probeMax) probeMax = elapsed;
+                }
                 Thread.Sleep(2);
             }
         });
         probeThread.IsBackground = true;
         probeThread.Start();
     }
-    public static void ResetHangProbe() { lock (probeLock) { probeMax = 0; } }
+    public static void ResetHangProbe() { lock (probeLock) { probeWindowStarted = System.Diagnostics.Stopwatch.GetTimestamp(); probeMax = 0; } }
     public static double HangProbeMax() { lock (probeLock) { return probeMax; } }
     public static void StopHangProbe() { probeRun = false; if (probeThread != null) probeThread.Join(6000); }
     public static double[] SwitchToSession(int digit, string log, long offset, string needle, int settleMs) {
@@ -6399,10 +6402,10 @@ try {
                         Record "Ctrl+$($target + 1): switch to Chat View session $target ($mode sample $sample)"
                         $shapeSample = $null
                         if ($shapeProof) {
-                            [VerifyNative]::ResetHangProbe()
                             $jobClock = [Diagnostics.Stopwatch]::StartNew()
                             $jobBefore = $job.ReadAccounting()
                             Wait-SwitchForeground
+                            [VerifyNative]::ResetHangProbe()
                             $shapeSample = [ChatSwitchObserver]::Measure($process.Id, $script:window, $target, $log, $offset, $needle, $settleMs, $null)
                             $jobAfter = $job.ReadAccounting()
                             $jobClock.Stop()
