@@ -915,10 +915,12 @@ foreach ($plan in $plans) {
             $actions.Add(@{case=$plan.name; input='pinned arrival'; state=$pinned})
             Shot 'pinned-after-arrival'
             $upLogStart = (Read-Shared "$settings/debug.log").Length
-            $viewH = [int]$bounds.Height
+            $visibleBounds = Transcript-Viewport
+            $visibleTop = [int]($visibleBounds.Top - $bounds.Top)
+            $viewH = [int]$visibleBounds.Height
             $dividerProof.reopened = Wait-For 'scroll up until the unread line is painted above the first unread message' {
                 $f = Divider-State $upLogStart
-                if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll -and $f.y -lt $f.scroll + $viewH - 40) { return $f }
+                if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll + $visibleTop -and $f.y -lt $f.scroll + $visibleTop + $viewH - 40) { return $f }
                 [void](Scroll-Transcript 120)
                 $null
             }
