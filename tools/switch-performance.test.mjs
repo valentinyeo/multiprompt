@@ -87,11 +87,14 @@ results = []
 for suggestion, box, mode in [("", "", "idle"), ("Ask next", "", "idle"), ("Ask next", "draft", "idle"), ("Ask next", "", "busy")]:
     value = dict(suggestion=suggestion, box=box, mode=mode, queue=[])
     results.append(dict(grey=namespace["fake_suggestion_shown"](value), screen=namespace["fake_screen"](value, True)))
+results.append(dict(screen=namespace["fake_screen"](dict(hax=True, suggestion="", box="", mode="idle", queue=[]), False)))
 print(json.dumps(results))
 `;
   const boundary = fileURLToPath(new URL('./verify-chat-delivery/boundary.py', import.meta.url));
   const result = JSON.parse(execFileSync('python3', ['-I', '-c', script, boundary], { encoding: 'utf8', timeout: 10000 }));
-  assert.deepEqual(result.map(row => Boolean(row.grey)), [false, true, false, false]);
+  assert.deepEqual(result.slice(0, 4).map(row => Boolean(row.grey)), [false, true, false, false]);
+  assert.ok(result[0].screen.startsWith('Claude Code\n'));
+  assert.ok(result[4].screen.startsWith('Hax\n'));
   assert.ok(!result[0].screen.includes('\x1b[2m'));
   assert.ok(result[1].screen.includes('\x1b[2mAsk next\x1b[0m'));
   assert.ok(result[2].screen.includes('draft'));

@@ -146,7 +146,7 @@ def fake_screen(claude, escapes):
         if claude.get("question_other"):
             rows.append("❯ " + claude["box"])
         return "\n".join(rows) + "\n"
-    lines = ["Hax" if state().get("hax") else "Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
+    lines = ["Hax" if claude.get("hax") else "Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
     for question, answer in claude.get("turns", []):
         lines.extend(["❯ " + question, "● " + answer, ""])
     lines += ["  Queued: " + " ".join(text.split()) for text in claude["queue"]]
@@ -313,7 +313,7 @@ def hax_init(value):
         (process / "stat").write_text(f"{pid} (hax) S 1 {pid} {pid} 0 -1", encoding="utf-8")
         (process / "cmdline").write_bytes(b"hax\0-p\0neutral\0")
         os.symlink(transcript, process / "fd/3")
-    fake_write(dict(mode="idle", box="", queue=[], suggestion=value["suggestion"]))
+    fake_write(dict(hax=True, mode="idle", box="", queue=[], suggestion=value["suggestion"]))
     return 0
 
 
