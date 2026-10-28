@@ -45,7 +45,7 @@ fn DrawTextW(_: HANDLE, _: [*]const u16, n: i32, rc: *RECT, _: u32) i32 {
     return rc.bottom;
 }
 ` + between('const ChangelogBullet =', 'pub const CHANGELOG =') +
-    between('const SOURCE_CHANGELOG =', '\ncomptime {').replace('const SOURCE_CHANGELOG =', 'var CHANGELOG =') +
+    between('const SOURCE_CHANGELOG =', '\ncomptime {') + '\nvar CHANGELOG = SOURCE_CHANGELOG;\n' +
     between('fn changelogEntryTopPad()', 'pub fn changelogContainsPoint(') + `
 test "geometry is reused for opening, hovering, scrolling and selection" {
     const initial = calcChangelogLayout();
@@ -69,6 +69,16 @@ test "geometry is reused for opening, hovering, scrolling and selection" {
         try std.testing.expect(row.h >= changelogMinRowH());
         try std.testing.expectEqual(@as(?i32, @intCast(i)), changelogIndexAtContentY(top, 498));
         try std.testing.expectEqual(@as(?i32, @intCast(i)), changelogIndexAtContentY(top + row.h - 1, 498));
+        if (@hasDecl(@This(), "changelog_bullet_starts")) {
+            const starts = @field(@This(), "changelog_bullet_starts");
+            const heights = @field(@This(), "changelog_bullet_heights");
+            var measured_height = changelogEntryTopPad() + uiScaled(22) + changelogEntryBottomPad();
+            for (heights[starts[i]..starts[i + 1]]) |height| {
+                try std.testing.expect(height > 0);
+                measured_height += changelogBulletGap() + height;
+            }
+            try std.testing.expectEqual(@max(changelogMinRowH(), measured_height), row.h);
+        }
         top += row.h;
     }
     try std.testing.expectEqual(top, changelogTotalContentHeight(498));
@@ -112,7 +122,9 @@ test('font resets invalidate layout and paint visits only visible cached rows', 
   assert.match(paint, /for \(first\.\.CHANGELOG.len\)/);
   assert.match(paint, /const range = changelogEntryYRange\(idx, summary_w\);/);
   assert.match(paint, /if \(ry >= rows_bottom\) break;/);
-  assert.doesNotMatch(paint, /changelogEntryHeightWithHdc\(/);
+  assert.doesNotMatch(paint, /changelogEntryHeightWithHdc\(|changelogBulletHeightWithHdc\(/);
+  const hit = between('pub fn changelogHitTest(', 'pub fn moveChangelogSelection(');
+  assert.doesNotMatch(hit, /changelogBulletHeightWithHdc\(|GetDC\(/);
 });
 
 test('existing command palette speed journey measures real input through changed screen pixels', () => {

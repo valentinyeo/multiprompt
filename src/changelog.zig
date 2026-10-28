@@ -2461,9 +2461,11 @@ fn changelogEntryHeightWithHdc(hdc: HANDLE, idx: usize, summary_w: i32) i32 {
     const entry = CHANGELOG[idx];
     if (entry.items.len > 0) {
         var total_h = changelogEntryTopPad() + uiScaled(22);
-        for (entry.items) |item| {
+        for (entry.items, 0..) |item, item_idx| {
             const bullet_w = changelogBulletTextWidth(summary_w, item.ticket.len > 0);
-            total_h += changelogBulletGap() + changelogBulletHeightWithHdc(hdc, item.text, bullet_w);
+            const bullet_h = changelogBulletHeightWithHdc(hdc, item.text, bullet_w);
+            changelog_bullet_heights[changelog_bullet_starts[idx] + item_idx] = bullet_h;
+            total_h += changelogBulletGap() + bullet_h;
         }
         total_h += changelogEntryBottomPad();
         return @max(min_row_h, total_h);
@@ -2483,6 +2485,14 @@ fn changelogEntryHeightWithHdc(hdc: HANDLE, idx: usize, summary_w: i32) i32 {
     return @max(min_row_h, changelogEntryTopPad() + wrapped_h + changelogEntryBottomPad());
 }
 
+const changelog_bullet_count = blk: {
+    @setEvalBranchQuota(10000);
+    var count: usize = 0;
+    for (SOURCE_CHANGELOG) |entry| count += entry.items.len;
+    break :blk count;
+};
+var changelog_bullet_starts: [CHANGELOG.len + 1]usize = .{0} ** (CHANGELOG.len + 1);
+var changelog_bullet_heights: [changelog_bullet_count]i32 = .{0} ** changelog_bullet_count;
 var changelog_layout_width: i32 = 0;
 var changelog_layout_scale: i32 = 0;
 var changelog_row_tops: [CHANGELOG.len + 1]i32 = .{0} ** (CHANGELOG.len + 1);
@@ -2496,7 +2506,9 @@ fn prepareChangelogLayout(summary_w: i32) void {
     const scale = uiScaled(100);
     if (changelog_layout_width == summary_w and changelog_layout_scale == scale) return;
     changelog_row_tops[0] = 0;
+    changelog_bullet_starts[0] = 0;
     for (CHANGELOG, 0..) |entry, idx| {
+        changelog_bullet_starts[idx + 1] = changelog_bullet_starts[idx] + entry.items.len;
         var height = changelogEntryTopPad() + uiScaled(22) + changelogEntryBottomPad();
         for (entry.items) |item| {
             const width = changelogBulletTextWidth(summary_w, item.ticket.len > 0);
@@ -2522,7 +2534,9 @@ fn measureChangelogEntry(hdc: HANDLE, idx: usize, summary_w: i32) void {
 fn measureVisibleChangelogRows(summary_w: i32, view_h: i32) void {
     const first: usize = @intCast(changelogIndexAtContentY(app_state.g_changelog_scroll, summary_w) orelse 0);
     var hdc: HANDLE = null;
-    defer { if (hdc != null) _ = ReleaseDC(app_state.g_main_hwnd, hdc); }
+    defer {
+        if (hdc != null) _ = ReleaseDC(app_state.g_main_hwnd, hdc);
+    }
     for (first..CHANGELOG.len) |idx| {
         if (changelog_row_tops[idx] >= app_state.g_changelog_scroll + view_h) break;
         if (changelog_row_measured[idx]) continue;
@@ -2643,18 +2657,11 @@ pub fn changelogHitTest(mx: i32, my: i32) ?ChangelogHit {
 
     const range = changelogEntryYRange(uidx, summary_w);
     const local_y = content_y - range.top;
-    const hdc = GetDC(app_state.g_main_hwnd);
-    if (hdc == null) return .{ .idx = idx, .ticket = "" };
-    defer _ = ReleaseDC(app_state.g_main_hwnd, hdc);
-    const old_font = SelectObject(hdc, uiFontSubtitle());
-    defer _ = SelectObject(hdc, old_font);
-
     var bullet_y = changelogEntryTopPad() + uiScaled(22) + changelogBulletGap();
     const bullet_left = layout.ox + 120 + changelogBulletIndent();
     const bullet_right = layout.ox + layout.overlay_w - 18;
-    for (entry.items) |item| {
-        const bullet_w = changelogBulletTextWidth(summary_w, item.ticket.len > 0);
-        const bullet_h = changelogBulletHeightWithHdc(hdc, item.text, bullet_w);
+    for (entry.items, 0..) |item, item_idx| {
+        const bullet_h = changelog_bullet_heights[changelog_bullet_starts[uidx] + item_idx];
         if (local_y >= bullet_y and local_y < bullet_y + bullet_h) {
             const ticket = if (mx >= bullet_left and mx < bullet_right) item.ticket else "";
             return .{ .idx = idx, .ticket = ticket };
@@ -2822,10 +2829,10 @@ pub fn paintChangelogOverlay(hdc: HANDLE) void {
         } else {
             var bullet_y = ry + top_pad + line_h + changelogBulletGap();
             const bullet_left = layout.ox + 120 + changelogBulletIndent();
-            for (entry.items) |item| {
+            for (entry.items, 0..) |item, item_idx| {
                 const has_ticket = item.ticket.len > 0;
                 const bullet_w = changelogBulletTextWidth(summary_w, has_ticket);
-                const bullet_h = changelogBulletHeightWithHdc(hdc, item.text, bullet_w);
+                const bullet_h = changelog_bullet_heights[changelog_bullet_starts[idx] + item_idx];
                 _ = SetTextColor(hdc, if (selected) RGB(230, 238, 248) else dim_col);
                 var bullet_rc = RECT{ .left = bullet_left, .top = bullet_y, .right = bullet_left + bullet_w, .bottom = bullet_y + bullet_h };
                 drawAsciiBulletLong(hdc, item.text, &bullet_rc, DT_WORDBREAK | DT_NOPREFIX);
