@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('settings-panel', 'appearance', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -14,6 +14,10 @@ $shapeProfile = $env:CHAT_SWITCH_PROFILE -eq '1'
 if ($shapeProof -and $Feature -ne 'chat-switch-speed') { throw 'Shape proof requires the chat-switch-speed journey' }
 if ($shapeProfile -and -not $shapeProof) { throw 'Switch profiling requires the shape-proof journey' }
 switch ($Feature) {
+        'app-icon' {
+            & "$PSScriptRoot/../../../tools/verify-app-icon/drive.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
+            return
+        }
         'chat-full-history' {
             & "$PSScriptRoot/../../../tools/verify-chat-delivery/drive.ps1" -Feature $Feature -Exe $Exe -Ssh "$(Split-Path $Exe)/ssh.exe" -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
             if ($LASTEXITCODE -ne 0) { throw 'Full-session history verification failed' }
@@ -122,6 +126,17 @@ try {
         $usageRoot = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $usageRoot | Out-Null
         Copy-Item (Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-908/usage-telemetry.json') (Join-Path $usageRoot 'usage-telemetry.json')
+        $usagePaceSnapshot = $null
+        if ($env:VERIFY_USAGE_PACE_FILE) {
+            Copy-Item $env:VERIFY_USAGE_PACE_FILE (Join-Path $Evidence 'pace-source.json')
+            $usagePaceSnapshot = Get-Content $env:VERIFY_USAGE_PACE_FILE -Raw | ConvertFrom-Json
+            $usageSourceTs = $usagePaceSnapshot.ts
+            $usagePaceSnapshot.ts = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            Save-Json $usagePaceSnapshot 'pace-replayed.json'
+            Copy-Item (Join-Path (Split-Path $Exe) 'usage-ssh.exe') (Join-Path $scratch 'usage-ssh.exe')
+            Copy-Item (Join-Path $Evidence 'pace-replayed.json') (Join-Path $scratch 'usage-pace.json')
+            [IO.File]::WriteAllText((Join-Path $usageRoot 'ssh-path.txt'), (Join-Path $scratch 'usage-ssh.exe'))
+        }
     }
     if ($Feature -eq 'chat-skill-pill') {
         $skillRoot = Join-Path $env:USERPROFILE '.claude/skills/pill-proof'

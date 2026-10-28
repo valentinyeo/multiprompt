@@ -679,6 +679,7 @@ const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
+const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -1244,6 +1245,7 @@ comptime {
         _ = @import("vps.zig");
         _ = @import("chat_composer.zig");
         _ = @import("chat_capture.zig");
+        _ = @import("console_snapshot.zig");
         _ = @import("chat_session.zig");
         _ = @import("chat_render.zig");
         _ = @import("chat_find_ui.zig");
@@ -1352,6 +1354,7 @@ fn recordFrontVisit() void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (freeze_recorder.heartbeat(msg, wp)) return 0;
     freeze_recorder.note(msg, app_state.active_shell, if (app_state.g_inbox_active) .inbox else if (app_state.g_all_sessions_active) .sessions else if (app_state.g_search_active) .search else if (app_state.g_shortcuts_active) .shortcuts else if (app_state.g_changelog_active) .changelog else if (app_state.g_browser_focus_mode) .browser else if (app_state.g_chat_active) .chat else .terminal);
     if (msg == update_release.WM_RESPONSIVE) {
         update_release.ready();
@@ -2104,6 +2107,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
             if (pt.x >= 0 and pt.x < SIDEBAR_W() and pt.y >= 0) {
                 const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
+                if (@import("update_card.zig").updateCardScroll(pt.x, pt.y, delta)) return 0;
                 if (sidebarStickyCardHitTest(pt.y)) {
                     cycleSidebarStatusCard(if (delta < 0) 1 else -1);
                     return 0;
@@ -3487,6 +3491,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_all_sessions_tab = AS_TAB_ARCHIVED;
                     openAllSessions(hwnd);
                 },
+                @intFromEnum(more_menu.Item.resync) => @import("chat_session.zig").chatResync(),
                 @intFromEnum(more_menu.Item.waiting) => hideActiveTabUntilAttention(),
                 @intFromEnum(more_menu.Item.remind) => if (tmux) {
                     _ = PostMessageW(hwnd, WM_APP_REMIND_PRESETS_OPEN, 0, 0);
@@ -4674,6 +4679,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     chatCopySelection();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_CHAT_RESYNC_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    @import("chat_session.zig").chatResync();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -7990,6 +8005,8 @@ pub fn main(init: std.process.Init) void {
         usage_telemetry.main(init) catch {};
         return;
     }
+    if (@import("console_snapshot.zig").runIfRequested(args)) return;
+    defer @import("console_snapshot.zig").close();
     if (update_release.runHelperIfRequested(args)) return;
 
     debugLog("launch process-start version=" ++ APP_VERSION);
@@ -8182,6 +8199,8 @@ pub fn main(init: std.process.Init) void {
     app_state.g_main_hwnd = hwnd;
     @import("browser_pane.zig").installBrowserDockHooks();
     defer @import("browser_pane.zig").uninstallBrowserDockHooks();
+    @import("report_upload.zig").start();
+    defer @import("report_upload.zig").stop();
     freeze_recorder.start(hwnd, APP_VERSION);
     defer freeze_recorder.stop();
     defer if (app_state.g_account_instance_mutex != null) {

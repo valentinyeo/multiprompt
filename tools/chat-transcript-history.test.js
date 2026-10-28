@@ -198,11 +198,16 @@ fn chatHistoryEntry(key: chat_transcript.Identity) ?*ChatHistoryEntry {
     return null;
 }
 fn captureChatTranscript(_: usize, _: []u16, _: bool) ?usize { capture_count += 1; return capture_result; }
+fn pollChatStatus(_: usize) void {}
 fn chatClassifyBlocks(_: []const u16, _: []ChatBlock) usize { return 0; }
 fn chatApplyDisplayGlyphs(_: []u16, _: []const ChatBlock) void {}
 fn chatLatestAgentReply(_: []u16) usize { return 0; }
 fn findShellById(id: u32) ?usize { for (shells, 0..) |s, i| if (s.shell_id == id) return i; return null; }
 fn saveSession() void {}
+var resync_notices: usize = 0;
+fn showHeaderNoticeAscii(text: []const u8, _: u64, _: bool) void {
+    if (std.mem.eql(u8, text, "Chat resynced")) resync_notices += 1;
+}
 fn chatRelayout(_: i32) void {
     var y: i32 = 0;
     for (g_chat_blocks[0..g_chat_block_count], 0..) |_, i| {
@@ -855,4 +860,80 @@ test "reset prefix" {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+
+test('unchanged keyed history polls live status without synchronous console acquisition', () => {
+  const refresh = fn('refreshChatBlockCache');
+  assert.match(refresh, /if \(!force\) pollChatStatus\(active_shell\)/);
+  assert.doesNotMatch(refresh, /captureChatTranscript\([^;]+true\)/);
+});
+
+test('IGSH-1102 live replies survive overlapping tail refreshes while retaining older history', () => {
+  const cases = String.raw`
+test "cache-first switch-back overlapping watch tail keeps live replies" {
+    const a = std.heap.page_allocator;
+    const key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var h: chat_history.History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n{\"role\":\"assistant\",\"id\":\"retained\",\"text\":\"Retained answer\"}\n@@MP_END@@\n", 1, key);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t50\t200\t9\t0\tclaude\tterm-1\t0\t\ttail\t50\n{\"role\":\"assistant\",\"id\":\"refreshed\",\"text\":\"Refreshed answer\"}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(u64, 0), h.start);
+    try h.apply(a, "@mp\t3\thistory\tok\tsid\t200\t300\t9\t0\tclaude\tterm-1\t0\t\tdelta\t50\n{\"role\":\"assistant\",\"id\":\"live\",\"text\":\"New live reply\"}\n@@MP_END@@\n", 3, key);
+    try std.testing.expectEqual(@as(u64, 0), h.start);
+    try std.testing.expectEqual(@as(u64, 300), h.offset);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Retained answerRefreshed answerNew live reply"), h.text.items);
+    try h.apply(a, "@mp\t4\thistory\tok\tsid\t300\t300\t9\t0\tclaude\tterm-1\t0\t\tdelta\t50\n@@MP_END@@\n", 4, key);
+    try std.testing.expectEqual(@as(u64, 0), h.start);
+    const snapshot = try h.encode(a, key);
+    defer a.free(snapshot);
+    var restored = try chat_history.History.decode(a, snapshot, key);
+    defer restored.deinit(a);
+    try std.testing.expectEqualSlices(u16, h.text.items, restored.text.items);
+    try std.testing.expectError(error.InvalidHistory, h.apply(a, "@mp\t5\thistory\tok\tsid\t299\t400\t9\t0\tclaude\tterm-1\t0\t\tdelta\t50\n@@MP_END@@\n", 5, key));
+    try std.testing.expectError(error.InvalidHistory, h.apply(a, "@mp\t5\thistory\tok\tsid\t300\t400\t8\t0\tclaude\tterm-1\t0\t\tdelta\t50\n@@MP_END@@\n", 5, key));
+    try std.testing.expectError(error.InvalidHistory, h.apply(a, "@mp\t5\thistory\tok\tother\t300\t400\t9\t0\tclaude\tterm-1\t0\t\tdelta\t50\n@@MP_END@@\n", 5, key));
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
+
+
+test('IGSH-1053 Resync confirms complete live reload, never saved disk or a failed load', () => {
+  assert.match(fn('chatFileOnReady'), /entry\.resync and !disk and !history\.more and history\.start == 0/);
+  const cases = String.raw`
+test "cache-first switch-back Resync success notice requires live source" {
+    const a = std.heap.page_allocator;
+    const key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    var one: ChatHistoryEntry = .{ .key = key, .resync = true };
+    defer one.history.deinit(a);
+    try g_chat_histories.append(a, &one);
+    defer g_chat_histories.deinit(a);
+    one.ready.store(true, .release);
+    chatFileOnReady();
+    try std.testing.expect(one.resync);
+    try std.testing.expectEqual(@as(usize, 0), resync_notices);
+    var h: chat_history.History = .{};
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\n{\"role\":\"assistant\",\"text\":\"Reloaded answer\"}\n@@MP_END@@\n", 1, key);
+    one.result = h;
+    one.loading_disk = true;
+    one.ready.store(true, .release);
+    chatFileOnReady();
+    try std.testing.expect(one.resync);
+    try std.testing.expectEqual(@as(usize, 0), resync_notices);
+    one.result = try one.history.clone(a);
+    one.ready.store(true, .release);
+    chatFileOnReady();
+    try std.testing.expect(!one.resync);
+    try std.testing.expectEqual(@as(usize, 1), resync_notices);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
 });

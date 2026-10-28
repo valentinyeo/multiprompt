@@ -199,7 +199,7 @@ test('after-paint Chat switches retain native edge masks throughout the old-to-n
   const native = switching.slice(switching.indexOf('const defer_native_browser'), switching.indexOf('const browser_preparing_previous'));
   assert.doesNotMatch(native, /!defer_browser/);
   assert.match(body(pane, 'hideBrowserFloatingChrome'), /if \(!app_state.g_browser_switch_preparing\) hideBrowserEdgeMasks\(\)/);
-  assert.match(switching, /if \(!defer_browser and defer_native_browser and app_state.g_browser_settle_ticks > 0\)/);
+  assert.match(switching, /if \(!defer_browser and defer_native_browser\)/);
 });
 
 

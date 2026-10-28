@@ -51,6 +51,10 @@ assert.match(desktop, /void Activate\(IntPtr h\) \{ Key\(0x12,false\); Key\(0x12
 assert.match(read('src/chat_send.zig'), /@import\("focus\.zig"\)\.ShowWindow\(shell\.hwnd/);
 assert.doesNotMatch(drive, /Stop-Process -Name|taskkill \/IM/i);
 assert.match(drive, /remaining_owned_processes/);
+assert.match(fakeSsh, /window-%lu\.txt[\s\S]*GetConsoleWindow\(\)/);
+assert.match(drive, /\$surface\.ToInt64\(\) -eq \[long\]\(\[IO\.File\]::ReadAllText\("\$state\/window-/);
+assert.doesNotMatch(drive, /Owner\(\$surface\) -eq \$transport\.Id/);
+assert.match(drive, /tab_id_after=\$respawn\.Groups\[1\]\.Value/);
 const skill = read('.claude/skills/verify-multiprompt/SKILL.md');
 assert.match(skill, /^---\nname: verify-multiprompt\ndescription:/);
 for (const section of ['Launch', 'Doctor', 'Drive', 'Evidence', 'Cleanup', 'Maintain']) assert.ok(skill.includes(`## ${section}`));

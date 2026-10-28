@@ -32,7 +32,12 @@ foreach ($mode in @('restored', 'maximized')) {
     if ($mode -eq 'maximized') {
         $geometry = [WindowControlsProof]::Geometry($script:window)
         [VerifyNative]::ClickClient($script:window, ($geometry[6] - [int](1.5 * $buttonW)), ([int]($buttonH / 2)))
-        Wait-Until { [VerifyNative]::IsZoomed($script:window) } 'custom maximize button maximizes'
+        Wait-Until {
+            $maximized = [WindowControlsProof]::Geometry($script:window)
+            [VerifyNative]::IsZoomed($script:window) -and
+                $maximized[4] -eq $maximized[10] -and $maximized[5] -eq $maximized[11] -and
+                $maximized[4] + $maximized[6] -eq $maximized[12] -and $maximized[5] + $maximized[7] -eq $maximized[13]
+        } 'custom maximize button maximizes'
     }
     foreach ($theme in @('dark', 'light', 'amoled')) {
         Select-Theme $theme ("controls-$mode-$theme-select")
@@ -61,7 +66,12 @@ if ([WindowControlsProof]::Hit($script:window, $dragX, $dragY) -ne 2) { throw 'T
 Wait-Until { $moved = [WindowControlsProof]::Geometry($script:window); $moved[0] -ge $geometry[0] + 30 -and $moved[1] -ge $geometry[1] + 30 } 'real top-strip drag moves the window'
 $dragged = [WindowControlsProof]::Geometry($script:window)
 [WindowControlsProof]::DoubleClick($script:window, $dragX, $dragY)
-Wait-Until { [VerifyNative]::IsZoomed($script:window) } 'double-clicking the top strip maximizes'
+Wait-Until {
+    $maximized = [WindowControlsProof]::Geometry($script:window)
+    [VerifyNative]::IsZoomed($script:window) -and
+        $maximized[4] -eq $maximized[10] -and $maximized[5] -eq $maximized[11] -and
+        $maximized[4] + $maximized[6] -eq $maximized[12] -and $maximized[5] + $maximized[7] -eq $maximized[13]
+} 'double-clicking the top strip maximizes'
 $geometry = [WindowControlsProof]::Geometry($script:window)
 [VerifyNative]::ClickClient($script:window, ($geometry[6] - [int](1.5 * $buttonW)), ([int]($buttonH / 2)))
 Wait-Until { -not [VerifyNative]::IsZoomed($script:window) } 'custom restore works after top-strip double-click'
@@ -106,7 +116,12 @@ Save-Json @{ differences = $differences; negativeDifferences = $negativeDifferen
 if ($differences -ne 0 -or $negativeDifferences -eq 0) { throw 'Window control pixel signature changed after docking, or its negative control was accepted' }
 Focus-LockedBrowser $browser
 [VerifyNative]::ClickClient($script:window, ($geometry[6] - [int](1.5 * $buttonW)), ([int]($buttonH / 2)))
-Wait-Until { [VerifyNative]::IsZoomed($script:window) } 'custom maximize works while the docked browser has focus'
+Wait-Until {
+    $maximized = [WindowControlsProof]::Geometry($script:window)
+    [VerifyNative]::IsZoomed($script:window) -and
+        $maximized[4] -eq $maximized[10] -and $maximized[5] -eq $maximized[11] -and
+        $maximized[4] + $maximized[6] -eq $maximized[12] -and $maximized[5] + $maximized[7] -eq $maximized[13]
+} 'custom maximize works while the docked browser has focus'
 $geometry = [WindowControlsProof]::Geometry($script:window)
 [VerifyNative]::ClickClient($script:window, ($geometry[6] - [int](1.5 * $buttonW)), ([int]($buttonH / 2)))
 Wait-Until { -not [VerifyNative]::IsZoomed($script:window) } 'custom restore with a docked browser'

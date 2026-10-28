@@ -261,7 +261,7 @@ test('ISSUE-511 gone handling requires complete listing twice and defends live t
 });
 
 test('ISSUE-511 urgent probes bypass spawn grace and requests during a job survive completion', () => {
-  assert.match(body('sshProbeStart', send), /!shell\.ssh_reconnect\.awaiting_probe and GetTickCount64\(\) -\| shell\.spawn_tick < 3000/);
+  assert.match(body('sshProbeStart', send), /!shell\.ssh_reconnect\.awaiting_probe and shell\.ssh_reconnect\.phase != \.reconnecting and GetTickCount64\(\) -\| shell\.spawn_tick < 3000/);
   assert.match(body('sshRequestSessionProbe', send), /ssh_probe_pending_request = true;\s*ssh_probe_next_tick = 0/);
   assert.match(body('sshProbeStart', send), /ssh_probe_job = job;\s*ssh_probe_pending_request = false/);
   assert.match(body('sshProbeFinish', send), /ssh_probe_next_tick = if \(ssh_probe_pending_request\) 0 else GetTickCount64\(\) \+ 15_000/);

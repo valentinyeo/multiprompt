@@ -520,9 +520,9 @@ pub const History = struct {
         const append = std.mem.eql(u8, mode_text, "delta");
         const prepend = std.mem.eql(u8, mode_text, "older");
         if ((append or prepend) and (inode != self.inode or !std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) or
-            (if (prepend) end != self.start or oldest != base else base != self.offset or oldest != self.start))) return error.InvalidHistory;
+            (if (prepend) end != self.start or oldest != base else base != self.offset))) return error.InvalidHistory;
         if (oldest > base) return error.InvalidHistory;
-        var next: History = .{ .status = if (append or prepend) self.status else .{}, .inode = inode, .offset = end, .start = if (mode == null and !append) 0 else oldest, .mtime = mtime, .more = std.mem.eql(u8, more, "1"), .revision = self.revision +% 1 };
+        var next: History = .{ .status = if (append or prepend) self.status else .{}, .inode = inode, .offset = end, .start = if (append) self.start else if (mode == null) 0 else oldest, .mtime = mtime, .more = std.mem.eql(u8, more, "1"), .revision = self.revision +% 1 };
         @memcpy(next.probe[0..probe.len], probe);
         errdefer next.deinit(a);
         @memcpy(next.sid[0..sid.len], sid);

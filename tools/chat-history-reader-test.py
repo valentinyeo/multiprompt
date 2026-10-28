@@ -116,6 +116,92 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertIn("\tquestion_text\tok\t", wire)
         self.assertEqual(run.call_args_list[0].args[0], ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "Purple"])
         self.assertEqual(run.call_args_list[1].args[0], ["tmux", "send-keys", "-t", "=term-1:", "Enter"])
+    def test_igsh1043_hax_only_processes_are_discovered_without_provider_children(self):
+        table = {10: (1, ['bash']), 11: (10, ['/opt/bin/hax', '-p', 'neutral']),
+                 20: (1, ['bash']), 21: (20, ['/opt/bin/hax', '--resume=neutral'])}
+        self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 11)
+        self.assertEqual(reader.agent_pid_for_panes([20], table, 'codex'), 21)
+        table[12] = (11, ['codex'])
+        self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 11)
+
+    def test_igsh1043_native_rewrite_cannot_reuse_another_message_identity(self):
+        def saved_message(text, offset):
+            rows = reader.conversation_rows(dict(kind='assistant', text=text), 'claude', offset)
+            self.assertEqual(len(rows), 1, 'Native saved reply must be readable')
+            self.assertIn('id', rows[0])
+            return rows[0]
+        first = saved_message('Original saved answer', 123)
+        again = saved_message('Original saved answer', 123)
+        replaced = saved_message('Rewritten different answer', 123)
+        repeated = saved_message('Original saved answer', 456)
+        self.assertEqual(first['id'], again['id'])
+        self.assertNotEqual(first['id'], replaced['id'])
+        self.assertNotEqual(first['id'], repeated['id'])
+
+    def test_igsh1043_hax_without_materialized_file_never_reads_another_claude_chat(self):
+        self.write(self.event('Unrelated Claude conversation'))
+        with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '10\n', '')), \
+                patch.object(reader, 'process_table', return_value={10: (1, ['hax'])}), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'), \
+                patch.object(reader, 'open_hax_transcript', return_value=None, create=True):
+            self.assertIsNone(reader.resolve_tmux_agent('claude', 'runner-starting'))
+
+    def test_igsh1043_idle_hax_keeps_its_exact_saved_session(self):
+        sid = '11111111-1111-4111-8111-111111111111'
+        path = self.home / '.local/state/hax/sessions/shared-runners' / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(dict(type='session', version=1, id=sid, cwd='/work/demo')) + '\n' + json.dumps(dict(kind='assistant', text='Saved reply after runner exits')) + '\n')
+        self.query.update(sid=sid, follow=True)
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            fields, rows = self.read()
+        self.assertEqual(fields[4], sid)
+        self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant'], ['Saved reply after runner exits'])
+
+    def test_igsh1043_live_hax_uses_owned_descriptor_not_newest_same_folder(self):
+        root = self.home / '.local/state/hax/sessions/shared-runners'
+        root.mkdir(parents=True)
+        sid = '11111111-1111-4111-8111-111111111111'
+        owned = root / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+        owned.write_text(json.dumps(dict(type='session', version=1, id=sid, cwd='/work/demo')) + '\n')
+        other = root / '2026-01-02T00-00-00Z_22222222-2222-4222-8222-222222222222.jsonl'
+        other.write_text(json.dumps(dict(type='session', version=1, id='22222222-2222-4222-8222-222222222222', cwd='/work/demo')) + '\n')
+        os.utime(owned, (1, 1))
+        os.utime(other, (2, 2))
+        original_iterdir = Path.iterdir
+        def iterdir(path):
+            return iter([Path('/proc/11/fd/3')]) if path == Path('/proc/11/fd') else original_iterdir(path)
+        with patch.object(Path, 'iterdir', iterdir), \
+                patch.object(reader.os, 'readlink', return_value=str(owned)), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'):
+            self.assertEqual(reader.resolve_tmux_agent('claude', 'runner-one', pid=11), (sid, owned))
+            self.assertEqual(reader.resolve_tmux_agent('codex', 'runner-one', pid=11), (sid, owned))
+
+    def test_igsh1043_native_hax_saved_sessions_keep_distinct_messages_and_offsets(self):
+        root = self.home / '.local/state/hax/sessions/work-demo-neutral'
+        root.mkdir(parents=True)
+        for index, sid in enumerate(['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']):
+            path = root / ('2026-01-01T00-00-00Z_' + sid + '.jsonl')
+            events = [dict(type='session', version=1, hax_version='neutral', id=sid, cwd='/work/demo', timestamp='2026-01-01T00:00:00Z', provider='codex', model='neutral'),
+                      dict(kind='user', text=f'Runner {index} question'),
+                      dict(kind='assistant', text=f'Runner {index} saved reply')]
+            path.write_text(''.join(json.dumps(event) + '\n' for event in events))
+            self.query = dict(id=7, codex=False, sid=sid, tmux='', cwd='/work/demo', cached_sid='', inode=0, offset=0, source_offsets=True)
+            fields, rows = self.read()
+            messages = [row for row in rows if row['role'] in ('user', 'assistant')]
+            self.assertEqual(fields[4], sid)
+            self.assertEqual([row['text'] for row in messages], [f'Runner {index} question', f'Runner {index} saved reply'])
+            identities = [row.get('read_id') or row.get('id') for row in messages]
+            self.assertTrue(all(identities))
+            self.assertEqual(len(set(identities)), 2)
+            with path.open('a') as output:
+                output.write(json.dumps(dict(kind='assistant', text=f'Runner {index} next reply')) + '\n')
+            _, delta = self.read()
+            self.assertEqual([row['text'] for row in delta if row['role'] == 'assistant'], [f'Runner {index} next reply'])
+            found = reader.response(dict(self.query, search=f'Runner {index} saved reply'))
+            self.assertIn(f'Runner {index} saved reply', found)
+            self.query.update(cached_sid='', inode=0, offset=0)
+            _, again = self.read()
+            self.assertEqual([row.get('read_id') or row.get('id') for row in again if row['role'] in ('user', 'assistant')][:2], identities)
 
     def test_claude_status_header(self):
         todos = [dict(content=f"Task {i}\tline\nnext", status="completed" if i < 3 else "in_progress" if i == 3 else "pending") for i in range(7)]

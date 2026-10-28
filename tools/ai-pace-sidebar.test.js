@@ -146,7 +146,8 @@ test("configured rows pair weekly usage with its reset and retain secondary quot
   assert.match(menu, /snapshot\.goals\[0\.\.count\]/);
   assert.match(menu, /aiPaceProviderLabel\(&goal\)/);
   assert.match(menu, /formatAiPaceResetDetail/);
-  assert.match(menu, /aiPaceWord\(goal\.pace\)/);
+  assert.match(menu, /formatAiUsagePace\(&pace_buf, goal\.weekly_pace\)/);
+  assert.match(menu, /formatAiUsagePace\(&five_pace_buf, goal\.five_hour_pace\)/);
   assert.match(menu, /formatAiPaceBonusReset/);
   assert.match(menu, /5H \{s\}.*Fable \{s\}/);
   assert.match(menu, /goal\.retrying/);

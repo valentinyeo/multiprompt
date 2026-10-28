@@ -608,6 +608,7 @@ function mockFiles(t, files) {
 
 
 test('full evidence oracle recomputes all cases and rejects corrupt screens, identity, actions and cleanup', t => {
+  const saved = JSON.parse(read('tools/fixtures/IGSH-1134/suggestion-capture.json'));
   const files = new Map();
   const base = path.join(root, 'tools/verify-chat-delivery/in-memory-evidence');
   const put = (file, value) => files.set(path.join(base, file), JSON.stringify(value));
@@ -619,7 +620,7 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
   for (const name of names) {
     const { observation, events } = fixture(name);
     observation.mode = name === 'idle-suggestion' ? 'idle' : 'busy';
-    observation.suggestion = 'Try the next step';
+    observation.suggestion = name === 'idle-suggestion' ? saved.suggestion : 'Try the next step';
     const wrapped = name === 'wrapped-leftover';
     if (wrapped) observation.leftover = leftover;
     put(`${name}/observation.json`, observation);
@@ -657,8 +658,18 @@ test('full evidence oracle recomputes all cases and rejects corrupt screens, ide
     return encoding && Buffer.isBuffer(value) ? value.toString(encoding) : value;
   });
   assert.equal(evaluateEvidence(base).status, 'passed');
+  assert.equal(JSON.parse(files.get(path.join(base, 'idle-suggestion/stand-in/ready.json'))).screen, saved.ready);
   const positive = new Map(files);
+  for (const screen of [saved.capture, saved.capture.replace('asking', '\u001b[38;2;100;100;100masking\u001b[m')]) {
+    log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen }]);
+    assert.equal(evaluateEvidence(base).status, 'passed', 'saved release capture differs only in SGR styling');
+  }
+  for (const [file, value] of positive) files.set(file, value);
   const mutations = [
+    () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace('asking', 'answering') }]),
+    () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace(saved.suggestion, '') }]),
+    () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: saved.capture.replace('\u001b[2m', '\u001b[2K') }]),
+    () => log('idle-suggestion/stand-in/agent-buffer.jsonl', fixture('idle-suggestion').events.slice(0, -1)),
     () => log('busy-send/stand-in/agent-buffer.jsonl', []),
     () => log('idle-suggestion/stand-in/capture.jsonl', [{ case: 'idle-suggestion', screen: '❯ blank' }]),
     () => put('idle-suggestion/stand-in/state.json', { name: 'idle-suggestion', mode: 'idle', suggestion: '' }),
@@ -1145,4 +1156,36 @@ test('IGSH-1055 removing the read anchor rotates source identity without truncat
     if (fd !== undefined) fs.closeSync(fd);
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('native runner-session journeys run automatically for candidates and published releases', () => {
+  const call = workflow.slice(workflow.indexOf('  workflow_call:'), workflow.indexOf('  pull_request:'));
+  assert.match(call, /      hax_sessions_proof:\n        required: false\n        default: false\n        type: boolean/);
+  assert.match(workflow, /!inputs\.hax_sessions_proof && github\.event_name == 'pull_request'/);
+  const caller = '.github/workflows/hax-sessions.yml';
+  assert.ok(fs.existsSync(path.join(root, caller)), 'candidate Windows journey has an automatic trigger');
+  assert.match(read(caller), /  pull_request:/);
+  assert.match(read(caller), /uses: \.\/\.github\/workflows\/verify\.yml/);
+  assert.match(read(caller), /feature: chat-delivery\n      hax_sessions_proof: true/);
+  const redRun = read('.github/workflows/check-red-run.yml');
+  assert.match(redRun, /name: Install Zig 0\.16\.0/);
+  assert.match(redRun, /zig-x86_64-linux-0\.16\.0.*GITHUB_PATH/);
+  const released = read('.github/workflows/release.yml');
+  assert.match(released, /  runner-sessions:\n    needs: \[prepare, release\]/);
+  assert.match(released, /feature: chat-delivery\n      hax_sessions_proof: true\n      tag: \$\{\{ needs\.prepare\.outputs\.tag \}\}/);
+});
+
+test('native runner file descriptors share one Windows notification root with their fixture state', () => {
+  const script = String.raw`
+import ast, ntpath, pathlib, sys, types
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+watch = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'watch_reader')
+assignment = next(node for node in ast.walk(watch) if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == 'watch_root' for target in node.targets))
+expression = compile(ast.Expression(assignment.value), '<notification-root>', 'eval')
+for transcript in [r'D:\verify\profile\home\native.jsonl', r'\\?\D:\verify\profile\home\native.jsonl']:
+    scope = dict(os=types.SimpleNamespace(path=ntpath), ROOT=pathlib.PureWindowsPath(r'D:\verify\profile\state'), resolved=(None, None, pathlib.PureWindowsPath(transcript)))
+    assert eval(expression, scope) == r'D:\verify\profile'
+print('NATIVE_WINDOWS_WATCH_ROOT_OK')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { encoding: 'utf8', timeout: 10000 }), /NATIVE_WINDOWS_WATCH_ROOT_OK/);
 });

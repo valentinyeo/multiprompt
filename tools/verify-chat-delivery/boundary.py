@@ -146,7 +146,7 @@ def fake_screen(claude, escapes):
         if claude.get("question_other"):
             rows.append("❯ " + claude["box"])
         return "\n".join(rows) + "\n"
-    lines = ["Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
+    lines = ["Hax" if claude.get("hax") else "Claude Code", "", "Working... (esc to interrupt)" if claude["mode"] == "busy" else "Ready", ""]
     for question, answer in claude.get("turns", []):
         lines.extend(["❯ " + question, "● " + answer, ""])
     lines += ["  Queued: " + " ".join(text.split()) for text in claude["queue"]]
@@ -298,8 +298,29 @@ def fake_send(argv):
     return fake_run("app", "send-keys", argv, change)
 
 
+def hax_init(value):
+    for index, name in enumerate(value["sessions"]):
+        sid = f"11111111-1111-4111-8111-{index + 1:012d}"
+        transcript = Path(value["home"]) / ".local/state/hax/sessions/shared-runners" / f"2026-01-01T00-00-00Z_{sid}.jsonl"
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        events = [dict(type="session", version=1, id=sid, timestamp="2026-01-01T00:00:00Z", cwd=value["cwd"], provider="codex", model="neutral")]
+        if name != "runner-empty":
+            events += [dict(kind="user", text=f"IGSH1043 runner {index} question"), dict(kind="assistant", text=f"IGSH1043 runner {index} saved reply")]
+        transcript.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+        pid = value["panes"][name]
+        process = Path(value["procRoot"]) / str(pid)
+        (process / "fd").mkdir(parents=True, exist_ok=True)
+        (process / "stat").write_text(f"{pid} (hax) S 1 {pid} {pid} 0 -1", encoding="utf-8")
+        (process / "cmdline").write_bytes(b"hax\0-p\0neutral\0")
+        os.symlink(transcript, process / "fd/3")
+    fake_write(dict(hax=True, mode="idle", box="", queue=[], suggestion=value["suggestion"]))
+    return 0
+
+
 def fake_init():
     value = state()
+    if value.get("hax"):
+        return hax_init(value)
     pane = str(value["panePid"])
     for target in (value["transcript"], value["meta"]):
         Path(target).parent.mkdir(parents=True, exist_ok=True)
@@ -379,6 +400,14 @@ def shell():
         fake_event("user", message=dict(role="user", content=question))
         fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
         return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append([question, answer]) is None) else 3
+    if op == "refresh-live-tail":
+        path = Path(state()["transcript"])
+        with path.open("r+b", buffering=0) as transcript:
+            first = transcript.read(1)
+            transcript.seek(0)
+            transcript.write(first)
+        record("tail-refreshes.jsonl", bytes=path.stat().st_size)
+        return 0
     if op == "live-turn" and len(ARGS) == 2:
         def complete(claude):
             accepted = list(claude["queue"])
@@ -386,6 +415,8 @@ def shell():
             answer = "Live answer " + ARGS[1]
             fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
             claude.setdefault("turns", []).append([" | ".join(accepted), answer])
+            if state().get("longChatProof"):
+                claude["mode"] = "busy"
             record("live-turns.jsonl", turn=int(ARGS[1]), accepted=accepted, answer=answer)
             return True
         return 0 if fake_run("shell", op, ARGS, complete) else 3
@@ -394,6 +425,23 @@ def shell():
         return 0
     if op == "init":
         return fake_init()
+    if op == "resync-init":
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text="Before resync")]))
+        result = fake_run("shell", op, ARGS, lambda claude: fake_submit(claude, "stale waiting message") is None)
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text="Stable trailing source boundary. " * 12)]))
+        return 0 if result else 3
+    if op == "resync-rewrite":
+        path = Path(state()["transcript"])
+        before = path.read_bytes()
+        stat = path.stat()
+        after = before.replace(b"Before resync", b"After  resync").replace(b'"enqueue"', b'"dequeue"')
+        if before == after or len(before) != len(after):
+            raise ValueError("Resync fixture must change content without changing cursor")
+        with path.open("r+b") as file:
+            file.write(after)
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        record("resync-rewrite.jsonl", bytes=len(after), before=before.decode(), after=after.decode())
+        return 0 if fake_run("shell", op, ARGS, lambda claude: claude.__setitem__("queue", []) is None) else 3
     if op == "reply-reference":
         original = "The original message starts here.\nSecond original line for context.\nThird original line stays on the wire.\nFourth original line ends the quote."
         fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=original)]))
@@ -841,7 +889,7 @@ def watch_reader():
         kernel.FindNextChangeNotification.argtypes = [wintypes.HANDLE]
         kernel.FindCloseChangeNotification.argtypes = [wintypes.HANDLE]
         kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-        watch_root = os.path.commonpath([str(ROOT), str(resolved[2].parent)])
+        watch_root = os.path.commonpath([str(ROOT), str(resolved[2].parent).removeprefix("\\\\?\\")])
         notification = kernel.FindFirstChangeNotificationW(watch_root, True, 0x13)
         if notification == ctypes.c_void_p(-1).value:
             raise ctypes.WinError(ctypes.get_last_error())
@@ -891,6 +939,15 @@ def ssh():
     declined = declined_remote(ARGS)
     if declined:
         kind, output, exit_code = declined
+        if kind == "capacity-poll" and state().get("hax"):
+            output = "@capacity|4|0.1|8000000|6000000|0|0|0|0|0\n"
+            if "vps" in ARGS:
+                output += "".join(name + "|1700000000|10|/verify/shared-runners|hax|Hax\n" for name in session_names())
+            if command.endswith("done"):
+                output += "@@ZS_END@@\n"
+            record("invocations.jsonl", kind="list", operation="native host inventory", argv=ARGS)
+            sys.stdout.write(output)
+            return 0
         record("declined.jsonl", operation="remote command", kind=kind, argv=ARGS, command=command, exitCode=exit_code)
         sys.stdout.write(output)
         return exit_code
@@ -908,7 +965,12 @@ def ssh():
             value = state()
             if value.get("remoteHome"):
                 os.environ.update(HOME=value["remoteHome"], USERPROFILE=value["remoteHome"])
-            return watch_reader()
+            try:
+                return watch_reader()
+            except Exception:
+                import traceback
+                (ROOT / f"reader-{os.getpid()}.stderr.log").write_text(traceback.format_exc(), encoding="utf-8")
+                raise
         env = os.environ.copy()
         if os.name == "nt":
             env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")

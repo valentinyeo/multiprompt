@@ -213,6 +213,8 @@ pub fn build(b: *std.Build) void {
     const livetest_tests = b.addTest(.{ .root_module = livetest_exe.root_module });
     test_step.dependOn(&b.addRunArtifact(livetest_tests).step);
     const vps_test_step = b.step("test-vps", "Run tests for the Linux server tools");
+    const user_tmux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/user-tmux.test.js" });
+    vps_test_step.dependOn(&user_tmux_tests.step);
     const chat_audit = b.addExecutable(.{ .name = "chat-audit", .root_module = b.createModule(.{
         .root_source_file = b.path("src/chat_audit.zig"),
         .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -228,7 +230,7 @@ pub fn build(b: *std.Build) void {
     const chat_send_integration = b.addSystemCommand(&.{ "python3", "tools/chat-tmux-send-test.py", "--integration" });
     vps_test_step.dependOn(&chat_send_integration.step);
     const outbox_test_step = b.step("test-chat-outbox", "Run native outbox delivery and restart tests");
-    const chat_send_routing = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tmux-send.test.js", "tools/chat-full-settle.test.js", "tools/chat-delivery.test.js", "tools/chat-outbox-key.test.js", "tools/chat-history-connection.test.js" });
+    const chat_send_routing = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tmux-send.test.js", "tools/chat-resync.test.js", "tools/chat-full-settle.test.js", "tools/chat-delivery.test.js", "tools/chat-outbox-key.test.js", "tools/chat-history-connection.test.js" });
     chat_send_routing.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     vps_test_step.dependOn(&chat_send_routing.step);
     outbox_test_step.dependOn(&chat_send_routing.step);
@@ -248,6 +250,8 @@ pub fn build(b: *std.Build) void {
     const ci_admission_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ci-admission.test.js" });
     test_step.dependOn(&ci_admission_tests.step);
     vps_test_step.dependOn(&ci_admission_tests.step);
+    const automerge_run_tests = b.addSystemCommand(&.{ "node", "--test", "tools/automerge-admit-run.test.js" });
+    vps_test_step.dependOn(&automerge_run_tests.step);
     const automerge_admit_tests = b.addSystemCommand(&.{ "bash", "tools/automerge-admit.test.sh" });
     test_step.dependOn(&automerge_admit_tests.step);
     vps_test_step.dependOn(&automerge_admit_tests.step);
@@ -329,7 +333,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(usage_mode_tests).step);
     const account_test_step = b.step("test-account", "Run portable account layout and SSH host tests");
-    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig" }) |source| {
+    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig", "src/tmux_closed.zig" }) |source| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(source),
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -455,6 +459,12 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     }) });
     test_step.dependOn(&b.addRunArtifact(reminders_load_tests).step);
+    const report_upload_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/report_upload.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(report_upload_tests).step);
     const freeze_recorder_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/freeze_recorder.zig"),
         .target = target,

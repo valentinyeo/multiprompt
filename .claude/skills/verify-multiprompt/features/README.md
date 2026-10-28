@@ -34,6 +34,8 @@ A passing selected journey does not cover all listed entry points or every sub-f
 
 ## Features
 
+- [App icon](app-icon.md): approved robot artwork in the Windows taskbar, window and executable; the previous release is the red control.
+
 - [Settings panel](settings-panel.md): keyboard and palette entry, existing settings persistence, centred native panel and focus-safe dismissal.
 
 - [Inline working dots](chat-working.md): screenshot pixels prove three animated dots in the next reply slot and their disappearance after the reply.
