@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const win = @import("win32.zig");
 const crash = @import("crash_recorder.zig");
 const upload = @import("report_upload.zig");
+extern "user32" fn PostMessageW(win.HANDLE, u32, usize, isize) callconv(.winapi) i32;
 extern "user32" fn RegisterWindowMessageW([*:0]const u16) callconv(.winapi) u32;
 
 pub const NOTICE_TEXT = "Multiprompt froze last time, a report was saved";
@@ -145,7 +146,7 @@ fn worker(_: ?*anyopaque) callconv(.winapi) u32 {
     var detector: Detector = .{};
     var token: u32 = 1;
     var started = awakeMillis();
-    if (win.PostMessageW(g_window, g_message, token, 0) == 0) return 0;
+    if (PostMessageW(g_window, g_message, token, 0) == 0) return 0;
     while (win.WaitForSingleObject(g_stop, 500) == 0x102) {
         if (win.IsWindow(g_window) == 0) break;
         const now = awakeMillis();
@@ -155,7 +156,7 @@ fn worker(_: ?*anyopaque) callconv(.winapi) u32 {
         if (responsive) {
             token +%= 1;
             started = now;
-            if (win.PostMessageW(g_window, g_message, token, 0) == 0) break;
+            if (PostMessageW(g_window, g_message, token, 0) == 0) break;
         }
     }
     return 0;
