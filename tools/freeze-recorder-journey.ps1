@@ -13,7 +13,7 @@ public static class FreezeJourney {
     [DllImport("kernel32.dll")] public static extern uint ResumeThread(IntPtr thread);
     [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr wp, IntPtr lp, uint flags, uint timeout, out UIntPtr result);
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr window, int command);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
@@ -73,7 +73,7 @@ function Reports { return @(Get-ChildItem $crashes -Filter 'freeze-*.txt' -Error
 function Stall([bool]$VerifyLive = $false) {
     if ([FreezeJourney]::SuspendThread($script:thread) -eq [uint32]::MaxValue) { throw 'Cannot suspend fixture main thread' }
     try {
-        [void][FreezeJourney]::ShowWindow($script:window, 0)
+        [void][FreezeJourney]::ShowWindowAsync($script:window, 0)
         Start-Sleep -Seconds 10
         if ($VerifyLive) {
             $rows = @(Wait-Uploads 1)
@@ -83,7 +83,7 @@ function Stall([bool]$VerifyLive = $false) {
         }
     } finally {
         [void][FreezeJourney]::ResumeThread($script:thread)
-        [void][FreezeJourney]::ShowWindow($script:window, 5)
+        [void][FreezeJourney]::ShowWindowAsync($script:window, 5)
     }
     [void](Wait-Window $script:app)
     Start-Sleep -Seconds 2
@@ -100,16 +100,16 @@ try {
     if ($owner -ne $app.Id) { throw 'Window belongs to another process' }
     $thread = [FreezeJourney]::OpenThread(2, $false, $mainThread)
     if ($thread -eq [IntPtr]::Zero) { throw 'Cannot open fixture main thread' }
-    Stall ([bool]$AccountState)
+    Stall ([bool]$Service)
     $reports = @(Reports)
     if ($reports.Count -ne 1) { throw "Ten-second stall must write exactly one report; found $($reports.Count)" }
     $text = [IO.File]::ReadAllText($reports[0].FullName)
     if ($text -notmatch '(?m)^stack_rvas:' -or $text -notmatch '(?m)^  0x[0-9A-F]+$' -or $text -notmatch '(?m)^instruction: [a-z0-9_.-]+\+0x[0-9A-F]+$') { throw 'Stuck location missing' }
     foreach ($sensitive in @($privateText, $scratch, $env:USERPROFILE, 'debug_log_tail', 'PRIVATE-')) { if ($text.Contains($sensitive)) { throw 'Private content leaked into report' } }
     Copy-Item $reports[0].FullName (Join-Path $Evidence 'first-freeze.txt')
-    if ($AccountState) { [void](Invoke-RestMethod "$Service/__journey/offline/true") }
+    if ($Service) { [void](Invoke-RestMethod "$Service/__journey/offline/true") }
     Stall
-    if ($AccountState -and @(Get-ChildItem $crashes -Filter 'upload-*.json').Count -ne 1) { throw 'Offline upload was not retained' }
+    if ($Service -and @(Get-ChildItem $crashes -Filter 'upload-*.json').Count -ne 1) { throw 'Offline upload was not retained' }
     if (@(Reports).Count -ne 2) { throw 'A recovered window must record its next freeze exactly once' }
     [void][FreezeJourney]::CloseHandle($thread)
     $thread = [IntPtr]::Zero
@@ -131,7 +131,7 @@ try {
     if (-not $log.Contains('Multiprompt froze last time, a report was saved')) { throw 'Next-start freeze notice missing' }
     if (Test-Path (Join-Path $crashes 'freeze.marker')) { throw 'Next-start notice was not consumed' }
     if (@(Reports).Count -ne 2) { throw 'Restart created an extra freeze report' }
-    if ($AccountState) {
+    if ($Service) {
         if (@(Get-ChildItem $crashes -Filter 'upload-*.json').Count -ne 1) { throw 'Restart lost pending report' }
         [void](Invoke-RestMethod "$Service/__journey/offline/false")
         $rows = @(Wait-Uploads 2)
@@ -146,6 +146,15 @@ try {
         if (@(Service-Reports).Count -ne 2) { throw 'Retry duplicated a service report' }
         if (@(Get-ChildItem $crashes -Filter 'upload-*.json').Count -ne 0) { throw 'Acknowledged uploads remain pending' }
         Write-Host 'FREEZE_UPLOAD_JOURNEY_OK'
+    }
+    if ($AccountState -and !$Service) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(50)
+        while (@(Get-ChildItem $crashes -Filter 'upload-*.json').Count -gt 0) {
+            if ([DateTime]::UtcNow -gt $deadline) { throw 'Live service never acknowledged pending reports' }
+            Start-Sleep -Milliseconds 250
+        }
+        @{ device = $state.device_id; version = ([regex]::Match($text, '(?m)^version: (.+)$')).Groups[1].Value; captured = ([regex]::Match($text, '(?m)^time_unix: (.+)$')).Groups[1].Value } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'live-result.json')
+        Write-Host 'FREEZE_LIVE_UPLOAD_OK'
     }
     @{ healthyReports = 0; firstStallReports = 1; secondStallReports = 2; restartNotice = $true; privateTextAbsent = $true; exeHash = (Get-FileHash $Exe -Algorithm SHA256).Hash } | ConvertTo-Json | Set-Content (Join-Path $Evidence 'result.json')
     Write-Host 'FREEZE_JOURNEY_OK'
