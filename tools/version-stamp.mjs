@@ -83,6 +83,7 @@ export function stampTree(files, requestedVersion) {
     if (!tickets.includes(match[1])) tickets.push(match[1]);
     bullets.push(...lines.filter(productChange).map(text => `        .{ .text = "${escape(text)}", .ticket = "${match[1]}" },`));
   }
+  if (!bullets.length) throw new Error('No unpublished product changes; wait for the next useful update');
   if (!changelogStart.test(files[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
   const result = { ...files };
   result[mainPath] = files[mainPath].replace(versionLine, line => line.replace(/"[^"]+"/, `"${version}"`));
@@ -281,13 +282,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const [command, base, head, ...extra] = process.argv.slice(2);
     if (command === 'check' && base && head && !extra.length) process.exitCode = check(base, head);
-    else if (command === 'build' && base && !extra.length) {
+    else if (command === 'pending' && base && head && !extra.length) {
+      const changes = addedSince(fragmentFiles(readTree(head)), fragmentFiles(readTree(base)));
+      const lines = Object.entries(changes).flatMap(([file, text]) => fragmentLines(file, text).filter(productChange));
+      if (lines.length) console.log(lines.join('\n'));
+    } else if (command === 'build' && base && !extra.length) {
       const publishedTags = head ? JSON.parse(head) : execFileSync('gh', ['api', '--paginate', 'repos/{owner}/{repo}/releases', '--jq', '.[] | select(.draft == false and .prerelease == false) | .tag_name'], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
       if (!Array.isArray(publishedTags) || publishedTags.some(tag => typeof tag !== 'string')) throw new Error('Expected an array of published release tags');
       const files = readTree('HEAD');
       fs.writeFileSync(changelogPath, buildChangelog(files, base, releaseHistory(base, files[changelogPath], publishedTags)));
     } else if (command === 'release' && !base) await release();
-    else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | build <tag> [published-tags-json] | release');
+    else throw new Error('Usage: node tools/version-stamp.mjs check <base> <head> | pending <published-tag> <head> | build <tag> [published-tags-json] | release');
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

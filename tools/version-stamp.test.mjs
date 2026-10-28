@@ -530,15 +530,8 @@ else if (args[1] !== 'merge') process.exit(1);
 });
 
 
-test('IGSH-1090 maintenance releases carry no invented note, preserving real prior notes', async () => {
-  const { releaseNotes } = await import('./release-notes.mjs');
-  const generated = buildChangelog(base(), 'v0.28.900');
-  assert.deepEqual(releaseNotes(generated, 'v0.28.900'), {
-    version: '0.28.900', releases: [
-      { version: '0.28.900', changes: [] },
-      { version: '0.28.735', changes: ['Existing.'] },
-    ],
-  });
+test('IGSH-1090 maintenance releases wait instead of inventing a note', () => {
+  assert.throws(() => buildChangelog(base(), 'v0.28.900'), /No unpublished product changes/);
 });
 
 test('IGSH-1090 fragment gate rejects filler and engineering notes, not specific product changes', async () => {
@@ -613,8 +606,7 @@ test('IGSH-1113 omits filtered historical releases while preserving current note
     ],
   });
   assert.deepEqual({ files, history }, saved);
-  const quiet = buildChangelog(history.at(-1).files, 'v0.28.900', history);
-  assert.deepEqual(releaseNotes(quiet, 'v0.28.900').releases[0], { version: '0.28.900', changes: [] });
+  assert.throws(() => buildChangelog(history.at(-1).files, 'v0.28.900', history), /No unpublished product changes/);
   assert.throws(() => buildChangelog({ ...files, 'changelog.d/DEMO-5-empty.md': ' \n' }, 'v0.28.900', history), /Fragment has no text/);
   const invalid = [...history, { tag: 'v0.28.899', files: { ...files, 'changelog.d/DEMO-6-empty.md': ' \n' } }];
   assert.throws(() => buildChangelog(files, 'v0.28.900', invalid), /Fragment has no text/);
