@@ -77,3 +77,30 @@ test('approved reader colours identify assistant replies, not the user or compos
   f.fill(20, 245, 250, 280, 0x1e1e1e);
   assert.throws(() => assertBadge(inspect(f.image, area)), assert.AssertionError);
 });
+
+test('badge outside the reply is rejected; approved grey badge inside is accepted', () => {
+  const f = fixture();
+  f.fill(28, 120, 68, 142, 0x353535);
+  f.fill(42, 126, 53, 136, 0xffffff);
+  assertBadge(inspect(f.image, area));
+  f.fill(20, 116, 250, 148, 0x202020);
+  f.fill(28, 120, 68, 142, 0x353535);
+  f.fill(42, 126, 53, 136, 0xffffff);
+  assert.throws(() => assertBadge(inspect(f.image, area)), assert.AssertionError);
+});
+
+test('growth proof rejects missing code, wrong reaction target and empty badges', async () => {
+  const fs = await import('node:fs');
+  assert.ok(fs.existsSync(new URL('./chat-popup-growth-proof.mjs', import.meta.url)), 'growth proof must ship with the menu');
+  const { assertSecondBadge, assertPaintedGrowth } = await import('./chat-popup-growth-proof.mjs');
+  const second = { left: 20, top: 190, right: 250, bottom: 280, ink: 100 };
+  const frame = { agent: [{ left: 20, top: 50, right: 250, bottom: 100, ink: 50 }, { left: 20, top: 110, right: 250, bottom: 180, ink: 100 }, second], user: [{}], dim: [], pill: [{left: 28, top: 250, right: 68, bottom: 272, ink: 30}] };
+  assertSecondBadge(frame);
+  for (const mutate of [f => { f.pill[0].ink = 0; }, f => { f.pill[0].top = 70; f.pill[0].bottom = 92; }, f => f.agent.splice(1, 1), f => f.user.push({}), f => f.dim.push({})]) {
+    const bad = structuredClone(frame); mutate(bad);
+    assert.throws(() => assertSecondBadge(bad), assert.AssertionError);
+  }
+  const f = fixture();
+  f.fill(28, 120, 68, 142, 0x444444);
+  assert.throws(() => assertPaintedGrowth(f.image, f.image, area, {left: 80, top: 230, right: 280, bottom: 290}), assert.AssertionError);
+});

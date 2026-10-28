@@ -331,7 +331,7 @@ def fake_init():
     (process / "stat").write_text(pane + " (claude) S 1 " + pane + " " + pane + " 0 -1", encoding="utf-8")
     (process / "cmdline").write_bytes(b"claude\0")
     fake_write(dict(mode=value["mode"], box="", queue=[], suggestion=value["suggestion"]))
-    if value.get("name") == "reactions":
+    if value.get("name") in ("reactions", "popup-growth"):
         fake_event("user", message=dict(role="user", content="start the reaction session"))
         prefix = "Same first words " + "for this example " * 8
         for identity, suffix in (("msg_first", "FIRST REPLY"), ("msg_second", "SECOND REPLY")):
@@ -570,6 +570,27 @@ def shell():
         return 0
     if op == "reaction-fallback":
         fake_event("user", message=dict(role="user", content="👍 to: Unavailable reply [mp:0000000000000000]"))
+        return 0
+    if op == "reaction-grow":
+        if state().get("name") != "popup-growth":
+            raise ValueError("Reply growth requires its own fixture")
+        transcript = Path(state()["transcript"])
+        before = transcript.read_bytes()
+        rows = [json.loads(line) for line in before.splitlines()]
+        first = [row for row in rows if row.get("message", {}).get("id") == "msg_first"]
+        if len(first) != 1:
+            raise ValueError("Expected one earlier reply to grow")
+        text = first[0]["message"]["content"][0]
+        if text["type"] != "text" or "```" in text["text"]:
+            raise ValueError("Expected an earlier reply without code")
+        text["text"] += "\n\n```zig\nconst popup_growth = true;\n```\n"
+        after = b"".join((json.dumps(row, ensure_ascii=True) + "\n").encode("utf-8") for row in rows)
+        (ROOT / "reaction-before.jsonl").write_bytes(before)
+        (ROOT / "reaction-after.jsonl").write_bytes(after)
+        temporary = transcript.with_suffix(".growth-tmp")
+        temporary.write_bytes(after)
+        temporary.replace(transcript)
+        record("growth.jsonl", operation="earlier reply gained code", reference="msg_first", target="msg_second")
         return 0
     if op == "show":
         sys.stdout.write(json.dumps(fake_locked(fake_read)) + "\n")

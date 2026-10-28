@@ -1824,3 +1824,16 @@ test "IGSH-934 a partial tail retains earlier streamed fragments of the same mes
     try std.testing.expect(std.mem.indexOf(u16, h.text.items, std.unicode.utf8ToUtf16LeStringLiteral("first part")) != null);
     try std.testing.expect(std.mem.indexOf(u16, h.text.items, std.unicode.utf8ToUtf16LeStringLiteral("second part")) != null);
 }
+
+test "IGSH-975 copying request identity returns raw source identity, not its presentation hash" {
+    const a = std.testing.allocator;
+    var history: History = .{};
+    defer history.deinit(a);
+    try history.rows.appendSlice(a, "{\"role\":\"assistant\",\"id\":\"render-id\",\"read_id\":\"msg_first\",\"text\":\"Reply\"}\n");
+    const id = try history.requestId(a, @import("chat_reaction.zig").reference("msg_first"));
+    defer a.free(id);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("msg_first"), id);
+    const missing = try history.requestId(a, @import("chat_reaction.zig").reference("missing"));
+    defer a.free(missing);
+    try std.testing.expectEqual(@as(usize, 0), missing.len);
+}

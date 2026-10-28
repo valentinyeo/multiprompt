@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readBmp } from './chat-code-font-proof.mjs';
 
-export function inspect(image, area) {
+export function inspect(image, area, allowClipped = false) {
   const pixel = (x, y) => image.pixels.readUIntLE((y * image.width + x) * 4, 3);
   const bg = pixel(area.left, area.top);
   const shifted = delta => [0, 8, 16].reduce((n, shift) => n | Math.min(255, ((bg >> shift) & 255) + delta) << shift, 0);
@@ -39,7 +39,7 @@ export function inspect(image, area) {
     if (tail < 100 || right - left < 20 || bottom - top < 8 || (kind === 'dim' && right - left <= 80)) continue;
     const group = kind === 'user' && right - left < 100 && bottom - top < 40 && solidPill > tail * 0.6 ? 'pill' : kind;
     if (group !== 'pill' && right - left < 80) continue;
-    if (reader && group === 'agent' && (left < 8 || left > 80)) continue;
+    if (reader && !allowClipped && group === 'agent' && (left < 8 || left > 80)) continue;
     let ink = 0;
     for (let iy = top + 3; iy < bottom - 3; iy++) for (let ix = left + 5; ix < right - 5; ix++) {
       const value = pixel(ix + area.left, iy + area.top);
@@ -69,7 +69,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const frame = inspect(readBmp(path.join(root, 'reactions-before.bmp')), json('reactions/area.json'));
     assert.ok(frame.agent.length >= 2, 'fixture replies not painted');
     const first = frame.agent[0];
-    console.log(JSON.stringify({ x: first.left + 30, y: first.top + 20 }));
+    console.log(JSON.stringify({ x: first.left + 30, y: first.top + 20, left: first.left, top: first.top, right: first.right, bottom: first.bottom }));
   } else if (process.argv[3] === '--frame') {
     const name = process.argv[4];
     assertBadge(inspect(readBmp(path.join(root, `reactions-${name}.bmp`)), json('reactions/area.json')), name === 'fallback' ? 2 : 1);

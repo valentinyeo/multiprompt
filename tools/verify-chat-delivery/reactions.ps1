@@ -9,6 +9,8 @@ $point = Wait-For 'two painted same-prefix replies' {
     $located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --locate 2> "$caseDir/oracle-locate-stderr.log"
     if ($LASTEXITCODE -eq 0) { ($located -join "`n") | ConvertFrom-Json }
 }
+[ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $point.x, $point.y)
+Shot 'reactions-hover'
 $menuStart = (Read-Shared "$settings/debug.log").Length
 Doctor
 $actions.Add(@{case=$plan.name; input='real right-click first same-prefix reply'; x=$point.x; y=$point.y})
@@ -23,9 +25,23 @@ $down = [char]::ConvertFromUtf32(0x1f44e)
 $heart = [string][char]0x2764 + [char]0xfe0f
 if ($menu -cne "React $up,React $down,React $heart,Reply,Copy") { throw "IGSH975_REACTIONS_MISSING: $menu" }
 $popup = Wait-For 'owned combined reaction popup visible' { $h = [ChatDeliveryDesktop]::CombinedMenu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } } 5
+$popupBounds = [ChatDeliveryDesktop]::CombinedMenuRect($popup, $app.Id)
+if ([Math]::Abs($popupBounds.Left - $point.left) -gt 2 -or $popupBounds.Top -lt $point.bottom) { throw 'Menu must open below the reply, left aligned' }
 Shot 'reactions-menu'
 $firstItem = [ChatDeliveryDesktop]::CombinedMenuRect($popup, $app.Id)
 Save @{count=6; left=$firstItem.Left; top=$firstItem.Top; right=$firstItem.Right; bottom=$firstItem.Bottom} "$caseDir/menu-item.json"
+$actions.Add(@{case=$plan.name; input='real click Copy request ID'})
+[ChatDeliveryDesktop]::PressCombinedMenu($main, $app.Id, $popup, 100, 135)
+[void](Wait-For 'raw request ID copied' { [Windows.Forms.Clipboard]::GetText() -ceq 'msg_first' })
+$toolbarLeft = [Math]::Min($point.right + 6, [int]$bounds.Right - 90)
+$toolbarY = $point.top + 14
+[ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $toolbarLeft + 14 - [int]$bounds.Left, $toolbarY - [int]$bounds.Top)
+$popup = Wait-For 'emoji hover action opens same combined menu' { $h = [ChatDeliveryDesktop]::CombinedMenu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } } 5
+Press @(0x1B) 'Esc: close combined menu'
+[void](Wait-For 'combined menu dismissed' { [ChatDeliveryDesktop]::CombinedMenu($app.Id) -eq [IntPtr]::Zero })
+[ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $toolbarLeft + 70 - [int]$bounds.Left, $toolbarY - [int]$bounds.Top)
+$popup = Wait-For 'more hover action opens same combined menu' { $h = [ChatDeliveryDesktop]::CombinedMenu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } } 5
+Save @{rightClick=$true; emojiHover=$true; moreHover=$true; requestId='msg_first'; below=$true; leftAligned=$true} "$caseDir/menu-proof.json"
 $actions.Add(@{case=$plan.name; input='real mouse click first native reaction menu item'})
 [ChatDeliveryDesktop]::PressCombinedMenu($main, $app.Id, $popup, 28, 28)
 [void](Wait-For 'one reaction reached the real send queue' { @((Fake-State).queue).Count -eq 1 })

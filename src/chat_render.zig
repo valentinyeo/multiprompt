@@ -3588,7 +3588,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
             }
         },
         .code => {
-            fillRoundRectAA(hdc, rc, uiScaled(CHAT_BUBBLE_RADIUS), chatCodePanelColor());
+            fillRoundRectAA(hdc, bubble_rc, uiScaled(CHAT_BUBBLE_RADIUS), chatCodePanelColor());
             chatPaintCodeHeader(hdc, rc, block);
             const text_rc = RECT{ .left = rc.left + uiScaled(CHAT_CODE_PAD), .top = rc.top + uiScaled(CHAT_CODE_PAD + CHAT_CODE_HEADER), .right = rc.right - uiScaled(CHAT_CODE_PAD), .bottom = rc.bottom - uiScaled(CHAT_CODE_PAD) };
             _ = SelectObject(hdc, ensureChatCodeFont());
@@ -4945,6 +4945,9 @@ fn chatHoverActionAt(x: i32, y: i32) ?struct { index: usize, action: usize } {
 fn chatPaintHoverActions(dc: HANDLE) void {
     var point: POINT = undefined;
     if (GetCursorPos(&point) == 0 or ScreenToClient(app_state.g_chat_transcript_hwnd, &point) == 0) return;
+    var client = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
+    if (!pointInRect(client, point.x, point.y)) return;
     const index = chatMessageHoverAt(point.y) orelse return;
     const rc = chatHoverActionRect(index);
     fillRoundRectAA(dc, rc, uiScaled(8), if (app_state.g_light_theme) 0xeeeeee else 0x1f1f1f);
@@ -5331,7 +5334,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_MOUSEMOVE => {
             const message_hover = chatMessageHoverAt(GET_Y(lp));
-            if (message_hover != g_hover_message or message_hover != null) {
+            if (message_hover != g_hover_message) {
                 g_hover_message = message_hover;
                 _ = InvalidateRect(hwnd, null, 0);
             }

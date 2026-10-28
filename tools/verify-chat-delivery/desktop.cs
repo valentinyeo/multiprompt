@@ -168,6 +168,10 @@ public static class ChatDeliveryDesktop {
         inputs[1].Data.Mouse.Flags = 4;
         if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Transcript click input failed");
     }
+    public static void HoverOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
+        if (Owner(main) != pid || GetForegroundWindow() != main || Owner(transcript) != pid || Class(transcript) != "ZigShellChatTranscript" || WindowFromPoint(new Point { X=x, Y=y }) != transcript) throw new InvalidOperationException("Hover ownership mismatch");
+        if (!SetCursorPos(x, y)) throw new InvalidOperationException("Hover input failed");
+    }
     public static void RightClickOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
         if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
             Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||
