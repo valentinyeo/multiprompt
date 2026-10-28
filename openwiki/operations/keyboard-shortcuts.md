@@ -234,6 +234,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Drag in Chat View | Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll |
 | Ctrl+C in Chat View | Copy the selection (right-click offers Reply and Copy) |
 | Ctrl+A in Chat View | Select all transcript text (transcript focus; composer keeps its own Ctrl+A) |
+| Ctrl+K "Chat View: Resync chat" | Chat View: reload messages from the session, repair waiting labels and keep the unsent draft without resending |
 | Ctrl+K "Chat View: More Menu" | Chat View: open the round three-dot menu next to the title as one grouped panel: Approve, Stop, Terminal, Rename, History, Waiting, Remind me, Archive, the current Model, End session and Remove from list; Up/Down/Enter or the mouse choose, Esc or a click outside closes |
 | Up / Down / Enter in Chat View | Up in an empty message box focuses the newest message; Up/Down move between messages, Enter opens the right-click options, Esc or typing returns to the box |
 | Enter / Ctrl+Enter in Chat View | Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion |

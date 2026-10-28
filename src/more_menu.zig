@@ -14,7 +14,7 @@ const RGB = startup.RGB;
 const L = startup.L;
 const uiScaled = drawing.uiScaled;
 
-pub const Item = enum(usize) { approve, stop, terminal, rename, history, waiting, remind, archive, model, end_session, remove };
+pub const Item = enum(usize) { approve, stop, terminal, rename, history, resync, waiting, remind, archive, model, end_session, remove };
 const ITEM_COUNT = std.meta.tags(Item).len;
 const CARD_COUNT = 5;
 
@@ -63,6 +63,7 @@ fn label(item: Item) []const u8 {
         .terminal => "Terminal",
         .rename => "Rename",
         .history => "History",
+        .resync => "Resync chat",
         .waiting => "Waiting",
         .remind => "Remind me",
         .archive => "Archive",
@@ -95,7 +96,7 @@ pub fn geometry(bounds: RECT, anchor: RECT) Geometry {
     const left = @max(bounds.left + uiScaled(8), right - width);
     const panel_top = anchor.bottom + uiScaled(8);
     const spare = bounds.bottom - uiScaled(8) - panel_top - 2 * pad - top_h - 4 * gap;
-    const row_h = std.math.clamp(@divTrunc(spare, 8), uiScaled(24), uiScaled(38));
+    const row_h = std.math.clamp(@divTrunc(spare, 9), uiScaled(24), uiScaled(38));
     const inner_l = left + pad;
     const inner_r = right - pad;
     var g: Geometry = std.mem.zeroes(Geometry);
@@ -108,7 +109,7 @@ pub fn geometry(bounds: RECT, anchor: RECT) Geometry {
     }
     y += top_h + gap;
     const groups = [_][]const Item{
-        &.{ .rename, .history },
+        &.{ .rename, .history, .resync },
         &.{ .waiting, .remind, .archive },
         &.{.model},
         &.{ .end_session, .remove },
