@@ -1968,7 +1968,7 @@ function Press([int[]]$Keys, [string]$Label) {
 
 function Type-Text([string]$Text) {
     Doctor
-    Assert-Foreground
+    Wait-Foreground
     Record ('Type ' + $Text)
     Assert-Foreground
     [VerifyNative]::Text($Text)

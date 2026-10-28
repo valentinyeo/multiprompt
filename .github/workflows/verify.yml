@@ -3,7 +3,7 @@ run-name: verify ${{ inputs.feature || (github.event_name == 'push' && 'full' ||
 
 on:
   push:
-    branches: [master, 'ceo/IGSH-1072*', ceo/IGSH-1061-recovery, ceo/IGSH-1083, ceo/IGSH-1079]
+    branches: [master, 'ceo/IGSH-1072*', ceo/IGSH-1061-recovery, ceo/IGSH-1083, ceo/IGSH-1079, ceo/IGSH-1055-hax2]
   workflow_dispatch:
     inputs:
       feature:
@@ -281,7 +281,8 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        app-revision: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["8f98adf9727bf2006374bfaacb781732b245b8ff","{0}"]', github.sha)) || fromJSON('[""]') }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
@@ -305,6 +306,7 @@ jobs:
       CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
+      VERIFY_APP_REVISION: ${{ matrix.app-revision }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
@@ -388,6 +390,13 @@ jobs:
         run: |
           if ($env:RELEASE_TAG) { throw 'safe-updates requires the branch verifier built with the job-only public key' }
           & tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
+      - name: Check out the independent application revision
+        if: matrix.app-revision != ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.app-revision }}
+          path: app-source
+          persist-credentials: false
       - name: Identify branch executable
         if: env.RELEASE_TAG == ''
         shell: pwsh
@@ -401,6 +410,13 @@ jobs:
       - name: Build branch executable
         if: env.RELEASE_TAG == ''
         run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }}
+        working-directory: ${{ matrix.app-revision && 'app-source' || '.' }}
+      - name: Stage the independently built application
+        if: matrix.app-revision != ''
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force zig-out/bin | Out-Null
+          Copy-Item app-source/zig-out/bin/* zig-out/bin/
       - name: Resolve real executable
         shell: pwsh
         env:
@@ -408,7 +424,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force verify-bin, evidence | Out-Null
-          $revision = (git rev-parse HEAD).Trim()
+          $harnessRevision = (git rev-parse HEAD).Trim()
+          $revision = if ($env:VERIFY_APP_REVISION) { (git -C app-source rev-parse HEAD).Trim() } else { $harnessRevision }
           if ($env:RELEASE_TAG) {
             gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir verify-bin --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern SHA256SUMS.txt
             if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
@@ -437,7 +454,7 @@ jobs:
           if ($env:CHAT_SHAPE_PROOF -eq '1' -and $env:RELEASE_TAG -eq 'v0.28.946' -and $hash -ne '45bef2a5da04ef62f4e3a2789467b17adb6ee4e38db3d6fc34916beef6f700cd') { throw 'Released946 baseline hash changed' }
           $optimization = if ($env:CHAT_SHAPE_PROOF -eq '1' -and -not $env:RELEASE_TAG) { 'ReleaseSmall' } else { 'published-or-default' }
           "VERIFY_OPTIMIZATION=$optimization" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          @{ revision = $revision; tag = $env:RELEASE_TAG; version = $version; sha256 = $hash; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
+          @{ revision = $revision; harnessRevision = $harnessRevision; tag = $env:RELEASE_TAG; version = $version; sha256 = $hash; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
@@ -539,6 +556,13 @@ jobs:
       - name: Run messages-only native layout regressions
         if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         run: zig build test-main --summary all
+      - name: Run CLEAN chat pixel positive controls
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        shell: bash
+        run: zig build test-clean-chat --summary all 2>&1 | tee evidence/clean-chat-native.log
+      - name: Require every CLEAN pixel positive control
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        run: node tools/check-clean-chat-output.mjs evidence/clean-chat-native.log
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         with:
@@ -733,7 +757,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: verify-${{ env.FEATURE }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.chat_reply_baseline && 'baseline' || 'candidate') || '' }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
+          name: verify-${{ env.FEATURE }}${{ matrix.app-revision && format('-{0}', matrix.app-revision) || '' }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.chat_reply_baseline && 'baseline' || 'candidate') || '' }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
           path: evidence/
           if-no-files-found: error
   tmux-identity-semantics:

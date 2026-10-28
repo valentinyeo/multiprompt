@@ -281,7 +281,7 @@ function assertsOwnedInput(source) {
   assert.equal((press.match(/::Chord\(/g) || []).length, 1);
   assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 0);
   assert.doesNotMatch(press, /Wait-Until|Start-Sleep|catch|\b(?:for|while)\s*\(/);
-  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Assert-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
+  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Wait-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
   assert.match(type, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/);
   assert.equal((type.match(/::Text\(/g) || []).length, 1);
   assert.doesNotMatch(type, /SetForegroundWindow|SetFocus|BringToForeground/);
@@ -298,7 +298,7 @@ test('IGSH-807: foreground ownership is bounded, refuses foreign input and is re
     ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', '    [void][VerifyNative]::SetForegroundWindow($script:window)\n    [void][VerifyNative]::SetForegroundWindow($script:window)\n'],
     ['    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)\n    [VerifyNative]::Chord($Keys)'],
     ['    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)\n    [VerifyNative]::Text($Text)'],
-    ["    Doctor\n    Assert-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
+    ["    Doctor\n    Wait-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
     ['$attempt -lt 50', '$true'],
     ['$attempt -lt 49', '$true'],
     ['    Assert-Foreground\n}\n\nfunction Press(', '    try { Assert-Foreground } catch {}\n}\n\nfunction Press('],
@@ -432,6 +432,10 @@ Refuses { Press @(0x41) 'lost before chord' }
 Reset
 $script:loseOnRecord = $true
 Refuses { Type-Text 'lost before text' }
+Reset
+[VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 2
+Type-Text 'recovered text'
+Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 2) 'Text did not recover owned foreground'
 Reset
 Type-Text 'owned text'
 Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 0) 'Text repaired focus or failed to inject'
@@ -587,7 +591,7 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(transport, /WriteAllText[\s\S]*?\.reply.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
   assertsOwnedInput(control);
-  assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
+  assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Wait-Foreground/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-ScratchPath \$scratch/);
 });
