@@ -6237,6 +6237,7 @@ try {
             if ($shapeProof) {
                 Add-Type -AssemblyName System.Windows.Forms
                 Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-switch-observer.cs')
+                [ChatSwitchObserver]::SidebarHeaderHeight = if ($env:RELEASE_TAG -eq 'v0.28.946') { 0 } else { 52 }
                 $shapeResult = [ordered]@{ schema = 1; source = 'GitHub Windows native desktop'; setup_passed = $false; errors = @(); app = @{ tag = $env:RELEASE_TAG; sha256 = $ExpectedHash; optimization = $env:VERIFY_OPTIMIZATION }; fixture = (Get-Content (Join-Path $Evidence 'chat-shape-manifest.json') -Raw | ConvertFrom-Json); session_shells = @(); modes = [ordered]@{ browser_closed = @(); browser_open = @() }; idle = @{} }
             }
             function Save-ShapeLatest([string]$Expected, [string]$Marker, [string]$Name) {

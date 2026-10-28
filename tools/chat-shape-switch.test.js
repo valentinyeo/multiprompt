@@ -197,9 +197,12 @@ test('IGSH-1040 shape timing clicks the owned sidebar row instead of a keyboard 
   assert.ok(observer.includes('"idle" : "sidebar-click"'));
   assert.ok(observer.includes('WindowFromPoint(point) != owner'));
   assert.ok(observer.includes('GetDpiForWindow(owner) != 96'));
-  assert.ok(observer.includes('new Point { X = 100, Y = 8 + 24 + 38 * target + 19 }'));
+  assert.ok(observer.includes('new Point { X = 100, Y = 8 + SidebarHeaderHeight + 24 + 38 * target + 19 }'));
   assert.ok(observer.includes('new Mouse { Flags = 2 }'));
   assert.ok(observer.includes('new Mouse { Flags = 4 }'));
   assert.doesNotMatch(observer.slice(observer.indexOf('if (target >= 0) {'), observer.indexOf('long position = offset;')), /Keyboard =/);
   assert.ok(control.includes('Sidebar timing requires the default ungrouped five-row fixture at 96 DPI'));
+  assert.ok(control.includes("[ChatSwitchObserver]::SidebarHeaderHeight = if ($env:RELEASE_TAG -eq 'v0.28.946') { 0 } else { 52 }"));
+  assert.match(read('src/workspace_switcher.zig'), /pub fn headerHeight\(\)[^]*?scale\(52\)/);
+  assert.match(read('src/sidebar.zig'), /var y:[^;]*workspace_switcher\.zig[^;]*headerHeight\(\)/);
 });
