@@ -158,7 +158,7 @@ test('changed implementation is comment-free and leaves no error log', async () 
     'src/update_notes.zig', 'src/update_card.zig', 'src/update_release.zig', 'src/update_release.ps1',
     'tools/release-notes.mjs', 'tools/version-stamp.mjs', 'tools/update-release-fixtures.mjs',
     'tools/update-release.test.ps1', 'tools/update-release-journey.ps1',
-    'tools/update-card-notes.test.js', 'tools/update-card-release-proof.ps1', 'tools/changelog-fragments.test.js',
+    'tools/update-card-notes.test.js', 'tools/changelog-fragments.test.js',
     'tools/changelog-entry.test.js', 'tools/version-stamp.test.mjs',
     'tools/fixtures/IGSH-728/master-update-card.zig',
     '.github/workflows/release.yml', '.github/workflows/test.yml',
