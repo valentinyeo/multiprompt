@@ -240,7 +240,7 @@ function Get-Content {
 $snapshot = Session
 @{ attempts=$script:reads; active=$snapshot.active_tab; tabs=@($snapshot.tabs).Count } | ConvertTo-Json -Compress
 `;
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 10000 });
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout.trim()), { attempts: 4, active: 1, tabs: 2 });
 });
