@@ -7,6 +7,12 @@ const test = require('node:test');
 
 const root = path.resolve(__dirname, '..');
 
+test('both visible pace surfaces use the glyph-aware rejection check', () => {
+  const source = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/control-feature-status-card.ps1'), 'utf8');
+  assert.match(source, /Assert-UsagePaceInk \$closedInk \$usagePaceSnapshot 'usage pill'/);
+  assert.match(source, /Assert-UsagePaceInk \$paceProof\.panel \$usagePaceSnapshot 'expanded panel'/);
+});
+
 test('pace proof accepts visible small marks but rejects missing or wrong-state ink', t => {
   if (process.platform !== 'win32') return t.skip('Native proof assertion runs on Windows');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pace-ink-'));
