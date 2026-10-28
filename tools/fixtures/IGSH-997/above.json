@@ -1,0 +1,67 @@
+{
+  "ts": 1793040000,
+  "mode": "codex",
+  "override": "auto",
+  "accounts": [
+    {
+      "id": "claude",
+      "label": "Claude",
+      "provider": "claude",
+      "week": {
+        "used": 40,
+        "time_gone": 20.0,
+        "resets_at": 1793523840.0,
+        "pace": {
+          "per_hour": 2.0,
+          "per_day": 12.0,
+          "ratio": 2,
+          "verdict": "above",
+          "empty_hours": 30.0
+        }
+      },
+      "five_hour": {
+        "used": 30,
+        "time_gone": 15.0,
+        "resets_at": 1793055300.0,
+        "pace": {
+          "per_hour": 12.0,
+          "per_day": 283.0,
+          "ratio": 2,
+          "verdict": "above",
+          "empty_hours": 5.8333
+        }
+      },
+      "stale": false
+    },
+    {
+      "id": "codex",
+      "label": "Codex",
+      "provider": "codex",
+      "week": {
+        "used": 10,
+        "time_gone": 5.0,
+        "resets_at": 1793614560.0,
+        "pace": {
+          "per_hour": 0.5,
+          "per_day": 5.0,
+          "ratio": 2,
+          "verdict": "above",
+          "empty_hours": 180.0
+        }
+      },
+      "five_hour": {
+        "used": null,
+        "time_gone": null,
+        "resets_at": null,
+        "pace": {
+          "per_hour": null,
+          "per_day": null,
+          "ratio": null,
+          "verdict": "unknown",
+          "empty_hours": null
+        }
+      },
+      "stale": false
+    }
+  ]
+}

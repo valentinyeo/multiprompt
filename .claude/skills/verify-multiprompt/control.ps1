@@ -126,6 +126,17 @@ try {
         $usageRoot = Join-Path $env:APPDATA 'ZigShell'
         New-Item -ItemType Directory -Force $usageRoot | Out-Null
         Copy-Item (Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-908/usage-telemetry.json') (Join-Path $usageRoot 'usage-telemetry.json')
+        $usagePaceSnapshot = $null
+        if ($env:VERIFY_USAGE_PACE_FILE) {
+            Copy-Item $env:VERIFY_USAGE_PACE_FILE (Join-Path $Evidence 'pace-source.json')
+            $usagePaceSnapshot = Get-Content $env:VERIFY_USAGE_PACE_FILE -Raw | ConvertFrom-Json
+            $usageSourceTs = $usagePaceSnapshot.ts
+            $usagePaceSnapshot.ts = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            Save-Json $usagePaceSnapshot 'pace-replayed.json'
+            Copy-Item (Join-Path (Split-Path $Exe) 'usage-ssh.exe') (Join-Path $scratch 'usage-ssh.exe')
+            Copy-Item (Join-Path $Evidence 'pace-replayed.json') (Join-Path $scratch 'usage-pace.json')
+            [IO.File]::WriteAllText((Join-Path $usageRoot 'ssh-path.txt'), (Join-Path $scratch 'usage-ssh.exe'))
+        }
     }
     if ($Feature -eq 'chat-skill-pill') {
         $skillRoot = Join-Path $env:USERPROFILE '.claude/skills/pill-proof'

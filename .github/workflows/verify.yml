@@ -20,6 +20,15 @@ on:
         description: Optional release tag instead of building this branch
         required: false
         type: string
+      usage_pace_proof:
+        description: Verify per-window pace through the existing SSH status boundary
+        required: false
+        default: false
+        type: boolean
+      usage_pace_status:
+        description: Optional base64 sanitized live Token Ladder status snapshot
+        required: false
+        type: string
       sending_status_proof:
         description: Capture the same message in flight and after delivery
         required: false
@@ -349,6 +358,8 @@ jobs:
       CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
+      USAGE_PACE_PROOF: ${{ inputs.usage_pace_proof && '1' || '' }}
+      USAGE_PACE_STATUS: ${{ inputs.usage_pace_status || '' }}
       VERIFY_APP_REVISION: ${{ matrix.app-revision }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
@@ -360,7 +371,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - name: Check verification contracts
-        run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/chat-shape-switch.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js
+        run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/chat-shape-switch.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js tools/capture-usage-pace.test.js tools/usage-pace-ink.test.js
       - name: Check remote sync proof oracle
         run: node --test tools/chat-remote-sync-proof.test.mjs tools/remote-switch-proof.test.mjs tools/chat-missing-note-proof.test.mjs
       - name: Check accepted message pixel oracle
@@ -419,7 +430,7 @@ jobs:
             if ($errors.Count) { throw ($errors | Out-String) }
           }
       - name: Install Zig 0.16.0
-        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options'
+        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.USAGE_PACE_PROOF == '1'
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP/zig.zip"
@@ -514,6 +525,17 @@ jobs:
         if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options'
         with:
           python-version: '3.12'
+      - name: Prepare usage pace SSH boundary
+        if: env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1'
+        shell: pwsh
+        run: |
+          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-pace-ssh.c -o verify-bin/usage-ssh.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Usage SSH boundary compilation failed' }
+          if ($env:USAGE_PACE_STATUS) {
+            [IO.File]::WriteAllBytes("$pwd/verify-bin/usage-pace-source.json", [Convert]::FromBase64String($env:USAGE_PACE_STATUS))
+          } else {
+            Copy-Item tools/fixtures/IGSH-997/sample.json verify-bin/usage-pace-source.json
+          }
       - name: Check measured chat shape contracts
         if: env.FEATURE == 'chat-switch-speed'
         run: |
@@ -763,6 +785,16 @@ jobs:
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') {
+            foreach ($mode in @('sample', 'above', 'below')) {
+              $env:VERIFY_USAGE_PACE_FILE = if ($mode -eq 'sample') { "$pwd/verify-bin/usage-pace-source.json" } else { "$pwd/tools/fixtures/IGSH-997/$mode.json" }
+              $directory = "$pwd/evidence/pace-$mode"
+              New-Item -ItemType Directory -Force $directory | Out-Null
+              Copy-Item evidence/build.json "$directory/build.json"
+              & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence $directory
+            }
+            Remove-Item Env:VERIFY_USAGE_PACE_FILE
+          }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar'
         with:
