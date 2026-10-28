@@ -24,6 +24,10 @@ test('assistant message entry points share a below-message menu with stable requ
   assert.match(hover, /g_hover_point orelse return/);
   assert.match(hover, /if \(app_state\.g_chat_rich_fonts\[12\] == null\)/);
   assert.doesNotMatch(hover, /GetCursorPos|ScreenToClient|DeleteObject/);
+  const boundary = fs.readFileSync(path.join(root, 'tools/verify-chat-delivery/boundary.py'), 'utf8');
+  const growth = boundary.slice(boundary.indexOf('    if op == "reaction-grow":'), boundary.indexOf('    if op == "show":'));
+  assert.match(growth, /replace_transcript\(temporary, transcript\)/);
+  assert.doesNotMatch(growth, /temporary\.replace/);
   if (!process.env.ZIG) return;
   const start = menu.indexOf('pub const Action');
   const end = menu.indexOf('\nconst State');

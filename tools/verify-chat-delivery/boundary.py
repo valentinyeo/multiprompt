@@ -387,6 +387,38 @@ def fake_seed_many(rounds):
     return 0
 
 
+def replace_transcript(replacement, transcript):
+    if os.name == "nt":
+        class RenameInfo(ctypes.Structure):
+            _fields_ = [("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE),
+                        ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * 1)]
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                      wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.SetFileInformationByHandle.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
+        kernel.SetFileInformationByHandle.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel.CloseHandle.restype = wintypes.BOOL
+        handle = kernel.CreateFileW(str(replacement), 0x10000, 7, None, 3, 0x80, None)
+        if handle == wintypes.HANDLE(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            filename = str(transcript.resolve()).encode("utf-16-le")
+            buffer = ctypes.create_string_buffer(RenameInfo.FileName.offset + len(filename) + ctypes.sizeof(wintypes.WCHAR))
+            info = ctypes.cast(buffer, ctypes.POINTER(RenameInfo)).contents
+            info.Flags = 1 | 2
+            info.FileNameLength = len(filename)
+            ctypes.memmove(ctypes.addressof(buffer) + RenameInfo.FileName.offset, filename, len(filename))
+            if not kernel.SetFileInformationByHandle(handle, 22, buffer, len(buffer)):
+                raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            kernel.CloseHandle(handle)
+    else:
+        os.replace(replacement, transcript)
+
+
 def shell():
     op = ARGS[0] if ARGS else ""
     if op == "resume" and len(ARGS) == 2:
@@ -506,35 +538,7 @@ def shell():
             kept = rows[-20:]
         replacement = transcript.with_suffix(".replacement")
         replacement.write_bytes(b"".join(kept))
-        if os.name == "nt":
-            class RenameInfo(ctypes.Structure):
-                _fields_ = [("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE),
-                            ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * 1)]
-
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-                                          wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
-            kernel.CreateFileW.restype = wintypes.HANDLE
-            kernel.SetFileInformationByHandle.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD)
-            kernel.SetFileInformationByHandle.restype = wintypes.BOOL
-            kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
-            kernel.CloseHandle.restype = wintypes.BOOL
-            handle = kernel.CreateFileW(str(replacement), 0x10000, 7, None, 3, 0x80, None)
-            if handle == wintypes.HANDLE(-1).value:
-                raise ctypes.WinError(ctypes.get_last_error())
-            try:
-                filename = str(transcript.resolve()).encode("utf-16-le")
-                buffer = ctypes.create_string_buffer(RenameInfo.FileName.offset + len(filename) + ctypes.sizeof(wintypes.WCHAR))
-                info = ctypes.cast(buffer, ctypes.POINTER(RenameInfo)).contents
-                info.Flags = 1 | 2
-                info.FileNameLength = len(filename)
-                ctypes.memmove(ctypes.addressof(buffer) + RenameInfo.FileName.offset, filename, len(filename))
-                if not kernel.SetFileInformationByHandle(handle, 22, buffer, len(buffer)):
-                    raise ctypes.WinError(ctypes.get_last_error())
-            finally:
-                kernel.CloseHandle(handle)
-        else:
-            os.replace(replacement, transcript)
+        replace_transcript(replacement, transcript)
         return 0
     if op == "retention-empty":
         transcript = Path(state()["transcript"])
@@ -589,7 +593,7 @@ def shell():
         (ROOT / "reaction-after.jsonl").write_bytes(after)
         temporary = transcript.with_suffix(".growth-tmp")
         temporary.write_bytes(after)
-        temporary.replace(transcript)
+        replace_transcript(temporary, transcript)
         record("growth.jsonl", operation="earlier reply gained code", reference="msg_first", target="msg_second")
         return 0
     if op == "show":

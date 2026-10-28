@@ -52,15 +52,20 @@ class ReaderContract(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "Windows remote-reader boundary")
 class ReaderSharing(unittest.TestCase):
-    def replace_while_open(self, patched, suffix=".jsonl", reset=False):
+    def replace_while_open(self, patched, suffix=".jsonl", reset=False, growth=False):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / ("session" + suffix)
             replacement = Path(directory) / "replacement"
             original = "".join(f"message {index}\n" for index in range(22))
             tail = "".join(original.splitlines(keepends=True)[-20:])
+            if growth:
+                row = dict(type="assistant", message=dict(id="msg_first", content=[dict(type="text", text="original")]))
+                original = json.dumps(row) + "\n"
+                row["message"]["content"][0]["text"] += "\n\n```zig\nconst popup_growth = true;\n```\n"
+                tail = json.dumps(row) + "\n"
             target.write_text(original, encoding="utf-8", newline="")
             replacement.write_text("replacement", encoding="utf-8")
-            (Path(directory) / "state.json").write_text(json.dumps(dict(transcript=str(target))), encoding="utf-8")
+            (Path(directory) / "state.json").write_text(json.dumps(dict(transcript=str(target), name="popup-growth")), encoding="utf-8")
             environment = os.environ.copy()
             environment.pop("PYTHONPATH", None)
             if patched:
@@ -70,8 +75,8 @@ class ReaderSharing(unittest.TestCase):
                                      text=True, env=environment)
             try:
                 self.assertEqual(child.stdout.readline().strip(), "OPENED")
-                if reset:
-                    command = [sys.executable, "-I", str(Path(__file__).with_name("boundary.py")), "shell", "retention-reset"]
+                if reset or growth:
+                    command = [sys.executable, "-I", str(Path(__file__).with_name("boundary.py")), "shell", "reaction-grow" if growth else "retention-reset"]
                     result = subprocess.run(command, env={**environment, "MP_VERIFY_STATE": directory},
                                             capture_output=True, text=True, timeout=20)
                     if patched:
@@ -100,6 +105,10 @@ class ReaderSharing(unittest.TestCase):
     def test_supplied_bootstrap_can_keep_reading_replaced_jsonl(self):
         self.replace_while_open(True, reset=True)
         print("POSIX_REPLACEMENT_WITH_HELD_READER_OK", flush=True)
+
+    def test_growth_preserves_a_held_transcript_reader(self):
+        self.replace_while_open(True, growth=True)
+        print("GROWTH_WITH_HELD_READER_OK", flush=True)
 
     def test_delete_sharing_alone_does_not_fix_windows_replace(self):
         self.replace_while_open(True)
