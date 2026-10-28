@@ -181,3 +181,33 @@ test('issue: the bridge bad_args reply keeps its own hint', async () => {
   assert.equal(JSON.parse(result.stdout).error, 'bad_args');
   assert.doesNotMatch(result.stderr, /[Rr]estart|[Rr]econnect|[Rr]eload/);
 });
+
+
+test('private user socket controls its own pane without a vault token', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-user-'));
+  fs.chmodSync(dir, 0o700);
+  const endpoint = path.join(dir, 'browser');
+  const server = net.createServer(socket => {
+    socket.once('data', data => {
+      assert.match(data.toString(), /^ZSB:inne-cro:/);
+      assert.doesNotMatch(data.toString(), /AUTH:/);
+      socket.end('{"ok":true,"session":"inne-cro"}\n');
+    });
+  });
+  await new Promise(resolve => server.listen(endpoint, resolve));
+  fs.chmodSync(endpoint, 0o600);
+  try {
+    const child = spawn('bash', [wrapper, 'status'], { env: { ...process.env, TMUX: '',
+      HOME: dir, ZSB_SESSION: 'inne-cro', ZSB_SOCKET: endpoint, MULTIPROMP_NOTIFY_RELAY_TOKEN: '' } });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', data => stdout += data);
+    child.stderr.on('data', data => stderr += data);
+    const code = await new Promise(resolve => child.on('close', resolve));
+    assert.equal(code, 0, stdout + stderr);
+    assert.equal(JSON.parse(stdout).session, 'inne-cro');
+    assert.doesNotMatch(stdout + stderr, /yeo-key|token|AUTH:/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
