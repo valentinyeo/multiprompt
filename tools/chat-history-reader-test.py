@@ -1810,6 +1810,49 @@ class HistoryReaderTest(unittest.TestCase):
         wire = reader.response(dict(self.query, sid='new-session', follow=False), resolved=current)
         self.assertIn('reply after session restart', wire)
 
+    def test_watch_follows_completed_session_when_metadata_arrives_last(self):
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        from threading import Event
+
+        self.write(self.event('old conversation'))
+        metadata = self.home / '.claude/sessions/4242.json'
+        metadata.parent.mkdir()
+        metadata.write_text(json.dumps(dict(sessionId='sid')))
+        incoming, writer = os.pipe()
+        self.addCleanup(os.close, incoming)
+        self.addCleanup(os.close, writer)
+        stdin = types.SimpleNamespace(fileno=lambda: incoming)
+        old = ('claude', 'sid', self.path, None)
+        replacement = self.path.with_name('completed-session.jsonl')
+        discovered = Event()
+
+        discoveries = []
+
+        def resolve(query, source, owner):
+            sid = json.loads(metadata.read_text())['sessionId']
+            discoveries.append(sid)
+            if len(discoveries) >= 3:
+                discovered.set()
+            return ('claude', sid, replacement, None) if sid != 'sid' else old
+
+        with patch.object(reader.sys, 'stdin', stdin), patch.object(reader, 'resolve_response_path', side_effect=resolve):
+            events = reader.watch_changes(self.query, old, reader.READER_SOURCE, True)
+            self.assertEqual(next(events), old)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                following = pool.submit(next, events)
+                replacement.write_text(json.dumps(self.event('completed reply before metadata')) + '\n')
+                created_seen = discovered.wait(2)
+                metadata.write_text(json.dumps(dict(sessionId='completed-session')))
+                try:
+                    current = following.result(timeout=2)
+                except TimeoutError:
+                    with self.path.open('a') as output:
+                        output.write('\n')
+                    current = following.result(timeout=2)
+            events.close()
+        self.assertTrue(created_seen)
+        self.assertEqual(current[2], replacement, 'completed reply stayed stale after session metadata changed')
+
     def test_watch_delegates_pane_identity_to_the_transcript_owner_once(self):
         self.assertTrue(hasattr(reader, 'watch'), 'reader must provide a persistent watch')
         owner = ('secondary', Path('/home/secondary'))
