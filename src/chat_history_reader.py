@@ -1214,9 +1214,13 @@ def queue_item(text):
     return dict(text=html.unescape(body)[:QUEUE_TEXT], sender='Task' if kind == 'task-notification' else html.unescape(sender or 'another session'), injected=True)
 
 
-def live_fields(source, size, tmux, shown=None):
+def live_fields(source, size, tmux, shown=None, sid=None):
     queue, sent = queue_replay(source, size)
     fields = dict(queue=[queue_item(text) for text in queue[:QUEUE_SHOWN]], sent=[queue_item(text) for text in sent[-QUEUE_SHOWN:]])
+    if sid is not None:
+        held = held_queue_fields(tmux, sid)
+        fields["queue"] = (held["queue"] + fields["queue"])[:QUEUE_SHOWN]
+        fields["sent"] = (fields["sent"] + held["sent"])[-QUEUE_SHOWN:]
     draft = box_draft_text(shown) if shown is not None else box_draft("=" + tmux + ":")
     if draft is not None:
         fields["draft"] = draft[:DRAFT_TEXT]
@@ -1577,7 +1581,7 @@ def response(q, source=None, as_owner=False, resolved=None):
             captured.append((base, data))
         status = status_header(source, info.st_size, agent, captured)
         if q.get("live") is True and agent == "claude" and tmux and mode != "older":
-            status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux, q.get("watch_screen")))
+            status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux, q.get("watch_screen"), sid))
         more = scan_more or page_more
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
@@ -1788,8 +1792,9 @@ def held_queue_fields(tmux, sid):
     if not held_queue_path(tmux).exists():
         return dict(queue=[], sent=[])
     with closing(held_queue_db(tmux)) as db:
-        rows = db.execute("SELECT text,state FROM messages WHERE sid=? AND state IN ('queued','submitted','delivered') ORDER BY created", (sid,)).fetchall()
-    return dict(queue=[text for text, state in rows if state == "queued"], sent=[text for text, state in rows if state == "delivered"])
+        queued = db.execute("SELECT text FROM messages WHERE sid=? AND state='queued' ORDER BY created LIMIT ?", (sid, QUEUE_SHOWN)).fetchall()
+        sent = db.execute("SELECT text FROM messages WHERE sid=? AND state='delivered' ORDER BY created DESC LIMIT ?", (sid, QUEUE_SHOWN)).fetchall()
+    return dict(queue=[row[0] for row in queued], sent=[row[0] for row in reversed(sent)])
 
 
 def send_response(q):

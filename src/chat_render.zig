@@ -4976,6 +4976,8 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
         menu_log_len += label.len;
     }
     debugLog(menu_log[0..menu_log_len]);
+    var echo_log: [64]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&echo_log, "[chat] message menu echo={d}", .{echo_id orelse 0}) catch "");
     var pt = POINT{ .x = GET_X(lp), .y = GET_Y(lp) };
     _ = ClientToScreen(hwnd, &pt);
     _ = SetForegroundWindow(app_state.g_main_hwnd);

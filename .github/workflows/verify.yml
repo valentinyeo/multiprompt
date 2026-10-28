@@ -29,6 +29,11 @@ on:
         description: Optional base64 sanitized live Token Ladder status snapshot
         required: false
         type: string
+      chat_cancel_proof:
+        description: Cancel held input before terminal handoff and prove receipt
+        required: false
+        default: false
+        type: boolean
       sending_status_proof:
         description: Capture the same message in flight and after delivery
         required: false
@@ -339,6 +344,7 @@ jobs:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_ACCEPTED_PROOF: ${{ inputs.chat_accepted_proof && '1' || '' }}
+      CHAT_CANCEL_PROOF: ${{ inputs.chat_cancel_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_LIVE_DELIVERY_PROOF: ${{ inputs.chat_live_delivery_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}

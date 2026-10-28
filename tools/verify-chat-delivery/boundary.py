@@ -168,6 +168,8 @@ def fake_event(kind, **fields):
     if kind != "queue-operation":
         row.update(uuid=str(uuid.uuid4()), isSidechain=False)
     row.update(fields)
+    if kind == "assistant" and state().get("name") == "cancel-held":
+        row["message"]["stop_reason"] = "end_turn"
     data = (json.dumps(row, ensure_ascii=True) + "\n").encode("utf-8")
     with open(value["transcript"], "ab", buffering=0) as output:
         output.write(data)
@@ -186,6 +188,9 @@ def fake_submit(claude, text):
         fake_queue_event("enqueue", text)
     else:
         fake_event("user", message=dict(role="user", content=text))
+        if state().get("name") == "cancel-held":
+            fake_event("assistant", message=dict(role="assistant", id="reply_" + uuid.uuid4().hex, content=[dict(type="text", text="Received " + text)]))
+            claude.setdefault("turns", []).append([text, "Received " + text])
 
 
 def fake_take(claude):
