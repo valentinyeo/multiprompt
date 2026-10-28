@@ -274,3 +274,16 @@ test('IGSH-1055 two independent app revisions share the identical branch verifie
   assert.match(workflow, /harnessRevision = \$harnessRevision/);
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}\$\{\{ matrix.app-revision/);
 });
+
+
+test('IGSH-1055 historical activity control reaches strict pixel checks before current CLEAN layout', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/drive.ps1'), 'utf8');
+  const legacy = source.indexOf('if ($statusBounds.Bottom -eq $hostBounds.Top)');
+  assert.ok(legacy >= 0, 'old status-above-host geometry remains observable');
+  const baseline = source.indexOf("Shot 'messages-only-before-tools'", legacy);
+  assert.match(source.slice(legacy, baseline), /\$observation.transcript = @\{left=\[int\]\$bounds.Left/);
+  const pixels = source.indexOf('proof.mjs" $Evidence --tools-only', baseline);
+  const complete = source.indexOf("Complete CLEAN proof requires current measured layout", pixels);
+  assert.ok(pixels > baseline && complete > pixels);
+  assert.match(source.slice(pixels, complete), /if \(\$LASTEXITCODE -ne 0\) \{ throw/);
+});

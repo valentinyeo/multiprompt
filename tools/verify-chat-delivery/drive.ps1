@@ -736,7 +736,7 @@ foreach ($plan in $plans) {
                 $viewBounds = $viewRows[0].Current.BoundingRectangle
                 @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $todoStatus) | Where-Object {
                     $r = $_.Current.BoundingRectangle
-                    -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $viewBounds.Left -and $r.Width -eq $viewBounds.Width -and $r.Top -ge $viewBounds.Top -and $r.Bottom -lt $viewBounds.Bottom -and $r.Height -gt 0
+                    -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $viewBounds.Left -and $r.Width -eq $viewBounds.Width -and ($r.Bottom -eq $viewBounds.Top -or ($r.Top -ge $viewBounds.Top -and $r.Bottom -lt $viewBounds.Bottom)) -and $r.Height -gt 0
                 }).Count -eq 1
             })
             $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
@@ -744,24 +744,29 @@ foreach ($plan in $plans) {
             $hostBounds = $views[0].Current.BoundingRectangle
             $statusRows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $todoStatus) | Where-Object {
                 $r = $_.Current.BoundingRectangle
-                -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $hostBounds.Left -and $r.Width -eq $hostBounds.Width -and $r.Top -ge $hostBounds.Top -and $r.Bottom -lt $hostBounds.Bottom -and $r.Height -gt 0
+                -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $hostBounds.Left -and $r.Width -eq $hostBounds.Width -and ($r.Bottom -eq $hostBounds.Top -or ($r.Top -ge $hostBounds.Top -and $r.Bottom -lt $hostBounds.Bottom)) -and $r.Height -gt 0
             })
             if ($statusRows.Count -ne 1) { throw 'CLEAN chat proof requires one owned painted status/footer row' }
             $statusBounds = $statusRows[0].Current.BoundingRectangle
             $composerBounds = [System.Windows.Automation.AutomationElement]::FromHandle($composer).Current.BoundingRectangle
-            $viewport = Transcript-Viewport
-            Save @{
-                viewport=@{left=$viewport.Left; top=$viewport.Top; width=$viewport.Width; height=$viewport.Height}
-                host=@{left=[int]$hostBounds.Left; top=[int]$hostBounds.Top; width=[int]$hostBounds.Width; height=[int]$hostBounds.Height}
-                status=@{left=[int]$statusBounds.Left; top=[int]$statusBounds.Top; width=[int]$statusBounds.Width; height=[int]$statusBounds.Height}
-                composer=@{left=[int]$composerBounds.Left; top=[int]$composerBounds.Top; width=[int]$composerBounds.Width; height=[int]$composerBounds.Height}
-            } "$caseDir/geometry-input.json"
-            $geometry = & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --geometry
-            if ($LASTEXITCODE -ne 0) { throw 'Owned transcript geometry was invalid' }
-            $geometry = $geometry | ConvertFrom-Json
-            $observation.transcript = $geometry.transcript
-            $observation.cleanChat = @{rows=$geometry.rows; working=$geometry.working}
-            $bounds = New-Object Drawing.Rectangle($geometry.transcript.left, $geometry.transcript.top, $geometry.transcript.width, $geometry.transcript.height)
+            if ($statusBounds.Bottom -eq $hostBounds.Top) {
+                $bounds = $hostBounds
+                $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
+            } else {
+                $viewport = Transcript-Viewport
+                Save @{
+                    viewport=@{left=$viewport.Left; top=$viewport.Top; width=$viewport.Width; height=$viewport.Height}
+                    host=@{left=[int]$hostBounds.Left; top=[int]$hostBounds.Top; width=[int]$hostBounds.Width; height=[int]$hostBounds.Height}
+                    status=@{left=[int]$statusBounds.Left; top=[int]$statusBounds.Top; width=[int]$statusBounds.Width; height=[int]$statusBounds.Height}
+                    composer=@{left=[int]$composerBounds.Left; top=[int]$composerBounds.Top; width=[int]$composerBounds.Width; height=[int]$composerBounds.Height}
+                } "$caseDir/geometry-input.json"
+                $geometry = & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --geometry
+                if ($LASTEXITCODE -ne 0) { throw 'Owned transcript geometry was invalid' }
+                $geometry = $geometry | ConvertFrom-Json
+                $observation.transcript = $geometry.transcript
+                $observation.cleanChat = @{rows=$geometry.rows; working=$geometry.working}
+                $bounds = New-Object Drawing.Rectangle($geometry.transcript.left, $geometry.transcript.top, $geometry.transcript.width, $geometry.transcript.height)
+            }
             Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript' $true
             Copy-Item $cache.FullName "$caseDir/app-cache-before.jsonl"
             Shot 'messages-only-before-tools'
@@ -807,6 +812,7 @@ foreach ($plan in $plans) {
             Shot 'messages-only-after-tools'
             & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --tools-only
             if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
+            if (-not $observation.Contains('cleanChat')) { throw 'Complete CLEAN proof requires current measured layout' }
             foreach ($mode in @('on', 'off')) {
                 $paletteLogStart = (Read-Shared "$settings/debug.log").Length
                 Press @(0x11, 0x4B) 'Ctrl+K: open CLEAN chat palette' $true
