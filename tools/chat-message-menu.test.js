@@ -1,8 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 
-const read = file => fs.readFileSync(file, 'utf8');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(file, 'utf8'));
 const chat = read('src/chat_render.zig');
 const fonts = read('src/fonts.zig');
 const layout = read('src/window_layout.zig');

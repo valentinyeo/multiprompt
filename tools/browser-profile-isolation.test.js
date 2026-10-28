@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -93,7 +95,7 @@ test("native Chrome own-profile adoption uses the opening budget and retains tim
 });
 
 test("branded stable Chrome journey opens a cold own-profile pane and binds its native pipe on every launch", () => {
-  const control = fs.readFileSync(path.join(__dirname, '..', '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
+  const control = readControlSource();
   const feature = fs.readFileSync(path.join(__dirname, '..', '.claude/skills/verify-multiprompt/features/browser-own-profile.md'), 'utf8');
   const journey = control.slice(control.indexOf("        'browser-own-profile' {"), control.indexOf("        'status-card' {"));
   for (const required of [
@@ -122,7 +124,7 @@ test("branded stable Chrome journey opens a cold own-profile pane and binds its 
 });
 
 test("only the own-profile journey keeps USERPROFILE real while browser data and HOME stay disposable", () => {
-  const control = fs.readFileSync(path.join(__dirname, '..', '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
+  const control = readControlSource();
   const redirects = /\$env:APPDATA = Join-Path \$scratch 'roaming'\s+\$env:LOCALAPPDATA = Join-Path \$scratch 'local'\s+if \(\$Feature -ne 'browser-own-profile'\) \{ \$env:USERPROFILE = Join-Path \$scratch 'profile' \}\s+\$env:HOME = Join-Path \$scratch 'profile'/;
   assert.match(control, redirects);
   assert.equal(control.match(/\$env:USERPROFILE\s*=/g).length, 1);
@@ -132,7 +134,7 @@ test("only the own-profile journey keeps USERPROFILE real while browser data and
 });
 
 test("journey cleanup owns only the extension checkout created by this run at its resolved path", () => {
-  const control = fs.readFileSync(path.join(__dirname, '..', '.claude/skills/verify-multiprompt/control.ps1'), 'utf8');
+  const control = readControlSource();
   const setup = /\$extension = Join-Path \$env:USERPROFILE 'Documents\/GitHub\/zigshell\/extension'\s+\$extensionRoot = \[IO.Path\]::GetFullPath\(\(Split-Path \$extension\)\)\s+\$extensionRootExisted = Test-Path -LiteralPath \$extensionRoot\s+if \(-not \$extensionRootExisted\) \{\s+New-Item -ItemType Directory -Path \$extensionRoot \| Out-Null\s+\$switchExtensionRoot = \(Resolve-Path -LiteralPath \$extensionRoot\).Path\s+\}\s+Copy-Item/;
   assert.match(control, setup);
   assert.doesNotMatch(control.replace('if (-not $extensionRootExisted)', 'if ($extensionRootExisted)'), setup);

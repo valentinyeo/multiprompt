@@ -1,11 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 const read = name => {
   const file = path.join(__dirname, '..', name);
   assert.ok(fs.existsSync(file), `Missing native switching support: ${name}`);
-  return fs.readFileSync(file, 'utf8');
+  return name.endsWith('control.ps1') ? readControlSource(file) : fs.readFileSync(file, 'utf8');
 };
 const control = read('.claude/skills/verify-multiprompt/control.ps1');
 const workflow = read('.github/workflows/verify.yml');

@@ -1,6 +1,8 @@
 const { test } = require('node:test');
 
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -9,7 +11,7 @@ function featureMatrix(source) {
   return require('./verify-features.cjs').discoverFeatures();
 }
 const root = path.resolve(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8'));
 const skill = '.claude/skills/verify-multiprompt/';
 const model = read('src/chat_view.zig');
 const driver = read(skill + 'control.ps1');
