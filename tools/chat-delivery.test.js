@@ -441,6 +441,8 @@ test "delivery: IGSH-1102 restart preserves equal-timestamp anchor and rejects b
     transcript(text, 2000);
     g_chat_blocks[0].message_id = 2;
     try enqueue(text, .delivered);
+    g_chat_outbox.items[0].anchor.after_ms = 2000;
+    if (@hasField(chat_echo.Anchor, "after_id")) g_chat_outbox.items[0].anchor.after_id = 2;
     try std.testing.expect(saveChatOutbox());
     try reload();
     g_chat_blocks[0].message_id = 1;
