@@ -213,6 +213,10 @@ try {
                 $newVersion = '9.99.999'
                 Assert ($NativeUpdate -and (Test-Path $NativeUpdate)) 'Native update build was not supplied'
                 Assert ([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($NativeUpdate)).Contains("MPVERSION=$newVersion;")) 'Native update build has the wrong version'
+                $installedNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
+                $installedNotes.version = $newVersion
+                $installedNotes.releases = @(@{ version = $newVersion; changes = @('Restart keeps your chats open.') }) + @($installedNotes.releases)
+                [IO.File]::WriteAllText("$cardExe.update/release-notes.json", ($installedNotes | ConvertTo-Json -Depth 8))
                 Remove-Item -LiteralPath "$cardExe.update/ready.txt" -Force
                 Move-Item -LiteralPath $cardExe -Destination "$Root/card.running.exe"
                 Copy-Item -LiteralPath $NativeUpdate -Destination $cardExe

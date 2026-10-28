@@ -128,6 +128,8 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(suite, /maintenance release waits without an update card/);
   assert.match(suite, /update-card-quiet\.png/);
   assert.match(suite, /Real product notes did not show again/);
+  assert.match(suite, /\$installedNotes\.version = \$newVersion/);
+  assert.match(suite, /Restart keeps your chats open/);
   const journey = read('tools/update-release-journey.ps1');
   assert.match(journey, /update card shows aggregated plain notes/);
   assert.match(journey, /Missing update card screenshot/);
