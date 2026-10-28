@@ -42,12 +42,12 @@ test('IGSH-816 accepts the same messages with only footer rows removed and ignor
   assert.equal(result.working.offInk, 0);
 });
 
-test('IGSH-816 rejects even one retained row pixel and requires the normal rows', async () => {
+test('IGSH-816 rejects retained rows without requiring an obsolete live footer', async () => {
   const { compareCleanChat } = await import('./chat-messages-only-proof.mjs');
   const on = frame(false);
   on.pixels[(geometry.rows.top * on.width + geometry.rows.left) * 4]++;
   assert.throws(() => compareCleanChat(frame(), on, frame(), geometry), /ON still paints/);
-  assert.throws(() => compareCleanChat(frame(false), frame(false), frame(false), geometry), /OFF has no painted/);
+  assert.equal(compareCleanChat(frame(false), frame(false), frame(false), geometry).rows.offInk, 0);
   const changed = frame();
   changed.pixels[(geometry.rows.top * changed.width + geometry.rows.left) * 4]++;
   assert.throws(() => compareCleanChat(frame(), frame(false), changed, geometry), /OFF did not restore today's/);
@@ -109,6 +109,8 @@ test('IGSH-816 default evidence evaluation requires the CLEAN pair and rejects t
     return files.get(name);
   });
   assert.equal(evaluate(root, false).cleanChat.rows.onInk, 0);
+  files.set('clean-chat-native.log', 'No CLEAN tests ran');
+  assert.throws(() => evaluate(root, true), /Missing passing CLEAN pixel tests/);
   const withoutTodo = rows([...messages, ...tools.map(row => row.id === 0 ? { ...row, text: 'Ran Check app-smoke state' } : row)]);
   const withTodo = files.get('messages-only/app-cache.jsonl');
   files.set('messages-only/app-cache.jsonl', withoutTodo);
@@ -128,8 +130,8 @@ test('IGSH-816 extends only the existing messages-only journey using checked pal
   const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
   const driver = read('tools/verify-chat-delivery/drive.ps1');
   const journey = driver.slice(driver.indexOf("Shot 'messages-only-after-tools'"), driver.indexOf('$fillLogStart ='));
-  assert.match(journey, /\$workingHeight -ne \$expectedGapHeight/);
-  assert.match(journey, /Floor\(14 \* \$statusBounds.Height \/ 28\)/);
+  assert.match(driver, /proof.mjs" \$Evidence --geometry/);
+  assert.match(driver, /\$observation.cleanChat = @\{rows=\$geometry.rows; working=\$geometry.working\}/);
   assert.match(journey, /--tools-only[\s\S]*foreach \(\$mode in @\('on', 'off'\)\)/);
   assert.match(journey, /Press @\(0x11, 0x4B\)/);
   assert.match(journey, /foreach \(\$letter in 'clean chat'\.ToCharArray\(\)\) \{ Press/);
@@ -169,7 +171,106 @@ test('IGSH-857 the stand-in agent writes the todo before the baseline so the sta
   const todo = driver.indexOf("Shell-Input 'todo'");
   assert.ok(todo > 0 && todo < driver.indexOf("Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript'"));
   assert.ok(todo < driver.indexOf('$observation.transcript = @{'));
-  assert.match(driver.slice(todo, driver.indexOf('$observation.transcript = @{')), /Wait-For 'owned status row above the transcript once the todo is read'/);
+  assert.match(driver.slice(todo, driver.indexOf('$observation.transcript = @{')), /Wait-For 'owned status row inside the transcript host once the todo is read'/);
   assert.match(boundary, /if op == "todo":[\s\S]*?name="TodoWrite"/);
   assert.match(boundary, /if op == "activity":[\s\S]*?for i in range\(11\):/);
+});
+
+
+test('IGSH-1055 measures visible content inside the expanded transcript host', async () => {
+  const { transcriptGeometry } = await import('./chat-messages-only-proof.mjs');
+  assert.equal(typeof transcriptGeometry, 'function', 'owned viewport measurement is available');
+  const host = { left: 30, top: 40, width: 960, height: 800 };
+  const status = { left: 30, top: 80, width: 960, height: 28 };
+  const composer = { left: 80, top: 750, width: 800, height: 60 };
+  const viewport = { left: 30, top: 80, width: 960, height: 644 };
+  assert.deepEqual(transcriptGeometry(host, status, composer, viewport), {
+    transcript: { left: 30, top: 108, width: 960, height: 616 },
+    rows: status,
+    working: { left: 30, top: 724, width: 960, height: 14 },
+  });
+  assert.throws(() => transcriptGeometry(host, { ...status, top: 0 }, composer, viewport), /status.*inside/);
+  assert.throws(() => transcriptGeometry(host, { ...status, width: 800 }, composer, viewport), /status.*inside/);
+  assert.throws(() => transcriptGeometry(host, status, { ...composer, top: 120 }, viewport), /working strip/);
+  assert.throws(() => transcriptGeometry(host, status, composer, { ...viewport, height: viewport.height - 16 }), /working strip/);
+  const scale = rect => Object.fromEntries(Object.entries(rect).map(([key, value]) => [key, value * 1.5]));
+  assert.deepEqual(transcriptGeometry(scale(host), scale(status), scale(composer), scale(viewport)),
+    Object.fromEntries(Object.entries(transcriptGeometry(host, status, composer, viewport)).map(([key, value]) => [key, scale(value)])));
+});
+
+
+test('IGSH-1055 live clean-chat proof requires every real native painter positive control', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  assert.match(fs.readFileSync(path.join(__dirname, 'check-clean-chat-output.mjs'), 'utf8'), /export function verifyCleanCoverage/);
+  const { verifyCleanCoverage } = await import('./check-clean-chat-output.mjs');
+  assert.equal(typeof verifyCleanCoverage, 'function', 'native positive controls are reusable by the complete live oracle');
+  const source = fs.readdirSync(path.join(__dirname, '../src')).filter(file => file.endsWith('.zig')).map(file => fs.readFileSync(path.join(__dirname, '../src', file), 'utf8')).join('\n');
+  const names = [...source.matchAll(/^test "(IGSH-816 CLEAN[^"\n]+)"/gm)].map(match => match[1]);
+  const output = names.map((name, i) => `${i + 1}/${names.length} chat_render.test.${name}...OK`).join('\n');
+  assert.equal(verifyCleanCoverage(output), names.length);
+  for (const name of names) {
+    assert.throws(() => verifyCleanCoverage(output.replace(`${name}...OK`, `${name}...FAIL`)), /Missing passing CLEAN pixel tests/);
+  }
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  assert.match(workflow, /zig build test-clean-chat --summary all 2>&1 \| tee evidence\/clean-chat-native.log/);
+  assert.match(workflow, /node tools\/check-clean-chat-output.mjs evidence\/clean-chat-native.log/);
+});
+
+
+test('IGSH-1055 unread measurements use the visible viewport, never the expanded host', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/drive.ps1'), 'utf8');
+  const shot = source.slice(source.indexOf("if ($Name -eq 'new-messages-visible')"), source.indexOf('function Doctor('));
+  assert.match(shot, /\$bounds = Transcript-Viewport/);
+  assert.match(source, /\$bounds = Transcript-Viewport\s+\$pillOrigin =/);
+});
+
+test('IGSH-1055 viewport follows current app frames and maps native screen coordinates', { skip: process.platform !== 'win32' }, () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const source = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/drive.ps1'), 'utf8');
+  const helper = source.match(/function Transcript-Viewport \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(helper, 'visible viewport reader exists');
+  const script = `Add-Type -AssemblyName System.Drawing
+Add-Type 'public static class ChatDeliveryDesktop { public struct Point { public int X; public int Y; } public static Point ScreenPoint(System.IntPtr h, int x, int y) { return new Point { X=8, Y=31 }; } }'
+$settings='fixture'; $main=[IntPtr]1
+function Read-Shared([string]$Path) { $script:fixture }
+${helper}
+$script:fixture='[chat] frame transcript 234,62,1006,644 edit'
+$r=Transcript-Viewport
+if ($r.Left -ne 242 -or $r.Top -ne 93 -or $r.Right -ne 1014 -or $r.Bottom -ne 675) { throw 'wrong screen mapping' }
+$script:fixture += "\n[chat] frame transcript 234,62,1006,614 edit"
+$r=Transcript-Viewport
+if ($r.Bottom -ne 645 -or 616 + 31 -lt $r.Bottom) { throw 'pill compared with stale host bounds' }
+Write-Host 'CURRENT_VIEWPORT_OK'`;
+  const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /CURRENT_VIEWPORT_OK/);
+});
+
+
+test('IGSH-1055 two independent app revisions share the identical branch verifier', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const workflow = fs.readFileSync(path.join(__dirname, '../.github/workflows/verify.yml'), 'utf8');
+  const expression = workflow.match(/^        app-revision: \$\{\{ (.+) \}\}$/m)?.[1];
+  assert.ok(expression, 'independent source matrix exists');
+  const revisions = (event, ref) => JSON.parse(JSON.stringify(vm.runInNewContext(expression, { github: { event_name: event, ref, sha: 'f'.repeat(40) }, fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value) })));
+  const pinned = revisions('push', 'refs/heads/ceo/IGSH-1055-hax2');
+  assert.equal(pinned.length, 2);
+  assert.equal(new Set(pinned).size, 2);
+  assert.ok(pinned.every(sha => /^[a-f0-9]{40}$/.test(sha)));
+  assert.equal(pinned[1], 'f'.repeat(40), 'current application source is the exact tested verifier head');
+  for (const [event, ref] of [['push', 'refs/heads/master'], ['pull_request', 'refs/pull/622/merge'], ['workflow_call', 'refs/tags/v0.28.999']]) {
+    assert.deepEqual(revisions(event, ref), ['']);
+  }
+  assert.match(workflow, /path: app-source/);
+  assert.match(workflow, /working-directory: \$\{\{ matrix.app-revision && 'app-source' \|\| '\.' \}\}/);
+  assert.match(workflow, /git -C app-source rev-parse HEAD/);
+  assert.match(workflow, /harnessRevision = \$harnessRevision/);
+  assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}\$\{\{ matrix.app-revision/);
 });
