@@ -924,6 +924,46 @@ test "ISSUE-511 pending urgent probe" {
 `), 'ISSUE-511 pending urgent');
 });
 
+test('IGSH-1081 stale probe keeps reattached transport on recovery cadence', async () => {
+  await zig(probeRuntime(`
+test "IGSH-1081 stale probe recovery" {
+    fake_now = 10000;
+    sshProbeStart();
+    const old = ssh_probe_job orelse return error.MissingProbe;
+    shells[0].spawn_tick = fake_now;
+    shells[0].disconnected = true;
+    shells[0].ssh_reconnect.phase = .reconnecting;
+    old.healthy[0] = true;
+    old.items[0].attached = true;
+    old.finished.store(true, .release);
+    _ = old.owners.fetchSub(1, .acq_rel);
+    sshProbeFinish();
+    try std.testing.expect(shells[0].disconnected);
+    try std.testing.expect(ssh_probe_next_tick <= fake_now + 1000);
+    fake_now += 3000;
+    sshProbeStart();
+    const next = ssh_probe_job orelse return error.MissingRecoveryProbe;
+    try std.testing.expectEqual(fake_now - 3000, next.items[0].spawn_tick);
+    next.healthy[0] = true;
+    next.items[0].attached = true;
+    next.finished.store(true, .release);
+    _ = next.owners.fetchSub(1, .acq_rel);
+    sshProbeFinish();
+    try std.testing.expect(!shells[0].disconnected);
+    shells[0].ssh_reconnect.phase = .connected;
+    fake_now = ssh_probe_next_tick;
+    sshProbeStart();
+    const idle = ssh_probe_job orelse return error.MissingIdleProbe;
+    idle.healthy[0] = true;
+    idle.items[0].attached = true;
+    idle.finished.store(true, .release);
+    _ = idle.owners.fetchSub(1, .acq_rel);
+    sshProbeFinish();
+    try std.testing.expectEqual(fake_now + 15000, ssh_probe_next_tick);
+}
+`), 'IGSH-1081 stale probe recovery');
+});
+
 test('ISSUE-511 repeated gone results cannot kill a live transport or end a creating or never-attached tab', async () => {
   await zig(probeRuntime(`
 test "ISSUE-511 protected gone results" {

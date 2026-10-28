@@ -2052,6 +2052,12 @@ fn sshProbeFinish() void {
         if (job.owners.fetchSub(1, .acq_rel) == 1) std.heap.page_allocator.destroy(job);
         ssh_probe_job = null;
         ssh_probe_next_tick = if (ssh_probe_pending_request) 0 else GetTickCount64() + 15_000;
+        for (app_state.shells[0..app_state.shell_count]) |shell| {
+            if (shell.ssh_reconnect.phase == .reconnecting) {
+                ssh_probe_next_tick = @min(ssh_probe_next_tick, GetTickCount64() + 1000);
+                break;
+            }
+        }
     }
     var checked: [256]bool = @splat(false);
     for (job.items[0..job.count]) |item| {

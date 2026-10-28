@@ -1,8 +1,6 @@
 name: Verify SSH reconnect
 
 on:
-  push:
-    branches: [ceo/IGSH-1081]
   workflow_dispatch:
     inputs:
       exe_source:

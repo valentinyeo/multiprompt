@@ -172,19 +172,20 @@ try {
         $transport = Transport 'verify-one'
         $surface = [ReconnectDesktop]::InputSurface($main)
         if ($transport -and $transport.Id -ne $dropped.Id -and $surface -ne [IntPtr]::Zero -and
-            [ReconnectDesktop]::Owner($surface) -eq $transport.Id -and
+            $surface.ToInt64() -eq [long]([IO.File]::ReadAllText("$state/window-$($transport.Id).txt").Trim()) -and
             $trace -match "ssh-reconnect ok id=$identity\b") { $true }
     } 5)
     $recovery.Stop()
     $reattachTrace = (Read-Log).Substring($reattachOffset)
-    $sameTab = $reattachTrace -match "respawnShellInPlace ok kind=tmux idx=0 id=$identity\b"
+    $respawn = [regex]::Match($reattachTrace, 'respawnShellInPlace ok kind=tmux idx=0 id=(\d+)')
+    $sameTab = $respawn.Success -and $respawn.Groups[1].Value -eq $identity
     $recovered = Transport 'verify-one'
     $invocation = [IO.File]::ReadAllText("$state/invocation-$($recovered.Id).txt")
     $attachOnly = $invocation -match "tmux attach -t '?=verify-one" -and $invocation -notmatch 'tmux new-session'
     $unchanged = $sessionsBefore -eq (Get-FileHash "$state/sessions.txt" -Algorithm SHA256).Hash
     $pass = $sameTab -and $attachOnly -and $unchanged -and $recovery.Elapsed.TotalMilliseconds -le 5000
     [IO.File]::WriteAllText("$Output/reattach.log", $reattachTrace)
-    @{pass=$pass; elapsed_ms=$recovery.Elapsed.TotalMilliseconds; tab_id_before=$identity; tab_id_after=$identity; session='verify-one'; sessions_unchanged=$unchanged; attach_only=$attachOnly; transport_before=$dropped.Id; transport_after=$recovered.Id; ssh_command=$invocation; boundary='ephemeral SSH stand-in; production attach command and native palette'} | ConvertTo-Json -Depth 4 | Set-Content "$Output/reattach.json"
+    @{pass=$pass; elapsed_ms=$recovery.Elapsed.TotalMilliseconds; tab_id_before=$identity; tab_id_after=$respawn.Groups[1].Value; session='verify-one'; sessions_unchanged=$unchanged; attach_only=$attachOnly; transport_before=$dropped.Id; transport_after=$recovered.Id; ssh_command=$invocation; boundary='ephemeral SSH stand-in; production attach command and native palette'} | ConvertTo-Json -Depth 4 | Set-Content "$Output/reattach.json"
     Shot 'reattach-recovered'
     if (!$pass) { throw 'Reattach replaced a session, changed tab identity or exceeded five seconds' }
     Write-Output 'REATTACH_PALETTE_SAME_TAB_OK'
