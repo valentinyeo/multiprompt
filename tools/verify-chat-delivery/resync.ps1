@@ -10,7 +10,7 @@ $observation.sendStart = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 $offset = (Read-Shared "$settings/debug.log").Length
 Press @(0x11, 0x4B) 'Ctrl+K: open existing chat menu'
 [void](Wait-For 'menu palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-$query = 'chat view more menu'
+$query = 'more menu'
 foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
 [void](Wait-For 'more menu command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=6466') })
 Press @(0x0D) 'Enter: open More Menu'

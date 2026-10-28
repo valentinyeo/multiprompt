@@ -1,5 +1,6 @@
 const chatTableRefresh = @import("chat_render.zig").chatTableRefresh;
 const chat_switch = @import("chat_switch.zig");
+const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const chat_layout_snapshot = @import("chat_layout_snapshot.zig");
 const ShowWindow = @import("focus.zig").ShowWindow;
 const SW_SHOWNOACTIVATE = @import("win32.zig").SW_SHOWNOACTIVATE;
@@ -1132,7 +1133,7 @@ pub fn chatFileOnReady() void {
             entry.failures = 0;
             if (entry.resync and !disk and !history.more and history.start == 0) {
                 entry.resync = false;
-                if (belongs_to_active) @import("console.zig").showHeaderNoticeAscii("Chat resynced", 3000, false);
+                if (belongs_to_active) showHeaderNoticeAscii("Chat resynced", 3000, false);
                 debugLog("[chat] resync completed");
             }
             entry.missing_message = @splat(0);

@@ -24,7 +24,7 @@ const std = @import("std");
 const Key = struct { shell_id: u32 = 42 };
 const Entry = struct { key: Key = .{}, cache_cancelled: std.atomic.Value(bool) = .init(false), disk_loaded: bool = false, resync: bool = false };
 var old: Entry = .{};
-var fresh: Entry = .{};
+var replacement: Entry = .{};
 var entries = [_]*Entry{&old};
 var g_chat_histories = struct { items: []*Entry }{ .items = &entries };
 var active_shell: u32 = 0;
@@ -48,9 +48,9 @@ fn chatHistoryForget(id: u32) void {
     std.debug.assert(g_chat_cache_write_mutex.held and id == 42 and old.cache_cancelled.load(.acquire));
     forgotten += 1;
 }
-fn chatHistoryEntry(_: Key) ?*Entry { return if (allocate) &fresh else null; }
+fn chatHistoryEntry(_: Key) ?*Entry { return if (allocate) &replacement else null; }
 fn chatFileRequest(_: Key) void {
-    std.debug.assert(!g_chat_cache_write_mutex.held and fresh.disk_loaded and fresh.resync);
+    std.debug.assert(!g_chat_cache_write_mutex.held and replacement.disk_loaded and replacement.resync);
     requests += 1;
 }
 fn debugLog(_: []const u8) void { notices += 1; }
