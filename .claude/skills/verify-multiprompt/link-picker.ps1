@@ -7,7 +7,7 @@ if ($initial.tabs[$initial.active_tab].PSObject.Properties['cv'] -and $initial.t
 Wait-WorkspaceSurface $initial.active_workspace $initial.active_tab $false
 $first = 'http://127.0.0.1:1/picker-first'
 $second = 'http://127.0.0.1:1/picker-second'
-$command = 'echo ' + $first + ' ' + $second
+$command = 'echo ' + $first + ' ' + $second + ' .'
 Type-Text $command
 Wait-ConsoleText $command
 Press @(0x0D) 'Enter: print two distinct links'
@@ -58,7 +58,7 @@ try {
             $pixel = $image.GetPixel($x, $y)
             if ($pixel.R -eq 31 -and $pixel.G -eq 31 -and $pixel.B -eq 31) { $fill++ }
             if ($pixel.R -eq 46 -and $pixel.G -eq 46 -and $pixel.B -eq 46) { $outline++ }
-            if ($pixel.B -gt 120 -and $pixel.B -gt $pixel.R + 50) { $blue++ }
+            if ($pixel.R -eq 0 -and $pixel.G -eq 122 -and $pixel.B -eq 204) { $blue++ }
         }
     }
     if ($fill -lt 5000 -or $outline -lt 100 -or $blue -gt 0) { throw "Picker style mismatch: fill=$fill outline=$outline blue=$blue" }

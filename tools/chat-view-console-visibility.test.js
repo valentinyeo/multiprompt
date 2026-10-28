@@ -132,8 +132,6 @@ fn IsWindowVisible(_: HANDLE) BOOL { return @intFromBool(visible); }
 fn ShowWindowAsync(hwnd: HANDLE, cmd: i32) BOOL { return ShowWindow(hwnd, cmd); }
 fn verboseLoggingEnabled() bool { return debug_enabled; }
 fn debugLog(line: []const u8) void { @memcpy(log[0..line.len], line); log_len = line.len; }
-const g_chat_transcript_hwnd: HANDLE = 101;
-const g_chat_composer_hwnd: HANDLE = 102;
 fn layoutChatControls() void {}
 fn updateBrowserVisibility() void {}
 fn focusActiveShell() void {}
