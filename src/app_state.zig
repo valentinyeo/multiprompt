@@ -3309,7 +3309,6 @@ pub const WM_SYSKEYDOWN: u32 = 0x0104;
 pub var g_win_held: bool = false;
 pub var g_native_paste_passthrough_until: u64 = 0;
 pub var g_browser_toggle_chord_held: bool = false;
-pub var g_browser_toggle_last_event_time: u32 = 0;
 pub var g_chat_toggle_chord_held: bool = false;
 pub var g_chat_toggle_last_event_time: u32 = 0;
 pub var g_voice_toggle_chord_held: bool = false;
@@ -3324,11 +3323,7 @@ pub var g_palette_chord_held: bool = false;
 pub var g_screenshot_chord_held: bool = false;
 pub var g_tab_url_chord_held: bool = false;
 pub var g_dictation_toggle_chord_held: bool = false;
-pub var g_browser_toggle_last_handled_event_time: u32 = 0;
 pub const BROWSER_TOGGLE_DEBOUNCE_MS: u32 = 1500;
-pub var g_browser_shortcut_open_guard_shell_id: u32 = 0;
-pub var g_browser_shortcut_open_guard_until: u64 = 0;
-pub const BROWSER_SHORTCUT_OPEN_GUARD_MS: u64 = 10_000;
 
 pub const STALE_ALT_REPAIR_EXTRA_INFO: usize = 0x4D505341;
 
