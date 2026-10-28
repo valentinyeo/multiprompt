@@ -22,6 +22,25 @@ test('red-run admission checks every PR without a hand-picked test or source rev
   assert.match(tests, /require_jobs "\$WINDOWS"[^\n]*"\$RED_RUN"/);
 });
 
+test('red-run uses the preceding revision for manual master runs without changing PR or branch baselines', () => {
+  const workflow = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
+  const caller = workflow.match(/^  check-red-run:\n((?:(?!^  [\w-]+:)[\s\S])*)/m)?.[1];
+  const expression = caller?.match(/^      base: \$\{\{ (.+) \}\}$/m)?.[1];
+  assert.ok(expression, 'red-run caller supplies a base revision');
+  const evaluate = new Function('github', 'format', `return (${expression});`);
+  const format = (template, value) => template.replace('{0}', value);
+  for (const [name, ref, event, expected] of [
+    ['pull request', 'refs/pull/1/merge', { pull_request: { base: { sha: 'pr-base' } } }, 'pr-base'],
+    ['master push', 'refs/heads/master', { before: 'push-base' }, 'push-base'],
+    ['manual master run', 'refs/heads/master', {}, 'head^'],
+    ['branch push', 'refs/heads/ceo/IGSH-1140', { before: 'push-base' }, 'origin/master'],
+    ['manual branch run', 'refs/heads/ceo/IGSH-1140', {}, 'origin/master'],
+  ]) {
+    const github = { ref, sha: 'head', event: { pull_request: { base: {} }, ...event } };
+    assert.equal(evaluate(github, format), expected, name);
+  }
+});
+
 function fixture(t) {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'red-run-test-'));
   t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
