@@ -248,6 +248,8 @@ pub fn build(b: *std.Build) void {
     const ci_admission_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ci-admission.test.js" });
     test_step.dependOn(&ci_admission_tests.step);
     vps_test_step.dependOn(&ci_admission_tests.step);
+    const automerge_run_tests = b.addSystemCommand(&.{ "node", "--test", "tools/automerge-admit-run.test.js" });
+    vps_test_step.dependOn(&automerge_run_tests.step);
     const automerge_admit_tests = b.addSystemCommand(&.{ "bash", "tools/automerge-admit.test.sh" });
     test_step.dependOn(&automerge_admit_tests.step);
     vps_test_step.dependOn(&automerge_admit_tests.step);
