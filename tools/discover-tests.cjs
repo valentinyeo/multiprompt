@@ -26,6 +26,9 @@ if (require.main === module) {
   } else if (process.argv.length !== 2) {
     console.error('usage: node tools/discover-tests.cjs [--list]');
     process.exitCode = 2;
+  } else if (process.env.GITHUB_ACTIONS !== 'true' && process.env.MULTIPROMPT_ALLOW_LOCAL_HEAVY !== '1') {
+    console.error('runs on GitHub Actions only; push and read gh pr checks, or set MULTIPROMPT_ALLOW_LOCAL_HEAVY=1 on a machine you own');
+    process.exitCode = 2;
   } else if (files.length) {
     const result = spawnSync(process.execPath, ['--test', '--test-concurrency=4', ...files], {
       cwd: root, stdio: 'inherit', env: { ...process.env, NODE_TEST_CONTEXT: undefined },

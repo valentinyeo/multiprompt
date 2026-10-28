@@ -60,6 +60,21 @@ test('empty discovery succeeds without accidentally invoking Node whole-tree dis
   assert.equal(result.stdout, '');
 }));
 
+test('full-suite execution refuses shared-server use while list inspection stays available', () => fixture((dir, put) => {
+  put('tools/must-not-run.test.cjs', "console.log('CHILD_EXECUTED');");
+  const invoke = (...args) => spawnSync(process.execPath, [script, ...args], {
+    cwd: dir, encoding: 'utf8', timeout: 30000,
+    env: { ...process.env, GITHUB_ACTIONS: undefined, MULTIPROMPT_ALLOW_LOCAL_HEAVY: undefined },
+  });
+  const denied = invoke();
+  assert.equal(denied.status, 2, denied.stdout + denied.stderr);
+  assert.equal(denied.stdout, '');
+  assert.match(denied.stderr, /runs on GitHub Actions only/);
+  const list = invoke('--list');
+  assert.equal(list.status, 0, list.stderr);
+  assert.equal(list.stdout.trim(), 'tools/must-not-run.test.cjs');
+}));
+
 test('the standard server graph reaches automatic discovery with the selected compiler', () => {
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   assert.match(build, /const server_tool_tests = b\.addSystemCommand\(&\.\{ "node", "tools\/discover-tests\.cjs" \}\);/);
