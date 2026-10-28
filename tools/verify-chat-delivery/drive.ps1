@@ -269,7 +269,8 @@ function Assert-FullHistory([string]$Stage) {
     }
     if (-not $complete) { throw "IGSH-815 incomplete session at $Stage" }
     $pollOffset = (Read-Shared "$settings/debug.log").Length
-    [void](Wait-For 'normal transcript poll completes after full history loads' {
+    Shell-Run @('history-refresh')
+    [void](Wait-For 'changed transcript delivery completes after full history loads' {
         (Read-Shared "$settings/debug.log").Substring($pollOffset) -match '(?s)\[chat\] transcript request shell=(\d+) offset=\d+ before=0.*?\[chat\] transcript load shell=\1 ok'
     })
     $offset = (Read-Shared "$settings/debug.log").Length

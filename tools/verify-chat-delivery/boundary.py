@@ -389,6 +389,9 @@ def fake_seed_many(rounds):
 
 def shell():
     op = ARGS[0] if ARGS else ""
+    if op == "history-refresh":
+        fake_event("progress", data=dict(type="hook_progress", hookName="history-refresh"))
+        return 0
     if op == "resume" and len(ARGS) == 2:
         value = state()
         value["sid"] = ARGS[1]
