@@ -282,7 +282,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const [command, base, head, ...extra] = process.argv.slice(2);
     if (command === 'check' && base && head && !extra.length) process.exitCode = check(base, head);
     else if (command === 'build' && base && !extra.length) {
-      const publishedTags = JSON.parse(head ?? execFileSync('gh', ['api', '--paginate', '--slurp', 'repos/{owner}/{repo}/releases', '--jq', '[.[][] | select(.draft == false and .prerelease == false) | .tag_name]'], { encoding: 'utf8' }));
+      const publishedTags = head ? JSON.parse(head) : execFileSync('gh', ['api', '--paginate', 'repos/{owner}/{repo}/releases', '--jq', '.[] | select(.draft == false and .prerelease == false) | .tag_name'], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean);
       if (!Array.isArray(publishedTags) || publishedTags.some(tag => typeof tag !== 'string')) throw new Error('Expected an array of published release tags');
       const files = readTree('HEAD');
       fs.writeFileSync(changelogPath, buildChangelog(files, base, releaseHistory(base, files[changelogPath], publishedTags)));
