@@ -17,13 +17,6 @@ if ($longDelivery) {
     Save $retained "$caseDir/retained-header.json"
 }
 foreach ($round in 1..$roundCount) {
-    if ($releasedLongDelivery -and $round -gt 1) {
-        $due = $firstReplyMs + ($round - 1) * 60000
-        while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $due) {
-            Doctor $true
-            Start-Sleep -Milliseconds 500
-        }
-    }
     if ($longDelivery -and $round -gt 1) { Shell-Run @('refresh-live-tail') }
     Shell-Input 'busy'
     $messages = @(1..3 | ForEach-Object { "Live request $round part $_" })
@@ -39,6 +32,13 @@ foreach ($round in 1..$roundCount) {
     $queuedFrame = 'live-queued-' + $round.ToString('00')
     Shot $queuedFrame
     $frames.Add($queuedFrame)
+    if ($releasedLongDelivery -and $round -gt 1) {
+        $due = $firstReplyMs + ($round - 1) * 60000
+        while ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $due) {
+            Doctor $true
+            Start-Sleep -Milliseconds 500
+        }
+    }
     Shell-Run @('live-turn', [string]$round)
     if ($firstReplyMs -eq 0) { $firstReplyMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
     $answer = "Live answer $round"

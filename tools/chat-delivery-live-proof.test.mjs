@@ -95,6 +95,42 @@ test('short runs, long idle gaps and mid-proof view toggles cannot prove thirty 
 });
 
 
+test('released workload keeps minute deadlines despite busy-send preparation', () => {
+  const drive = fs.readFileSync(new URL('./verify-chat-delivery/live-delivery.ps1', import.meta.url), 'utf8');
+  const loop = drive.slice(drive.indexOf('foreach ($round in 1..$roundCount)'), drive.indexOf('    $answer ='));
+  assert.match(loop, /\$due = \$firstReplyMs \+ \(\$round - 1\) \* 60000/);
+  assert.match(loop, /\$messages = @\(1\.\.3/);
+  const operations = [...loop.matchAll(/\$due =|Shell-Run @\('refresh-live-tail'\)|Shell-Input 'busy'|Type-Composer \$message|Shot \$queuedFrame|Shell-Run @\('live-turn',/g)].map(match => match[0]);
+  assert.equal(operations.length, 6);
+  for (const preparationMs of [5500, 13000]) {
+    let now = 0;
+    let firstReplyMs = 0;
+    const turns = [];
+    for (let round = 1; round <= 31; round++) {
+      for (const operation of operations) {
+        if (operation === '$due =' && round > 1) {
+          const due = firstReplyMs + (round - 1) * 60000;
+          while (now < due) now += 500;
+        } else if (operation.includes('refresh-live-tail') && round > 1) now += 1000;
+        else if (operation === "Shell-Input 'busy'") now += 500;
+        else if (operation === 'Type-Composer $message') now += preparationMs;
+        else if (operation === 'Shot $queuedFrame') now += 250;
+        else if (operation.includes("'live-turn'")) {
+          turns.push(now);
+          now += 100;
+          if (firstReplyMs === 0) firstReplyMs = now;
+        }
+      }
+      now += 1500;
+    }
+    assert.equal(turns.length, 31);
+    assert.ok(turns.at(-1) - turns[0] >= 1800000, 'workload spans thirty minutes');
+    for (let i = 1; i < turns.length; i++) {
+      assert.ok(turns[i] - turns[i - 1] <= 65000, `busy preparation delayed turn ${i + 1}: ${turns[i] - turns[i - 1]} ms`);
+    }
+  }
+});
+
 test('long delivery proof can be dispatched on the exact branch', () => {
   const workflow = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
   const dispatch = workflow.split('  workflow_dispatch:')[1].split('  workflow_call:')[0];
