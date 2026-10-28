@@ -124,7 +124,8 @@ export function buildChangelog(files, tag, history = []) {
   };
   let previous = history.length ? fragmentFiles(history[0].files) : {};
   for (const step of history.slice(1)) {
-    const added = addedSince(fragmentFiles(step.files), previous);
+    const added = Object.fromEntries(Object.entries(addedSince(fragmentFiles(step.files), previous))
+      .filter(([file, text]) => fragmentLines(file, text).some(productChange)));
     if (Object.keys(added).length) stamp(step.tag, added);
     previous = fragmentFiles(step.files);
   }

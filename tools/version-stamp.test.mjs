@@ -594,7 +594,7 @@ test('IGSH-1095 Zig test-only repairs need no invented product note but runtime 
 test('IGSH-1113 omits filtered historical releases while preserving current notes and validation', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const maintenance = { 'changelog.d/DEMO-1-maintenance.md': 'Fixed a test so releases stop getting stuck.\n' };
-  const product = { 'changelog.d/DEMO-2-chat.md': 'Switching chats is faster.\n' };
+  const product = { 'changelog.d/DEMO-2-chat.md': 'Switching chats is faster.\nAdded proof for chat replies.\n' };
   const latest = { 'changelog.d/DEMO-3-update.md': 'The update card explains each change.\n' };
   const history = [
     { tag: 'v0.28.896', files: base() },
