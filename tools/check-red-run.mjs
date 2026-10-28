@@ -61,12 +61,14 @@ try {
       if (!tests.length) throw new Error('No changed regression tests. Add a portable .test.js, .test.mjs, .test.cjs or Python regression that fails on merge-base source.');
       const inputs = changed.filter(file => /^(?:tools\/fixtures\/|tools\/[^/]*fixture[^/]*$|tests\/fixtures\/)/.test(file));
       execFileSync('git', ['-C', red, 'restore', `--source=${head}`, '--worktree', '--', ...tests, ...inputs], { stdio: 'pipe' });
+      const testOnly = changed.every(file => docs.test(file) || testFile(file));
       for (const file of tests) {
         const fixed = run(file, green);
         console.log(`HEAD ${file}\n${fixed.output}`);
         if (fixed.error || fixed.status !== 0 || (!file.endsWith('.py') && !/^# tests [1-9]\d*$/m.test(fixed.output))) {
           throw new Error(`${file} does not pass on PR source; cannot prove red.`);
         }
+        if (testOnly) continue;
         const before = run(file, red);
         console.log(`MERGE_BASE ${file}\n${before.output}`);
         if (before.status === 0) throw new Error(`${file} stayed green on merge-base source; the test does not prove this fix.`);
@@ -76,7 +78,7 @@ try {
         if (before.error || before.status !== 1 || !assertion) throw new Error(`${file} needs an assertion failure on merge-base source, not an infrastructure or loading error.`);
         console.log(`RED PROVEN ${file} exit=${before.status} merge-base=${base}`);
       }
-      console.log(`RED_RUN_PROVEN ${tests.length} changed suites`);
+      console.log(`${testOnly ? 'TEST_ONLY_PROVEN' : 'RED_RUN_PROVEN'} ${tests.length} changed suites`);
     }
   }
 } catch (error) {
