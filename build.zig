@@ -481,7 +481,7 @@ pub fn build(b: *std.Build) void {
     const run_frequent_tests = b.addRunArtifact(frequent_tests);
     test_step.dependOn(&run_frequent_tests.step);
     vps_test_step.dependOn(&run_frequent_tests.step);
-    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js", "tools/account-keys.test.js", "tools/split-settings.test.js" });
+    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/changelog-layout.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js", "tools/account-keys.test.js", "tools/split-settings.test.js" });
     frequent_integration_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&frequent_integration_tests.step);
     vps_test_step.dependOn(&frequent_integration_tests.step);

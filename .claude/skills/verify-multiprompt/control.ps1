@@ -412,6 +412,39 @@ public static class VerifyNative {
         if (!PagePainted(sourceDock, sourceRgb, sourcePatch)) throw new InvalidOperationException("Source session color is not on screen before Ctrl+Tab");
         if (PagePainted(targetDock, targetRgb, targetPatch)) throw new InvalidOperationException("Target session color is already on screen before Ctrl+Tab; this sample would not be a switch");
     }
+    public static double ChangelogResponse(IntPtr owner) {
+        UIntPtr result;
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        if (SendMessageTimeout(owner, 0, UIntPtr.Zero, IntPtr.Zero, 2, 2000, out result) == IntPtr.Zero) throw new InvalidOperationException("Changelog response timed out");
+        return timer.Elapsed.TotalMilliseconds;
+    }
+    public static double MeasureChangelogKey(IntPtr owner, ushort key) {
+        if (GetForegroundWindow() != owner) throw new InvalidOperationException("Changelog does not own keyboard focus");
+        Rect frame;
+        if (!GetWindowRect(owner, out frame)) throw new InvalidOperationException("Missing changelog frame");
+        int x = frame.Left + (frame.Right - frame.Left) / 2 + 100;
+        int y = frame.Top + (frame.Bottom - frame.Top) / 2 - 48;
+        using (var pixels = new System.Drawing.Bitmap(96, 96))
+        using (var graphics = System.Drawing.Graphics.FromImage(pixels)) {
+            ReadPatch(x, y, pixels, graphics);
+            var before = new int[576];
+            for (int row = 0; row < 24; row++) for (int col = 0; col < 24; col++) before[row * 24 + col] = pixels.GetPixel(col * 4, row * 4).ToArgb();
+            Input[] inputs = new Input[2];
+            inputs[0].type = inputs[1].type = 1;
+            inputs[0].data.keyboard = new Keyboard { key = key };
+            inputs[1].data.keyboard = new Keyboard { key = key, flags = 2 };
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Changelog input failed");
+            do {
+                ReadPatch(x, y, pixels, graphics);
+                int changed = 0;
+                for (int row = 0; row < 24; row++) for (int col = 0; col < 24; col++) if (before[row * 24 + col] != pixels.GetPixel(col * 4, row * 4).ToArgb()) changed++;
+                if (changed >= 8) { ChangelogResponse(owner); return timer.Elapsed.TotalMilliseconds; }
+                Thread.Sleep(1);
+            } while (timer.ElapsedMilliseconds < 10000);
+            throw new InvalidOperationException("Changelog key never changed the visible text surface");
+        }
+    }
     static void ReadPatch(int x, int y, System.Drawing.Bitmap pixels, System.Drawing.Graphics graphics) {
         IntPtr screen = GetDC(IntPtr.Zero);
         IntPtr target = graphics.GetHdc();
@@ -6159,6 +6192,23 @@ try {
             $result.checks += @{ name = 'status-card'; heights = $heights; usagePill = $true; menuStyle = $true; secondClick = $true; escape = $true; outside = $true; entry = 'Ctrl+Shift+G' }
         }
         'command-palette' {
+            $changelogSpeed = [ordered]@{ open_ms = @(); scroll_ms = @(); close_ms = @(); before_ms = @(); after_ms = @(); samples = 5; input = 'native SendInput'; completion = 'visible text patch changed and UI thread responded'; errors = 0 }
+            for ($sample = 0; $sample -lt 5; $sample++) {
+                $changelogSpeed.before_ms += [VerifyNative]::ChangelogResponse($script:window)
+                Focus-Palette 'changelog' 6241
+                $changelogSpeed.open_ms += [VerifyNative]::MeasureChangelogKey($script:window, 0x0D)
+                if ($sample -eq 0) { Snapshot 'changelog-open' }
+                $changelogSpeed.scroll_ms += [VerifyNative]::MeasureChangelogKey($script:window, 0x22)
+                if ($sample -eq 0) { Snapshot 'changelog-scrolled' }
+                $changelogSpeed.close_ms += [VerifyNative]::MeasureChangelogKey($script:window, 0x1B)
+                $changelogSpeed.after_ms += [VerifyNative]::ChangelogResponse($script:window)
+            }
+            Save-Json $changelogSpeed 'changelog-speed.json'
+            foreach ($kind in @('open_ms', 'scroll_ms', 'close_ms', 'after_ms')) {
+                if (($changelogSpeed[$kind] | Measure-Object -Maximum).Maximum -ge 100) { throw ('Changelog ' + $kind + ' reached 100 milliseconds: ' + ($changelogSpeed[$kind] -join ', ')) }
+            }
+            Snapshot 'changelog-closed'
+            $result.checks += @{ name = 'changelog-speed'; timings = $changelogSpeed; budget_ms = 100; entry = 'Ctrl+K Changelog' }
             Palette 'interface'
             Snapshot 'action'
             Press @(0x0D) 'Enter: UI Size: Increase'
