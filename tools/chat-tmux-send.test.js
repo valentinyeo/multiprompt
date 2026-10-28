@@ -241,7 +241,7 @@ test('IGSH-1063 question worker sends numeric key arrays through the reader prot
 const std = @import("std");
 const MAX_OPTIONS = 4;
 const Identity = struct { host: u8 = 0, shell_id: u32 = 7, tmux: [8:0]u8 = "term-1\x00\x00".* };
-const app_state = struct { var g_chat_permission_send_failed = std.atomic.Value(u32).init(0); };
+var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
 var recorded: std.ArrayList(u8) = .empty;
 fn debugLog(_: []const u8) void {}
 fn chatHistoryPersistent(_: u8, _: u32, query: []const u8, _: usize, wire: *std.ArrayList(u8), _: ?*std.atomic.Value(bool)) bool {
