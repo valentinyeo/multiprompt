@@ -1126,11 +1126,10 @@ test('IGSH-1055 removing the read anchor rotates source identity without truncat
     execFileSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), 'shell', 'forget-message', 'remove'], {
       env: { ...process.env, MP_VERIFY_STATE: dir }, encoding: 'utf8', timeout: 30000,
     });
-    assert.equal(fs.readFileSync(fd, 'utf8'), removed + kept, 'open readers retain the previous complete source');
-    fs.closeSync(fd);
-    fd = undefined;
     assert.equal(fs.readFileSync(transcript, 'utf8'), kept);
     assert.notEqual(fs.statSync(transcript, { bigint: true }).ino, before, 'history reset requires a new source identity');
+    assert.equal(fs.readFileSync(fd, 'utf8'), removed + kept, 'open readers retain the previous complete source');
+    assert.deepEqual(fs.readdirSync(dir).sort(), ['source.jsonl', 'state.json']);
     fs.appendFileSync(transcript, kept);
     assert.equal(fs.readFileSync(transcript, 'utf8'), kept + kept);
   } finally {
