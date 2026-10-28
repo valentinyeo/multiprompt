@@ -931,6 +931,7 @@ def watch_reader():
         finally:
             kernel.FindCloseChangeNotification(notification)
 
+    namespace["start_held_worker"] = lambda *args: None
     namespace["watch_changes"] = changes
     namespace["watch"](namespace["READER_SOURCE"])
     return 0
@@ -981,6 +982,8 @@ def ssh():
             env["PYTHONPATH"] = str(Path(__file__).resolve().parent) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         if state().get("remoteHome"):
             env.update(HOME=state()["remoteHome"], USERPROFILE=state()["remoteHome"])
+        if remote[-1:] == ["--serve"]:
+            remote[3] = "import base64,sys;n=dict(__name__='verified_remote_reader');exec(base64.b64decode(sys.stdin.buffer.readline()),n);n['start_held_worker']=lambda *a:None;n['serve'](n['READER_SOURCE'])"
         with (ROOT / f"reader-{os.getpid()}.stderr.log").open("ab", buffering=0) as error:
             return subprocess.call([sys.executable, *remote[1:]], stdin=sys.stdin.buffer, stdout=sys.stdout.buffer, stderr=error, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
     if "tmux list-clients" in command:

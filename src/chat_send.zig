@@ -688,7 +688,7 @@ fn chatOutboxEnqueueInState(list: *std.ArrayList(ChatOutboxEntry), allocator: st
     entry.state = state;
     var random_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
     defer random_io.deinit();
-    random_io.io().random(std.mem.asBytes(&entry.queue_id));
+    while (entry.queue_id == 0) random_io.io().random(std.mem.asBytes(&entry.queue_id));
     entry.id = app_state.g_chat_echo_next_id;
     app_state.g_chat_echo_next_id +%= 1;
     if (entry.id == 0) entry.id = app_state.g_chat_echo_next_id;
@@ -1031,7 +1031,7 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
     var pending: [CHAT_OUTBOX_MAX_PER_KEY]chat_echo.Pending = undefined;
     for (app_state.g_chat_outbox.items) |e| {
         if (result.count >= pending.len) break;
-        if (e.state == .cancelled or (!e.write_started and !e.retryable) or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+        if (e.state == .cancelled or (e.host_held and !e.host_confirmed) or (!e.write_started and !e.retryable) or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
         pending[result.count] = .{
             .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
             .text = e.text,
@@ -2240,6 +2240,31 @@ fn chatEchoTestAssign(blocks: []const ChatBlock, buf: []const u16, anchor: chat_
     return chatEchoAssignedBlock(&assignment, app_state.g_chat_outbox.items[0].id);
 }
 
+test "IGSH-1010 held input cannot borrow an unrelated identical transcript receipt" {
+    const allocator = std.testing.allocator;
+    const saved = app_state.g_chat_outbox;
+    app_state.g_chat_outbox = .empty;
+    defer {
+        for (app_state.g_chat_outbox.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        app_state.g_chat_outbox.deinit(allocator);
+        app_state.g_chat_outbox = saved;
+    }
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("same text");
+    const buf = std.unicode.utf8ToUtf16LeStringLiteral("\u{276f} same text\r\n");
+    var blocks: [8]ChatBlock = undefined;
+    const n = chatClassifyBlocks(buf, &blocks);
+    try std.testing.expect(chatOutboxEnqueueInState(&app_state.g_chat_outbox, allocator, "tmux:7:host-test", text, .delivered));
+    app_state.g_chat_outbox.items[0].write_started = true;
+    app_state.g_chat_outbox.items[0].host_held = true;
+    var assignment: ChatEchoAssignment = .{};
+    chatEchoAssignForKey("tmux:7:host-test", blocks[0..n], buf, true, &assignment);
+    try std.testing.expectEqual(@as(usize, 0), assignment.count);
+    app_state.g_chat_outbox.items[0].host_confirmed = true;
+    chatEchoAssignForKey("tmux:7:host-test", blocks[0..n], buf, true, &assignment);
+    try std.testing.expectEqual(@as(usize, 1), assignment.count);
+    try std.testing.expect(chatEchoAssignedBlock(&assignment, app_state.g_chat_outbox.items[0].id) != null);
+}
+
 test "Chat View echo matches only user blocks after the baseline" {
     const buf = std.unicode.utf8ToUtf16LeStringLiteral(
         "\u{276f} old message\r\n\r\n\u{25cf} reply\r\n\r\n\u{276f} hello wrapped\r\n",
@@ -2464,6 +2489,15 @@ fn chatTmuxSettle() void {
             i += 1;
             continue;
         };
+        if (entry.host_held and !entry.host_confirmed) {
+            for (history.history.status.received[0..history.history.status.received_len]) |identity| {
+                if (identity == entry.queue_id) {
+                    entry.host_confirmed = true;
+                    changed = true;
+                    break;
+                }
+            }
+        }
         var matched: ?usize = null;
         var evidence: chat_echo.TranscriptEvidence = if (entry.transcript_queued) .enqueued else .none;
         if (entry.channel_history_revision != history.history.revision or entry.channel_history_generation != history.generation) {
@@ -2534,7 +2568,7 @@ fn chatFullSettleStart() void {
     const now_ms: i64 = @intCast(GetTickCount64());
     const tick = GetTickCount64();
     for (app_state.g_chat_outbox.items) |entry| {
-        if (entry.host_held or !chat_echo.needsFullSettle(entry.state, entry.write_started, entry.transcript_queued, entry.sent_tick_ms, now_ms)) continue;
+        if (!chat_echo.needsFullSettle(entry.state, entry.write_started, entry.transcript_queued, entry.sent_tick_ms, now_ms)) continue;
         const outbox_key = entry.key[0..entry.key_len];
         const idx = chatOutboxShellForKey(outbox_key) orelse continue;
         const key = chatFileIdentityForShell(idx);
@@ -2565,7 +2599,7 @@ fn chatFullSettleStart() void {
                     a.destroy(job);
                     return;
                 };
-                job.entries[job.count] = .{ .id = candidate.id, .sent_ms = candidate.anchor.sent_ms, .text = text };
+                job.entries[job.count] = .{ .id = candidate.id, .queue_id = if (candidate.host_held) candidate.queue_id else 0, .sent_ms = candidate.anchor.sent_ms, .text = text };
                 job.count += 1;
                 job.after_ms = @min(job.after_ms, candidate.anchor.sent_ms);
             }
@@ -2586,10 +2620,13 @@ fn chatFullSettleThread(job: *app_state.ChatFullSettleJob) void {
     defer job.finished.store(true, .release);
     const a = std.heap.page_allocator;
     var texts: [16][]const u8 = undefined;
+    var identity_buf: [16][32]u8 = undefined;
+    var identities: [16][]const u8 = undefined;
     var count: usize = 0;
     defer for (texts[0..count]) |text| a.free(text);
     for (job.entries[0..job.count]) |target| {
         texts[count] = std.unicode.utf16LeToUtf8Alloc(a, target.text) catch return;
+        identities[count] = if (target.queue_id == 0) "" else std.fmt.bufPrint(&identity_buf[count], "desktop-{x}", .{target.queue_id}) catch return;
         count += 1;
     }
     const id: u32 = @truncate(job.entries[0].id);
@@ -2601,6 +2638,7 @@ fn chatFullSettleThread(job: *app_state.ChatFullSettleJob) void {
         .tmux = std.mem.sliceTo(&job.key.tmux, 0),
         .cwd = std.mem.sliceTo(&job.key.cwd, 0),
         .texts = texts[0..count],
+        .message_ids = identities[0..count],
         .after_ms = job.after_ms,
     }, .{}) catch return;
     defer a.free(query);

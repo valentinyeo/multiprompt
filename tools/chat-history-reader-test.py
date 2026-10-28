@@ -2890,5 +2890,18 @@ class HeldQueueTest(unittest.TestCase):
         self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['target'])
 
 
+    def test_offline_reconciliation_cannot_borrow_a_matching_message(self):
+        self.enqueue('target', 1)
+        self.path.write_text(json.dumps(dict(type='user', message=dict(role='user', content='target'), timestamp='2026-10-28T20:00:00Z')) + '\n')
+        query = dict(id=7, tmux='term-1', texts=['target'], message_ids=['message-1'], after_ms=0)
+        with patch.object(reader, 'resolve_response_path', return_value=('claude', 'sid', self.path, None)):
+            wire = reader.settle_response(query)
+            self.assertEqual(json.loads(wire.splitlines()[1])['delivered_ms'], 0)
+            self.cancel('target', 1)
+            wire = reader.settle_response(query)
+            self.assertEqual(json.loads(wire.splitlines()[1])['delivered_ms'], 0)
+        self.send.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

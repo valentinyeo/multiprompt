@@ -48,6 +48,8 @@ pub const QueueItem = struct {
     sender: [64]u16 = @splat(0),
 };
 pub const Status = struct {
+    received: [20]u64 = @splat(0),
+    received_len: usize = 0,
     question: @import("chat_options.zig").Prompt = .{},
     queue: [QUEUE_MAX]QueueItem = @splat(.{}),
     queue_len: usize = 0,
@@ -150,12 +152,21 @@ fn fillQueue(result: *Status, items: ?[]const std.json.Value, sent: bool) void {
 pub fn parseStatus(line: []const u8) ?Parsed {
     if (std.mem.indexOf(u8, line, "\"status\"") == null) return null;
     const WireTodo = struct { text: []const u8 = "", status: []const u8 = "pending" };
-    const WireStatus = struct { role: []const u8, question: ?@import("chat_options.zig").WirePrompt = null, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const std.json.Value = null, sent: ?[]const std.json.Value = null, draft: ?[]const u8 = null };
+    const WireStatus = struct { received: ?[]const []const u8 = null, role: []const u8, question: ?@import("chat_options.zig").WirePrompt = null, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const std.json.Value = null, sent: ?[]const std.json.Value = null, draft: ?[]const u8 = null };
     const parsed = std.json.parseFromSlice(WireStatus, std.heap.page_allocator, line, .{ .ignore_unknown_fields = true }) catch return null;
     defer parsed.deinit();
     const value = parsed.value;
     if (!std.mem.eql(u8, value.role, "status")) return null;
     var result: Status = .{};
+    if (value.received) |identities| {
+        for (identities) |identity| {
+            if (result.received_len == result.received.len) break;
+            if (!std.mem.startsWith(u8, identity, "desktop-")) continue;
+            const number = std.fmt.parseInt(u64, identity[8..], 16) catch continue;
+            result.received[result.received_len] = number;
+            result.received_len += 1;
+        }
+    }
     if (value.question) |question| result.question = @import("chat_options.zig").Prompt.fromWire(question);
     result.model_len = statusText(&result.model, value.model);
     result.percent_left = if (value.percent_left) |left| @min(left, 100) else null;
@@ -798,4 +809,10 @@ test "IGSH-1030 labels match Android and disclosure identity ignores buffer move
     after.source_offset = 1;
     try std.testing.expect(noteKey(before, w("body")) != noteKey(after, w("xxbody")));
     try std.testing.expect(!before.note_open);
+}
+
+test "IGSH-1010 host receipts keep exact identities and reject other clients" {
+    const parsed = parseStatus("{\"role\":\"status\",\"received\":[\"desktop-123\",\"proof-123\",\"desktop-invalid\",\"desktop-456\"]}").?;
+    try std.testing.expectEqual(@as(usize, 2), parsed.status.received_len);
+    try std.testing.expectEqualSlices(u64, &.{ 0x123, 0x456 }, parsed.status.received[0..parsed.status.received_len]);
 }

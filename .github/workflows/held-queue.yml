@@ -1,0 +1,63 @@
+name: Held message cancellation
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_ref:
+        description: Optional desktop source control revision
+        type: string
+        default: ''
+      companion_ref:
+        description: Android source revision
+        type: string
+        default: main
+      expected_red:
+        description: Require the original missing cancellation boundary
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [desktop, android]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: valentinyeo/multiprompt-android
+          ref: ${{ inputs.companion_ref }}
+          path: companion
+      - name: Prepare real terminal fixture
+        env:
+          APP_REF: ${{ inputs.app_ref }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y tmux
+          if [ -n "$APP_REF" ]; then [[ "$APP_REF" =~ ^[0-9a-f]{40}$ ]]; git show "$APP_REF:src/chat_history_reader.py" > "$RUNNER_TEMP/desktop-reader.py"; else cp src/chat_history_reader.py "$RUNNER_TEMP/desktop-reader.py"; fi
+      - name: Cancel held input after all readers close
+        env:
+          MP_QUEUE_READER_SOURCE: ${{ matrix.source == 'desktop' && format('{0}/desktop-reader.py', runner.temp) || 'companion/app/src/main/assets/chat_history_reader.py' }}
+          EVIDENCE: verification-evidence/${{ matrix.source }}
+          EXPECTED_RED: ${{ inputs.expected_red }}
+        run: |
+          mkdir -p "$EVIDENCE"
+          if [ "$EXPECTED_RED" = true ]; then
+            if python3 tools/held-queue-proof.py > "$EVIDENCE/control.log" 2>&1; then cat "$EVIDENCE/control.log"; exit 1; fi
+            cat "$EVIDENCE/control.log"
+            grep -F CANCEL_BOUNDARY_MISSING "$EVIDENCE/control.log"
+          else
+            python3 tools/held-queue-proof.py
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: held-queue-${{ matrix.source }}
+          path: verification-evidence/

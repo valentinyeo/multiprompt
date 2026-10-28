@@ -3610,7 +3610,7 @@ fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void 
     _ = SetTextColor(hdc, customColorOr("text", themeConsoleFg()));
     const start = if (chat_reply.reference(e.text)) |r| r.body_start else 0;
     _ = chatFlowText(hdc, e.text[start..], text_rc, false, true, null, offset + start, null, null, true);
-    if (e.state == .delivered and e.delivery_watch.removed_ms == 0) chatDimQueuedBubble(hdc, bubble);
+    if (e.state == .delivered and !e.host_confirmed and e.delivery_watch.removed_ms == 0) chatDimQueuedBubble(hdc, bubble);
     chatPaintEchoStatus(hdc, e, chatStatusRowRect(bubble));
     if (!app_state.clean_chat and actions.send_again) {
         const old = SelectObject(hdc, chatMetadataFont());
@@ -4958,7 +4958,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     if (chatHistoryEntry(reaction_identity)) |entry| reaction_sid = entry.history.sid;
     const reaction_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
     const reaction_reference = if (block_at) |index| app_state.g_chat_blocks[index].reaction_reference else 0;
-    const waiting = if (echo_index) |ei| chat_echo.cancellable(app_state.g_chat_outbox.items[ei].state, app_state.g_chat_outbox.items[ei].delivery_watch.removed_ms) else false;
+    const waiting = if (echo_index) |ei| !app_state.g_chat_outbox.items[ei].host_confirmed and chat_echo.cancellable(app_state.g_chat_outbox.items[ei].state, app_state.g_chat_outbox.items[ei].delivery_watch.removed_ms) else false;
     var items = chatContextMenuItems(keyboard_block == null and chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions, waiting);
     if (block_at) |index| {
         const role = app_state.g_chat_blocks[index].role;
@@ -5669,7 +5669,7 @@ test "IGSH-1010 a message waiting in Claude's queue gets Cancel after Reply and 
 fn chatCancelQueuedFromMenu(id: u64) void {
     const ei = chatOutboxIndexById(id) orelse return;
     const entry = app_state.g_chat_outbox.items[ei];
-    if (!chat_echo.cancellable(entry.state, entry.delivery_watch.removed_ms)) return;
+    if (entry.host_confirmed or !chat_echo.cancellable(entry.state, entry.delivery_watch.removed_ms)) return;
     if (!@import("chat_send.zig").chatCancelQueued(app_state.active_shell, id, entry.text, entry.anchor.sent_ms, entry.queue_id)) {
         showHeaderNoticeAscii("Could not cancel the message; try again", 3500, true);
     }
