@@ -210,3 +210,32 @@ test('idle sampling discards ten warmup polls after painted selection before tak
   assert.ok(painted >= 0 && warmup > painted && start > warmup && measure > start);
   assert.match(driver.slice(warmup, start), /Count -ge 10/);
 });
+
+
+test('snapshot reads retry missing and partial live writes before returning valid state', { skip: process.platform !== 'win32' }, () => {
+  const file = new URL('./switch-performance.ps1', import.meta.url);
+  assert.ok(fs.existsSync(file), 'The real-window performance driver must ship');
+  const driver = fs.readFileSync(file, 'utf8');
+  const reader = driver.slice(driver.indexOf('function Wait-For('), driver.indexOf('$result ='));
+  const script = String.raw`
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$app = $null
+$settings = 'unused'
+$script:reads = 0
+function Get-Content {
+    param([string]$Path, [switch]$Raw)
+    $script:reads++
+    if ($script:reads -eq 1) { throw [IO.FileNotFoundException]::new('snapshot replacement') }
+    if ($script:reads -eq 2) { return '{' }
+    if ($script:reads -eq 3) { return '{}' }
+    return '{"tabs":[{},{}],"active_tab":1}'
+}
+` + reader + String.raw`
+$snapshot = Session
+@{ attempts=$script:reads; active=$snapshot.active_tab; tabs=@($snapshot.tabs).Count } | ConvertTo-Json -Compress
+`;
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), { attempts: 4, active: 1, tabs: 2 });
+});

@@ -40,7 +40,14 @@ function Wait-For([string]$Name, [scriptblock]$Check, [int]$Seconds = 120) {
     } while ($timer.Elapsed.TotalSeconds -lt $Seconds)
     throw "Timed out: $Name"
 }
-function Session { Get-Content "$settings/session.json" -Raw | ConvertFrom-Json }
+function Session {
+    Wait-For 'readable session snapshot' {
+        try {
+            $snapshot = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+            if ($null -ne $snapshot -and $null -ne $snapshot.PSObject.Properties['tabs'] -and $null -ne $snapshot.PSObject.Properties['active_tab']) { return $snapshot }
+        } catch { return $false }
+    }
+}
 $result = @{ revision=$Revision; switches=@(); idleUs=@() }
 try {
     & python "$PSScriptRoot/switch-performance-fixture.py" $profile "$(Split-Path $Exe)/ssh.exe"
