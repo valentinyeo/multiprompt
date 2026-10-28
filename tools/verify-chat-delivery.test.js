@@ -1019,28 +1019,27 @@ print('WINDOWS_NOTIFICATION_BOUNDARY_OK')
 });
 
 
-test('retained-history recovery delivers wheel input to the verified focused HWND', () => {
+test('retained-history recovery targets the owned HWND without stealing typing focus', () => {
   const start = drive.indexOf('function Retention-Top {');
   const end = drive.indexOf('\nfunction Assert-Retention', start);
   const recovery = drive.slice(start, end);
   assert.ok(start >= 0 && end > start);
-  assert.match(recovery, /Wait-For 'retained transcript keyboard focus'/);
-  assert.match(recovery, /::Focus\(\$main\)\[1\] -eq \$transcript.ToInt64\(\)/);
-  assert.match(recovery, /input='focused transcript HWND wheel'/);
-  assert.match(recovery, /::WheelFocusedTranscript\(\$main, \$app.Id, \$transcript, 30000\)/);
+  assert.doesNotMatch(recovery, /FocusOwnedWindow|::Focus\(/);
+  assert.match(recovery, /input='owned transcript HWND wheel'/);
+  assert.match(recovery, /::WheelOwnedTranscriptMessage\(\$main, \$app.Id, \$transcript, 30000\)/);
   assert.match(recovery, /\$position\.scroll -eq 0/);
   const desktop = read('tools/verify-chat-delivery/desktop.cs');
-  const first = desktop.indexOf('    public static void WheelFocusedTranscript(');
+  const first = desktop.indexOf('    public static void WheelOwnedTranscriptMessage(');
   const last = desktop.indexOf('    public static void PressOwnedTranscript(', first);
   const wheel = desktop.slice(first, last);
   assert.ok(first >= 0 && last > first);
-  for (const guard of ['Owner(main) != pid', 'GetForegroundWindow() != main', 'Owner(transcript) != pid', '!IsChild(main, transcript)', 'Class(transcript) != "ZigShellChatTranscript"', '!IsWindowVisible(transcript)', 'Focus(main)[1] != transcript.ToInt64()']) assert.ok(wheel.includes(guard), guard);
+  for (const guard of ['Owner(main) != pid', 'GetForegroundWindow() != main', 'Owner(transcript) != pid', '!IsChild(main, transcript)', 'Class(transcript) != "ZigShellChatTranscript"', '!IsWindowVisible(transcript)']) assert.ok(wheel.includes(guard), guard);
   assert.match(wheel, /SendWheelMessage\(transcript, 0x020A,/);
   assert.match(wheel, /delta < short.MinValue/);
   assert.match(wheel, /delta > short.MaxValue/);
   assert.match(wheel, /delta % 120 != 0/);
   assert.match(wheel, /== IntPtr.Zero\) throw/);
-  assert.doesNotMatch(wheel, /SendInput/);
+  assert.doesNotMatch(wheel, /SendInput|Focus\(/);
 });
 
 test('remote appended-message receipt keeps the request window across delayed font logs', () => {
@@ -1102,13 +1101,12 @@ test('IGSH-1063 question proof selects the saved AMOLED theme and supports publi
   assert.match(adapter, /tag: \$\{\{ github\.event\.client_payload\.tag \|\| '' \}\}/);
 });
 
-test('Doctor waits for visible versioned UIA state after native tab transitions without accepting another process', () => {
+test('failed window identity retains observed fields and crash reports without weakening Doctor', () => {
   const doctor = drive.slice(drive.indexOf('function Doctor('), drive.indexOf('function Press('));
-  assert.match(doctor, /Wait-For 'visible versioned owned app' \{/);
-  assert.match(doctor, /\$element = \[System.Windows.Automation.AutomationElement\]::FromHandle\(\$main\)/);
-  assert.match(doctor, /-not \$element.Current.IsOffscreen -and \$element.Current.ProcessId -eq \$app.Id -and \$title -match/);
   assert.match(doctor, /Save .*IsOffscreen.*ProcessId.*title.*doctor-window.json/);
+  assert.match(doctor, /\$element.Current.IsOffscreen -or \$element.Current.ProcessId -ne \$app.Id -or \$title -notmatch/);
   assert.match(doctor, /throw 'Doctor: visible versioned UI Automation identity missing'/);
   assert.match(doctor, /Owner\(\$main\) -ne \$app.Id/);
   assert.match(doctor, /\$app.HasExited -or \$app.Path -ne \$Exe -or \(Get-FileHash \$Exe -Algorithm SHA256\).Hash -ne \$ExpectedHash/);
+  assert.match(drive, /if \(Test-Path "\$settings\/crashes"\) \{/);
 });

@@ -92,15 +92,12 @@ function Doctor([bool]$Chat = $false) {
     $app.Refresh()
     if ($app.HasExited -or $app.Path -ne $Exe -or (Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Doctor: executable identity mismatch' }
     if ([ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Class($main) -ne 'ZigShell') { throw 'Doctor: owned main HWND missing' }
-    try {
-        $element = Wait-For 'visible versioned owned app' {
-            $element = [System.Windows.Automation.AutomationElement]::FromHandle($main)
-            $title = $element.Current.Name
-            if (-not $element.Current.IsOffscreen -and $element.Current.ProcessId -eq $app.Id -and $title -match ('multiprompt v' + [regex]::Escape($ExpectedVersion) + '(?:\s|$)')) { return $element }
-            Save @{offscreen=$element.Current.IsOffscreen; pid=$element.Current.ProcessId; title=$title; hwnd=$main.ToInt64()} "$caseDir/doctor-window.json"
-        } 10
-    } catch { throw 'Doctor: visible versioned UI Automation identity missing' }
+    $element = [System.Windows.Automation.AutomationElement]::FromHandle($main)
     $title = $element.Current.Name
+    if ($element.Current.IsOffscreen -or $element.Current.ProcessId -ne $app.Id -or $title -notmatch ('multiprompt v' + [regex]::Escape($ExpectedVersion) + '(?:\s|$)')) {
+        Save @{offscreen=$element.Current.IsOffscreen; pid=$element.Current.ProcessId; title=$title; hwnd=$main.ToInt64()} "$caseDir/doctor-window.json"
+        throw 'Doctor: visible versioned UI Automation identity missing'
+    }
     $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
     if (@($published.shells).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 3 }).Count -ne 1 -or
         ($expectedShells -eq 2 -and @($published.shells | Where-Object { $_.kind -eq 0 }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not published' }
@@ -366,16 +363,11 @@ function Retention-Top {
     $rows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
     if ($rows.Count -ne 1) { throw 'Retained transcript ownership missing' }
     $transcript = [IntPtr]$rows[0].Current.NativeWindowHandle
-    [void](Wait-For 'retained transcript keyboard focus' {
-        [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $transcript) -and
-            [ChatDeliveryDesktop]::Focus($main)[1] -eq $transcript.ToInt64()
-    })
     [void](Wait-For 'restore first message after the proof copy moved selection to the bottom' {
         $position = Divider-State
         if ($position -and $position.scroll -eq 0) { return $true }
-        [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $transcript)
-        $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='focused transcript HWND wheel'; hwnd=$transcript.ToInt64(); delta=30000})
-        [ChatDeliveryDesktop]::WheelFocusedTranscript($main, $app.Id, $transcript, 30000)
+        $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='owned transcript HWND wheel'; hwnd=$transcript.ToInt64(); delta=30000})
+        [ChatDeliveryDesktop]::WheelOwnedTranscriptMessage($main, $app.Id, $transcript, 30000)
         $false
     })
 }
@@ -1135,7 +1127,7 @@ foreach ($plan in $plans) {
                 if (Test-Path $source) { Get-Content $source | Add-Content "$Evidence/$file" }
             }
             if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$caseDir/session-after.json" }
-            if ($isReply -and (Test-Path "$settings/crashes")) {
+            if (Test-Path "$settings/crashes") {
                 New-Item -ItemType Directory -Force "$caseDir/crashes" | Out-Null
                 Copy-Item "$settings/crashes/*.txt" "$caseDir/crashes/" -ErrorAction SilentlyContinue
             }
