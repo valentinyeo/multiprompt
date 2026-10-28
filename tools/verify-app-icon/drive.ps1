@@ -100,7 +100,7 @@ function Save-Icon($Handle, [string]$Name) {
 }
 
 function Get-OwnedProcessIds {
-    @(Get-Process | Where-Object { $_.Path -and ($_.Path -ieq $Exe) } | ForEach-Object { [uint32]$_.Id })
+    @(Get-Process | Where-Object { $path = try { $_.Path } catch { $null }; $path -and ($path -ieq $Exe) } | ForEach-Object { [uint32]$_.Id })
 }
 
 $maxDifference = 8.0
