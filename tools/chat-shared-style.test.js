@@ -43,6 +43,9 @@ test('received messages use one below-message panel with real request IDs', () =
   assert.match(menu, /ReaderOutline/);
   assert.match(menu, /ReaderRaised/);
   assert.match(menu, /anchor.bottom \+ scaled\(6\)/);
+  assert.match(menu, /0x0205 => return 0/);
+  assert.match(menu, /std\.meta\.eql\(previous, point\)/);
+  assert.match(menu, /stationary mouse messages preserve keyboard action selection/);
 });
 
 test('pull requests run reaction proof instead of the appearance shortcut', () => {
@@ -56,7 +59,7 @@ test('pull requests run reaction proof instead of the appearance shortcut', () =
 
 test('branch proof uses the full proposed change and installs the regression compiler', () => {
   const tests = fs.readFileSync('.github/workflows/test.yml', 'utf8');
-  assert.match(tests, /base: \$\{\{ github\.event\.pull_request\.base\.sha \|\| \(github\.ref != 'refs\/heads\/master' && 'origin\/master'\)/);
+  assert.match(tests, /base: \$\{\{ github\.event\.pull_request\.base\.sha \|\| \(github\.ref == 'refs\/heads\/master'[^\n]+\|\| 'origin\/master'/);
   const red = fs.readFileSync('.github/workflows/check-red-run.yml', 'utf8');
   assert.ok(red.indexOf('name: Install Zig 0.16.0') >= 0);
   assert.ok(red.indexOf('name: Install Zig 0.16.0') < red.indexOf('name: Require changed tests'));
