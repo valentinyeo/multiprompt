@@ -372,6 +372,8 @@ jobs:
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/control.ps1", [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count) { throw ($errors | Out-String) }
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          & tools/split-feature-controls.ps1 -Path "$pwd/.claude/skills/verify-multiprompt/control.ps1" -Output "$pwd/evidence/control-ast.json"
           if ($env:FEATURE -eq 'chat-options') {
             [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/chat-options.ps1", [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { throw ($errors | Out-String) }

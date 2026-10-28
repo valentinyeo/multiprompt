@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$driver = Join-Path $PSScriptRoot '../.claude/skills/verify-multiprompt/control.ps1'
+$driver = Join-Path $PSScriptRoot '../.claude/skills/verify-multiprompt/control-library.ps1'
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($driver, [ref]$tokens, [ref]$errors)

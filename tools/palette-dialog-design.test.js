@@ -1,9 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8'));
 
 const palette = () => read('src/sidebar.zig').split('if (app_state.g_search_active) {')[1].split('if (app_state.g_shortcuts_active)')[0];
 

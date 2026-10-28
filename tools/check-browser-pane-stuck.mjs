@@ -3,11 +3,14 @@ import { discoverFeatures } from './verify-features.cjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import appSource from './app-source.js';
+const { readControlSource } = appSource;
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 const directory = '.claude/skills/verify-multiprompt';
-const driver = read(`${directory}/control.ps1`);
+const driver = readControlSource().replace(/\r\n/g, '\n');
 const workflow = read('.github/workflows/verify.yml');
 const map = read(`${directory}/features/browser-pane-stuck.md`);
 
