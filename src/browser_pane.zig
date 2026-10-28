@@ -3173,7 +3173,8 @@ pub fn snippetFormAnchoredBesideBrowser() bool {
 }
 
 pub fn browserChromeHiddenForOverlay() bool {
-    return app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_inbox_active or app_state.g_all_sessions_active or app_state.g_url_picker_active or
+    return @import("settings_panel.zig").isOpen() or
+        app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_inbox_active or app_state.g_all_sessions_active or app_state.g_url_picker_active or
         (app_state.g_snippet_create_active and !snippetFormAnchoredBesideBrowser()) or
         (app_state.g_search_active and !paletteAnchoredBesideBrowser());
 }

@@ -362,7 +362,7 @@ function assertsDispatchOnly(source) {
 }
 
 test('IGSH-1033 master smoke stays small while release candidates retain feature-owned coverage', () => {
-  const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
+  const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'settings-panel', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
   function contract(source) {
     assert.match(source, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083, ceo\/IGSH-1079, ceo\/IGSH-1033\]\n  workflow_dispatch:/m);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), featureMatrix(source).pr);

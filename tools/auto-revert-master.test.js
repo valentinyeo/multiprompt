@@ -565,6 +565,7 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   assert.doesNotMatch(verify, /github.event_name == 'push' \|\| inputs.feature == 'all'/);
   const matrices = [featureMatrix(verify).pr, featureMatrix(verify).full];
   assert.ok(matrices[1].length >= 21);
+  assert.ok(matrices[1].includes('settings-panel'));
   assert.ok(matrices[1].includes('chat-dictation'));
   assert.ok(matrices[1].includes('tmux-binding'));
   assert.ok(matrices[1].includes('chat-send-latency'));

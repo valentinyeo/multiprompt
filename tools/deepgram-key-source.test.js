@@ -43,12 +43,14 @@ test("IGSH-540: readDeepgramApiKey reads only the saved user variable", () => {
   assert.doesNotMatch(body, /GetEnvironmentVariable/);
 });
 
-test("IGSH-540: DEEPGRAM_API_KEY is only named by readDeepgramApiKey", () => {
+test("IGSH-540: DEEPGRAM_API_KEY is only named by its registry reader and writer", () => {
   for (const file of zigFiles(srcDir)) {
     const text = fs.readFileSync(file, "utf8");
     const reads = [...text.matchAll(/\("DEEPGRAM_API_KEY"/g)].length;
     if (path.basename(file) === "voice.zig") {
-      assert.strictEqual(reads, 1, "voice.zig must read DEEPGRAM_API_KEY in one place");
+      assert.strictEqual(reads, 2, "voice.zig owns the single registry reader and writer");
+      assert.match(functionBody(text, "saveDeepgramApiKey"), /RegSetValueExW\(environment, L\("DEEPGRAM_API_KEY"\)/);
+      assert.doesNotMatch(functionBody(text, "saveDeepgramApiKey"), /GetEnvironmentVariable|SetEnvironmentVariable/);
       assert.match(functionBody(text, "readDeepgramApiKey"), /\("DEEPGRAM_API_KEY"/);
     } else {
       assert.strictEqual(reads, 0, `${path.relative(srcDir, file)} reads DEEPGRAM_API_KEY directly`);
