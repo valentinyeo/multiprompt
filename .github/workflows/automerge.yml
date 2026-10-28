@@ -45,7 +45,7 @@ jobs:
       - name: Record checked out head
         run: git rev-parse HEAD
       - name: Prove regression on merge-base source
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && github.ref_name != github.event.repository.default_branch
         run: node tools/check-red-run.mjs origin/master HEAD
       - name: Check admission regressions before manual inspection
         if: github.event_name == 'workflow_dispatch'

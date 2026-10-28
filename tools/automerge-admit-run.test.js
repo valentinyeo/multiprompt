@@ -291,3 +291,7 @@ for (const [login, verdict] of [['software-factory-runners', 'merge'], ['other-a
     assert.ok(result.stdout.includes(verdict), result.stdout);
   });
 }
+
+test('manual emergency inspection on master does not require a new source diff', () => {
+  assert.match(workflow, /name: Prove regression on merge-base source\n        if: github.event_name == 'workflow_dispatch' && github.ref_name != github.event.repository.default_branch/);
+});
