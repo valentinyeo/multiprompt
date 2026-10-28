@@ -60,6 +60,20 @@ jobs:
           }
           "SPEED_HEAD=$((git rev-parse HEAD).Trim())" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "SPEED_BASE=$base" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Build diagnostic baseline separately from measured builds
+        shell: pwsh
+        run: |
+          git worktree add --detach profile "$env:SPEED_BASE"
+          if ($LASTEXITCODE -ne 0) { throw 'Profile checkout failed' }
+          node tools/switch-performance.mjs instrument profile --profile
+          if ($LASTEXITCODE -ne 0) { throw 'Profile instrumentation failed' }
+          Push-Location profile
+          try { zig build; if ($LASTEXITCODE -ne 0) { throw 'Profile build failed' } } finally { Pop-Location }
+          Copy-Item baseline/zig-out/bin/ssh.exe profile/zig-out/bin/ssh.exe
+          Copy-Item baseline/zig-out/bin/tmux.exe profile/zig-out/bin/tmux.exe
+      - name: Diagnose baseline idle stages
+        shell: powershell
+        run: ./tools/switch-performance.ps1 -Exe profile/zig-out/bin/multiprompt.exe -Evidence evidence/profile -Revision "$env:SPEED_BASE"
       - name: Repeat alternating baseline and candidate workloads
         shell: powershell
         run: |
@@ -74,17 +88,9 @@ jobs:
             node tools/switch-performance.mjs report "evidence/run-$i/base/samples.json" "evidence/run-$i/head/samples.json"
             if ($LASTEXITCODE -ne 0) { Write-Host "Run $i exceeded unchanged limits; retaining every sample" }
           }
-      - name: Build diagnostic baseline separately from measured builds
-        shell: pwsh
-        run: |
-          git -C baseline restore src/main.zig
-          node tools/switch-performance.mjs instrument baseline --profile
-          if ($LASTEXITCODE -ne 0) { throw 'Profile instrumentation failed' }
-          Push-Location baseline
-          try { zig build; if ($LASTEXITCODE -ne 0) { throw 'Profile build failed' } } finally { Pop-Location }
-      - name: Diagnose baseline idle stages
-        shell: powershell
-        run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multiprompt.exe -Evidence evidence/profile -Revision "$env:SPEED_BASE"
+          $global:LASTEXITCODE = 0
+      - name: Require all five quiet-observer workloads
+        run: node tools/switch-performance.mjs repeated evidence
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -92,5 +98,3 @@ jobs:
           path: evidence
           if-no-files-found: error
           retention-days: 7
-      - name: Require all five quiet-observer workloads
-        run: node tools/switch-performance.mjs repeated evidence

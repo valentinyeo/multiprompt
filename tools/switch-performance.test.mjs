@@ -248,6 +248,7 @@ $snapshot = Session
 
 test('repeated observer proof rejects dropped runs, changed executables and sustained slow idle', async () => {
   const { assessRepeated } = await oracle();
+  assert.equal(typeof assessRepeated, 'function', 'Repeated observer accounting must ship');
   const sample = poll => ({ ...workload(), sha256: 'a'.repeat(64), observerPollMs: poll, observerIdleCpuMs: poll === 25 ? 1000 : 50, appIdleCpuMs: 100, idleWallMs: 45000 });
   const pairs = () => Array.from({ length: 5 }, () => ({ base: sample(25), head: sample(750) }));
   assert.equal(assessRepeated(pairs()).length, 5);
