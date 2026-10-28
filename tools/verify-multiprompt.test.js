@@ -109,10 +109,11 @@ test('IGSH-1113 required appearance verification cannot be filtered out for any 
   assert.ok(featureMatrix(workflow).pr.includes('appearance'));
 });
 
-test('release tags reuse master verification instead of starting another full Windows matrix', () => {
+test('release tags reuse master verification instead of starting another full Windows matrix', async () => {
   const push = workflow.match(/^  push:\r?\n((?:    [^\n]*\r?\n)+)/m);
   assert.ok(push, 'master pushes still trigger full verification');
-  assert.match(push[1], /^    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083, ceo\/IGSH-1079, ceo\/IGSH-1033\]\r?$/m);
+  const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
+  verifyPushBranches(workflow);
   assert.ok(workflow.includes(`github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck'))`), 'recovery branch runs only its failing browser journey');
   assert.doesNotMatch(push[1], /^    tags(?:-ignore)?:/m, 'release tags must not duplicate the tested master matrix');
 });
@@ -448,6 +449,10 @@ Refuses { Press @(0x41) 'lost before chord' }
 Reset
 $script:loseOnRecord = $true
 Refuses { Type-Text 'lost before text' }
+Reset
+[VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 2
+Type-Text 'recovered text'
+Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 2) 'Text did not recover owned foreground'
 Reset
 Type-Text 'owned text'
 Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 0) 'Text repaired focus or failed to inject'
