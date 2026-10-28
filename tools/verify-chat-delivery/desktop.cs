@@ -178,5 +178,17 @@ public static class ChatDeliveryDesktop {
         keys.Add(mapped & 0xff);
         Chord(keys.ToArray());
     }
+    public static void Text(string text) {
+        var inputs = new Input[text.Length * 2];
+        for (int i = 0; i < text.Length; i++) {
+            inputs[2 * i].Type = 1;
+            inputs[2 * i].Data.Keyboard.Scan = text[i];
+            inputs[2 * i].Data.Keyboard.Flags = 4;
+            inputs[2 * i + 1].Type = 1;
+            inputs[2 * i + 1].Data.Keyboard.Scan = text[i];
+            inputs[2 * i + 1].Data.Keyboard.Flags = 6;
+        }
+        if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length) throw new InvalidOperationException("Unicode text SendInput failed");
+    }
     public static void Type(ushort key) { Chord(new[] { (int)key }); }
 }

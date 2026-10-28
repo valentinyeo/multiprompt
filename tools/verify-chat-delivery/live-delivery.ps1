@@ -47,7 +47,7 @@ foreach ($round in 1..$roundCount) {
         Press @(0x11, 0x4B) 'Ctrl+K: select live conversation'
         [void](Wait-For 'live palette ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
         $query = 'chat view select all'
-        foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+        [ChatDeliveryDesktop]::Text($query)
         [void](Wait-For 'live select-all command ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=\d+ target=6364(?:\s|$)') })
         Press @(0x0D) 'Enter: select live conversation'
         Press @(0x11, 0x43) 'Ctrl+C: copy rendered live conversation'

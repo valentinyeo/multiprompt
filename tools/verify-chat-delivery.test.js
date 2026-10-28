@@ -1216,3 +1216,14 @@ test('full-history continuity advances a real transcript stream without adding v
 test('native crash evidence retains the minidump beside its text report', () => {
   assert.match(drive, /Copy-Item "\$settings\/crashes\/\*\.dmp" "\$caseDir\/crashes\/"/);
 });
+
+
+test('live palette queries use one ordered Unicode input batch instead of racing translated keys', () => {
+  const desktop = read('tools/verify-chat-delivery/desktop.cs');
+  const live = read('tools/verify-chat-delivery/live-delivery.ps1');
+  assert.match(desktop, /public static void Text\(string text\)/);
+  assert.match(desktop, /inputs\[2 \* i\]\.Data\.Keyboard\.Scan = text\[i\]/);
+  assert.match(desktop, /inputs\[2 \* i \+ 1\]\.Data\.Keyboard\.Flags = 6/);
+  assert.match(live, /\[ChatDeliveryDesktop\]::Text\(\$query\)/);
+  assert.doesNotMatch(live, /foreach \(\$letter in \$query\.ToCharArray\(\)\)/);
+});

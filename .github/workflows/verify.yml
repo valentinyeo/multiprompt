@@ -801,6 +801,7 @@ jobs:
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
       - name: Analyze native continuity crash
+        timeout-minutes: 10
         if: always() && inputs.long_chat_proof
         shell: pwsh
         run: |
