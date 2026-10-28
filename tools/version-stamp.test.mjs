@@ -556,3 +556,33 @@ test('IGSH-1090 fragment gate rejects filler and engineering notes, not specific
     'The update card explains each change.',
   ]) assert.doesNotThrow(() => checkFragments({}, { [name]: line }, ['src/example.zig', name]));
 });
+
+test('IGSH-1095 Zig test-only repairs need no invented product note but runtime edits still do', t => {
+  const file = 'src/browser.zig';
+  const runtime = 'pub fn status() []const u8 { return "connected"; }\n';
+  const before = `${runtime}test "health" {\n    const state = "opening";\n    _ = state;\n}\n`;
+  const fixed = `${runtime}test "health" {\n    const text = "} test \\"quoted\\" {";\n    if (true) { _ = text; }\n}\n`;
+  const r = repo(t, { ...base(), [file]: before });
+  r.write({ [file]: fixed });
+  expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
+  for (const source of [
+    fixed.replace('return "connected"', 'return "opening"'),
+    fixed + 'pub const deadline = 90000;\n',
+    'pub const deadline = 90000;\n' + fixed,
+    fixed.replace('pub fn status()', 'pub fn changedStatus()'),
+    'pub const config = struct { test "nested" { unreachable; } };\n',
+  ]) {
+    r.write({ [file]: source });
+    const result = r.check(r.initial, r.commit());
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /App code changed/);
+  }
+  r.write({ [file]: `${runtime}test { const char = '}'; _ = char; }\n` });
+  expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
+  r.write({ [file]: runtime });
+  expectKind(r.check(r.initial, r.commit()), 'CODE', 0);
+  r.git('rm', file);
+  const deleted = r.check(r.initial, r.commit());
+  assert.equal(deleted.status, 1);
+  assert.match(deleted.stderr, /App code changed/);
+});

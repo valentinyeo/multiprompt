@@ -3504,7 +3504,12 @@ test "IGSH-523 docked pane without an extension never resolves on health ticks" 
     app_state.shells[0].browser_bind_nonce[0] = 'X';
     app_state.shells[0].browser_bind_nonce_len = 1;
     for (0..5) |_| {
+        var message: @import("win32.zig").MSG = undefined;
+        _ = @import("win32.zig").PeekMessageW(&message, null, 0, 0, 0);
+        try std.testing.expectEqual(@as(BOOL, 0), IsHungAppWindow(hwnd));
         browserHealthTick();
+        try std.testing.expectEqual(hwnd, app_state.shells[0].browser_hwnd);
+        try std.testing.expectEqual(@as(u8, 0), app_state.shells[0].browser_health_misses);
         for (app_state.g_browser_resolve_inflight) |entry| try std.testing.expectEqual(@as(u32, 0), entry.shell_id);
         try std.testing.expectEqual(@as(i64, 0), app_state.shells[0].browser_window_id);
         try std.testing.expectEqualStrings("connected", browserConnectionState(&app_state.shells[0]));

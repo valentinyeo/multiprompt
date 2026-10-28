@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { tokenize } from './strip-comments.mjs';
 
 const mainPath = 'src/main.zig';
 const changelogPath = 'src/changelog.zig';
@@ -30,12 +31,37 @@ export function fragmentLines(file, text) {
   return lines;
 }
 
+function runtimeZigTokens(source) {
+  const tokens = tokenize(source, 'zig').tokens;
+  const result = [];
+  let depth = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    if (depth === 0 && tokens[i][0] === 'word' && tokens[i][1] === 'test') {
+      if (tokens[i + 1]?.[0] === 'string') i++;
+      if (tokens[++i]?.[1] !== '{') throw new Error('Invalid Zig test declaration');
+      let testDepth = 1;
+      while (testDepth && ++i < tokens.length) {
+        if (tokens[i][0] === 'code' && tokens[i][1] === '{') testDepth++;
+        if (tokens[i][0] === 'code' && tokens[i][1] === '}') testDepth--;
+      }
+      if (testDepth) throw new Error('Unclosed Zig test declaration');
+      continue;
+    }
+    if (tokens[i][0] === 'code' && tokens[i][1] === '{') depth++;
+    if (tokens[i][0] === 'code' && tokens[i][1] === '}') depth--;
+    result.push(tokens[i]);
+  }
+  return JSON.stringify(result);
+}
+
 export function checkFragments(base, head, changed) {
   for (const file of Object.keys(head).filter(file => file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
     const lines = fragmentLines(file, head[file]);
     if (changed.includes(file) && lines.some(line => !productChange(line))) throw new Error(`${file}: write a specific user-visible change; omit notes for checks, tests or pipeline work`);
   }
-  if (changed.some(file => file.startsWith('src/')) && !changed.some(file => !(file in base) && file in head && file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
+  const appChanged = changed.some(file => file.startsWith('src/') &&
+    (!file.endsWith('.zig') || !(file in base) || !(file in head) || runtimeZigTokens(base[file]) !== runtimeZigTokens(head[file])));
+  if (appChanged && !changed.some(file => !(file in base) && file in head && file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
     throw new Error('App code changed: add changelog.d/<TICKET>-<slug>.md with at least one plain product line');
   }
 }
@@ -151,7 +177,14 @@ function check(baseRev, headRev) {
     console.error(fixHint);
   }
   if (kind === 'CODE' && autoRevertBranch()) console.error('Changelog note not required on an auto-revert/ branch');
-  else if (kind === 'CODE') checkFragments(base, head, changed);
+  else if (kind === 'CODE') {
+    for (const file of changed.filter(file => file.startsWith('src/') && file.endsWith('.zig'))) {
+      for (const [tree, rev] of [[base, baseRev], [head, headRev]]) {
+        if (git(['ls-tree', '--name-only', rev, '--', file]).trim()) tree[file] = git(['show', `${rev}:${file}`]);
+      }
+    }
+    checkFragments(base, head, changed);
+  }
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `kind=${kind}\n`);
   console.log(kind);
   return kind === 'HAND_EDIT' ? 1 : 0;
