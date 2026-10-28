@@ -1,5 +1,7 @@
 # Chat focus
 
+Verify on: push
+
 ## Sub-features
 
 - A restored Chat View session starts with its typing box focused.

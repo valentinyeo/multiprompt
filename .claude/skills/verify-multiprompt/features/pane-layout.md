@@ -1,5 +1,7 @@
 # Pane layout
 
+Verify on: push
+
 ## Sub-features
 
 - Alt+Q keeps cycling browser ↔ chat/shell with no focus outline in any theme; the journey compares the exact pane margins between input-focused and browser-focused screenshots (IGSH-807).

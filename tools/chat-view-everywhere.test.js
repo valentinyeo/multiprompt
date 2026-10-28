@@ -1,7 +1,13 @@
 const { test } = require('node:test');
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const skill = '.claude/skills/verify-multiprompt/';
@@ -134,7 +140,7 @@ test('IGSH-820 native refused-action tests, maps and existing Windows journey ar
     'IGSH-820 pinned tab refuses workspace close atomically',
     'IGSH-820 pinned tab refuses Inbox archive',
   ]) assert.ok(main.includes(`test "${title}"`), title);
-  assert.match(workflow, /feature:.*fromJSON\('\[[^\n]*"chat-view-everywhere"/);
+  assert.ok(featureMatrix(workflow).full.includes('chat-view-everywhere'));
   assert.match(workflow, /if: \(env.FEATURE == 'chat-view' \|\| env.FEATURE == 'chat-view-everywhere'\) && env.RELEASE_TAG == ''(?:(?!\r?\n      - )[\s\S])*?zig build test-main/m);
   for (const name of ['chat-view-everywhere']) {
     assert.deepEqual(read(skill + `features/${name}.md`).match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);

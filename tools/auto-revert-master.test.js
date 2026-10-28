@@ -1,7 +1,13 @@
 const test = require('node:test');
+
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
 const { decide } = require('./auto-revert-master.js');
 
 const repository = 'valentinyeo/multiprompt';
@@ -554,10 +560,10 @@ test('auto-revert workflow grants contents and pull-request writes with the exis
 test('PR smoke and full master matrix stay wired without duplicate release-tag journeys', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
   const release = fs.readFileSync(`${__dirname}/../.github/workflows/release.yml`, 'utf8');
-  assert.match(verify, /pull_request' && fromJSON\('\["appearance"\]'\)/);
+  assert.ok(featureMatrix(verify).pr.includes('appearance'));
   assert.match(verify, /github.event_name == 'push' \|\| inputs.feature == 'all'/);
-  const matrices = [...verify.matchAll(/fromJSON\('(\[[^'\n]+\])'\)/g)].map(match => JSON.parse(match[1]));
-  assert.equal(matrices[1].length, 21);
+  const matrices = [featureMatrix(verify).pr, featureMatrix(verify).full];
+  assert.ok(matrices[1].length >= 21);
   assert.ok(matrices[1].includes('chat-dictation'));
   assert.ok(matrices[1].includes('tmux-binding'));
   assert.ok(matrices[1].includes('chat-send-latency'));
@@ -569,7 +575,7 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
-  assert.match(verify, /^  verify:\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
+  assert.match(verify, /^  verify:\n    needs: journeys\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
 
 test('controlled red proof requires the marker on appearance master pushes and excludes reverts', () => {
