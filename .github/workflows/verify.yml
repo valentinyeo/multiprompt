@@ -156,6 +156,8 @@ on:
       - tools/verify-multiprompt.test.js
       - tools/verify-features.cjs
       - tools/test-workflow-structure.test.mjs
+      - tools/chat-history-reader-test.py
+      - tools/check-red-run.mjs
       - tools/verify-workflow-branches.mjs
       - tools/chat-sync-audit.py
       - tools/chat-sync-audit.test.py

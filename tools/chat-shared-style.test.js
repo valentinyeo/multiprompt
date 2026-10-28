@@ -43,6 +43,7 @@ test('received messages use one below-message panel with real request IDs', () =
   assert.match(menu, /ReaderOutline/);
   assert.match(menu, /ReaderRaised/);
   assert.match(menu, /anchor.bottom \+ scaled\(6\)/);
+  assert.match(menu, /0x0205 => return 0/);
 });
 
 test('pull requests run reaction proof instead of the appearance shortcut', () => {

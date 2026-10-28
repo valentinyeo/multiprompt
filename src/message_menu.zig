@@ -97,7 +97,7 @@ pub fn paint(dc: w.HANDLE, items: []const Item, hover: ?usize, light: bool) void
     }
 }
 
-const State = struct { items: []const Item, hover: ?usize = null, selected: u32 = 0, open: bool = true, light: bool };
+const State = struct { items: []const Item, hover: ?usize = null, selected: u32 = 0, open: bool = true, close_message: w.UINT = 0, light: bool };
 var active: ?*State = null;
 var registered = false;
 
@@ -126,7 +126,9 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             state.open = false;
             return 0;
         },
+        0x0205 => return 0,
         w.WM_RBUTTONDOWN, w.WM_MOUSEWHEEL, 0x0215, 0x001F, w.WM_DESTROY => {
+            state.close_message = msg;
             state.open = false;
             _ = @import("focus.zig").PostMessageW(hwnd, 0, 0, 0);
             return 0;
@@ -158,7 +160,7 @@ pub fn track(owner: w.HANDLE, anchor: w.RECT, items: []const Item) u32 {
     _ = w.UpdateWindow(hwnd);
     _ = w.SetCapture(hwnd);
     defer _ = w.ReleaseCapture();
-    var message: w.MSG = undefined;
+    var message: w.MSG = std.mem.zeroes(w.MSG);
     while (state.open) {
         const status = w.GetMessageW(&message, null, 0, 0);
         if (status <= 0) {
@@ -166,6 +168,7 @@ pub fn track(owner: w.HANDLE, anchor: w.RECT, items: []const Item) u32 {
             return 0;
         }
         if (message.message == w.WM_KEYDOWN or message.message == 0x0104) {
+            state.close_message = message.message;
             switch (message.wParam) {
                 w.VK_ESCAPE => state.open = false,
                 0x0D, 0x20 => {
@@ -186,6 +189,8 @@ pub fn track(owner: w.HANDLE, anchor: w.RECT, items: []const Item) u32 {
         _ = w.TranslateMessage(&message);
         _ = w.DispatchMessageW(&message);
     }
+    var log: [128]u8 = undefined;
+    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "[chat] message panel closed msg={x} key={x} selected={d}", .{ state.close_message, message.wParam, state.selected }) catch "");
     return state.selected;
 }
 
