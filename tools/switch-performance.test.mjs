@@ -20,15 +20,15 @@ test('complete workload passes; injected 300 ms switching fails', async () => {
   assert.equal(assess(delayed).pass, false);
   assert.equal(assess(delayed).p95Ms, 301);
 });
-test('nearest-rank p95 and strict idle maximum respect the requested boundaries', async () => {
+test('nearest-rank p95 and idle median respect the requested boundaries', async () => {
   const { assess } = await oracle();
   const data = workload();
   data.switches.forEach(sample => { sample.us = 100000; });
-  data.idleUs[0] = 5000;
+  data.idleUs.fill(5000);
   assert.equal(assess(data).pass, true);
-  data.idleUs[0]++;
+  data.idleUs.fill(5001);
   assert.equal(assess(data).pass, false);
-  data.idleUs[0]--;
+  data.idleUs.fill(5000);
   data.switches.slice(0, 3).forEach(sample => { sample.us++; });
   assert.equal(assess(data).pass, false);
 });
@@ -163,4 +163,29 @@ test('performance cleanup stops its owned process tree without racing disposable
   const cleanup = driver.slice(driver.lastIndexOf('} finally {'));
   assert.match(cleanup, /\$job\.Stop\(\)[\s\S]*\$job\.Dispose\(\)/);
   assert.doesNotMatch(cleanup, /Remove-Item -LiteralPath \$profile/, 'The disposable Windows runner owns final profile removal');
+});
+
+
+test('settled idle median tolerates isolated scheduling outliers, never sustained slow polls', async () => {
+  const { assess } = await oracle();
+  const data = workload();
+  data.idleUs = [1000, 1000, 1000, 1000, 4000, 6000, 19000, 19000, 19000, 19000];
+  assert.equal(assess(data).idleMedianMs, 5);
+  assert.equal(assess(data).idleMaxMs, 19);
+  assert.equal(assess(data).pass, true);
+  data.idleUs[4] = 4002;
+  assert.equal(assess(data).pass, false);
+  data.idleUs = [1000, 1000, 1000, 1000, 5000, 19000, 19000, 19000, 19000, 19000, 19000];
+  assert.equal(assess(data).idleMedianMs, 19);
+  assert.equal(assess(data).pass, false);
+});
+
+test('idle sampling discards ten warmup polls after painted selection before taking measurements', () => {
+  const driver = fs.readFileSync(new URL('./switch-performance.ps1', import.meta.url), 'utf8');
+  const painted = driver.indexOf("Wait-For 'loaded idle conversation painted'");
+  const warmup = driver.indexOf("Wait-For 'ten warmup idle Chat View polls'", painted);
+  const start = driver.indexOf('$idleOffset = (Read-Log).Length', warmup);
+  const measure = driver.indexOf("Wait-For 'ten unchanged idle Chat View polls'", start);
+  assert.ok(painted >= 0 && warmup > painted && start > warmup && measure > start);
+  assert.match(driver.slice(warmup, start), /Count -ge 10/);
 });

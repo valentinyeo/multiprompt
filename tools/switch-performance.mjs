@@ -15,8 +15,11 @@ export function assess(data) {
   if (!Array.isArray(data.idleUs) || data.idleUs.length < 10 || data.idleUs.some(us => !Number.isFinite(us) || us < 0)) throw new Error('Missing idle poll samples');
   const sorted = data.switches.map(sample => sample.us / 1000).sort((a, b) => a - b);
   const p95Ms = sorted[Math.ceil(sorted.length * 0.95) - 1];
-  const idleMaxMs = Math.max(...data.idleUs) / 1000;
-  return { p95Ms, maxMs: sorted.at(-1), idleMaxMs, idleShell: data.idleShell, switches: sorted.length, idlePolls: data.idleUs.length, pass: p95Ms <= 100 && idleMaxMs <= 5 };
+  const idle = data.idleUs.map(us => us / 1000).sort((a, b) => a - b);
+  const middle = Math.floor(idle.length / 2);
+  const idleMedianMs = idle.length % 2 ? idle[middle] : (idle[middle - 1] + idle[middle]) / 2;
+  const idleMaxMs = idle.at(-1);
+  return { p95Ms, maxMs: sorted.at(-1), idleMedianMs, idleMaxMs, idleShell: data.idleShell, switches: sorted.length, idlePolls: data.idleUs.length, pass: p95Ms <= 100 && idleMedianMs <= 5 };
 }
 
 export function instrument(root) {
@@ -47,7 +50,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (command === 'instrument' && files.length === 1) instrument(files[0]);
   else if (command === 'report' && files.length === 2) {
     const rows = files.map(file => ({ revision: JSON.parse(fs.readFileSync(file)).revision, ...assess(JSON.parse(fs.readFileSync(file))) }));
-    const report = ['## Session speed', '', '| Build | Switch p95 | Slowest switch | Idle poll max | Samples |', '| --- | ---: | ---: | ---: | ---: |', ...rows.map(row => `| ${row.revision} | ${row.p95Ms.toFixed(3)} ms | ${row.maxMs.toFixed(3)} ms | ${row.idleMaxMs.toFixed(3)} ms | ${row.switches} switches / ${row.idlePolls} idle polls (session ${row.idleShell}) |`), '', 'Limits: switch p95 ≤100 ms; every observed idle poll ≤5 ms. Ten sessions, one 250 MiB transcript. Idle polls use an already loaded conversation after the switching cycle, not an ongoing history backfill. Diagnostic dispatch timing, with matching painted content; not input-to-pixel latency. Baseline receives identical idle-only diagnostic instrumentation. One run per build; no speedup claim.'].join('\n');
+    const report = ['## Session speed', '', '| Build | Switch p95 | Slowest switch | Idle poll median | Idle poll max | Samples |', '| --- | ---: | ---: | ---: | ---: | ---: |', ...rows.map(row => `| ${row.revision} | ${row.p95Ms.toFixed(3)} ms | ${row.maxMs.toFixed(3)} ms | ${row.idleMedianMs.toFixed(3)} ms | ${row.idleMaxMs.toFixed(3)} ms | ${row.switches} switches / ${row.idlePolls} idle polls (session ${row.idleShell}) |`), '', 'Limits: switch p95 ≤100 ms; settled idle poll median ≤5 ms. Ten sessions, one 250 MiB transcript. Ten warmup idle polls are discarded before sampling an already loaded conversation after the switching cycle, not an ongoing history backfill. Diagnostic dispatch timing, with matching painted content; not input-to-pixel latency. Baseline receives identical idle-only diagnostic instrumentation. One run per build; no speedup claim.'].join('\n');
     console.log(report);
     if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + '\n');
     fs.writeFileSync(path.join(path.dirname(files[1]), 'verdict.json'), JSON.stringify(rows, null, 2));

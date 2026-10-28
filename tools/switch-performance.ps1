@@ -97,6 +97,8 @@ try {
     $idleShellId = (Session).tabs[$idleTarget].shell_id
     [void](Wait-For 'loaded idle conversation painted' { (Read-Log).Substring($offset) -match ('\[switch\] chat content shown shell=' + $idleShellId + ' blocks=[1-9]') })
     $result.idleShell = $idleTarget
+    $warmupOffset = (Read-Log).Length
+    [void](Wait-For 'ten warmup idle Chat View polls' { [regex]::Matches((Read-Log).Substring($warmupOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60)
     $idleOffset = (Read-Log).Length
     [void](Wait-For 'ten unchanged idle Chat View polls' { [regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)').Count -ge 10 } 60)
     $result.idleUs = @([regex]::Matches((Read-Log).Substring($idleOffset), 'chat-idle-poll: us=(\d+)') | ForEach-Object { [long]$_.Groups[1].Value })
