@@ -4925,6 +4925,7 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
 }
 
 var g_hover_message: ?usize = null;
+var g_hover_point: ?POINT = null;
 
 fn chatMessageHoverAt(y: i32) ?usize {
     const index = chatTranscriptBlockAtPoint(y) orelse return null;
@@ -4936,9 +4937,7 @@ fn chatMessageHoverAt(y: i32) ?usize {
 fn chatHoverActionRect(index: usize) RECT {
     const run = chat_style.runBounds(app_state.g_chat_bubble_pos[0..app_state.g_chat_block_count], index);
     const bubble = app_state.g_chat_layout_rects[run.first];
-    var client = std.mem.zeroes(RECT);
-    chatViewClientRect(&client);
-    const left = @max(client.left, @min(app_state.g_chat_content_left + bubble.right + uiScaled(6), client.right - uiScaled(90)));
+    const left = @max(0, @min(app_state.g_chat_content_left + bubble.right + uiScaled(6), app_state.g_chat_layout_width - uiScaled(90)));
     return .{ .left = left, .top = bubble.top - app_state.g_chat_scroll_y, .right = left + uiScaled(84), .bottom = bubble.top - app_state.g_chat_scroll_y + uiScaled(28) };
 }
 
@@ -4950,17 +4949,12 @@ fn chatHoverActionAt(x: i32, y: i32) ?struct { index: usize, action: usize } {
 }
 
 fn chatPaintHoverActions(dc: HANDLE) void {
-    var point: POINT = undefined;
-    if (GetCursorPos(&point) == 0 or ScreenToClient(app_state.g_chat_transcript_hwnd, &point) == 0) return;
-    var client = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_chat_transcript_hwnd, &client);
-    if (!pointInRect(client, point.x, point.y)) return;
+    const point = g_hover_point orelse return;
     const index = chatMessageHoverAt(point.y) orelse return;
     const rc = chatHoverActionRect(index);
     fillRoundRectAA(dc, rc, uiScaled(8), if (app_state.g_light_theme) 0xeeeeee else 0x1f1f1f);
-    const font = @import("fonts.zig").messageMenuIconFont();
-    defer _ = DeleteObject(font);
-    const old = SelectObject(dc, font);
+    if (app_state.g_chat_rich_fonts[12] == null) app_state.g_chat_rich_fonts[12] = @import("fonts.zig").messageMenuIconFont();
+    const old = SelectObject(dc, app_state.g_chat_rich_fonts[12]);
     defer _ = SelectObject(dc, old);
     _ = SetBkMode(dc, TRANSPARENT);
     _ = SetTextColor(dc, if (app_state.g_light_theme) 0x444444 else 0x8a8a8a);
@@ -5342,6 +5336,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         WM_MOUSEMOVE => {
             if (chatTableMouseMove(hwnd, GET_X(lp))) return 0;
             if (chatScrollUiMouseMove(GET_Y(lp))) return 0;
+            g_hover_point = .{ .x = GET_X(lp), .y = GET_Y(lp) };
             const message_hover = chatMessageHoverAt(GET_Y(lp));
             if (message_hover != g_hover_message) {
                 g_hover_message = message_hover;
@@ -5376,6 +5371,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         0x02A3 => {
             g_hover_message = null;
+            g_hover_point = null;
             app_state.g_chat_hover_link = null;
             app_state.g_chat_hover_copy = null;
             app_state.g_chat_hover_image = false;
