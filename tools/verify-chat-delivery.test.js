@@ -1119,3 +1119,29 @@ test('failed window identity retains observed fields and crash reports without w
   assert.match(doctor, /\$app.HasExited -or \$app.Path -ne \$Exe -or \(Get-FileHash \$Exe -Algorithm SHA256\).Hash -ne \$ExpectedHash/);
   assert.match(drive, /if \(Test-Path "\$settings\/crashes"\) \{/);
 });
+
+
+test('IGSH-1055 removing the read anchor rotates source identity without truncating an open reader', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-anchor-rotation-'));
+  let fd;
+  try {
+    const transcript = path.join(dir, 'source.jsonl');
+    const kept = JSON.stringify({ message: { id: 'keep', content: 'retained message' } }) + '\n';
+    const removed = JSON.stringify({ message: { id: 'remove', content: 'known read anchor' } }) + '\n';
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ name: 'messages-only', transcript }));
+    fs.writeFileSync(transcript, removed + kept);
+    fd = fs.openSync(transcript, 'r');
+    const before = fs.statSync(transcript, { bigint: true }).ino;
+    execFileSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), 'shell', 'forget-message', 'remove'], {
+      env: { ...process.env, MP_VERIFY_STATE: dir }, encoding: 'utf8', timeout: 30000,
+    });
+    assert.equal(fs.readFileSync(transcript, 'utf8'), kept);
+    assert.notEqual(fs.statSync(transcript, { bigint: true }).ino, before, 'history reset requires a new source identity');
+    assert.equal(fs.readFileSync(fd, 'utf8'), removed + kept, 'open readers retain the previous complete source');
+    fs.appendFileSync(transcript, kept);
+    assert.equal(fs.readFileSync(transcript, 'utf8'), kept + kept);
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
