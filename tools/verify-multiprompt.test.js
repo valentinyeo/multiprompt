@@ -506,6 +506,16 @@ Write-Host 'IGSH-807 owned foreground and bounded retry behaviour passed'
   }
 });
 
+test('pane layout samples the grouped row below the permanent workspace header', () => {
+  const expression = control.match(/int rowTop = ([^;]+);/)[1];
+  const { runInNewContext } = require('node:vm');
+  const S = (value, dpi, scale) => Math.trunc(value * dpi * scale / 9600);
+  const context = { client: { Top: 0 }, gap: 8, hidePills: true, dpi: 96, scale: 100, S };
+  assert.equal(runInNewContext(expression, context), 88);
+  assert.equal(runInNewContext(expression, { ...context, hidePills: false }), 122);
+  assert.equal(runInNewContext(expression, { ...context, client: { Top: 30 } }), 118);
+});
+
 function assertsPaneFocusGeometry(source, workflowText) {
   const focus = source.slice(source.indexOf("            foreach ($theme in @('dark', 'multiprompt'"), source.indexOf("            Select-Theme 'dark' 'pane-layout-final-dark'"));
   assert.match(focus, /foreach \(\$theme in @\('dark', 'multiprompt', 'light', 'amoled', 'mid', 'edgegray', 'system'\)\)/);
