@@ -321,6 +321,8 @@ var hide_requested = false;
 var controls_ready = true;
 var require_alt_unlock = false;
 var alt_unlocked = false;
+var alt_held = false;
+var foreground_timer_armed = false;
 var g_inbox_active = false;
 var g_all_sessions_active = false;
 var g_native_browser_focus_pending_shell_id: u32 = 0;
@@ -330,7 +332,7 @@ var g_refocus_waiting_for_alt_release = false;
 fn altqLog(comptime _: []const u8, _: anytype) void {}
 fn altqPtr(hwnd: HANDLE) usize { return hwnd orelse 0; }
 fn GetFocus() HANDLE { return focused; }
-fn GetAsyncKeyState(_: i32) i16 { return 0; }
+fn GetAsyncKeyState(_: i32) i16 { return if (alt_held) -32768 else 0; }
 fn isCtrlDown() bool { return false; }
 fn keybd_event(_: u8, _: u8, flags: u32, _: usize) void { if (flags == 0) { alt_unlocked = true; } }
 fn foregroundIsOurs() bool { return foregroundHwndIsOurs(foreground); }
@@ -340,7 +342,7 @@ fn activeShellHwndForFocusGuard() HANDLE { return shells[0].hwnd; }
 fn requestShellRefocus(_: u32, _: u32) void {}
 fn activateConsoleForeground(hwnd: HANDLE) i32 { return SetForegroundWindow(hwnd); }
 fn GetTickCount64() u64 { return 1000; }
-fn SetTimer(_: HANDLE, _: usize, _: u32, _: ?usize) usize { return 1; }
+fn SetTimer(_: HANDLE, timer: usize, _: u32, _: ?usize) usize { if (timer == TIMER_CHAT_FOREGROUND_RETRY) { foreground_timer_armed = true; } return 1; }
 fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) i32 { return 1; }
 fn closeWebView2() void {}
 fn cancelShellRefocus(_: HANDLE) void {}
@@ -403,6 +405,21 @@ test "IGSH-1142 denied frame parking still lands the owned composer through shar
     require_alt_unlock = false;
     alt_unlocked = false;
 }
+test "IGSH-1142 held Alt preserves the existing guarded foreground completion" {
+    foreground = 10;
+    focused = 10;
+    require_alt_unlock = true;
+    alt_held = true;
+    g_chat_foreground_retries = 0;
+    foreground_timer_armed = false;
+    openChatView();
+    try std.testing.expect(g_chat_foreground_retries > 0);
+    try std.testing.expect(foreground_timer_armed);
+    try std.testing.expect(!alt_unlocked);
+    try std.testing.expect(!attached);
+    require_alt_unlock = false;
+    alt_held = false;
+}
 test "IGSH-955 background chat restore never takes another app's foreground" {
     foreground = 999;
     focused = 999;
@@ -431,7 +448,7 @@ test('IGSH-955 production chat handoff transfers cross-thread foreground before 
     fs.writeFileSync(file, chatHandoffHarness(source));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, JSON.stringify({ signal: result.signal, error: result.error, stdout: result.stdout, stderr: result.stderr }));
-    assert.match(result.stderr, /All 4 tests passed/);
+    assert.match(result.stderr, /All 5 tests passed/);
     console.log(result.stderr.trim());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
