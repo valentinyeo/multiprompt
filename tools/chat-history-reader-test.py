@@ -1853,6 +1853,26 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertTrue(created_seen)
         self.assertEqual(current[2], replacement, 'completed reply stayed stale after session metadata changed')
 
+    def test_watch_completed_session_metadata_save_is_atomic(self):
+        write_text = Path.write_text
+        metadata = self.home / '.claude/sessions/4242.json'
+        partial_saves = []
+
+        def partial_write(path, text, *args, **kwargs):
+            if path.parent == metadata.parent and 'completed-session' in text:
+                with path.open('w') as output:
+                    output.write(text[:1])
+                    output.flush()
+                    partial_saves.append(json.loads(metadata.read_text())['sessionId'])
+                    output.write(text[1:])
+                return len(text)
+            return write_text(path, text, *args, **kwargs)
+
+        with patch.object(Path, 'write_text', partial_write):
+            self.test_watch_follows_completed_session_when_metadata_arrives_last()
+        self.assertEqual(partial_saves, ['sid'])
+        self.assertEqual(json.loads(metadata.read_text())['sessionId'], 'completed-session')
+
     def test_watch_delegates_pane_identity_to_the_transcript_owner_once(self):
         self.assertTrue(hasattr(reader, 'watch'), 'reader must provide a persistent watch')
         owner = ('secondary', Path('/home/secondary'))
