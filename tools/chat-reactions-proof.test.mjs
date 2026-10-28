@@ -104,3 +104,14 @@ test('growth proof rejects missing code, wrong reaction target and empty badges'
   f.fill(28, 120, 68, 142, 0x444444);
   assert.throws(() => assertPaintedGrowth(f.image, f.image, area, {left: 80, top: 230, right: 280, bottom: 290}), assert.AssertionError);
 });
+
+test('grey composer controls cannot substitute for a reply badge', () => {
+  const f = fixture();
+  f.fill(28, 120, 68, 142, 0x353535);
+  f.fill(42, 126, 53, 136, 0xffffff);
+  f.fill(260, 245, 291, 276, 0x353535);
+  f.fill(270, 253, 281, 267, 0xffffff);
+  assertBadge(inspect(f.image, area));
+  f.fill(28, 120, 68, 142, 0x444444);
+  assert.throws(() => assertBadge(inspect(f.image, area)), assert.AssertionError);
+});

@@ -26,6 +26,11 @@ test('assistant message entry points share a below-message menu with stable requ
   try {
     fs.writeFileSync(path.join(dir, 'test.zig'), 'const std = @import("std");\n' + menu.slice(start, end) + `
       test "one horizontal emoji row and three independent menu actions" {
+          try std.testing.expectEqual(@as(?Action, null), completedPress(null, null));
+          try std.testing.expectEqual(@as(?Action, null), completedPress(null, .like));
+          try std.testing.expectEqual(@as(?Action, null), completedPress(.like, null));
+          try std.testing.expectEqual(@as(?Action, null), completedPress(.like, .heart));
+          try std.testing.expectEqual(Action.like, completedPress(.like, .like).?);
           try std.testing.expectEqual(Action.like, actionAt(20, 20).?);
           try std.testing.expectEqual(Action.dislike, actionAt(65, 20).?);
           try std.testing.expectEqual(Action.heart, actionAt(110, 20).?);

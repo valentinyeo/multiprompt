@@ -16,7 +16,11 @@ pub fn actionAt(x: i32, y: i32) ?Action {
     return actions[3 + @as(usize, @intCast(@divTrunc(y - 52, 34)))];
 }
 
-const State = struct { chosen: u32 = 0, hover: ?Action = null, done: bool = false, scale: i32 };
+pub fn completedPress(down: ?Action, up: ?Action) ?Action {
+    return if (down != null and down == up) down else null;
+}
+
+const State = struct { chosen: u32 = 0, hover: ?Action = null, pressed: ?Action = null, done: bool = false, scale: i32 };
 var active: ?*State = null;
 
 fn scaled(value: i32) i32 {
@@ -111,12 +115,16 @@ fn proc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINA
             return 0;
         },
         w.WM_LBUTTONDOWN, w.WM_RBUTTONDOWN => {
+            state.pressed = if (msg == w.WM_LBUTTONDOWN) hit(lp) else null;
             if (hit(lp) == null) state.done = true;
             return 0;
         },
         w.WM_LBUTTONUP => {
-            state.chosen = if (hit(lp)) |action| @intFromEnum(action) else 0;
-            state.done = true;
+            if (completedPress(state.pressed, hit(lp))) |action| {
+                state.chosen = @intFromEnum(action);
+                state.done = true;
+            }
+            state.pressed = null;
             return 0;
         },
         0x0215, 0x001f, 0x0010 => {

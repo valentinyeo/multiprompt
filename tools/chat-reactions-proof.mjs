@@ -47,6 +47,7 @@ export function inspect(image, area, allowClipped = false) {
     }
     groups[group].push({ left: left + area.left, right: right + area.left + 1, top: top + area.top, bottom: bottom + area.top + 1, ink });
   }
+  groups.pill = groups.pill.filter(pill => groups.agent.some(reply => pill.left >= reply.left && pill.right <= reply.right));
   for (const list of Object.values(groups)) list.sort((a, b) => a.top - b.top);
   return groups;
 }
