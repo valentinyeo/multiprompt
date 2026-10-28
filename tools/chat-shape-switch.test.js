@@ -185,6 +185,8 @@ test('IGSH-1040 receipts use existing owned app copy commands, not keyboard focu
   assert.doesNotMatch(receipt, /KeyDown|KeyUp|Focus-Palette/);
   assert.ok(observer.includes('actual != pid || GetForegroundWindow() != owner'));
   assert.ok(observer.includes('new uint[] { 0x8000 + 149, 0x8000 + 148 }'));
+  assert.ok(observer.includes('PostMessage(owner, message, UIntPtr.Zero, IntPtr.Zero)'));
+  assert.doesNotMatch(observer, /SendMessageTimeout/);
   assert.match(read('src/win32.zig'), /WM_APP_CHAT_SELECT_ALL: u32 = WM_APP \+ 149/);
   assert.match(read('src/win32.zig'), /WM_APP_CHAT_COPY_SELECTION: u32 = WM_APP \+ 148/);
   assert.ok(receipt.includes("if (-not $last.Success) { throw 'Copied target transcript belongs to a different seeded session' }"));
