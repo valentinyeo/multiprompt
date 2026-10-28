@@ -88,7 +88,7 @@ test('ISSUE-444 main graphics live with the backbuffer rather than each paint', 
 
 test('ISSUE-444 main and transcript backbuffers expose DIB pixels to the shared graphics', () => {
   const main = body(source('drawing.zig'), 'ensurePaintBackbuffer');
-  const transcript = body(source('chat_render.zig'), 'chatTranscriptWndProc');
+  const transcript = body(source('chat_render.zig'), 'ensureTranscriptBackbuffer');
   for (const paint of [main, transcript]) {
     assert.match(paint, /CreateDIBSection/);
     assert.match(paint, /\.height = -(?:h|height)\b/);
@@ -156,6 +156,68 @@ test "native gradient clip retains visible corners and skips invisible paths" {
   try {
     fs.writeFileSync(path.join(dir, 'corners.zig'), code);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'corners.zig')], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test('IGSH-1149 transcript paint resources survive repeated frames and release on growth or destruction', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'transcript-paint-'));
+  try {
+    const render = source('chat_render.zig');
+    assert.match(body(render, 'chatTranscriptWndProc'), /ensureTranscriptBackbuffer\(hdc, w, h\)/);
+    assert.match(body(render, 'chatTranscriptWndProc'), /WM_DESTROY => \{\s*resetTranscriptBackbuffer\(\)/);
+    const fields = render.slice(render.indexOf('var transcript_paint_dc:'), render.indexOf('fn resetTranscriptBackbuffer('));
+    const code = `
+const std = @import("std");
+const HANDLE = ?*anyopaque;
+var allocated: usize = 0;
+var deleted: usize = 0;
+var dc_deleted: usize = 0;
+var fail_bitmap = false;
+fn CreateCompatibleDC(_: HANDLE) HANDLE { return @ptrFromInt(1); }
+fn DeleteDC(_: HANDLE) i32 { dc_deleted += 1; return 1; }
+fn DeleteObject(_: HANDLE) i32 { deleted += 1; return 1; }
+fn SelectObject(_: HANDLE, _: HANDLE) HANDLE { return @ptrFromInt(2); }
+${fields}
+${body(render, 'resetTranscriptBackbuffer')}
+${body(render, 'ensureTranscriptBackbuffer')}
+test "reuse, resize, failed allocation and teardown" {
+    try std.testing.expect(ensureTranscriptBackbuffer(null, 0, 100) == null);
+    for (0..120) |_| try std.testing.expect(ensureTranscriptBackbuffer(null, 700, 500) != null);
+    try std.testing.expectEqual(@as(usize, 1), allocated);
+    try std.testing.expectEqual(@as(usize, 0), deleted);
+    try std.testing.expect(ensureTranscriptBackbuffer(null, 900, 500) != null);
+    try std.testing.expectEqual(@as(usize, 2), allocated);
+    try std.testing.expectEqual(@as(usize, 1), deleted);
+    resetTranscriptBackbuffer();
+    try std.testing.expectEqual(@as(usize, 2), deleted);
+    try std.testing.expectEqual(@as(usize, 2), dc_deleted);
+    resetTranscriptBackbuffer();
+    try std.testing.expectEqual(@as(usize, 2), deleted);
+    fail_bitmap = true;
+    try std.testing.expect(ensureTranscriptBackbuffer(null, 900, 500) == null);
+    try std.testing.expectEqual(@as(usize, 3), dc_deleted);
+    fail_bitmap = false;
+    try std.testing.expect(ensureTranscriptBackbuffer(null, 900, 500) != null);
+    resetTranscriptBackbuffer();
+    try std.testing.expectEqual(@as(usize, 3), deleted);
+}
+`;
+    fs.writeFileSync(path.join(dir, 'paint.zig'), code);
+    fs.writeFileSync(path.join(dir, 'win32.zig'), `
+const main = @import("paint.zig");
+pub const BITMAPINFO = struct { header: struct { width: i32, height: i32 } };
+pub fn CreateDIBSection(_: ?*anyopaque, _: *const BITMAPINFO, _: i32, _: *?*anyopaque, _: ?*anyopaque, _: i32) ?*anyopaque {
+    if (main.fail_bitmap) return null;
+    main.allocated += 1;
+    return @ptrFromInt(3);
+}
+`);
+    fs.writeFileSync(path.join(dir, 'paint.zig'), code.replace('var allocated:', 'pub var allocated:').replace('var fail_bitmap', 'pub var fail_bitmap'));
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'paint.zig')], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
