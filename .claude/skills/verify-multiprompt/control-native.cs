@@ -880,7 +880,7 @@ public static class GroupRailProof {
             int clientLeft = origin.X - frame.Left;
             int left = clientLeft + S(8, dpi, scale);
             int right = clientLeft + S(220, dpi, scale) - S(8, dpi, scale) / 2;
-            int top = origin.Y - frame.Top + S(8, dpi, scale) + (hidePills ? 0 : 34);
+            int top = origin.Y - frame.Top + S(8, dpi, scale) + (hidePills ? 0 : 34) + S(52, dpi, scale);
             int headerHeight = 28, rowHeight = S(38, dpi, scale);
             int secondHeader = top + headerHeight + (collapsed ? 0 : 2 * rowHeight);
             int groupBottom = secondHeader + headerHeight + 2 * rowHeight;
