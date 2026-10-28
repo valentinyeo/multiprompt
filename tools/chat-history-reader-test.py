@@ -1771,6 +1771,45 @@ class HistoryReaderTest(unittest.TestCase):
                 next(events)
         resolve.assert_called_once()
 
+    def test_watch_follows_session_created_before_metadata_changes(self):
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        from threading import Event
+
+        self.write(self.event('old conversation'))
+        incoming, writer = os.pipe()
+        self.addCleanup(os.close, incoming)
+        self.addCleanup(os.close, writer)
+        stdin = types.SimpleNamespace(fileno=lambda: incoming)
+        old = ('claude', 'sid', self.path, None)
+        replacement = self.path.with_name('new-session.jsonl')
+        discovered = Event()
+        metadata_ready = Event()
+
+        def resolve(query, source, owner):
+            discovered.set()
+            return ('claude', 'new-session', replacement, None) if metadata_ready.is_set() else old
+
+        with patch.object(reader.sys, 'stdin', stdin), patch.object(reader, 'resolve_response_path', side_effect=resolve):
+            events = reader.watch_changes(self.query, old, reader.READER_SOURCE, True)
+            self.assertEqual(next(events), old)
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                following = pool.submit(next, events)
+                replacement.touch()
+                created_seen = discovered.wait(2)
+                metadata_ready.set()
+                replacement.write_text(json.dumps(self.event('reply after session restart')) + '\n')
+                try:
+                    current = following.result(timeout=2)
+                except TimeoutError:
+                    with self.path.open('a') as output:
+                        output.write('\n')
+                    current = following.result(timeout=2)
+            events.close()
+        self.assertTrue(created_seen, 'new session creation must trigger discovery')
+        self.assertEqual(current[2], replacement, 'reply stayed on old session when metadata followed file creation')
+        wire = reader.response(dict(self.query, sid='new-session', follow=False), resolved=current)
+        self.assertIn('reply after session restart', wire)
+
     def test_watch_delegates_pane_identity_to_the_transcript_owner_once(self):
         self.assertTrue(hasattr(reader, 'watch'), 'reader must provide a persistent watch')
         owner = ('secondary', Path('/home/secondary'))

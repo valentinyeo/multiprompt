@@ -40,6 +40,7 @@ if ($Feature -eq 'chat-full-history') { $plans = @(@{name='full-history'; mode='
 if ($env:CHAT_SKILLS_PROOF -eq '1') { $plans = @(@{name='fresh-skills'; mode='busy'; text='live skill discovery'}) }
 if ($env:CHAT_ACCEPTED_PROOF -eq '1') { $plans = @(@{name='accepted-message'; mode='busy'; text='accepted message stays readable'}) }
 if ($env:CHAT_SENDING_PROOF -eq '1') { $plans = @($plans[0]) }
+if ($env:CHAT_LIVE_DELIVERY_PROOF -eq '1') { $plans = @(@{name='live-delivery'; mode='busy'; text='continuous busy-session delivery'}) }
 if ($env:CHAT_SWITCH_PROOF -eq '1') { $plans = @(@{name='remote-switch'; mode='idle'; text='long remote conversation switching'}) }
 if ($env:CHAT_REMOTE_PROOF -eq '1') { $plans = @(@{name='remote-sync'; mode='idle'; text='remote session follows live process'}) }
 if ($env:CHAT_MISSING_PROOF -eq '1') { $plans = @(@{name='missing-transcript'; mode='idle'; text='no transcript behind this tab'}) }
@@ -445,7 +446,8 @@ foreach ($plan in $plans) {
     $isReply = $plan.name -eq 'reply-reference'
     $isNotes = $plan.name -eq 'session-notes'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
-    $hasTranscript = $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote
+    $isLiveDelivery = $plan.name -eq 'live-delivery'
+    $hasTranscript = $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -569,6 +571,8 @@ foreach ($plan in $plans) {
             . "$PSScriptRoot/reactions.ps1"
         } elseif ($isSwitch) {
             . "$PSScriptRoot/remote-switch.ps1"
+        } elseif ($isLiveDelivery) {
+            . "$PSScriptRoot/live-delivery.ps1"
         } elseif ($isRemote) {
             [void](Wait-For 'initial remote transcript read' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
             Bind-Transcript
@@ -1156,6 +1160,10 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_LIVE_DELIVERY_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-delivery-live-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_REPLY_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-reply-reference-proof.mjs" verify $Evidence
     exit $LASTEXITCODE

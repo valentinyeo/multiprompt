@@ -379,6 +379,16 @@ def shell():
         fake_event("user", message=dict(role="user", content=question))
         fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
         return 0 if fake_run("shell", op, ARGS, lambda claude: claude.setdefault("turns", []).append([question, answer]) is None) else 3
+    if op == "live-turn" and len(ARGS) == 2:
+        def complete(claude):
+            accepted = list(claude["queue"])
+            fake_take(claude)
+            answer = "Live answer " + ARGS[1]
+            fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=answer)]))
+            claude.setdefault("turns", []).append([" | ".join(accepted), answer])
+            record("live-turns.jsonl", turn=int(ARGS[1]), accepted=accepted, answer=answer)
+            return True
+        return 0 if fake_run("shell", op, ARGS, complete) else 3
     if op == "detach-console":
         (ROOT / "console-detached").touch()
         return 0

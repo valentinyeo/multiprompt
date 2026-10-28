@@ -1838,7 +1838,7 @@ def watch_changes(q, resolved, source, as_owner):
                             at += 16 + length
                             if mask & 0x4000 or name == path.name:
                                 changed = True
-                            elif q.get("tmux") and mask & 0x180 and name.endswith(".jsonl"):
+                            elif q.get("tmux") and mask & 0x18A and name.endswith(".jsonl"):
                                 latest = resolve_response_path(dict(q, follow=True), source, as_owner)
                                 if latest[2] is None and as_owner:
                                     return
