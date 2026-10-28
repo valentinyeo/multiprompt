@@ -1139,10 +1139,7 @@ const keepSearchSelectionVisible = @import("command_palette.zig").keepSearchSele
 const updateSearchResults = @import("command_palette.zig").updateSearchResults;
 const paletteRowIsHeader = @import("command_palette.zig").paletteRowIsHeader;
 const stepOverPaletteHeaders = @import("command_palette.zig").stepOverPaletteHeaders;
-const BROWSER_SHORTCUT_OPEN_GUARD_MS = @import("app_state.zig").BROWSER_SHORTCUT_OPEN_GUARD_MS;
-const claimBrowserToggleEvent = @import("shortcuts.zig").claimBrowserToggleEvent;
 const physicalBrowserShortcutShouldRecover = @import("shortcuts.zig").physicalBrowserShortcutShouldRecover;
-const physicalBrowserShortcutMayClose = @import("shortcuts.zig").physicalBrowserShortcutMayClose;
 const startStaleAltMouseHookThread = @import("shortcuts.zig").startStaleAltMouseHookThread;
 const recordNativeBrowserDropGesture = @import("shortcuts.zig").recordNativeBrowserDropGesture;
 const openUrlAtScreenPoint = @import("clipboard.zig").openUrlAtScreenPoint;
@@ -2735,14 +2732,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (physical_shortcut) {
                 const event_time: u32 = @truncate(@as(usize, @bitCast(lp)));
                 browserTraceN("shortcutToggle event=", event_time);
-                if (!claimBrowserToggleEvent(event_time, &app_state.g_browser_toggle_last_handled_event_time)) {
-                    browserTrace("shortcutToggle suppressed duplicate event time");
-                    return 0;
-                }
             }
             if (wp == 2 and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) {
-                app_state.g_browser_shortcut_open_guard_shell_id = app_state.shells[app_state.active_shell].shell_id;
-                app_state.g_browser_shortcut_open_guard_until = GetTickCount64() + BROWSER_SHORTCUT_OPEN_GUARD_MS;
                 openBrowserPaneForShell(app_state.active_shell, "");
                 return 0;
             }
@@ -2761,14 +2752,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     browser_hwnd_live,
                     app_state.shells[target_idx].browser_launch_tick,
                 );
-                if (physical_shortcut and app_state.shells[target_idx].browser_enabled and !recover_dead_pane and !physicalBrowserShortcutMayClose(
-                    app_state.shells[target_idx].shell_id,
-                    app_state.shells[target_idx].browser_launch_tick,
-                    app_state.shells[target_idx].browser_hwnd == null,
-                    GetTickCount64(),
-                    app_state.g_browser_shortcut_open_guard_shell_id,
-                    app_state.g_browser_shortcut_open_guard_until,
-                )) return 0;
                 if (app_state.g_webview2_active) {
                     closeWebView2();
                     if (app_state.active_shell < app_state.shell_count) _ = showShellConsole(app_state.active_shell, SW_SHOW, "wndProc.WM_APP_BROWSER_TOGGLE");
@@ -2779,18 +2762,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 } else {
                     app_state.shells[target_idx].browser_enabled = !app_state.shells[target_idx].browser_enabled;
                 }
+                if (physical_shortcut) browserTraceN("shortcutToggle enabled=", @intFromBool(app_state.shells[target_idx].browser_enabled));
                 if (app_state.shells[target_idx].browser_enabled) {
-                    if (physical_shortcut) {
-                        app_state.g_browser_shortcut_open_guard_shell_id = app_state.shells[target_idx].shell_id;
-                        app_state.g_browser_shortcut_open_guard_until = GetTickCount64() + BROWSER_SHORTCUT_OPEN_GUARD_MS;
-                        browserTrace("shortcutToggle armed 10s open guard");
-                    }
                     ensureBrowserDefaultUrl(target_idx);
                     updateBrowserVisibility();
                 } else {
-                    if (app_state.g_browser_shortcut_open_guard_shell_id == app_state.shells[target_idx].shell_id) {
-                        app_state.g_browser_shortcut_open_guard_until = 0;
-                    }
                     discardBrowserUrlBarEdit();
                     if (target_idx == app_state.active_shell) {
                         app_state.g_browser_focus_mode = false;
@@ -5698,7 +5674,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_active = false;
                     app_state.g_browser_focus_mode = false;
                     app_state.g_shell_focused = true;
-                    app_state.g_browser_shortcut_open_guard_until = 0;
                     clearSearchBackdrop();
                     discardBrowserUrlBarEdit();
                     closeWebView2();
