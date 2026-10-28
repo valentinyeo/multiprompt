@@ -2274,6 +2274,9 @@ test('group proof samples and clicks below the workspace picker at every support
   const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
   const expression = group.match(/int top = ([^;]+);/)[1];
   const top = new Function('origin', 'frame', 'dpi', 'scale', 'hidePills', 'S', `return ${expression};`);
+  const pane = source.slice(source.indexOf('public static class PaneLayoutProof {'));
+  const rowExpression = pane.match(/int rowTop = ([^;]+);/)[1];
+  const rowTop = new Function('client', 'gap', 'dpi', 'scale', 'hidePills', 'S', `return ${rowExpression};`);
   for (const [dpi, scale, hidePills, expected] of [
     [96, 100, false, 125], [96, 100, true, 91],
     [120, 100, false, 140], [144, 100, false, 155],
@@ -2282,6 +2285,9 @@ test('group proof samples and clicks below the workspace picker at every support
     assert.equal(top({ Y: 231 }, { Top: 200 }, dpi, scale, hidePills,
       (value, d, s) => Math.trunc(value * d * s / 9600)), expected,
     `group headline must clear the workspace picker: dpi=${dpi} scale=${scale} hidePills=${hidePills}`);
+    assert.equal(rowTop({ Top: 31 }, Math.trunc(8 * dpi * scale / 9600), dpi, scale, hidePills,
+      (value, d, s) => Math.trunc(value * d * s / 9600)), expected + 28,
+    `pane icon scan must follow the group headline: dpi=${dpi} scale=${scale} hidePills=${hidePills}`);
   }
 });
 
