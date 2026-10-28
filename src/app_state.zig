@@ -2686,6 +2686,9 @@ pub var g_chat_history_channels: [3]ChatHistoryChannel = @splat(.{});
 pub var g_chat_history_channel_mutex: SpinMutex = .{};
 pub var g_chat_history_channels_closing: std.atomic.Value(bool) = .init(false);
 pub var g_chat_permission_send_failed = std.atomic.Value(u32).init(0);
+pub var g_chat_cancel_busy = std.atomic.Value(bool).init(false);
+pub var g_chat_cancel_id = std.atomic.Value(u64).init(0);
+pub var g_chat_cancel_result = std.atomic.Value(u8).init(0);
 
 pub var g_chat_switch_loading: bool = false;
 pub var g_chat_prepend_pending = false;
@@ -2892,6 +2895,8 @@ pub const ChatOutboxEntry = struct {
     retryable: bool = false,
     delivery_watch: chat_echo.DeliveryWatch = .{},
     channel_sent: bool = false,
+    host_held: bool = false,
+    queue_id: u64 = 0,
     channel_pending: bool = false,
     steer_pending: bool = false,
     sent_tick_ms: i64 = 0,
@@ -3640,6 +3645,9 @@ pub const ChatTmuxSendJob = struct {
     echo_id: u64,
     text: []u16,
     retry: bool,
+    queued_at: i64 = 0,
+    queue_id: u64 = 0,
+    held: bool = false,
     written: bool = false,
     rejected: bool = false,
     box_not_clear: bool = false,

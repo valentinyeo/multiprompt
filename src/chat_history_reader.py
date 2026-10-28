@@ -1470,6 +1470,8 @@ def response(q, source=None, as_owner=False, resolved=None):
     if ISSUE_268_CHAT_FIND and "search" in q:
         return search_response(q, path, agent, sid)
     rid, tmux = q["id"], q["tmux"]
+    if agent == "claude" and tmux:
+        drain_held_queue(tmux, sid, path)
     rows, budget = [], 0
     queue_stamps = {}
     with path.open("rb") as source:
@@ -1644,6 +1646,146 @@ def clear_prompt_box(target, box):
             stuck = True
             break
     return box, stuck
+
+
+def held_queue_path(tmux):
+    if not isinstance(tmux, str) or not TMUX_NAME.fullmatch(tmux):
+        raise ValueError("invalid tmux name")
+    return HOME / ".local/state/multiprompt/held-messages" / (hashlib.sha256(tmux.encode()).hexdigest() + ".sqlite3")
+
+
+def held_queue_db(tmux):
+    import sqlite3
+    path = held_queue_path(tmux)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    db = sqlite3.connect(path)
+    os.chmod(path, 0o600)
+    db.execute("CREATE TABLE IF NOT EXISTS messages (key TEXT PRIMARY KEY, sid TEXT NOT NULL, text TEXT NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('queued','submitted','delivered','cancelled')), scan INTEGER NOT NULL DEFAULT 0, receipt TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL)")
+    db.execute("CREATE INDEX IF NOT EXISTS pending ON messages(sid,state,created)")
+    return db
+
+
+def held_message_key(q):
+    text, stamp, token = q.get("text"), q.get("queued_at"), q.get("message_id")
+    if (not isinstance(text, str) or not text.strip() or "\x00" in text or type(stamp) is not int or stamp <= 0 or
+            not isinstance(token, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,80}", token) is None):
+        raise ValueError("invalid held message")
+    return token
+
+
+def enqueue_response(q):
+    from contextlib import closing
+    key = held_message_key(q)
+    name = q["tmux"]
+    resolved = resolve_tmux_agent("claude", name)
+    if not resolved:
+        return f"@mp\t{q['id']}\tsend\terror\tagent_unavailable\t0\n{END}\n"
+    sid, transcript = resolved
+    with closing(held_queue_db(name)) as db, db:
+        db.execute("INSERT OR IGNORE INTO messages(key,sid,text,queued_at,state,created) VALUES (?,?,?,?,'queued',?)",
+                   (key, sid, q["text"], q["queued_at"], time.time_ns()))
+    drain_held_queue(name, sid, transcript)
+    return f"@mp\t{q['id']}\tsend\tok\t-\t0\n{END}\n"
+
+
+def cancel_queued_response(q):
+    from contextlib import closing
+    key = held_message_key(q)
+    reason = "not_queued"
+    with closing(held_queue_db(q["tmux"])) as db, db:
+        changed = db.execute("UPDATE messages SET state='cancelled' WHERE key=? AND state='queued'", (key,)).rowcount
+        if changed or db.execute("SELECT 1 FROM messages WHERE key=? AND state='cancelled'", (key,)).fetchone():
+            reason = None
+    return f"@mp\t{q['id']}\tcancel_queued\t{'error' if reason else 'ok'}\t{reason or '-'}\t0\n{END}\n"
+
+
+def held_queue_ready(tmux, path):
+    shown = subprocess.run(["tmux", "capture-pane", "-p", "-e", "-J", "-t", "=" + tmux + ":"],
+                           capture_output=True, text=True, timeout=5, check=True).stdout
+    plain = ANSI.sub("", shown)
+    draft = box_draft_text(shown)
+    if draft is None or draft.strip() or "❯" not in plain:
+        return False
+    if any(hint in plain.lower() for hint in ("esc to interrupt", "ctrl+c to interrupt", "edit queued messages",
+                                               "select a queued message", "enter to select", "esc to cancel")):
+        return False
+    with path.open("rb") as source:
+        size = os.fstat(source.fileno()).st_size
+        start = max(0, size - TAIL_BYTES)
+        source.seek(start)
+        if start:
+            source.readline()
+        rows = source.read().splitlines()
+    for raw in reversed(rows):
+        event = load_line(raw)
+        if not isinstance(event, dict) or event.get("isSidechain"):
+            continue
+        if event.get("type") == "system" and event.get("subtype") == "turn_duration":
+            return True
+        if event.get("type") == "user":
+            return False
+        if event.get("type") == "assistant":
+            return (event.get("message") or {}).get("stop_reason") == "end_turn"
+    return not rows
+
+
+def drain_held_queue(tmux, sid, transcript):
+    from contextlib import closing
+    if not held_queue_path(tmux).exists():
+        return
+    with closing(held_queue_db(tmux)) as db:
+        submitted = db.execute("SELECT key,text,scan FROM messages WHERE sid=? AND state='submitted' ORDER BY created", (sid,)).fetchall()
+        for key, text, scanned in submitted:
+            with transcript.open("rb") as source:
+                source.seek(scanned)
+                data = source.read(TAIL_BYTES)
+            complete = data.rfind(b"\n") + 1
+            consumed, receipt = scanned, None
+            for raw in data[:complete].splitlines(keepends=True):
+                event = load_line(raw)
+                consumed += len(raw)
+                if isinstance(event, dict) and event.get("type") == "user" and not event.get("isSidechain"):
+                    if any(row["role"] == "user" and row["text"].replace("\r", "") == text.replace("\r", "") for row in conversation_rows(event, "claude", consumed - len(raw))):
+                        receipt = event.get("timestamp", "")
+                        break
+            with db:
+                db.execute("UPDATE messages SET scan=?,state=?,receipt=? WHERE key=? AND state='submitted'",
+                           (consumed, "delivered" if receipt is not None else "submitted", receipt or "", key))
+            if receipt is None:
+                return
+        if not db.execute("SELECT 1 FROM messages WHERE sid=? AND state='queued' LIMIT 1", (sid,)).fetchone():
+            return
+        if not held_queue_ready(tmux, transcript):
+            return
+        current = resolve_tmux_agent("claude", tmux)
+        if current is None or current[0] != sid or Path(current[1]) != Path(transcript):
+            return
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM messages WHERE sid=? AND state='submitted' LIMIT 1", (sid,)).fetchone():
+                return
+            pending = db.execute("SELECT key,text FROM messages WHERE sid=? AND state='queued' ORDER BY created LIMIT 1", (sid,)).fetchone()
+            if pending is None:
+                return
+            key, text = pending
+            db.execute("UPDATE messages SET state='submitted',scan=? WHERE key=? AND state='queued'", (transcript.stat().st_size, key))
+        try:
+            result = send_response(dict(id=0, tmux=tmux, text=text))
+            failure = "Terminal handoff failed; receipt not confirmed" if "\tsend\terror\t" in result else ""
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            failure = "Terminal handoff interrupted; receipt not confirmed"
+        if failure:
+            with db:
+                db.execute("UPDATE messages SET receipt=? WHERE key=? AND state='submitted'", (failure, key))
+
+
+def held_queue_fields(tmux, sid):
+    from contextlib import closing
+    if not held_queue_path(tmux).exists():
+        return dict(queue=[], sent=[])
+    with closing(held_queue_db(tmux)) as db:
+        rows = db.execute("SELECT text,state FROM messages WHERE sid=? AND state IN ('queued','submitted','delivered') ORDER BY created", (sid,)).fetchall()
+    return dict(queue=[text for text, state in rows if state == "queued"], sent=[text for text, state in rows if state == "delivered"])
 
 
 def send_response(q):
@@ -1979,7 +2121,9 @@ def serve(source):
                 rid = 0
                 raise ValueError("invalid request id")
             if query.get("op") in ("send", "question_text"):
-                wire = send_response(query)
+                wire = enqueue_response(query) if "message_id" in query else send_response(query)
+            elif query.get("op") == "cancel_queued":
+                wire = cancel_queued_response(query)
             elif query.get("op") == "draft":
                 wire = draft_response(query)
             elif query.get("op") in ("stop", "permission", "question", "send_queued", "edit_queued"):

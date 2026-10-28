@@ -2751,10 +2751,10 @@ class HeldQueueTest(unittest.TestCase):
         self.ready = patch.object(reader, 'held_queue_ready', return_value=False).start()
 
     def enqueue(self, text, stamp):
-        return reader.enqueue_response(dict(id=1, tmux='term-1', text=text, queued_at=stamp))
+        return reader.enqueue_response(dict(id=1, tmux='term-1', text=text, queued_at=stamp, message_id=f'message-{stamp}'))
 
     def cancel(self, text, stamp):
-        return reader.cancel_queued_response(dict(id=2, tmux='term-1', text=text, queued_at=stamp))
+        return reader.cancel_queued_response(dict(id=2, tmux='term-1', text=text, queued_at=stamp, message_id=f'message-{stamp}'))
 
     def test_cancel_before_handoff_never_reaches_terminal(self):
         self.assertIn('\tsend\tok\t', self.enqueue('target', 1))

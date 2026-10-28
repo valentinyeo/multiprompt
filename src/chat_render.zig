@@ -991,7 +991,7 @@ fn chatMeasureBlockRect(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: ch
 
 fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32, status: bool) RECT {
     var rect = chatMeasureBlockRect(hdc, text, .{ .start = 0, .len = text.len, .role = .user }, .single, width, y, null);
-    if (!app_state.clean_chat and status) rect.bottom += uiScaled(CHAT_STATUS_H);
+    if (status) rect.bottom += uiScaled(CHAT_STATUS_H);
     return rect;
 }
 
@@ -1704,7 +1704,7 @@ fn chatShellSyncBuild() void {
     if (key.len > 0) {
         for (app_state.g_chat_outbox.items) |e| {
             if (pending_count >= pending.len) break;
-            if (e.state == .not_sent or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+            if (e.state == .cancelled or e.state == .not_sent or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
             pending[pending_count] = .{ .id = e.id, .text = e.text };
             pending_count += 1;
         }
@@ -2194,7 +2194,7 @@ pub fn chatRelayout(client_width: i32) void {
                 if (app_state.g_chat_echo_layout_count >= app_state.g_chat_echo_layout.len) break;
                 if (!std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key) or g_reaction_view.hidesPending(e.id)) continue;
                 y += chatBlockGapBefore(true, .user, true, .single);
-                var rc = chatMeasureEchoRect(hdc, e.text, width, y, e.state == .not_sent);
+                var rc = chatMeasureEchoRect(hdc, e.text, width, y, (e.state == .not_sent or e.state == .cancelled));
                 if (!app_state.clean_chat and chat_echo.pendingActions(e.state).send_again) rc.bottom += uiScaled(26);
                 rc.left += app_state.g_chat_content_left;
                 rc.right += app_state.g_chat_content_left;
@@ -3599,7 +3599,7 @@ fn chatPaintBlock(hdc: HANDLE, buf: []const u16, block: ChatBlock, pos: chat_sty
 fn chatPaintEcho(hdc: HANDLE, e: ChatOutboxEntry, rc: RECT, offset: usize) void {
     _ = SetBkMode(hdc, TRANSPARENT);
     const actions = chat_echo.pendingActions(e.state);
-    const status_h = if (!app_state.clean_chat and e.state == .not_sent) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
+    const status_h = if (e.state == .cancelled or (!app_state.clean_chat and e.state == .not_sent)) uiScaled(CHAT_STATUS_H) else @as(i32, 0);
     const actions_h = if (!app_state.clean_chat and actions.send_again) uiScaled(26) else @as(i32, 0);
     const bubble = RECT{ .left = rc.left, .top = rc.top + chatReplyLineHeight(e.text), .right = rc.right, .bottom = rc.bottom - status_h - actions_h };
     chatPaintReplyLine(hdc, e.text, rc);
@@ -3633,11 +3633,11 @@ fn chatStatusRowRect(bubble: RECT) RECT {
 }
 
 fn chatPaintEchoStatus(hdc: HANDLE, e: ChatOutboxEntry, area: RECT) void {
-    if (app_state.clean_chat or e.state != .not_sent) return;
+    if (e.state != .cancelled and (app_state.clean_chat or e.state != .not_sent)) return;
     const old = SelectObject(hdc, chatMetadataFont());
     defer _ = SelectObject(hdc, old);
     _ = SetTextColor(hdc, customColorOr("danger", if (app_state.g_light_theme) RGB(180, 40, 40) else RGB(240, 120, 120)));
-    const label: [*:0]const u16 = if (e.write_started) L("Delivery unconfirmed") else L("Not sent");
+    const label: [*:0]const u16 = if (e.state == .cancelled) L("Cancelled") else if (e.write_started) L("Delivery unconfirmed") else L("Not sent");
     var rc = area;
     _ = chatDrawText(hdc, label, -1, &rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
@@ -4957,7 +4957,8 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     if (chatHistoryEntry(reaction_identity)) |entry| reaction_sid = entry.history.sid;
     const reaction_shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
     const reaction_reference = if (block_at) |index| app_state.g_chat_blocks[index].reaction_reference else 0;
-    var items = chatContextMenuItems(keyboard_block == null and chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions);
+    const waiting = if (echo_index) |ei| chat_echo.cancellable(app_state.g_chat_outbox.items[ei].state, app_state.g_chat_outbox.items[ei].delivery_watch.removed_ms) else false;
+    var items = chatContextMenuItems(keyboard_block == null and chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions, waiting);
     if (block_at) |index| {
         const role = app_state.g_chat_blocks[index].role;
         if ((role == .prose or role == .code) and reply_text != null and @import("chat_composer.zig").chatAcAgent() == .claude) {
@@ -4994,6 +4995,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
         1 => chatCopyTextToClipboard(if (items.copy_target == .selection) selection_text else message_text),
         5 => if (echo_id) |id| chatEchoSendAgain(id),
         6 => if (echo_id) |id| chatEchoRemove(id),
+        11 => if (echo_id) |id| chatCancelQueuedFromMenu(id),
         4 => if (reply_text) |text| {
             app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
             chatNavClear();
@@ -5606,15 +5608,15 @@ test "status row todo expansion stays on its tab and unknown tabs have no strip"
 
 const ChatContextCopyTarget = enum { selection, message, nothing };
 const ChatContextMenu = struct {
-    items: [8]@import("fonts.zig").MessageMenuItem = undefined,
+    items: [9]@import("fonts.zig").MessageMenuItem = undefined,
     len: usize = 0,
     copy_target: ChatContextCopyTarget,
 };
 
-fn chatContextMenuItems(selected: bool, message: bool, reply: bool, link: bool, unsent: bool) ChatContextMenu {
+fn chatContextMenuItems(selected: bool, message: bool, reply: bool, link: bool, unsent: bool, waiting: bool) ChatContextMenu {
     var result = ChatContextMenu{ .copy_target = chatContextCopyTarget(selected, message) };
     const Item = @import("fonts.zig").MessageMenuItem;
-    const actions = [_]?Item{ if (reply) .reply else null, .copy, if (link) .copy_link else null, if (unsent) .send_again else null, if (unsent) .remove else null };
+    const actions = [_]?Item{ if (reply) .reply else null, .copy, if (link) .copy_link else null, if (unsent) .send_again else null, if (unsent) .remove else null, if (waiting) .cancel_queued else null };
     for (actions) |action| {
         if (action) |item| {
             result.items[result.len] = item;
@@ -5630,29 +5632,44 @@ fn chatContextCopyTarget(selected: bool, message: bool) ChatContextCopyTarget {
 
 test "IGSH-718 message menu contains exactly Reply then Copy" {
     const Item = @import("fonts.zig").MessageMenuItem;
-    const menu = chatContextMenuItems(false, true, true, false, false);
+    const menu = chatContextMenuItems(false, true, true, false, false, false);
     try std.testing.expectEqualSlices(Item, &.{ .reply, .copy }, menu.items[0..menu.len]);
     try std.testing.expectEqual(.message, menu.copy_target);
 }
 
 test "IGSH-718 tool menu contains Copy only and selection wins" {
     const Item = @import("fonts.zig").MessageMenuItem;
-    const tool = chatContextMenuItems(false, true, false, false, false);
+    const tool = chatContextMenuItems(false, true, false, false, false, false);
     try std.testing.expectEqualSlices(Item, &.{.copy}, tool.items[0..tool.len]);
-    const selected = chatContextMenuItems(true, true, true, false, false);
+    const selected = chatContextMenuItems(true, true, true, false, false, false);
     try std.testing.expectEqualSlices(Item, &.{ .reply, .copy }, selected.items[0..selected.len]);
     try std.testing.expectEqual(.selection, selected.copy_target);
-    try std.testing.expectEqual(.selection, chatContextMenuItems(true, false, false, false, false).copy_target);
+    try std.testing.expectEqual(.selection, chatContextMenuItems(true, false, false, false, false, false).copy_target);
 }
 
 test "IGSH-718 link and unsent actions follow Reply and Copy" {
     const Item = @import("fonts.zig").MessageMenuItem;
-    const link = chatContextMenuItems(false, true, true, true, false);
+    const link = chatContextMenuItems(false, true, true, true, false, false);
     try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .copy_link }, link.items[0..link.len]);
-    const unsent = chatContextMenuItems(false, true, true, false, true);
+    const unsent = chatContextMenuItems(false, true, true, false, true, false);
     try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .send_again, .remove }, unsent.items[0..unsent.len]);
-    const both = chatContextMenuItems(false, true, true, true, true);
+    const both = chatContextMenuItems(false, true, true, true, true, false);
     try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .copy_link, .send_again, .remove }, both.items[0..both.len]);
+}
+
+test "IGSH-1010 a message waiting in Claude's queue gets Cancel after Reply and Copy" {
+    const Item = @import("fonts.zig").MessageMenuItem;
+    const waiting = chatContextMenuItems(false, true, true, false, false, true);
+    try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .cancel_queued }, waiting.items[0..waiting.len]);
+}
+
+fn chatCancelQueuedFromMenu(id: u64) void {
+    const ei = chatOutboxIndexById(id) orelse return;
+    const entry = app_state.g_chat_outbox.items[ei];
+    if (!chat_echo.cancellable(entry.state, entry.delivery_watch.removed_ms)) return;
+    if (!@import("chat_send.zig").chatCancelQueued(app_state.active_shell, id, entry.text, entry.anchor.sent_ms, entry.queue_id)) {
+        showHeaderNoticeAscii("Could not cancel the message; try again", 3500, true);
+    }
 }
 
 test "ISSUE-438 nearest caret covers spaces line tails and below the last line" {

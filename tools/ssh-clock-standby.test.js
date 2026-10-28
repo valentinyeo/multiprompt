@@ -315,6 +315,7 @@ const shells = [_]struct { activity: enum { idle, active } = .idle }{.{}};
 fn GetTickCount64() u64 { return fake_tick; }
 fn nowFileTime() u64 { return @as(u64, @intCast(fake_wall)) * 10000 + 116444736000000000; }
 fn chatTmuxSendFinish() void {}
+fn chatCancelFinish() void {}
 fn chatFullSettleFinish() void {}
 fn chatTmuxSettle() void {}
 fn saveChatOutbox() bool { return true; }
