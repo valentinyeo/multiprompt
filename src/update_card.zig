@@ -107,7 +107,7 @@ pub fn stopUpdateCardWatch() void {
 }
 
 pub fn updateCardVisible() bool {
-    if (app_state.g_update_ver_len == 0 or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed or app_state.g_update_relaunching) return false;
+    if (card_notes.count == 0 or app_state.g_update_ver_len == 0 or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed or app_state.g_update_relaunching) return false;
     const cur = app_state.g_update_ver[0..app_state.g_update_ver_len];
     return !std.mem.eql(u8, cur, app_state.g_update_dismissed[0..app_state.g_update_dismissed_len]);
 }
@@ -182,6 +182,7 @@ pub fn updateCardPoll() void {
     if (update_release.poll()) |version| {
         if (!release_ready or !std.mem.eql(u8, version, app_state.g_update_ver[0..app_state.g_update_ver_len])) {
             card_notes = update_release.cardNotes(version);
+            if (card_notes.count == 0) debugLog2("[update] quiet release waiting ", version);
             card_notes_logged = false;
             card_expanded = false;
             restart_status = "";
