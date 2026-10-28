@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 public static class ChatSwitchObserver {
+    public static int SidebarHeaderHeight;
     [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] struct Mouse { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
@@ -18,6 +19,19 @@ public static class ChatSwitchObserver {
     delegate bool WindowProc(IntPtr window, IntPtr state);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
+    [DllImport("user32.dll", EntryPoint="PostMessageW", SetLastError=true)] static extern bool PostMessage(IntPtr window, uint message, UIntPtr wp, IntPtr lp);
+    public static void CopyTranscript(int pid, IntPtr owner) {
+        uint actual;
+        GetWindowThreadProcessId(owner, out actual);
+        if (actual != pid || GetForegroundWindow() != owner) throw new InvalidOperationException("Transcript copy requires its owned foreground window");
+        foreach (uint message in new uint[] { 0x8000 + 149, 0x8000 + 148 }) {
+            if (!PostMessage(owner, message, UIntPtr.Zero, IntPtr.Zero))
+                throw new InvalidOperationException("Owned transcript copy command failed: " + Marshal.GetLastWin32Error());
+        }
+    }
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, WindowProc callback, IntPtr state);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
@@ -44,7 +58,7 @@ public static class ChatSwitchObserver {
         if (count != 1) throw new InvalidOperationException("Expected one visible owned transcript");
         return found;
     }
-    static void Capture(IntPtr owner, int pid, string path) {
+    static double Capture(IntPtr owner, int pid, string path, Stopwatch clock) {
         IntPtr view = Transcript(owner, pid);
         Rect rect;
         var origin = new Point();
@@ -52,8 +66,10 @@ public static class ChatSwitchObserver {
             throw new InvalidOperationException("Transcript capture rectangle unavailable");
         using (var bitmap = new Bitmap(rect.Right, rect.Bottom, PixelFormat.Format32bppRgb)) {
             using (var graphics = Graphics.FromImage(bitmap)) graphics.CopyFromScreen(origin.X, origin.Y, 0, 0, bitmap.Size);
+            double captured = clock.Elapsed.TotalMilliseconds;
             bitmap.Save(path + ".bmp", ImageFormat.Bmp);
             bitmap.Save(path + ".png", ImageFormat.Png);
+            return captured;
         }
     }
     public static Dictionary<string, object> Measure(int pid, IntPtr owner, int target, string log, long offset, string needle, int intervalMs, string imagePrefix) {
@@ -63,6 +79,15 @@ public static class ChatSwitchObserver {
             throw new InvalidOperationException("Switch observation requires its owned foreground window");
         bool images = !String.IsNullOrEmpty(imagePrefix);
         if (images && target < 0) throw new InvalidOperationException("Image replay needs a real target");
+        Input[] inputs = target >= 0 ? new Input[2] : null;
+        if (target >= 0) {
+            if (GetDpiForWindow(owner) != 96) throw new InvalidOperationException("Sidebar fixture requires 96 DPI");
+            var point = new Point { X = 100, Y = 8 + SidebarHeaderHeight + 24 + 38 * target + 19 };
+            if (!ClientToScreen(owner, ref point) || WindowFromPoint(point) != owner || !SetCursorPos(point.X, point.Y))
+                throw new InvalidOperationException("Sidebar row is not in the owned foreground window");
+            inputs[0].Data.Mouse = new Mouse { Flags = 2 };
+            inputs[1].Data.Mouse = new Mouse { Flags = 4 };
+        }
         var points = new List<Dictionary<string, object>>();
         using (var app = Process.GetProcessById(pid))
         using (var observer = Process.GetCurrentProcess()) {
@@ -73,18 +98,12 @@ public static class ChatSwitchObserver {
             var clock = Stopwatch.StartNew();
             points.Add(new Dictionary<string, object> { { "elapsed_ms", 0.0 }, { "cpu_ms", 0.0 } });
             if (target >= 0) {
-                var inputs = new Input[4];
-                for (int i = 0; i < inputs.Length; i++) inputs[i].Type = 1;
-                inputs[0].Data.Keyboard = new Keyboard { Key = 0x11 };
-                inputs[1].Data.Keyboard = new Keyboard { Key = (ushort)(0x31 + target) };
-                inputs[2].Data.Keyboard = new Keyboard { Key = (ushort)(0x31 + target), Flags = 2 };
-                inputs[3].Data.Keyboard = new Keyboard { Key = 0x11, Flags = 2 };
                 if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
-                    throw new InvalidOperationException("Observed switch SendInput failed");
+                    throw new InvalidOperationException("Observed sidebar click SendInput failed");
             }
             long position = offset;
             string carry = "";
-            double shown = -1, cpuAtShown = -1, captureStarted = -1, captureCompleted = -1;
+            double shown = -1, cpuAtShown = -1, captureStarted = -1, capturePixels = -1, captureCompleted = -1;
             double nextCpu = 25;
             while (clock.Elapsed.TotalMilliseconds < intervalMs) {
                 if (target >= 0 && shown < 0) {
@@ -102,7 +121,7 @@ public static class ChatSwitchObserver {
                                 cpuAtShown = app.TotalProcessorTime.TotalMilliseconds - appStart;
                                 if (images) {
                                     captureStarted = clock.Elapsed.TotalMilliseconds;
-                                    Capture(owner, pid, imagePrefix + "-first-observed");
+                                    capturePixels = Capture(owner, pid, imagePrefix + "-first-observed", clock);
                                     captureCompleted = clock.Elapsed.TotalMilliseconds;
                                 }
                             }
@@ -122,15 +141,15 @@ public static class ChatSwitchObserver {
             double cpu = app.TotalProcessorTime.TotalMilliseconds - appStart;
             var systemEnd = SystemTimes();
             points.Add(new Dictionary<string, object> { { "elapsed_ms", elapsed }, { "cpu_ms", cpu } });
-            if (images) Capture(owner, pid, imagePrefix + "-settled");
+            if (images) Capture(owner, pid, imagePrefix + "-settled", clock);
             return new Dictionary<string, object> {
-                { "input", target < 0 ? "idle" : "ctrl-digit" }, { "shown_ms", shown }, { "cpu_at_shown_ms", cpuAtShown },
+                { "input", target < 0 ? "idle" : "sidebar-click" }, { "shown_ms", shown }, { "cpu_at_shown_ms", cpuAtShown },
                 { "elapsed_ms", elapsed }, { "cpu_ms", cpu }, { "cpu_one_core_percent", 100 * cpu / elapsed },
                 { "cpu_points", points }, { "observer_cpu_ms", observer.TotalProcessorTime.TotalMilliseconds - observerStart },
                 { "machine_busy_percent", 100 * (1 - (systemEnd[0] - systemStart[0]) / (systemEnd[1] - systemStart[1])) },
                 { "forced_paints", false }, { "image_probe", images },
                 { "timing_scope", "first nonempty cached target paint; latest-message receipt verified after timing" },
-                { "capture_started_ms", captureStarted }, { "capture_completed_ms", captureCompleted },
+                { "capture_started_ms", captureStarted }, { "capture_pixels_ms", capturePixels }, { "capture_completed_ms", captureCompleted },
                 { "frame_scope", "first observed after completed target-paint log; not compositor-first-present" }
             };
         }

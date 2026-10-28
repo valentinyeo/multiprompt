@@ -44,19 +44,24 @@ test('IGSH-1040 opt-in keeps published946 app, bridge and extension together and
 test('IGSH-1040 ordinary CPU windows do not request paints or capture images', () => {
   assert.doesNotMatch(observer, /InvalidateRect|WM_PAINT|0x000F|DwmFlush|RedrawWindow/);
   assert.match(observer, /if \(images\) \{\s+captureStarted[\s\S]*?Capture\(owner, pid/);
-  assert.match(observer, /if \(images\) Capture\(owner, pid, imagePrefix \+ "-settled"\)/);
+  assert.match(observer, /if \(images\) Capture\(owner, pid, imagePrefix \+ "-settled", clock\)/);
   assert.match(observer, /"cpu_one_core_percent", 100 \* cpu \/ elapsed/);
   assert.doesNotMatch(observer, /ProcessorCount/);
   assert.match(observer, /GetForegroundWindow\(\) != owner/);
+  assert.ok(observer.indexOf('graphics.CopyFromScreen') < observer.indexOf('double captured = clock.Elapsed.TotalMilliseconds;'));
+  assert.ok(observer.indexOf('double captured = clock.Elapsed.TotalMilliseconds;') < observer.indexOf('bitmap.Save(path'));
+  assert.ok(observer.includes('{ "capture_pixels_ms", capturePixels }'));
+  assert.ok(control.includes('ended - Math.Max(started, probeWindowStarted)'));
+  assert.match(control, /ResetHangProbe\(\)[^\n]*probeWindowStarted = System.Diagnostics.Stopwatch.GetTimestamp\(\)/);
 });
 
 test('IGSH-1040 replay and copied receipt stay outside the ordinary measurement call', () => {
   const ordinary = control.indexOf('$shapeSample = [ChatSwitchObserver]::Measure(');
-  const receipt = control.indexOf('Save-ShapeLatest $shapeSample.expected_latest', ordinary);
-  const replay = control.indexOf('$image = [ChatSwitchObserver]::Measure(', receipt);
-  assert.ok(ordinary > 0 && receipt > ordinary && replay > receipt);
-  assert.ok(control.slice(ordinary, receipt).includes('$settleMs, $null)'));
-  assert.ok(control.slice(receipt, replay).includes('same source painted before image replay'));
+  const replay = control.indexOf('$image = [ChatSwitchObserver]::Measure(', ordinary);
+  const receipt = control.indexOf('Save-ShapeLatest $shapeSample.expected_latest', replay);
+  assert.ok(ordinary > 0 && replay > ordinary && receipt > replay);
+  assert.ok(control.slice(ordinary, replay).includes('$settleMs, $null)'));
+  assert.ok(control.slice(ordinary, replay).includes('same source painted before image replay'));
   assert.match(control, /\$latest = \[regex\]::Match\(\$copied,/);
   assert.match(control, /\$last = \[regex\]::Match\(\$copied,/);
   assert.ok(observer.includes('not compositor-first-present'));
@@ -81,6 +86,9 @@ test('IGSH-1040 profile capture refuses ambiguous recorder ownership and never c
   assert.throws(() => ownedProfile(profile.replace('if ($started)', 'if ($true)')));
   assert.throws(() => ownedProfile(profile + '\nwpr -cancel'));
   assert.ok(control.indexOf('Invoke-ChatSwitchProfile -TargetProcessId') > control.indexOf('$shapeResult.idle.after ='));
+  assert.ok(control.includes('$slow = $allSamples | Sort-Object -Property @{ Expression = { [double]$_.shown_ms } } -Descending | Select-Object -First 1'));
+  const restore = control.slice(control.indexOf('if ($profileClosed) {'), control.indexOf('$profileSource ='));
+  assert.match(restore, /\$script:browserShellId = \$shellIds\[\$tab\][^]*Press-CloseBrowserPane/);
 });
 
 test('IGSH-1040 final evidence is checked after cleanup even when the measured budgets fail', () => {
@@ -93,8 +101,10 @@ test('IGSH-1040 every direct observer call restores the exact owned foreground b
   const calls = [...journey.matchAll(/\[ChatSwitchObserver\]::Measure\(/g)];
   assert.equal(calls.length, 5);
   for (const call of calls) {
-    assert.match(journey.slice(0, call.index).split('\n').slice(-2, -1).join(''), /^\s*Wait-SwitchForeground$/);
+    const before = journey.slice(0, call.index).replace(/^\s*\[VerifyNative\]::ResetHangProbe\(\)\r?\n/gm, '');
+    assert.match(before.split('\n').slice(-2, -1).join(''), /^\s*Wait-SwitchForeground$/);
   }
+  assert.match(journey, /Wait-SwitchForeground\s+\[VerifyNative\]::ResetHangProbe\(\)\s+\$shapeSample = \[ChatSwitchObserver\]::Measure/);
   const helper = journey.slice(journey.indexOf('function Wait-SwitchForeground {'), journey.indexOf('function Test-TabChat('));
   assert.match(helper, /Doctor[\s\S]*Wait-Until/);
   assert.match(helper, /if \(\[VerifyNative\]::GetForegroundWindow\(\) -ne \$script:window\) \{[\s\S]*\[VerifyNative\]::BringToForeground\(\$script:window\)/);
@@ -177,4 +187,33 @@ try {
 `], { encoding: 'utf8', timeout: 30000 });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /REORDERED_SESSION_RECEIPTS_PROVEN/);
+});
+
+test('IGSH-1040 receipts use existing owned app copy commands, not keyboard focus timing', () => {
+  const receipt = control.slice(control.indexOf('function Save-ShapeLatest('), control.indexOf('function Wait-SwitchForeground'));
+  assert.ok(receipt.includes('[ChatSwitchObserver]::CopyTranscript($process.Id, $script:window)'));
+  assert.doesNotMatch(receipt, /KeyDown|KeyUp|Focus-Palette/);
+  assert.ok(observer.includes('actual != pid || GetForegroundWindow() != owner'));
+  assert.ok(observer.includes('new uint[] { 0x8000 + 149, 0x8000 + 148 }'));
+  assert.ok(observer.includes('PostMessage(owner, message, UIntPtr.Zero, IntPtr.Zero)'));
+  assert.doesNotMatch(observer, /SendMessageTimeout/);
+  assert.match(read('src/win32.zig'), /WM_APP_CHAT_SELECT_ALL: u32 = WM_APP \+ 149/);
+  assert.match(read('src/win32.zig'), /WM_APP_CHAT_COPY_SELECTION: u32 = WM_APP \+ 148/);
+  assert.ok(receipt.includes("if (-not $last.Success) { throw 'Copied target transcript belongs to a different seeded session' }"));
+});
+
+test('IGSH-1040 shape timing clicks the owned sidebar row instead of a keyboard substitute', () => {
+  assert.ok(observer.includes('"idle" : "sidebar-click"'));
+  assert.ok(observer.includes('WindowFromPoint(point) != owner'));
+  assert.ok(observer.includes('GetDpiForWindow(owner) != 96'));
+  assert.ok(observer.includes('new Point { X = 100, Y = 8 + SidebarHeaderHeight + 24 + 38 * target + 19 }'));
+  assert.ok(observer.includes('new Mouse { Flags = 2 }'));
+  assert.ok(observer.includes('new Mouse { Flags = 4 }'));
+  assert.doesNotMatch(observer.slice(observer.indexOf('if (target >= 0) {'), observer.indexOf('long position = offset;')), /Keyboard =/);
+  assert.ok(observer.indexOf('!SetCursorPos(point.X, point.Y)') < observer.indexOf('double appStart ='));
+  assert.ok(observer.indexOf('var clock = Stopwatch.StartNew();') < observer.indexOf('if (SendInput('));
+  assert.ok(control.includes('Sidebar timing requires the default ungrouped five-row fixture at 96 DPI'));
+  assert.ok(control.includes("[ChatSwitchObserver]::SidebarHeaderHeight = if ($env:RELEASE_TAG -eq 'v0.28.946') { 0 } else { 52 }"));
+  assert.match(read('src/workspace_switcher.zig'), /pub fn headerHeight\(\)[^]*?scale\(52\)/);
+  assert.match(read('src/sidebar.zig'), /var y:[^;]*workspace_switcher\.zig[^;]*headerHeight\(\)/);
 });

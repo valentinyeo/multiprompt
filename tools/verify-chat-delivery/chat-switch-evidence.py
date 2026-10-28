@@ -98,7 +98,7 @@ def evaluate(value, root, require_cleanup=False):
                 require(sample['source_shell'] == previous_target, 'switch route sequence is disconnected')
             previous_target = sample['target_shell']
             targets.append(sample['target_shell'])
-            require(sample['input'] == 'ctrl-digit' and sample['timing_scope'] == TIMING_SCOPE, 'unrecorded input or paint timing scope')
+            require(sample['input'] in ('ctrl-digit', 'sidebar-click') and sample['timing_scope'] == TIMING_SCOPE, 'unrecorded input or paint timing scope')
             peak = max(peak, cpu(sample))
             require(number(sample['layout_width'], 'layout_width') > 0 and number(sample['client_width'], 'client_width') > 0, 'paint geometry must be nonempty')
             require(type(sample['post_paint_moves']) is bool, 'post-paint movement must be observed')
@@ -115,6 +115,8 @@ def evaluate(value, root, require_cleanup=False):
             require(probe['source_shell'] == sample['source_shell'] and probe['target_shell'] == sample['target_shell'] and probe['image_probe'] is True and probe['forced_paints'] is False, 'image replay must follow the same route separately')
             require(probe['frame_scope'] == FRAME_SCOPE, 'first-observation scope must remain explicit')
             require(number(probe['shown_ms'], 'image paint time') <= number(probe['capture_started_ms'], 'capture start') <= number(probe['capture_completed_ms'], 'capture end') <= number(probe['elapsed_ms'], 'image interval'), 'image capture timing missing')
+            if 'capture_pixels_ms' in probe:
+                require(probe['capture_started_ms'] <= number(probe['capture_pixels_ms'], 'pixel copy completion') <= probe['capture_completed_ms'], 'pixel timestamp must precede file encoding completion')
             first = image(root, probe['image_prefix'] + '-first-observed')
             settled = image(root, probe['image_prefix'] + '-settled')
             if not latest or shown >= 150 or hang >= 100 or first != settled or sample['layout_width'] != sample['client_width'] or sample['post_paint_moves']:
@@ -128,9 +130,11 @@ def evaluate(value, root, require_cleanup=False):
         tree = json.loads(artifact(root, 'process-tree.json').decode('utf-8-sig'))
         result = json.loads(artifact(root, 'result.json').decode('utf-8-sig'))
         require(tree['activeAfterStop'] == 0 and result['scratchRemoved'] is True, 'owned process/scratch cleanup incomplete')
+    limitations = [FRAME_SCOPE, TIMING_SCOPE, 'one profile is a partial cache sample; message order and layout semantics are generated']
+    if any(sample['input'] != 'sidebar-click' for samples in value['modes'].values() for sample in samples):
+        limitations.insert(0, 'Ctrl+digit path, not sidebar-click proof')
     return dict(status='failed' if failures else 'passed', category='switch-budget' if failures else 'within-observed-budgets', product_acceptance_proven=False,
-                failures=failures, switches=40, peak_observed_one_core_percent=peak,
-                limitations=['Ctrl+digit path, not sidebar-click proof', FRAME_SCOPE, TIMING_SCOPE, 'one profile is a partial cache sample; message order and layout semantics are generated'])
+                failures=failures, switches=40, peak_observed_one_core_percent=peak, limitations=limitations)
 
 
 if __name__ == '__main__':

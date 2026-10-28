@@ -716,6 +716,49 @@ test('metadata retention oracle rejects the actual 708 identity and worker dispa
   assert.match(run.stderr, /TestExpectedEqual/);
 });
 
+test('IGSH-1040 live replies arrive between older pages without losing staged history', () => {
+  const cases = String.raw`
+test "cache-first switch-back live tail during older loading" {
+    const a = std.heap.page_allocator;
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", ""), .disk_loaded = true, .before = 200 };
+    defer one.history.deinit(a);
+    defer one.backfill.deinit(a);
+    try g_chat_histories.append(a, &one);
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    try one.history.apply(a, "@mp\t1\thistory\tok\tsid\t200\t300\t9\t0\tclaude\tterm-1\t0\t\ttail\t200\n{\"role\":\"assistant\",\"id\":\"third\",\"text\":\"third\"}\n@@MP_END@@\n", 1, one.key);
+    remote_pages = &.{
+        "@mp\t2\thistory\tok\tsid\t100\t200\t9\t0\tclaude\tterm-1\t0\t\tolder\t100\n{\"role\":\"assistant\",\"id\":\"second\",\"text\":\"second\"}\n@@MP_END@@\n",
+        "@mp\t3\thistory\tok\tsid\t300\t400\t9\t0\tclaude\tterm-1\t0\t\tdelta\t200\n{\"role\":\"assistant\",\"id\":\"fourth\",\"text\":\"fourth\"}\n@@MP_END@@\n",
+        "@mp\t4\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\t0\t\tolder\t0\n{\"role\":\"assistant\",\"id\":\"first\",\"text\":\"first\"}\n@@MP_END@@\n",
+    };
+    remote_calls = 0;
+    one.pending = true;
+    chatFileFetchThread(&one, one.key, 2, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 0), one.before);
+    try std.testing.expectEqual(@as(usize, 1), one.backfill.pages.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("third"), one.history.text.items);
+    chatFileFetchThread(&one, one.key, 3, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 100), one.before);
+    try std.testing.expectEqual(@as(usize, 1), one.backfill.pages.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("thirdfourth"), one.history.text.items);
+    chatFileFetchThread(&one, one.key, 4, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 0), one.before);
+    try std.testing.expectEqual(@as(u64, 400), one.history.offset);
+    try std.testing.expectEqual(ticks, one.next);
+    try std.testing.expectEqual(@as(usize, 0), one.backfill.pages.items.len);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("firstsecondthirdfourth"), one.history.text.items);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
+
 test('IGSH-815 snapshot deferral arms polling and stalled older pages stop continuing', () => {
   const cases = `
 test "cache-first switch-back IGSH-815 restart and continuation progress" {

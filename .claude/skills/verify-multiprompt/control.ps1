@@ -245,24 +245,27 @@ public static class VerifyNative {
     static Thread probeThread;
     static volatile bool probeRun;
     static double probeMax;
+    static long probeWindowStarted;
     static readonly object probeLock = new object();
     public static void StartHangProbe(IntPtr owner) {
         probeRun = true;
         probeThread = new Thread(() => {
-            var timer = new System.Diagnostics.Stopwatch();
             while (probeRun) {
                 UIntPtr result;
-                timer.Restart();
+                long started = System.Diagnostics.Stopwatch.GetTimestamp();
                 SendMessageTimeout(owner, 0, UIntPtr.Zero, IntPtr.Zero, 2, 5000, out result);
-                double elapsed = timer.Elapsed.TotalMilliseconds;
-                lock (probeLock) { if (elapsed > probeMax) probeMax = elapsed; }
+                long ended = System.Diagnostics.Stopwatch.GetTimestamp();
+                lock (probeLock) {
+                    double elapsed = Math.Max(0, ended - Math.Max(started, probeWindowStarted)) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                    if (elapsed > probeMax) probeMax = elapsed;
+                }
                 Thread.Sleep(2);
             }
         });
         probeThread.IsBackground = true;
         probeThread.Start();
     }
-    public static void ResetHangProbe() { lock (probeLock) { probeMax = 0; } }
+    public static void ResetHangProbe() { lock (probeLock) { probeWindowStarted = System.Diagnostics.Stopwatch.GetTimestamp(); probeMax = 0; } }
     public static double HangProbeMax() { lock (probeLock) { return probeMax; } }
     public static void StopHangProbe() { probeRun = false; if (probeThread != null) probeThread.Join(6000); }
     public static double[] SwitchToSession(int digit, string log, long offset, string needle, int settleMs) {
@@ -6287,13 +6290,16 @@ try {
             if ($shapeProof) {
                 Add-Type -AssemblyName System.Windows.Forms
                 Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/chat-switch-observer.cs')
+                [ChatSwitchObserver]::SidebarHeaderHeight = if ($env:RELEASE_TAG -eq 'v0.28.946') { 0 } else { 52 }
                 $shapeResult = [ordered]@{ schema = 1; source = 'GitHub Windows native desktop'; setup_passed = $false; errors = @(); app = @{ tag = $env:RELEASE_TAG; sha256 = $ExpectedHash; optimization = $env:VERIFY_OPTIMIZATION }; fixture = (Get-Content (Join-Path $Evidence 'chat-shape-manifest.json') -Raw | ConvertFrom-Json); session_shells = @(); modes = [ordered]@{ browser_closed = @(); browser_open = @() }; idle = @{} }
             }
             function Save-ShapeLatest([string]$Expected, [string]$Marker, [string]$Name) {
-                Focus-Palette 'chat view select all' 6364
-                Press @(0x0D) 'Enter: select actual rendered transcript'
+                Doctor
+                Assert-Foreground
+                Record 'Copy the actual transcript through owned app commands outside timed and image windows'
                 [Windows.Forms.Clipboard]::Clear()
-                Press @(0x11, 0x43) 'Ctrl+C: verify the generated latest message outside timing'
+                [ChatSwitchObserver]::CopyTranscript($process.Id, $script:window)
+                Wait-Until { [Windows.Forms.Clipboard]::ContainsText() } 'owned transcript copy completed' 10
                 $copied = [Windows.Forms.Clipboard]::GetText()
                 $latest = [regex]::Match($copied, [regex]::Escape($Expected))
                 $last = [regex]::Match($copied, [regex]::Escape($Marker))
@@ -6307,6 +6313,16 @@ try {
                 return $latest.Success
             }
             function Wait-SwitchForeground {
+                if ($shapeProof) {
+                    $state = Read-Session
+                    if ([VerifyNative]::GetDpiForWindow($script:window) -ne 96 -or
+                        ($state.single_window -and -not $state.hide_pills) -or
+                        ($state.PSObject.Properties['groups'] -and @($state.groups).Count -gt 0) -or
+                        ($state.PSObject.Properties['ui_scale'] -and $state.ui_scale -ne 100) -or
+                        ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -or
+                        ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed) -or
+                        @($state.tabs | Where-Object { $_.PSObject.Properties['pinned_top'] -and $_.pinned_top }).Count -gt 0) { throw 'Sidebar timing requires the default ungrouped five-row fixture at 96 DPI' }
+                }
                 Doctor
                 Wait-Until {
                     if ([VerifyNative]::GetForegroundWindow() -ne $script:window) {
@@ -6436,10 +6452,10 @@ try {
                         Record "Ctrl+$($target + 1): switch to Chat View session $target ($mode sample $sample)"
                         $shapeSample = $null
                         if ($shapeProof) {
-                            [VerifyNative]::ResetHangProbe()
                             $jobClock = [Diagnostics.Stopwatch]::StartNew()
                             $jobBefore = $job.ReadAccounting()
                             Wait-SwitchForeground
+                            [VerifyNative]::ResetHangProbe()
                             $shapeSample = [ChatSwitchObserver]::Measure($process.Id, $script:window, $target, $log, $offset, $needle, $settleMs, $null)
                             $jobAfter = $job.ReadAccounting()
                             $jobClock.Stop()
@@ -6484,7 +6500,6 @@ try {
                             $shapeSample.expected_latest = $seedTurn.expected_latest
                             $shapeSample.last_marker = $seedTurn.last_marker
                             $shapeSample.latest_receipt = "$mode-$sample-latest.txt"
-                            $shapeSample.latest_message_verified = Save-ShapeLatest $shapeSample.expected_latest $shapeSample.last_marker $shapeSample.latest_receipt
                             $sourceOffset = (Get-Item -LiteralPath $log).Length
                             Press @(0x11, (0x31 + $current)) 'Return to the identical source for a separate image replay'
                             Wait-Until { (Read-Session).active_tab -eq $current -and (Read-SharedLog $log $sourceOffset).Contains('[switch] chat content shown shell=' + $shellIds[$current] + ' ') } 'same source painted before image replay' 30
@@ -6496,6 +6511,7 @@ try {
                             $image.target_shell = $shellIds[$target]
                             $image.image_prefix = $imagePrefix
                             $shapeSample.frame_probe = $image
+                            $shapeSample.latest_message_verified = Save-ShapeLatest $shapeSample.expected_latest $shapeSample.last_marker $shapeSample.latest_receipt
                             $shapeResult.modes[$mode] += $shapeSample
                         }
                         $current = $target
@@ -6511,12 +6527,13 @@ try {
                     if ($shapeProfile) {
                         $gapCase.phase = 'separate-profile'
                         $allSamples = @($shapeResult.modes.browser_closed) + @($shapeResult.modes.browser_open)
-                        $slow = $allSamples | Sort-Object -Property shown_ms -Descending | Select-Object -First 1
+                        $slow = $allSamples | Sort-Object -Property @{ Expression = { [double]$_.shown_ms } } -Descending | Select-Object -First 1
                         $profileClosed = $slow.browser_mode -eq 'browser_closed'
                         if ($profileClosed) {
                             for ($tab = 0; $tab -lt $sessionCount; $tab++) {
                                 Press @(0x11, (0x31 + $tab)) 'Select a session to restore the browser-closed profile mode'
                                 Wait-Until { (Read-Session).active_tab -eq $tab } 'profile browser-close target selected'
+                                $script:browserShellId = $shellIds[$tab]
                                 Press-CloseBrowserPane 'Close this owned pane before the separate baseline profile'
                             }
                         }
