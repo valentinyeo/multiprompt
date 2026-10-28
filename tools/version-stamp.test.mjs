@@ -169,7 +169,7 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
       assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
       assert.match(cache, new RegExp(`if: ${pathGuard}${guard}\\(?github\\.event_name == '`));
       if (cache.includes('uses: actions/cache/restore@')) {
-        const event = windows?.includes(cache) ? "\\(github\\.event_name == 'pull_request' \\|\\| \\(github\\.event_name == 'push' && github\\.ref != 'refs/heads/master'\\)\\)" : "github\\.event_name == 'pull_request'";
+        const event = windows?.includes(cache) ? "\\(github\\.event_name == 'pull_request' \\|\\| github\\.event_name == 'workflow_dispatch' \\|\\| \\(github\\.event_name == 'push' && github\\.ref != 'refs/heads/master'\\)\\)" : "github\\.event_name == 'pull_request'";
         assert.match(cache, new RegExp(`if: ${pathGuard}${guard}${event}\n`));
       } else {
         assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
