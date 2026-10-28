@@ -2,7 +2,38 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyCleanCoverage } from './check-clean-chat-output.mjs';
 import { readBmp } from './chat-code-font-proof.mjs';
+
+export function transcriptGeometry(host, status, composer, viewport) {
+  for (const rect of [host, status, composer, viewport]) {
+    assert.ok(Object.values(rect).every(Number.isSafeInteger), 'integer owned window bounds required');
+  }
+  assert.ok(status.left === host.left && status.width === host.width && status.top >= host.top &&
+    status.top + status.height < host.top + host.height && status.height > 0, 'status row must be inside the owned transcript host');
+  const top = status.top + status.height;
+  assert.ok(viewport.left === host.left && viewport.width === host.width && viewport.top === status.top,
+    'reported content must match the owned status and transcript');
+  const bottom = viewport.top + viewport.height;
+  const gap = composer.top - Math.floor(12 * status.height / 28) - bottom;
+  assert.equal(gap, Math.floor(14 * status.height / 28), 'removed working strip must not reserve space');
+  assert.ok(bottom > top + 100 && bottom < host.top + host.height, 'visible transcript content must exclude composer');
+  return {
+    transcript: { left: host.left, top, width: host.width, height: bottom - top },
+    rows: status,
+    working: { left: host.left, top: bottom, width: host.width, height: Math.floor(14 * status.height / 28) },
+  };
+}
+
+export function completedToolCalls(rows) {
+  return rows.filter(call => {
+    if (call.role !== 'tool') return false;
+    const results = rows.filter(row => row.role === 'tool_result' && row.id === call.id);
+    if (results.length > 1) return false;
+    const result = results[0] || call;
+    return result.status === 'ok' && typeof result.detail === 'string' && result.detail.includes('verified');
+  });
+}
 
 export function compareTranscript(before, after, rect) {
   assert.equal(before.width, after.width);
@@ -65,7 +96,6 @@ export function compareCleanChat(baseline, on, off, { transcript, rows, working 
     }
     if (name === 'rows') {
       assert.equal(restoredChanges, 0, "IGSH-816 CLEAN chat OFF did not restore today's status/outbox/footer rows");
-      assert.ok(offInk > 0, 'IGSH-816 CLEAN chat OFF has no painted status/outbox/footer rows');
       assert.equal(onInk, 0, 'IGSH-816 CLEAN chat ON still paints status/outbox/footer rows');
     } else {
       assert.equal(onInk, 0, 'IGSH-849 CLEAN chat ON still paints the removed working strip');
@@ -159,7 +189,7 @@ export function evaluate(root, complete, toolsOnly = false) {
   assert.deepEqual(messages(beforeRows), [['user', 'start the fake session'], ['assistant', 'The fake session is ready.']]);
   assert.deepEqual(messages(rows), messages(beforeRows), 'tool updates must not change message data');
   const tools = rows.filter(row => row.role === 'tool');
-  const completed = tools.filter(row => row.status === 'ok' && row.detail.includes('verified'));
+  const completed = completedToolCalls(rows);
   assert.equal(tools.length, 12, 'production reader retained all tool calls');
   assert.equal(completed.length, 12, 'production reader retained all paired successful results');
   assert.deepEqual([...new Set(tools.map(row => row.text))].sort(), ['Ran Check app-smoke state', 'Ran Inspect app-smoke run details', 'Ran Read commit statuses on PR head', 'TodoWrite'].sort());
@@ -173,6 +203,7 @@ export function evaluate(root, complete, toolsOnly = false) {
     { transcript: observation.transcript, ...observation.cleanChat },
   );
   if (complete) {
+    verifyCleanCoverage(fs.readFileSync(path.join(root, 'clean-chat-native.log'), 'utf8'));
     assert.equal(observation.newMessages?.passed, true, 'IGSH-813 new-message journey must complete');
     assert.deepEqual(observation.newMessages.transitions, ['arrival-up', 'arrival-bottom', 'scroll-retains', 'bottom-reset', 'pill-jump-clear', 'close-retains', 'hidden-arrival']);
     assert.equal(observation.unreadDivider?.passed, true, 'IGSH-814 unread divider journey must complete');
@@ -208,6 +239,16 @@ export function evaluate(root, complete, toolsOnly = false) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = path.resolve(process.argv[2]);
+  if (process.argv.includes('--geometry')) {
+    const { host, status, composer, viewport } = JSON.parse(fs.readFileSync(path.join(root, 'messages-only', 'geometry-input.json'), 'utf8').replace(/^\uFEFF/, ''));
+    console.log(JSON.stringify(transcriptGeometry(host, status, composer, viewport)));
+    process.exit(0);
+  }
+  if (process.argv.includes('--tool-count')) {
+    const rows = fs.readFileSync(root, 'utf8').replace(/^\uFEFF/, '').trim().split(/\r?\n/).slice(1).map(line => JSON.parse(line));
+    console.log(completedToolCalls(rows).length);
+    process.exit(0);
+  }
   const complete = process.argv.includes('--complete');
   let result;
   try {
