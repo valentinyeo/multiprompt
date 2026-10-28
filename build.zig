@@ -27,7 +27,6 @@ pub fn build(b: *std.Build) void {
         if (std.mem.allEqual(u8, &key, 0)) @panic("Release signing public key is still the all-zero placeholder; configure it before publishing");
     }
 
-
     const mod = b.addModule("multiprompt", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -662,6 +661,10 @@ pub fn build(b: *std.Build) void {
     console_font_lifecycle_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&console_font_lifecycle_tests.step);
     vps_test_step.dependOn(&console_font_lifecycle_tests.step);
+    const combined_menu_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-combined-menu.test.js" });
+    combined_menu_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&combined_menu_tests.step);
+    vps_test_step.dependOn(&combined_menu_tests.step);
     const window_flicker_tests = b.addSystemCommand(&.{ "node", "--test", "tools/window-flicker.test.js" });
     window_flicker_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&window_flicker_tests.step);

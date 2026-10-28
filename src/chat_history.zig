@@ -450,6 +450,19 @@ pub const History = struct {
         return .{ .role = m.role, .id = id, .segment = m.segment, .timestamp = m.timestamp, .text = if (id.len == 0) m.text else "", .settlement = if (id.len == 0) m.settlement else null };
     }
 
+    pub fn requestId(self: History, a: std.mem.Allocator, reference: u64) ![]u16 {
+        if (reference == 0) return a.alloc(u16, 0);
+        var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            const parsed = try std.json.parseFromSlice(Message, a, line, .{ .ignore_unknown_fields = true });
+            defer parsed.deinit();
+            const id = parsed.value.read_id orelse parsed.value.id;
+            if (@import("chat_reaction.zig").reference(id) == reference) return std.unicode.utf8ToUtf16LeAlloc(a, id);
+        }
+        return a.alloc(u16, 0);
+    }
+
     pub fn encode(self: History, a: std.mem.Allocator, key: transcript.Identity) ![]u8 {
         var start: usize = 0;
         const budget = TAIL_BYTES - 512;

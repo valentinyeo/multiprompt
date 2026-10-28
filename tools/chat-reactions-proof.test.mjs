@@ -10,14 +10,14 @@ function fixture() {
   };
   fill(0, 0, 300, 300, 0x202020);
   fill(20, 10, 250, 45, 0x555555);
-  fill(20, 60, 250, 116, 0x444444);
+  fill(20, 60, 250, 148, 0x444444);
   fill(20, 165, 250, 230, 0x444444);
   fill(28, 120, 68, 142, 0x585858);
   fill(42, 126, 53, 136, 0xffffff);
   return { image, fill };
 }
 
-test('real filled badge attached below the first reply accepted', () => {
+test('real filled badge inside the first reply accepted', () => {
   assertBadge(inspect(fixture().image, area));
 });
 for (const [name, mutate] of [
@@ -35,12 +35,14 @@ for (const [name, mutate] of [
 
 test('gradient fills remain one bubble; shared pill shade does not split user rows', () => {
   const f = fixture();
-  for (const [top, bottom, base] of [[10, 45, 53], [60, 116, 36], [165, 230, 36]]) {
+  for (const [top, bottom, base] of [[10, 45, 53], [60, 148, 36], [165, 230, 36]]) {
     for (let step = 0; step < 8; step++) {
       const shade = 32 + base + 8 - Math.trunc(8 * step / 7);
       f.fill(20, top + Math.trunc((bottom - top) * step / 8), 250, top + Math.trunc((bottom - top) * (step + 1) / 8), shade * 0x010101);
     }
   }
+  f.fill(28, 120, 68, 142, 0x585858);
+  f.fill(42, 126, 53, 136, 0xffffff);
   assertBadge(inspect(f.image, area));
 });
 
@@ -64,7 +66,7 @@ test('approved reader colours identify assistant replies, not the user or compos
   f.fill(120, 0, 220, 10, 0x1e1e1e);
   f.fill(0, 285, 300, 300, 0x1e1e1e);
   f.fill(20, 10, 250, 45, 0x3a3a3a);
-  f.fill(20, 60, 250, 116, 0x1e1e1e);
+  f.fill(20, 60, 250, 148, 0x1e1e1e);
   f.fill(20, 165, 250, 230, 0x1e1e1e);
   f.fill(28, 120, 68, 142, 0x323232);
   f.fill(42, 126, 53, 136, 0xffffff);
