@@ -181,7 +181,9 @@ test('settled idle median tolerates isolated scheduling outliers, never sustaine
 });
 
 test('idle sampling discards ten warmup polls after painted selection before taking measurements', () => {
-  const driver = fs.readFileSync(new URL('./switch-performance.ps1', import.meta.url), 'utf8');
+  const file = new URL('./switch-performance.ps1', import.meta.url);
+  assert.ok(fs.existsSync(file), 'The real-window performance driver must ship');
+  const driver = fs.readFileSync(file, 'utf8');
   const painted = driver.indexOf("Wait-For 'loaded idle conversation painted'");
   const warmup = driver.indexOf("Wait-For 'ten warmup idle Chat View polls'", painted);
   const start = driver.indexOf('$idleOffset = (Read-Log).Length', warmup);
