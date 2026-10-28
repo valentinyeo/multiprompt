@@ -2268,3 +2268,67 @@ test('IGSH-1108 CLI writes JSON job outputs and rejects unavailable or unsafe fe
     assert.match(result.stderr, /Unsupported desktop journey/);
   }
 });
+
+test('group proof samples and clicks below the workspace picker at every supported scale', () => {
+  const source = read(skill + 'control-native.cs');
+  const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
+  const expression = group.match(/int top = ([^;]+);/)[1];
+  const top = new Function('origin', 'frame', 'dpi', 'scale', 'hidePills', 'S', `return ${expression};`);
+  const pane = source.slice(source.indexOf('public static class PaneLayoutProof {'));
+  const rowExpression = pane.match(/int rowTop = ([^;]+);/)[1];
+  const rowTop = new Function('client', 'gap', 'dpi', 'scale', 'hidePills', 'S', `return ${rowExpression};`);
+  for (const [dpi, scale, hidePills, expected] of [
+    [96, 100, false, 125], [96, 100, true, 91],
+    [120, 100, false, 140], [144, 100, false, 155],
+    [96, 125, false, 140], [144, 125, true, 143],
+  ]) {
+    assert.equal(top({ Y: 231 }, { Top: 200 }, dpi, scale, hidePills,
+      (value, d, s) => Math.trunc(value * d * s / 9600)), expected,
+    `group headline must clear the workspace picker: dpi=${dpi} scale=${scale} hidePills=${hidePills}`);
+    assert.equal(rowTop({ Top: 31 }, Math.trunc(8 * dpi * scale / 9600), dpi, scale, hidePills,
+      (value, d, s) => Math.trunc(value * d * s / 9600)), expected + 28,
+    `pane icon scan must follow the group headline: dpi=${dpi} scale=${scale} hidePills=${hidePills}`);
+  }
+});
+
+test('native group pixel proof reports the current header and member rectangles', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-proof-'));
+  const source = read(skill + 'control-native.cs');
+  const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
+  const script = `$ErrorActionPreference = 'Stop'
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+public static class VerifyNative {
+    public struct Rect { public int Left, Top, Right, Bottom; }
+    public struct Point { public int X, Y; }
+}
+${group}
+'@
+$image = New-Object System.Drawing.Bitmap 800, 900
+try { $image.Save((Join-Path $PSScriptRoot 'sidebar.png')) } finally { $image.Dispose() }
+$frame = New-Object VerifyNative+Rect
+$frame.Left = 200; $frame.Top = 200
+$origin = New-Object VerifyNative+Point
+$origin.X = 208; $origin.Y = 231
+foreach ($collapsed in @($false, $true)) {
+    $proof = [GroupRailProof]::Check((Join-Path $PSScriptRoot 'sidebar.png'), $frame, $origin, 96, 100, $false, $collapsed)
+    if ($proof.headerTops[0] -ne 125) { throw 'First group overlaps the workspace picker' }
+    $second = if ($collapsed) { 153 } else { 229 }
+    if ($proof.headerTops[1] -ne $second -or $proof.sidebarRect[3] -ne ($second + 104)) { throw 'Member rectangles do not track group collapse' }
+    if (-not $proof.noFill -or -not $proof.noRail -or $proof.flushLeft) { throw 'Pixel checks no longer inspect the blank image faithfully' }
+}
+Write-Host 'NATIVE_GROUP_GEOMETRY_OK'
+`;
+  try {
+    const file = path.join(dir, 'group-proof.ps1');
+    fs.writeFileSync(file, script);
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', file], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /NATIVE_GROUP_GEOMETRY_OK/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
