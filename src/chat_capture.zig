@@ -1116,6 +1116,7 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
     if (shell_index >= app_state.shell_count or out.len < 2) return null;
     const pid = app_state.shells[shell_index].pid;
     if (pid == 0) return null;
+    @import("console_snapshot.zig").invalidate();
     app_state.g_chat_screen_status_len = 0;
 
     _ = FreeConsole();

@@ -290,7 +290,8 @@ test('status polling uses isolated snapshots without attaching the UI console', 
   const poll = source.slice(source.indexOf('pub fn poll('), source.indexOf('fn readExact('));
   assert.doesNotMatch(poll, /AttachConsole|FreeConsole|WaitForSingleObject|Sleep|readExact/);
   assert.match(poll, /PeekNamedPipe[\s\S]*available == 0[\s\S]*ReadFile/);
-  assert.match(poll, /h.request.pid == pid and h.request.sid == sid/);
+  assert.match(poll, /!discard and h.request.pid == pid and h.request.sid == sid/);
+  assert.match(capture, /@import\("console_snapshot.zig"\)\.invalidate\(\)/);
   assert.match(source, /test "snapshot polling never waits for partial data and rejects a switched session"/);
   const main = fs.readFileSync(new URL('../src/main.zig', import.meta.url), 'utf8');
   assert.ok(main.indexOf('runIfRequested(args)') < main.indexOf('debugLog("launch process-start'));

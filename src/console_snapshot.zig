@@ -10,8 +10,13 @@ var input: win.HANDLE = null;
 var output: win.HANDLE = null;
 var process: win.HANDLE = null;
 var pending = false;
+var discard = false;
 var reply: Reply = undefined;
 var received: usize = 0;
+
+pub fn invalidate() void {
+    discard = pending;
+}
 
 pub fn close() void {
     if (input != null) _ = win.CloseHandle(input);
@@ -21,6 +26,7 @@ pub fn close() void {
     output = null;
     process = null;
     pending = false;
+    discard = false;
     received = 0;
 }
 
@@ -84,7 +90,8 @@ pub fn poll(pid: u32, sid: u32) ?Snapshot {
             if (received < @sizeOf(Header) + h.chars * @sizeOf(u16)) continue;
             pending = false;
             received = 0;
-            if (h.request.pid == pid and h.request.sid == sid and h.width > 0) result = .{ .width = h.width, .rows = h.rows, .raw = reply.raw[0..h.chars] };
+            if (!discard and h.request.pid == pid and h.request.sid == sid and h.width > 0) result = .{ .width = h.width, .rows = h.rows, .raw = reply.raw[0..h.chars] };
+            discard = false;
             break;
         }
     }
@@ -181,4 +188,13 @@ test "snapshot polling never waits for partial data and rejects a switched sessi
     try std.testing.expect(readExact(request_reader, std.mem.asBytes(&request)));
     try std.testing.expectEqual(@as(u32, 56), request.pid);
     try std.testing.expectEqual(@as(u32, 78), request.sid);
+    const current = Header{ .request = request, .width = 2, .rows = 1, .chars = 2 };
+    invalidate();
+    try std.testing.expect(win.WriteFile(reply_writer, std.mem.asBytes(&current), @sizeOf(Header), &count, null) != 0);
+    try std.testing.expect(win.WriteFile(reply_writer, std.mem.asBytes(&text), @sizeOf(@TypeOf(text)), &count, null) != 0);
+    try std.testing.expect(poll(56, 78) == null);
+    try std.testing.expect(readExact(request_reader, std.mem.asBytes(&request)));
+    try std.testing.expect(win.WriteFile(reply_writer, std.mem.asBytes(&current), @sizeOf(Header), &count, null) != 0);
+    try std.testing.expect(win.WriteFile(reply_writer, std.mem.asBytes(&text), @sizeOf(@TypeOf(text)), &count, null) != 0);
+    try std.testing.expectEqualSlices(u16, &text, poll(56, 78).?.raw);
 }
