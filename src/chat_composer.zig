@@ -1751,8 +1751,7 @@ pub fn openChatView() void {
     layoutChatControls();
     _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_SHOW);
     _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_SHOW);
-    _ = SetForegroundWindow(app_state.g_main_hwnd);
-    _ = SetFocus(app_state.g_chat_composer_hwnd);
+    focusActiveShell();
     for (&app_state.g_voice_deferred_text) |*pending| {
         if (pending.shell_id == app_state.shells[app_state.active_shell].shell_id and pending.len != 0) {
             insertTextIntoChatComposer(pending.text[0..pending.len]);
