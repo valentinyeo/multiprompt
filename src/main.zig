@@ -2029,6 +2029,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_MOUSEWHEEL, WM_MOUSEHWHEEL => {
             var pt: POINT = .{ .x = GET_X(lp), .y = GET_Y(lp) };
             _ = ScreenToClient(hwnd, &pt);
+            if (msg == WM_MOUSEWHEEL and @import("update_card.zig").updateCardScroll(pt.x, pt.y, @bitCast(@as(u16, @truncate(wp >> 16))))) return 0;
             if (chatViewOwnsInput()) {
                 const layout = chatViewLayout();
                 var wheel_area = layout.transcript;

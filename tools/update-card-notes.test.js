@@ -81,12 +81,19 @@ test('existing card uses the same growing rectangle for layout and hits, with th
   const card = read('src/update_card.zig');
   assertCardNotes(card);
   assert.equal((card.match(/update_release.cardNotes\(/g) || []).length, 2);
-  assert.match(card, /const rows = card_notes.shown\(card_expanded\) \+ @intFromBool\(cardHasToggle\(\)\)/);
+  assert.match(card, /const desired = uiScaled\(UPDATE_CARD_H\) \+ notes_height/);
   assert.match(card, /return updateCardHeight\(\) \+ @import\("window_layout.zig"\).paneGap\(\)/);
   assert.match(card, /\.top = sticky.top - @import\("window_layout.zig"\).paneGap\(\) - updateCardHeight\(\)/);
   assert.match(card, /const card = updateCardRect\(\)/);
   assert.match(card, /utf8ToUtf16Le\(&wide, card_notes.line\(i\)\)/);
-  assert.match(card, /DT_SINGLELINE \| DT_NOPREFIX \| DT_END_ELLIPSIS/);
+  const painter = card.slice(card.indexOf('const notes_rect = updateCardNotesRect(card);'), card.indexOf('var more_buf:', card.indexOf('pub fn paintSidebarUpdateCard')));
+  assert.match(painter, /DrawTextW\(hdc, &wide, @intCast\(n\), &note_rc, DT_WORDBREAK \| DT_NOPREFIX\)/);
+  assert.doesNotMatch(painter, /DT_SINGLELINE|DT_END_ELLIPSIS/);
+  assert.match(card, /DT_WORDBREAK \| DT_NOPREFIX \| @import\("win32.zig"\).DT_CALCRECT/);
+  assert.match(card, /IntersectClipRect\(hdc, notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom\)/);
+  assert.match(card, /card_scroll = std.math.clamp/);
+  assert.match(card, /const bottom = card.bottom - uiScaled\(30\)/);
+  assert.match(read('src/main.zig'), /if \(msg == WM_MOUSEWHEEL and @import\("update_card.zig"\).updateCardScroll/);
   const notes = read('src/update_notes.zig');
   for (const name of [
     'IGSH-728 picks only versions between installed and offered, newest first',
@@ -219,4 +226,62 @@ test('IGSH-1090 published executable paints its own published notes, with no bin
   assert.match(proof.stdout, /RELEASE_CARD_RECEIPT=/);
   assert.match(proof.stdout, /RELEASE_CARD_PNG=/);
   console.log(proof.stdout);
+});
+
+test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejects the old released painter', {
+  skip: process.platform !== 'win32' || process.env.GITHUB_WORKFLOW !== 'Test repeat',
+  timeout: 300000,
+}, async t => {
+  const os = require('node:os');
+  const { createHash } = require('node:crypto');
+  const { spawnSync } = require('node:child_process');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapped-card-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const fragment = 'Update notes wrap in full, with scrolling for longer lists.';
+  const api = async endpoint => {
+    const response = await fetch(`https://api.github.com/repos/valentinyeo/multiprompt/${endpoint}`);
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  const download = async (release, name, destination) => {
+    const asset = release.assets.find(item => item.name === name);
+    assert.ok(asset, name);
+    const response = await fetch(asset.browser_download_url);
+    assert.equal(response.status, 200);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert.equal(`sha256:${createHash('sha256').update(bytes).digest('hex')}`, asset.digest);
+    fs.writeFileSync(destination, bytes);
+  };
+  const latest = await api('releases/latest');
+  const notes = path.join(directory, 'notes.json');
+  await download(latest, 'release-notes.json', notes);
+  const history = JSON.parse(fs.readFileSync(notes, 'utf8'));
+  const shipped = history.releases.find(release => release.changes.includes(fragment));
+  let exe = path.join(root, 'zig-out/bin/multiprompt.exe');
+  if (shipped) {
+    const release = shipped.version === latest.tag_name.slice(1) ? latest : await api(`releases/tags/v${shipped.version}`);
+    exe = path.join(directory, 'released.exe');
+    await download(release, 'multiprompt-x64.exe', exe);
+    history.version = shipped.version;
+    fs.writeFileSync(notes, JSON.stringify(history));
+  }
+  const old = await api('releases/tags/v0.28.983');
+  const before = path.join(directory, 'before.exe');
+  await download(old, 'multiprompt-x64.exe', before);
+  const proof = (binary, label) => spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+    path.join(root, 'tools/update-card-release-proof.ps1'), '-Exe', binary, '-Notes', notes,
+    '-Evidence', path.join(directory, label), '-Wrapped'],
+  { encoding: 'utf8', timeout: 120000, maxBuffer: 16 * 1024 * 1024 });
+  const red = proof(before, 'red');
+  assert.notEqual(red.status, 0, red.stdout + red.stderr);
+  assert.match(red.stdout + red.stderr, /Card did not expose wrapped note bounds/);
+  console.log('WRAPPED_CARD_RED v0.28.983 rejects the unwrapped painter');
+  const green = proof(exe, 'green');
+  assert.equal(green.status, 0, green.stdout + green.stderr);
+  assert.match(green.stdout, /WRAPPED_CARD_RECEIPT=/);
+  assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-normal:/);
+  assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-minimum:/);
+  assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-scrolled:/);
+  assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-collapsed:/);
+  console.log(green.stdout);
 });
