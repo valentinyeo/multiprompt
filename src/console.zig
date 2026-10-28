@@ -2757,7 +2757,10 @@ pub fn switchToShell(idx: u32) void {
         }
     }
     app_state.g_chat_switch_preparing = false;
-    if (defer_browser and app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    if (defer_browser and app_state.g_chat_transcript_hwnd != null) {
+        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+        _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
+    }
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
     if (!app_state.g_restoring) publishInboxState();
     app_state.g_skip_view_bump = false;
