@@ -277,6 +277,8 @@ test('IGSH-1055 two independent app revisions share the identical branch verifie
 
 
 test('IGSH-1055 historical activity control reaches strict pixel checks before current CLEAN layout', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
   const source = fs.readFileSync(path.join(__dirname, 'verify-chat-delivery/drive.ps1'), 'utf8');
   const legacy = source.indexOf('if ($statusBounds.Bottom -eq $hostBounds.Top)');
   assert.ok(legacy >= 0, 'old status-above-host geometry remains observable');
