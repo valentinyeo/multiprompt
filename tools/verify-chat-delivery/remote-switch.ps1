@@ -144,5 +144,14 @@ $observation.idleThree = Measure-CPU {} 2000
 $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
 $observation.idleThree.sessions = @($saved.tabs).Count
 $observation.idleThree.shell = $saved.tabs[$saved.active_tab].shell_id
+if ($env:CHAT_SWITCH_PROFILE -eq '1') {
+    . "$PSScriptRoot/chat-switch-profile.ps1"
+    Invoke-ChatSwitchProfile -TargetProcessId $app.Id -Directory "$Evidence/switch-profile" -Route @{mode='workspace'; remote_shell=$saved.tabs[$saved.active_tab].shell_id; separate_from_acceptance=$true} -Switch {
+        for ($repeat = 0; $repeat -lt 5; $repeat++) {
+            Switch-Sample @(0x12, 0x27) $true $false
+            Switch-Sample @(0x12, 0x25) $true $false
+        }
+    }
+}
 Shot 'remote-switch-complete'
 Save $observation "$caseDir/observation.json"

@@ -73,3 +73,11 @@ test('fixture closure reads saved tabs rather than delayed inbox publication', (
   assert.doesNotMatch(driver, /inbox-default/);
   assert.match(closure, /\$remaining\.Count -eq 1 -and \$remaining\[0\]\.kind -eq 'tmux' -and \$remaining\[0\]\.tmux_host -eq 2/);
 });
+
+
+test('remote profiling repeats real workspace switches only after acceptance samples', () => {
+  const driver = fs.readFileSync(new URL('./verify-chat-delivery/remote-switch.ps1', import.meta.url), 'utf8');
+  assert.ok(driver.indexOf('Invoke-ChatSwitchProfile') > driver.indexOf('$observation.idleThree.shell ='));
+  assert.match(driver, /Switch-Sample @\(0x12, 0x27\) \$true \$false/);
+  assert.match(driver, /Switch-Sample @\(0x12, 0x25\) \$true \$false/);
+});
