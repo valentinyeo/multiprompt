@@ -1189,3 +1189,25 @@ print('NATIVE_WINDOWS_WATCH_ROOT_OK')
 `;
   assert.match(execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { encoding: 'utf8', timeout: 10000 }), /NATIVE_WINDOWS_WATCH_ROOT_OK/);
 });
+
+test('full-history continuity advances a real transcript stream without adding visible messages', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'history-refresh-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const transcript = path.join(directory, 'session.jsonl');
+  const original = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'Retained reply' } }) + '\n';
+  fs.writeFileSync(transcript, original);
+  fs.writeFileSync(path.join(directory, 'state.json'), JSON.stringify({ name: 'full-history', sid: 'history-stream', transcript }));
+  execFileSync('python3', ['-I', path.join(root, 'tools/verify-chat-delivery/boundary.py'), 'shell', 'history-refresh'], {
+    env: { ...process.env, MP_VERIFY_STATE: directory }, encoding: 'utf8', timeout: 10000,
+  });
+  const updated = fs.readFileSync(transcript, 'utf8');
+  assert.ok(updated.startsWith(original));
+  assert.ok(Buffer.byteLength(updated) > Buffer.byteLength(original));
+  const appended = JSON.parse(updated.slice(original.length));
+  assert.equal(appended.type, 'progress');
+  assert.equal(appended.sessionId, 'history-stream');
+  assert.equal(appended.message, undefined);
+  const history = drive.slice(drive.indexOf('function Assert-FullHistory'), drive.indexOf('function Retention-Copy'));
+  assert.match(history, /Shell-Run @\('history-refresh'\)/);
+  assert.ok(history.indexOf("Shell-Run @('history-refresh')") > history.indexOf('$pollOffset ='));
+});
