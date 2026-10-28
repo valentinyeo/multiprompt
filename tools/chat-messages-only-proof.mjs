@@ -25,6 +25,16 @@ export function transcriptGeometry(host, status, composer, viewport) {
   };
 }
 
+export function completedToolCalls(rows) {
+  return rows.filter(call => {
+    if (call.role !== 'tool') return false;
+    const results = rows.filter(row => row.role === 'tool_result' && row.id === call.id);
+    if (results.length > 1) return false;
+    const result = results[0] || call;
+    return result.status === 'ok' && typeof result.detail === 'string' && result.detail.includes('verified');
+  });
+}
+
 export function compareTranscript(before, after, rect) {
   assert.equal(before.width, after.width);
   assert.equal(before.height, after.height);
@@ -179,7 +189,7 @@ export function evaluate(root, complete, toolsOnly = false) {
   assert.deepEqual(messages(beforeRows), [['user', 'start the fake session'], ['assistant', 'The fake session is ready.']]);
   assert.deepEqual(messages(rows), messages(beforeRows), 'tool updates must not change message data');
   const tools = rows.filter(row => row.role === 'tool');
-  const completed = tools.filter(row => row.status === 'ok' && row.detail.includes('verified'));
+  const completed = completedToolCalls(rows);
   assert.equal(tools.length, 12, 'production reader retained all tool calls');
   assert.equal(completed.length, 12, 'production reader retained all paired successful results');
   assert.deepEqual([...new Set(tools.map(row => row.text))].sort(), ['Ran Check app-smoke state', 'Ran Inspect app-smoke run details', 'Ran Read commit statuses on PR head', 'TodoWrite'].sort());
@@ -232,6 +242,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (process.argv.includes('--geometry')) {
     const { host, status, composer, viewport } = JSON.parse(fs.readFileSync(path.join(root, 'messages-only', 'geometry-input.json'), 'utf8').replace(/^\uFEFF/, ''));
     console.log(JSON.stringify(transcriptGeometry(host, status, composer, viewport)));
+    process.exit(0);
+  }
+  if (process.argv.includes('--tool-count')) {
+    const rows = fs.readFileSync(root, 'utf8').replace(/^\uFEFF/, '').trim().split(/\r?\n/).slice(1).map(line => JSON.parse(line));
+    console.log(completedToolCalls(rows).length);
     process.exit(0);
   }
   const complete = process.argv.includes('--complete');

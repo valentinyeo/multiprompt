@@ -289,3 +289,20 @@ test('IGSH-1055 historical activity control reaches strict pixel checks before c
   assert.ok(pixels > baseline && complete > pixels);
   assert.match(source.slice(pixels, complete), /if \(\$LASTEXITCODE -ne 0\) \{ throw/);
 });
+
+
+test('IGSH-1055 completion requires paired successful results in current and legacy caches', async () => {
+  const { completedToolCalls } = await import('./chat-messages-only-proof.mjs');
+  assert.equal(typeof completedToolCalls, 'function');
+  const call = { role: 'tool', id: 'activity-1', status: 'running', detail: 'input' };
+  const result = { role: 'tool_result', id: call.id, status: 'ok', detail: 'verified' };
+  assert.equal(completedToolCalls([call]).length, 0);
+  assert.equal(completedToolCalls([call, result]).length, 1);
+  assert.equal(completedToolCalls([result, call]).length, 1);
+  assert.equal(completedToolCalls([call, { ...result, id: 'unrelated' }]).length, 0);
+  assert.equal(completedToolCalls([call, { ...result, status: 'error' }]).length, 0);
+  assert.equal(completedToolCalls([call, { ...result, detail: 'different output' }]).length, 0);
+  assert.equal(completedToolCalls([call, result, result]).length, 0);
+  assert.equal(completedToolCalls([{ ...call, status: 'ok', detail: 'verified' }]).length, 1);
+  assert.equal(completedToolCalls([{ ...call, status: 'ok', detail: 'verified' }, { ...result, status: 'error' }]).length, 0);
+});
