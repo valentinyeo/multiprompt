@@ -425,6 +425,23 @@ def shell():
         return 0
     if op == "init":
         return fake_init()
+    if op == "resync-init":
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text="Before resync")]))
+        result = fake_run("shell", op, ARGS, lambda claude: fake_submit(claude, "stale waiting message") is None)
+        fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text="Stable trailing source boundary. " * 12)]))
+        return 0 if result else 3
+    if op == "resync-rewrite":
+        path = Path(state()["transcript"])
+        before = path.read_bytes()
+        stat = path.stat()
+        after = before.replace(b"Before resync", b"After  resync").replace(b'"enqueue"', b'"dequeue"')
+        if before == after or len(before) != len(after):
+            raise ValueError("Resync fixture must change content without changing cursor")
+        with path.open("r+b") as file:
+            file.write(after)
+        os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        record("resync-rewrite.jsonl", bytes=len(after), before=before.decode(), after=after.decode())
+        return 0 if fake_run("shell", op, ARGS, lambda claude: claude.__setitem__("queue", []) is None) else 3
     if op == "reply-reference":
         original = "The original message starts here.\nSecond original line for context.\nThird original line stays on the wire.\nFourth original line ends the quote."
         fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text=original)]))

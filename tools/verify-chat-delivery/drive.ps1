@@ -47,6 +47,7 @@ if ($env:CHAT_MISSING_PROOF -eq '1') { $plans = @(@{name='missing-transcript'; m
 if ($env:CHAT_NOTES_PROOF -eq '1') { $plans = @(@{name='session-notes'; mode='idle'; text='runner note disclosure'}) }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') { $plans = @(@{name='reactions'; mode='busy'; text='draft stays here'}) }
 if ($env:CHAT_REPLY_PROOF -eq '1') { $plans = @(@{name='reply-reference'; mode='idle'; text='compact reply navigation'}) }
+if ($env:CHAT_RESYNC_PROOF -eq '1') { $plans = @(@{name='resync'; mode='busy'; text='draft stays here'}) }
 if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
@@ -441,6 +442,7 @@ foreach ($plan in $plans) {
     $job = $null
     $main = [IntPtr]::Zero
     $composer = [IntPtr]::Zero
+    $isResync = $plan.name -eq 'resync'
     $isReaction = $plan.name -eq 'reactions'
     $isAccepted = $plan.name -eq 'accepted-message'
     $isSwitch = $plan.name -eq 'remote-switch'
@@ -455,7 +457,7 @@ foreach ($plan in $plans) {
     $isNotes = $plan.name -eq 'session-notes'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
     $isLiveDelivery = $plan.name -eq 'live-delivery'
-    $hasTranscript = $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
+    $hasTranscript = $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -514,6 +516,7 @@ foreach ($plan in $plans) {
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-yak/SKILL.md", "---`nname: verify-yak`ndescription: Cached selection fixture`n---`nFixture")
         }
         if ($hasTranscript) { Shell-Run @('init') }
+        if ($isResync) { Shell-Run @('resync-init') }
         if ($isReply) { Shell-Run @('reply-reference') }
         if ($isNotes) { Shell-Run @('session-notes') }
         if ($isLiveDelivery -and $env:CHAT_LONG_PROOF -eq '1') { Shell-Run @('history') }
@@ -548,7 +551,9 @@ foreach ($plan in $plans) {
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($isHax) {
+        if ($isResync) {
+            . "$PSScriptRoot/resync.ps1"
+        } elseif ($isHax) {
             . "$PSScriptRoot/hax-sessions.ps1"
         } elseif ($env:CHAT_SKILLS_PROOF -eq '1') {
             Type-Composer '/verify-zebra'
@@ -1198,6 +1203,10 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_RESYNC_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-resync-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_LIVE_DELIVERY_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-delivery-live-proof.mjs" $Evidence
     exit $LASTEXITCODE

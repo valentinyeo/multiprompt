@@ -3,7 +3,7 @@ run-name: verify ${{ inputs.feature || (github.event_name == 'push' && 'full' ||
 
 on:
   push:
-    branches: [master, 'ceo/IGSH-1072*', ceo/IGSH-1061-recovery, ceo/IGSH-1083, ceo/IGSH-1079, ceo/IGSH-1055-hax2]
+    branches: [master, 'ceo/IGSH-1072*', ceo/IGSH-1061-recovery, ceo/IGSH-1083, ceo/IGSH-1079, ceo/IGSH-1055-hax2, ceo/IGSH-1053-hax11]
   workflow_dispatch:
     inputs:
       feature:
@@ -86,6 +86,11 @@ on:
         type: boolean
       missing_note_proof:
         description: Open a tab with no transcript and require the plain not-available note, never terminal text
+        required: false
+        default: false
+        type: boolean
+      chat_resync_proof:
+        description: Reload stale messages and waiting labels without losing drafts or resending
         required: false
         default: false
         type: boolean
@@ -326,7 +331,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON(needs.journeys.outputs.full) || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11' && fromJSON('["chat-delivery"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON(needs.journeys.outputs.full) || fromJSON(format('["{0}"]', inputs.feature)) }}
         app-revision: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["5d2a820355969173090f0fcd0c72a7b3bd222141","{0}"]', github.sha)) || fromJSON('[""]') }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
@@ -338,6 +343,7 @@ jobs:
       CHAT_LIVE_DELIVERY_PROOF: ${{ inputs.chat_live_delivery_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_REACTIONS_PROOF: ${{ inputs.chat_reactions_proof && '1' || '' }}
+      CHAT_RESYNC_PROOF: ${{ (inputs.chat_resync_proof || (github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11')) && '1' || '' }}
       CHAT_NOTES_PROOF: ${{ inputs.chat_notes_proof && '1' || '' }}
       CHAT_REPLY_PROOF: ${{ inputs.chat_reply_proof && '1' || '' }}
       CHAT_REPLY_BASELINE: ${{ inputs.chat_reply_baseline && '1' || '' }}
