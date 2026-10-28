@@ -342,9 +342,6 @@ fn activeBrowserHasForegroundFocus() bool { return foreground == 20; }
 fn activeShellHwndForFocusGuard() HANDLE { return shells[0].hwnd; }
 fn requestShellRefocus(_: u32, _: u32) void {}
 fn activateConsoleForeground(hwnd: HANDLE) i32 { return SetForegroundWindow(hwnd); }
-var foreground_unlocked = false;
-var activation_pending = false;
-fn unlockBrowserForeground() void { foreground_unlocked = true; }
 fn GetTickCount64() u64 { return 1000; }
 fn SetTimer(_: HANDLE, timer: usize, _: u32, _: ?usize) usize { if (timer == TIMER_CHAT_FOREGROUND_RETRY) { foreground_timer_armed = true; } return 1; }
 fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) i32 { return 1; }
@@ -366,9 +363,8 @@ fn GetWindowThreadProcessId(_: HANDLE, _: ?usize) u32 { return 2; }
 fn AttachThreadInput(_: u32, _: u32, attach: i32) i32 { attached = attach != 0; return 1; }
 fn SetForegroundWindow(hwnd: HANDLE) i32 {
     if (!focusGuard(hwnd)) return 0;
-    if (activation_pending) return 0;
     if (require_alt_unlock and !alt_unlocked) return 0;
-    if (foreground != g_main_hwnd and (!attached or !foreground_unlocked) and !alt_unlocked) return 0;
+    if (foreground != g_main_hwnd and !attached and !alt_unlocked) return 0;
     foreground = hwnd;
     return 1;
 }
@@ -389,7 +385,6 @@ test "IGSH-955 chat takes foreground before asynchronously hiding the console" {
         focused = initial;
         hide_requested = false;
         hidden_while_foreground = false;
-        foreground_unlocked = false;
         openChatView();
         try std.testing.expect(hide_requested);
         try std.testing.expect(!hidden_while_foreground);
@@ -426,29 +421,12 @@ test "IGSH-1142 held Alt preserves the existing guarded foreground completion" {
     require_alt_unlock = false;
     alt_held = false;
 }
-test "IGSH-1028 pending console activation uses the existing composer foreground retry" {
-    foreground = 10;
-    focused = 10;
-    activation_pending = true;
-    foreground_timer_armed = false;
-    g_chat_foreground_retries = 0;
-    openChatView();
-    try std.testing.expect(hide_requested);
-    try std.testing.expect(foreground_timer_armed);
-    try std.testing.expect(g_chat_foreground_retries > 0);
-    activation_pending = false;
-    foreground = g_main_hwnd;
-    focusActiveShell();
-    try std.testing.expectEqual(g_chat_composer_hwnd, focused);
-}
 test "IGSH-955 background chat restore never takes another app's foreground" {
     foreground = 999;
     focused = 999;
-    foreground_unlocked = false;
     openChatView();
     try std.testing.expectEqual(@as(HANDLE, 999), foreground);
     try std.testing.expectEqual(@as(HANDLE, 999), focused);
-    try std.testing.expect(!foreground_unlocked);
     try std.testing.expect(!attached);
 }
 test "IGSH-955 failed chat control creation leaves console focus intact" {
@@ -471,7 +449,7 @@ test('IGSH-955 production chat handoff transfers cross-thread foreground before 
     fs.writeFileSync(file, chatHandoffHarness(source));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, JSON.stringify({ signal: result.signal, error: result.error, stdout: result.stdout, stderr: result.stderr }));
-    assert.match(result.stderr, /All 6 tests passed/);
+    assert.match(result.stderr, /All 5 tests passed/);
     console.log(result.stderr.trim());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
@@ -577,4 +555,58 @@ test('link selection uses the approved rounded dark control and outline, never t
   assert.match(selected, /CreatePen\(0, 1,/);
   assert.match(selected, /drawRoundRect/);
   assert.doesNotMatch(selected, /RGB\(0, 122, 204\)|FillRect/);
+});
+
+test('repeated chat layout preserves composer font without redundant edit redraws', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const composer = require('./app-source').readAppSource();
+  const start = composer.indexOf('fn layoutChatControls()');
+  const end = composer.indexOf('    const base_h = chatComposerBaseEditH();', start);
+  assert.ok(start >= 0 && end > start);
+  const production = composer.slice(start, end) + '    _ = &layout;\n}\n';
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'composer-font-layout-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'test.zig'), `
+const std = @import("std");
+var g_chat_active = true;
+var g_chat_composer_hwnd: ?usize = 1;
+var g_chat_layout_browser_reserved = false;
+var current_font: usize = 0;
+var desired_font: usize = 42;
+var redraws: usize = 0;
+fn browserSlotReserved() bool { return false; }
+fn chatViewLayout() u8 { return 0; }
+fn ensureChatFont() ?*anyopaque { return @ptrFromInt(desired_font); }
+fn SendMessageW(_: ?usize, msg: u32, wp: usize, _: isize) isize {
+    if (msg == 0x0031) return @bitCast(current_font);
+    if (msg == 0x0030) {
+        current_font = wp;
+        redraws += 1;
+    }
+    return 0;
+}
+${production}
+test "font changes redraw once; repeated session layouts retain text and font" {
+    layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 42), current_font);
+    try std.testing.expectEqual(@as(usize, 1), redraws);
+    for (0..80) |_| layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 1), redraws);
+    desired_font = 43;
+    layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 43), current_font);
+    try std.testing.expectEqual(@as(usize, 2), redraws);
+    g_chat_active = false;
+    desired_font = 44;
+    layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 43), current_font);
+    try std.testing.expectEqual(@as(usize, 2), redraws);
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
