@@ -36,6 +36,14 @@ test('expansion and collapse must change body space', () => {
   assert.throws(() => noteBands(image(32, 220), frame), /full bubbles/);
 });
 
+test('proof cache readers grant sharing needed by concurrent writers and replacement', async () => {
+  const source = fs.readFileSync(new URL('./verify-chat-delivery/drive.ps1', import.meta.url), 'utf8');
+  const share = source.match(/\$stream = \[IO\.File\]::Open\(\$Path, \[IO\.FileMode\]::Open, \[IO\.FileAccess\]::Read, (.+)\)/)[1];
+  const { runInNewContext } = await import('node:vm');
+  const expression = share.replaceAll('[IO.FileShare]::ReadWrite', '3').replaceAll('[IO.FileShare]::Delete', '4').replaceAll('-bor', '|');
+  assert.equal(runInNewContext(expression) & 7, 7);
+});
+
 test('reading the transcript cache allows atomic replacement during native proof', { skip: process.platform !== 'win32' }, () => {
   const source = fs.readFileSync(new URL('./verify-chat-delivery/drive.ps1', import.meta.url), 'utf8');
   const reader = source.slice(source.indexOf('function Read-Shared('), source.indexOf('function Step('));
@@ -49,7 +57,7 @@ $Path = Join-Path $env:NOTES_CACHE_TEST 'cache.jsonl'
 [IO.File]::WriteAllText(($Path + '.next'), 'new transcript')
 $stream = ${expression}
 try {
-  [IO.File]::Replace(($Path + '.next'), $Path, $null)
+  [IO.File]::Replace(($Path + '.next'), $Path, ($Path + '.previous'))
   $old = [IO.StreamReader]::new($stream)
   try { if ($old.ReadToEnd() -cne 'old transcript') { throw 'Open reader lost its original snapshot' } } finally { $old.Dispose() }
 } finally { $stream.Dispose() }
