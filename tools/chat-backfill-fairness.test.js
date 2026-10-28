@@ -131,7 +131,7 @@ test('full-history continuation stays automatic across disk restore without a ca
   assert.match(ready, /const before = if \(entry.stalled\) 0 else if \(entry.backfill.pages.items.len > 0\) entry.backfill.start else if \(disk or history.start < entry.history.start/);
   assert.match(ready, /entry.before = before/);
   assert.match(ready, /if \(!disk and !history.more and history.start == 0\) entry.loaded_ms/);
-  assert.match(ready, /if \(disk or entry.before > 0\) @as\(u64, 0\)/);
+  assert.match(ready, /if \(disk or entry.prepended or entry.before > 0\) @as\(u64, 0\)/);
   assert.match(body(session, 'chatFileFetchThread'), /chat_history.History.decode/);
   assert.match(history, /try std.testing.expectEqual\(@as\(usize, 50\), restored.blocks.items.len\)/);
   const changelog = readChangelogEntry('IGSH-815').trim();
