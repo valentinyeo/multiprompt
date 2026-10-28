@@ -1,6 +1,8 @@
 name: Held message cancellation
 
 on:
+  push:
+    branches: [ceo/IGSH-1010-r9]
   workflow_dispatch:
     inputs:
       app_ref:
@@ -27,6 +29,7 @@ jobs:
       fail-fast: false
       matrix:
         source: [desktop, android]
+        mode: [candidate, control]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -34,19 +37,19 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: valentinyeo/multiprompt-android
-          ref: ${{ inputs.companion_ref }}
+          ref: ${{ matrix.mode == 'control' && '7bc752421f1599727aaef1bc316e0ee81b4a0630' || inputs.companion_ref || (github.event_name == 'push' && github.ref_name) || 'main' }}
           path: companion
       - name: Prepare real terminal fixture
         env:
-          APP_REF: ${{ inputs.app_ref }}
+          APP_REF: ${{ matrix.mode == 'control' && 'fa0a1b29f77f6f22a54af7e06df5f2417190643a' || inputs.app_ref }}
         run: |
           sudo apt-get update && sudo apt-get install -y tmux
           if [ -n "$APP_REF" ]; then [[ "$APP_REF" =~ ^[0-9a-f]{40}$ ]]; git show "$APP_REF:src/chat_history_reader.py" > "$RUNNER_TEMP/desktop-reader.py"; else cp src/chat_history_reader.py "$RUNNER_TEMP/desktop-reader.py"; fi
       - name: Cancel held input after all readers close
         env:
           MP_QUEUE_READER_SOURCE: ${{ matrix.source == 'desktop' && format('{0}/desktop-reader.py', runner.temp) || 'companion/app/src/main/assets/chat_history_reader.py' }}
-          EVIDENCE: verification-evidence/${{ matrix.source }}
-          EXPECTED_RED: ${{ inputs.expected_red }}
+          EVIDENCE: verification-evidence/${{ matrix.source }}-${{ matrix.mode }}
+          EXPECTED_RED: ${{ matrix.mode == 'control' || inputs.expected_red }}
         run: |
           mkdir -p "$EVIDENCE"
           if [ "$EXPECTED_RED" = true ]; then
@@ -59,5 +62,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: held-queue-${{ matrix.source }}
+          name: held-queue-${{ matrix.source }}-${{ matrix.mode }}
           path: verification-evidence/
