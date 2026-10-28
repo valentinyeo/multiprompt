@@ -8,9 +8,9 @@
             Palette 'new cmd'
             Press @(0x0D) 'Enter: create terminal target for Chat View handoff'
             Wait-Until { $state = Read-Session; @($state.tabs).Count -eq 2 -and $state.active_tab -eq 1 } 'second CMD selected'
-            if ((Read-Session).tabs[1].cv) {
+            if ((Read-Session).tabs[1].PSObject.Properties['cv'] -and (Read-Session).tabs[1].cv) {
                 Press @(0x12, 0x43) 'Alt+C: keep target in terminal view'
-                Wait-Until { -not (Read-Session).tabs[1].cv } 'target saved as terminal view'
+                Wait-Until { -not (Read-Session).tabs[1].PSObject.Properties['cv'] -or -not (Read-Session).tabs[1].cv } 'target saved as terminal view'
             }
             $chatShellId = $script:browserShellId
             $script:browserShellId = (Read-Session).tabs[1].shell_id
@@ -26,7 +26,7 @@
             [VerifyNative]::Chord(@(0x11, 0x32))
             Wait-Until {
                 $state = Read-Session
-                $state.active_tab -eq 1 -and -not $state.tabs[1].cv -and
+                $state.active_tab -eq 1 -and (-not $state.tabs[1].PSObject.Properties['cv'] -or -not $state.tabs[1].cv) -and
                     [VerifyNative]::DockedPaneWindow($script:window) -eq $terminalBrowser -and
                     [VerifyNative]::PaneVisible($script:window)
             } 'same connected terminal browser visible within three seconds' 3 -PollMilliseconds 20
