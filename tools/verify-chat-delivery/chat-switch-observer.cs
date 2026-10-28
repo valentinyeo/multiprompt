@@ -18,6 +18,9 @@ public static class ChatSwitchObserver {
     delegate bool WindowProc(IntPtr window, IntPtr state);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, WindowProc callback, IntPtr state);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
@@ -73,14 +76,15 @@ public static class ChatSwitchObserver {
             var clock = Stopwatch.StartNew();
             points.Add(new Dictionary<string, object> { { "elapsed_ms", 0.0 }, { "cpu_ms", 0.0 } });
             if (target >= 0) {
-                var inputs = new Input[4];
-                for (int i = 0; i < inputs.Length; i++) inputs[i].Type = 1;
-                inputs[0].Data.Keyboard = new Keyboard { Key = 0x11 };
-                inputs[1].Data.Keyboard = new Keyboard { Key = (ushort)(0x31 + target) };
-                inputs[2].Data.Keyboard = new Keyboard { Key = (ushort)(0x31 + target), Flags = 2 };
-                inputs[3].Data.Keyboard = new Keyboard { Key = 0x11, Flags = 2 };
+                if (GetDpiForWindow(owner) != 96) throw new InvalidOperationException("Sidebar fixture requires 96 DPI");
+                var point = new Point { X = 100, Y = 8 + 24 + 38 * target + 19 };
+                if (!ClientToScreen(owner, ref point) || WindowFromPoint(point) != owner || !SetCursorPos(point.X, point.Y))
+                    throw new InvalidOperationException("Sidebar row is not in the owned foreground window");
+                var inputs = new Input[2];
+                inputs[0].Data.Mouse = new Mouse { Flags = 2 };
+                inputs[1].Data.Mouse = new Mouse { Flags = 4 };
                 if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) != inputs.Length)
-                    throw new InvalidOperationException("Observed switch SendInput failed");
+                    throw new InvalidOperationException("Observed sidebar click SendInput failed");
             }
             long position = offset;
             string carry = "";
@@ -124,7 +128,7 @@ public static class ChatSwitchObserver {
             points.Add(new Dictionary<string, object> { { "elapsed_ms", elapsed }, { "cpu_ms", cpu } });
             if (images) Capture(owner, pid, imagePrefix + "-settled");
             return new Dictionary<string, object> {
-                { "input", target < 0 ? "idle" : "ctrl-digit" }, { "shown_ms", shown }, { "cpu_at_shown_ms", cpuAtShown },
+                { "input", target < 0 ? "idle" : "sidebar-click" }, { "shown_ms", shown }, { "cpu_at_shown_ms", cpuAtShown },
                 { "elapsed_ms", elapsed }, { "cpu_ms", cpu }, { "cpu_one_core_percent", 100 * cpu / elapsed },
                 { "cpu_points", points }, { "observer_cpu_ms", observer.TotalProcessorTime.TotalMilliseconds - observerStart },
                 { "machine_busy_percent", 100 * (1 - (systemEnd[0] - systemStart[0]) / (systemEnd[1] - systemStart[1])) },

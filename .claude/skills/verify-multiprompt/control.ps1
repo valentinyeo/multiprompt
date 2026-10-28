@@ -6267,6 +6267,16 @@ try {
                 return $latest.Success
             }
             function Wait-SwitchForeground {
+                if ($shapeProof) {
+                    $state = Read-Session
+                    if ([VerifyNative]::GetDpiForWindow($script:window) -ne 96 -or
+                        ($state.single_window -and -not $state.hide_pills) -or
+                        ($state.PSObject.Properties['groups'] -and @($state.groups).Count -gt 0) -or
+                        ($state.PSObject.Properties['ui_scale'] -and $state.ui_scale -ne 100) -or
+                        ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -or
+                        ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed) -or
+                        @($state.tabs | Where-Object { $_.PSObject.Properties['pinned_top'] -and $_.pinned_top }).Count -gt 0) { throw 'Sidebar timing requires the default ungrouped five-row fixture at 96 DPI' }
+                }
                 Doctor
                 Wait-Until {
                     if ([VerifyNative]::GetForegroundWindow() -ne $script:window) {
@@ -6444,7 +6454,6 @@ try {
                             $shapeSample.expected_latest = $seedTurn.expected_latest
                             $shapeSample.last_marker = $seedTurn.last_marker
                             $shapeSample.latest_receipt = "$mode-$sample-latest.txt"
-                            $shapeSample.latest_message_verified = Save-ShapeLatest $shapeSample.expected_latest $shapeSample.last_marker $shapeSample.latest_receipt
                             $sourceOffset = (Get-Item -LiteralPath $log).Length
                             Press @(0x11, (0x31 + $current)) 'Return to the identical source for a separate image replay'
                             Wait-Until { (Read-Session).active_tab -eq $current -and (Read-SharedLog $log $sourceOffset).Contains('[switch] chat content shown shell=' + $shellIds[$current] + ' ') } 'same source painted before image replay' 30
@@ -6456,6 +6465,7 @@ try {
                             $image.target_shell = $shellIds[$target]
                             $image.image_prefix = $imagePrefix
                             $shapeSample.frame_probe = $image
+                            $shapeSample.latest_message_verified = Save-ShapeLatest $shapeSample.expected_latest $shapeSample.last_marker $shapeSample.latest_receipt
                             $shapeResult.modes[$mode] += $shapeSample
                         }
                         $current = $target

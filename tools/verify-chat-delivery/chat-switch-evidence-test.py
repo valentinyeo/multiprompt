@@ -74,6 +74,19 @@ class SwitchEvidenceTest(unittest.TestCase):
         self.assertEqual(result['peak_observed_one_core_percent'], 40)
         self.assertIn(proof.FRAME_SCOPE, result['limitations'])
 
+    def test_native_sidebar_clicks_keep_all_existing_observation_budgets(self):
+        for samples in self.value['modes'].values():
+            for sample in samples:
+                sample['input'] = 'sidebar-click'
+        try:
+            result = self.evaluate()
+        except ValueError as error:
+            self.fail(str(error))
+        self.assertEqual(result['status'], 'passed')
+        self.assertNotIn('Ctrl+digit path, not sidebar-click proof', result['limitations'])
+        self.value['modes']['browser_open'][0]['shown_ms'] = 150
+        self.assertEqual(self.evaluate()['status'], 'failed')
+
     def test_one_slow_outlier_fails_even_with_a_fast_median(self):
         self.value['modes']['browser_closed'][7]['shown_ms'] = 150
         result = self.evaluate()

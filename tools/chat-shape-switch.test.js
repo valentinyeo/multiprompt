@@ -52,11 +52,11 @@ test('IGSH-1040 ordinary CPU windows do not request paints or capture images', (
 
 test('IGSH-1040 replay and copied receipt stay outside the ordinary measurement call', () => {
   const ordinary = control.indexOf('$shapeSample = [ChatSwitchObserver]::Measure(');
-  const receipt = control.indexOf('Save-ShapeLatest $shapeSample.expected_latest', ordinary);
-  const replay = control.indexOf('$image = [ChatSwitchObserver]::Measure(', receipt);
-  assert.ok(ordinary > 0 && receipt > ordinary && replay > receipt);
-  assert.ok(control.slice(ordinary, receipt).includes('$settleMs, $null)'));
-  assert.ok(control.slice(receipt, replay).includes('same source painted before image replay'));
+  const replay = control.indexOf('$image = [ChatSwitchObserver]::Measure(', ordinary);
+  const receipt = control.indexOf('Save-ShapeLatest $shapeSample.expected_latest', replay);
+  assert.ok(ordinary > 0 && replay > ordinary && receipt > replay);
+  assert.ok(control.slice(ordinary, replay).includes('$settleMs, $null)'));
+  assert.ok(control.slice(ordinary, replay).includes('same source painted before image replay'));
   assert.match(control, /\$latest = \[regex\]::Match\(\$copied,/);
   assert.match(control, /\$last = \[regex\]::Match\(\$copied,/);
   assert.ok(observer.includes('not compositor-first-present'));
@@ -191,4 +191,15 @@ test('IGSH-1040 selected transcript copy queues confirmation and copy without re
   assert.ok(receipt.indexOf('[VerifyNative]::KeyUp(0x11)') > copied);
   assert.match(receipt, /finally \{\s+\[VerifyNative\]::KeyUp\(0x43\)/);
   assert.ok(receipt.includes("if (-not $last.Success) { throw 'Copied target transcript belongs to a different seeded session' }"));
+});
+
+test('IGSH-1040 shape timing clicks the owned sidebar row instead of a keyboard substitute', () => {
+  assert.ok(observer.includes('"idle" : "sidebar-click"'));
+  assert.ok(observer.includes('WindowFromPoint(point) != owner'));
+  assert.ok(observer.includes('GetDpiForWindow(owner) != 96'));
+  assert.ok(observer.includes('new Point { X = 100, Y = 8 + 24 + 38 * target + 19 }'));
+  assert.ok(observer.includes('new Mouse { Flags = 2 }'));
+  assert.ok(observer.includes('new Mouse { Flags = 4 }'));
+  assert.doesNotMatch(observer.slice(observer.indexOf('if (target >= 0) {'), observer.indexOf('long position = offset;')), /Keyboard =/);
+  assert.ok(control.includes('Sidebar timing requires the default ungrouped five-row fixture at 96 DPI'));
 });

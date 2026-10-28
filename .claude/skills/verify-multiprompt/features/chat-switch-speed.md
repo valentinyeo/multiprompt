@@ -73,8 +73,11 @@ Shown time covers first nonempty cached paint.
 Latest-message receipts are checked after that window.
 This does not prove latest-message paint latency.
 Product acceptance still needs that native proof.
-The current native input remains Ctrl+digit.
-It does not prove sidebar-click latency.
+Audit-shape runs click the owned sidebar rows.
+They require default scale and 96 DPI.
+Legacy observations retain the Ctrl+digit limitation.
+Receipt copying follows each separate image replay.
+The copy notification cannot contaminate that replay.
 The image follows the completed target-paint log.
 It does not guarantee the first compositor-presented frame.
 Those limitations remain in the oracle's output.

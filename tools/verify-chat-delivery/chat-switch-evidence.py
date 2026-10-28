@@ -98,7 +98,7 @@ def evaluate(value, root, require_cleanup=False):
                 require(sample['source_shell'] == previous_target, 'switch route sequence is disconnected')
             previous_target = sample['target_shell']
             targets.append(sample['target_shell'])
-            require(sample['input'] == 'ctrl-digit' and sample['timing_scope'] == TIMING_SCOPE, 'unrecorded input or paint timing scope')
+            require(sample['input'] in ('ctrl-digit', 'sidebar-click') and sample['timing_scope'] == TIMING_SCOPE, 'unrecorded input or paint timing scope')
             peak = max(peak, cpu(sample))
             require(number(sample['layout_width'], 'layout_width') > 0 and number(sample['client_width'], 'client_width') > 0, 'paint geometry must be nonempty')
             require(type(sample['post_paint_moves']) is bool, 'post-paint movement must be observed')
@@ -128,9 +128,11 @@ def evaluate(value, root, require_cleanup=False):
         tree = json.loads(artifact(root, 'process-tree.json').decode('utf-8-sig'))
         result = json.loads(artifact(root, 'result.json').decode('utf-8-sig'))
         require(tree['activeAfterStop'] == 0 and result['scratchRemoved'] is True, 'owned process/scratch cleanup incomplete')
+    limitations = [FRAME_SCOPE, TIMING_SCOPE, 'one profile is a partial cache sample; message order and layout semantics are generated']
+    if any(sample['input'] != 'sidebar-click' for samples in value['modes'].values() for sample in samples):
+        limitations.insert(0, 'Ctrl+digit path, not sidebar-click proof')
     return dict(status='failed' if failures else 'passed', category='switch-budget' if failures else 'within-observed-budgets', product_acceptance_proven=False,
-                failures=failures, switches=40, peak_observed_one_core_percent=peak,
-                limitations=['Ctrl+digit path, not sidebar-click proof', FRAME_SCOPE, TIMING_SCOPE, 'one profile is a partial cache sample; message order and layout semantics are generated'])
+                failures=failures, switches=40, peak_observed_one_core_percent=peak, limitations=limitations)
 
 
 if __name__ == '__main__':
