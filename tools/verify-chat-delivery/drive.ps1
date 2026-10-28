@@ -970,7 +970,7 @@ foreach ($plan in $plans) {
             [void](Wait-For 'second tab saved and published' {
                 $tabs = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
                 $published = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
-                $tabs.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 'tmux' }).Count -eq 1 -and @($published | Where-Object { $_.kind -eq 'cmd' }).Count -eq 1
+                $tabs.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 3 }).Count -eq 1 -and @($published | Where-Object { $_.kind -eq 0 }).Count -eq 1
             })
             $expectedShells = 2
             $sendOffset = (Get-Item -LiteralPath $transcript).Length
