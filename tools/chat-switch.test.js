@@ -307,6 +307,7 @@ test "cached target is presented before queued browser work, never for a termina
 
 test('IGSH-1147 Chat View to terminal restores a parked native browser without an existing settle timer', () => {
   const os = require('node:os');
+  const path = require('node:path');
   const { spawnSync } = require('node:child_process');
   const consoleSource = fs.readFileSync(require('node:path').join(__dirname, '../src/console.zig'), 'utf8');
   const switchStart = consoleSource.indexOf('pub fn switchToShell(');
