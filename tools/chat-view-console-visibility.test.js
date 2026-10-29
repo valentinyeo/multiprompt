@@ -323,6 +323,7 @@ var controls_ready = true;
 var require_alt_unlock = false;
 var alt_unlocked = false;
 var alt_held = false;
+var g_native_browser_alt_unlocked_at: u64 = 0;
 var foreground_timer_armed = false;
 var g_inbox_active = false;
 var g_all_sessions_active = false;
@@ -375,6 +376,7 @@ fn ShowWindowAsync(hwnd: HANDLE, _: i32) i32 {
     hidden_while_foreground = foreground == hwnd;
     return 1;
 }
+${fn(text, 'unlockBrowserForeground')}
 ${fn(text, 'parkMainWindowBeforeActiveShellRemoval')}
 ${fn(text, 'focusActiveShell')}
 ${fn(text, 'focusActiveShellInner')}
@@ -402,6 +404,23 @@ test "IGSH-1142 denied frame parking still lands the owned composer through shar
     try std.testing.expectEqual(g_main_hwnd, foreground);
     try std.testing.expectEqual(g_chat_composer_hwnd, focused);
     try std.testing.expect(alt_unlocked);
+    try std.testing.expect(!attached);
+    require_alt_unlock = false;
+    alt_unlocked = false;
+}
+test "IGSH-1028 guarded console hide first unlocks the foreground handoff" {
+    foreground = 10;
+    focused = 10;
+    require_alt_unlock = true;
+    alt_unlocked = false;
+    hidden_while_foreground = false;
+    hide_requested = false;
+    openChatView();
+    try std.testing.expect(hide_requested);
+    try std.testing.expect(!hidden_while_foreground);
+    try std.testing.expectEqual(g_main_hwnd, foreground);
+    try std.testing.expectEqual(g_chat_composer_hwnd, focused);
+    try std.testing.expectEqual(@as(u64, 1000), g_native_browser_alt_unlocked_at);
     try std.testing.expect(!attached);
     require_alt_unlock = false;
     alt_unlocked = false;
@@ -449,7 +468,7 @@ test('IGSH-955 production chat handoff transfers cross-thread foreground before 
     fs.writeFileSync(file, chatHandoffHarness(source));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, JSON.stringify({ signal: result.signal, error: result.error, stdout: result.stdout, stderr: result.stderr }));
-    assert.match(result.stderr, /All 5 tests passed/);
+    assert.match(result.stderr, /All 6 tests passed/);
     console.log(result.stderr.trim());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
