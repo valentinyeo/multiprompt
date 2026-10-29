@@ -69,7 +69,7 @@ test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', 
   for (const token of ['$serverJob = New-Object VerifyJob', '$recordJob = New-Object VerifyJob', '$helper.Stop()', '$helper.Dispose()', 'toggle-helper-process-tree.json']) assert.ok(journey.includes(token), token);
   const native = read('.claude/skills/verify-multiprompt/control-native.cs').split('public static double ImmediateBrowserTogglePair(int delay)')[1]?.split('public static void OpenAndCloseBrowserPane()')[0];
   assert.ok(native);
-  assert.match(native, /chord\(\);[\s\S]*Thread\.Sleep\(delay\);[\s\S]*chord\(\);/);
+  assert.match(native, /chord\(\);[\s\S]*remaining = delay - clock\.Elapsed\.TotalMilliseconds;[\s\S]*Thread\.Sleep\(\(int\)\(remaining\)\);[\s\S]*chord\(\);/);
   assert.match(native, /gap > 300/);
   assert.match(native, /SendInput\(\(uint\)batch.Length, batch/);
   assert.doesNotMatch(native, /Key\(0x12/);
