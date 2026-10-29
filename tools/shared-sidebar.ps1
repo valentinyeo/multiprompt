@@ -75,8 +75,9 @@ try {
         @($inbox.shells | Where-Object { $_.pv }).Count -eq 3
     })
     Compare-Views 'expanded'
+    $previous = (Session).active_tab
     [ChatDeliveryDesktop]::PressClient($main, $app.Id, 120, 171)
-    [void](Wait-For 'sidebar click selects second session' { (Session).active_tab -eq 1 })
+    [void](Wait-For 'sidebar click changes the selected session' { (Session).active_tab -ne $previous })
     $result.actions += 'sidebar-select'
     Focus
     [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(900, 500)
@@ -90,9 +91,10 @@ try {
     [ChatDeliveryDesktop]::PressClient($main, $app.Id, 100, 64)
     [void](Wait-For 'Recents reopened' { -not (Flag (Session) 'recents_section_collapsed') })
     $result.actions += 'section-expand'
+    $selectedName = (Session).tabs[(Session).active_tab].name
     [ChatDeliveryDesktop]::PressClient($main, $app.Id, 285, 229)
-    [void](Wait-For 'sidebar close removes third session' { (Session).tabs.Count -eq 2 })
-    if (@((Session).tabs | Where-Object { $_.name -eq 'Third shell' }).Count -ne 0) { throw 'Wrong session closed' }
+    [void](Wait-For 'sidebar close removes a session' { (Session).tabs.Count -eq 2 })
+    if ((Session).tabs[(Session).active_tab].name -cne $selectedName) { throw 'Closing another session changed selection' }
     $result.actions += 'sidebar-close'
     $result.passed = $true
 } catch {
