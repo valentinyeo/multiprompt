@@ -2936,6 +2936,55 @@ class HeldQueueTest(unittest.TestCase):
 
 
 
+    def test_large_preceding_record_does_not_block_exact_receipt(self):
+        self.enqueue('target', 1)
+        self.enqueue('next', 2)
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        preceding = json.dumps(dict(type='assistant', message=dict(role='assistant', content='x' * (reader.TAIL_BYTES + 1)))) + '\n'
+        wrong = json.dumps(dict(type='user', message=dict(role='user', content='target extra'))) + '\n'
+        receipt = json.dumps(dict(type='user', message=dict(role='user', content='target'), timestamp='2026-10-28T20:00:00Z')) + '\n'
+        self.path.write_text(preceding + wrong + receipt)
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [])
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['target'])
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual([call.args[0]['text'] for call in self.send.call_args_list], ['target', 'next'])
+
+    def test_large_exact_user_receipt_unblocks_queue_once(self):
+        text = 'x' * (reader.TAIL_BYTES + 1)
+        self.enqueue(text, 1)
+        self.enqueue('next', 2)
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.path.write_text(json.dumps(dict(type='user', message=dict(role='user', content=text), timestamp='2026-10-28T20:00:00Z')) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [text])
+        self.assertEqual([call.args[0]['text'] for call in self.send.call_args_list], [text, 'next'])
+
+    def test_incomplete_large_receipt_retains_anchor_until_completed(self):
+        text = 'x' * (reader.TAIL_BYTES + 1)
+        self.enqueue(text, 1)
+        self.enqueue('next', 2)
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        inode = self.path.stat().st_ino
+        record = json.dumps(dict(type='user', message=dict(role='user', content=text), timestamp='2026-10-28T20:00:00Z'))
+        self.path.write_text(record)
+        reader.drain_held_queue('term-1', 'other-sid', self.path)
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        with reader.held_queue_db('term-1') as db:
+            self.assertEqual(db.execute("SELECT sid,source_inode,scan,state FROM messages WHERE key='message-1'").fetchone(), ('sid', inode, 0, 'submitted'))
+        self.send.assert_called_once()
+        with self.path.open('a') as source:
+            source.write('\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [text])
+        self.assertEqual([call.args[0]['text'] for call in self.send.call_args_list], [text, 'next'])
+
     def test_cancel_wins_race_before_submission_claim(self):
         self.enqueue('target', 1)
         def cancel_before_claim(*args):
