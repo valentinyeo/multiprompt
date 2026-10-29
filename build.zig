@@ -195,6 +195,14 @@ pub fn build(b: *std.Build) void {
     const install_listener_rejection = b.addInstallArtifact(listener_rejection, .{ .dest_sub_path = "local-listener-rejection.exe" });
     b.step("local-listener-rejection", "Build the local listener rejection regression").dependOn(&install_listener_rejection.step);
 
+    const smooth_shape_tests = b.addTest(.{
+        .root_module = exe.root_module,
+        .filters = &.{"IGSH-1192"},
+    });
+    const run_smooth_shape_tests = b.addRunArtifact(smooth_shape_tests);
+    run_smooth_shape_tests.has_side_effects = true;
+    b.step("test-smooth-shapes", "Run native fractional avatar pixel proof").dependOn(&run_smooth_shape_tests.step);
+
     const clean_chat_tests = b.addTest(.{
         .root_module = exe.root_module,
         .filters = &.{"IGSH-816 CLEAN"},

@@ -45,7 +45,7 @@ test('ISSUE-444 inbox background and glyph and Send button use smooth shapes', (
 test('ISSUE-444 shared loader enables antialiasing, half pixels, round strokes and clipping', () => {
   const smooth = source('smooth.zig');
   for (const symbol of ['GdipSetSmoothingMode', 'GdipSetPixelOffsetMode', 'GdipSetClipHrgn']) assert.ok(smooth.includes(symbol), symbol);
-  assert.match(smooth, /set_smoothing\(self\.graphics, 4\)/);
+  assert.match(smooth, /set_smoothing\(self\.graphics, 5\)/);
   assert.match(smooth, /set_pixel_offset\(self\.graphics, 4\)/);
   assert.match(smooth, /set_pen_caps\(pen, 2, 2, 0\)/);
   assert.match(smooth, /set_pen_join\(pen, 2\)/);
