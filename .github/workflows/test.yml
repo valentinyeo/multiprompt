@@ -8,13 +8,28 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  admission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Admit branch work only after master publication
+        if: github.ref != 'refs/heads/master' && github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release-priority.mjs admit
+
   test:
+    needs: [admission]
     name: test-windows (${{ matrix.group }})
     runs-on: windows-latest
     timeout-minutes: ${{ matrix.group == 1 && 15 || 10 }}
@@ -169,6 +184,7 @@ jobs:
           if [ -d .zig-cache ]; then du -sh .zig-cache; fi
 
   test-update-source:
+    needs: [admission]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -266,7 +282,7 @@ jobs:
           echo 'Release placeholder rejected; ordinary tests remain buildable'
 
   test-windows-update:
-    needs: [build-windows]
+    needs: [admission, build-windows]
     runs-on: windows-latest
     timeout-minutes: 10
     strategy:
@@ -332,6 +348,7 @@ jobs:
           if-no-files-found: error
 
   test-vps:
+    needs: [admission]
     name: test-vps (${{ matrix.group }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -448,6 +465,7 @@ jobs:
           if [ -d .zig-cache ]; then du -sh .zig-cache; fi
 
   test-worker:
+    needs: [admission]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -511,6 +529,7 @@ jobs:
         run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js
 
   build-windows:
+    needs: [admission]
     name: build-windows (${{ matrix.arch }})
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -610,12 +629,14 @@ jobs:
 
 
   check-red-run:
+    needs: [admission]
     uses: ./.github/workflows/check-red-run.yml
     with:
       base: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && (github.event.before || format('{0}^', github.sha))) || 'origin/master' }}
       head: ${{ github.event.pull_request.head.sha || github.sha }}
 
   switch-performance:
+    needs: [admission]
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -706,7 +727,7 @@ jobs:
 
   test-result:
     name: test
-    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance]
+    needs: [admission, test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2

@@ -151,3 +151,26 @@ test('missing baseline timing warns without hiding invalid candidate evidence', 
     assert.match(invalid.stderr, /Expected exactly 50 switches/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('live cache evidence preserves the shipped replacement-sharing fix', () => {
+  const drive = read('tools/verify-chat-delivery/drive.ps1');
+  const helper = drive.slice(drive.indexOf('function Read-Shared('), drive.indexOf('function Step('));
+  assert.match(helper, /\[IO.FileShare\]::ReadWrite -bor \[IO.FileShare\]::Delete/);
+  if (process.platform !== 'win32') return;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'shared-cache-read-'));
+  try {
+    const file = path.join(directory, 'cache.jsonl');
+    fs.writeFileSync(file, 'complete cache record');
+    const script = `$ErrorActionPreference = 'Stop'
+${helper}
+$writer = [IO.FileStream]::new($env:CACHE_READ_FIXTURE, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete), 4096, [IO.FileOptions]::DeleteOnClose)
+try {
+  if ((Read-Shared $env:CACHE_READ_FIXTURE) -cne 'complete cache record') { throw 'Cache evidence differs from actual bytes' }
+  Write-Output 'CACHE_REPLACEMENT_READ_OK'
+} finally { $writer.Dispose() }
+`;
+    const observed = spawnSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', env: { ...process.env, CACHE_READ_FIXTURE: file } });
+    assert.equal(observed.status, 0, observed.stdout + observed.stderr);
+    assert.match(observed.stdout, /CACHE_REPLACEMENT_READ_OK/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});

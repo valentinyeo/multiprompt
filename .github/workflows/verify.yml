@@ -258,6 +258,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Admit direct branch journeys after master publication
+        if: github.workflow == 'Verify desktop' && github.ref != 'refs/heads/master' && github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release-priority.mjs admit
       - name: Check feature discovery contracts
         run: node --test tools/verify-multiprompt.test.js
       - id: features

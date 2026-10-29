@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: release-${{ (inputs.proof || inputs.publication_proof) && format('proof-{0}', github.ref) || 'production' }}
@@ -38,6 +39,7 @@ jobs:
     if: inputs.publication_proof
     permissions:
       contents: read
+      actions: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -46,10 +48,17 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Admit publication proof after master publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release-priority.mjs admit
       - name: Prove forward-only publication
         run: node --test tools/release-version.test.mjs
 
   prepare:
+    permissions:
+      contents: read
+      actions: write
     if: github.event_name != 'pull_request' && !inputs.publication_proof
     runs-on: ubuntu-latest
     outputs:
@@ -62,6 +71,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Put master publication before branch proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIORITY_MODE: ${{ (inputs.proof || inputs.publication_proof || (github.ref != 'refs/heads/master' && github.ref_type != 'tag')) && 'admit' || 'preempt' }}
+        run: node tools/release-priority.mjs "$PRIORITY_MODE"
       - name: Verify release history on the branch
         if: inputs.proof
         run: node --test tools/version-stamp.test.mjs tools/release-version.test.mjs
