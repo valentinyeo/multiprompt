@@ -2,6 +2,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 #include <limits.h>
+#include <string.h>
 
 using PlainDraw = int (*)(HDC, const wchar_t *, int, RECT *, unsigned);
 
@@ -44,6 +45,24 @@ static unsigned clusterEnd(const wchar_t *text, unsigned length, unsigned begin)
 }
 
 struct Painter {
+    struct Entry {
+        wchar_t *text = nullptr;
+        unsigned length = 0;
+        int width = 0, height = 0;
+        float em = 0;
+        COLORREF ink = 0;
+        HDC dc = nullptr;
+        HBITMAP bitmap = nullptr;
+        HGDIOBJ previous = nullptr;
+        void clear() {
+            if (dc && previous) SelectObject(dc, previous);
+            if (bitmap) DeleteObject(bitmap);
+            if (dc) DeleteDC(dc);
+            if (text) HeapFree(GetProcessHeap(), 0, text);
+            text = nullptr; bitmap = nullptr; dc = nullptr; previous = nullptr;
+        }
+    } entries[128];
+    unsigned next = 0;
     ID2D1Factory *factory = nullptr;
     IDWriteFactory *write = nullptr;
     ID2D1DCRenderTarget *target = nullptr;
@@ -51,7 +70,12 @@ struct Painter {
     ID2D1SolidColorBrush *brush = nullptr;
     float size = 0;
 
-    ~Painter() { reset(); if (write) write->Release(); if (factory) factory->Release(); }
+    ~Painter() {
+        for (auto &entry : entries) entry.clear();
+        reset();
+        if (write) write->Release();
+        if (factory) factory->Release();
+    }
     void reset() {
         if (brush) brush->Release();
         if (target) target->Release();
@@ -63,7 +87,7 @@ struct Painter {
         if (!write && FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown **>(&write)))) return false;
         if (!target) {
             const auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE,
-                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE), 96, 96);
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
             if (FAILED(factory->CreateDCRenderTarget(&properties, &target))) return false;
             target->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             if (FAILED(target->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &brush))) { reset(); return false; }
@@ -81,65 +105,69 @@ struct Painter {
         return true;
     }
     bool draw(HDC dc, const wchar_t *text, unsigned length, RECT bounds, float em) {
-        RECT clip;
+        RECT clip, visible;
         if (GetClipBox(dc, &clip) == ERROR) return false;
-        RECT visible = {
-            bounds.left > clip.left ? bounds.left : clip.left,
-            bounds.top > clip.top ? bounds.top : clip.top,
-            bounds.right < clip.right ? bounds.right : clip.right,
-            bounds.bottom < clip.bottom ? bounds.bottom : clip.bottom
-        };
-        if (visible.left >= visible.right || visible.top >= visible.bottom) return true;
-        if (!ready(em) || FAILED(target->BindDC(dc, &visible))) return false;
-        wchar_t symbol[3];
-        if (length == 1 && (text[0] == 0x2713 || text[0] == 0x2717)) {
-            symbol[0] = text[0] == 0x2713 ? 0x2705 : 0x274c;
-            symbol[1] = 0xfe0f; text = symbol; length = 2;
-        } else if (length <= 2) {
-            unsigned at = 0;
-            if (emoji(scalar(text, length, at)) && at == length) {
-                CopyMemory(symbol, text, length * sizeof(wchar_t));
-                symbol[length++] = 0xfe0f; text = symbol;
+        if (!IntersectRect(&visible, &bounds, &clip)) return true;
+        const int width = bounds.right - bounds.left, height = bounds.bottom - bounds.top;
+        const COLORREF ink = GetTextColor(dc);
+        Entry *cached = nullptr;
+        for (auto &entry : entries) {
+            if (entry.text && entry.length == length && entry.width == width && entry.height == height &&
+                entry.em == em && entry.ink == ink && !memcmp(entry.text, text, length * sizeof(wchar_t))) {
+                cached = &entry;
+                break;
             }
         }
-        IDWriteTextLayout *layout = nullptr;
-        if (FAILED(write->CreateTextLayout(text, length, format, float(bounds.right - bounds.left), float(bounds.bottom - bounds.top), &layout))) return false;
-        DWRITE_TEXT_METRICS metrics;
-        if (SUCCEEDED(layout->GetMetrics(&metrics)) && metrics.widthIncludingTrailingWhitespace > bounds.right - bounds.left)
-            layout->SetFontSize(em * (bounds.right - bounds.left) / metrics.widthIncludingTrailingWhitespace, {0, length});
-        const int width = visible.right - visible.left, height = visible.bottom - visible.top;
-        BITMAPINFO info = {};
-        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-        info.bmiHeader.biWidth = width;
-        info.bmiHeader.biHeight = -height;
-        info.bmiHeader.biPlanes = 1;
-        info.bmiHeader.biBitCount = 32;
-        info.bmiHeader.biCompression = BI_RGB;
-        void *pixels = nullptr;
-        HDC snapshot = CreateCompatibleDC(dc);
-        HBITMAP bitmap = snapshot ? CreateDIBSection(dc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0) : nullptr;
-        ID2D1Bitmap *background = nullptr;
-        if (bitmap) {
-            HGDIOBJ previous = SelectObject(snapshot, bitmap);
-            if (BitBlt(snapshot, 0, 0, width, height, dc, visible.left, visible.top, SRCCOPY) && GdiFlush())
-                target->CreateBitmap(D2D1::SizeU(width, height), pixels, width * 4,
-                    D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE)), &background);
-            SelectObject(snapshot, previous);
-            DeleteObject(bitmap);
+        if (!cached) {
+            if (!ready(em)) return false;
+            Entry &entry = entries[next++ % 128];
+            entry.clear();
+            entry.text = static_cast<wchar_t *>(HeapAlloc(GetProcessHeap(), 0, length * sizeof(wchar_t)));
+            entry.dc = CreateCompatibleDC(dc);
+            BITMAPINFO info = {};
+            info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            info.bmiHeader.biWidth = width;
+            info.bmiHeader.biHeight = -height;
+            info.bmiHeader.biPlanes = 1;
+            info.bmiHeader.biBitCount = 32;
+            info.bmiHeader.biCompression = BI_RGB;
+            void *pixels = nullptr;
+            entry.bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+            if (!entry.text || !entry.dc || !entry.bitmap) { entry.clear(); return false; }
+            CopyMemory(entry.text, text, length * sizeof(wchar_t));
+            entry.length = length; entry.width = width; entry.height = height; entry.em = em; entry.ink = ink;
+            entry.previous = SelectObject(entry.dc, entry.bitmap);
+            ZeroMemory(pixels, width * height * 4);
+            RECT cell = {0, 0, width, height};
+            if (FAILED(target->BindDC(entry.dc, &cell))) { entry.clear(); return false; }
+            wchar_t symbol[3];
+            if (length == 1 && (text[0] == 0x2713 || text[0] == 0x2717)) {
+                symbol[0] = text[0] == 0x2713 ? 0x2705 : 0x274c;
+                symbol[1] = 0xfe0f; text = symbol; length = 2;
+            } else if (length <= 2) {
+                unsigned at = 0;
+                if (emoji(scalar(text, length, at)) && at == length) {
+                    CopyMemory(symbol, text, length * sizeof(wchar_t));
+                    symbol[length++] = 0xfe0f; text = symbol;
+                }
+            }
+            IDWriteTextLayout *layout = nullptr;
+            if (FAILED(write->CreateTextLayout(text, length, format, float(width), float(height), &layout))) { entry.clear(); return false; }
+            DWRITE_TEXT_METRICS metrics;
+            if (SUCCEEDED(layout->GetMetrics(&metrics)) && metrics.widthIncludingTrailingWhitespace > width)
+                layout->SetFontSize(em * width / metrics.widthIncludingTrailingWhitespace, {0, length});
+            brush->SetColor(D2D1::ColorF(GetRValue(ink) / 255.0f, GetGValue(ink) / 255.0f, GetBValue(ink) / 255.0f));
+            target->BeginDraw();
+            target->Clear(D2D1::ColorF(0, 0, 0, 0));
+            target->DrawTextLayout(D2D1::Point2F(0, 0), layout, brush,
+                static_cast<D2D1_DRAW_TEXT_OPTIONS>(D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT));
+            const HRESULT result = target->EndDraw();
+            layout->Release();
+            if (FAILED(result)) { entry.clear(); reset(); return false; }
+            cached = &entry;
         }
-        if (snapshot) DeleteDC(snapshot);
-        if (!background) { layout->Release(); return false; }
-        target->BeginDraw();
-        target->DrawBitmap(background);
-        background->Release();
-        const auto color = GetTextColor(dc);
-        brush->SetColor(D2D1::ColorF(GetRValue(color) / 255.0f, GetGValue(color) / 255.0f, GetBValue(color) / 255.0f));
-        target->DrawTextLayout(D2D1::Point2F(float(bounds.left - visible.left), float(bounds.top - visible.top)), layout, brush,
-            static_cast<D2D1_DRAW_TEXT_OPTIONS>(D2D1_DRAW_TEXT_OPTIONS_CLIP | D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT));
-        const HRESULT result = target->EndDraw();
-        layout->Release();
-        if (FAILED(result)) reset();
-        return SUCCEEDED(result);
+        const BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+        return AlphaBlend(dc, bounds.left, bounds.top, width, height, cached->dc, 0, 0, width, height, blend) != 0;
     }
 };
 

@@ -74,9 +74,11 @@ test('Successful color-font runs remain visible to native rendering diagnostics'
 
 test('Color glyphs composite over the actual message and rounded badge pixels', () => {
   const source = read('src/color_emoji.cpp');
-  assert.match(source, /BitBlt\(snapshot, 0, 0, width, height, dc, visible.left, visible.top, SRCCOPY\)/);
-  assert.match(source, /target->DrawBitmap\(background\)/);
-  assert.doesNotMatch(source, /target->Clear\(/);
+  assert.match(source, /D2D1_ALPHA_MODE_PREMULTIPLIED/);
+  assert.match(source, /AlphaBlend\(dc, bounds.left, bounds.top/);
+  assert.match(source, /target->Clear\(D2D1::ColorF\(0, 0, 0, 0\)\)/);
+  assert.match(source, /entry.em == em && entry.ink == ink/);
+  assert.match(read('src/message_menu.zig'), /@import\("dwrite_text.zig"\)\.draw\(dc, glyph,/);
 });
 
 test('Cross-build budget covers native color-font linkage', () => {

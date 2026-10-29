@@ -6,6 +6,7 @@ fn linkColorEmoji(b: *std.Build, module: *std.Build.Module) void {
     module.addCSourceFile(.{ .file = b.path("src/color_emoji.cpp"), .flags = &.{ "-std=c++17", "-fno-exceptions", "-fno-rtti" } });
     module.link_libcpp = true;
     module.linkSystemLibrary("gdi32", .{});
+    module.linkSystemLibrary("msimg32", .{});
     module.linkSystemLibrary("d2d1", .{});
     module.linkSystemLibrary("dwrite", .{});
 }
