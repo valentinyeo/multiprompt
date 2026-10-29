@@ -389,6 +389,9 @@ def fake_seed_many(rounds):
 
 def shell():
     op = ARGS[0] if ARGS else ""
+    if op == "history-refresh":
+        fake_event("progress", data=dict(type="hook_progress", hookName="history-refresh"))
+        return 0
     if op == "resume" and len(ARGS) == 2:
         value = state()
         value["sid"] = ARGS[1]
@@ -550,12 +553,17 @@ def shell():
             fake_event("assistant", message=dict(role="assistant", id="switch-" + str(i), content=[dict(type="text", text=text)]))
         return 0
     if op == "history":
-        for i in range(24):
+        for i in range(320 if state().get("longChatProof") else 24):
             fake_event("user", message=dict(role="user", content=f"IGSH815 user {i:02d}"))
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=f"IGSH815 assistant {i:02d}")]))
             identity = "history-" + str(i)
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo history"))]))
-            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * (40000 if state().get("longChatProof") else 12000), is_error=False)]))
+            fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="synthetic tool output " * (3000 if state().get("longChatProof") else 12000), is_error=False)]))
+        if state().get("longChatProof"):
+            for i in range(300):
+                identity = "history-tail-" + str(i)
+                fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], content=[dict(type="tool_use", id=identity, name="Bash", input=dict(command="echo " + "historical tool payload " * 17))]))
+                fake_event("user", message=dict(role="user", content=[dict(type="tool_result", tool_use_id=identity, content="completed tool work " * 65, is_error=False)]))
         return 0
     if op == "todo":
         fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="tool_use", id="activity-todo", name="TodoWrite", input=dict(todos=[dict(content="Prove the status row", status="pending", activeForm="Proving the status row")]))]))

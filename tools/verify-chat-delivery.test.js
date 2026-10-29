@@ -1199,3 +1199,76 @@ test('Doctor checks owned tabs through saved session state, not a delayed inbox 
   assert.match(doctor, /\$_.kind -eq 'tmux'/);
   assert.match(doctor, /\$_.kind -eq 'cmd'/);
 });
+
+test('long-chat reproduction includes hundreds of visible exchanges rather than only hidden tool bytes', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'long-chat-workload-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const transcript = path.join(dir, 'transcript.jsonl');
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+    name: 'full-history', mode: 'busy', suggestion: queueTexts.suggestion, fake: true, sid: 'sid-history', longChatProof: true,
+    transcript, meta: path.join(dir, 'sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
+    cwd: 'C:/verify/work', panePid: 4242,
+  }));
+  const shell = op => execFileSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), 'shell', op], {
+    env: { ...process.env, MP_VERIFY_STATE: dir }, encoding: 'utf8', timeout: 60000,
+  });
+  shell('init');
+  shell('history');
+  const bytes = fs.readFileSync(transcript);
+  const rows = bytes.toString('utf8').trim().split('\n').map(line => JSON.parse(line));
+  const visible = rows.filter(row => typeof row.message?.content === 'string' || row.message?.content?.some(part => part.type === 'text'));
+  assert.equal(visible.length, 642);
+  assert.ok(bytes.length > 18 * 1024 * 1024);
+  assert.equal(visible.at(-1).message.content[0].text, 'IGSH815 assistant 319');
+  shell('history-refresh');
+  const updated = fs.readFileSync(transcript, 'utf8');
+  assert.ok(updated.startsWith(bytes.toString('utf8')));
+  const appended = JSON.parse(updated.slice(bytes.length));
+  assert.equal(appended.type, 'progress');
+  assert.equal(appended.message, undefined);
+});
+
+
+test('full-history copy proof distinguishes message 10 from 100 and rejects lost, repeated or reordered messages', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'history-copy-proof-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, 'full-history'));
+  const json = (file, value) => fs.writeFileSync(path.join(dir, file), JSON.stringify(value));
+  const messages = ['start the fake session', 'The fake session is ready.', ...Array.from({ length: 320 }, (_, i) => [
+    `IGSH815 user ${String(i).padStart(2, '0')}`, `IGSH815 assistant ${String(i).padStart(2, '0')}`,
+  ]).flat()];
+  fs.writeFileSync(path.join(dir, 'full-history/transcript.jsonl'), messages.map(text => JSON.stringify({ message: { content: text } })).join('\n'));
+  json('full-history/observation.json', { error: null });
+  json('build.json', { tag: '', sha256: 'fixturehash', version: '1.0.0' });
+  json('full-history/doctor.json', { sha256: 'fixturehash', version: '1.0.0', chat: true, tmux: true, pid: 1, hwnd: 20, composer: 21, focus: [20, 21] });
+  for (const stage of ['open', 'restart']) {
+    json(`full-history/${stage}.json`, { messages: 642, blocks: 1262, polled: true });
+    json(`full-history/${stage}-latest.json`, { latest: 'IGSH815 assistant 319', visibleMs: 500 });
+    fs.writeFileSync(path.join(dir, `full-history/${stage}-copied.txt`), messages.join('\n\n'));
+    for (const edge of ['', '-first', '-last']) {
+      const image = Buffer.alloc(10001, edge === '-last' ? 1 : 0);
+      Buffer.from('89504e470d0a1a0a', 'hex').copy(image);
+      fs.writeFileSync(path.join(dir, `full-history-${stage}${edge}.png`), image);
+    }
+  }
+  json('full-history/long-chat.json', { sourceBytes: 19 * 1024 * 1024, restoreMs: 500, sustainedMs: 5000, samples: Array.from({ length: 3 }, () => ({ ink: 20, width: 800, height: 600 })) });
+  fs.writeFileSync(path.join(dir, 'full-history/sustained-copied.txt'), messages.join('\n\n'));
+  for (const name of ['restart-process-tree', 'process-tree']) json(`full-history/${name}.json`, { ActiveProcesses: 0 });
+  json('cleanup.json', { remaining_owned_processes: 0, evidence_preserved: true, scratch_removed: true });
+  const evaluate = () => {
+    try {
+      execFileSync(process.execPath, [path.join(root, 'tools/chat-full-history-proof.mjs'), dir], {
+        env: { ...process.env, CHAT_LONG_PROOF: '1' }, encoding: 'utf8', stdio: 'pipe', timeout: 10000,
+      });
+    } catch (error) { assert.equal(error.status, 1); }
+    return JSON.parse(fs.readFileSync(path.join(dir, 'result.json'), 'utf8'));
+  };
+  assert.equal(evaluate().status, 'passed');
+  for (const actual of [messages.slice(1), [...messages, messages[22]], [messages[1], messages[0], ...messages.slice(2)]]) {
+    fs.writeFileSync(path.join(dir, 'full-history/open-copied.txt'), actual.join('\n\n'));
+    assert.equal(evaluate().status, 'failed');
+  }
+  fs.writeFileSync(path.join(dir, 'full-history/open-copied.txt'), messages.join('\n\n'));
+  json('full-history/restart-latest.json', { latest: 'IGSH815 assistant 319', visibleMs: 2001 });
+  assert.equal(evaluate().status, 'failed');
+});
