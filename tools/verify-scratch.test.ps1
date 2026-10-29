@@ -98,6 +98,7 @@ try {
 $fontScratch = Join-Path ([IO.Path]::GetTempPath()) ('verify-font-' + [guid]::NewGuid().ToString('N'))
 $fontRoot = Join-Path $fontScratch 'local/ZigShell/fonts'
 $registrar = $null
+$foreign = $null
 $native = @'
 using System;
 using System.Runtime.InteropServices;
@@ -116,6 +117,9 @@ try {
     New-Item -ItemType Directory -Force $fontRoot | Out-Null
     $font = Join-Path $fontRoot 'NordwandMono-SemiBold-proof.ttf'
     Copy-Item (Join-Path $PSScriptRoot '../src/fonts/NordwandMono-SemiBold.ttf') $font
+    $foreign = Join-Path $fontScratch 'foreign.ttf'
+    Copy-Item $font $foreign
+    if ([VerifyNative]::AddFontResourceEx($foreign, 0, [IntPtr]::Zero) -le 0) { throw 'Foreign control font did not register' }
     $env:FONT_TEST_PATH = $font
     $env:FONT_TEST_READY = Join-Path $fontScratch 'registered.txt'
     $scriptFile = Join-Path $fontScratch 'register.ps1'
@@ -143,6 +147,7 @@ foreach ($registration in @(1, 2)) {
     Write-Output 'GLOBAL_FONT_KILLED_REGISTRAR_LOCK_PROVEN'
     Release-ScratchConsoleFonts $fontScratch
     if ($script:fontCleanup.Count -ne 1 -or $script:fontCleanup[0].registrations -ne 2) { throw 'Both orphaned font registrations were not reclaimed' }
+    if (-not [VerifyNative]::RemoveFontResourceEx($foreign, 0, [IntPtr]::Zero)) { throw 'Cleanup removed an unrelated font registration' }
     Release-ScratchConsoleFonts $fontScratch
     if ($script:fontCleanup[0].registrations -ne 0) { throw 'Font cleanup did not converge' }
     Remove-ScratchPath $fontScratch 1
@@ -157,6 +162,9 @@ foreach ($registration in @(1, 2)) {
         foreach ($file in [IO.Directory]::EnumerateFiles($fontRoot, '*.ttf')) {
             while ([VerifyNative]::RemoveFontResourceEx($file, 0, [IntPtr]::Zero)) {}
         }
+    }
+    if ($null -ne $foreign) {
+        while ([VerifyNative]::RemoveFontResourceEx($foreign, 0, [IntPtr]::Zero)) {}
     }
     Microsoft.PowerShell.Management\Remove-Item -LiteralPath $fontScratch -Recurse -Force -ErrorAction SilentlyContinue
 }

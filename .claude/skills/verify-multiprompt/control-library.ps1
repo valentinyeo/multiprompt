@@ -15,7 +15,7 @@ function Release-ScratchConsoleFonts([string]$Path) {
     $released = @()
     foreach ($entry in Get-ChildItem -LiteralPath $fontRoot -Force) {
         if ($entry -isnot [IO.FileInfo] -or $entry.Extension -ine '.ttf' -or
-            ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq [IO.FileAttributes]::ReparsePoint) { continue }
         $count = 0
         while ([VerifyNative]::RemoveFontResourceEx($entry.FullName, 0, [IntPtr]::Zero)) { $count++ }
         $released += @{ name = $entry.Name; registrations = $count }

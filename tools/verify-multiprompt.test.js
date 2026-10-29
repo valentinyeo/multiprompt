@@ -993,6 +993,7 @@ test('ISSUE-559 real Windows cleanup rejects the old vanished-lockfile race and 
   assert.match(result.stdout, /ISSUE-559 production cleanup passed/);
   assert.match(result.stdout, /GLOBAL_FONT_KILLED_REGISTRAR_LOCK_PROVEN/);
   assert.match(result.stdout, /GLOBAL_FONT_OWNED_CLEANUP_OK/);
+  console.log(result.stdout);
 });
 
 test('ISSUE-559 setup waits for rendered browser readiness and retries only owned-frame activation', () => {
