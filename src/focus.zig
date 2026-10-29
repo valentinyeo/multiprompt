@@ -745,7 +745,6 @@ pub fn browserPaneOwnsForegroundHwnd(fg: HANDLE, bh: HANDLE) bool {
 pub fn foregroundHwndIsOurs(fg: HANDLE) bool {
     if (fg == null or app_state.g_main_hwnd == null) return false;
     if (fg == app_state.g_main_hwnd) return true;
-    if (GetAncestor(fg, GA_ROOTOWNER) == app_state.g_main_hwnd) return true;
     if (@import("settings_panel.zig").ownsWindow(fg)) return true;
     if (app_state.g_urlbar_hwnd) |ub| {
         if (fg == ub and IsWindow(ub) != 0) {
@@ -761,7 +760,7 @@ pub fn foregroundHwndIsOurs(fg: HANDLE) bool {
             if (browserPaneOwnsForegroundHwnd(fg, bh)) return true;
         }
     }
-    return @import("browser_pane.zig").pendingBrowserWindowOwnsForeground(fg);
+    return false;
 }
 
 pub fn foregroundIsOurs() bool {

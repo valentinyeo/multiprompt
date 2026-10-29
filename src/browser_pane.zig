@@ -1615,24 +1615,6 @@ fn browserWindowProfileMatches(hwnd: HANDLE, idx: u32) bool {
     return expected.len > 0 and std.ascii.eqlIgnoreCase(expected, actual);
 }
 
-pub fn pendingBrowserWindowOwnsForeground(hwnd: HANDLE) bool {
-    if (!edgeWindowClassMatches(hwnd)) return false;
-    var title: [128]u16 = undefined;
-    const len = InternalGetWindowText(hwnd, &title, title.len);
-    if (len > 0) {
-        const now = GetTickCount64();
-        for (app_state.g_cancelled_browser_launches) |launch| {
-            if (launch.nonce_len == 0 or now >= launch.deadline) continue;
-            var nonce: [40]u16 = undefined;
-            for (launch.nonce[0..launch.nonce_len], 0..) |c, i| nonce[i] = c;
-            if (std.mem.indexOf(u16, title[0..@intCast(len)], nonce[0..launch.nonce_len]) != null) return true;
-        }
-    }
-    const idx = app_state.g_browser_adopt_target_idx;
-    if (idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or app_state.shells[idx].browser_launch_tick == 0) return false;
-    return browserWindowProfileMatches(hwnd, idx);
-}
-
 fn enumBrowserAdopt(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     if (!edgeWindowClassMatches(hwnd)) return 1;
     if (browserSnapshotContains(hwnd)) return 1;
@@ -2113,9 +2095,9 @@ pub fn browserHibernationTick() void {
             if (!app_state.shells[i].browser_enabled) continue;
             var buf: [256]u8 = undefined;
             debugLog(std.fmt.bufPrint(&buf, "browser-freeze-state: now={d} active={d} swap={d} shell={d} window={d} frozen={} parked={d} activity={s} last_event={d} busy={}", .{
-                GetTickCount64(),                                                                                                  app_state.active_shell,                 app_state.g_chat_browser_swap.shell_id,
-                app_state.shells[i].shell_id,                                                                                      app_state.shells[i].browser_window_id,  app_state.shells[i].browser_frozen,
-                app_state.shells[i].browser_parked_since,                                                                          @tagName(app_state.shells[i].activity), app_state.shells[i].last_active_event,
+                GetTickCount64(), app_state.active_shell, app_state.g_chat_browser_swap.shell_id,
+                app_state.shells[i].shell_id, app_state.shells[i].browser_window_id, app_state.shells[i].browser_frozen,
+                app_state.shells[i].browser_parked_since, @tagName(app_state.shells[i].activity), app_state.shells[i].last_active_event,
                 browserPaneSessionBusy(i, if (browserPowerSaving()) BROWSER_FREEZE_PARK_MS_SAVING else BROWSER_FREEZE_PARK_MS_AC),
             }) catch "browser-freeze-state: unavailable");
         }

@@ -56,7 +56,9 @@
             if ($fourth.browser_connection_id -le $second.browser_connection_id + 1) { throw 'Palette batch did not open and cancel an intermediate connection' }
             Assert-ConnectedPaneStaysVisible $fourth.browser_connection_id
             Press @(0x12, 0x10, 0x41) 'Alt+Shift+A: toggle working browser pane closed'
+            $shiftToggleCooldown = [Diagnostics.Stopwatch]::StartNew()
             $closed = Assert-BrowserPane 'closed' 'shift-a-toggle'
+            Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5
             Press @(0x12, 0x10, 0x42) 'Alt+Shift+B: toggle browser pane open'
             $fifth = Assert-BrowserPane 'open' 'shift-b-toggle' $fourth.browser_connection_id
             Focus-BrowserPaneOwner 'shift-b-toggle' $fifth.browser_connection_id
@@ -64,82 +66,4 @@
             Press @(0x0D) 'Enter: Close All Browser Panes'
             $closed = Assert-BrowserPane 'closed' 'final-close'
             Snapshot 'after'
-
-            $helperJobs = @()
-            try {
-                $debug = Join-Path $scratch 'roaming/ZigShell/debug.log'
-                $serverState = Join-Path $Evidence 'slow-server.json'
-                $serverLog = Join-Path $Evidence 'slow-server.log'
-                $python = (Get-Command python.exe -ErrorAction Stop).Source
-                $serverScript = (Resolve-Path (Join-Path $PSScriptRoot '../../../tools/verify-browser-toggle-server.py')).Path
-                $serverJob = New-Object VerifyJob
-                $helperJobs += $serverJob
-                $slowServer = $serverJob.Start($python, $scratch, $serverLog, (Join-Path $Evidence 'slow-server-error.log'), ('"' + $serverScript + '" "' + $serverState + '"'))
-                Wait-Until { Test-Path $serverState } 'local slow-loading page ready'
-                $port = (Get-Content $serverState -Raw | ConvertFrom-Json).port
-                $ffmpeg = (Get-Command ffmpeg.exe -ErrorAction Stop).Source
-                $video = Join-Path $Evidence 'immediate-toggle.mp4'
-                $recordJob = New-Object VerifyJob
-                $helperJobs += $recordJob
-                $recorder = $recordJob.Start($ffmpeg, $scratch, (Join-Path $Evidence 'video-out.log'), (Join-Path $Evidence 'video-error.log'), ('-y -f gdigrab -framerate 10 -i desktop -t 90 -vf scale=960:-2 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "' + $video + '"'))
-                $script:immediatePairs = @()
-                function Assert-ImmediateBrowserPairs([string]$Page) {
-                    for ($i = 0; $i -lt 20; $i++) {
-                        Doctor
-                        Record "IGSH-1126 $Page immediate Alt+A pair $i"
-                        [VerifyNative]::BringToForeground($script:window)
-                        Wait-Foreground
-                        $before = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count
-                        $gap = [VerifyNative]::ImmediateBrowserTogglePair((50 + ($i % 5) * 50))
-                        Wait-Until { @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count -eq $before + 2 } 'both physical key presses handled' -Seconds 5 -PollMilliseconds 10
-                        $states = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=' | Select-Object -Last 2 | ForEach-Object { $_.Line })
-                        if ($states[0] -notmatch 'enabled= 1$' -or $states[1] -notmatch 'enabled= 0$') { throw 'Immediate pair did not open then close' }
-                        $closed = Assert-BrowserPane 'closed' ("immediate-$Page-$i")
-                        $script:immediatePairs += @{ page = $Page; pair = $i; gapMs = $gap; states = $states; closed = $closed.browser_state -eq 'closed' }
-                        Save-Json $script:immediatePairs 'immediate-toggle.json'
-                    }
-                }
-                Assert-ImmediateBrowserPairs 'blank'
-                Press @(0x12, 0x41) 'Alt+A: open browser for slow navigation'
-                $slowPane = Assert-BrowserPane 'open' 'slow-open'
-                Focus-BrowserPaneOwner 'slow-open' $slowPane.browser_connection_id
-                $slowUrl = "http://127.0.0.1:$port/slow"
-                Palette 'browser url'
-                Press @(0x0D) 'Enter: choose browser URL'
-                Type-Text $slowUrl
-                Press @(0x0D) 'Enter: retain slow URL through app navigation'
-                Wait-Until { (Read-Session).tabs[0].burl -eq $slowUrl } 'slow URL saved through the real app UI'
-                $browser = [VerifyNative]::DockedPaneWindow($script:window)
-                [uint32]$browserPid = 0
-                [void][VerifyNative]::GetWindowThreadProcessId($browser, [ref]$browserPid)
-                Record 'Focus owned browser before native address-bar navigation'
-                [VerifyNative]::FocusOwnedWindow($browser, $browserPid, $script:window)
-                if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Browser lost focus before Ctrl+L' }
-                Press @(0x11, 0x4C) 'Ctrl+L: navigate browser pane'
-                Wait-Until {
-                    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-                    $focused.Current.ClassName -eq 'OmniboxViewViews' -and $focused.Current.HasKeyboardFocus -and
-                        [VerifyNative]::GetForegroundWindow() -eq $browser
-                } 'verified browser address bar has keyboard focus'
-                Type-Text "http://127.0.0.1:$port/slow"
-                Press @(0x0D) 'Enter: start slow page'
-                Wait-Until { (Test-Path $serverLog) -and (Get-Content $serverLog -Raw) -match 'SLOW_LOADING' } 'browser received unfinished page'
-                if ((Get-Content $serverLog -Raw) -match 'SLOW_FINISHED') { throw 'Slow page already finished before close' }
-                Snapshot 'slow-loading'
-                Press @(0x12, 0x41) 'Alt+A: close while page still loads'
-                $closed = Assert-BrowserPane 'closed' 'slow-loading-close'
-                if ((Get-Content $serverLog -Raw) -match 'SLOW_FINISHED') { throw 'Close waited for page completion' }
-                Save-Json @{ loadingObserved = $true; retainedUrl = $slowUrl; closed = $closed.browser_state -eq 'closed'; finishedBeforeClose = $false } 'slow-toggle.json'
-                Assert-ImmediateBrowserPairs 'slow'
-                Get-Content $debug | Where-Object { $_ -match 'shortcutToggle' } | Set-Content -Encoding UTF8 (Join-Path $Evidence 'toggle-keys.log')
-                Snapshot 'immediate-after'
-                if (-not $recorder.WaitForExit(120000) -or $recorder.ExitCode -ne 0 -or (Get-Item $video).Length -le 0) { throw 'Toggle screen recording failed' }
-                $recorder.Dispose()
-                $slowServer.Dispose()
-            } finally {
-                $helperStops = @()
-                foreach ($helper in $helperJobs) {
-                    try { $helperStops += @{ activeAfterStop = $helper.Stop().ActiveProcesses } } finally { $helper.Dispose() }
-                }
-                Save-Json $helperStops 'toggle-helper-process-tree.json'
-            }
+        

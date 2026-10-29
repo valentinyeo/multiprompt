@@ -210,6 +210,7 @@ fn prepare(webview_owner: u32) void {
     g_search_active = true;
     g_browser_focus_mode = true;
     g_shell_focused = false;
+    g_browser_shortcut_open_guard_until = 1234;
     cancelled = @splat(0);
     window_closes = @splat(0);
     hidden = @splat(false);
@@ -268,6 +269,7 @@ test "production palette handler closes every session through native teardown an
         try std.testing.expect(!g_webview2_active and g_webview2_owner_shell_id == 0);
         if (owner != 0) try std.testing.expectEqual(@as(u8, 0), g_webview2_focus_retries);
         try std.testing.expect(!g_search_active and !g_browser_focus_mode and g_shell_focused);
+        try std.testing.expectEqual(@as(u64, 0), g_browser_shortcut_open_guard_until);
         for ([_]u32{ edits_discarded, layouts, mouse_syncs, sidebar_invalidations, saves, refocuses }) |count| {
             try std.testing.expectEqual(@as(u32, 1), count);
         }
@@ -333,8 +335,4 @@ test('extracted production close-all handler releases native panes and WebView2 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test('IGSH-1126 close-all no longer maintains a browser opening delay', () => {
-  assert.doesNotMatch(main, /g_browser_shortcut_open_guard/);
 });

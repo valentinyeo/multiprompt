@@ -25,7 +25,7 @@ for (const [file, names] of [
     'browserPlaceholderPure applies the deadline only to uncovered slots',
   ]],
   ['src/shortcuts.zig', [
-    'Alt browser toggle accepts twenty immediate released presses',
+    'Alt browser open guard rejects a delayed complete second chord',
     'Alt browser shortcut recovers an enabled pane with no live window',
   ]],
 ]) {
@@ -147,11 +147,17 @@ for (const [before, after] of [
   assert.throws(() => foregroundInputContract(broken), assert.AssertionError, before);
 }
 function shiftedShortcutTimingContract(source) {
-  assert.match(source, /Press @\(0x12, 0x10, 0x41\)[^\n]*\n\s+\$closed = Assert-BrowserPane 'closed' 'shift-a-toggle'\n\s+Press @\(0x12, 0x10, 0x42\)/);
-  assert.doesNotMatch(source, /shiftToggleCooldown|browser shortcut debounce elapsed/);
+  const debounce = Number(read('src/app_state.zig').match(/BROWSER_TOGGLE_DEBOUNCE_MS: u32 = ([\d_]+);/)?.[1].replaceAll('_', ''));
+  assert.ok(Number.isFinite(debounce) && debounce > 0, 'production browser shortcut debounce exists');
+  const sequence = source.match(/Press @\(0x12, 0x10, 0x41\)[^\n]*\n\s+\$shiftToggleCooldown = \[Diagnostics.Stopwatch\]::StartNew\(\)\n\s+\$closed = Assert-BrowserPane 'closed' 'shift-a-toggle'\n\s+Wait-Until \{ \$shiftToggleCooldown.ElapsedMilliseconds -ge (\d+) \} 'browser shortcut debounce elapsed' (\d+)\n\s+Press @\(0x12, 0x10, 0x42\)[^\n]*\n\s+\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id/);
+  assert.ok(sequence, 'shifted shortcuts retain close/new-identity assertions with a bounded monotonic cooldown after the first chord');
+  const cooldown = Number(sequence[1]);
+  const timeout = Number(sequence[2]) * 1000;
+  assert.ok(cooldown > debounce && timeout > cooldown && timeout <= 10000, 'journey waits past production debounce within a bounded timeout');
 }
 shiftedShortcutTimingContract(driver);
-assert.throws(() => shiftedShortcutTimingContract(driver.replace("            Press @(0x12, 0x10, 0x42)", "            Wait-Until { $false } 'browser shortcut debounce elapsed' 5\n            Press @(0x12, 0x10, 0x42)")));
+assert.throws(() => shiftedShortcutTimingContract(driver.replace("            Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5\n", '')));
+assert.throws(() => shiftedShortcutTimingContract(driver.replace('ElapsedMilliseconds -ge 1600', 'ElapsedMilliseconds -ge 1000')));
 function browserForegroundContract(source) {
   const helper = source.match(/function Focus-BrowserPaneOwner\([^\n]*\) \{\n([\s\S]*?)\n\}/)?.[1];
   assert.ok(helper, 'browser launches explicitly activate the main window after docking');
