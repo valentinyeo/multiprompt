@@ -26,7 +26,6 @@ const Entry = struct {
     expires_ms: i64 = 0,
     channel_pending: bool = false,
     channel_sent: bool = false,
-    host_held: bool = false,
     channel_sent_ms: i64 = 0,
     sent_tick_ms: i64 = 0,
     channel_retries: u8 = 0,
@@ -54,7 +53,7 @@ var enter_ok = true;
 var notices: usize = 0;
 const chat_echo = struct { fn fileTimeToUnixMs(_: u64) i64 { return 12345; } };
 const ChatTmuxSendJob = struct {
-    key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, held: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false,
+    key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false,
     finished: std.atomic.Value(bool) = .init(true),
 };
 var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;
@@ -154,17 +153,6 @@ test "IGSH-608 a box that will not clear never pastes and leaves the message not
     try std.testing.expect(!storage[0].channel_pending);
     try std.testing.expect(g_chat_tmux_send_job == null);
 }
-test "IGSH-1010 held rejection never falls back to terminal paste" {
-    reset();
-    const job = std.heap.page_allocator.create(ChatTmuxSendJob) catch unreachable;
-    job.* = .{ .text = std.heap.page_allocator.dupe(u16, &.{'x'}) catch unreachable, .held = true, .rejected = true };
-    g_chat_tmux_send_job = job;
-    storage[0].channel_pending = true;
-    chatTmuxSendFinish();
-    try std.testing.expectEqual(@as(usize, 0), pastes + enters);
-    try std.testing.expect(storage[0].host_held);
-    try std.testing.expectEqual(@as(@TypeOf(storage[0].state), .not_sent), storage[0].state);
-}
 test "channel write failure falls back once but a written request or retry never pastes" {
     reset(); finishJob(false, false, 1);
     try std.testing.expectEqual(@as(usize, 1), pastes);
@@ -201,7 +189,7 @@ function execute(disabled = false) {
 test('production routing and completion execute with safe write-failure fallback', () => {
   const result = execute();
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /All 7 tests passed/);
+  assert.match(result.stderr, /All 6 tests passed/);
 });
 test('turning the switch off executes the original console path', () => {
   const result = execute(true);

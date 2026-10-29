@@ -51,7 +51,6 @@ if ($env:CHAT_REPLY_PROOF -eq '1') { $plans = @(@{name='reply-reference'; mode='
 if ($env:CHAT_RESYNC_PROOF -eq '1') { $plans = @(@{name='resync'; mode='busy'; text='draft stays here'}) }
 if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
-if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
 $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
@@ -248,40 +247,6 @@ function Click-NewMessages([bool]$Close) {
     $x = if ($Close) { [int]($v.right - ($v.bottom - $v.top) / 2) } else { [int](($v.left + $v.right) / 2) }
     $actions.Add(@{case=$plan.name; input='click new messages'; close=$Close; x=$x; y=[int](($v.top + $v.bottom) / 2)})
     [ChatDeliveryDesktop]::PressClient($main, $app.Id, $x, [int](($v.top + $v.bottom) / 2))
-}
-function Find-CancelMenu([scriptblock]$Accept) {
-    $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
-    $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
-    $found = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
-    if ($found.Count -ne 1) { throw 'Expected one visible owned transcript' }
-    $bounds = $found[0].Current.BoundingRectangle
-    $view = [IntPtr]$found[0].Current.NativeWindowHandle
-    for ($row = 0; $row -lt 40; $row++) {
-        $y = [int]($bounds.Bottom - 16 - $row * 14)
-        if ($y -le $bounds.Top) { break }
-        foreach ($fraction in @(0.85, 0.7, 0.55, 0.4, 0.25)) {
-            $x = [int]($bounds.Left + $bounds.Width * $fraction)
-            $start = (Read-Shared "$settings/debug.log").Length
-            Doctor
-            $actions.Add(@{case=$plan.name; ms=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); input='real cancellation menu click'; x=$x; y=$y})
-            try { [ChatDeliveryDesktop]::RightClickOwnedTranscript($main, $app.Id, $view, $x, $y) }
-            catch {
-                Start-Sleep -Milliseconds 500
-                continue
-            }
-            Start-Sleep -Milliseconds 400
-            $tail = (Read-Shared "$settings/debug.log").Substring($start)
-            $menus = [regex]::Matches($tail, '\[chat\] message menu items=([^\r\n]+)')
-            if ($menus.Count -eq 0) { continue }
-            $items = $menus[$menus.Count - 1].Groups[1].Value
-            $echoMatches = [regex]::Matches($tail, '\[chat\] message menu echo=(\d+)')
-            $echo = if ($echoMatches.Count) { [int]$echoMatches[$echoMatches.Count - 1].Groups[1].Value } else { -1 }
-            if (& $Accept $items $echo) { return @{items=$items; x=$x; y=$y} }
-            [ChatDeliveryDesktop]::Type(0x1B)
-            Start-Sleep -Milliseconds 700
-        }
-    }
-    $null
 }
 function Type-Composer([string]$Text) {
     [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
@@ -507,7 +472,6 @@ foreach ($plan in $plans) {
     $isQueue = $plan.name -eq 'queue-draft-sync'
     $isHax = $env:CHAT_HAX_PROOF -eq '1'
     $isSendStays = $plan.name -eq 'send-stays-gone'
-    $isCancel = $plan.name -eq 'cancel-held'
     $isMissing = $plan.name -eq 'missing-transcript'
     $isActivity = $plan.name -eq 'messages-only'
     $isHistory = $plan.name -eq 'full-history'
@@ -515,7 +479,7 @@ foreach ($plan in $plans) {
     $isNotes = $plan.name -eq 'session-notes'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
     $isLiveDelivery = $plan.name -eq 'live-delivery'
-    $hasTranscript = $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isCancel -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
+    $hasTranscript = $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -1156,42 +1120,6 @@ foreach ($plan in $plans) {
             } 5)
             Shot "$($plan.name)-done"
             $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-        } elseif ($isCancel) {
-            $texts = @('cancel keep one', 'cancel target two', 'cancel keep three')
-            [void](Step 'transcript-loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)
-            foreach ($text in $texts) {
-                Type-Composer $text
-                Press @(0x0D) 'Enter: send composer' $true
-                [void](Wait-For 'composer cleared after send' { ([ChatDeliveryDesktop]::Text($composer)) -ceq '' } 10)
-            }
-            [void](Step 'three-messages-held' { (Queue-View) -ceq ('queued:' + ($texts -join '|queued:')) } 30)
-            Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-held.json"
-            Shot 'cancel-held-waiting'
-            $offered = Find-CancelMenu { param($items, $echo) $items -match 'Cancel message' -and $echo -eq 2 }
-            [void](Step 'middle-message-offers-cancel' { $null -ne $offered })
-            if ($null -eq $offered) { throw 'Middle message has no Cancel action' }
-            Shot 'cancel-held-menu'
-            [ChatDeliveryDesktop]::Type(0x4E)
-            [void](Step 'middle-message-cancelled' {
-                $saved = Read-Shared "$settings/chat-outbox.json" | ConvertFrom-Json
-                @($saved.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -ceq $texts[1] -and $_.s -eq 4 }).Count -eq 1
-            } 30)
-            [void](Step 'other-messages-still-held' { (Queue-View) -ceq ('queued:' + $texts[0] + '|queued:' + $texts[2]) })
-            Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-cancelled.json"
-            Shot 'cancel-held-cancelled'
-            Shell-Input 'idle'
-            [void](Step 'survivors-received-in-order' { (Queue-View) -ceq ('sent:' + $texts[0] + '|sent:' + $texts[2]) } 30)
-            [void](Step 'survivor-echoes-settled' {
-                $saved = Read-Shared "$settings/chat-outbox.json" | ConvertFrom-Json
-                @($saved.queues | ForEach-Object { $_.messages } | Where-Object { $_.t -cne $texts[1] }).Count -eq 0
-            } 30)
-            Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-final.json"
-            Shot 'cancel-held-delivered'
-            $taken = Find-CancelMenu { param($items, $echo) $echo -eq 0 -and $items -notmatch 'Cancel message|React' }
-            [void](Step 'delivered-message-has-no-cancel' { $null -ne $taken })
-            Shot 'cancel-held-taken-menu'
-            [ChatDeliveryDesktop]::Type(0x1B)
-            $observation.endMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         } elseif ($isQueue) {
             $t = $queueTexts
             [void](Step 'chat-view-read-transcript' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' } 30)
@@ -1321,10 +1249,6 @@ Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_pro
 Stop-Transcript
 if ($env:CHAT_RESYNC_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-resync-proof.mjs" $Evidence
-    exit $LASTEXITCODE
-}
-if ($env:CHAT_CANCEL_PROOF -eq '1') {
-    & node "$PSScriptRoot/../chat-cancel-proof.cjs" $Evidence
     exit $LASTEXITCODE
 }
 if ($env:CHAT_LIVE_DELIVERY_PROOF -eq '1') {

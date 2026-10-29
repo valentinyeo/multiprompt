@@ -18,7 +18,6 @@ function declaration(name) {
 }
 const prelude = `
 const std = @import("std");
-fn chatCancelFinish() void {}
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
@@ -42,7 +41,6 @@ const CHAT_OUTBOX_KEY_CAP = 256;
 const CHAT_OUTBOX_LOAD_LIMIT = 16 * 1024 * 1024;
 const CHAT_ECHO_PREFIX_CAP = 40;
 const CHAT_CONFIRMED_MAX_PER_KEY = 50;
-const CHAT_STATUS_H: i32 = 20;
 const ShellSendResult = enum { ok, write_failed, enter_failed };
 const ReconnectState = struct { phase: enum { connected, ended, closed } = .connected, fn ok(_: *@This()) void {} };
 const Shell = struct { chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
@@ -93,7 +91,6 @@ const ChatTmuxSendJob = struct {
     echo_id: u64,
     text: []u16,
     retry: bool = false,
-    held: bool = false,
     written: bool = true,
     rejected: bool = false,
     box_not_clear: bool = false,
@@ -1456,19 +1453,6 @@ test "IGSH-975 popup snapshot sends the clicked reply after live blocks change" 
     try std.testing.expectEqual(reference, sent.reference);
     try std.testing.expectEqualSlices(u16, quote, sent.quote);
     try std.testing.expectEqualSlices(u16, draft, composer_text);
-}
-
-test "delivery: IGSH-1010 cancellation survives restart without retry or terminal writes" {
-    defer clear();
-    const json = "{\\"version\\":2,\\"queues\\":[{\\"key\\":\\"test\\",\\"messages\\":[{\\"t\\":\\"cancelled prompt\\",\\"s\\":4,\\"x\\":1,\\"held\\":1,\\"qid\\":77}]}]}";
-    chatOutboxParseJson(&g_chat_outbox, std.heap.page_allocator, json);
-    try std.testing.expect(saveChatOutbox());
-    try reload();
-    try std.testing.expectEqual(@as(usize, 1), g_chat_outbox.items.len);
-    try std.testing.expectEqual(@as(u8, 4), @intFromEnum(g_chat_outbox.items[0].state));
-    chatOutboxTick();
-    try std.testing.expectEqual(@as(usize, 0), writes + channel_starts);
-    try std.testing.expect(!chat_echo.pendingActions(g_chat_outbox.items[0].state).send_again);
 }
 
 `;

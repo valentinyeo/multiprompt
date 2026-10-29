@@ -223,7 +223,7 @@ pub fn textHash(text: []const u16) u64 {
     return hash.final();
 }
 
-pub const OutboxState = enum(u8) { queued = 0, sending = 1, not_sent = 2, delivered = 3, cancelled = 4 };
+pub const OutboxState = enum(u8) { queued = 0, sending = 1, not_sent = 2, delivered = 3 };
 
 pub const ISSUE_349_ORPHAN_SENDING_SETTLES = true;
 
@@ -233,17 +233,6 @@ pub fn orphanedSending(state: OutboxState, id: u64, verify_id: u64) bool {
 
 pub fn mayType(state: OutboxState, write_started: bool, busy: bool, link_down: bool) bool {
     return state == .queued and !write_started and !busy and !link_down;
-}
-
-pub fn cancellable(state: OutboxState, removed_ms: i64) bool {
-    return state == .delivered and removed_ms == 0;
-}
-
-test "IGSH-1010 only a message waiting in Claude's queue can be cancelled" {
-    for (std.enums.values(OutboxState)) |state| {
-        try std.testing.expectEqual(state == .delivered, cancellable(state, 0));
-        try std.testing.expect(!cancellable(state, 1200));
-    }
 }
 
 pub const PendingActions = struct { send_again: bool, remove: bool };
@@ -361,7 +350,6 @@ pub fn refusesCommand(warning: []const u16, text: []const u16) bool {
 }
 
 pub fn stateOnLoad(saved: u8, write_started: bool) OutboxState {
-    if (saved == @intFromEnum(OutboxState.cancelled)) return .cancelled;
     if (write_started) return if (saved == @intFromEnum(OutboxState.delivered)) .delivered else .not_sent;
     return if (saved == 0) .queued else .not_sent;
 }
@@ -991,6 +979,7 @@ test "ISSUE-460 all pending states have a hard deadline independent of busy and 
     try std.testing.expect(!pendingExpired(.not_sent, 1000, 901000));
     try std.testing.expectEqual(@as(u8, 2), @intFromEnum(OutboxState.not_sent));
 }
+
 
 test "IGSH-991 text search preserves first matches and UTF16 alignment" {
     try std.testing.expectEqual(@as(?usize, 0), indexOfText(&w("abc"), &.{}));
