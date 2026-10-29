@@ -1,0 +1,10 @@
+[Unit]
+Description=Check uploaded desktop incident reports
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
