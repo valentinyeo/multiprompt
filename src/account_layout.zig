@@ -36,7 +36,7 @@ fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
     if (!eq(u8, a.removed_hosts orelse &.{}, b.removed_hosts orelse &.{})) return false;
     if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
-    for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name)) return false;
+    for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name) or x.color != y.color) return false;
     for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or (x.favorite orelse false) != (y.favorite orelse false) or (x.muted orelse false) != (y.muted orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
     return true;
 }
@@ -59,11 +59,29 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
     }
     for (local.tabs, owned) |tab, synced| {
         if (find(remote.tabs, tab) != null or (synced and tab.tmux_session.len > 0)) continue;
-        if (workspaceIndex(ws.items, tab.workspace) == null) try ws.append(a, .{ .name = tab.workspace });
+        if (workspaceIndex(ws.items, tab.workspace) == null) try ws.append(a, if (workspaceIndex(local.workspaces, tab.workspace)) |i| local.workspaces[i] else .{ .name = tab.workspace });
         try tabs.append(a, tab);
     }
     if (ws.items.len > max_ws or tabs.items.len > max_tabs) return error.LayoutCapacity;
     return .{ .settings = remote.settings, .revision = remote.revision, .hosts = remote.hosts, .removed_hosts = remote.removed_hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
+}
+
+pub fn colorsFrom(a: Allocator, target: Layout, source: Layout) !Layout {
+    var result = target;
+    const workspaces = try a.dupe(layout.Workspace, target.workspaces);
+    for (workspaces) |*workspace| {
+        if (workspaceIndex(source.workspaces, workspace.name)) |i| workspace.color = source.workspaces[i].color;
+    }
+    result.workspaces = workspaces;
+    return result;
+}
+
+pub fn withoutColors(a: Allocator, target: Layout) !Layout {
+    var result = target;
+    const workspaces = try a.dupe(layout.Workspace, target.workspaces);
+    for (workspaces) |*workspace| workspace.color = null;
+    result.workspaces = workspaces;
+    return result;
 }
 
 pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab) !Layout {
@@ -83,7 +101,7 @@ pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab)
     for (base.tabs, 0..) |t, i| {
         if (t.tmux_session.len == 0 or find(edited.tabs, t) != null or find(closed, t) != null) continue;
         try tabs.insert(a, @min(i, tabs.items.len), t);
-        if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, .{ .name = t.workspace });
+        if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, if (workspaceIndex(base.workspaces, t.workspace)) |wi| base.workspaces[wi] else .{ .name = t.workspace });
     }
     const removed = try @import("account_hosts.zig").mergeRemoved(a, base.removed_hosts orelse &.{}, edited.removed_hosts orelse &.{});
     return .{ .settings = edited.settings, .revision = edited.revision, .hosts = edited.hosts, .removed_hosts = if (removed.len > 0) removed else null, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
@@ -101,6 +119,14 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
     }
     for (edited.workspaces) |w| {
         if (workspaceIndex(base.workspaces, w.name) == null and workspaceIndex(ws.items, w.name) == null) try ws.append(a, w);
+    }
+    for (ws.items) |*workspace| {
+        const ei = workspaceIndex(edited.workspaces, workspace.name) orelse continue;
+        const bi = workspaceIndex(base.workspaces, workspace.name) orelse {
+            if (edited.workspaces[ei].color) |color| workspace.color = color;
+            continue;
+        };
+        if (edited.workspaces[ei].color != base.workspaces[bi].color) workspace.color = edited.workspaces[ei].color;
     }
     for (remote.tabs) |r| {
         var t = r;
@@ -139,7 +165,7 @@ pub fn rebase(a: Allocator, base: Layout, edited: Layout, remote: Layout) !Layou
     for (edited.tabs) |t| {
         if (find(base.tabs, t) == null and find(tabs.items, t) == null) try tabs.append(a, t);
     }
-    for (tabs.items) |t| if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, .{ .name = t.workspace });
+    for (tabs.items) |t| if (workspaceIndex(ws.items, t.workspace) == null) try ws.append(a, if (workspaceIndex(edited.workspaces, t.workspace)) |i| edited.workspaces[i] else .{ .name = t.workspace });
     var order_changed = base.tabs.len != edited.tabs.len;
     if (!order_changed) {
         order_changed = false;
@@ -255,6 +281,7 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
         }
         var local = r;
         var name: []const u8 = "Other";
+        var color: ?u8 = null;
         if (r.object.get("workspace")) |index| {
             if (index == .integer and index.integer >= 0) {
                 if (old_ws) |workspaces| {
@@ -262,12 +289,14 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
                         const w = workspaces.array.items[@intCast(index.integer)];
                         if (w == .object) if (w.object.get("name")) |n| {
                             if (n == .string) name = n.string;
+                            const value = @import("json_reader.zig").uintDefault(w, "color", 7);
+                            color = if (value < 7) @intCast(value) else null;
                         };
                     }
                 }
             }
         }
-        if (workspaceIndex(ws.items, name) == null) try ws.append(a, .{ .name = name });
+        if (workspaceIndex(ws.items, name) == null) try ws.append(a, .{ .name = name, .color = color });
         try local.object.put(a, "workspace", .{ .integer = @intCast(workspaceIndex(ws.items, name).?) });
         try records.append(local);
     }
@@ -286,6 +315,11 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
             };
         }
         try value.object.put(a, "name", .{ .string = w.name });
+        if (w.color) |color| {
+            try value.object.put(a, "color", .{ .integer = color });
+        } else {
+            _ = value.object.swapRemove("color");
+        }
         try workspaces.append(value);
     }
     if (remote.settings) |settings| {
@@ -946,4 +980,61 @@ test "IGSH-814 resync retains each matching chat read anchor" {
     const tabs = @import("json_reader.zig").array(@import("json_reader.zig").field(parsed.value, "tabs"));
     try std.testing.expectEqual(std.math.maxInt(u64), @import("json_reader.zig").uint(tabs[0], "last_read_message_id"));
     try std.testing.expectEqual(@as(u64, 42), @import("json_reader.zig").uint(tabs[1], "last_read_message_id"));
+}
+
+test "IGSH-1172 colors rebase independently reset reorder and survive cache" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const base = Layout{ .workspaces = &.{ .{ .name = "Cedar", .color = 1 }, .{ .name = "Orbit" } }, .tabs = &.{} };
+    const edited = Layout{ .workspaces = &.{ .{ .name = "Orbit", .color = 4 }, .{ .name = "Cedar", .color = null } }, .tabs = &.{} };
+    const remote = Layout{ .revision = 2, .workspaces = &.{ .{ .name = "Cedar", .color = 5 }, .{ .name = "Orbit", .color = 6 }, .{ .name = "Lagoon", .color = 2 } }, .tabs = &.{} };
+    try std.testing.expect(!equal(base, edited));
+    try std.testing.expect(publishNeeded(edited, base, base));
+    const result = try rebase(a, base, edited, remote);
+    try std.testing.expectEqualStrings("Orbit", result.workspaces[0].name);
+    try std.testing.expectEqual(@as(?u8, 4), result.workspaces[0].color);
+    try std.testing.expectEqual(@as(?u8, null), result.workspaces[1].color);
+    try std.testing.expectEqual(@as(?u8, 2), result.workspaces[2].color);
+    const unchanged = try rebase(a, base, base, remote);
+    try std.testing.expect(equal(unchanged, remote));
+    const cache = try prepareCache(a, "{\"tabs\":[],\"workspaces\":[{\"name\":\"Cedar\",\"color\":1}]}", result);
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, cache, .{});
+    defer parsed.deinit();
+    const workspaces = parsed.value.object.get("workspaces").?.array.items;
+    try std.testing.expectEqual(@as(i64, 4), workspaces[0].object.get("color").?.integer);
+    try std.testing.expect(!workspaces[1].object.contains("color"));
+    try std.testing.expectEqual(@as(i64, 2), workspaces[2].object.get("color").?.integer);
+    const applied = try apply(a, base, &.{}, remote, 9, 256);
+    try std.testing.expect(equal(applied, remote));
+    const renamed = Layout{ .workspaces = &.{ .{ .name = "Spruce", .color = 1 }, .{ .name = "Orbit" } }, .tabs = &.{} };
+    const rename_result = try rebase(a, base, renamed, base);
+    try std.testing.expectEqualStrings("Spruce", rename_result.workspaces[0].name);
+    try std.testing.expectEqual(@as(?u8, 1), rename_result.workspaces[0].color);
+}
+
+test "old server sync preserves pending workspace color until upgrade" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const base = Layout{ .workspaces = &.{.{ .name = "Other" }}, .tabs = &.{one} };
+    var renamed = one;
+    renamed.name = "Renamed";
+    renamed.manual = true;
+    const edited = Layout{ .workspaces = &.{.{ .name = "Other", .color = 4 }}, .tabs = &.{renamed} };
+    const rebased = try rebase(a, base, edited, base);
+    const outbound = try withoutColors(a, rebased);
+    const json = try layout.encode(a, outbound);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"color\"") == null);
+    try std.testing.expectEqualStrings("Renamed", outbound.tabs[0].name);
+    const old_ack = try apply(a, edited, &.{true}, outbound, 9, 256);
+    const preserved = try colorsFrom(a, outbound, edited);
+    try std.testing.expectEqual(@as(?u8, null), old_ack.workspaces[0].color);
+    try std.testing.expectEqual(@as(?u8, 4), preserved.workspaces[0].color);
+    const upgraded = try rebase(a, old_ack, preserved, outbound);
+    try std.testing.expectEqual(@as(?u8, 4), upgraded.workspaces[0].color);
+    const server_reset = Layout{ .workspaces = &.{.{ .name = "Other" }}, .tabs = &.{renamed} };
+    const honored = try rebase(a, upgraded, upgraded, server_reset);
+    try std.testing.expectEqual(@as(?u8, null), honored.workspaces[0].color);
+    try std.testing.expectEqual(@as(u8, 1), layout.workspaceColor(1, honored.workspaces[0].color));
 }

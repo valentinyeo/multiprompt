@@ -1574,6 +1574,7 @@ pub fn newPillForMove() ?u8 {
     const ws = app_state.g_lws_count;
     app_state.g_lws_count += 1;
     app_state.g_ws_name_len[ws] = 0;
+    app_state.g_ws_colors[ws] = null;
     app_state.g_ws_id_len[ws] = 0;
     app_state.g_ws_last_shell[ws] = 0;
     app_state.g_ws_focus[ws] = .none;
@@ -2350,6 +2351,7 @@ pub fn ensureOtherWorkspaceSlot() void {
         app_state.g_lws_count += 1;
         app_state.g_ws_names[next] = std.mem.zeroes([32]u8);
         app_state.g_ws_name_len[next] = 0;
+        app_state.g_ws_colors[next] = null;
         app_state.g_ws_ids[next] = std.mem.zeroes([32]u8);
         app_state.g_ws_id_len[next] = 0;
         app_state.g_ws_last_shell[next] = 0;
@@ -3272,6 +3274,7 @@ fn leaveSingleWindowMode() bool {
     for (0..app_state.shell_count) |i| app_state.shells[i].workspace = 0;
     app_state.g_active_workspace = 0;
     app_state.g_lws_count = 1;
+    app_state.g_ws_colors[0] = app_state.g_ws_colors[active_slot];
     app_state.g_ws_last_shell[0] = app_state.g_ws_last_shell[active_slot];
     app_state.g_ws_focus[0] = app_state.g_ws_focus[active_slot];
     app_state.g_ws_names[0] = std.mem.zeroes([32]u8);
@@ -3285,6 +3288,7 @@ fn leaveSingleWindowMode() bool {
     var clear_ws: u8 = 1;
     while (clear_ws < MAX_LWS) : (clear_ws += 1) {
         app_state.g_ws_name_len[clear_ws] = 0;
+        app_state.g_ws_colors[clear_ws] = null;
         app_state.g_ws_id_len[clear_ws] = 0;
         app_state.g_ws_last_shell[clear_ws] = 0;
         app_state.g_ws_focus[clear_ws] = .none;
@@ -3319,6 +3323,7 @@ pub fn newWorkspace() void {
     const new_ws = app_state.g_lws_count;
     app_state.g_lws_count += 1;
     app_state.g_ws_name_len[new_ws] = 0;
+    app_state.g_ws_colors[new_ws] = null;
     app_state.g_ws_last_shell[new_ws] = 0;
     app_state.g_ws_focus[new_ws] = .none;
     app_state.g_active_workspace = new_ws;
@@ -3358,6 +3363,7 @@ pub fn compactWorkspaceSlots() void {
             if (new_count != ws) {
                 app_state.g_ws_names[new_count] = app_state.g_ws_names[ws];
                 app_state.g_ws_name_len[new_count] = app_state.g_ws_name_len[ws];
+                app_state.g_ws_colors[new_count] = app_state.g_ws_colors[ws];
                 app_state.g_ws_ids[new_count] = app_state.g_ws_ids[ws];
                 app_state.g_ws_id_len[new_count] = app_state.g_ws_id_len[ws];
                 app_state.g_ws_snoozed[new_count] = app_state.g_ws_snoozed[ws];
@@ -3377,6 +3383,7 @@ pub fn compactWorkspaceSlots() void {
         var t = new_count;
         while (t < app_state.g_lws_count) : (t += 1) {
             app_state.g_ws_name_len[t] = 0;
+            app_state.g_ws_colors[t] = null;
             app_state.g_ws_id_len[t] = 0;
             app_state.g_ws_snoozed[t] = false;
             app_state.g_ws_last_shell[t] = 0;
@@ -3483,6 +3490,7 @@ fn removeWorkspaceSlot(slot: u8) void {
     while (ws + 1 < app_state.g_lws_count) : (ws += 1) {
         app_state.g_ws_names[ws] = app_state.g_ws_names[ws + 1];
         app_state.g_ws_name_len[ws] = app_state.g_ws_name_len[ws + 1];
+        app_state.g_ws_colors[ws] = app_state.g_ws_colors[ws + 1];
         app_state.g_ws_ids[ws] = app_state.g_ws_ids[ws + 1];
         app_state.g_ws_id_len[ws] = app_state.g_ws_id_len[ws + 1];
         app_state.g_ws_snoozed[ws] = app_state.g_ws_snoozed[ws + 1];
@@ -3491,6 +3499,7 @@ fn removeWorkspaceSlot(slot: u8) void {
     }
     app_state.g_lws_count -= 1;
     app_state.g_ws_name_len[app_state.g_lws_count] = 0;
+    app_state.g_ws_colors[app_state.g_lws_count] = null;
     app_state.g_ws_id_len[app_state.g_lws_count] = 0;
     app_state.g_ws_snoozed[app_state.g_lws_count] = false;
     app_state.g_ws_last_shell[app_state.g_lws_count] = 0;
@@ -3520,6 +3529,7 @@ pub fn swapWorkspaceSlots(a: u8, b: u8) void {
     const tmp_ilen = app_state.g_ws_id_len[a];
     app_state.g_ws_id_len[a] = app_state.g_ws_id_len[b];
     app_state.g_ws_id_len[b] = tmp_ilen;
+    std.mem.swap(?u8, &app_state.g_ws_colors[a], &app_state.g_ws_colors[b]);
     std.mem.swap(bool, &app_state.g_ws_snoozed[a], &app_state.g_ws_snoozed[b]);
     std.mem.swap(u32, &app_state.g_ws_last_shell[a], &app_state.g_ws_last_shell[b]);
     std.mem.swap(app_state.WorkspaceFocus, &app_state.g_ws_focus[a], &app_state.g_ws_focus[b]);
@@ -3894,6 +3904,10 @@ fn exportSlotSessionFile(slot: u8) bool {
     appendJsonEscaped(&json_buf, &pos, wid);
     const last_shell = std.fmt.bufPrint(json_buf[pos..], "\",\"last_shell\":{d},\"focus\":\"{s}\"", .{ app_state.g_ws_last_shell[slot], @tagName(app_state.g_ws_focus[slot]) }) catch return false;
     pos += last_shell.len;
+    if (app_state.g_ws_colors[slot]) |color| {
+        const encoded = std.fmt.bufPrint(json_buf[pos..], ",\"color\":{d}", .{color}) catch return false;
+        pos += encoded.len;
+    }
     const t3 = "}]";
     @memcpy(json_buf[pos .. pos + t3.len], t3);
     pos += t3.len;
@@ -4168,6 +4182,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
     if (!importWorkspaceGroups(json, tabs[0..tab_count])) return false;
     logSavedTabsAudit("absorbWorkspace:parsed", tabs[0..tab_count]);
 
+    var src_colors: [MAX_LWS]?u8 = @splat(null);
     var src_names: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
     var src_name_len: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
     var src_wids: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
@@ -4181,6 +4196,8 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         const ncap = @min(nn, @as(u32, 31));
         if (ncap > 0) @memcpy(src_names[swi][0..ncap], nb[0..ncap]);
         src_name_len[swi] = ncap;
+        const color = json_reader.uintDefault(obj, "color", 7);
+        src_colors[swi] = if (color < 7) @intCast(color) else null;
         var wb: [64]u8 = std.mem.zeroes([64]u8);
         const wn2 = json_reader.copyString(obj, "wid", &wb);
         const wcap = @min(wn2, @as(u32, @intCast(src_wids[swi].len)));
@@ -4227,6 +4244,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         const name_len = @min(name.len, @as(usize, 31));
         @memcpy(app_state.g_ws_names[slot][0..name_len], name[0..name_len]);
         app_state.g_ws_name_len[slot] = @intCast(name_len);
+        app_state.g_ws_colors[slot] = src_colors[0];
         const id_len = @min(id.len, app_state.g_ws_ids[slot].len);
         @memcpy(app_state.g_ws_ids[slot][0..id_len], id[0..id_len]);
         app_state.g_ws_id_len[slot] = @intCast(id_len);
@@ -4252,6 +4270,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
                 const ncap2 = @min(nm.len, @as(usize, 31));
                 @memcpy(app_state.g_ws_names[slot][0..ncap2], nm[0..ncap2]);
                 app_state.g_ws_name_len[slot] = @intCast(ncap2);
+                app_state.g_ws_colors[slot] = src_colors[src_ws];
                 app_state.g_ws_id_len[slot] = 0;
                 if (!first_slot_assigned) {
                     first_slot_assigned = true;
@@ -4384,6 +4403,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         var s = entry_lws;
         while (s < app_state.g_lws_count) : (s += 1) {
             app_state.g_ws_name_len[s] = 0;
+            app_state.g_ws_colors[s] = null;
             app_state.g_ws_id_len[s] = 0;
             app_state.g_ws_last_shell[s] = 0;
             app_state.g_ws_focus[s] = .none;
@@ -4489,4 +4509,46 @@ pub fn openWorkspaceByIndex(workspace_idx: usize) void {
             spawnWorkspaceWindow(id);
         }
     }
+}
+
+test "IGSH-1172 workspace color overrides follow reorder and deletion" {
+    const old_count = app_state.g_lws_count;
+    const old_names = app_state.g_ws_names;
+    const old_lengths = app_state.g_ws_name_len;
+    const old_ids = app_state.g_ws_ids;
+    const old_id_lengths = app_state.g_ws_id_len;
+    const old_colors = app_state.g_ws_colors;
+    const old_snoozed = app_state.g_ws_snoozed;
+    const old_last_shell = app_state.g_ws_last_shell;
+    const old_focus = app_state.g_ws_focus;
+    const old_active = app_state.g_active_workspace;
+    const old_shell_count = app_state.shell_count;
+    const old_single = app_state.g_single_window;
+    defer {
+        app_state.g_lws_count = old_count;
+        app_state.g_ws_names = old_names;
+        app_state.g_ws_name_len = old_lengths;
+        app_state.g_ws_ids = old_ids;
+        app_state.g_ws_id_len = old_id_lengths;
+        app_state.g_ws_colors = old_colors;
+        app_state.g_ws_snoozed = old_snoozed;
+        app_state.g_ws_last_shell = old_last_shell;
+        app_state.g_ws_focus = old_focus;
+        app_state.g_active_workspace = old_active;
+        app_state.shell_count = old_shell_count;
+        app_state.g_single_window = old_single;
+    }
+    app_state.g_lws_count = 3;
+    app_state.g_single_window = false;
+    app_state.shell_count = 0;
+    app_state.g_ws_colors[0] = 6;
+    app_state.g_ws_colors[1] = null;
+    app_state.g_ws_colors[2] = 3;
+    swapWorkspaceSlots(0, 2);
+    try std.testing.expectEqual(@as(?u8, 3), app_state.g_ws_colors[0]);
+    try std.testing.expectEqual(@as(?u8, 6), app_state.g_ws_colors[2]);
+    removeWorkspaceSlot(0);
+    try std.testing.expectEqual(@as(?u8, null), app_state.g_ws_colors[0]);
+    try std.testing.expectEqual(@as(?u8, 6), app_state.g_ws_colors[1]);
+    try std.testing.expectEqual(@as(?u8, null), app_state.g_ws_colors[2]);
 }

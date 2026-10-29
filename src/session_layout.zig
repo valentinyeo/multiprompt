@@ -4,7 +4,11 @@ const Allocator = std.mem.Allocator;
 
 pub const max_bytes = 1024 * 1024;
 pub const Host = @import("account_hosts.zig").Host;
-pub const Workspace = struct { name: []const u8 };
+pub const Workspace = struct { name: []const u8, color: ?u8 = null };
+
+pub fn workspaceColor(order: usize, override: ?u8) u8 {
+    return override orelse @as(u8, @intCast(order % 7));
+}
 pub const Tab = struct {
     kind: []const u8 = "tmux",
     name: []const u8,
@@ -79,6 +83,7 @@ pub fn validate(layout: Layout) !void {
     if (layout.removed_hosts) |removed| try @import("account_hosts.zig").validateRemoved(removed);
     if (layout.hosts) |hosts| try @import("account_hosts.zig").validate(hosts);
     for (layout.workspaces, 0..) |ws, i| {
+        if (ws.color != null and ws.color.? >= 7) return error.InvalidLayout;
         if (ws.name.len > 32 or !validText(ws.name, 32)) return error.InvalidLayout;
         for (layout.workspaces[0..i]) |old| if (std.mem.eql(u8, old.name, ws.name)) return error.InvalidLayout;
     }
@@ -111,6 +116,11 @@ pub fn parse(a: Allocator, json: []const u8) !std.json.Parsed(Layout) {
     const value = try std.json.parseFromSlice(std.json.Value, a, json, .{});
     defer value.deinit();
     if (parsed.value.settings == null and value.value.object.contains("settings")) return error.InvalidLayout;
+    for (value.value.object.get("workspaces").?.array.items) |workspace| {
+        if (workspace.object.get("color")) |color| {
+            if (color != .integer or color.integer < 0 or color.integer >= 7) return error.InvalidLayout;
+        }
+    }
     if (value.value.object.get("removed_hosts")) |removed| {
         if (removed != .array) return error.InvalidHosts;
     }
@@ -137,7 +147,8 @@ pub fn merge(a: Allocator, local: Layout, server: Layout, max_workspaces: usize,
     try tabs.appendSlice(a, local.tabs);
     for (server.workspaces) |ws| {
         var found = false;
-        for (workspaces.items) |old| if (std.mem.eql(u8, old.name, ws.name)) {
+        for (workspaces.items) |*old| if (std.mem.eql(u8, old.name, ws.name)) {
+            old.color = ws.color;
             found = true;
             break;
         };
@@ -575,4 +586,29 @@ test "IGSH-600 removed hosts round trip as an optional validated array" {
     for ([_][]const u8{ &.{3}, &.{ 2, 2 }, &.{ 0, 1, 2, 0 } }) |bad| {
         try std.testing.expectError(error.InvalidHosts, encode(a, .{ .workspaces = &.{}, .tabs = &.{}, .removed_hosts = bad }));
     }
+}
+
+test "IGSH-1172 arbitrary workspace colors cycle validate and round trip" {
+    const a = std.testing.allocator;
+    const names = [_][]const u8{ "Cedar", "Orbit", "Lagoon", "Moss", "Comet", "Coral", "Dune", "River", "Nova" };
+    var workspaces: [9]Workspace = undefined;
+    for (names, 0..) |name, i| {
+        workspaces[i] = .{ .name = name };
+        try std.testing.expectEqual(@as(u8, @intCast(i % 7)), workspaceColor(i, null));
+    }
+    workspaces[1].color = 6;
+    const bytes = try encode(a, .{ .workspaces = &workspaces, .tabs = &.{} });
+    defer a.free(bytes);
+    const restored = try parse(a, bytes);
+    defer restored.deinit();
+    for (workspaces, restored.value.workspaces) |expected, actual| {
+        try std.testing.expectEqualStrings(expected.name, actual.name);
+        try std.testing.expectEqual(expected.color, actual.color);
+    }
+    try std.testing.expectEqual(@as(u8, 6), workspaceColor(1, restored.value.workspaces[1].color));
+    workspaces[1].color = 7;
+    try std.testing.expectError(error.InvalidLayout, encode(a, .{ .workspaces = &workspaces, .tabs = &.{} }));
+    const legacy = try parse(a, "{\"workspaces\":[{\"name\":\"Cedar\"}],\"tabs\":[]}");
+    defer legacy.deinit();
+    try std.testing.expectEqual(@as(?u8, null), legacy.value.workspaces[0].color);
 }

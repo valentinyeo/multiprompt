@@ -206,7 +206,7 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn('if (sessionFileIsValid(bytes)) bytes else null', prepare)
         self.assertIn('account_layout.restoreCache', prepare)
         reply = function(MAIN, 'handleLayoutReply')
-        failure = reply.split('accountPrepareRestore(to_apply) catch {', 1)[1].split('};', 1)[0]
+        failure = reply.split('accountPrepareRestore(to_apply, !reply.colors_supported and reply.job.edited == null) catch {', 1)[1].split('};', 1)[0]
         self.assertNotIn('return;', failure)
         self.assertNotIn('g_account_locked = was_locked;', reply)
 

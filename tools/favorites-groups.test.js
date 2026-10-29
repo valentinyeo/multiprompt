@@ -15,7 +15,7 @@ test('IGSH-556: groups stay local without account layout or Worker fields', () =
   for (const field of ['group_id', 'starred_group_id', 'starred_group']) {
     assert.throws(() => audit(`tab.${field} = 17;`), assert.AssertionError);
   }
-  const header = source => assert.match(source, /X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal\\r\\n/);
+  const header = source => assert.match(source, /X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color\\r\\n/);
   const client = read('src/account_client.zig');
   header(client);
   assert.throws(() => header(client.replace('settings,hosts', 'settings,hosts,groups')), assert.AssertionError);

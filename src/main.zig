@@ -8530,7 +8530,9 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
                 defer arena.deinit();
                 if (captureSessionLayout(arena.allocator(), false)) |current| {
-                    app_state.g_account_local_base = session_layout.encode(std.heap.page_allocator, current) catch null;
+                    const base = if (app_state.g_account_colors_supported) current else @import("account_layout.zig").withoutColors(arena.allocator(), current) catch current;
+                    app_state.g_account_local_base = session_layout.encode(std.heap.page_allocator, base) catch null;
+                    if (!app_state.g_account_colors_supported) @import("account_desktop.zig").publishSessionLayout();
                 } else |_| {}
             }
 

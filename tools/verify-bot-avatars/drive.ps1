@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [string]$WorkspaceName = '',
+    [ValidateRange(0, 2)][int]$WorkspaceIndex = 0,
     [ValidateSet(96, 144)][int]$Dpi = 96
 )
 $ErrorActionPreference = 'Stop'
@@ -16,6 +16,7 @@ Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
 Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/job.cs"
 Add-Type -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/title-bar-native.cs"
+Add-Type -Path "$PSScriptRoot/settings.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $env:IGSH_246 = '0'
 $env:MULTIPROMPT_NO_LOGIN = '1'
@@ -24,6 +25,10 @@ $env:MP_VERIFY_PYTHON = (Get-Command python.exe).Source
 $env:MP_VERIFY_BOUNDARY = (Resolve-Path "$PSScriptRoot/../verify-chat-delivery/boundary.py").Path
 $env:PATH = (Split-Path $Exe) + ';' + $env:PATH
 $env:PYTHONUTF8 = '1'
+$workspaceNames = @('Cedar', 'Orbit', 'Lagoon')
+$WorkspaceName = $workspaceNames[$WorkspaceIndex]
+$colorIndex = $WorkspaceIndex % 7
+$palette = @(0xA9C29A, 0xC98F72, 0xD4BE94, 0x93A9C4, 0xB7A6D6, 0xD9A0A8, 0x9DD3C4)
 $checks = [Collections.Generic.List[object]]::new()
 $result = @{passed=$false; error=$null; checks=$checks; cleanup='pending'}
 $job = $null
@@ -45,7 +50,7 @@ function Appearance([string]$Name) {
     foreach ($byte in [Text.Encoding]::UTF8.GetBytes($Name)) {
         $hash = (($hash -bxor [uint64]$byte) * [uint64]16777619) -band [uint64]4294967295
     }
-    $color = switch ($WorkspaceName) { 'inne' { 2 } 'Hypertask' { 5 } 'Software Factory' { 4 } default { 0 } }
+    $color = $colorIndex
     @{face=[int]($hash % 20); color=$color}
 }
 function Layouts {
@@ -75,17 +80,20 @@ function Check-Pixels($Row, [string]$Name) {
         for ($y = 0; $y -lt $Row.size; $y++) {
             for ($x = 0; $x -lt $Row.size; $x++) {
                 $p = $bitmap.GetPixel($x, $y)
-                if (($Row.color -eq 2 -and $p.R -gt $p.G * 1.1 -and $p.G -gt $p.B * 1.1) -or
-                    ($Row.color -eq 4 -and $p.B -gt $p.R * 1.1 -and $p.G -gt $p.R * 1.05) -or
-                    ($Row.color -eq 5 -and $p.B -gt $p.G * 1.1 -and $p.R -gt $p.G * 1.05)) { $workspaceTint++ }
+                $expected = $palette[$Row.color]
+                $red = ($expected -shr 16) -band 255
+                $green = ($expected -shr 8) -band 255
+                $blue = $expected -band 255
+                $shade = $p.R / [double]$red
+                if ($shade -ge .60 -and $shade -le 1.03 -and [Math]::Abs($p.G - $green * $shade) -lt 12 -and [Math]::Abs($p.B - $blue * $shade) -lt 12) { $workspaceTint++ }
                 if ([Math]::Min($p.R, [Math]::Min($p.G, $p.B)) -gt 215) { $bright++ }
                 if ([Math]::Max($p.R, [Math]::Max($p.G, $p.B)) -lt 40) { $dark++ }
                 if ([Math]::Max($p.R, [Math]::Max($p.G, $p.B)) - [Math]::Min($p.R, [Math]::Min($p.G, $p.B)) -gt 16) { $tint++ }
             }
         }
         $area = $Row.size * $Row.size
-        if ($bright -lt $area * .01 -or $dark -lt $area * .15 -or ($Row.color -ne 0 -and $tint -lt $area * .12)) { throw "Robot pixels absent: $Name bright=$bright dark=$dark tint=$tint area=$area" }
-        if ($Row.color -in @(2, 4, 5) -and $workspaceTint -lt $area * .08) { throw "Workspace hue absent: $Name" }
+        if ($bright -lt $area * .01 -or $dark -lt $area * .15 -or $tint -lt $area * .12) { throw "Robot pixels absent: $Name bright=$bright dark=$dark tint=$tint area=$area" }
+        if ($workspaceTint -lt $area * .08) { throw "Workspace hue absent: $Name" }
         $bitmap.Save("$Evidence/$Name.png")
         $checks.Add(@{name=$Name; passed=$true; face=$Row.face; color=$Row.color; size=$Row.size; bright=$bright; dark=$dark; tint=$tint; workspaceTint=$workspaceTint})
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
@@ -95,7 +103,7 @@ try {
     function Px([int]$Value) { [int][Math]::Floor($Value * $Dpi / 96) }
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedHash) { throw 'Binary checksum mismatch' }
     if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Binary version mismatch' }
-    $displayNames = @('inne Chief of Staff', 'Mini Boss CEO', 'HT Product Lead', 'SF Design Lead', 'HT Design Lead', 'Triage')
+    $displayNames = @('Cedar agent', 'Orbit agent', 'Lagoon agent', 'Moss agent', 'Dune agent', 'Coral agent')
     $names = @($displayNames | ForEach-Object { $_.Replace(' ', '-') })
     $looks = @($names | ForEach-Object { $a = Appearance $_; "$($a.face):$($a.color)" } | Select-Object -Unique)
     if ($looks.Count -ne $names.Count) { throw 'Fixture bot identities must be visually distinct' }
@@ -113,8 +121,8 @@ try {
     $console | Add-Member -NotePropertyName turns -NotePropertyValue (,@('Show the next step', 'Robot previews are ready.')) -Force
     Save $console "$state/claude.json"
     $tabs = @()
-    for ($i = 0; $i -lt $names.Count; $i++) { $tabs += @{kind='tmux'; name=$displayNames[$i]; manual=$true; tmux_host=0; tmux_session=$names[$i]; pinned_top=($i -lt 2); cv=$false; pid=0} }
-    Save @{active_tab=0; single_window=$true; workspace_count=1; workspaces=@(@{name=$WorkspaceName; wid='default'}); chat_active=$false; amoled_theme=$true; tabs=$tabs} "$settings/session.json"
+    for ($i = 0; $i -lt $names.Count; $i++) { $tabs += @{kind='tmux'; name=$displayNames[$i]; manual=$true; tmux_host=0; tmux_session=$names[$i]; workspace=$WorkspaceIndex; pinned_top=($i -lt 2); cv=$false; pid=0} }
+    Save @{active_tab=0; single_window=$true; active_workspace=$WorkspaceIndex; workspace_count=3; workspaces=@($workspaceNames | ForEach-Object { @{name=$_; wid=('workspace-' + $_.ToLowerInvariant())} }); chat_active=$false; amoled_theme=$true; tabs=$tabs} "$settings/session.json"
     [IO.File]::WriteAllText("$settings/theme-mode.txt", 'amoled')
     [IO.File]::WriteAllText("$settings/ssh-path.txt", (Join-Path (Split-Path $Exe) 'ssh.exe'))
     $job = [VerifyJob]::new()
@@ -168,6 +176,29 @@ try {
     Shot 'chat-amoled'
     Copy-Item "$settings/session.json" "$Evidence/session-selected.json"
     Save @(Layouts) "$Evidence/layouts.json"
+    [ChatDeliveryDesktop]::Chord(@(0x11, 0xbc))
+    $panel = Wait-For 'settings palette panel' { $h = [BotSettingsDesktop]::Panel($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    $content = Wait-For 'settings palette content' { $h = [BotSettingsDesktop]::Content($panel, $app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    [BotSettingsDesktop]::Scroll($content, $app.Id, 4)
+    Shot 'workspace-settings-picker'
+    $top = [BotSettingsDesktop]::ColorsTop($content) + [BotSettingsDesktop]::Scale($content, $WorkspaceIndex * 80 + 54 - 192)
+    [ChatDeliveryDesktop]::PressClient($content, $app.Id, ([BotSettingsDesktop]::Scale($content, 16 + 4 * 40 + 20)), $top)
+    [void](Wait-For 'picked palette color persisted' {
+        $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+        $workspace = @($saved.workspaces)[$WorkspaceIndex]
+        if ($workspace.PSObject.Properties['color']) { $workspace.color -eq 4 }
+    })
+    $checks.Add(@{name='settings-color-persisted'; passed=$true; workspace=$WorkspaceName; color=4})
+    Shot 'workspace-settings-picked'
+    [ChatDeliveryDesktop]::Chord(@(0x1b))
+    [void](Wait-For 'settings closed' { [BotSettingsDesktop]::Panel($app.Id) -eq [IntPtr]::Zero })
+    $colorIndex = 4
+    $overridden = Wait-For 'workspace faces recolored' {
+        $v = @(Layouts | Where-Object { $_.color -eq 4 -and $_.size -eq (Px 56) })
+        if ($v.Count -ge 2) { ,$v }
+    }
+    Check-Pixels $overridden[0] 'overridden-workspace-robot'
+    Shot 'workspace-override'
     $result.passed = $true
  } catch {
     $result.error = $_.Exception.Message

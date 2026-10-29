@@ -182,7 +182,7 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             break :blk workspaceDisplayName(@intCast(ws), &name_buf);
         } else getInstanceName();
         if (name.len > 32) return error.InvalidLayout;
-        try workspaces.append(a, .{ .name = try a.dupe(u8, name) });
+        try workspaces.append(a, .{ .name = try a.dupe(u8, name), .color = app_state.g_ws_colors[ws] });
     }
     for (app_state.shells[0..app_state.shell_count]) |shell| {
         const remote = shell.tmux_session_len > 0;
@@ -276,7 +276,8 @@ pub fn publishSessionLayout() void {
     const local = accountCapturePush(arena.allocator(), base.value) catch return;
     const synced = session_layout.parse(arena.allocator(), app_state.g_account_base orelse return) catch return;
     defer synced.deinit();
-    if (!account_layout.publishNeeded(local, base.value, synced.value)) {
+    const needs_publish = account_layout.publishNeeded(local, base.value, synced.value);
+    if (!needs_publish) {
         app_state.g_account_dirty_at = 0;
         _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
         accountDeletePending();
@@ -287,6 +288,15 @@ pub fn publishSessionLayout() void {
     if (syncAuthPath(&path_buf, "account-layout-pending.json")) |path| {
         if (!writeFileAtomicW(path, pending)) {
             showHeaderNoticeAscii("Could not save pending sync changes", 4000, true);
+            return;
+        }
+    }
+    if (!app_state.g_account_colors_supported) {
+        const plain_local = account_layout.withoutColors(arena.allocator(), local) catch return;
+        const plain_base = account_layout.withoutColors(arena.allocator(), base.value) catch return;
+        if (!account_layout.publishNeeded(plain_local, plain_base, synced.value)) {
+            app_state.g_account_dirty_at = 0;
+            _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
             return;
         }
     }
@@ -305,9 +315,18 @@ pub fn pullSessionLayout() void {
     }
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const current = captureSessionLayout(arena.allocator(), false) catch return;
+    const held = session_layout.parse(arena.allocator(), app_state.g_account_local_base orelse return) catch return;
+    defer held.deinit();
+    const current = accountCapturePush(arena.allocator(), held.value) catch return;
     const edited = session_layout.encode(std.heap.page_allocator, current) catch return;
-    startAccountJob(.{ .kind = .pull, .edited = edited });
+    const base = std.heap.page_allocator.dupe(u8, app_state.g_account_local_base orelse {
+        std.heap.page_allocator.free(edited);
+        return;
+    }) catch {
+        std.heap.page_allocator.free(edited);
+        return;
+    };
+    startAccountJob(.{ .kind = .pull, .base = base, .edited = edited });
 }
 pub fn accountPush() void {
     if (app_state.g_account_busy or app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_reauth or app_state.g_account_base == null or !app_state.g_account_retry.ready(GetTickCount64())) return;
@@ -842,6 +861,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     defer remote.deinit();
     if (remote.status == 401) reply.unauthorized = true;
     if (remote.status != 200) return error.Network;
+    const colors_supported = remote.colors_supported;
+    reply.colors_supported = colors_supported;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -908,6 +929,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             if (merged.conflict) debugLog("account-sync: host address conflict, keeping local field");
         }
         synced_hosts = merged_hosts;
+        if (!colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
         if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(synced_hosts, server.value.hosts orelse &.{}))) break;
         const publish_hosts = if (hosts_ready) synced_hosts else server.value.hosts;
         rebased.hosts = if (remote.hosts_supported) try account_hosts.withoutRemoved(alloc, publish_hosts orelse &.{}, removed) else null;
@@ -974,7 +996,7 @@ fn layoutSyncWorker(submitted: AccountJob) void {
         a.destroy(reply);
     }
 }
-fn accountPrepareRestore(json: []const u8) !void {
+fn accountPrepareRestore(json: []const u8, preserve_cached_colors: bool) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -985,7 +1007,28 @@ fn accountPrepareRestore(json: []const u8) !void {
     const old = readFileAllocWin32(path, SESSION_JSON_CAPACITY);
     defer if (old) |bytes| std.heap.page_allocator.free(bytes);
     const valid = if (old) |bytes| (if (sessionFileIsValid(bytes)) bytes else null) else null;
-    const cache = try account_layout.restoreCache(a, valid, server.value) orelse return;
+    var restored = server.value;
+    if (preserve_cached_colors) if (valid) |bytes| {
+        const cached = std.json.parseFromSlice(std.json.Value, a, bytes, .{}) catch null;
+        if (cached) |parsed| {
+            defer parsed.deinit();
+            if (parsed.value == .object) if (parsed.value.object.get("workspaces")) |workspaces| {
+                if (workspaces == .array) {
+                    const copy = try a.dupe(session_layout.Workspace, restored.workspaces);
+                    for (copy) |*workspace| for (workspaces.array.items) |item| {
+                        if (item != .object) continue;
+                        const name = item.object.get("name") orelse continue;
+                        if (name != .string or !std.mem.eql(u8, name.string, workspace.name)) continue;
+                        const color = item.object.get("color") orelse break;
+                        if (color == .integer and color.integer >= 0 and color.integer < 7) workspace.color = @intCast(color.integer);
+                        break;
+                    };
+                    restored.workspaces = copy;
+                }
+            };
+        }
+    };
+    const cache = try account_layout.restoreCache(a, valid, restored) orelse return;
     if (!writeFileAtomicW(path, cache)) return error.Storage;
 }
 pub fn applyServerLayout(json: []const u8) !void {
@@ -1028,6 +1071,7 @@ pub fn applyServerLayout(json: []const u8) !void {
             closeShellRemember(i, false);
         }
     }
+    const old_colors = app_state.g_ws_colors;
     const old_names = app_state.g_ws_names;
     const old_name_len = app_state.g_ws_name_len;
     const old_ids = app_state.g_ws_ids;
@@ -1045,6 +1089,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         app_state.g_ws_names[wi] = @splat(0);
         @memcpy(app_state.g_ws_names[wi][0..name.len], name);
         app_state.g_ws_name_len[wi] = @intCast(name.len);
+        app_state.g_ws_colors[wi] = if (wi < desired.workspaces.len) desired.workspaces[wi].color else null;
         app_state.g_ws_ids[wi] = @splat(0);
         app_state.g_ws_id_len[wi] = 0;
         app_state.g_ws_snoozed[wi] = false;
@@ -1069,6 +1114,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         const slot = app_state.g_lws_count;
         app_state.g_ws_names[slot] = old_names[oi];
         app_state.g_ws_name_len[slot] = old_name_len[oi];
+        app_state.g_ws_colors[slot] = old_colors[oi];
         app_state.g_ws_ids[slot] = old_ids[oi];
         app_state.g_ws_id_len[slot] = old_id_len[oi];
         app_state.g_ws_snoozed[slot] = true;
@@ -1320,7 +1366,13 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     const alloc = arena.allocator();
     const server = session_layout.parse(alloc, bytes) catch return;
     defer server.deinit();
+    app_state.g_account_colors_supported = reply.colors_supported;
     var to_apply = bytes;
+    if (!reply.colors_supported and reply.job.edited != null) {
+        const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer edited.deinit();
+        to_apply = session_layout.encode(alloc, account_layout.colorsFrom(alloc, server.value, edited.value) catch return) catch return;
+    }
     var local_ack: ?[]u8 = null;
     if (!app_state.g_account_bootstrapping and reply.job.edited != null) {
         const edit = reply.job.edited.?;
@@ -1330,14 +1382,16 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         const previous = session_layout.parse(alloc, app_state.g_account_base orelse bytes) catch return;
         defer previous.deinit();
         for (sent.value.tabs, 0..) |tab, i| ownership[i] = account_layout.find(previous.value.tabs, tab) != null or account_layout.find(server.value.tabs, tab) != null;
-        const ack = account_layout.apply(alloc, sent.value, ownership[0..sent.value.tabs.len], server.value, MAX_LWS, MAX_SHELLS) catch return;
+        var ack = account_layout.apply(alloc, sent.value, ownership[0..sent.value.tabs.len], server.value, MAX_LWS, MAX_SHELLS) catch return;
+        if (!reply.colors_supported) ack = account_layout.withoutColors(alloc, ack) catch return;
         local_ack = session_layout.encode(alloc, ack) catch return;
         const current = accountCapturePush(alloc, sent.value) catch return;
-        const rebased = account_layout.rebase(alloc, sent.value, current, server.value) catch return;
+        const apply_remote = if (reply.colors_supported) server.value else account_layout.colorsFrom(alloc, server.value, sent.value) catch return;
+        const rebased = account_layout.rebase(alloc, sent.value, current, apply_remote) catch return;
         to_apply = session_layout.encode(alloc, rebased) catch return;
     }
     if (app_state.g_account_bootstrapping) {
-        accountPrepareRestore(to_apply) catch {
+        accountPrepareRestore(to_apply, !reply.colors_supported and reply.job.edited == null) catch {
             app_state.g_account_status = "Could not reconcile saved layout. Local cache kept.";
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
         };
@@ -1349,7 +1403,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             return;
         };
     }
-    if (app_state.g_account_bootstrapping or reply.job.base != null) accountDeletePending();
+    if (reply.colors_supported and (app_state.g_account_bootstrapping or reply.job.base != null)) accountDeletePending();
     var keep_closed: usize = 0;
     for (app_state.g_account_closed[0..app_state.g_account_closed_count]) |c| {
         const probe = session_layout.Tab{ .name = "", .tmux_session = c.session[0..c.len], .tmux_host = c.host, .workspace = "" };

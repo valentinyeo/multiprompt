@@ -19,62 +19,52 @@ function block(source, prefix) {
   return source.slice(start, end);
 }
 
-test('real bot identity matches Android, survives renamed titles and covers the family', () => {
-  assert.ok(fs.existsSync(path.join(root, 'src/bot_avatar.zig')), 'Sidebar needs the approved robot family, not provider glyphs');
+test('workspace order owns color and raw session owns face for arbitrary names', () => {
   const source = read('src/bot_avatar.zig');
+  assert.match(source, /workspaceColor\(workspace, state\.g_ws_colors\[workspace\]\)/);
+  assert.doesNotMatch(source, /eqlIgnoreCase/);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-identity-'));
   try {
     const identity = block(source, 'pub const Appearance = struct') + ';';
     const forShell = block(source, 'pub fn forShell(');
+    fs.writeFileSync(path.join(dir, 'session_layout.zig'), block(read('src/session_layout.zig'), 'pub fn workspaceColor('));
     fs.writeFileSync(path.join(dir, 'identity.zig'), `const std = @import("std");
-const state = struct { pub const Shell = struct {
-  tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
-  name: [64]u16 = @splat(0), name_len: u32 = 0, workspace: u8 = 0,
-};
-pub var g_lws_count: u32 = 3;
-pub var g_ws_names = [_][]const u8{"inne", "Hypertask", "Software Factory"};
-pub var g_ws_name_len = [_]u32{4, 9, 16};
-pub var g_window_display_name_u8: []const u8 = "Other";
-pub var g_window_display_name_u8_len: u32 = 5;
+const state = struct {
+  pub const Shell = struct {
+    tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
+    name: [64]u16 = @splat(0), name_len: u32 = 0, workspace: u8 = 0,
+  };
+  pub var g_lws_count: u32 = 9;
+  pub var g_ws_colors: [9]?u8 = @splat(null);
 };
 ${identity}
 ${forShell}
-test "Android reference vectors and stable raw identity" {
-    const examples = [_]struct { name: []const u8, face: u8, color: u8 }{
-        .{ .name = "HT Product Lead", .face = 0, .color = 3 },
-        .{ .name = "SF Design Lead", .face = 8, .color = 3 },
-        .{ .name = "机器人", .face = 9, .color = 4 },
-    };
-    for (examples) |example| {
-        const got = Appearance.forSession(example.name);
-        try std.testing.expectEqual(example.face, got.face);
-        try std.testing.expectEqual(example.color, got.color);
-    }
+test "ordered palette cycles and overrides never change the face" {
     var shell: state.Shell = .{};
-    @memcpy(shell.tmux_session[0..15], "HT Product Lead");
-    shell.tmux_session_len = 15;
-    const before = forShell(&shell);
-    try std.testing.expectEqual(@as(u8, 2), before.color);
-    shell.workspace = 1;
-    try std.testing.expectEqual(@as(u8, 5), forShell(&shell).color);
-    shell.workspace = 2;
-    try std.testing.expectEqual(@as(u8, 4), forShell(&shell).color);
-    shell.workspace = 3;
+    @memcpy(shell.tmux_session[0..9], "agent-one");
+    shell.tmux_session_len = 9;
+    const face = forShell(&shell).face;
+    for (0..9) |i| {
+        shell.workspace = @intCast(i);
+        try std.testing.expectEqual(@as(u8, @intCast(i % 7)), forShell(&shell).color);
+        try std.testing.expectEqual(face, forShell(&shell).face);
+        state.g_ws_colors[i] = 6;
+        try std.testing.expectEqual(@as(u8, 6), forShell(&shell).color);
+    }
+    shell.name[0] = 'X';
+    shell.name_len = 1;
+    try std.testing.expectEqual(face, forShell(&shell).face);
+    state.g_ws_colors = @splat(null);
+    shell.workspace = 255;
     try std.testing.expectEqual(@as(u8, 0), forShell(&shell).color);
-    state.g_window_display_name_u8 = " INNE ";
-    state.g_window_display_name_u8_len = 6;
-    try std.testing.expectEqual(@as(u8, 2), forShell(&shell).color);
-    shell.workspace = 0;
-    @memcpy(shell.name[0..7], std.unicode.utf8ToUtf16LeStringLiteral("Renamed"));
-    shell.name_len = 7;
-    try std.testing.expectEqual(before, forShell(&shell));
-    var seen: [20][8]bool = @splat(@splat(false));
+    var seen: [20]bool = @splat(false);
     for (0..10000) |i| {
         var name: [32]u8 = undefined;
-        const got = Appearance.forSession(try std.fmt.bufPrint(&name, "Runner {d}", .{i}));
-        seen[got.face][got.color] = true;
+        const got = Appearance.forSession(try std.fmt.bufPrint(&name, "agent-{d}", .{i}));
+        seen[got.face] = true;
+        try std.testing.expectEqual(@as(u8, 0), got.color);
     }
-    for (seen) |face| for (face) |present| try std.testing.expect(present);
+    for (seen) |present| try std.testing.expect(present);
 }
 `);
     const result = spawnSync(process.env.ZIG_EXE || 'zig', ['test', path.join(dir, 'identity.zig')], {encoding: 'utf8', timeout: 120000});
