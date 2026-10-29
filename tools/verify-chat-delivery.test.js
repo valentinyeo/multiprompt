@@ -1199,3 +1199,31 @@ test('Doctor checks owned tabs through saved session state, not a delayed inbox 
   assert.match(doctor, /\$_.kind -eq 'tmux'/);
   assert.match(doctor, /\$_.kind -eq 'cmd'/);
 });
+
+test('long-chat reproduction includes hundreds of visible exchanges rather than only hidden tool bytes', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'long-chat-workload-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const transcript = path.join(dir, 'transcript.jsonl');
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+    name: 'full-history', mode: 'busy', fake: true, sid: 'sid-history', longChatProof: true,
+    transcript, meta: path.join(dir, 'sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
+    cwd: 'C:/verify/work', panePid: 4242,
+  }));
+  const shell = op => execFileSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), 'shell', op], {
+    env: { ...process.env, MP_VERIFY_STATE: dir }, encoding: 'utf8', timeout: 60000,
+  });
+  shell('init');
+  shell('history');
+  const bytes = fs.readFileSync(transcript);
+  const rows = bytes.toString('utf8').trim().split('\n').map(line => JSON.parse(line));
+  const visible = rows.filter(row => typeof row.message?.content === 'string' || row.message?.content?.some(part => part.type === 'text'));
+  assert.equal(visible.length, 642);
+  assert.ok(bytes.length > 18 * 1024 * 1024);
+  assert.equal(visible.at(-1).message.content[0].text, 'IGSH815 assistant 319');
+  shell('history-refresh');
+  const updated = fs.readFileSync(transcript, 'utf8');
+  assert.ok(updated.startsWith(bytes.toString('utf8')));
+  const appended = JSON.parse(updated.slice(bytes.length));
+  assert.equal(appended.type, 'progress');
+  assert.equal(appended.message, undefined);
+});

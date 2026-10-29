@@ -10,12 +10,13 @@ try {
   assert.equal(observation.error, null);
   const source = fs.readFileSync(path.join(root, 'full-history/transcript.jsonl'), 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line));
   const messages = source.filter(row => typeof row.message?.content === 'string' || row.message?.content?.some(part => part.type === 'text')).map(row => typeof row.message.content === 'string' ? row.message.content : row.message.content.find(part => part.type === 'text').text);
-  assert.equal(messages.length, 50);
+  const rounds = process.env.CHAT_LONG_PROOF === '1' ? 320 : 24;
+  assert.equal(messages.length, 2 + rounds * 2);
   for (const stage of ['open', 'restart']) {
     const measured = json(`full-history/${stage}.json`);
     const copied = fs.readFileSync(path.join(root, `full-history/${stage}-copied.txt`), 'utf8');
     assert.equal(measured.messages, messages.length);
-    assert.equal(measured.blocks, messages.length + 24);
+    assert.equal(measured.blocks, messages.length + rounds);
     assert.equal(measured.polled, true);
     let offset = 0;
     for (const message of messages) {
@@ -44,7 +45,7 @@ try {
     assert.ok(continuity.samples.length >= (build.tag ? 1500 : 3));
     for (const sample of continuity.samples) assert.ok(sample.ink >= 8 && sample.width >= 200 && sample.height >= 100);
     const copied = fs.readFileSync(path.join(root, 'full-history/sustained-copied.txt'), 'utf8');
-    assert.ok(copied.includes('IGSH815 assistant 23'));
+    assert.ok(copied.includes(`IGSH815 assistant ${rounds - 1}`));
   }
   const build = json('build.json');
   const doctor = json('full-history/doctor.json');

@@ -261,22 +261,25 @@ function Clear-Composer {
     for ($i = 0; $i -lt $length; $i++) { Press @(0x08) 'Backspace: clear composer' $true }
 }
 function Assert-FullHistory([string]$Stage) {
+    $rounds = if ($env:CHAT_LONG_PROOF -eq '1') { 320 } else { 24 }
+    $blocks = 2 + 3 * $rounds
     $offset = (Read-Shared "$settings/debug.log").Length
     $complete = Step 'all session rows reach the renderer' {
         Press @(0x11, 0x30) 'Ctrl+0: measure every rendered session row'
         $log = (Read-Shared "$settings/debug.log").Substring($offset)
         $frames = [regex]::Matches($log, '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
-        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq 74
+        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq $blocks
     }
     if (-not $complete) { throw "IGSH-815 incomplete session at $Stage" }
     $pollOffset = (Read-Shared "$settings/debug.log").Length
-    [void](Wait-For 'normal transcript poll completes after full history loads' {
+    Shell-Run @('history-refresh')
+    [void](Wait-For 'changed transcript delivery completes after full history loads' {
         (Read-Shared "$settings/debug.log").Substring($pollOffset) -match '(?s)\[chat\] transcript request shell=(\d+) offset=\d+ before=0.*?\[chat\] transcript load shell=\1 ok'
     })
     $offset = (Read-Shared "$settings/debug.log").Length
     Press @(0x11, 0x30) 'Ctrl+0: measure every session row after polling'
     $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
-    if ($frames.Count -eq 0 -or [int]$frames[$frames.Count - 1].Groups[1].Value -ne 74) { throw "IGSH-815 session rows lost after polling at $Stage" }
+    if ($frames.Count -eq 0 -or [int]$frames[$frames.Count - 1].Groups[1].Value -ne $blocks) { throw "IGSH-815 session rows lost after polling at $Stage" }
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
     $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
@@ -292,7 +295,7 @@ function Assert-FullHistory([string]$Stage) {
     $copied = [Windows.Forms.Clipboard]::GetText()
     [IO.File]::WriteAllText("$caseDir/$Stage-copied.txt", $copied)
     $actual = @([regex]::Matches($copied, 'IGSH815 (?:user|assistant) \d+') | ForEach-Object { $_.Value })
-    $expected = @(0..23 | ForEach-Object { 'IGSH815 user {0:00}' -f $_; 'IGSH815 assistant {0:00}' -f $_ })
+    $expected = @(0..($rounds - 1) | ForEach-Object { 'IGSH815 user {0:00}' -f $_; 'IGSH815 assistant {0:00}' -f $_ })
     if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-815 incomplete copied messages at $Stage" }
     Shot "full-history-$Stage"
     Press @(0x1B) 'Esc: clear transcript selection'
@@ -337,7 +340,7 @@ function Assert-FullHistory([string]$Stage) {
     Save @{stage=$Stage; wheel_notch_px=$moved; browser_notch_px=$browserNotch; thumb_height=[int]$scrollUi.Groups[2].Value; button_click=@($clickX, $clickY)} "$caseDir/$Stage-scroll-ui.json"
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Doctor $true
-    Save @{stage=$Stage; blocks=74; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
+    Save @{stage=$Stage; blocks=$blocks; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 function Retention-Copy([string]$Stage, [int]$Count) {
     $offset = (Read-Shared "$settings/debug.log").Length
