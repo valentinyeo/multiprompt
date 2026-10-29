@@ -28,17 +28,20 @@ function api(route) {
 
 export function collect(repo, output) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('Expected owner/repository');
-  const runs = api(`repos/${repo}/actions/workflows/release.yml/runs?status=completed&per_page=${policy.historyRuns}`).workflow_runs;
+  const runs = ['release.yml', 'auto-release.yml'].flatMap(workflow => api(`repos/${repo}/actions/workflows/${workflow}/runs?status=completed&per_page=${policy.historyRuns}`).workflow_runs).sort((a, b) => b.id - a.id);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'release-history-'));
   const history = [];
   const regressions = [];
   try {
     for (const run of runs) {
+      if (history.length === policy.historyRuns) break;
       const checks = [];
+      let released = false;
       let page = 1;
       for (;;) {
         const jobs = api(`repos/${repo}/actions/runs/${run.id}/jobs?per_page=100&page=${page++}`).jobs;
         for (const job of jobs) {
+          if (/^(?:release \/ )?prepare$/.test(job.name)) released = true;
           for (const step of job.steps ?? []) {
             if (!['success', 'failure', 'timed_out'].includes(step.conclusion)) continue;
             checks.push({ name: `${job.name} / ${step.name}`, kind: policy.defaultKind, failed: step.conclusion !== 'success' });
@@ -46,6 +49,7 @@ export function collect(repo, output) {
         }
         if (jobs.length < 100) break;
       }
+      if (run.name === 'auto-release' && !released) continue;
       const artifacts = api(`repos/${repo}/actions/runs/${run.id}/artifacts?per_page=100`).artifacts;
       const speed = artifacts.filter(artifact => artifact.name.startsWith('speed-trend-') && !artifact.expired);
       const samples = new Map();
