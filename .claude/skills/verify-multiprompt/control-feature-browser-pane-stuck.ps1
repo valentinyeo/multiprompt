@@ -100,7 +100,9 @@
                     }
                 }
                 Assert-ImmediateBrowserPairs 'blank'
-                $slowPane = Open-BrowserPane 'slow-open'
+                Press @(0x12, 0x41) 'Alt+A: open browser for slow navigation'
+                $slowPane = Assert-BrowserPane 'open' 'slow-open'
+                Focus-BrowserPaneOwner 'slow-open' $slowPane.browser_connection_id
                 $browser = [VerifyNative]::DockedPaneWindow($script:window)
                 [uint32]$browserPid = 0
                 [void][VerifyNative]::GetWindowThreadProcessId($browser, [ref]$browserPid)

@@ -71,6 +71,7 @@ test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', 
   assert.match(journey, /Press @\(0x11, 0x4C\) 'Ctrl\+L: navigate browser pane'/);
   assert.match(journey, /ClassName -eq 'OmniboxViewViews'/);
   assert.doesNotMatch(journey, /Alt\+L: navigate browser pane/);
+  assert.match(journey, /Press @\(0x12, 0x41\) 'Alt\+A: open browser for slow navigation'/);
 });
 
 test('IGSH-1126 a launch-owned browser belongs to the app before adoption', () => {
