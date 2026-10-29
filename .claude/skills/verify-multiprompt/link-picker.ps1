@@ -75,20 +75,27 @@ try {
     Press @(0x28) 'Down: select second link'
     Snapshot 'second-selection'
     Press @(0x0D) 'Enter: open selected second link'
-    Wait-Until { $listener.Pending() } 'browser requests the selected link' 60
-    $client = $listener.AcceptTcpClient()
-    try {
-        $stream = $client.GetStream()
-        $stream.ReadTimeout = 10000
-        $reader = New-Object IO.StreamReader($stream)
-        $request = $reader.ReadLine()
-        if ($request -cne 'GET /picker-second HTTP/1.1') { throw "Wrong selected link request: $request" }
-        Save-Json @{ request = $request; selectedUrl = $second; port = $port } 'link-request.json'
-        $body = '<html><title>Selected second link</title><body>Selected second link</body></html>'
-        $reply = [Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/html`r`nContent-Length: $($body.Length)`r`nConnection: close`r`n`r`n$body")
-        $stream.Write($reply, 0, $reply.Length)
-    } finally { $client.Dispose() }
+    $script:pickerRequest = $null
+    Wait-Until {
+        if (-not $listener.Pending()) { return $false }
+        $client = $listener.AcceptTcpClient()
+        try {
+            $stream = $client.GetStream()
+            $stream.ReadTimeout = 10000
+            $reader = New-Object IO.StreamReader($stream)
+            $request = $reader.ReadLine()
+            if ([string]::IsNullOrEmpty($request)) { return $false }
+            $script:pickerRequest = $request
+            $body = '<html><title>Selected second link</title><body>Selected second link</body></html>'
+            $reply = [Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/html`r`nContent-Length: $($body.Length)`r`nConnection: close`r`n`r`n$body")
+            $stream.Write($reply, 0, $reply.Length)
+            return $true
+        } finally { $client.Dispose() }
+    } 'browser requests the selected link beyond empty speculative connections' 60
+    if ($script:pickerRequest -cne 'GET /picker-second HTTP/1.1') { throw "Wrong selected link request: $script:pickerRequest" }
+    Save-Json @{ request = $script:pickerRequest; selectedUrl = $second; port = $port } 'link-request.json'
     Wait-Until { [VerifyNative]::IsWindowVisible($transcript) } 'chat restored after Enter'
+    [VerifyNative]::BringToForeground($script:window)
     Snapshot 'after'
     $result.checks += @{ name = 'link-picker'; theme = 'amoled'; transcriptHidden = $true; escapeRestored = $true; enterRestored = $true; selectedUrl = $second; fillPixels = $fill; outlinePixels = $outline; bluePixels = $blue; version = $ExpectedVersion }
 } finally { $listener.Stop() }
