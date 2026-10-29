@@ -69,7 +69,12 @@ try {
     $job = [VerifyJob]::new()
     $app = $job.Start($Exe, $profile, "$Output/stdout.log", "$Output/stderr.log", $(if ($Standalone) { '--no-window-restore' } else { '--single-window --no-window-restore' }))
     $main = Wait-For 'owned visible application' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-    [void](Wait-For 'six restored sessions' { $s = Session; $null -ne $s -and $s.tabs.Count -eq $(if ($Standalone) { 3 } else { 6 }) })
+    [void](Wait-For 'published startup sessions' {
+        try {
+            $live = Get-Content -LiteralPath "$settings/inbox-default.json" -Raw | ConvertFrom-Json
+            @($live.shells).Count -eq $(if ($Standalone) { 3 } else { 6 })
+        } catch { $false }
+    })
     Focus
     $start = [Diagnostics.ProcessStartInfo]::new('ffmpeg', "-y -f gdigrab -framerate 8 -i desktop -an -c:v libx264 -preset ultrafast -pix_fmt yuv420p `"$Output/shortcuts.mp4`"")
     $start.UseShellExecute = $false; $start.RedirectStandardInput = $true; $start.CreateNoWindow = $true
