@@ -173,3 +173,25 @@ test('two simultaneous key writes admit exactly one', async () => {
   const results = await Promise.all([put(adminKey, body.revision, a), put(adminKey, body.revision, b)]);
   assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
 });
+
+
+test('workspace keys negotiate and update only their workspace color', async () => {
+  await reset();
+  const initial = seed();
+  initial.workspaces[0].color = 2;
+  initial.workspaces[1].color = 5;
+  await db.prepare('UPDATE layouts SET layout=? WHERE account=?').bind(JSON.stringify(initial), account).run();
+  const headers = { 'X-Layout-Features': 'workspace_color' };
+  const response = await call('/v1/layout', innerKey, { headers });
+  const data = await response.json();
+  assert.deepEqual(data.layout.workspaces, [{ name: 'inne', color: 2 }]);
+  data.layout.workspaces[0].color = 4;
+  const updated = await put(innerKey, data.revision, data.layout, headers);
+  assert.equal(updated.status, 200);
+  assert.deepEqual(updated.body.layout.workspaces, [{ name: 'inne', color: 4 }]);
+  assert.deepEqual((await stored()).layout.workspaces, [{ name: 'inne', color: 4 }, { name: 'Work', color: 5 }]);
+  const legacy = await get(innerKey);
+  assert.deepEqual(legacy.body.layout.workspaces, [{ name: 'inne' }]);
+  assert.equal((await put(innerKey, legacy.body.revision, legacy.body.layout)).status, 200);
+  assert.equal((await stored()).layout.workspaces[0].color, 4);
+});

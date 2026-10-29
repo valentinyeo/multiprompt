@@ -647,6 +647,7 @@ pub var g_starred_last_shell: u32 = 0;
 pub var g_active_workspace: u8 = 0;
 pub var g_lws_count: u8 = 1;
 pub var g_ws_names: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
+pub var g_ws_colors: [MAX_LWS]?u8 = @splat(null);
 pub var g_ws_name_len: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
 pub var g_ws_ids: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
 pub var g_ws_id_len: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;

@@ -74,6 +74,7 @@ fn panel() w.RECT {
 const ContentGeometry = struct {
     stacked: bool,
     look: w.RECT,
+    colors: w.RECT,
     keys: w.RECT,
     about: w.RECT,
 };
@@ -83,9 +84,10 @@ fn contentGeometry() ContentGeometry {
     const stacked = width < s(440);
     const extra = if (stacked) s(40) else @as(i32, 0);
     const look = w.RECT{ .left = 0, .right = width, .top = s(24), .bottom = s(168) + extra };
-    const keys = w.RECT{ .left = 0, .right = width, .top = look.bottom + s(44), .bottom = look.bottom + s(148) };
+    const colors = w.RECT{ .left = 0, .right = width, .top = look.bottom + s(44), .bottom = look.bottom + s(44) + s(@as(i32, @intCast(state.g_lws_count)) * 80) };
+    const keys = w.RECT{ .left = 0, .right = width, .top = colors.bottom + s(44), .bottom = colors.bottom + s(148) };
     const about = w.RECT{ .left = 0, .right = width, .top = keys.bottom + s(44), .bottom = keys.bottom + s(148) };
-    return .{ .stacked = stacked, .look = look, .keys = keys, .about = about };
+    return .{ .stacked = stacked, .look = look, .colors = colors, .keys = keys, .about = about };
 }
 
 fn controlRect(control: Control) w.RECT {
@@ -417,6 +419,7 @@ fn paintContent(hdc: w.HANDLE) void {
     presets.top += s(1);
     presets.bottom -= s(1);
     smooth.fillRoundRect(hdc, presets, s(18), tokens.ReaderPanel);
+    paintWorkspaceColors(hdc);
     paintText(hdc, "KEYS", lineRect(g.keys.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
     card(hdc, g.keys);
     paintText(hdc, "ABOUT", lineRect(g.about.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
@@ -429,6 +432,41 @@ fn paintContent(hdc: w.HANDLE) void {
         const line = lineRect(top, @max(1, s(1)));
         _ = w.FillRect(hdc, &line, separator);
     }
+}
+
+fn colorDotRect(workspace: usize, color: usize) w.RECT {
+    const cell = @min(s(40), @divTrunc(client(viewport).right - s(32), 8));
+    const left = s(16) + cell * @as(i32, @intCast(color));
+    const top = contentGeometry().colors.top + s(@as(i32, @intCast(workspace)) * 80 + 36);
+    return .{ .left = left, .right = left + cell, .top = top - scroll, .bottom = top + s(36) - scroll };
+}
+
+fn paintWorkspaceColors(hdc: w.HANDLE) void {
+    const g = contentGeometry();
+    paintText(hdc, "WORKSPACE COLORS", lineRect(g.colors.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
+    card(hdc, g.colors);
+    for (0..state.g_lws_count) |workspace| {
+        var name: [32]u8 = undefined;
+        paintText(hdc, @import("workspaces.zig").workspaceDisplayName(@intCast(workspace), &name), lineRect(g.colors.top + s(@as(i32, @intCast(workspace)) * 80), s(36)), 0, tokens.ReaderForeground, 0);
+        for (@import("bot_avatar.zig").colors, 0..) |hex, color| {
+            var rc = colorDotRect(workspace, color);
+            const selected = @import("session_layout.zig").workspaceColor(workspace, state.g_ws_colors[workspace]) == color;
+            if (selected) smooth.fillEllipse(hdc, rc, tokens.ReaderForeground);
+            rc.left += s(4);
+            rc.right -= s(4);
+            rc.top += s(4);
+            rc.bottom -= s(4);
+            smooth.fillEllipse(hdc, rc, ((hex >> 16) & 255) | (hex & 0xFF00) | ((hex & 255) << 16));
+        }
+        paintText(hdc, "Auto", colorDotRect(workspace, 7), 2, if (state.g_ws_colors[workspace] == null) tokens.ReaderForeground else tokens.ReaderHint, w.DT_CENTER);
+    }
+}
+
+fn chooseWorkspaceColor(workspace: usize, color: ?u8) void {
+    state.g_ws_colors[workspace] = color;
+    @import("session.zig").saveSession();
+    _ = w.InvalidateRect(state.g_main_hwnd, null, 0);
+    _ = w.InvalidateRect(viewport, null, 0);
 }
 
 fn currentTheme() []const u8 {
@@ -568,11 +606,41 @@ fn dispatch(control: Control) void {
     }
 }
 
+var color_focus: usize = 0;
+
 fn contentProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
     const prior_action = state.g_focus_user_action_tick;
     defer state.g_focus_user_action_tick = prior_action;
     state.g_focus_user_action_tick = if (@import("focus.zig").foregroundIsOurs()) state.g_focus_input_tick else 0;
     switch (message) {
+        w.WM_LBUTTONDOWN => {
+            const x: i16 = @bitCast(@as(u16, @truncate(@as(usize, @bitCast(lp)))));
+            const y: i16 = @bitCast(@as(u16, @truncate(@as(usize, @bitCast(lp)) >> 16)));
+            for (0..state.g_lws_count) |workspace| for (0..8) |color| {
+                const rc = colorDotRect(workspace, color);
+                if (x >= rc.left and x < rc.right and y >= rc.top and y < rc.bottom) {
+                    color_focus = workspace;
+                    _ = @import("focus.zig").SetFocus(hwnd);
+                    chooseWorkspaceColor(workspace, if (color < 7) @intCast(color) else null);
+                    return 0;
+                }
+            };
+            return 0;
+        },
+        w.WM_KEYDOWN => {
+            if (state.g_lws_count == 0) return 0;
+            color_focus = @min(color_focus, state.g_lws_count - 1);
+            if (wp == 0x26 or wp == 0x28) {
+                if (wp == 0x26) color_focus -|= 1 else color_focus = @min(color_focus + 1, state.g_lws_count - 1);
+                const rc = colorDotRect(color_focus, 0);
+                setScroll(scroll + rc.top - s(40));
+            } else if (wp == 0x25 or wp == 0x27) {
+                const current = @import("session_layout.zig").workspaceColor(color_focus, state.g_ws_colors[color_focus]);
+                chooseWorkspaceColor(color_focus, (current + @as(u8, if (wp == 0x25) 6 else 1)) % 7);
+            } else if (wp == 0x24 or wp == 0x2e) chooseWorkspaceColor(color_focus, null);
+            return 0;
+        },
+        0x0087 => return 1,
         w.WM_PAINT => {
             var ps = std.mem.zeroes(w.PAINTSTRUCT);
             const hdc = w.BeginPaint(hwnd, &ps);
@@ -755,7 +823,7 @@ pub fn open(parent: w.HANDLE) void {
         release();
         return;
     }
-    viewport = w.CreateWindowExW(0x10000, L("MultipromptSettingsContent"), L("Settings cards"), 0x40000000 | 0x10000000 | 0x02000000, 0, 0, 1, 1, window, null, instance, null);
+    viewport = w.CreateWindowExW(0x10000, L("MultipromptSettingsContent"), L("Settings cards"), 0x40000000 | 0x10000000 | 0x02000000 | 0x00010000, 0, 0, 1, 1, window, null, instance, null);
     for (std.meta.tags(Control)) |control| {
         const parent_window = if (control == .close) window else viewport;
         children[index(control)] = w.CreateWindowExW(0, L("BUTTON"), label(control), 0x40000000 | 0x10000000 | 0x00010000 | 0xb | 0x4000, 0, 0, 1, 1, parent_window, @ptrFromInt(@intFromEnum(control)), instance, null);

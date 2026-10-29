@@ -10,7 +10,7 @@ pub const Appearance = struct {
     pub fn forSession(name: []const u8) Appearance {
         var hash: u32 = 2166136261;
         for (name) |byte| hash = (hash ^ byte) *% 16777619;
-        return .{ .face = @intCast(hash % 20), .color = @intCast((hash / 20) % 8) };
+        return .{ .face = @intCast(hash % 20), .color = 0 };
     }
 };
 
@@ -21,16 +21,12 @@ pub fn forShell(shell: *const state.Shell) Appearance {
         break :blk name[0..n];
     };
     var appearance = Appearance.forSession(session);
-    const workspace_name = if (shell.workspace < state.g_lws_count and state.g_ws_name_len[shell.workspace] > 0)
-        state.g_ws_names[shell.workspace][0..state.g_ws_name_len[shell.workspace]]
-    else
-        state.g_window_display_name_u8[0..state.g_window_display_name_u8_len];
-    const workspace = std.mem.trim(u8, workspace_name, " \t\r\n");
-    appearance.color = if (std.ascii.eqlIgnoreCase(workspace, "inne")) 2 else if (std.ascii.eqlIgnoreCase(workspace, "Hypertask")) 5 else if (std.ascii.eqlIgnoreCase(workspace, "Software Factory")) 4 else 0;
+    const workspace = if (shell.workspace < state.g_lws_count) shell.workspace else 0;
+    appearance.color = @import("session_layout.zig").workspaceColor(workspace, state.g_ws_colors[workspace]);
     return appearance;
 }
 
-const colors = [_]u32{ 0xFFFFFF, 0xA9C29A, 0xC98F72, 0xD4BE94, 0x93A9C4, 0xB7A6D6, 0xD9A0A8, 0x9DD3C4 };
+pub const colors = [_]u32{ 0xA9C29A, 0xC98F72, 0xD4BE94, 0x93A9C4, 0xB7A6D6, 0xD9A0A8, 0x9DD3C4 };
 const grey: u32 = 0x9A9A9A;
 const visor: u32 = 0x121212;
 const eyes: u32 = 0xF2F2F2;
@@ -151,7 +147,7 @@ pub fn draw(dc: w.HANDLE, rect: w.RECT, appearance: Appearance) void {
 
 fn drawFace(dc: w.HANDLE, rect: w.RECT, appearance: Appearance) void {
     const face = appearance.face;
-    const head = colors[appearance.color];
+    const head = colors[appearance.color % colors.len];
     const p = Painter{ .dc = dc, .rect = rect, .face = face };
     const hb: Box = switch (face) {
         10 => .{ .x = -4, .y = 70, .width = 264, .height = 220, .radius = 80 },
@@ -248,12 +244,12 @@ fn drawFace(dc: w.HANDLE, rect: w.RECT, appearance: Appearance) void {
 }
 
 test "Android and desktop share raw UTF-8 bot identity" {
-    try std.testing.expectEqual(Appearance{ .face = 0, .color = 3 }, Appearance.forSession("HT Product Lead"));
-    try std.testing.expectEqual(Appearance{ .face = 8, .color = 3 }, Appearance.forSession("SF Design Lead"));
-    try std.testing.expectEqual(Appearance{ .face = 9, .color = 4 }, Appearance.forSession("机器人"));
+    try std.testing.expectEqual(Appearance{ .face = 15, .color = 0 }, Appearance.forSession("agent-one"));
+    try std.testing.expectEqual(Appearance{ .face = 13, .color = 0 }, Appearance.forSession("agent-two"));
+    try std.testing.expectEqual(Appearance{ .face = 9, .color = 0 }, Appearance.forSession("机器人"));
     var shell: state.Shell = std.mem.zeroes(state.Shell);
-    @memcpy(shell.tmux_session[0..15], "HT Product Lead");
-    shell.tmux_session_len = 15;
+    @memcpy(shell.tmux_session[0..9], "agent-one");
+    shell.tmux_session_len = 9;
     const first = forShell(&shell);
     shell.name[0] = 'X';
     shell.name_len = 1;

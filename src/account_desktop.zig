@@ -182,7 +182,7 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             break :blk workspaceDisplayName(@intCast(ws), &name_buf);
         } else getInstanceName();
         if (name.len > 32) return error.InvalidLayout;
-        try workspaces.append(a, .{ .name = try a.dupe(u8, name) });
+        try workspaces.append(a, .{ .name = try a.dupe(u8, name), .color = app_state.g_ws_colors[ws] });
     }
     for (app_state.shells[0..app_state.shell_count]) |shell| {
         const remote = shell.tmux_session_len > 0;
@@ -1028,6 +1028,7 @@ pub fn applyServerLayout(json: []const u8) !void {
             closeShellRemember(i, false);
         }
     }
+    const old_colors = app_state.g_ws_colors;
     const old_names = app_state.g_ws_names;
     const old_name_len = app_state.g_ws_name_len;
     const old_ids = app_state.g_ws_ids;
@@ -1045,6 +1046,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         app_state.g_ws_names[wi] = @splat(0);
         @memcpy(app_state.g_ws_names[wi][0..name.len], name);
         app_state.g_ws_name_len[wi] = @intCast(name.len);
+        app_state.g_ws_colors[wi] = if (wi < desired.workspaces.len) desired.workspaces[wi].color else null;
         app_state.g_ws_ids[wi] = @splat(0);
         app_state.g_ws_id_len[wi] = 0;
         app_state.g_ws_snoozed[wi] = false;
@@ -1069,6 +1071,7 @@ pub fn applyServerLayout(json: []const u8) !void {
         const slot = app_state.g_lws_count;
         app_state.g_ws_names[slot] = old_names[oi];
         app_state.g_ws_name_len[slot] = old_name_len[oi];
+        app_state.g_ws_colors[slot] = old_colors[oi];
         app_state.g_ws_ids[slot] = old_ids[oi];
         app_state.g_ws_id_len[slot] = old_id_len[oi];
         app_state.g_ws_snoozed[slot] = true;
