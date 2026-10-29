@@ -788,7 +788,7 @@ pub fn layoutChatControls() void {
     const status_h = @import("chat_render.zig").chatStatusHeight(layout.transcript.bottom - layout.transcript.top);
     if (app_state.g_chat_status_hwnd != null) {
         _ = MoveWindow(app_state.g_chat_status_hwnd, layout.transcript.left, layout.transcript.top, layout.transcript.right - layout.transcript.left, status_h, 0);
-        _ = ShowWindow(app_state.g_chat_status_hwnd, if (status_h > 0 and !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active) SW_SHOW else SW_HIDE);
+        _ = ShowWindow(app_state.g_chat_status_hwnd, if (status_h > 0 and chatViewOwnsInput()) SW_SHOW else SW_HIDE);
         _ = InvalidateRect(app_state.g_chat_status_hwnd, null, 0);
     }
     const win = layout.transcript_window;
