@@ -33,12 +33,13 @@ test("IGSH-820 pinned protection uses one guard and no session lock state", () =
   assert.match(source, /WM_APP_CLOSE => \{\s*if \(shell_count > 0\) \{\s*closeShell\(active_shell\)/);
 });
 
-test("IGSH-820 pinned rows retain the normal close cross without a pin-specific drawing", () => {
+test("IGSH-820 pinned robot tiles select safely while close actions remain guarded", () => {
   const paint = bodyOf("fn paintSidebar(");
   assert.doesNotMatch(paint, /drawSessionLockIcon|shells\[i\]\.pinned_top/);
   assert.match(paint, /if \(is_act\) \{[\s\S]*?uiFontClose\(\)/);
   assert.match(paint, /if \(i == active_shell\) \{\s*const font_close = uiFontClose\(\)/);
-  assert.match(source, /if \(!g_sidebar_collapsed and mx > SIDEBAR_W\(\) - 30\) \{\s*closeShell\(tab_idx\)/);
+  assert.match(source, /if \(!g_sidebar_collapsed and !shells\[tab_idx\]\.pinned_top and mx > SIDEBAR_W\(\) - 30\) \{\s*closeShell\(tab_idx\)/);
+  assert.match(paint, /if \(row\.tile\) \{\s*paintPinnedBot/);
 });
 
 test("empty workspace closes atomically and can be absorbed again", () => {

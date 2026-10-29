@@ -1561,8 +1561,8 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
     if (AttachConsole(pid) == 0) return false;
     defer _ = FreeConsole();
 
-    const handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (handle == null) return false;
+    const handle = @import("clipboard.zig").openAttachedConsoleOutput() orelse return false;
+    defer _ = CloseHandle(handle);
     var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
     if (GetConsoleScreenBufferInfo(handle, &info) == 0) return false;
 

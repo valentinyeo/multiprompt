@@ -402,7 +402,7 @@ pub const empty_shell = Shell{
 };
 
 pub const MAX_SHELLS = 256;
-pub var g_sidebar_w_full: i32 = if (LOOK_UNIFIED) 220 else 320;
+pub var g_sidebar_w_full: i32 = if (LOOK_UNIFIED) 300 else 320;
 pub const SIDEBAR_W_COLLAPSED: i32 = 44;
 pub const SIDEBAR_W_MIN: i32 = 150;
 pub const SIDEBAR_W_MAX: i32 = 500;
@@ -698,6 +698,9 @@ pub const Row = struct {
     shell_idx: u32,
     section_tier: SidebarTier = .recent,
     y: i32,
+    x: i32 = 0,
+    width: i32 = 0,
+    tile: bool = false,
 };
 pub const MAX_ROWS: usize = MAX_SHELLS + INBOX_MAX_ROWS + MAX_GROUPS + 6;
 pub const SECTION_HEADER_H: i32 = 24;
@@ -3319,6 +3322,7 @@ pub var g_font_shell_tab_title: HANDLE = null;
 pub var g_font_subtitle: HANDLE = null;
 pub var g_font_status_card: HANDLE = null;
 pub var g_font_close: HANDLE = null;
+pub var g_font_bot: [3]HANDLE = @splat(null);
 pub var g_font_inbox_title: HANDLE = null;
 pub var g_font_inbox_sub: HANDLE = null;
 pub var g_font_thread_title: HANDLE = null;

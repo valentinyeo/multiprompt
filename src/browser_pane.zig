@@ -655,7 +655,7 @@ pub fn SIDEBAR_W() i32 {
     return uiScaled(if (app_state.g_sidebar_collapsed) SIDEBAR_W_COLLAPSED else app_state.g_sidebar_w_full);
 }
 pub fn tabRowH() i32 {
-    return uiScaled(if (LOOK_UNIFIED) 38 else 52);
+    return uiScaled(if (LOOK_UNIFIED and !app_state.g_sidebar_collapsed) 58 else if (LOOK_UNIFIED) 38 else 52);
 }
 
 pub fn inboxButtonRect(in_overlay: bool) RECT {

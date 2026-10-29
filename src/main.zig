@@ -1968,7 +1968,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_shell_focused = false;
                 _ = InvalidateRect(hwnd, null, 0);
                 const logical_my = my + app_state.g_sidebar_scroll;
-                const target = hitTestSidebar(logical_my);
+                const target = hitTestSidebar(mx, logical_my);
                 switch (target) {
                     .inbox => |ri| {
                         jumpToInboxRow(ri);
@@ -1980,7 +1980,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     },
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) {
-                            if (!app_state.g_sidebar_collapsed and mx > SIDEBAR_W() - 30) {
+                            if (!app_state.g_sidebar_collapsed and !app_state.shells[tab_idx].pinned_top and mx > SIDEBAR_W() - 30) {
                                 closeShell(tab_idx);
                             } else if (isCtrlDown()) {
                                 commitRename();
@@ -2169,7 +2169,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOUSEMOVE => {
-            const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_Y(lp) + app_state.g_sidebar_scroll)) {
+            const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll)) {
                 .tab => |index| index,
                 else => null,
             } else null;
@@ -2324,7 +2324,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (sidebarStickyCardHitTest(my)) return 0;
 
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
-                    const ht = hitTestSidebar(logical_my_drag);
+                    const ht = hitTestSidebar(mx, logical_my_drag);
                     var target_gidx: ?u32 = null;
                     switch (ht) {
                         .tab => |ti| {
@@ -2415,7 +2415,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const sidebar_w_for_reorder = SIDEBAR_W();
                 if (my >= 0 and !sidebarStickyCardHitTest(my) and mx >= -REORDER_X_MARGIN and mx < sidebar_w_for_reorder + REORDER_X_MARGIN) {
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
-                    const ht = hitTestSidebar(logical_my_drag);
+                    const ht = hitTestSidebar(mx, logical_my_drag);
                     if (sidebarTierForDrop(ht)) |want_tier| {
                         if (app_state.drag_src < app_state.shell_count and shellSidebarTier(app_state.drag_src) != want_tier) {
                             switch (want_tier) {
@@ -2550,7 +2550,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
                 if (sidebarStickyCardHitTest(my)) return 0;
                 const logical_my = my + app_state.g_sidebar_scroll;
-                const ht = hitTestSidebar(logical_my);
+                const ht = hitTestSidebar(mx, logical_my);
                 switch (ht) {
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) openTabContextPalette(hwnd, tab_idx);
@@ -2612,7 +2612,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 const logical_my = my + app_state.g_sidebar_scroll;
-                const ht = hitTestSidebar(logical_my);
+                const ht = hitTestSidebar(mx, logical_my);
                 switch (ht) {
                     .tab => |tab_idx| {
                         if (mx <= SIDEBAR_W() - 30 and tab_idx < app_state.shell_count and tab_idx == app_state.active_shell) {

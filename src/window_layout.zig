@@ -41,11 +41,10 @@ const ensureDevThemeInitialized = @import("themes.zig").ensureDevThemeInitialize
 const customColorOr = @import("themes.zig").customColorOr;
 const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
 const SHELL_PAD = @import("app_state.zig").SHELL_PAD;
-const tabRowH = @import("browser_pane.zig").tabRowH;
 const DEV_TOP_PAD = @import("app_state.zig").DEV_TOP_PAD;
 const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
-const tabRowY = @import("sidebar.zig").tabRowY;
+const tabRowForShell = @import("sidebar.zig").tabRowForShell;
 const ShowWindow = @import("focus.zig").ShowWindow;
 const ShowWindowAsync = @import("focus.zig").ShowWindowAsync;
 const SetWindowPos = @import("focus.zig").SetWindowPos;
@@ -534,13 +533,13 @@ pub fn invalidateSpinnerRects() void {
     for (0..app_state.shell_count) |i| {
         if (app_state.shells[i].muted) continue;
         if (app_state.shells[i].activity != .active) continue;
-        const top = tabRowY(@intCast(i)) orelse continue;
-        const y: i32 = top - app_state.g_sidebar_scroll;
+        const row = tabRowForShell(@intCast(i)) orelse continue;
+        const y: i32 = row.y - app_state.g_sidebar_scroll;
         var rc = RECT{
             .left = 0,
             .top = y,
             .right = SIDEBAR_W(),
-            .bottom = y + tabRowH(),
+            .bottom = y + @import("sidebar.zig").rowTotalHeight(row),
         };
         _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
     }

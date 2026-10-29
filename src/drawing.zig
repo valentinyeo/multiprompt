@@ -195,6 +195,10 @@ pub fn ensurePaintBackbuffer(hdc: HANDLE, w: i32, h: i32) HANDLE {
 
 pub fn resetFontCache() void {
     @import("changelog.zig").resetChangelogLayout();
+    for (&app_state.g_font_bot) |*font| {
+        if (font.* != null) _ = DeleteObject(font.*);
+        font.* = null;
+    }
     @import("dwrite_text.zig").resetFonts();
     @import("chat_render.zig").resetTableMetrics();
     app_state.g_chat_tables.clear(std.heap.page_allocator);
@@ -356,6 +360,16 @@ pub fn uiFontStatusCard() HANDLE {
         app_state.g_font_status_card = CreateFontW(uiScaled(smaller), 0, 0, 0, themeSubtitleFontWeight(), 0, 0, 0, 0, 0, 0, 0, 0, themeSubtitleFontFace());
     }
     return app_state.g_font_status_card orelse uiFontSubtitle();
+}
+
+pub fn uiFontBot(role: enum { name, preview, pinned }) HANDLE {
+    const index = @intFromEnum(role);
+    if (app_state.g_font_bot[index] == null) {
+        const heights = [_]i32{ -14, -13, -12 };
+        const weights = [_]i32{ 600, 400, 500 };
+        app_state.g_font_bot[index] = CreateFontW(uiScaled(heights[index]), 0, 0, 0, weights[index], 0, 0, 0, 0, 0, 0, 4, 0, if (role == .pinned) L(@import("fonts.zig").UI_MEDIUM_FACE) else L(@import("fonts.zig").UI_FACE));
+    }
+    return app_state.g_font_bot[index] orelse @import("fonts.zig").controlFont();
 }
 
 pub fn uiFontInboxTitle() HANDLE {
@@ -683,7 +697,7 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
         right_limit = layout.meta_pill.left - margin;
     }
     const center = @divTrunc(column.left + column.right, 2);
-    const icon_w: i32 = 0;
+    const icon_w: i32 = uiScaled(34);
     const name = shell.name[0..shell.name_len];
     const text_w = measureTitleText(uiFontTitle(), name);
     const max_w = @min(column.right - column.left - margin * 2, 2 * (right_limit - center));
@@ -691,7 +705,9 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     const width = std.math.clamp(icon_w + text_w + pad * 2, pad * 2 + uiScaled(40), max_w);
     layout.pill = .{ .left = center - @divTrunc(width, 2), .top = pill_top, .right = center - @divTrunc(width, 2) + width, .bottom = pill_top + pill_h };
     layout.has_icon = icon_w > 0;
-    layout.icon = .{ .left = layout.pill.left + pad - uiScaled(2), .top = pill_top, .right = layout.pill.left + pad - uiScaled(2) + uiScaled(24), .bottom = pill_top + pill_h };
+    const icon_size = uiScaled(28);
+    const icon_top = pill_top + @divTrunc(pill_h - icon_size, 2);
+    layout.icon = .{ .left = layout.pill.left + uiScaled(8), .top = icon_top, .right = layout.pill.left + uiScaled(8) + icon_size, .bottom = icon_top + icon_size };
     layout.text = .{ .left = layout.pill.left + pad + icon_w, .top = pill_top, .right = layout.pill.right - pad, .bottom = pill_top + pill_h };
     return layout;
 }
@@ -733,6 +749,10 @@ fn paintChatTitlePill(hdc: HANDLE) void {
     _ = SetBkMode(hdc, TRANSPARENT);
     fillRoundRectAA(hdc, layout.pill, @divTrunc(layout.pill.bottom - layout.pill.top, 2), border);
     fillRoundRectAA(hdc, .{ .left = layout.pill.left + edge, .top = layout.pill.top + edge, .right = layout.pill.right - edge, .bottom = layout.pill.bottom - edge }, @divTrunc(layout.pill.bottom - layout.pill.top, 2) - edge, fill);
+    if (layout.has_icon) {
+        const avatar = @import("bot_avatar.zig");
+        avatar.draw(hdc, layout.icon, avatar.forShell(shell));
+    }
     if (shell.name_len > 0) {
         _ = SelectObject(hdc, uiFontTitle());
         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(20, 20, 20) else if (@import("themes.zig").themeReaderDark()) tokens.ReaderForeground else RGB(255, 255, 255));
@@ -783,7 +803,11 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
         if (attention) {
             drawAttentionDot(hdc, @divTrunc(ag_rc.left + ag_rc.right, 2), @divTrunc(ag_rc.top + ag_rc.bottom, 2), 4, customColorOr("attention", RGB(80, 140, 255)));
         } else {
-            drawAgentIcon(hdc, &ag_rc, ag, app_state.shells[app_state.active_shell].activity == .active);
+            const avatar = @import("bot_avatar.zig");
+            ag_rc.top = title_top + @divTrunc(title_bottom - title_top - uiScaled(24), 2);
+            ag_rc.bottom = ag_rc.top + uiScaled(24);
+            ag_rc.right = ag_rc.left + uiScaled(24);
+            avatar.draw(hdc, ag_rc, avatar.forShell(&app_state.shells[app_state.active_shell]));
         }
         text_left += 30;
     }
