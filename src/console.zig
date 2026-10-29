@@ -2790,23 +2790,14 @@ pub fn switchToShell(idx: u32) void {
     }
 }
 
-pub fn nthVisibleShell(n: u32) ?u32 {
-    if (app_state.g_tab_sort_auto) {
-        var rows: [MAX_ROWS]Row = undefined;
-        const rn = layoutRows(&rows);
-        var count: u32 = 0;
-        for (0..rn) |ri| {
-            if (rows[ri].kind != .tab) continue;
-            if (count == n) return rows[ri].shell_idx;
-            count += 1;
-        }
-        return null;
-    }
-    var count: u32 = 0;
-    for (0..app_state.shell_count) |i| {
-        if (isTabHidden(@intCast(i))) continue;
-        if (count == n) return @intCast(i);
-        count += 1;
+pub fn nthVisibleShell(n: u32) ?Row {
+    var rows: [MAX_ROWS]Row = undefined;
+    const count = layoutRows(&rows);
+    var position: u32 = 0;
+    for (rows[0..count]) |row| {
+        if (row.kind != .tab and row.kind != .inbox) continue;
+        if (position == n) return row;
+        position += 1;
     }
     return null;
 }

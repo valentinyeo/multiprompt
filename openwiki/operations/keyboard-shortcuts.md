@@ -113,7 +113,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | --- | --- |
 | Alt+S | Favorite or unfavorite this session |
 | Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab |
-| Ctrl+1 ... 9 | Switch to tab 1-9 |
+| Ctrl+1 ... 9 | Open session 1-9 in this workspace, pinned first |
 | Ctrl+W | Close active tab / session |
 | Ctrl+Shift+W | Close active session completely (tmux kill + tab close) |
 | Ctrl+Shift+U | Toggle unread-only filter (sidebar + inbox) |

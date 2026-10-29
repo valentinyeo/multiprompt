@@ -249,7 +249,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Tabs", .b = "", .header = true },
     .{ .a = "Alt+S", .b = "Favorite or unfavorite this session", .header = false },
     .{ .a = "Ctrl+Tab / Ctrl+Shift+Tab", .b = "Next / previous tab", .header = false },
-    .{ .a = "Ctrl+1 ... 9", .b = "Switch to tab 1-9", .header = false },
+    .{ .a = "Ctrl+1 ... 9", .b = "Open session 1-9 in this workspace, pinned first", .header = false },
     .{ .a = "Ctrl+W", .b = "Close active tab / session", .header = false },
     .{ .a = "Ctrl+Shift+W", .b = "Close active session completely (tmux kill + tab close)", .header = false },
     .{ .a = "Ctrl+Shift+U", .b = "Toggle unread-only filter (sidebar + inbox)", .header = false },
@@ -1821,9 +1821,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (!shift and kb.vkCode >= 0x31 and kb.vkCode <= 0x39) {
                     const tab_idx: u32 = kb.vkCode - 0x31;
-                    if (tab_idx < app_state.shell_count) {
-                        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SWITCH_TAB, tab_idx, 0);
-                    }
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SWITCH_TAB, tab_idx, 0);
                     return 1;
                 }
                 if (shift and kb.vkCode == 0x57 and (kb.flags & 0x20) == 0) {

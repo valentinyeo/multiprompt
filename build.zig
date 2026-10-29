@@ -271,6 +271,10 @@ pub fn build(b: *std.Build) void {
     chat_send_routing.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     vps_test_step.dependOn(&chat_send_routing.step);
     outbox_test_step.dependOn(&chat_send_routing.step);
+    const workspace_number_tests = b.addSystemCommand(&.{ "node", "--test", "tools/workspace-number-shortcuts.test.js" });
+    workspace_number_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
+    test_step.dependOn(&workspace_number_tests.step);
+    vps_test_step.dependOn(&workspace_number_tests.step);
     const chat_view_gaps_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-gaps.test.js" });
     vps_test_step.dependOn(&chat_view_gaps_tests.step);
     const pane_spacing_tests = b.addSystemCommand(&.{ "node", "--test", "tools/pane-spacing.test.js", "tools/group-palette.test.js" });

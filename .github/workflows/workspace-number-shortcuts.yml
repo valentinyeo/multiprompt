@@ -1,0 +1,92 @@
+name: Workspace number shortcuts
+run-name: workspace numbers ${{ inputs.tag || github.ref_name }}
+
+on:
+  push:
+    branches: [ceo/IGSH-1186]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release to verify; empty builds this branch
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workspace-numbers-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  shortcuts:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Acquire application
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          New-Item -ItemType Directory -Force bin, evidence | Out-Null
+          if ($env:RELEASE_TAG) {
+            if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
+            gh release download $env:RELEASE_TAG --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt --dir bin
+            if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+            $line = @(Get-Content bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?multiprompt-x64\.exe$' })
+            if ($line.Count -ne 1 -or (Get-FileHash bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne ($line[0] -split '\s+')[0].ToLower()) { throw 'Release checksum mismatch' }
+            Move-Item bin/multiprompt-x64.exe bin/multiprompt.exe
+          } else {
+            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
+            if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+            Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
+            & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" build
+            if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
+            Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+          }
+          @{tag=$env:RELEASE_TAG; revision=(git rev-parse HEAD).Trim(); sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower(); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"} | ConvertTo-Json | Set-Content evidence/provenance.json
+      - name: Regression against production selection
+        if: inputs.tag == ''
+        shell: pwsh
+        env:
+          ZIG: ${{ runner.temp }}/zig-x86_64-windows-0.16.0/zig.exe
+        run: node --test tools/workspace-number-shortcuts.test.js
+      - name: Install desktop recorder
+        shell: powershell
+        run: choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
+      - name: Workspace and Starred keyboard recording
+        shell: powershell
+        run: ./tools/workspace-number-shortcuts.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence/workspaces"
+      - name: Standalone pinned keyboard recording
+        shell: powershell
+        run: ./tools/workspace-number-shortcuts.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence/standalone" -Standalone
+      - name: Reject old raw-index selection
+        if: inputs.tag == ''
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force old-bin, evidence/negative | Out-Null
+          gh release download v0.28.1001 --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt --dir old-bin
+          if ($LASTEXITCODE -ne 0) { throw 'Negative-control download failed' }
+          $line = @(Get-Content old-bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?multiprompt-x64\.exe$' })
+          if ($line.Count -ne 1 -or (Get-FileHash old-bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne ($line[0] -split '\s+')[0].ToLower()) { throw 'Negative-control checksum mismatch' }
+          try { & tools/workspace-number-shortcuts.ps1 -Exe "$PWD/old-bin/multiprompt-x64.exe" -Output "$PWD/evidence/negative" -Standalone } catch { Write-Host $_ }
+          $result = Get-Content evidence/negative/result.json -Raw | ConvertFrom-Json
+          if ($result.passed -or $result.cleanup -ne 0 -or $result.error -cne 'Timed out: home Ctrl+1 selects Pinned first') { throw 'Old selection did not fail the intended pinned-order assertion' }
+          Write-Host 'OLD_NUMBER_SELECTION_REJECTED'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: workspace-number-shortcuts
+          path: evidence
+          if-no-files-found: error
+          retention-days: 14
