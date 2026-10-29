@@ -2774,6 +2774,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.shells[target_idx].browser_enabled,
                     browser_hwnd_live,
                     app_state.shells[target_idx].browser_launch_tick,
+                    app_state.shells[target_idx].browser_connection_id != 0 or app_state.shells[target_idx].browser_hwnd != null or
+                        app_state.shells[target_idx].browser_relaunch_after_tick != 0,
                 );
                 if (app_state.g_webview2_active) {
                     closeWebView2();
