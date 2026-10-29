@@ -87,7 +87,7 @@ export function collect(repo, output) {
 }
 
 export function fileRegressions(repo, report) {
-  const existing = api(`repos/${repo}/issues?state=open&per_page=100`);
+  const existing = api(`repos/${repo}/issues?state=all&per_page=100`);
   const names = new Set();
   for (const regression of report.regressions) {
     if (names.has(regression.name)) continue;

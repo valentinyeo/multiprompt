@@ -29,7 +29,7 @@ jobs:
       - name: Prove speed warnings and blocking stability
         run: node --test tools/release-gates.test.mjs
   history:
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'master'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'master')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -45,7 +45,7 @@ jobs:
       - name: Record release failures and speed trends
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node tools/release-gates-history.mjs "$GITHUB_REPOSITORY" release-report --file-regressions
+        run: node tools/release-gates-history.mjs "$GITHUB_REPOSITORY" release-report ${{ github.event_name == 'workflow_run' && '--file-regressions' || '' }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

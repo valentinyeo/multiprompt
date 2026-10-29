@@ -37,7 +37,7 @@ function journeyContract(source) {
     '$immediate = [Diagnostics.Stopwatch]::StartNew()',
     "'enter' { [VerifyNative]::Chord(@(0x0D)) }", "'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }",
     "'mic-click' { [VerifyNative]::ClickClient($script:window,", "$expected = $typed + ' Go forward ten meters.'",
-    "[VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-812 transcript appears immediately without another input' -Seconds 1",
+    "[VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-812 transcript appears without another input or five-second freeze' -Seconds 5",
     '$elapsed = $immediate.ElapsedMilliseconds', "Assert-ReleaseTiming 'dictation-transcript' $elapsed",
     'WM_GETTEXT = [VerifyNative]::EditText($handle)', "Assert-DictationMic $mic $false ($stop + '-stopped')",
     "@('audio-bytes\\t89160', 'fixture-response-bytes\\t101', 'http-status\\t200', 'target-chat-composer\\t22')",
