@@ -84,6 +84,8 @@ pub fn restore() void {
     state.g_active_workspace = s.workspace;
     state.g_starred_workspace = s.starred;
     state.g_lws_count = @intCast(@max(s.workspaces.len, @as(usize, s.workspace) + 1));
+    state.g_ws_colors = @splat(null);
+    for (s.workspace_colors, 0..) |color, i| state.g_ws_colors[i] = color;
     for (s.workspaces, 0..) |name, i| {
         @memcpy(state.g_ws_names[i][0..name.len], name);
         state.g_ws_name_len[i] = @intCast(name.len);
@@ -98,6 +100,8 @@ pub fn restore() void {
         shell.last_read_message_id = row.last_read_message_id;
         shell.kind = @enumFromInt(row.kind);
         shell.workspace = row.workspace;
+        @memcpy(shell.tmux_session[0..row.tmux_session.len], row.tmux_session);
+        shell.tmux_session_len = @intCast(row.tmux_session.len);
         shell.group_id = row.group_id;
         shell.starred_group_id = row.starred_group_id;
         shell.ai_agent = row.agent;
@@ -258,6 +262,7 @@ pub fn save() void {
         .chat_id = shell.chat_id,
         .last_read_message_id = shell.last_read_message_id,
         .name = state.shells[i].name[0..shell.name_len],
+        .tmux_session = shell.tmux_session[0..shell.tmux_session_len],
         .kind = @intFromEnum(shell.kind),
         .workspace = shell.workspace,
         .group_id = shell.group_id,
@@ -303,6 +308,7 @@ pub fn save() void {
         .workspace = state.g_active_workspace,
         .starred = state.g_starred_workspace,
         .workspaces = workspaces[0..state.g_lws_count],
+        .workspace_colors = state.g_ws_colors[0..state.g_lws_count],
         .groups = groups[0..state.group_count],
         .rows = rows[0..state.shell_count],
         .chat = chat,

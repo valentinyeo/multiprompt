@@ -2,7 +2,7 @@ name: Robot avatars
 run-name: robot avatars ${{ inputs.tag || github.ref_name }}
 on:
   push:
-    branches: [ceo/IGSH-1150, ceo/IGSH-1172]
+    branches: [ceo/IGSH-1150, ceo/IGSH-1172, ceo/IGSH-1172-generic]
   workflow_dispatch:
     inputs:
       tag:
@@ -87,8 +87,8 @@ jobs:
       - name: Native robot pixels and sidebar clicks
         shell: powershell
         run: |
-          foreach ($workspace in @('inne', 'Hypertask', 'Software Factory')) {
-            & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_HASH -Evidence "$pwd/evidence/$workspace" -WorkspaceName $workspace
+          foreach ($workspace in 0..2) {
+            & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_HASH -Evidence "$pwd/evidence/$workspace" -WorkspaceIndex $workspace
           }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

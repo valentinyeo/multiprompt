@@ -7,6 +7,7 @@ pub const Row = struct {
     chat_id: u64 = 0,
     last_read_message_id: u64 = 0,
     name: []const u16,
+    tmux_session: []const u8 = "",
     kind: u8 = 0,
     workspace: u8 = 0,
     group_id: u32 = 0,
@@ -29,6 +30,7 @@ pub const Snapshot = struct {
     workspace: u8 = 0,
     starred: bool = false,
     workspaces: []const []const u8 = &.{},
+    workspace_colors: []const ?u8 = &.{},
     groups: []const Group = &.{},
     rows: []const Row,
     chat: bool = false,
@@ -67,12 +69,14 @@ fn valid(s: Snapshot) bool {
     if (s.version != 1 or s.rows.len == 0 or s.rows.len > 256 or s.workspace >= 9 or s.workspaces.len > 9 or s.groups.len > 64 or s.text.len > 32768 or s.blocks.len > 256 or s.font < 10 or s.font > 28 or s.sidebar_width < 100 or s.sidebar_width > 1000) return false;
     var active = false;
     for (s.rows, 0..) |row, i| {
-        if (row.id == 0 or row.name.len > 63 or row.kind > 6 or row.workspace >= 9 or row.browser_split > 1000) return false;
+        if (row.id == 0 or row.name.len > 63 or row.tmux_session.len > 63 or row.kind > 6 or row.workspace >= 9 or row.browser_split > 1000) return false;
         for (s.rows[0..i]) |previous| if (previous.id == row.id) return false;
         if (row.id == s.active) active = true;
     }
     for (s.groups) |group| if (group.name.len > 63 or group.color >= 8) return false;
     for (s.workspaces) |name| if (name.len > 31) return false;
+    if (s.workspace_colors.len != 0 and s.workspace_colors.len != s.workspaces.len) return false;
+    for (s.workspace_colors) |color| if (color != null and color.? >= 7) return false;
     for (s.blocks) |block| {
         if (block.kind != .list and block.level > 6) return false;
         if (block.start > s.text.len or block.len > s.text.len - block.start or block.prefix > block.len or block.detail_start > s.text.len or block.detail_len > s.text.len - block.detail_start or block.diff_start > s.text.len or block.diff_len > s.text.len - block.diff_start) return false;
@@ -209,4 +213,25 @@ test "IGSH-925 launch snapshot carries the browser pane split and legacy decodes
     try std.testing.expect(!legacy.value.rows[0].browser);
     try std.testing.expectEqual(@as(u16, 350), legacy.value.rows[0].browser_split);
     try std.testing.expect((try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[],\"browser_split\":1001}]}")) == null);
+}
+
+test "IGSH-1172 launch cache preserves colors and raw face identity" {
+    const a = std.testing.allocator;
+    const bytes = try encode(a, .{
+        .active = 1,
+        .rows = &.{.{ .id = 1, .name = &.{'X'}, .tmux_session = "agent-one", .workspace = 1 }},
+        .workspaces = &.{ "Cedar", "Orbit" },
+        .workspace_colors = &.{ null, 6 },
+    });
+    defer a.free(bytes);
+    const parsed = (try decode(a, bytes)).?;
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("agent-one", parsed.value.rows[0].tmux_session);
+    try std.testing.expectEqualSlices(?u8, &.{ null, 6 }, parsed.value.workspace_colors);
+    try std.testing.expectError(error.InvalidSnapshot, encode(a, .{
+        .active = 1,
+        .rows = &.{.{ .id = 1, .name = &.{'X'} }},
+        .workspaces = &.{"Cedar"},
+        .workspace_colors = &.{7},
+    }));
 }

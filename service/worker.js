@@ -18,11 +18,12 @@ function layoutResponse(request, value, status = 200) {
     if (!layoutFeature(request, 'input')) delete visible.input;
     return visible;
   }) } };
+  if (value.layout && !layoutFeature(request, 'workspace_color')) value.layout.workspaces = value.layout.workspaces.map(({ color, ...workspace }) => workspace);
   if (value.layout && !layoutFeature(request, 'settings')) delete value.layout.settings;
   if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal');
+  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color');
   return response;
 }
 export function validateLayout(x) {
@@ -47,7 +48,7 @@ export function validateLayout(x) {
   }
   const ws = new Set(), ids = new Set();
   for (const w of x.workspaces) {
-    if (!keys(w, ['name']) || !text(w.name, 32) || new TextEncoder().encode(w.name).length > 31 || ws.has(w.name)) fail(400, 'invalid_workspace');
+    if (!keys(w, ['name', ...(Object.hasOwn(w || {}, 'color') ? ['color'] : [])]) || (Object.hasOwn(w, 'color') && (!Number.isInteger(w.color) || w.color < 0 || w.color >= 7)) || !text(w.name, 32) || new TextEncoder().encode(w.name).length > 31 || ws.has(w.name)) fail(400, 'invalid_workspace');
     ws.add(w.name);
   }
   for (const t of x.tabs) {
@@ -102,7 +103,7 @@ async function authenticateKey(db, key, pathname) {
 function scoped(device, layout) {
   if (device.kind !== 'workspace') return layout;
   if (!layout.workspaces.some(w => w.name === device.workspace)) fail(404, 'workspace_not_found');
-  return { schema: 1, revision: layout.revision, workspaces: [{ name: device.workspace }], tabs: layout.tabs.filter(tab => tab.workspace === device.workspace) };
+  return { schema: 1, revision: layout.revision, workspaces: [layout.workspaces.find(w => w.name === device.workspace)], tabs: layout.tabs.filter(tab => tab.workspace === device.workspace) };
 }
 function confine(device, layout, previous) {
   if (!previous) fail(503, 'layout_not_seeded');
@@ -118,7 +119,7 @@ function confine(device, layout, previous) {
     else if (!placed) { tabs.push(...layout.tabs); placed = true; }
   }
   if (!placed) tabs.push(...layout.tabs);
-  return validateLayout({ ...previous, revision: layout.revision, tabs });
+  return validateLayout({ ...previous, revision: layout.revision, workspaces: previous.workspaces.map(w => w.name === name ? layout.workspaces[0] : w), tabs });
 }
 async function sessionAccount(request, env, auth) {
   if (!env.BETTER_AUTH_SECRET || !(request.headers.get('Cookie') || '').includes('session_token')) return null;
@@ -325,6 +326,14 @@ export default {
         const confined = device.kind === 'workspace';
         if (confined) layout = confine(device, layout, previousLayout);
         const req = confined ? { headers: new Headers({ 'X-Layout-Features': (request.headers.get('X-Layout-Features') || '').split(',').map(feature => feature.trim()).filter(feature => !['settings', 'hosts', 'host_removal'].includes(feature)).join(',') }) } : request;
+        if (!layoutFeature(req, 'workspace_color')) {
+          const storedWorkspaces = new Map((previousLayout?.workspaces || []).map(workspace => [workspace.name, workspace]));
+          for (const workspace of layout.workspaces) {
+            const color = storedWorkspaces.get(workspace.name)?.color;
+            if (color !== undefined) workspace.color = color;
+            else delete workspace.color;
+          }
+        }
         if (!layoutFeature(req, 'settings')) {
           if (previousLayout?.settings !== undefined) layout.settings = { ...previousLayout.settings };
           else delete layout.settings;

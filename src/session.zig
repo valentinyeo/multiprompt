@@ -656,6 +656,12 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
     }
     const split_state = std.fmt.bufPrint(json_buf[pos..], ",\"inbox_tab\":{d},\"inbox_visits_order\":true", .{app_state.g_inbox_tab}) catch return false;
     pos += split_state.len;
+    if (!app_state.g_single_window) {
+        if (app_state.g_ws_colors[0]) |color| {
+            const encoded = std.fmt.bufPrint(json_buf[pos..], ",\"workspace_color\":{d}", .{color}) catch return false;
+            pos += encoded.len;
+        }
+    }
     if (app_state.g_single_window and pos + 256 < json_buf.len) {
         var swbuf: [96]u8 = undefined;
         const sw = std.fmt.bufPrint(&swbuf, ",\"single_window\":true,\"active_workspace\":{d},\"workspace_count\":{d},\"workspaces\":[", .{ app_state.g_active_workspace, app_state.g_lws_count }) catch swbuf[0..0];
@@ -674,6 +680,10 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             appendJsonEscaped(&json_buf, &pos, app_state.g_ws_names[wi][0..nlen]);
             json_buf[pos] = '"';
             pos += 1;
+            if (app_state.g_ws_colors[wi]) |color| {
+                const encoded = std.fmt.bufPrint(json_buf[pos..], ",\"color\":{d}", .{color}) catch return false;
+                pos += encoded.len;
+            }
             ensureWorkspaceSlotId(@intCast(wi));
             const wp_ = ",\"wid\":\"";
             @memcpy(json_buf[pos .. pos + wp_.len], wp_);
@@ -1702,6 +1712,9 @@ pub fn restoreSession() u32 {
     }
     app_state.g_hide_pills = json_reader.boolean(json_reader.field(json, "hide_pills"), app_state.g_hide_pills);
 
+    app_state.g_ws_colors = @splat(null);
+    const workspace_color = json_reader.uintDefault(json, "workspace_color", 7);
+    app_state.g_ws_colors[0] = if (workspace_color < 7) @intCast(workspace_color) else null;
     var saved_last_shell: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
     app_state.g_ws_last_shell = [_]u32{0} ** MAX_LWS;
     app_state.g_ws_focus = [_]app_state.WorkspaceFocus{.none} ** MAX_LWS;
@@ -1715,6 +1728,8 @@ pub fn restoreSession() u32 {
         for (json_reader.array(json_reader.field(json, "workspaces")), 0..) |obj, wi| {
             if (wi >= MAX_LWS) break;
             app_state.g_ws_name_len[wi] = json_reader.copyString(obj, "name", &app_state.g_ws_names[wi]);
+            const color = json_reader.uintDefault(obj, "color", 7);
+            app_state.g_ws_colors[wi] = if (color < 7) @intCast(color) else null;
             var wid_tmp: [64]u8 = std.mem.zeroes([64]u8);
             const wid_n = json_reader.copyString(obj, "wid", &wid_tmp);
             const wid_cap = @min(wid_n, @as(u32, @intCast(app_state.g_ws_ids[wi].len)));

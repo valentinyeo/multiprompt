@@ -33,7 +33,7 @@ function audit(desktop, client) {
   assert.match(client, /WinHttpQueryHeaders\(req, 22, null, &header_buf, &size, null\)/);
   assert.match(client, /hosts_supported = layoutSupportsHosts\(raw\);/);
   assert.match(client, /\.hosts_supported = hosts_supported/);
-  assert.match(client.slice(client.indexOf('pub fn request('), client.indexOf('pub fn field(')), /X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal\\r\\n/);
+  assert.match(client.slice(client.indexOf('pub fn request('), client.indexOf('pub fn field(')), /X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color\\r\\n/);
   const worker = desktop.slice(desktop.indexOf('fn layoutSyncWorker('), desktop.indexOf('fn layoutSyncWorker(') + 700);
   assert.match(worker, /accountRequest\(job, reply\)/);
   assert.match(desktop, /std.Thread.spawn\(\.\{\}, layoutSyncWorker/);
