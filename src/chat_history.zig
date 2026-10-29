@@ -470,18 +470,18 @@ pub const History = struct {
         const budget = TAIL_BYTES - 512;
         if (rows.len <= budget) return rows;
         var end = rows.len;
-        var cursor = end;
-        while (cursor > 0) {
-            const row_end = cursor;
-            cursor -= 1;
-            const row_start = if (std.mem.lastIndexOfScalar(u8, rows[0..cursor], '\n')) |n| n + 1 else 0;
-            const parsed = try std.json.parseFromSlice(Message, a, rows[row_start..cursor], .{ .ignore_unknown_fields = true });
+        var position = end;
+        while (position > 0) {
+            const row_end = position;
+            position -= 1;
+            const row_start = if (std.mem.lastIndexOfScalar(u8, rows[0..position], '\n')) |n| n + 1 else 0;
+            const parsed = try std.json.parseFromSlice(Message, a, rows[row_start..position], .{ .ignore_unknown_fields = true });
             defer parsed.deinit();
             if ((std.mem.eql(u8, parsed.value.role, "user") or std.mem.eql(u8, parsed.value.role, "assistant")) and parsed.value.text.len > 0) {
                 if (row_start < rows.len - budget and row_end - row_start <= budget) end = row_end;
                 break;
             }
-            cursor = row_start;
+            position = row_start;
         }
         var start = end -| budget;
         if (start > 0) start += if (std.mem.indexOfScalar(u8, rows[start..end], '\n')) |n| n + 1 else end - start;
