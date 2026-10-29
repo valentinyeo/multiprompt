@@ -86,16 +86,20 @@
                 function Assert-ImmediateBrowserPairs([string]$Page) {
                     for ($i = 0; $i -lt 20; $i++) {
                         Doctor
+                        $before = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count
                         Record "IGSH-1126 $Page immediate Alt+A pair $i"
                         [VerifyNative]::BringToForeground($script:window)
                         Wait-Foreground
-                        $before = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count
-                        $gap = [VerifyNative]::ImmediateBrowserTogglePair((50 + ($i % 5) * 50))
+                        $completion = [Diagnostics.Stopwatch]::StartNew()
+                        $gap = [VerifyNative]::ImmediateBrowserTogglePair(50)
                         Wait-Until { @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count -eq $before + 2 } 'both physical key presses handled' -Seconds 5 -PollMilliseconds 10
                         $states = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=' | Select-Object -Last 2 | ForEach-Object { $_.Line })
                         if ($states[0] -notmatch 'enabled= 1$' -or $states[1] -notmatch 'enabled= 0$') { throw 'Immediate pair did not open then close' }
                         $closed = Assert-BrowserPane 'closed' ("immediate-$Page-$i")
-                        $script:immediatePairs += @{ page = $Page; pair = $i; gapMs = $gap; states = $states; closed = $closed.browser_state -eq 'closed' }
+                        $verifiedClosedMs = $completion.Elapsed.TotalMilliseconds
+                        $speedWarning = $gap -gt 300
+                        if ($speedWarning) { Record "WARNING: Alt+A input spacing exceeded 300 ms: $gap" }
+                        $script:immediatePairs += @{ page = $Page; pair = $i; inputGapMs = $gap; verifiedClosedMs = $verifiedClosedMs; speedLimitMs = 300; speedWarning = $speedWarning; states = $states; closed = $closed.browser_state -eq 'closed' }
                         Save-Json $script:immediatePairs 'immediate-toggle.json'
                     }
                 }

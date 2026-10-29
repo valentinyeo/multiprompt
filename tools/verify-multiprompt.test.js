@@ -2464,7 +2464,7 @@ test('release sidebar pixel oracles use the live width and approved expanded row
   }
 });
 
-test('IGSH-1161 immediate key-pair deadline includes first injection time without relaxing the 300ms bound', () => {
+test('IGSH-1165 key-pair scheduler records late spacing without hiding the second physical press', () => {
   const native = read(skill + 'control-native.cs');
   const method = native.split('public static double ImmediateBrowserTogglePair(int delay)')[1].split('public static void OpenAndCloseBrowserPane()')[0];
   const timing = method.slice(method.indexOf('var clock ='), method.indexOf('return gap;') + 'return gap;'.length)
@@ -2486,8 +2486,8 @@ test('IGSH-1161 immediate key-pair deadline includes first injection time withou
   for (const injectionMs of [0, 20, 52, 100]) {
     assert.deepEqual(pair(injectionMs), { gap: 250, starts: [0, 250] });
   }
-  assert.throws(() => pair(350), /Alt\+A pair exceeded 300 ms/);
-  assert.throws(() => pair(0, 60), /Alt\+A pair exceeded 300 ms/);
+  assert.deepEqual(pair(350), { gap: 350, starts: [0, 350] });
+  assert.deepEqual(pair(0, 60), { gap: 310, starts: [0, 310] });
 });
 
 test('slow browser scenario reacquires owned foreground after immediate-close pairs', () => {
@@ -2532,4 +2532,63 @@ test('IGSH-1176 forced browser timeout proof fits the GitHub dispatch input limi
   const dispatch = workflow.slice(workflow.indexOf('  workflow_dispatch:'), workflow.indexOf('  workflow_call:'));
   assert.ok([...dispatch.matchAll(/^      [a-z_]+:$/gm)].length <= 25);
   assert.match(workflow, /VERIFY_BROWSER_STALL: \$\{\{ \(inputs\.browser_stall \|\| inputs\.dictation_stall\) && '1' \|\| '' \}\}/);
+});
+
+test('IGSH-1165 late input warns while physical input and closure remain mandatory', () => {
+  const journey = read(skill + 'control-feature-browser-pane-stuck.ps1');
+  assert.match(journey, /ImmediateBrowserTogglePair\(50\)/);
+  assert.match(journey, /\$speedWarning = \$gap -gt 300/);
+  assert.match(journey, /if \(\$speedWarning\) \{ Record "WARNING:/);
+  assert.match(journey, /inputGapMs = \$gap; verifiedClosedMs = \$verifiedClosedMs/);
+  assert.match(journey, /Count -eq \$before \+ 2[\s\S]*'both physical key presses handled' -Seconds 5/);
+  assert.match(journey, /throw 'Immediate pair did not open then close'/);
+  assert.match(journey, /Assert-BrowserPane 'closed' \("immediate-\$Page-\$i"\)/);
+  if (process.platform !== 'win32') return;
+  const block = journey.slice(journey.indexOf('                        $speedWarning ='), journey.indexOf('                        Save-Json $script:immediatePairs'));
+  const result = require('node:child_process').spawnSync('powershell.exe', ['-NoProfile', '-Command', `
+$ErrorActionPreference = 'Stop'
+$gap = 350
+$verifiedClosedMs = 400
+$Page = 'blank'
+$i = 0
+$states = @('enabled= 1', 'enabled= 0')
+$closed = @{browser_state='closed'}
+$script:immediatePairs = @()
+$script:warnings = @()
+function Record($Text) { $script:warnings += $Text }
+${block}
+if ($script:warnings.Count -ne 1 -or $script:immediatePairs.Count -ne 1 -or -not $script:immediatePairs[0].closed -or -not $script:immediatePairs[0].speedWarning -or $script:immediatePairs[0].speedLimitMs -ne 300) { throw 'Late input lost warning or closure evidence' }
+Write-Host 'LATE_INPUT_WARNING_WITH_CLOSURE_OK'
+`], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /LATE_INPUT_WARNING_WITH_CLOSURE_OK/);
+});
+
+test('IGSH-1165 log sampling cannot invalidate foreground before the first physical key', () => {
+  if (process.platform !== 'win32') return;
+  const journey = read(skill + 'control-feature-browser-pane-stuck.ps1');
+  const pairs = journey.slice(journey.indexOf('function Assert-ImmediateBrowserPairs('));
+  const prefix = pairs.slice(pairs.indexOf('                        Doctor'), pairs.indexOf('                        Wait-Until'));
+  const run = body => require('node:child_process').spawnSync('powershell.exe', ['-NoProfile', '-Command', `
+$ErrorActionPreference = 'Stop'
+Add-Type 'public class VerifyNative { public static bool Owned; public static int Keys; public static void BringToForeground(System.IntPtr hwnd) { if (hwnd.ToInt64() != 17) throw new System.Exception("Wrong target"); Owned = true; } public static double ImmediateBrowserTogglePair(int delay) { if (!Owned) throw new System.Exception("Physical input targeted a foreign window"); Keys += 2; return delay; } }'
+$script:window = [IntPtr]17
+$debug = 'fixture'
+$Page = 'blank'
+$i = 0
+function Doctor {}
+function Record($Text) {}
+function Select-String($Path, $Pattern) { [VerifyNative]::Owned = $false; 'one previous toggle' }
+function Wait-Foreground { if (-not [VerifyNative]::Owned) { throw 'Foreground unavailable' } }
+${body}
+if ([VerifyNative]::Keys -ne 2 -or $before -ne 1) { throw 'Physical pair or baseline log count missing' }
+Write-Host 'FIRST_PHYSICAL_KEY_TARGETED_OK'
+`], { encoding: 'utf8', timeout: 20000 });
+  const red = run(read('tools/fixtures/IGSH-1165/foreign-first-key.ps1'));
+  assert.notEqual(red.status, 0, red.stdout + red.stderr);
+  assert.match(red.stderr, /Physical input targeted a foreign window/);
+  console.log('FIRST_KEY_NEGATIVE_CONTROL_REJECTED');
+  const result = run(prefix);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /FIRST_PHYSICAL_KEY_TARGETED_OK/);
 });
