@@ -1563,7 +1563,7 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
     }
     if (pinned > 0) y += @as(i32, @intCast((pinned + columns - 1) / columns)) * uiScaled(96) + uiScaled(8);
     for (rows[0..count]) |row| {
-        if (row.kind == .section and row.section_tier == .pinned) continue;
+        if (row.kind == .section and row.section_tier == .pinned and pinned > 0) continue;
         if (row.kind == .tab and effPinnedTop(row.shell_idx)) continue;
         var next = row;
         next.y = y;
@@ -1697,6 +1697,16 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
         _ = SetTextColor(hdc, hint);
         var close = RECT{ .left = right, .top = y, .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
         _ = DrawTextW(hdc, L("\u{00d7}"), -1, &close, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        var time: [24]u16 = undefined;
+        const time_len = @import("inbox.zig").inboxRelTime(shell.last_active, &time);
+        if (time_len > 0) {
+            _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+            var measure: RECT = std.mem.zeroes(RECT);
+            _ = DrawTextW(hdc, &time, @intCast(time_len), &measure, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
+            var stamp = RECT{ .left = right - measure.right - uiScaled(6), .top = y + uiScaled(5), .right = right - uiScaled(6), .bottom = y + uiScaled(29) };
+            _ = DrawTextW(hdc, &time, @intCast(time_len), &stamp, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+            right = stamp.left - uiScaled(6);
+        }
     }
     const size = uiScaled(40);
     const left = column.left + uiScaled(10);

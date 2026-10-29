@@ -82,6 +82,7 @@ const HitTarget = union(enum) {none: void, section: SidebarTier, header: u32, ta
 const app_state = @This();
 var g_sidebar_collapsed = false;
 var g_starred_workspace = false;
+var pinned_collapsed = false;
 const SECTION_HEADER_H = 24;
 const GROUP_HEADER_H = 24;
 const BTN_H = 30;
@@ -90,6 +91,7 @@ fn SIDEBAR_W() i32 {return 300;}
 fn tabRowH() i32 {return 58;}
 fn effPinnedTop(i: usize) bool {return i < 4;}
 fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
+    if (pinned_collapsed) { out[0] = .{.kind = .section, .section_tier = .pinned, .y = 20}; return 1; }
     for (0..5) |i| out[i] = .{.shell_idx = @intCast(i), .y = 20 + @as(i32, @intCast(i)) * 58};
     return 5;
 }
@@ -114,6 +116,11 @@ test "tiles wrap and every mouse target remains the painted session" {
     g_sidebar_collapsed = true;
     try std.testing.expectEqual(@as(u32, 5), layoutRows(&rows));
     try std.testing.expect(!rows[0].tile);
+    g_sidebar_collapsed = false;
+    pinned_collapsed = true;
+    try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
+    try std.testing.expect(rows[0].kind == .section);
+    try std.testing.expect(hitTestSidebar(20, rows[0].y + 10) == .section);
 }
 `);
     const result = spawnSync(process.env.ZIG_EXE || 'zig', ['test', path.join(dir, 'layout.zig')], {encoding: 'utf8', timeout: 120000});

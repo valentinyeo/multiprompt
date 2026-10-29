@@ -194,11 +194,11 @@ pub fn ensurePaintBackbuffer(hdc: HANDLE, w: i32, h: i32) HANDLE {
 }
 
 pub fn resetFontCache() void {
+    @import("changelog.zig").resetChangelogLayout();
     for (&app_state.g_font_bot) |*font| {
         if (font.* != null) _ = DeleteObject(font.*);
         font.* = null;
     }
-    @import("changelog.zig").resetChangelogLayout();
     @import("dwrite_text.zig").resetFonts();
     @import("chat_render.zig").resetTableMetrics();
     app_state.g_chat_tables.clear(std.heap.page_allocator);

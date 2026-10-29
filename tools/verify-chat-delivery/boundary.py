@@ -1028,7 +1028,7 @@ def ssh():
         attach("workspace")
         return 0
     target = attached_session(command)
-    if target in session_names():
+    if target is not None and target in session_names():
         record("invocations.jsonl", kind="attach", session=target)
         (attach_fake if state().get("fake") else attach)(target)
         return 0
