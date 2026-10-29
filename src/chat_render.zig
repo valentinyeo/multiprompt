@@ -7069,7 +7069,7 @@ fn floatProofRing(pixels: []const u32, stride: usize, bg: u32, rect: RECT, round
     return count;
 }
 
-test "IGSH-1001 the scroll-down button sits on a clear gap, not on chat text" {
+test "IGSH-1189 the scroll-down button has a thin theme outline without a clearing surround" {
     const w = @import("win32.zig");
     const GdiFlush = struct {
         extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
@@ -7104,7 +7104,6 @@ test "IGSH-1001 the scroll-down button sits on a clear gap, not on chat text" {
     chat_scroll_drag = null;
     var canvas = @import("smooth.zig").Canvas.init(dc);
     defer canvas.deinit();
-    const bg = themeConsoleBg();
     const ink = RGB(200, 60, 60);
     var everything = RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
     const brush = CreateSolidBrush(ink);
@@ -7113,14 +7112,13 @@ test "IGSH-1001 the scroll-down button sits on a clear gap, not on chat text" {
     chatPaintScrollUi(&canvas, dc, width, height);
     _ = GdiFlush();
     const box = chatScrollJumpBox(width, height);
-    const gap = @import("chat_float.zig").moat();
-    const round = @divTrunc(box.right - box.left, 2) - 5;
-    const box_rc = RECT{ .left = box.left, .top = box.top, .right = box.right, .bottom = box.bottom };
-    const not_clear = floatProofRing(pixels, width, bg, box_rc, round, gap - 1);
-    std.debug.print("IGSH-1001 scroll-down button: gap pixels still showing chat text={d}\n", .{not_clear});
-    try std.testing.expectEqual(@as(usize, 0), not_clear);
-    const beside = pixels[@as(usize, @intCast(box.top + @divTrunc(box.bottom - box.top, 2))) * width + @as(usize, @intCast(box.left - gap - 4))];
+    const cy = box.top + @divTrunc(box.bottom - box.top, 2);
+    const beside = pixels[@as(usize, @intCast(cy)) * width + @as(usize, @intCast(box.left - 4))];
     try std.testing.expectEqual(ink, scrollProofColor(beside));
+    const face = pixels[@as(usize, @intCast(cy)) * width + @as(usize, @intCast(box.left + 4))];
+    try std.testing.expectEqual(app_state.g_chat_input_color, scrollProofColor(face));
+    const bytes = @as([*]const u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    try scrollProofSave(L("chat-shared-jump.bmp"), bytes, info.header);
 }
 
 fn moreMenuProofNear(pixel: u32, r: u32, g: u32, b: u32, slack: u32) bool {
