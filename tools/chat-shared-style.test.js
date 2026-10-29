@@ -11,23 +11,27 @@ function body(source, signature) {
   return source.slice(at, source.indexOf('\n}', at) + 2);
 }
 
-test('chat sidebar shows names and unread only, with details on hover', () => {
+test('chat sidebar shows approved robots and previews, retaining unread and hover details', () => {
   const row = body(sidebar, 'fn paintChatSidebarRow(');
-  assert.doesNotMatch(row, /drawAgentIcon|DrawIconEx|DRAFT|browser_frozen|browser_suspended|drawFavoriteDot/);
+  assert.doesNotMatch(row, /drawAgentIcon|DrawIconEx|browser_frozen|browser_suspended|drawFavoriteDot/);
   assert.match(row, /needs_attention[^]*?RGB\(137, 180, 248\)/);
   assert.match(row, /g_sidebar_hover == index/);
-  assert.match(row, /if \(hovered\)[^]*?inboxRelTime/);
-  assert.match(row, /if \(hovered\)[^]*?00d7/);
-  assert.match(sidebar, /if \(app_state\.g_chat_active and !app_state\.g_sidebar_collapsed\) \{\s*paintChatSidebarRow/);
+  assert.match(row, /if \(app_state\.g_sidebar_hover == index\)[^]*?inboxRelTime/);
+  assert.match(row, /if \(app_state\.g_sidebar_hover == index\)[^]*?00d7/);
+  assert.match(row, /avatar\.draw/);
+  assert.match(row, /shell\.preview/);
+  assert.match(row, /chatDraftHasForShell/);
+  assert.match(sidebar, /if \(!app_state\.g_sidebar_collapsed and [^\n]+\) \{\s*paintChatSidebarRow/);
 });
 
-test('chat title is regular text without agent icons', () => {
+test('chat title shares the bot identity without provider glyphs', () => {
   const layout = body(drawing, 'pub fn chatTitleLayout(');
   assert.doesNotMatch(layout, /shell\.ai_agent|shell\.needs_attention/);
   assert.match(layout, /measureTitleText\(uiFontTitle\(\), name\)/);
   const paint = body(drawing, 'fn paintChatTitlePill(');
   assert.match(paint, /SelectObject\(hdc, uiFontTitle\(\)\)/);
   assert.doesNotMatch(paint, /drawAgentIcon|drawAttentionDot/);
+  assert.match(paint, /avatar\.draw\(hdc, layout\.icon, avatar\.forShell\(shell\)\)/);
 });
 
 test('received messages use one below-message panel with real request IDs', () => {

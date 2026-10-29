@@ -140,3 +140,40 @@ test('robot proof reuses existing verified action pins', () => {
     assert.ok(existing.includes(`${action}@${pin}`), `${action} must reuse a repository-verified commit, not an invented pin`);
   }
 });
+
+test('preview capture reads the attached console even when the app inherits redirected stdout', () => {
+  const source = read('src/shell_poll.zig');
+  const capture = block(source, 'fn captureShellPreview(');
+  const at = capture.indexOf('    var info: CONSOLE_SCREEN_BUFFER_INFO');
+  assert.ok(at > 0);
+  const prefix = capture.slice(0, at)
+    .replace('missed_done_recovered: *bool', '_: *bool')
+    .replace('@import("clipboard.zig").openAttachedConsoleOutput', 'output.openAttachedConsoleOutput');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-preview-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'preview.zig'), `const std = @import("std");
+const HANDLE = ?*anyopaque;
+const DWORD = u32;
+const STD_OUTPUT_HANDLE = 0;
+const app_state = struct { const shell_count: u32 = 1; };
+const console: HANDLE = @ptrFromInt(1234);
+const file: HANDLE = @ptrFromInt(5678);
+var closed = false;
+fn FreeConsole() i32 { return 1; }
+fn AttachConsole(_: u32) i32 { return 1; }
+fn GetStdHandle(_: i32) HANDLE { return file; }
+fn CloseHandle(handle: HANDLE) i32 { closed = handle == console; return 1; }
+const output = struct { fn openAttachedConsoleOutput() ?HANDLE { return console; } };
+${prefix}
+    return handle == console;
+}
+test "console buffer is used and released, never the inherited log file" {
+    var recovered = false;
+    try std.testing.expect(captureShellPreview(0, 42, &recovered));
+    try std.testing.expect(closed);
+}
+`);
+    const result = spawnSync(process.env.ZIG_EXE || 'zig', ['test', path.join(dir, 'preview.zig')], {encoding: 'utf8', timeout: 120000});
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});

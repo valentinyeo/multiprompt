@@ -1,1 +1,3 @@
-Your bots have matching robot faces on desktop and phone, with larger pinned faces and message previews.
+Robot faces now match your phone.
+Pinned bots look bigger.
+Messages show previews.
