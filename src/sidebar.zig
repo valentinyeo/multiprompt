@@ -1550,11 +1550,17 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
     const columns: u32 = @intCast(@max(1, @divTrunc(SIDEBAR_W() - uiScaled(16), width + gap)));
     var n: u32 = 0;
     var pinned: u32 = 0;
+    var total_pinned: u32 = 0;
+    for (rows[0..count]) |row| {
+        if (row.kind == .tab and effPinnedTop(row.shell_idx)) total_pinned += 1;
+    }
     for (rows[0..count]) |row| {
         if (row.kind != .tab or !effPinnedTop(row.shell_idx)) continue;
         var tile = row;
         tile.tile = true;
-        tile.x = uiScaled(8) + @as(i32, @intCast(pinned % columns)) * (width + gap);
+        const in_row = @min(columns, total_pinned - (pinned / columns) * columns);
+        const row_width = @as(i32, @intCast(in_row)) * width + @as(i32, @intCast(in_row - 1)) * gap;
+        tile.x = @max(uiScaled(8), @divTrunc(SIDEBAR_W() - row_width, 2)) + @as(i32, @intCast(pinned % columns)) * (width + gap);
         tile.width = @min(width, SIDEBAR_W() - tile.x - uiScaled(8));
         tile.y = y + @as(i32, @intCast(pinned / columns)) * uiScaled(96);
         out[n] = tile;
@@ -1909,7 +1915,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 const hl_radius: i32 = uiScaled(24);
                 const ob = SelectObject(hdc, hl_brush);
                 const op = SelectObject(hdc, hl_pen);
-                _ = @import("smooth.zig").drawRoundRect(hdc, column.left, y + 3, column.right, y + tabRowH() - 3, hl_radius, hl_radius);
+                _ = @import("smooth.zig").drawRoundRect(hdc, column.left, y + uiScaled(1), column.right, y + tabRowH() - uiScaled(1), hl_radius, hl_radius);
                 _ = SelectObject(hdc, ob);
                 _ = SelectObject(hdc, op);
                 _ = DeleteObject(hl_brush);
