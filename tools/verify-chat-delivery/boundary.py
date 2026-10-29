@@ -946,6 +946,17 @@ def watch_reader():
     return 0
 
 
+def attached_session(command):
+    match = re.search(r"\btmux attach -t (.+)", command)
+    if not match:
+        return None
+    try:
+        parts = shlex.split(match[1])
+    except ValueError:
+        return None
+    return parts[0].removeprefix("=") if parts else None
+
+
 def ssh():
     if ARGS == ["-V"]:
         print("OpenSSH_verification")
@@ -1016,10 +1027,10 @@ def ssh():
         record("invocations.jsonl", kind="attach", session="workspace", identity=current, command=command)
         attach("workspace")
         return 0
-    match = re.search(r"tmux attach -t ['\"]?=?([A-Za-z0-9._:-]+)", command)
-    if match and match[1] in session_names():
-        record("invocations.jsonl", kind="attach", session=match[1])
-        (attach_fake if state().get("fake") else attach)(match[1])
+    target = attached_session(command)
+    if target in session_names():
+        record("invocations.jsonl", kind="attach", session=target)
+        (attach_fake if state().get("fake") else attach)(target)
         return 0
     record("unsupported.jsonl", operation="remote command", hasPython=bool(python), argv=ARGS, command=command)
     return 96

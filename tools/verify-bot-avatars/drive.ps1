@@ -127,6 +127,8 @@ try {
 } catch { $result.error = $_.Exception.Message; Write-Host $result.error } finally {
     if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() }
     if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/debug.log" }
+    if (Test-Path "$state/invocations.jsonl") { Copy-Item "$state/invocations.jsonl" "$Evidence/invocations.jsonl" }
+    if (Test-Path "$state/unsupported.jsonl") { Copy-Item "$state/unsupported.jsonl" "$Evidence/unsupported.jsonl" }
     Save $result "$Evidence/result.json"
     if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
 }

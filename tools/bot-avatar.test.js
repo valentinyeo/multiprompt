@@ -123,3 +123,34 @@ test "tiles wrap and every mouse target remains the painted session" {
   assert.match(block(drawing, 'fn paintChatTitlePill('), /avatar\.draw\(hdc, layout\.icon, avatar\.forShell\(shell\)\)/);
   assert.match(block(sidebar, 'fn paintChatSidebarRow('), /shell\.preview/);
 });
+
+
+test('robot proof reuses existing verified action pins', () => {
+  const workflow = read('.github/workflows/bot-avatars.yml');
+  const existing = read('.github/workflows/verify.yml') + read('.github/workflows/test.yml');
+  for (const [, action, pin] of workflow.matchAll(/uses: (actions\/[\w-]+)@([a-f0-9]{40})/g)) {
+    assert.ok(existing.includes(`${action}@${pin}`), `${action} must reuse a repository-verified commit, not an invented pin`);
+  }
+});
+
+
+test('native SSH fixture attaches legal raw names without truncating spaces or UTF-8', () => {
+  const source = read('tools/verify-chat-delivery/boundary.py');
+  assert.match(source, /def attached_session\(command\):/);
+  const result = spawnSync('python3', ['-I', '-c', String.raw`
+import ast, pathlib, re, shlex, sys
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+tree = ast.parse(source)
+function = next(item for item in tree.body if isinstance(item, ast.FunctionDef) and item.name == 'attached_session')
+namespace = dict(re=re, shlex=shlex)
+exec(compile(ast.Module(body=[function], type_ignores=[]), '<production SSH boundary>', 'exec'), namespace)
+for name in ['HT Product Lead', 'SF Design Lead', '机器人', "bot's console", 'verify-agent']:
+    command = 'tmux attach -t ' + shlex.quote('=' + name)
+    assert namespace['attached_session'](command) == name
+assert namespace['attached_session']('tmux list-sessions') is None
+assert namespace['attached_session']("tmux attach -t '") is None
+print('RAW_SESSION_NAMES_PROVEN')
+`, path.join(root, 'tools/verify-chat-delivery/boundary.py')], {encoding: 'utf8'});
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /RAW_SESSION_NAMES_PROVEN/);
+});

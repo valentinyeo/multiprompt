@@ -1661,11 +1661,11 @@ pub fn hitTestSidebar(mx: i32, logical_my: i32) HitTarget {
     return HitTarget{ .none = {} };
 }
 
-pub fn tabRowY(shell_idx: u32) ?i32 {
+pub fn tabRowForShell(shell_idx: u32) ?Row {
     var rows: [MAX_ROWS]Row = undefined;
     const n = layoutRows(&rows);
     for (0..n) |ri| {
-        if (rows[ri].kind == .tab and rows[ri].shell_idx == shell_idx) return rows[ri].y;
+        if (rows[ri].kind == .tab and rows[ri].shell_idx == shell_idx) return rows[ri];
     }
     return null;
 }

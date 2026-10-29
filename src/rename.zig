@@ -65,7 +65,6 @@ const MENU_HEADER_COLOR_BASE = @import("win32.zig").MENU_HEADER_COLOR_BASE;
 const L = @import("startup.zig").L;
 const getInstanceName = @import("startup.zig").getInstanceName;
 const SIDEBAR_W = @import("browser_pane.zig").SIDEBAR_W;
-const tabRowH = @import("browser_pane.zig").tabRowH;
 const MAX_LWS = @import("app_state.zig").MAX_LWS;
 const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
@@ -77,7 +76,8 @@ const normalizeGroupOrder = @import("sidebar.zig").normalizeGroupOrder;
 const Row = @import("app_state.zig").Row;
 const MAX_ROWS = @import("app_state.zig").MAX_ROWS;
 const layoutRows = @import("sidebar.zig").layoutRows;
-const tabRowY = @import("sidebar.zig").tabRowY;
+const uiScaled = @import("drawing.zig").uiScaled;
+const tabRowForShell = @import("sidebar.zig").tabRowForShell;
 const PostMessageW = @import("focus.zig").PostMessageW;
 const focusGuardDispatchTick = @import("focus.zig").focusGuardDispatchTick;
 const focusGuard = @import("focus.zig").focusGuard;
@@ -282,16 +282,18 @@ fn startRenameInternal(idx: u32, thread_title: bool) void {
         const edit_w = @max(name_rc.right - name_rc.left, 100);
         app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, edit_x, edit_y, edit_w, edit_h, app_state.g_main_hwnd, null, null, null);
     } else {
-        const logical_y: i32 = tabRowY(idx) orelse (@as(i32, @intCast(idx)) * tabRowH());
-        const y: i32 = logical_y - app_state.g_sidebar_scroll;
+        const row = tabRowForShell(idx) orelse return;
+        const y = row.y - app_state.g_sidebar_scroll;
+        const name_left = if (row.tile) row.x + uiScaled(4) else uiScaled(12);
+        const name_width = if (row.tile) row.width - uiScaled(8) else SIDEBAR_W() - uiScaled(54);
         app_state.g_edit_hwnd = CreateWindowExW(
             0,
             L("EDIT"),
             null,
             WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-            12,
-            y + 3,
-            SIDEBAR_W() - 54,
+            name_left,
+            y + (if (row.tile) uiScaled(68) else uiScaled(3)),
+            name_width,
             22,
             app_state.g_main_hwnd,
             null,
