@@ -1258,6 +1258,7 @@ comptime {
         _ = @import("drawing.zig");
         _ = @import("smooth.zig");
         _ = @import("telemetry_panel.zig");
+        _ = @import("usage_card.zig");
         _ = @import("clipboard.zig");
         _ = @import("notifications.zig");
         _ = @import("browser_bridge.zig");
@@ -1427,6 +1428,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (@import("fonts.zig").menuChar(wp)) |result| return result;
     }
     if (@import("fonts.zig").menuMessage(msg, lp)) |result| return result;
+    if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) return 0;
     if (app_state.g_account_locked) {
         switch (msg) {
             WM_PAINT => {
@@ -1558,6 +1560,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SIZE => {
+            @import("usage_card.zig").close();
             more_menu.close();
             @import("workspace_switcher.zig").close();
             @import("settings_panel.zig").reposition();
@@ -1945,6 +1948,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 {
+                    if (@import("usage_card.zig").versionStripHit(mx, my)) {
+                        updateCardRelaunch(hwnd);
+                        return 0;
+                    }
                     const upd_hit = updateCardHit(mx, my);
                     if (upd_hit != 0) {
                         app_state.g_shell_focused = false;
@@ -7021,6 +7028,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_ACTIVATEAPP => {
             if (wp == 0) {
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
+                @import("usage_card.zig").close();
                 @import("chat_session.zig").chatReadDeactivate();
             } else {
                 focusGuardNoteActivation();

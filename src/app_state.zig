@@ -1596,6 +1596,7 @@ pub const AiPaceGoal = struct {
     five_hour_reset_filetime: u64 = 0,
     has_bonus_reset: bool = false,
     bonus_reset_filetime: u64 = 0,
+    week_elapsed_tenths: ?u16 = null,
     weekly_pace: AiUsagePace = .{},
     five_hour_pace: AiUsagePace = .{},
     pace: AiPace = .on_pace,

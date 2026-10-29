@@ -1559,8 +1559,9 @@ test('IGSH-908 status-card journey keeps compact pages and proves the existing-s
   assert.match(journey, /if \(\$height -gt 30 -or \$height -lt 20\) \{ throw/);
   assert.match(journey, /IGSH-908: usage pill has no frame at the sidebar bottom/);
   for (const check of ['usage panel closes on second click', 'usage panel closes on Escape', 'usage panel closes on outside click']) assert.ok(journey.includes(check));
-  assert.match(journey, /MenuLook/);
-  assert.match(journey, /\$look\.cornerShown/);
+  assert.match(journey, /Assert-UsageCardPixels 'pill-open'/);
+  assert.match(journey, /MultiPromptUsageCard/);
+  assert.match(journey, /Assert-AppVersionInk 'pill-closed'/);
   assert.match(journey, /usagePill = \$true/);
   assert.match(journey, /Snapshot 'pill-closed'/);
   assert.match(journey, /Snapshot 'pill-open'/);
