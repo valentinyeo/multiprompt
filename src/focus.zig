@@ -434,6 +434,7 @@ fn foregroundWinEventProc(hook: HANDLE, event: DWORD, hwnd: HANDLE, idObject: LO
     clearSelectedTabDotOnReturn();
     if (app_state.g_main_hwnd == null) return;
     if (foregroundHwndIsOurs(hwnd)) {
+        installHook();
         const browser_popup_active = activeBrowserTransientPopupHasForegroundFocus();
         if (browser_popup_active) {
             browserTrace("FGevt Edge popup -> suspend maskRaise");
@@ -522,7 +523,6 @@ pub fn uninstallKeyboardHook() void {
     app_state.g_screenshot_chord_held = false;
     app_state.g_tab_url_chord_held = false;
     if (app_state.g_hook != null) {
-        altqLog("keyboard_hook uninstall foreground={X} ours={}", .{ altqPtr(GetForegroundWindow()), foregroundIsOurs() });
         _ = UnhookWindowsHookEx(app_state.g_hook);
         app_state.g_hook = null;
     }
