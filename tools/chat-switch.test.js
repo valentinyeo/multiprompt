@@ -101,6 +101,9 @@ test('production switch timer releases missing paints, defers all overlays and i
   const os = require('node:os'), path = require('node:path');
   const { spawnSync } = require('node:child_process');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-switch-deadline-'));
+  const switching = body('switchToShell');
+  const saveAt = switching.indexOf('saveSession();');
+  const saveGuard = switching.slice(switching.lastIndexOf('    if (', saveAt), switching.indexOf('\n    }', saveAt) + 6).replaceAll('@import("launch_cache.zig").', 'launch_cache.');
   const prelude = `
 const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -154,13 +157,31 @@ fn wakeBrowserPaneFromFreeze(_: u32) void {}
 fn updateBrowserVisibility() void { exchanges += 1; }
 fn browserPaneActive() bool { return false; }
 fn armBrowserVisibilitySettle(_: u32) void {}
-fn saveSession() void {}
+var saves: usize = 0;
+var g_focus_user_action_tick: u64 = 0;
+const launch_cache = struct { const pending = false; };
+fn saveSession() void { saves += 1; }
 fn writePaneSessionFileForShell(_: u32) void {}
 fn chatSwitchLogBrowserShown() void {}
 fn chatFileOnReady() void { std.debug.assert(g_chat_browser_swap.shell_id == 0); ready += 1; }
 fn refreshChatTranscript(_: bool) void { std.debug.assert(g_chat_browser_swap.shell_id == 0); refreshes += 1; }
 `;
   const cases = `
+test "deferred switches persist once after their first paint, not twice" {
+    const idx: u32 = 0;
+    const prev: u32 = 1;
+    const unarchived_on_open = false;
+    const defer_browser = true;
+    saves = 0;
+    ${saveGuard}
+    try std.testing.expectEqual(@as(usize, 0), saves);
+    g_chat_browser_swap.request(7, 1000);
+    _ = g_chat_browser_swap.didPaint(7);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 1), saves);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 1), saves);
+}
 test "missing paint releases through the production timer exactly once" {
     g_chat_browser_swap.request(7, 1000);
     test_now = 1299;

@@ -2699,7 +2699,7 @@ pub fn switchToShell(idx: u32) void {
     }
     if (idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or !app_state.shells[idx].browser_native) hideBrowserEdgeMasks();
     ensureActiveVisible();
-    if (!app_state.g_restoring and (idx != prev or unarchived_on_open or
+    if (!app_state.g_restoring and !defer_browser and (idx != prev or unarchived_on_open or
         (@import("launch_cache.zig").pending and app_state.g_focus_user_action_tick != 0 and idx < app_state.shell_count)))
     {
         saveSession();
