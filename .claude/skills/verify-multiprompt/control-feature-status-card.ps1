@@ -117,8 +117,8 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             $pillY = $client.Bottom - [int][Math]::Round(14 * $scale)
             Record 'Real click: expand AI usage pill'
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
-            Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $null)) } 'AI usage data panel visible'
-            $menu = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $null)
+            Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'AI usage data panel visible'
+            $menu = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')
             Snapshot 'pill-open'
             Snapshot 'action'
             $look = Assert-UsageCardPixels 'pill-open' $pages[2] $scale
@@ -127,15 +127,15 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             }
             Record 'Real second click: close AI usage pill'
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
-            Wait-Until { -not [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $null)) } 'usage panel closes on second click'
+            Wait-Until { -not [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'usage panel closes on second click'
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
-            Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $null)) } 'usage panel reopens'
+            Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'usage panel reopens'
             Press @(0x1B) 'Escape: dismiss AI usage panel'
-            Wait-Until { -not [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $null)) } 'usage panel closes on Escape'
+            Wait-Until { -not [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'usage panel closes on Escape'
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
-            Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $null)) } 'usage panel reopens before outside click'
+            Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'usage panel reopens before outside click'
             [VerifyNative]::ClickClient($script:window, [int]($client.Right * 3 / 4), ($client.Bottom - [int][Math]::Round(4 * $scale)))
-            Wait-Until { -not [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', $null)) } 'usage panel closes on outside click'
+            Wait-Until { -not [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'usage panel closes on outside click'
             Snapshot 'pill-dismissed'
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
             Wait-Until { [VerifyNative]::IsWindowVisible($menu) } 'usage panel reopens for release notes'

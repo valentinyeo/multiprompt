@@ -46,8 +46,8 @@ pub fn paintVersionStrip(dc: w.HANDLE) void {
         std.fmt.bufPrint(&buffer, "Update ready: v{s} \xc2\xb7 Restart", .{state.g_update_ver[0..state.g_update_ver_len]}) catch "Update ready"
     else
         "Multiprompt v" ++ @import("main.zig").APP_VERSION;
-    var rect = versionStripRect();
-    drawing.drawAscii(dc, label, &rect, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX | w.DT_END_ELLIPSIS);
+    const rect = versionStripRect();
+    text(dc, label, rect, if (state.g_light_theme) RGB(110, 110, 110) else RGB(90, 90, 90), 0);
 }
 
 pub fn geometry(client: RECT, pill: RECT, count: usize) RECT {
@@ -65,15 +65,18 @@ fn inside(rect: RECT, x: i32, y: i32) bool {
 fn text(dc: w.HANDLE, value: []const u8, rect: RECT, color: w.DWORD, flags: w.UINT) void {
     _ = w.SetTextColor(dc, color);
     var r = rect;
-    drawing.drawAscii(dc, value, &r, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX | w.DT_END_ELLIPSIS | flags);
+    var wide: [256]u16 = undefined;
+    const length = std.unicode.utf8ToUtf16Le(&wide, value) catch return;
+    _ = w.DrawTextW(dc, &wide, @intCast(length), &r, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX | w.DT_END_ELLIPSIS | flags);
 }
 
 pub fn weeklyElapsed(goal: state.AiPaceGoal, now: u64) ?u16 {
     if (goal.week_elapsed_tenths) |elapsed| return elapsed;
     if (!goal.has_weekly_reset) return null;
     const week: u64 = 7 * 24 * 60 * 60 * 10_000_000;
-    const remaining = goal.weekly_reset_filetime -| now;
-    return @intCast(1000 - @min(week, remaining) * 1000 / week);
+    const remaining = @min(week, goal.weekly_reset_filetime -| now);
+    const elapsed = week - remaining;
+    return @intCast(elapsed * 1000 / week);
 }
 
 fn countdown(buffer: []u8, reset: u64, now: u64) []const u8 {
@@ -314,4 +317,7 @@ test "IGSH-1086 usage card keeps missing windows honest and weekly elapsed indep
     goal.weekly_reset_filetime = 7 * 24 * 60 * 60 * 10_000_000;
     try std.testing.expectEqual(@as(?u16, 0), weeklyElapsed(goal, 0));
     try std.testing.expectEqual(@as(?u16, 500), weeklyElapsed(goal, goal.weekly_reset_filetime / 2));
+    try std.testing.expectEqual(@as(?u16, 1000), weeklyElapsed(goal, goal.weekly_reset_filetime));
+    goal.weekly_reset_filetime *= 2;
+    try std.testing.expectEqual(@as(?u16, 0), weeklyElapsed(goal, 0));
 }
