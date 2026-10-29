@@ -38,3 +38,14 @@ test('priority runs before expensive branch fan-out and production journeys', ()
   assert.match(read('.github/workflows/verify.yml'), /node tools\/release-priority.mjs admit/);
   assert.match(read('.github/workflows/auto-release.yml'), /actions: write/);
 });
+
+test('reusable journey wrappers preserve read permission for admission', () => {
+  const directory = new URL('../.github/workflows/', import.meta.url);
+  for (const name of fs.readdirSync(directory).filter(name => name.endsWith('.yml'))) {
+    const source = fs.readFileSync(new URL(name, directory), 'utf8');
+    if (!source.includes('uses: ./.github/workflows/verify.yml')) continue;
+    assert.match(source, /permissions:\n  contents: (?:read|write)\n  actions: read/, name);
+  }
+  const source = read('.github/workflows/verify.yml');
+  assert.doesNotMatch(source, /github.workflow == 'Verify desktop' && github.ref/);
+});

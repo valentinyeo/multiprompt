@@ -237,6 +237,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}${{ inputs.feature && format('-feature-{0}', inputs.feature) || '' }}
@@ -258,8 +259,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Admit direct branch journeys after master publication
-        if: github.workflow == 'Verify desktop' && github.ref != 'refs/heads/master' && github.ref_type != 'tag'
+      - name: Admit branch journeys after master publication
+        if: github.ref != 'refs/heads/master' && github.ref_type != 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: node tools/release-priority.mjs admit
