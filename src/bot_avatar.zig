@@ -15,10 +15,19 @@ pub const Appearance = struct {
 };
 
 pub fn forShell(shell: *const state.Shell) Appearance {
-    if (shell.tmux_session_len > 0) return Appearance.forSession(shell.tmux_session[0..shell.tmux_session_len]);
     var name: [256]u8 = undefined;
-    const n = std.unicode.utf16LeToUtf8(&name, shell.name[0..shell.name_len]) catch 0;
-    return Appearance.forSession(name[0..n]);
+    const session = if (shell.tmux_session_len > 0) shell.tmux_session[0..shell.tmux_session_len] else blk: {
+        const n = std.unicode.utf16LeToUtf8(&name, shell.name[0..shell.name_len]) catch 0;
+        break :blk name[0..n];
+    };
+    var appearance = Appearance.forSession(session);
+    const workspace_name = if (shell.workspace < state.g_lws_count and state.g_ws_name_len[shell.workspace] > 0)
+        state.g_ws_names[shell.workspace][0..state.g_ws_name_len[shell.workspace]]
+    else
+        state.g_window_display_name_u8[0..state.g_window_display_name_u8_len];
+    const workspace = std.mem.trim(u8, workspace_name, " \t\r\n");
+    appearance.color = if (std.ascii.eqlIgnoreCase(workspace, "inne")) 2 else if (std.ascii.eqlIgnoreCase(workspace, "Hypertask")) 5 else if (std.ascii.eqlIgnoreCase(workspace, "Software Factory")) 4 else 0;
+    return appearance;
 }
 
 const colors = [_]u32{ 0xFFFFFF, 0xA9C29A, 0xC98F72, 0xD4BE94, 0x93A9C4, 0xB7A6D6, 0xD9A0A8, 0x9DD3C4 };
