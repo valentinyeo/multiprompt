@@ -318,6 +318,7 @@ function Assert-FullHistory([string]$Stage) {
         Press @(0x1B) 'Esc: clear latest-message selection'
     }
     $offset = (Read-Shared "$settings/debug.log").Length
+    Bind-Transcript
     $complete = Step 'all session rows reach the renderer' {
         Press @(0x11, 0x30) 'Ctrl+0: measure every rendered session row'
         $log = (Read-Shared "$settings/debug.log").Substring($offset)
@@ -401,6 +402,7 @@ function Assert-FullHistory([string]$Stage) {
     Save @{stage=$Stage; blocks=$blocks; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 function Retention-Copy([string]$Stage, [int]$Count) {
+    if ($Stage -eq 'open') { Bind-Transcript }
     $offset = (Read-Shared "$settings/debug.log").Length
     $complete = Step "IGSH-934 $Stage keeps $Count messages" {
         Press @(0x11, 0x30) 'Ctrl+0: measure retained conversation'
