@@ -38,7 +38,7 @@ function journeyContract(source) {
     "'enter' { [VerifyNative]::Chord(@(0x0D)) }", "'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }",
     "'mic-click' { [VerifyNative]::ClickClient($script:window,", "$expected = $typed + ' Go forward ten meters.'",
     "[VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-812 transcript appears immediately without another input' -Seconds 1",
-    '$elapsed = $immediate.ElapsedMilliseconds', 'if ($elapsed -gt 1000) { throw',
+    '$elapsed = $immediate.ElapsedMilliseconds', "Assert-ReleaseTiming 'dictation-transcript' $elapsed",
     'WM_GETTEXT = [VerifyNative]::EditText($handle)', "Assert-DictationMic $mic $false ($stop + '-stopped')",
     "@('audio-bytes\\t89160', 'fixture-response-bytes\\t101', 'http-status\\t200', 'target-chat-composer\\t22')",
     '.Count -ne $iteration) { throw', "Snapshot ($stop + '-delivered')",
@@ -72,7 +72,7 @@ test('IGSH-812 real Windows inputs, visible mic pixels and immediate owned nativ
     "'ctrl-d' { [VerifyNative]::Chord(@(0x11, 0x44)) }", "'mic-click' { [VerifyNative]::ClickClient($script:window,",
     "Assert-DictationMic $micLive $true ($stop + '-listening')", 'Type-Text $typed',
     '[VerifyNative]::EditText($handle) -ceq $typed', '[VerifyNative]::EditText($handle) -ceq $expected',
-    'if ($elapsed -gt 1000) { throw', '$pixels[0] -gt $pixels[2] / 2',
+    "Assert-ReleaseTiming 'dictation-transcript' $elapsed", '$pixels[0] -gt $pixels[2] / 2',
     'WindowFromPoint(center) != owner', '$transcript.Current.ProcessId -ne $process.Id',
   ]) {
     const broken = driver.replaceAll(required, 'REMOVED');

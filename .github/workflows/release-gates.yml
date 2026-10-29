@@ -1,6 +1,9 @@
 name: Release gate policy
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   push:
     branches: [ceo/IGSH-1171]
   pull_request:
@@ -16,6 +19,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   policy:
+    if: github.event_name != 'workflow_run'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -24,3 +28,27 @@ jobs:
           node-version: 22
       - name: Prove speed warnings and blocking stability
         run: node --test tools/release-gates.test.mjs
+  history:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Record release failures and speed trends
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release-gates-history.mjs "$GITHUB_REPOSITORY" release-report --file-regressions
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: release-gate-history
+          path: release-report/
+          if-no-files-found: error

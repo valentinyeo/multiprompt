@@ -73,3 +73,19 @@ test('history separates unchanged-code flakes from deterministic failures', asyn
   assert.equal(summarize(runs.map(run => ({ ...run, sha: 'same-sha', checks: [{ name: 'browser-switch-gap', kind: 'speed', failed: true }] })))[0].quarantined, false);
   assert.equal(summarize(runs.map(run => ({ ...run, checks: [{ ...run.checks[0], kind: 'stability' }] })))[0].quarantined, false);
 });
+
+test('speed-only warnings retain the complete repeated workload and invalid samples still block', async () => {
+  assert.match(read('tools/switch-performance.mjs'), /speedWarnings = false/);
+  const { assessRepeated } = await import('./switch-performance.mjs');
+  const workload = () => ({ sha256: 'a'.repeat(64), observerPollMs: 750, observerIdleCpuMs: 0, appIdleCpuMs: 0, idleWallMs: 1000, idleStatusReads: 50, sessionCount: 10, transcriptBytes: 250 * 1024 * 1024, idleShell: 1, switches: Array.from({ length: 50 }, (_, index) => ({ shell: index % 10, us: 300000, blocks: 2 })), idleUs: Array(50).fill(10000) });
+  const pairs = Array.from({ length: 5 }, () => ({ base: workload(), head: workload() }));
+  assert.throws(() => assessRepeated(pairs), /exceeded unchanged/);
+  const rows = assessRepeated(pairs, { speedWarnings: true });
+  assert.equal(rows.length, 5);
+  assert.equal(rows[0].candidate.pass, false);
+  assert.equal(rows[0].candidate.p95Ms, 300);
+  pairs[0].head.switches.pop();
+  assert.throws(() => assessRepeated(pairs, { speedWarnings: true }), /exactly 50/);
+  assert.match(read('.github/workflows/test.yml'), /report evidence\/base\/samples.json evidence\/head\/samples.json --release-policy/);
+  assert.match(read('.github/workflows/test.yml'), /Assert-ReleaseTiming 'ui-hang' \$rows\[1\].maxMs/);
+});

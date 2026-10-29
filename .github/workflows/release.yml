@@ -29,6 +29,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ (inputs.proof || inputs.publication_proof) && format('proof-{0}', github.ref) || 'production' }}
+  cancel-in-progress: ${{ inputs.proof || inputs.publication_proof }}
+
 jobs:
   publication-proof:
     if: inputs.publication_proof

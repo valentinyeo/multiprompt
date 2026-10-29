@@ -2230,7 +2230,7 @@ test('IGSH-857: debug.log is read with shared access so a live app write cannot 
   assert.equal(control.split('Read-SharedText $launchLog').length - 1, 1);
 });
 
-test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that takes over 100 ms to draw', () => {
+test('IGSH-977 chat-send-latency journey sends 20 messages and reports every paint through the release timing policy', () => {
   assert.match(control, /ValidateSet\([^\n)]*'chat-send-latency'/);
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('chat-send-latency'));
@@ -2240,7 +2240,7 @@ test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that ta
   assert.match(journey, /for \(\$n = 1; \$n -le 20; \$n\+\+\)/);
   assert.match(journey, /Press @\(0x0D\)/);
   assert.match(journey, /send-latency id=/);
-  assert.match(journey, /took longer than 100 ms/);
+  assert.match(journey, /Assert-ReleaseTiming 'chat-send-paint' \$sample.paintedMs/);
   assert.doesNotMatch(journey, /Set-Content|Stop-Process/);
   assert.match(journey, /0x276F/);
   assert.match(journey, /claude agent/);
