@@ -23,6 +23,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 
 ## Hard rules
 
+- Fundamental shared changes need Android tickets. This includes chat, sessions, and sync. Create or update one paired ticket first. Link both tickets in both directions. Reuse board 2060's Multiprompt Android label. Record old and new client compatibility. Verify both clients before declaring Done. Existing release gates remain unchanged.
 - **Never restart multiprompt without asking the user.** Use the in-app updater.
 - **Never compile on the laptop.** Use the in-app updater.
 - **Every user-facing feature ships on all three surfaces in the same version:** a keyboard shortcut (when sensible), a Ctrl+K palette entry, and a row in `SHORTCUT_ROWS` (`src/shortcuts.zig`) plus `openwiki/operations/keyboard-shortcuts.md`. Tab actions also go in the tab-context palette band (7100+). `tools/palette-rows.test.js` and `tools/shortcuts-doc.test.js` fail on drift (regenerate with `node tools/shortcuts-doc.mjs`).

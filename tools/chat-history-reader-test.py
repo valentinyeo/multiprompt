@@ -3035,6 +3035,171 @@ class HeldQueueTest(unittest.TestCase):
         self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['target'])
 
 
+    def test_deferred_receipt_survives_old_worker_cursor_overwrite(self):
+        self.ready.return_value = True
+        self.enqueue('accepted ', 1)
+        self.ready.return_value = False
+        self.enqueue('later', 2)
+        receipt = json.dumps(dict(type='attachment', attachment=dict(type='queued_command', prompt='accepted'), timestamp='first')) + '\n'
+        padding = (json.dumps(dict(type='system', message='padding')) + '\n') * 12
+        with self.path.open('a') as source:
+            source.write(receipt + padding)
+        with patch.object(reader, 'TAIL_BYTES', 128):
+            reader.drain_held_queue('term-1', 'sid', self.path)
+            with reader.held_queue_db('term-1') as db:
+                self.assertEqual(db.execute("SELECT state FROM messages WHERE key='message-1'").fetchone()[0], 'submitted')
+                db.execute("UPDATE messages SET scan=? WHERE key='message-1'", (self.path.stat().st_size,))
+            for _ in range(10):
+                reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['accepted '])
+        self.send.assert_called_once()
+
+    def test_changed_claim_does_not_acknowledge(self):
+        self.ready.return_value = True
+        self.enqueue('accepted ', 1)
+        self.ready.return_value = False
+        self.enqueue('later', 2)
+        receipt = json.dumps(dict(type='user', message=dict(role='user', content='accepted'), timestamp='first')) + '\n'
+        with self.path.open('a') as source:
+            source.write(receipt + (json.dumps(dict(type='system', message='padding')) + '\n') * 12)
+        with patch.object(reader, 'TAIL_BYTES', 128):
+            reader.drain_held_queue('term-1', 'sid', self.path)
+            with self.path.open('r+') as source:
+                source.write(receipt.replace('first', 'other', 1))
+            for _ in range(10):
+                reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [])
+        self.send.assert_called_once()
+
+    def test_old_repeat_receipt_before_origin_does_not_block_new_send(self):
+        self.enqueue('yes', 1)
+        with self.path.open('a') as source:
+            source.write(json.dumps(dict(type='user', message=dict(role='user', content='yes'), timestamp='old')) + '\n')
+        with reader.held_queue_db('term-1') as db:
+            db.execute("UPDATE messages SET state='delivered',receipt='old' WHERE key='message-1'")
+        self.enqueue('yes', 2)
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual([call.args[0]['text'] for call in self.send.call_args_list], ['yes'])
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['yes'])
+
+    def test_trimmed_head_waits_for_three_queued_rows_before_handoff(self):
+        self.ready.return_value = True
+        self.enqueue('head ', 1)
+        self.ready.return_value = False
+        self.enqueue('first missing', 2)
+        self.enqueue('second missing', 3)
+        self.enqueue('third accepted', 4)
+        head = json.dumps(dict(type='attachment', attachment=dict(type='queued_command', prompt='head'), timestamp='head')) + '\n'
+        padding = (json.dumps(dict(type='system', message='padding')) + '\n') * 12
+        third = json.dumps(dict(type='user', message=dict(role='user', content='third accepted'), timestamp='third')) + '\n'
+        with self.path.open('a') as source:
+            source.write(head + padding + third)
+        with reader.held_queue_db('term-1') as db:
+            db.execute("UPDATE messages SET scan=? WHERE key='message-1'", (self.path.stat().st_size,))
+            db.execute('PRAGMA user_version=0')
+        self.send.reset_mock()
+        self.ready.return_value = True
+
+        def verify_before_send(request):
+            with reader.held_queue_db('term-1') as db:
+                states = dict(db.execute('SELECT key,state FROM messages'))
+            self.assertEqual(states['message-1'], 'delivered')
+            self.assertEqual(states['message-4'], 'delivered')
+            self.assertEqual(states['message-3'], 'queued')
+            return '@mp\t1\tsend\tok\t-\t0\n@@MP_END@@\n'
+
+        self.send.side_effect = verify_before_send
+        with patch.object(reader, 'TAIL_BYTES', 128):
+            reader.drain_held_queue('term-1', 'sid', self.path)
+            self.send.assert_not_called()
+            with reader.held_queue_db('term-1') as db:
+                self.assertEqual(db.execute("SELECT state FROM messages WHERE key='message-1'").fetchone()[0], 'submitted')
+                self.assertEqual(db.execute("SELECT key FROM held_receipts WHERE key='message-1'").fetchone(), ('message-1',))
+                db.execute("UPDATE messages SET scan=? WHERE key='message-1'", (self.path.stat().st_size,))
+            for _ in range 20:
+                reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual([call.args[0]['text'] for call in self.send.call_args_list], ['first missing'])
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['head ', 'third accepted'])
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'], ['second missing'])
+
+    def test_legacy_delivered_acceptance_does_not_acknowledge_later_copy(self):
+        self.enqueue('same ', 1)
+        acceptance = json.dumps(dict(type='attachment', attachment=dict(type='queued_command', prompt='same'), timestamp='first')) + '\n'
+        with self.path.open('a') as source:
+            source.write(acceptance)
+        with reader.held_queue_db('term-1') as db:
+            db.execute("UPDATE messages SET state='delivered',receipt='first' WHERE key='message-1'")
+            db.execute('PRAGMA user_version=0')
+        self.enqueue('same', 2)
+        with self.path.open('a') as source:
+            source.write(json.dumps(dict(type='user', message=dict(role='user', content='same'), timestamp='later')) + '\n')
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['same '])
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'], ['same'])
+        self.send.assert_not_called()
+
+    def test_upgrade_recovers_trimmed_receipt_and_reconciles_later_queue(self):
+        self.ready.return_value = True
+        self.enqueue('accepted ', 1)
+        self.ready.return_value = False
+        self.enqueue('missing', 2)
+        self.enqueue('already', 3)
+        with self.path.open('a') as source:
+            source.write(json.dumps(dict(type='attachment', attachment=dict(type='queued_command', prompt='accepted'), timestamp='first')) + '\n')
+            source.write(json.dumps(dict(type='user', message=dict(role='user', content='already'), timestamp='third')) + '\n')
+        with reader.held_queue_db('term-1') as db:
+            db.execute("UPDATE messages SET scan=? WHERE key='message-1'", (self.path.stat().st_size,))
+            db.execute('PRAGMA user_version=0')
+        self.send.reset_mock()
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['accepted ', 'already'])
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'], ['missing'])
+        self.send.assert_not_called()
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual([call.args[0]['text'] for call in self.send.call_args_list], ['missing'])
+
+    def test_reconciliation_respects_origin_identity_and_exact_interior(self):
+        self.path.write_text(json.dumps(dict(type='user', message=dict(role='user', content='before'))) + '\n')
+        self.enqueue('before', 1)
+        self.enqueue('a b ', 2)
+        with self.path.open('a') as source:
+            source.write(json.dumps(dict(type='user', message=dict(role='user', content='a  b'))) + '\n')
+        reader.drain_held_queue('term-1', 'other-sid', self.path)
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [])
+        replacement = self.home / 'replacement.jsonl'
+        replacement.write_text(json.dumps(dict(type='user', message=dict(role='user', content='before'))) + '\n')
+        with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', replacement)):
+            self.ready.return_value = True
+            reader.drain_held_queue('term-1', 'sid', replacement)
+        self.send.assert_not_called()
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [])
+
+    def test_interior_whitespace_is_not_normalized(self):
+        self.enqueue('spaces  inside', 1)
+        self.enqueue('tab\tinside', 2)
+        self.enqueue('line\ninside', 3)
+        with self.path.open('a') as source:
+            for text in ('spaces inside', 'tab inside', 'line inside'):
+                source.write(json.dumps(dict(type='user', message=dict(role='user', content=text))) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [])
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'],
+                         ['spaces  inside', 'tab\tinside', 'line\ninside'])
+        self.send.assert_not_called()
+
+    def test_one_receipt_cannot_acknowledge_two_identical_rows(self):
+        self.enqueue('same', 1)
+        self.enqueue('same', 2)
+        self.path.write_text(json.dumps(dict(type='user', message=dict(role='user', content='same'))) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['same'])
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'], ['same'])
+
     def test_offline_reconciliation_cannot_borrow_a_matching_message(self):
         self.enqueue('target', 1)
         self.path.write_text(json.dumps(dict(type='user', message=dict(role='user', content='target'), timestamp='2026-10-28T20:00:00Z')) + '\n')
