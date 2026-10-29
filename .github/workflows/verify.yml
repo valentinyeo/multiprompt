@@ -234,7 +234,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_crash_proof && '-crash' || '' }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
