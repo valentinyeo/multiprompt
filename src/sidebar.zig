@@ -1681,10 +1681,6 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]con
     const reader = @import("themes.zig").themeReaderDark();
     _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else if (reader) tokens.ReaderHint else RGB(98, 102, 109)));
     var rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.right - uiScaled(8), .bottom = y + height };
-    if (!reader and !app_state.g_chat_active) {
-        _ = DrawTextW(hdc, text, len, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-        return;
-    }
     var upper: [128]u16 = undefined;
     var n: usize = 0;
     while (n < upper.len and (if (len < 0) text[n] != 0 else n < @as(usize, @intCast(len)))) : (n += 1) {
@@ -1910,8 +1906,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
             if (i == app_state.active_shell and LOOK_UNIFIED) {
                 const reader = @import("themes.zig").themeReaderDark();
                 const hl = if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_amoled_theme) RGB(42, 42, 42) else tintColor(sidebar_bg, RGB(160, 160, 160), 1, 6);
-                const hl_brush = CreateSolidBrush(if (!app_state.g_sidebar_collapsed and !app_state.g_light_theme) RGB(53, 53, 53) else if (reader or (app_state.g_chat_active and !app_state.g_light_theme)) tokens.ReaderControl else hl);
-                const hl_pen = CreatePen(0, 1, if (reader or (app_state.g_chat_active and !app_state.g_light_theme)) tokens.ReaderOutline else customColorOr("overlay_border", hl));
+                const hl_brush = CreateSolidBrush(if (!app_state.g_sidebar_collapsed and !app_state.g_light_theme) RGB(53, 53, 53) else if (reader or !app_state.g_light_theme) tokens.ReaderControl else hl);
+                const hl_pen = CreatePen(0, 1, if (reader or !app_state.g_light_theme) tokens.ReaderOutline else customColorOr("overlay_border", hl));
                 const hl_radius: i32 = uiScaled(24);
                 const ob = SelectObject(hdc, hl_brush);
                 const op = SelectObject(hdc, hl_pen);
@@ -1956,7 +1952,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
             if (app_state.drag_active and i != app_state.drag_src) {}
 
-            if (!app_state.g_sidebar_collapsed and (app_state.g_chat_active or app_state.shells[i].tmux_session_len > 0 or app_state.shells[i].ai_agent != 0)) {
+            if (!app_state.g_sidebar_collapsed) {
                 paintChatSidebarRow(hdc, column, y, @intCast(i));
             } else if (app_state.g_sidebar_collapsed) {
                 const sw = SIDEBAR_W();
@@ -1987,243 +1983,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 }
                 if (app_state.shells[i].favorite) {
                     drawFavoriteDot(hdc, 9, y + 10);
-                }
-            } else if (LOOK_UNIFIED) {
-                const fav_size: i32 = uiScaled(16);
-                const fav_gap: i32 = uiScaled(8);
-                const left_pad: i32 = column.left + uiScaled(12);
-                const icon: HANDLE = app_state.shells[i].favicon_hicon orelse switch (app_state.shells[i].kind) {
-                    .cmd => app_state.g_icon_cmd,
-                    .pwsh => app_state.g_icon_pwsh,
-                    .bash, .gitbash => app_state.g_icon_bash,
-                    else => null,
-                };
-                var text_left: i32 = left_pad;
-                if (icon != null) {
-                    _ = DrawIconEx(hdc, left_pad, y + @divFloor(tabRowH() - fav_size, 2), icon, fav_size, fav_size, 0, null, DI_NORMAL);
-                    text_left = left_pad + fav_size + fav_gap;
-                }
-                const is_act = i == app_state.active_shell;
-                const reserve: i32 = (if (is_act) @as(i32, 30) else 12) + (if (app_state.shells[i].favorite) FAVORITE_DOT_D + 4 else 0);
-                var text_right = SIDEBAR_W() - reserve;
-                if (app_state.shells[i].favorite) {
-                    drawFavoriteDot(hdc, text_right + 2 + @divTrunc(FAVORITE_DOT_D, 2), y + @divFloor(tabRowH(), 2));
-                }
-                var eta_num_buf: [16]u16 = undefined;
-                var eta_num_len: usize = 0;
-                var eta_num_overdue = false;
-                var eta_num_w: i32 = 0;
-                if (app_state.g_eta_numbers_on and app_state.shells[i].eta_total_ms > 0) {
-                    var eb: [16]u8 = undefined;
-                    const remaining_ms: i64 = etaRemainingMs(app_state.shells[i].eta_deadline_tick, GetTickCount64());
-                    const txt = formatEtaRemaining(remaining_ms, &eb);
-                    eta_num_overdue = remaining_ms < 0;
-                    eta_num_len = asciiToU16(txt, &eta_num_buf);
-                    if (eta_num_len > 0) {
-                        _ = SelectObject(hdc, font_subtitle);
-                        var measure_rc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
-                        _ = DrawTextW(hdc, @ptrCast(&eta_num_buf), @intCast(eta_num_len), &measure_rc, DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT);
-                        eta_num_w = measure_rc.right - measure_rc.left;
-                        text_right -= eta_num_w + 6;
-                    }
-                }
-                if (chatDraftHasForShell(@intCast(i))) {
-                    _ = SelectObject(hdc, font_subtitle);
-                    _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(120, 120, 130) else RGB(150, 150, 160)));
-                    var draft_rc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
-                    _ = DrawTextW(hdc, L("DRAFT"), -1, &draft_rc, DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT);
-                    const draft_w = draft_rc.right;
-                    draft_rc = .{ .left = text_right - draft_w, .top = y, .right = text_right, .bottom = y + tabRowH() };
-                    _ = DrawTextW(hdc, L("DRAFT"), -1, &draft_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                    text_right -= draft_w + 6;
-                }
-                if (app_state.shells[i].disconnected or app_state.shells[i].needs_attention or app_state.shells[i].ai_agent != 0) {
-                    var ag_sb_rc = RECT{ .left = text_left, .top = y, .right = text_left + 14, .bottom = y + tabRowH() };
-                    if (app_state.shells[i].disconnected) {
-                        drawAttentionDot(hdc, @divTrunc(ag_sb_rc.left + ag_sb_rc.right, 2), @divTrunc(ag_sb_rc.top + ag_sb_rc.bottom, 2), 4, RGB(255, 145, 55));
-                    } else if (app_state.shells[i].needs_attention) {
-                        drawAttentionDot(hdc, @divTrunc(ag_sb_rc.left + ag_sb_rc.right, 2), @divTrunc(ag_sb_rc.top + ag_sb_rc.bottom, 2), 4, customColorOr("attention", RGB(60, 120, 220)));
-                    } else {
-                        drawAgentIcon(hdc, &ag_sb_rc, app_state.shells[i].ai_agent, app_state.shells[i].activity == .active);
-                    }
-                    text_left += 18;
-                }
-                if (app_state.shells[i].browser_enabled) {
-                    if (app_state.shells[i].keep_awake) {
-                        var kaw_sb_rc = RECT{ .left = text_left, .top = y, .right = text_left + 14, .bottom = y + tabRowH() };
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, if (is_act) RGB(100, 180, 220) else RGB(70, 130, 160));
-                        _ = DrawTextW(hdc, L("\u{25C9}"), -1, &kaw_sb_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-                        text_left += 18;
-                    } else if (app_state.shells[i].browser_frozen or app_state.shells[i].browser_suspended) {
-                        var frz_sb_rc = RECT{ .left = text_left, .top = y, .right = text_left + 14, .bottom = y + tabRowH() };
-                        _ = SelectObject(hdc, font_title);
-                        _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(140, 140, 150) else RGB(120, 120, 130)));
-                        _ = DrawTextW(hdc, L("z"), -1, &frz_sb_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-                        text_left += 18;
-                    }
-                }
-                _ = SelectObject(hdc, font_shell_tab_title);
-                const title_color: DWORD = if (app_state.g_light_theme) RGB(20, 20, 20) else RGB(255, 255, 255);
-                _ = SetTextColor(hdc, title_color);
-                if (app_state.shells[i].name_len > 0) {
-                    var line_rc = RECT{ .left = text_left, .top = y, .right = text_right, .bottom = y + tabRowH() };
-                    _ = SetTextCharacterExtra(hdc, DEV_LETTER_SPACING);
-                    _ = DrawTextW(hdc, @ptrCast(&app_state.shells[i].name), @intCast(app_state.shells[i].name_len), &line_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    _ = SetTextCharacterExtra(hdc, 0);
-                }
-                _ = SelectObject(hdc, font_title);
-                if (is_act) {
-                    const font_close = uiFontClose();
-                    _ = SelectObject(hdc, font_close);
-                    _ = SetTextColor(hdc, customColorOr("muted", RGB(170, 178, 190)));
-                    var x_rc = RECT{ .left = SIDEBAR_W() - 26, .top = y, .right = SIDEBAR_W() - 8, .bottom = y + tabRowH() };
-                    _ = DrawTextW(hdc, L("\u{00d7}"), -1, &x_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-                    _ = SelectObject(hdc, font_title);
-                }
-                if (eta_num_len > 0) {
-                    _ = SelectObject(hdc, font_subtitle);
-                    const eta_muted = customColorOr("muted", if (app_state.g_light_theme) RGB(120, 120, 130) else RGB(150, 150, 160));
-                    _ = SetTextColor(hdc, if (eta_num_overdue) etaOverdueColor() else eta_muted);
-                    var eta_rc = RECT{ .left = SIDEBAR_W() - reserve - eta_num_w, .top = y, .right = SIDEBAR_W() - reserve, .bottom = y + tabRowH() };
-                    _ = DrawTextW(hdc, @ptrCast(&eta_num_buf), @intCast(eta_num_len), &eta_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                    _ = SelectObject(hdc, font_title);
-                }
-                if (app_state.g_eta_progress_on and app_state.shells[i].eta_total_ms > 0) {
-                    const bar_remaining_ms = etaRemainingMs(app_state.shells[i].eta_deadline_tick, GetTickCount64());
-                    const elapsed_ms: i64 = etaElapsedMs(app_state.shells[i].eta_total_ms, bar_remaining_ms);
-                    const overdue = bar_remaining_ms < 0;
-                    const frac = if (overdue) @as(f32, 1) else etaFillFraction(elapsed_ms, app_state.shells[i].eta_total_ms);
-                    const track_left = 8;
-                    const track_right = SIDEBAR_W() - 8;
-                    const track_w = track_right - track_left;
-                    if (track_w > 0) {
-                        const fill_w: i32 = @intFromFloat(@as(f32, @floatFromInt(track_w)) * frac);
-                        const line_top = y + tabRowH() - 6;
-                        const line_bottom = line_top + 2;
-                        const progress_color = if (overdue) etaOverdueColor() else customColorOr("accent", RGB(79, 168, 255));
-                        if (fill_w > 0) {
-                            var fill_rc = RECT{ .left = track_left, .top = line_top, .right = track_left + fill_w, .bottom = line_bottom };
-                            const fill_br = CreateSolidBrush(progress_color);
-                            _ = FillRect(hdc, &fill_rc, fill_br);
-                            _ = DeleteObject(fill_br);
-                        }
-                    }
-                }
-            } else {
-                const base_text_left: i32 = 12;
-                const fav_size: i32 = 16;
-                const fav_gap: i32 = 6;
-                const has_fav = app_state.shells[i].favicon_hicon != null;
-                if (has_fav) {
-                    _ = DrawIconEx(hdc, base_text_left, y + 8, app_state.shells[i].favicon_hicon.?, fav_size, fav_size, 0, null, DI_NORMAL);
-                }
-                var text_left: i32 = if (has_fav) base_text_left + fav_size + fav_gap else base_text_left;
-                if (app_state.shells[i].disconnected) {
-                    drawAttentionDot(hdc, text_left + 7, y + @divFloor(tabRowH(), 2), 4, RGB(255, 145, 55));
-                    text_left += 18;
-                } else if (app_state.shells[i].needs_attention) {
-                    drawAttentionDot(hdc, text_left + 7, y + @divFloor(tabRowH(), 2), 4, customColorOr("attention", RGB(60, 120, 220)));
-                    text_left += 18;
-                }
-                var text_right = SIDEBAR_W() - 32 - (if (app_state.shells[i].favorite) FAVORITE_DOT_D + 4 else 0);
-                if (chatDraftHasForShell(@intCast(i))) {
-                    _ = SelectObject(hdc, font_subtitle);
-                    _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(120, 120, 130) else RGB(150, 150, 160)));
-                    var draft_rc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
-                    _ = DrawTextW(hdc, L("DRAFT"), -1, &draft_rc, DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT);
-                    const draft_w = draft_rc.right;
-                    draft_rc = .{ .left = text_right - draft_w, .top = y + 6, .right = text_right, .bottom = y + 26 };
-                    _ = DrawTextW(hdc, L("DRAFT"), -1, &draft_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-                    text_right -= draft_w + 6;
-                }
-
-                if (app_state.shells[i].favorite) {
-                    drawFavoriteDot(hdc, text_right + 2 + @divTrunc(FAVORITE_DOT_D, 2), y + 16);
-                }
-                _ = SelectObject(hdc, font_shell_tab_title);
-                const title_white: DWORD = if (@import("themes.zig").themeReaderDark()) tokens.ReaderForeground else RGB(255, 255, 255);
-                const title_color: DWORD = if (i == app_state.active_shell) customColorOr("text", title_white) else customColorOr("text_inactive", if (app_state.g_light_theme) RGB(25, 25, 25) else title_white);
-                _ = SetTextColor(hdc, title_color);
-                var line1_rc = RECT{ .left = text_left, .top = y + 6, .right = text_right, .bottom = y + 26 };
-                if (app_state.shells[i].name_len > 0) {
-                    var measure_rc = line1_rc;
-                    _ = DrawTextW(hdc, @ptrCast(&app_state.shells[i].name), @intCast(app_state.shells[i].name_len), &measure_rc, DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT);
-                    _ = DrawTextW(hdc, @ptrCast(&app_state.shells[i].name), @intCast(app_state.shells[i].name_len), &line1_rc, DT_SINGLELINE | DT_NOPREFIX);
-
-                    _ = SelectObject(hdc, font_subtitle);
-                    const tag_color = if (app_state.shells[i].kind == .tmux)
-                        themeTagTmux(i == app_state.active_shell, if (app_state.g_light_theme and i != app_state.active_shell) RGB(30, 120, 30) else if (i == app_state.active_shell) RGB(100, 180, 100) else RGB(70, 140, 70))
-                    else if (app_state.shells[i].keep_alive)
-                        themeTagVps(i == app_state.active_shell, if (app_state.g_light_theme and i != app_state.active_shell) RGB(30, 90, 180) else if (i == app_state.active_shell) RGB(100, 160, 240) else RGB(70, 120, 190))
-                    else
-                        themeTagNeutral(i == app_state.active_shell, if (app_state.g_light_theme and i != app_state.active_shell) RGB(100, 100, 110) else if (i == app_state.active_shell) RGB(140, 140, 150) else RGB(100, 100, 110));
-                    _ = SetTextColor(hdc, tag_color);
-                    var tag_buf: [20]u16 = undefined;
-                    var tbi: usize = 0;
-                    const kind_str: []const u8 = switch (app_state.shells[i].kind) {
-                        .cmd => "CMD",
-                        .pwsh => "PWS",
-                        .vps => "VPS",
-                        .tmux => "TMX",
-                        .vps2 => "VPS",
-                        .bash => "BSH",
-                        .gitbash => "GIT",
-                    };
-                    for (kind_str) |c| {
-                        tag_buf[tbi] = c;
-                        tbi += 1;
-                    }
-                    if (app_state.shells[i].ram_mb > 0) {
-                        tag_buf[tbi] = ' ';
-                        tbi += 1;
-                        var ram_val = app_state.shells[i].ram_mb;
-                        var ram_digits: [6]u8 = undefined;
-                        var rdi: usize = 0;
-                        while (ram_val > 0) : (rdi += 1) {
-                            ram_digits[rdi] = @intCast(ram_val % 10 + '0');
-                            ram_val /= 10;
-                        }
-                        if (rdi == 0) {
-                            ram_digits[0] = '0';
-                            rdi = 1;
-                        }
-                        while (rdi > 0) {
-                            rdi -= 1;
-                            tag_buf[tbi] = ram_digits[rdi];
-                            tbi += 1;
-                        }
-                        tag_buf[tbi] = 'M';
-                        tbi += 1;
-                    }
-                    var tag_rc = RECT{ .left = measure_rc.right + 6, .top = y + 8, .right = text_right, .bottom = y + 26 };
-                    _ = DrawTextW(hdc, @ptrCast(&tag_buf), @intCast(tbi), &tag_rc, DT_SINGLELINE | DT_NOPREFIX);
-
-                    _ = SelectObject(hdc, font_title);
-                }
-                _ = SelectObject(hdc, font_title);
-
-                const sub_len: usize = if (app_state.shells[i].last_title_len > 0) @intCast(app_state.shells[i].last_title_len) else 0;
-                const show_subtitle = sub_len > 0 and !u16SliceEql(
-                    app_state.shells[i].last_title[0..sub_len],
-                    app_state.shells[i].name[0..app_state.shells[i].name_len],
-                );
-                if (show_subtitle) {
-                    _ = SelectObject(hdc, font_subtitle);
-                    const sub_color: DWORD = if (i == app_state.active_shell) customColorOr("subtitle", RGB(220, 220, 220)) else customColorOr("subtitle", if (app_state.g_light_theme) RGB(90, 90, 90) else RGB(220, 220, 220));
-                    _ = SetTextColor(hdc, sub_color);
-                    var line2_rc = RECT{ .left = text_left, .top = y + 28, .right = text_right, .bottom = y + 44 };
-                    _ = DrawTextW(hdc, @ptrCast(&app_state.shells[i].last_title), @intCast(app_state.shells[i].last_title_len), &line2_rc, DT_SINGLELINE | DT_NOPREFIX);
-                    _ = SelectObject(hdc, font_title);
-                }
-
-                if (i == app_state.active_shell) {
-                    const font_close = uiFontClose();
-                    _ = SelectObject(hdc, font_close);
-                    _ = SetTextColor(hdc, customColorOr("muted", RGB(180, 180, 180)));
-                    var x_rc = RECT{ .left = SIDEBAR_W() - 28, .top = y, .right = SIDEBAR_W() - 6, .bottom = y + tabRowH() };
-                    _ = DrawTextW(hdc, L("\u{00d7}"), -1, &x_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-                    _ = SelectObject(hdc, font_title);
                 }
             }
         }
