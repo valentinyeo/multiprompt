@@ -103,6 +103,12 @@
                 Press @(0x12, 0x41) 'Alt+A: open browser for slow navigation'
                 $slowPane = Assert-BrowserPane 'open' 'slow-open'
                 Focus-BrowserPaneOwner 'slow-open' $slowPane.browser_connection_id
+                $slowUrl = "http://127.0.0.1:$port/slow"
+                Palette 'browser url'
+                Press @(0x0D) 'Enter: choose browser URL'
+                Type-Text $slowUrl
+                Press @(0x0D) 'Enter: retain slow URL through app navigation'
+                Wait-Until { (Read-Session).tabs[0].burl -eq $slowUrl } 'slow URL saved through the real app UI'
                 $browser = [VerifyNative]::DockedPaneWindow($script:window)
                 [uint32]$browserPid = 0
                 [void][VerifyNative]::GetWindowThreadProcessId($browser, [ref]$browserPid)
@@ -123,7 +129,7 @@
                 Press @(0x12, 0x41) 'Alt+A: close while page still loads'
                 $closed = Assert-BrowserPane 'closed' 'slow-loading-close'
                 if ((Get-Content $serverLog -Raw) -match 'SLOW_FINISHED') { throw 'Close waited for page completion' }
-                Save-Json @{ loadingObserved = $true; closed = $closed.browser_state -eq 'closed'; finishedBeforeClose = $false } 'slow-toggle.json'
+                Save-Json @{ loadingObserved = $true; retainedUrl = $slowUrl; closed = $closed.browser_state -eq 'closed'; finishedBeforeClose = $false } 'slow-toggle.json'
                 Assert-ImmediateBrowserPairs 'slow'
                 Get-Content $debug | Where-Object { $_ -match 'shortcutToggle' } | Set-Content -Encoding UTF8 (Join-Path $Evidence 'toggle-keys.log')
                 Snapshot 'immediate-after'

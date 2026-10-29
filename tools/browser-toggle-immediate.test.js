@@ -70,6 +70,7 @@ test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', 
   assert.match(native, /gap > 300/);
   assert.match(journey, /Press @\(0x11, 0x4C\) 'Ctrl\+L: navigate browser pane'/);
   assert.match(journey, /ClassName -eq 'OmniboxViewViews'/);
+  assert.ok(journey.includes("(Read-Session).tabs[0].burl -eq $slowUrl"));
   assert.doesNotMatch(journey, /Alt\+L: navigate browser pane/);
   assert.match(journey, /Press @\(0x12, 0x41\) 'Alt\+A: open browser for slow navigation'/);
 });
