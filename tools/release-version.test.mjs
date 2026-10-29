@@ -65,7 +65,7 @@ if (args[0] === 'run') {
   process.exit(0);
 }
 if (args[0] === 'api' && args[1].endsWith('/releases/latest')) {
-  console.log('v1.2.8');
+  console.log(process.env.PUBLISHED_TAG || 'v1.2.8');
   process.exit(0);
 }
 if (args[0] === 'api') {
@@ -400,7 +400,10 @@ test('auto-release creates only a tag ref on the tested commit under a branch-re
     ['api', '-X', 'POST', 'repos/example/multiprompt/git/refs', '-f', 'ref=refs/tags/v1.2.9', '-f', `sha=${tested}`],
   ]);
   f.git('fetch', '--tags', 'origin');
-  const second = f.admit();
+  const retry = f.admit();
+  assert.equal(retry.status, 0, retry.stderr);
+  assert.equal(retry.stdout, `tag=v1.2.9\nsha=${tested}\n`);
+  const second = f.admit({ PUBLISHED_TAG: 'v1.2.9' });
   assert.equal(second.status, 0, second.stderr);
   assert.equal(second.stdout, '');
 });
