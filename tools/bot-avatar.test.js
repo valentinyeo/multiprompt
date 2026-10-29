@@ -29,8 +29,15 @@ test('real bot identity matches Android, survives renamed titles and covers the 
     fs.writeFileSync(path.join(dir, 'identity.zig'), `const std = @import("std");
 const state = struct { pub const Shell = struct {
   tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
-  name: [64]u16 = @splat(0), name_len: u32 = 0,
-}; };
+  name: [64]u16 = @splat(0), name_len: u32 = 0, workspace: u8 = 0,
+};
+pub var g_workspace_count: u32 = 3;
+pub var g_workspaces = [_]struct { name: []const u8, name_len: u32 }{
+    .{ .name = "inne", .name_len = 4 },
+    .{ .name = "Hypertask", .name_len = 9 },
+    .{ .name = "Software Factory", .name_len = 16 },
+};
+};
 ${identity}
 ${forShell}
 test "Android reference vectors and stable raw identity" {
@@ -48,6 +55,12 @@ test "Android reference vectors and stable raw identity" {
     @memcpy(shell.tmux_session[0..15], "HT Product Lead");
     shell.tmux_session_len = 15;
     const before = forShell(&shell);
+    try std.testing.expectEqual(@as(u8, 2), before.color);
+    shell.workspace = 1;
+    try std.testing.expectEqual(@as(u8, 5), forShell(&shell).color);
+    shell.workspace = 2;
+    try std.testing.expectEqual(@as(u8, 4), forShell(&shell).color);
+    shell.workspace = 0;
     @memcpy(shell.name[0..7], std.unicode.utf8ToUtf16LeStringLiteral("Renamed"));
     shell.name_len = 7;
     try std.testing.expectEqual(before, forShell(&shell));
