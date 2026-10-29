@@ -45,10 +45,10 @@
             $samples = @($timed | ForEach-Object { @{ id = [uint64]$_.Groups[1].Value; enqueueMs = [math]::Round([int64]$_.Groups[2].Value / 1000.0, 2); paintedMs = [math]::Round([int64]$_.Groups[3].Value / 1000.0, 2) } })
             if ($samples.Count -ne 20) { throw "chat-send-latency: expected 20 timed sends, found $($samples.Count)" }
             $painted = @($samples | ForEach-Object { $_.paintedMs } | Sort-Object)
-            $summary = @{ budgetMs = 100; count = $samples.Count; medianMs = $painted[10]; maxMs = $painted[-1]; samples = $samples }
+            $summary = @{ budgetMs = $releaseGatePolicy.checks.'chat-send-paint'.limit; count = $samples.Count; medianMs = $painted[10]; maxMs = $painted[-1]; samples = $samples }
             Save-Json $summary 'chat-send-latency.json'
             Snapshot 'after'
-            $late = @($samples | Where-Object { $_.paintedMs -gt 100 })
-            $result.checks += @{ name = 'chat-send-latency'; budgetMs = 100; count = $samples.Count; medianMs = $summary.medianMs; maxMs = $summary.maxMs; over = $late.Count }
+            $late = @($samples | Where-Object { $_.paintedMs -gt $releaseGatePolicy.checks.'chat-send-paint'.limit })
+            $result.checks += @{ name = 'chat-send-latency'; budgetMs = $releaseGatePolicy.checks.'chat-send-paint'.limit; count = $samples.Count; medianMs = $summary.medianMs; maxMs = $summary.maxMs; over = $late.Count }
             foreach ($sample in $samples) { Assert-ReleaseTiming 'chat-send-paint' $sample.paintedMs ('send ' + $sample.id) }
         
