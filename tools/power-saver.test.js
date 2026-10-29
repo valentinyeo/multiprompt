@@ -64,8 +64,8 @@ test("inbox publish debounces bursts into one write via a dedicated timer", () =
   assert.match(app, /if \(wp == TIMER_INBOX_PUBLISH\) \{\s+_ = KillTimer\(hwnd, TIMER_INBOX_PUBLISH\);\s+publishInboxStateNow\(\);/);
 });
 
-test("title bar shows the active power tier without disturbing the version text", () => {
-  assert.match(app, /if \(g_power_deep_idle\) " - Idle" else if \(powerSaving\(\)\) " - Saver" else ""/);
+test("window title stays fixed during power changes", () => {
+  assert.match(app, /const title = "Multi Bot"/);
 });
 
 test("persistent per-host VPS channel falls back to the one-shot path on any failure", () => {

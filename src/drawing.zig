@@ -658,7 +658,7 @@ fn chatTitleMetaText(now: u64) []const u16 {
     const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
     if (cap_msg) {
         if (app_state.g_account_reauth) {
-            return std.mem.span(L("Sign in again: Ctrl+K > Sign in to multiprompt"));
+            return std.mem.span(L("Sign in again: Ctrl+K > Sign in to Multi Bot"));
         }
         if (app_state.g_cap_msg_len > 0) return app_state.g_cap_msg_text[0..app_state.g_cap_msg_len];
         return std.mem.span(L("Tab limit reached (256) - close a tab"));
@@ -825,7 +825,7 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
         _ = SetTextColor(hdc, warn_col);
         var cap_rc = RECT{ .left = right_x, .top = title_top, .right = band_right - 8, .bottom = title_bottom };
         if (app_state.g_account_reauth) {
-            _ = DrawTextW(hdc, L("Sign in again: Ctrl+K > Sign in to multiprompt"), -1, &cap_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            _ = DrawTextW(hdc, L("Sign in again: Ctrl+K > Sign in to Multi Bot"), -1, &cap_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         } else if (app_state.g_cap_msg_len > 0) {
             _ = DrawTextW(hdc, @ptrCast(&app_state.g_cap_msg_text), @intCast(app_state.g_cap_msg_len), &cap_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         } else {

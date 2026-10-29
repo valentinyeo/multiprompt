@@ -1,11 +1,9 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const IS_DEV = @import("main.zig").IS_DEV;
-const APP_VERSION = @import("main.zig").APP_VERSION;
 const DWORD = @import("win32.zig").DWORD;
 const LPARAM = @import("win32.zig").LPARAM;
 const LPCWSTR = @import("win32.zig").LPCWSTR;
-const powerSaving = @import("power.zig").powerSaving;
 const LoadImageW = @import("win32.zig").LoadImageW;
 const IMAGE_ICON = @import("win32.zig").IMAGE_ICON;
 const LR_DEFAULTCOLOR = @import("win32.zig").LR_DEFAULTCOLOR;
@@ -17,8 +15,6 @@ const LoadLibraryA = @import("win32.zig").LoadLibraryA;
 const GetProcAddress = @import("win32.zig").GetProcAddress;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const appendDecimal = @import("diagnostics.zig").appendDecimal;
-const workspaceDisplayName = @import("workspaces.zig").workspaceDisplayName;
-const voiceStatusLabel = @import("voice.zig").voiceStatusLabel;
 
 pub fn playNotificationSound() void {
     const mciFn = app_state.g_mciSendStringA orelse return;
@@ -315,117 +311,8 @@ pub fn getInstanceName() []const u8 {
 }
 
 pub fn buildWindowTitle(buf: *[256]u16) LPCWSTR {
-    var pos: usize = 0;
-    const base = if (IS_DEV) "multiprompt v" ++ APP_VERSION ++ " [DEV]" else "multiprompt v" ++ APP_VERSION;
-    const inst = getInstanceName();
-    const has_display = app_state.g_window_display_name_len > 0;
-    if (app_state.g_inbox_active) {
-        const inbox = "Inbox - ";
-        for (inbox) |c| {
-            if (pos >= 255) break;
-            buf[pos] = @intCast(c);
-            pos += 1;
-        }
-    } else if (app_state.g_single_window) {
-        var nbuf: [32]u8 = undefined;
-        const wsname = if (app_state.g_starred_workspace) "Starred" else workspaceDisplayName(app_state.g_active_workspace, &nbuf);
-        for (wsname) |c| {
-            if (pos >= 255) break;
-            buf[pos] = @intCast(c);
-            pos += 1;
-        }
-        var cbuf: [20]u8 = undefined;
-        const cnt: []const u8 = std.fmt.bufPrint(&cbuf, " ({d}/{d}) - ", .{ if (app_state.g_starred_workspace) @as(u32, 1) else @as(u32, app_state.g_active_workspace) + 2, app_state.g_lws_count + 1 }) catch " - ";
-        for (cnt) |c| {
-            if (pos >= 255) break;
-            buf[pos] = @intCast(c);
-            pos += 1;
-        }
-    } else if (has_display or !std.mem.eql(u8, inst, "default")) {
-        if (has_display) {
-            for (0..app_state.g_window_display_name_len) |di| {
-                if (pos >= 255) break;
-                buf[pos] = app_state.g_window_display_name[di];
-                pos += 1;
-            }
-        } else {
-            for (inst) |c| {
-                if (pos >= 255) break;
-                buf[pos] = @intCast(c);
-                pos += 1;
-            }
-        }
-        const sep = " - ";
-        for (sep) |c| {
-            if (pos >= 255) break;
-            buf[pos] = @intCast(c);
-            pos += 1;
-        }
-    }
-    for (base) |c| {
-        if (pos >= 255) break;
-        buf[pos] = @intCast(c);
-        pos += 1;
-    }
-    const power_suffix: []const u8 = if (app_state.g_power_deep_idle) " - Idle" else if (powerSaving()) " - Saver" else "";
-    for (power_suffix) |c| {
-        if (pos >= 255) break;
-        buf[pos] = @intCast(c);
-        pos += 1;
-    }
-    if (app_state.g_voice_mode_active) {
-        const voice_sep = " - ";
-        for (voice_sep) |c| {
-            if (pos >= 255) break;
-            buf[pos] = @intCast(c);
-            pos += 1;
-        }
-        const voice_label = voiceStatusLabel();
-        var vli: usize = 0;
-        while (voice_label[vli] != 0 and pos < 255) : (vli += 1) {
-            buf[pos] = voice_label[vli];
-            pos += 1;
-        }
-    }
-    if (IS_DEV and app_state.g_dev_font_hud) {
-        const tag = "  -  ";
-        for (tag) |c| {
-            if (pos >= 255) break;
-            buf[pos] = @intCast(c);
-            pos += 1;
-        }
-        var fi: usize = 0;
-        while (fi < app_state.g_dev_theme.console_font.len and app_state.g_dev_theme.console_font[fi] != 0 and pos < 255) : (fi += 1) {
-            buf[pos] = app_state.g_dev_theme.console_font[fi];
-            pos += 1;
-        }
-        if (pos < 255) {
-            buf[pos] = ' ';
-            pos += 1;
-        }
-        var h: i32 = app_state.g_dev_theme.console_font_height;
-        if (h < 0) h = 0;
-        var digits: [8]u8 = undefined;
-        var dn: usize = 0;
-        if (h == 0) {
-            digits[0] = '0';
-            dn = 1;
-        }
-        while (h > 0 and dn < digits.len) : (h = @divTrunc(h, 10)) {
-            digits[dn] = @intCast('0' + @as(u8, @intCast(@mod(h, 10))));
-            dn += 1;
-        }
-        while (dn > 0 and pos < 255) {
-            dn -= 1;
-            buf[pos] = digits[dn];
-            pos += 1;
-        }
-        if (pos + 2 <= 255) {
-            buf[pos] = 'p';
-            buf[pos + 1] = 'x';
-            pos += 2;
-        }
-    }
-    buf[pos] = 0;
+    const title = "Multi Bot";
+    for (title, 0..) |c, i| buf[i] = c;
+    buf[title.len] = 0;
     return @ptrCast(buf);
 }

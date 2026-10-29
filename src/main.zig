@@ -8053,7 +8053,7 @@ pub fn main(init: std.process.Init) void {
         if (handleSyncAuthCallback(callback_url)) {
             runVaultFlowProcess();
         } else {
-            _ = MessageBoxW(null, L("multiprompt could not complete sign-in. Try again from Ctrl+K."), L("multiprompt"), 0x10);
+            _ = MessageBoxW(null, L("Multi Bot could not complete sign-in. Try again from Ctrl+K."), L("Multi Bot"), 0x10);
         }
         return;
     }
@@ -8208,7 +8208,7 @@ pub fn main(init: std.process.Init) void {
     const hwnd = CreateWindowExW(
         0,
         L("ZigShell"),
-        if (IS_DEV) L("multiprompt v" ++ APP_VERSION ++ " [DEV]") else L("multiprompt v" ++ APP_VERSION),
+        L("Multi Bot"),
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | @import("win32.zig").WS_MAXIMIZE,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
@@ -8226,6 +8226,8 @@ pub fn main(init: std.process.Init) void {
     }
 
     app_state.g_main_hwnd = hwnd;
+    if (IS_DEV) _ = @import("win32.zig").SetPropW(hwnd, L("MultipromptDevWindow"), @ptrFromInt(1));
+    _ = @import("win32.zig").SetPropW(hwnd, L("MultipromptWorkspaceInstance"), @ptrFromInt(@import("workspaces.zig").workspaceInstanceProperty(getInstanceName())));
     @import("browser_pane.zig").installBrowserDockHooks();
     defer @import("browser_pane.zig").uninstallBrowserDockHooks();
     @import("report_upload.zig").start();

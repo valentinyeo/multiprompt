@@ -7,7 +7,7 @@ pub const LOOP_MAX_CRASHES: usize = 4;
 pub const LOOP_WINDOW_SECS: i64 = 900;
 pub const NOTICE_MAX_AGE_SECS: i64 = 600;
 pub const LOG_TAIL_LINES: usize = 200;
-pub const NOTICE_TEXT = "multiprompt restarted after a crash (details saved)";
+pub const NOTICE_TEXT = "Multi Bot restarted after a crash (details saved)";
 pub const CRASH_NAME_LEN: usize = 25;
 
 pub const Snapshot = struct {

@@ -352,7 +352,9 @@ function Doctor {
     if ($owner -ne $process.Id -or [VerifyNative]::Class($script:window) -ne 'ZigShell') { throw 'Doctor: window ownership mismatch' }
     if ($process.Path -ne $Exe -or (Get-FileHash $Exe -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'Doctor: executable identity mismatch' }
     $title = [VerifyNative]::Title($script:window)
-    if ($title -notmatch ('multiprompt v' + [regex]::Escape($ExpectedVersion) + '(?:\s|$)')) { throw "Doctor: wrong version in $title" }
+    $legacyTitle = '(?:^| - )multiprompt v' + [regex]::Escape($ExpectedVersion) + '(?= |$)(?: .*)?$'
+    if ($title -cne 'Multi Bot' -and $title -cnotmatch $legacyTitle) { throw "Doctor: wrong window title: $title" }
+    if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Doctor: executable version mismatch' }
     $element = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
     if ($element.Current.ProcessId -ne $process.Id -or $element.Current.IsOffscreen) { throw 'Doctor: UI Automation cannot see owned window' }
     $state = Read-Inbox

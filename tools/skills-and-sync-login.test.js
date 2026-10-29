@@ -12,7 +12,7 @@ test('Ctrl+K exposes grouped native and harness skills with keyboard command bro
   assert.match(main, /SEARCH_SKILLS_MENU_OFFSET/);
   assert.match(main, /g_search_skills_mode/);
   assert.match(main, /L\("Skills\.\.\."\)/);
-  assert.match(main, /"multiprompt skills"/);
+  assert.match(main, /"Multi Bot skills"/);
   assert.match(main, /L\("coding harness"\)/);
   assert.doesNotMatch(main, /plus_btn/);
   assert.doesNotMatch(main, /showChatPlusMenu/);

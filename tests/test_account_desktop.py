@@ -235,10 +235,10 @@ class AccountDesktop(unittest.TestCase):
         self.assertIn('g_account_login_active = false;', function(MAIN, 'handleLayoutReply'))
         self.assertIn('if (reply.cancelled)', function(MAIN, 'handleLayoutReply'))
 
-    def test_version_matches_window_titles(self):
+    def test_fixed_window_title_and_version_marker(self):
         self.assertRegex(MAIN, r'const APP_VERSION = build_config\.app_version orelse "[^"\n]+"')
-        self.assertIn('L("multiprompt v" ++ APP_VERSION ++ " [DEV]")', MAIN)
-        self.assertIn('L("multiprompt v" ++ APP_VERSION)', MAIN)
+        self.assertIn('L("Multi Bot")', MAIN)
+        self.assertIn('const title = "Multi Bot";', (ROOT / 'src/startup.zig').read_text())
 
     def test_version_matches_latest_changelog(self):
         def version(source):

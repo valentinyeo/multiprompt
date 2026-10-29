@@ -24,11 +24,11 @@ Preconditions:
 - Inbox has a visible selected session, with no active search or unread-only filter hiding it.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=inbox`; Windows runs `control.ps1 -Feature inbox`.
-- **Open.** Press Ctrl+Shift+I. Require the actual window title to start `Inbox - ` then press Alt+I to select All and capture `action.png`, showing the list before the mutation.
+- **Open.** Press Ctrl+Shift+I. Require published `inbox_active` to be true (or the legacy `Inbox - ` title) then press Alt+I to select All and capture `action.png`, showing the list before the mutation.
 - **Toggle.** Read the session's current attention value, then press the real `u` key. Require the published session attention value to change. Capture `after.png` while Inbox is visible.
-- **Return.** Press Esc. The actual window title must no longer start `Inbox - `. Capture `returned.png` with the usable workspace restored.
+- **Return.** Press Esc. Require published `inbox_active` to be false (or the legacy title to leave `Inbox - `). Capture `returned.png` with the usable workspace restored.
 - **Mute.** After `returned.png`, press Ctrl+K, type `new cmd`, then Enter, and require two saved tabs and two published Inbox sessions, so the Inbox is never empty while one is muted. Record the second tab's `shell_id` as the sid and require it to be listed and match the active saved tab. Record the saved tab count. Press Ctrl+K, type `mute tab`, then Enter. Require Read-Session to save `muted: true` on the same active tab and Read-Inbox to publish a valid list without that sid.
-- **Muted Inbox.** Press Ctrl+Shift+I, require the `Inbox - ` title, then press Alt+I for All. Capture `muted.png`, showing Inbox without the session. Record `inbox-muted-hidden` in `result.json` with the sid, `listed=false`, and the title.
+- **Muted Inbox.** Press Ctrl+Shift+I, require published `inbox_active` (or the legacy `Inbox - ` title), then press Alt+I for All. Capture `muted.png`, showing Inbox without the session. Record `inbox-muted-hidden` in `result.json` with the sid, `listed=false`, and the title.
 - **Muted return.** Press Esc and require Inbox to close. Require the same session to remain in Read-Session with the same tab count as before muting. Capture `muted-returned.png`, showing the muted tab still in its workspace.
 - **Unmute.** Press Ctrl+K, type `unmute tab`, then Enter. Require the same sid to reappear in Read-Inbox and record `inbox-unmuted-listed` with the sid and `listed=true`.
 - **Proof.** Inspect `action.png`, `after.png`, and `returned.png` for the selected session, blue dot, and workspace return; inspect `muted.png` and `muted-returned.png` for Inbox absence and tab survival. `result.json` records attention before/after, the mute/unmute checks, and Inbox window titles. `data/roaming/ZigShell/inbox-default.json` and `session.json` are app-published side effects, not harness-created fixtures.

@@ -1,6 +1,6 @@
 
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox'
-            Wait-Until { [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'Inbox window state'
+            Wait-Until { (($state = Read-Inbox) -and $state.PSObject.Properties['inbox_active'] -and $state.inbox_active -eq $true) -or ([VerifyNative]::Title($script:window).StartsWith('Inbox - ')) } 'Inbox window state'
             Press @(0x12, 0x49) 'Alt+I: select All split'
             Snapshot 'action'
             $prior = (Read-Inbox).shells[0].att
@@ -9,7 +9,7 @@
             Snapshot 'after'
             $result.checks += @{ name = 'inbox-toggle-read'; attentionBefore = $prior; attentionAfter = (Read-Inbox).shells[0].att; title = [VerifyNative]::Title($script:window) }
             Press @(0x1B) 'Esc: return from Inbox'
-            Wait-Until { -not [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'Inbox closed'
+            Wait-Until { (($state = Read-Inbox) -and $state.PSObject.Properties['inbox_active'] -and $state.inbox_active -eq $false) -or (-not [VerifyNative]::Title($script:window).StartsWith('Inbox - ') -and [VerifyNative]::Title($script:window) -cne 'Multi Bot') } 'Inbox closed'
             Snapshot 'returned'
             Palette 'new cmd'
             Press @(0x0D) 'Enter: create a second CMD session to mute'
@@ -29,12 +29,12 @@
             } 'active tab saved as muted'
             Wait-Until { $state = Read-Inbox; $null -ne $state -and @($state.shells | Where-Object { $_.sid -eq $sid }).Count -eq 0 } 'muted session absent from published Inbox'
             Press @(0x11, 0x10, 0x49) 'Ctrl+Shift+I: open Inbox with the session muted'
-            Wait-Until { [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'muted Inbox window state'
+            Wait-Until { (($state = Read-Inbox) -and $state.PSObject.Properties['inbox_active'] -and $state.inbox_active -eq $true) -or [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'muted Inbox window state'
             Press @(0x12, 0x49) 'Alt+I: select All split with the session muted'
             Snapshot 'muted'
             $result.checks += @{ name = 'inbox-muted-hidden'; sid = $sid; listed = $false; title = [VerifyNative]::Title($script:window) }
             Press @(0x1B) 'Esc: return from Inbox with the session muted'
-            Wait-Until { -not [VerifyNative]::Title($script:window).StartsWith('Inbox - ') } 'muted Inbox closed'
+            Wait-Until { (($state = Read-Inbox) -and $state.PSObject.Properties['inbox_active'] -and $state.inbox_active -eq $false) -or (-not [VerifyNative]::Title($script:window).StartsWith('Inbox - ') -and [VerifyNative]::Title($script:window) -cne 'Multi Bot') } 'muted Inbox closed'
             Wait-Until {
                 $state = Read-Session
                 $null -ne $state -and @($state.tabs).Count -eq @($baseline.tabs).Count -and

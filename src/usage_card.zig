@@ -45,7 +45,7 @@ pub fn paintVersionStrip(dc: w.HANDLE) void {
     const label = if (updateReady())
         std.fmt.bufPrint(&buffer, "Update ready: v{s} \xc2\xb7 Restart", .{state.g_update_ver[0..state.g_update_ver_len]}) catch "Update ready"
     else
-        "Multiprompt v" ++ @import("main.zig").APP_VERSION;
+        "Multi Bot v" ++ @import("main.zig").APP_VERSION;
     const rect = versionStripRect();
     text(dc, label, rect, if (state.g_light_theme) RGB(110, 110, 110) else RGB(90, 90, 90), 0);
 }
@@ -174,8 +174,8 @@ pub fn paint(dc: w.HANDLE, client: RECT, pill: RECT, data: *const state.AiPaceSn
     _ = w.RestoreDC(dc, clipped);
     _ = w.SelectObject(dc, regular);
     const footer = RECT{ .left = left, .top = card.bottom - px(48), .right = right, .bottom = card.bottom - px(22) };
-    text(dc, "Multiprompt", footer, dim, 0);
-    text(dc, "v" ++ @import("main.zig").APP_VERSION, .{ .left = left + px(74), .top = footer.top, .right = right - px(90), .bottom = footer.bottom }, ink, 0);
+    text(dc, "Multi Bot", footer, dim, 0);
+    text(dc, "v" ++ @import("main.zig").APP_VERSION, .{ .left = left + px(85), .top = footer.top, .right = right - px(90), .bottom = footer.bottom }, ink, 0);
     text(dc, "Release notes \xe2\x80\xba", .{ .left = right - px(88), .top = footer.top, .right = right, .bottom = footer.bottom }, if (footer_focused) ink else dim, w.DT_RIGHT);
     _ = w.SelectObject(dc, small);
     text(dc, "Grey tick = how much of the week has passed", .{ .left = left, .top = card.bottom - px(22), .right = right, .bottom = card.bottom - px(3) }, if (light) dim else RGB(90, 90, 90), 0);

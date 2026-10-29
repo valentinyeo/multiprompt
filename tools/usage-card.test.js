@@ -10,7 +10,7 @@ test('approved card replaces the plain menu and shows the actual installed versi
   assert.match(card, /AI USAGE THIS WEEK/);
   assert.match(card, /std\.unicode\.utf8ToUtf16Le\(&wide, value\)/);
   assert.match(read('.claude/skills/verify-multiprompt/control-feature-status-card.ps1'), /'MultiPromptUsageCard', 'AI usage this week'/);
-  assert.match(card, /Multiprompt v" \+\+ @import\("main.zig"\).APP_VERSION/);
+  assert.match(card, /Multi Bot v" \+\+ @import\("main.zig"\).APP_VERSION/);
   assert.match(card, /"v" \+\+ @import\("main.zig"\).APP_VERSION/);
   assert.match(card, /5-hour window not reported/);
   assert.match(card, /Grey tick = how much of the week has passed/);

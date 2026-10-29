@@ -277,10 +277,11 @@ pub fn publishInboxStateNow() void {
     pos += writeUintTo(json[pos..], @intFromPtr(app_state.g_main_hwnd));
     json[pos] = '"';
     pos += 1;
-    const selection = std.fmt.bufPrint(json[pos..], ",\"active_shell_id\":{d},\"active_workspace\":{d},\"starred_view\":{}", .{
+    const selection = std.fmt.bufPrint(json[pos..], ",\"active_shell_id\":{d},\"active_workspace\":{d},\"starred_view\":{},\"inbox_active\":{}", .{
         if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0,
         app_state.g_active_workspace,
         app_state.g_starred_workspace,
+        app_state.g_inbox_active,
     }) catch return;
     pos += selection.len;
     if (app_state.g_single_window) {
@@ -1448,6 +1449,7 @@ pub fn openInbox(hwnd: HANDLE) void {
     publishInboxState();
     loadInboxModel();
     app_state.g_inbox_active = true;
+    publishInboxStateNow();
     app_state.g_inbox_filter_active = false;
     app_state.g_inbox_filter_len = 0;
     updateMainWindowTitle();
@@ -1473,6 +1475,7 @@ pub fn closeInbox(hwnd: HANDLE) void {
     if (!app_state.g_inbox_active) return;
     rememberCurrentInboxSelection();
     app_state.g_inbox_active = false;
+    publishInboxStateNow();
     app_state.g_inbox_filter_active = false;
     app_state.g_inbox_filter_len = 0;
     updateMainWindowTitle();

@@ -653,7 +653,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_THEME_LIGHT_OFFSET => "light",
         SEARCH_THEME_AMOLED_OFFSET => "amoled",
         SEARCH_THEME_EDGE_GRAY_OFFSET => "edge grey",
-        SEARCH_THEME_MULTIPROMPT_OFFSET => "multiprompt",
+        SEARCH_THEME_MULTIPROMPT_OFFSET => "multi bot",
         SEARCH_THEME_DEV_BLUE_OFFSET => "dev blue",
         SEARCH_THEME_DEV_EDIT_OFFSET => "edit dev theme json",
         SEARCH_THEME_DEV_RELOAD_OFFSET => "reload dev theme",
@@ -671,7 +671,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CREATEWS_OFFSET => "create workspace",
         SEARCH_WORKSPACES_MENU_OFFSET => "open workspace",
         SEARCH_WORKSPACE_DELETE_MENU_OFFSET => "delete workspace",
-        SEARCH_QUIT_OFFSET => "quit multiprompt",
+        SEARCH_QUIT_OFFSET => "quit multi bot",
         SEARCH_FULLWIDTH_OFFSET => "full-width",
         SEARCH_SHORTCUTS_OFFSET => "keyboard shortcuts",
         SEARCH_CLOSEWIN_OFFSET => "close workspace",
@@ -750,7 +750,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_DISCARD_UNSENT_OFFSET => "chat view discard unsent messages not sent",
         SEARCH_CHAT_PUSH_QUEUED_OFFSET => "chat view send queued in claude message now push",
         SEARCH_CHAT_EDIT_QUEUED_OFFSET => "chat view edit queued messages pull back into the prompt box",
-        SEARCH_MULTIPROMPT_LOGIN_OFFSET => "sign in to multiprompt sync",
+        SEARCH_MULTIPROMPT_LOGIN_OFFSET => "sign in to multi bot sync",
         SEARCH_SYNC_SIGNOUT_OFFSET => "account: sign out",
         SEARCH_SYNC_STATUS_OFFSET => "account: devices",
         SEARCH_APPROVE_DEVICES_OFFSET => "account: approve devices",
@@ -795,7 +795,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_BROWSER_FORWARD_OFFSET => "browser forward",
         SEARCH_BROWSER_MODE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_native) "browser: use app address bar" else "browser: use browser address bar and tabs",
         SEARCH_BROWSER_ENGINE_OFFSET => if (app_state.g_browser_engine == .edge) "browser: switch all panes to chrome" else "browser: switch all panes to edge",
-        SEARCH_RESTART_OFFSET => "restart multiprompt",
+        SEARCH_RESTART_OFFSET => "restart multi bot",
         SEARCH_UPDATE_OFFSET => "restart to update relaunch new version",
         SEARCH_ZSB_REBIND_OFFSET => "browser: repair agent connection",
         SEARCH_SHELL_DIAG_OFFSET => "copy session diagnostics",
@@ -1996,7 +1996,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_result_count += 1;
 
         const theme_ids = [_]usize{ SEARCH_THEME_SYSTEM_OFFSET, SEARCH_THEME_DARK_OFFSET, SEARCH_THEME_MID_OFFSET, SEARCH_THEME_LIGHT_OFFSET, SEARCH_THEME_AMOLED_OFFSET, SEARCH_THEME_EDGE_GRAY_OFFSET, SEARCH_THEME_MULTIPROMPT_OFFSET, SEARCH_THEME_DEV_BLUE_OFFSET, SEARCH_THEME_DEV_EDIT_OFFSET, SEARCH_THEME_DEV_RELOAD_OFFSET };
-        const theme_labels = [_][]const u8{ "system windows automatic follow appearance light dark", "dark", "mid", "light", "amoled", "edge grey edge gray native edge 333333", "multiprompt midnight violet website landing", "dev blue", "edit dev theme json", "reload dev theme" };
+        const theme_labels = [_][]const u8{ "system windows automatic follow appearance light dark", "dark", "mid", "light", "amoled", "edge grey edge gray native edge 333333", "multi bot multiprompt midnight violet website landing", "dev blue", "edit dev theme json", "reload dev theme" };
         for (theme_ids, theme_labels) |theme_id, label| {
             if (!IS_DEV and theme_id >= SEARCH_THEME_DEV_BLUE_OFFSET and theme_id != SEARCH_THEME_MULTIPROMPT_OFFSET) continue;
             if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
@@ -2656,7 +2656,7 @@ pub fn updateSearchResults() void {
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_quit = (app_state.g_search_len == 0);
         if (!show_quit) {
-            const quit_labels = [_][]const u8{ "quit", "quit multiprompt", "quit zigshell", "exit", "shutdown", "close all", "restore workspaces" };
+            const quit_labels = [_][]const u8{ "quit", "quit multi bot", "quit multiprompt", "quit zigshell", "exit", "shutdown", "close all", "restore workspaces" };
             for (quit_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
                     show_quit = true;
@@ -2673,7 +2673,7 @@ pub fn updateSearchResults() void {
     if (app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_restart = (app_state.g_search_len == 0);
         if (!show_restart) {
-            const restart_labels = [_][]const u8{ "restart", "relaunch", "reboot", "restart app", "reload app", "restart multiprompt", "restart zigshell" };
+            const restart_labels = [_][]const u8{ "restart", "relaunch", "reboot", "restart app", "reload app", "restart multi bot", "restart multiprompt", "restart zigshell" };
             for (restart_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
                     show_restart = true;

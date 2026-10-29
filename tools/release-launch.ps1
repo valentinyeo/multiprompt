@@ -28,6 +28,7 @@ public static class ReleaseWindow {
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr data);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder text, int size);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr window, StringBuilder text, int size);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out Rect rectangle);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rectangle);
@@ -68,6 +69,10 @@ try {
     if ($window -eq [IntPtr]::Zero) { throw 'Built app did not show its main window' }
     Start-Sleep -Seconds 2
     if ($process.HasExited -or [ReleaseWindow]::Find([uint32]$process.Id) -ne $window) { throw 'Main window closed after launch' }
+    $titleBuffer = [Text.StringBuilder]::new(256)
+    [void][ReleaseWindow]::GetWindowText($window, $titleBuffer, $titleBuffer.Capacity)
+    $title = $titleBuffer.ToString()
+    if ($title -cne 'Multi Bot') { throw "Unexpected main window title: $title" }
     $response = [IntPtr]::Zero
     if ([ReleaseWindow]::SendMessageTimeout($window, 0, [IntPtr]::Zero, [IntPtr]::Zero, 2, 2000, [ref]$response) -eq [IntPtr]::Zero) { throw 'Main window is unresponsive' }
     $rectangle = New-Object ReleaseWindow+Rect
@@ -91,6 +96,7 @@ try {
         executableSha256 = (Get-FileHash $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
         pid = $process.Id
         windowClass = 'ZigShell'
+        title = $title
         visible = $true
         responsive = $true
         width = $width

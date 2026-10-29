@@ -965,7 +965,7 @@ fn otherZigShellEnum(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     }
     var title: [128]u16 = std.mem.zeroes([128]u16);
     const title_len = GetWindowTextW(hwnd, &title, 128);
-    const other_is_dev = if (title_len > 0) titleHasDevMarker(title[0..@intCast(title_len)]) else false;
+    const other_is_dev = @import("win32.zig").GetPropW(hwnd, L("MultipromptDevWindow")) != null or (if (title_len > 0) titleHasDevMarker(title[0..@intCast(title_len)]) else false);
     if (other_is_dev != IS_DEV) return 1;
     ctx.found = true;
     return 0;
@@ -989,7 +989,7 @@ pub fn listZigShellWindowsEnum(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     if (!windowOwnerProcessStillActive(hwnd)) return 1;
     var title: [128]u16 = std.mem.zeroes([128]u16);
     const title_len = GetWindowTextW(hwnd, &title, 128);
-    const other_is_dev = if (title_len > 0) titleHasDevMarker(title[0..@intCast(title_len)]) else false;
+    const other_is_dev = @import("win32.zig").GetPropW(hwnd, L("MultipromptDevWindow")) != null or (if (title_len > 0) titleHasDevMarker(title[0..@intCast(title_len)]) else false);
     if (other_is_dev != IS_DEV) return 1;
     if (ctx.count < ctx.hwnds.len) {
         ctx.hwnds[ctx.count] = hwnd;

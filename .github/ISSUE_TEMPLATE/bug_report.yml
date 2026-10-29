@@ -6,7 +6,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: The version shown in the multiprompt title bar
+      description: The version shown in Multi Bot’s About card
       placeholder: v0.28.712
     validations:
       required: true

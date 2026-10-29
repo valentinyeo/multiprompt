@@ -166,8 +166,8 @@ before(async () => {
   }));
   const file = batch(`"${winPath(exe)}"`);
   launches.push(spawn('nice', ['-n', '10', 'wine', 'cmd', '/c', file], { env, stdio: 'ignore' }));
-  await until('real app window', 90000, () => windows('multiprompt v').length === 1);
-  realWindow = windows('multiprompt v')[0];
+  await until('real app window', 90000, () => windows('^Multi Bot$').length === 1);
+  realWindow = windows('^Multi Bot$')[0];
   realPids = appPids();
   assert.ok(realPids.length);
 }, { timeout: 300000 });
@@ -189,8 +189,8 @@ test('separate settings: test window starts beside the real app without handover
   const result = tool('start', '--exe', winPath(exe), '--session', 'C:\\fixture\\session.json', '--idle-seconds', '2');
   assert.equal(result.status, 0, result.output);
   assert.match(result.output, /started pid=\d+ hwnd=[0-9a-f]+ appdata=/);
-  await until('two visible app windows', 90000, () => windows('multiprompt v').length === 2);
-  testWindow = windows('multiprompt v').find(window => window !== realWindow);
+  await until('two visible app windows', 90000, () => windows('^Multi Bot$').length === 2);
+  testWindow = windows('^Multi Bot$').find(window => window !== realWindow);
   state = JSON.parse(fs.readFileSync(path.join(prefix, 'drive_c/lt/state.txt'), 'utf8'));
   assert.ok(state.pid > 0);
   testPids = appPids().filter(pid => !realPids.includes(pid));
@@ -323,8 +323,8 @@ test('own window: stop closes only the test window and removes its folder', { ti
   assert.equal(result.status, 0, result.output);
   assert.match(result.output, new RegExp(`stopped pid=${state.pid} folder_removed=1`));
   await until('test process gone, real processes intact', 20000, () => JSON.stringify(appPids()) === JSON.stringify(realPids));
-  assert.ok(windows('multiprompt v').includes(realWindow));
-  assert.ok(!windows('multiprompt v').includes(testWindow));
+  assert.ok(windows('^Multi Bot$').includes(realWindow));
+  assert.ok(!windows('^Multi Bot$').includes(testWindow));
   assert.ok(!fs.existsSync(folder));
   assert.ok(!fs.existsSync(path.join(prefix, 'drive_c/lt/state.txt')));
   assert.match(status(), /alive=0/);

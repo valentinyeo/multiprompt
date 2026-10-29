@@ -475,7 +475,7 @@ fn currentTheme() []const u8 {
     if (state.g_mid_theme) return "Mid";
     if (state.g_amoled_theme) return "AMOLED";
     if (state.g_edge_gray_theme) return "Edge gray";
-    if (state.g_multiprompt_theme) return "Multiprompt";
+    if (state.g_multiprompt_theme) return "Multi Bot";
     if (state.g_dev_theme_active) return "Custom";
     return "Dark";
 }
@@ -577,7 +577,7 @@ fn ensureVisible(control: Control) void {
 fn chooseTheme() void {
     const menu = w.CreatePopupMenu();
     defer _ = w.DestroyMenu(menu);
-    const labels = [_]w.LPCWSTR{ L("System"), L("Dark"), L("Mid"), L("Light"), L("AMOLED"), L("Edge gray"), L("Multiprompt") };
+    const labels = [_]w.LPCWSTR{ L("System"), L("Dark"), L("Mid"), L("Light"), L("AMOLED"), L("Edge gray"), L("Multi Bot") };
     for (labels, 0..) |name, i| _ = w.AppendMenuW(menu, 0, i + 1, name);
     var bounds = std.mem.zeroes(w.RECT);
     _ = w.GetWindowRect(children[index(.theme)], &bounds);

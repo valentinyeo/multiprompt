@@ -423,7 +423,7 @@ fn accountLock() void {
         if (app_state.shells[i].hwnd != null) _ = ShowWindow(app_state.shells[i].hwnd, SW_HIDE);
         closeBrowserForShell(@intCast(i));
     }
-    app_state.g_account_status = "Sign in to multiprompt to open your workspaces.";
+    app_state.g_account_status = "Sign in to Multi Bot to open your workspaces.";
     _ = SetForegroundWindow(app_state.g_main_hwnd);
     _ = SetFocus(app_state.g_main_hwnd);
     _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
@@ -465,7 +465,7 @@ fn accountSyncFailed(has_token: bool) void {
             app_state.g_account_locked = false;
             app_state.g_account_status = "Offline; restored local workspaces. Sync will retry.";
         },
-        .sign_in => app_state.g_account_status = "Sign in to multiprompt to open your workspaces.",
+        .sign_in => app_state.g_account_status = "Sign in to Multi Bot to open your workspaces.",
         .retry => app_state.g_account_status = "Cannot reach account service. Sync will retry.",
     }
     if (notify and !app_state.g_account_locked) showHeaderNoticeAscii("Sync failed; local changes kept for retry", 4000, true);
@@ -1340,7 +1340,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         if (reply.job.kind == .startup) {
             accountLock();
         } else {
-            showHeaderNoticeAscii("Sign in again: Ctrl+K > Sign in to multiprompt", 86400000, true);
+            showHeaderNoticeAscii("Sign in again: Ctrl+K > Sign in to Multi Bot", 86400000, true);
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
         }
         return;
@@ -1458,7 +1458,7 @@ pub fn paintAccountLock(hwnd: HANDLE) void {
     var title = rc;
     title.top = @divTrunc(rc.bottom, 2) - uiScaled(110);
     title.bottom = title.top + uiScaled(36);
-    _ = DrawTextW(hdc, L("multiprompt"), -1, &title, DT_CENTER | DT_SINGLELINE);
+    _ = DrawTextW(hdc, L("Multi Bot"), -1, &title, DT_CENTER | DT_SINGLELINE);
     var status = title;
     status.top += uiScaled(48);
     status.bottom += uiScaled(68);
@@ -1580,7 +1580,7 @@ pub fn accountClaim(hwnd: HANDLE) bool {
     }
     if (result != 0 and result != 0x80) {
         _ = CloseHandle(mutex);
-        _ = MessageBoxW(hwnd, L("multiprompt is already open for this account on this device."), L("multiprompt"), 0x40);
+        _ = MessageBoxW(hwnd, L("Multi Bot is already open for this account on this device."), L("Multi Bot"), 0x40);
         return false;
     }
     app_state.g_account_instance_mutex = mutex;
@@ -1846,7 +1846,7 @@ fn promptForSecret(message: []const u8, username_prefill: []const u8) ?[]u8 {
     var password_w: [256]u16 = std.mem.zeroes([256]u16);
     defer std.crypto.secureZero(u16, &password_w);
     const message_z = asciiToWideZ(message, &message_w) orelse return null;
-    const caption_z = asciiToWideZ("multiprompt sync", &caption_w) orelse return null;
+    const caption_z = asciiToWideZ("Multi Bot sync", &caption_w) orelse return null;
     const target_z = asciiToWideZ("multiprompt sync", &target_w) orelse return null;
     const prefill_len = @min(username_prefill.len, username_w.len - 1);
     for (username_prefill[0..prefill_len], 0..) |c, i| username_w[i] = c;
@@ -1960,7 +1960,7 @@ fn deleteSyncAuthFile(suffix: []const u8) void {
 
 fn handleRejectedSyncToken() void {
     deleteSyncAuthFile("sync-auth-tokens.dat");
-    showSyncMessage("Your multiprompt sign-in has expired. Open Ctrl+K and choose Sign in to multiprompt again.", true);
+    showSyncMessage("Your Multi Bot sign-in has expired. Open Ctrl+K and choose Sign in to Multi Bot again.", true);
 }
 
 fn loadAccessToken() ?[]u8 {
@@ -1997,7 +1997,7 @@ fn showSyncMessage(text: []const u8, is_error: bool) void {
         std.crypto.secureZero(u16, wide);
         std.heap.page_allocator.free(wide);
     }
-    _ = MessageBoxW(null, wide.ptr, L("multiprompt sync"), if (is_error) @as(u32, 0x10) else @as(u32, 0x40));
+    _ = MessageBoxW(null, wide.ptr, L("Multi Bot sync"), if (is_error) @as(u32, 0x10) else @as(u32, 0x40));
 }
 
 fn setSecretClipboardText(text: []const u16) bool {
@@ -2053,7 +2053,7 @@ fn showRecoveryKeyDialog(recovery_key: [32]u8) void {
     defer std.crypto.secureZero(u8, &msg_buf);
     const msg = std.fmt.bufPrint(
         &msg_buf,
-        "Your multiprompt recovery key{s}:\r\n\r\n{s}\r\n\r\nSave this recovery key somewhere safe. It is the only way back in if you forget your passphrase.\r\n\r\nClick OK once you have saved it.",
+        "Your Multi Bot recovery key{s}:\r\n\r\n{s}\r\n\r\nSave this recovery key somewhere safe. It is the only way back in if you forget your passphrase.\r\n\r\nClick OK once you have saved it.",
         .{ if (copied) " (already copied to the clipboard)" else "", encoded },
     ) catch return;
     showSyncMessage(msg, false);
@@ -2063,13 +2063,13 @@ fn runVaultCreateFlow(access_token: []const u8, email: []const u8) void {
     const first = promptForSecret("Choose a sync passphrase. You'll need it on your other devices too.", email) orelse return;
     defer freeSecret(first);
     if (first.len < 8) {
-        showSyncMessage("Use at least 8 characters for your sync passphrase. Try Ctrl+K > Sign in to multiprompt again.", true);
+        showSyncMessage("Use at least 8 characters for your sync passphrase. Try Ctrl+K > Sign in to Multi Bot again.", true);
         return;
     }
     const second = promptForSecret("Enter your new sync passphrase again to confirm.", email) orelse return;
     defer freeSecret(second);
     if (!std.mem.eql(u8, first, second)) {
-        showSyncMessage("Those passphrases didn't match. Try Ctrl+K > Sign in to multiprompt again.", true);
+        showSyncMessage("Those passphrases didn't match. Try Ctrl+K > Sign in to Multi Bot again.", true);
         return;
     }
 
@@ -2084,11 +2084,11 @@ fn runVaultCreateFlow(access_token: []const u8, email: []const u8) void {
     switch (putVault(access_token, 0, sealed.envelope)) {
         .ok => {},
         .conflict => {
-            showSyncMessage("Another device just set up this account's sync vault. Try Ctrl+K > Sign in to multiprompt again to unlock it.", true);
+            showSyncMessage("Another device just set up this account's sync vault. Try Ctrl+K > Sign in to Multi Bot again to unlock it.", true);
             return;
         },
         .network_error => {
-            showSyncMessage("Could not save your sync vault. Check your connection and try Ctrl+K > Sign in to multiprompt again.", true);
+            showSyncMessage("Could not save your sync vault. Check your connection and try Ctrl+K > Sign in to Multi Bot again.", true);
             return;
         },
         .unauthorized => {
@@ -2098,7 +2098,7 @@ fn runVaultCreateFlow(access_token: []const u8, email: []const u8) void {
     }
     showRecoveryKeyDialog(sealed.recovery_key);
     if (!writeDpapiFile("sync-vault-key.dat", &sealed.vault_key)) {
-        showSyncMessage("Your vault was created, but this computer could not remember it. Try Ctrl+K > Sign in to multiprompt again and enter your passphrase.", true);
+        showSyncMessage("Your vault was created, but this computer could not remember it. Try Ctrl+K > Sign in to Multi Bot again and enter your passphrase.", true);
         return;
     }
 }
@@ -2106,34 +2106,34 @@ fn runVaultCreateFlow(access_token: []const u8, email: []const u8) void {
 fn runVaultUnlockWithPassphrase(access_token: []const u8, email: []const u8, envelope: []const u8) void {
     var attempt: u8 = 0;
     while (attempt < 3) : (attempt += 1) {
-        const message = if (attempt == 0) "Enter your multiprompt sync passphrase." else "Wrong passphrase. Try again.";
+        const message = if (attempt == 0) "Enter your Multi Bot sync passphrase." else "Wrong passphrase. Try again.";
         const passphrase = promptForSecret(message, email) orelse return;
         defer freeSecret(passphrase);
         var vault_key = sync_protocol.openEnvelopeVaultKey(std.heap.page_allocator, passphrase, envelope) catch |err| {
             if (err == error.WrongPassphrase) continue;
-            showSyncMessage("Could not open your sync vault. Try Ctrl+K > Sign in to multiprompt again.", true);
+            showSyncMessage("Could not open your sync vault. Try Ctrl+K > Sign in to Multi Bot again.", true);
             return;
         };
         defer std.crypto.secureZero(u8, &vault_key);
         if (!writeDpapiFile("sync-vault-key.dat", &vault_key)) {
-            showSyncMessage("Unlocked, but this computer could not remember it. Try Ctrl+K > Sign in to multiprompt again.", true);
+            showSyncMessage("Unlocked, but this computer could not remember it. Try Ctrl+K > Sign in to Multi Bot again.", true);
             return;
         }
         _ = access_token;
-        showSyncMessage("multiprompt sync is unlocked on this computer.", false);
+        showSyncMessage("Multi Bot sync is unlocked on this computer.", false);
         return;
     }
-    showSyncMessage("Wrong passphrase, three times. Use Ctrl+K > Sign in to multiprompt again and choose the recovery key.", true);
+    showSyncMessage("Wrong passphrase, three times. Use Ctrl+K > Sign in to Multi Bot again and choose the recovery key.", true);
 }
 
 fn runVaultUnlockWithRecoveryKey(access_token: []const u8, email: []const u8, revision: i64, envelope: []const u8) void {
-    const recovery_text = promptForSecret("Enter your multiprompt recovery key.", email) orelse return;
+    const recovery_text = promptForSecret("Enter your Multi Bot recovery key.", email) orelse return;
     defer freeSecret(recovery_text);
     var recovered = sync_protocol.openEnvelopeWithRecoveryKey(std.heap.page_allocator, recovery_text, envelope) catch |err| {
         const text = if (err == error.WrongRecoveryKey or err == error.BadRecoveryKeyFormat)
-            "That recovery key didn't work. Try Ctrl+K > Sign in to multiprompt again."
+            "That recovery key didn't work. Try Ctrl+K > Sign in to Multi Bot again."
         else
-            "Could not open your sync vault with that recovery key. Try Ctrl+K > Sign in to multiprompt again.";
+            "Could not open your sync vault with that recovery key. Try Ctrl+K > Sign in to Multi Bot again.";
         showSyncMessage(text, true);
         return;
     };
@@ -2147,12 +2147,12 @@ fn runVaultUnlockWithRecoveryKey(access_token: []const u8, email: []const u8, re
     const new_second = promptForSecret("Enter your new sync passphrase again to confirm.", email) orelse return;
     defer freeSecret(new_second);
     if (new_first.len < 8 or !std.mem.eql(u8, new_first, new_second)) {
-        showSyncMessage("Those passphrases didn't match or were too short. Your recovery key still works. Try Ctrl+K > Sign in to multiprompt again.", true);
+        showSyncMessage("Those passphrases didn't match or were too short. Your recovery key still works. Try Ctrl+K > Sign in to Multi Bot again.", true);
         return;
     }
 
     const rewrapped = sync_protocol.rewrapPassphrase(std.heap.page_allocator, vault_key, new_first, envelope) catch {
-        showSyncMessage("Could not set your new passphrase. Try Ctrl+K > Sign in to multiprompt again.", true);
+        showSyncMessage("Could not set your new passphrase. Try Ctrl+K > Sign in to Multi Bot again.", true);
         return;
     };
     defer std.heap.page_allocator.free(rewrapped);
@@ -2166,14 +2166,14 @@ fn runVaultUnlockWithRecoveryKey(access_token: []const u8, email: []const u8, re
         return;
     }
     if (outcome != .ok) {
-        showSyncMessage("Your recovery key worked, but saving the new passphrase failed. Try Ctrl+K > Sign in to multiprompt again.", true);
+        showSyncMessage("Your recovery key worked, but saving the new passphrase failed. Try Ctrl+K > Sign in to Multi Bot again.", true);
         return;
     }
     if (!writeDpapiFile("sync-vault-key.dat", &vault_key)) {
-        showSyncMessage("Unlocked, but this computer could not remember it. Try Ctrl+K > Sign in to multiprompt again.", true);
+        showSyncMessage("Unlocked, but this computer could not remember it. Try Ctrl+K > Sign in to Multi Bot again.", true);
         return;
     }
-    showSyncMessage("multiprompt sync is unlocked with your new passphrase on this computer.", false);
+    showSyncMessage("Multi Bot sync is unlocked with your new passphrase on this computer.", false);
 }
 
 fn retryRecoveryRewrap(access_token: []const u8, recovery_text: []const u8, vault_key: [32]u8, new_passphrase: []const u8) VaultPut {
@@ -2194,13 +2194,13 @@ fn retryRecoveryRewrap(access_token: []const u8, recovery_text: []const u8, vaul
 
 pub fn runVaultFlowProcess() void {
     const access_token = loadAccessToken() orelse {
-        showSyncMessage("Sign in to multiprompt first (Ctrl+K > Sign in to multiprompt).", true);
+        showSyncMessage("Sign in to Multi Bot first (Ctrl+K > Sign in to Multi Bot).", true);
         return;
     };
     defer freeSecret(access_token);
 
     if (hasVaultKey()) {
-        showSyncMessage("multiprompt sync is already unlocked on this computer.", false);
+        showSyncMessage("Multi Bot sync is already unlocked on this computer.", false);
         return;
     }
 
@@ -2474,6 +2474,6 @@ test "ISSUE-502 optimistic account startup blocks only a confirmed signed out re
     signed_out.* = .{ .job = .{ .kind = .startup }, .unauthorized = true };
     handleLayoutReply(@bitCast(@intFromPtr(signed_out)));
     try std.testing.expect(app_state.g_account_locked);
-    try std.testing.expectEqualStrings("Sign in to multiprompt to open your workspaces.", app_state.g_account_status);
+    try std.testing.expectEqualStrings("Sign in to Multi Bot to open your workspaces.", app_state.g_account_status);
     try std.testing.expectEqual(@as(u32, 42), app_state.shells[0].shell_id);
 }

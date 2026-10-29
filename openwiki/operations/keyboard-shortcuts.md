@@ -186,7 +186,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Keys | Action |
 | --- | --- |
 | Ctrl+Shift+1 ... 5 | New CMD / TMUX / VPS / PowerShell |
-| Ctrl+N | New multiprompt window |
+| Ctrl+N | New Multi Bot window |
 | Ctrl+Shift+T | Reopen last closed tab |
 | Alt+Space | Window menu (move/size/min/max) |
 | Win+Arrows | Snap / maximize / minimize (edge-snapped Left/Right hops monitors) |
@@ -197,14 +197,14 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Keys | Action |
 | --- | --- |
 | Ctrl+K | Open command palette; it opens with your last 5 sessions |
-| Ctrl+K -&gt; Account: Sign Out | Forget this device login and lock multiprompt |
+| Ctrl+K -&gt; Account: Sign Out | Forget this device login and lock Multi Bot |
 | Ctrl+K -&gt; Account: Approve devices | Approve or deny a new device reaching your servers |
 | Ctrl+K -&gt; Account: Remove server 1 | Remove server 1 from your account on every device after confirmation |
 | Ctrl+K -&gt; Account: Remove server 2 | Remove server 2 from your account on every device after confirmation |
 | Ctrl+K -&gt; Account: Remove server 3 | Remove server 3 from your account on every device after confirmation |
 | Ctrl+K -&gt; Account: Devices | List account devices and revoke a device |
 | Ctrl+K -&gt; Sync: Pull Now | Reconcile server workspaces and synchronized tmux tabs |
-| Ctrl+Shift+K | Open command palette from any multiprompt surface, including browser |
+| Ctrl+Shift+K | Open command palette from any Multi Bot surface, including browser |
 | Ctrl+K → Usage: Sign In to Primary / Secondary Claude Account | Force sign-in one telemetry profile in its own terminal |
 | Ctrl+K → Power Saver: Auto / Always / Off | Choose when background timers, VPS polling, and idle tabs slow down to save power |
 | Ctrl+Shift+G | Cycle Combined, VPS, and Today's AI telemetry cards |
@@ -288,7 +288,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; Changelog | what changed in each version |
 | (agent-reported) Session ETA countdown | Sidebar row shows time left + a progress line; toggle either from Ctrl+K → ETA Countdown Numbers / ETA Progress Line |
 | Ctrl+K → Estimate Accuracy | See how each agent's time estimates compare to how long tasks actually took |
-| Ctrl+K → Restart multiprompt | Save session and relaunch the app |
+| Ctrl+K → Restart Multi Bot | Save session and relaunch the app |
 | Ctrl+K → Restart to update | Restart when an update is ready (same as the sidebar card) |
 | F1 | This shortcuts overview |
 

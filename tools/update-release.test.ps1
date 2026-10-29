@@ -245,7 +245,7 @@ try {
                 $deadline = [DateTime]::UtcNow.AddSeconds(20)
                 do {
                     $restored = @(Get-Process | Where-Object {
-                        try { $processPath = $_.Path; $processPath -ieq $cardExe -and $_.MainWindowTitle.Contains($newVersion) } catch { $false }
+                        try { $processPath = $_.Path; $processPath -ieq $cardExe -and $_.MainWindowTitle -ceq 'Multi Bot' } catch { $false }
                     })
                     if ($restored.Count -eq 1 -and (Test-Path $inboxPath)) {
                         try {

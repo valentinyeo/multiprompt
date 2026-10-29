@@ -55,9 +55,13 @@ function Show-Workspace([string]$Name) {
         [ReconnectDesktop]::Key(0x12, $true)
         Start-Sleep -Milliseconds 500
         $app.Refresh()
-        if ($app.MainWindowTitle.StartsWith("$Name (")) { return }
+        try {
+            $state = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+            $slot = [int]$state.active_workspace
+            if ($slot -ge 0 -and $slot -lt @($state.workspaces).Count -and $state.workspaces[$slot].name -ceq $Name) { return }
+        } catch {}
     }
-    throw "Could not switch to workspace $Name; title is $($app.MainWindowTitle)"
+    throw "Could not switch to workspace $Name in saved session"
 }
 function Tab-Count([string]$Text) {
     $found = [regex]::Matches($Text, 'account-sync: applied workspaces=\S* tabs=(\d+)')

@@ -105,7 +105,7 @@ after(() => {
 
 test('ISSUE-308 frozen copy is replaced', { timeout: 240000 }, async () => {
   launch();
-  await until('first app window', 90000, () => windows('multiprompt v').length);
+  await until('first app window', 90000, () => windows('^Multi Bot$').length);
   const original = appPids();
   assert.ok(original.length, 'First app has no Unix process');
   for (const pid of original) process.kill(pid, 'SIGSTOP');
@@ -113,7 +113,7 @@ test('ISSUE-308 frozen copy is replaced', { timeout: 240000 }, async () => {
   await until('frozen owner replacement without an already-open dialog', 60000, () => {
     const current = appPids();
     return original.every(pid => !current.includes(pid)) && current.length > 0
-      && windows('multiprompt v').length > 0 && windows('^multiprompt$').length === 0;
+      && windows('^Multi Bot$').length > 0 && windows('^multiprompt$').length === 0;
   });
   if (process.env.IGSH308_SHOT) {
     const shot = run('import', ['-window', 'root', process.env.IGSH308_SHOT]);
@@ -123,14 +123,14 @@ test('ISSUE-308 frozen copy is replaced', { timeout: 240000 }, async () => {
 
 test('ISSUE-308 live copy is focused', { timeout: 240000 }, async () => {
   launch();
-  await until('first app window', 90000, () => windows('multiprompt v').length);
+  await until('first app window', 90000, () => windows('^Multi Bot$').length);
   const original = appPids();
   assert.ok(original.length, 'First app has no Unix process');
   const second = launch();
   await until('second launch to exit and leave only the live owner without a dialog', 45000, () => {
     const current = appPids();
     return second.exitCode !== null && JSON.stringify(current) === JSON.stringify(original)
-      && windows('multiprompt v').length > 0 && windows('^multiprompt$').length === 0;
+      && windows('^Multi Bot$').length > 0 && windows('^multiprompt$').length === 0;
   });
 });
 
@@ -155,7 +155,7 @@ test('ISSUE-502 cached chat and 45 sidebar sessions paint before deferred startu
   launch();
   let windowMs;
   await until('launch first paint', 90000, () => {
-    if (windowMs === undefined && windows('multiprompt v').length) windowMs = Date.now() - began;
+    if (windowMs === undefined && windows('^Multi Bot$').length) windowMs = Date.now() - began;
     const output = readLog();
     return process.env.MP_LAUNCH_BASELINE === '1' ? /\[switch\] chat painted/.test(output) : /launch first-paint ms=\d+/.test(output);
   });

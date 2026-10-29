@@ -6,7 +6,7 @@ const upload = @import("report_upload.zig");
 extern "user32" fn PostMessageW(win.HANDLE, u32, usize, isize) callconv(.winapi) i32;
 extern "user32" fn RegisterWindowMessageW([*:0]const u16) callconv(.winapi) u32;
 
-pub const NOTICE_TEXT = "Multiprompt froze last time, a report was saved";
+pub const NOTICE_TEXT = "Multi Bot froze last time, a report was saved";
 pub const THRESHOLD_MS = 5000;
 const EVENT_COUNT = 16;
 pub const View = enum(u3) { terminal, chat, browser, inbox, search, sessions, shortcuts, changelog };

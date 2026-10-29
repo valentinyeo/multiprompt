@@ -99,9 +99,9 @@ function Doctor([bool]$Chat = $false) {
     if ([ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Class($main) -ne 'ZigShell') { throw 'Doctor: owned main HWND missing' }
     $element = [System.Windows.Automation.AutomationElement]::FromHandle($main)
     $title = $element.Current.Name
-    if ($element.Current.IsOffscreen -or $element.Current.ProcessId -ne $app.Id -or $title -notmatch ('multiprompt v' + [regex]::Escape($ExpectedVersion) + '(?:\s|$)')) {
+    if ($element.Current.IsOffscreen -or $element.Current.ProcessId -ne $app.Id -or ($title -cne 'Multi Bot' -and $title -cnotmatch ('(?:^| - )multiprompt v' + [regex]::Escape($ExpectedVersion) + '(?= |$)(?: .*)?$'))) {
         Save @{offscreen=$element.Current.IsOffscreen; pid=$element.Current.ProcessId; title=$title; hwnd=$main.ToInt64()} "$caseDir/doctor-window.json"
-        throw 'Doctor: visible versioned UI Automation identity missing'
+        throw 'Doctor: visible UI Automation identity or fixed title missing'
     }
     $session = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
     $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1' -or $env:CHAT_LIVE_DELIVERY_PROOF -eq '1') { $expectedShells } else { 1 }

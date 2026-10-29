@@ -205,7 +205,7 @@ pub fn signIn(cancel: *const std.atomic.Value(bool)) !Response {
         switch (state.callback(callback.code, callback.state, callback.oauth_error, pkce.state)) {
             .ignore => continue,
             .denied => {
-                const message = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nCache-Control: no-store\r\n\r\nSign-in was declined. Return to multiprompt to retry.";
+                const message = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nCache-Control: no-store\r\n\r\nSign-in was declined. Return to Multi Bot to retry.";
                 _ = send(client, message.ptr, message.len, 0);
                 return error.LoginDenied;
             },
@@ -217,7 +217,7 @@ pub fn signIn(cancel: *const std.atomic.Value(bool)) !Response {
             a.free(body);
         }
         const response = try request("POST", "/oauth/token", "", body);
-        const message = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nCache-Control: no-store\r\n\r\nReturn to multiprompt. You may close this window.";
+        const message = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nCache-Control: no-store\r\n\r\nReturn to Multi Bot. You may close this window.";
         _ = send(client, message.ptr, message.len, 0);
         return response;
     }

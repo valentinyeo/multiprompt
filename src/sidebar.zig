@@ -2183,7 +2183,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(95, 95, 95) else RGB(155, 155, 155)));
                 _ = SelectObject(hdc, palette_hint_font);
                 var rename_hint_rc = RECT{ .left = ox + 12, .top = oy + input_h, .right = ox + overlay_w - 12, .bottom = oy + input_h + row_h };
-                _ = paletteDrawText(hdc, L("Ctrl+A selects all  ·  Enter saves  ·  Esc cancels  ·  syncs multiprompt, tmux, and agent"), -1, &rename_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                _ = paletteDrawText(hdc, L("Ctrl+A selects all  ·  Enter saves  ·  Esc cancels  ·  syncs Multi Bot, tmux, and agent"), -1, &rename_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
             } else if (!app_state.g_browser_url_mode and !app_state.g_search_remind_input_mode and app_state.g_search_result_count == 0 and app_state.g_search_len > 0) {
                 _ = SetTextColor(hdc, customColorOr("hint", RGB(100, 100, 100)));
                 _ = SelectObject(hdc, palette_hint_font);
@@ -2515,7 +2515,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(130, 45, 45) else RGB(230, 135, 135));
                         var q_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Quit multiprompt"), -1, &q_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Quit Multi Bot"), -1, &q_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var q_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2534,7 +2534,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                 "Restart to update (no update ready)";
                             drawAscii(hdc, ut, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         } else {
-                            _ = paletteDrawText(hdc, L("Restart multiprompt"), -1, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                            _ = paletteDrawText(hdc, L("Restart Multi Bot"), -1, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         }
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
@@ -3202,13 +3202,13 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                             var skill_hint_rc = RECT{ .left = ox + overlay_w - 175, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            _ = DrawTextW(hdc, if (skill.source == .multiprompt) L("multiprompt skills") else L("coding harness"), -1, &skill_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                            _ = DrawTextW(hdc, if (skill.source == .multiprompt) L("Multi Bot skills") else L("coding harness"), -1, &skill_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (is_multiprompt_login) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
                         var sync_login_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 130, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Sign in to multiprompt"), -1, &sync_login_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Sign in to Multi Bot"), -1, &sync_login_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sync_login_hint_rc = RECT{ .left = ox + overlay_w - 130, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3905,7 +3905,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = paletteDrawText(hdc, L("Themes..."), -1, &theme_menu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
-                        const current_theme = if (app_state.g_system_theme) (if (app_state.g_light_theme) L("System Light") else L("System Dark")) else if (app_state.g_multiprompt_theme) L("multiprompt") else if (app_state.g_dev_theme_active) L("Dev Blue") else if (app_state.g_light_theme) L("Light") else if (app_state.g_edge_gray_theme) L("Edge Grey") else if (app_state.g_mid_theme) L("Mid") else if (app_state.g_amoled_theme) L("AMOLED") else L("Dark");
+                        const current_theme = if (app_state.g_system_theme) (if (app_state.g_light_theme) L("System Light") else L("System Dark")) else if (app_state.g_multiprompt_theme) L("Multi Bot") else if (app_state.g_dev_theme_active) L("Dev Blue") else if (app_state.g_light_theme) L("Light") else if (app_state.g_edge_gray_theme) L("Edge Grey") else if (app_state.g_mid_theme) L("Mid") else if (app_state.g_amoled_theme) L("AMOLED") else L("Dark");
                         var theme_menu_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, current_theme, -1, &theme_menu_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_theme_choice) {
@@ -3930,7 +3930,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             SEARCH_THEME_AMOLED_OFFSET => L("AMOLED"),
                             SEARCH_THEME_EDGE_GRAY_OFFSET => L("Edge Grey"),
                             SEARCH_THEME_DEV_BLUE_OFFSET => L("Dev Blue"),
-                            SEARCH_THEME_MULTIPROMPT_OFFSET => L("multiprompt"),
+                            SEARCH_THEME_MULTIPROMPT_OFFSET => L("Multi Bot"),
                             else => L("Theme"),
                         };
                         var theme_choice_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };

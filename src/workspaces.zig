@@ -588,6 +588,13 @@ pub fn windowOwnerProcessStillActive(hwnd: HANDLE) bool {
     return GetExitCodeProcess(proc, &exit_code) != 0 and exit_code == STILL_ACTIVE;
 }
 
+pub fn workspaceInstanceProperty(id: []const u8) usize {
+    var hash: u64 = 14695981039346656037;
+    for (id) |byte| hash = (hash ^ byte) *% 1099511628211;
+    const value: usize = @truncate(hash);
+    return if (value == 0) 1 else value;
+}
+
 fn findAndFocusWorkspaceWindowEnum(candidate: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     const ctx: *FindWorkspaceWinCtx = @ptrFromInt(@as(usize, @bitCast(lp)));
     if (ctx.found != null) return 0;
@@ -604,13 +611,15 @@ fn findAndFocusWorkspaceWindowEnum(candidate: HANDLE, lp: LPARAM) callconv(WINAP
     const title_len = InternalGetWindowText(candidate, &title, 256);
     if (title_len == 0) return 1;
     const t = title[0..@intCast(title_len)];
-    const other_is_dev = titleHasDevMarker(t);
+    const other_is_dev = @import("win32.zig").GetPropW(candidate, L("MultipromptDevWindow")) != null or titleHasDevMarker(t);
     if (other_is_dev != IS_DEV) return 1;
-    const id_match = ctx.id.len > 0 and titleStartsWithAscii(t, ctx.id);
-    const name_match = ctx.name.len > 0 and titleStartsWithAscii(t, ctx.name);
-    const default_match = std.mem.eql(u8, ctx.id, "default") and
+    const instance = @import("win32.zig").GetPropW(candidate, L("MultipromptWorkspaceInstance"));
+    const instance_match = ctx.id.len > 0 and instance != null and @intFromPtr(instance) == workspaceInstanceProperty(ctx.id);
+    const id_match = instance == null and ctx.id.len > 0 and titleStartsWithAscii(t, ctx.id);
+    const name_match = instance == null and ctx.name.len > 0 and titleStartsWithAscii(t, ctx.name);
+    const default_match = instance == null and std.mem.eql(u8, ctx.id, "default") and
         (titleHasPlainPrefix(t, "multiprompt v") or titleHasPlainPrefix(t, "ZigShell v"));
-    if (id_match or name_match or default_match) {
+    if (instance_match or id_match or name_match or default_match) {
         ctx.found = candidate;
         return 0;
     }
@@ -1661,7 +1670,7 @@ fn buildNewWindowTask(exe_path: [*:0]const u16) ?*IShellLinkW {
     _ = link.lpVtbl.SetPath(link, exe_path);
     _ = link.lpVtbl.SetArguments(link, L("--new-window"));
     _ = link.lpVtbl.SetIconLocation(link, exe_path, 0);
-    _ = link.lpVtbl.SetDescription(link, L("Open a new blank multiprompt window"));
+    _ = link.lpVtbl.SetDescription(link, L("Open a new blank Multi Bot window"));
 
     var store_ptr: ?*anyopaque = null;
     if (link.lpVtbl.QueryInterface(link, &IID_IPropertyStore, &store_ptr) == S_OK) {
@@ -1715,7 +1724,7 @@ fn repairStartMenuShortcutIdentity(exe_path: LPCWSTR) void {
 
     _ = link.lpVtbl.SetPath(link, exe_path);
     _ = link.lpVtbl.SetIconLocation(link, exe_path, 0);
-    _ = link.lpVtbl.SetDescription(link, L("Open multiprompt"));
+    _ = link.lpVtbl.SetDescription(link, L("Open Multi Bot"));
     var store_ptr: ?*anyopaque = null;
     if (link.lpVtbl.QueryInterface(link, &IID_IPropertyStore, &store_ptr) == S_OK and store_ptr != null) {
         setPropertyStoreAppId(@ptrCast(@alignCast(store_ptr.?)));
