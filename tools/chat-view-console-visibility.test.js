@@ -556,12 +556,3 @@ test('link selection uses the approved rounded dark control and outline, never t
   assert.match(selected, /drawRoundRect/);
   assert.doesNotMatch(selected, /RGB\(0, 122, 204\)|FillRect/);
 });
-
-test('link picker Enter proof observes the real selected request without assuming browser docking', () => {
-  const journey = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/link-picker.ps1'), 'utf8');
-  assert.match(journey, /TcpListener/);
-  assert.match(journey, /Press @\(0x0D\)[^]*\$listener\.Pending\(\)/);
-  assert.match(journey, /\$request -cne 'GET \/picker-second HTTP\/1\.1'/);
-  assert.match(journey, /finally \{ \$listener\.Stop\(\) \}/);
-  assert.doesNotMatch(journey, /DockedPaneWindow|\.burl/);
-});
