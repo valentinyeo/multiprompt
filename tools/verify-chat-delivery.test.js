@@ -1236,6 +1236,29 @@ test('long-chat reproduction includes hundreds of visible exchanges rather than 
 });
 
 
+test('IGSH-1152 crash replay preserves the original large-row workload, not newer history shapes', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-crash-workload-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const transcript = path.join(dir, 'transcript.jsonl');
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+    name: 'live-delivery', mode: 'busy', suggestion: queueTexts.suggestion, fake: true, sid: 'sid-crash', longChatProof: true, crashProof: true,
+    transcript, meta: path.join(dir, 'sessions/4242.json'), procDir: path.join(dir, 'proc/4242'), cwd: 'C:/verify/work', panePid: 4242,
+  }));
+  const shell = op => execFileSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), 'shell', op], {
+    env: { ...process.env, MP_VERIFY_STATE: dir }, encoding: 'utf8', timeout: 60000,
+  });
+  shell('init');
+  shell('history');
+  const rows = fs.readFileSync(transcript, 'utf8').trim().split('\n').map(JSON.parse).slice(2);
+  const original = require('node:zlib').gunzipSync(fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1152/original-history.jsonl.gz'))).toString('utf8').trim().split('\n').map(JSON.parse);
+  const digest = value => require('node:crypto').createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  assert.equal(digest(rows.map(({ type, message }) => ({ type, message }))), digest(original));
+  const results = rows.flatMap(row => Array.isArray(row.message.content) ? row.message.content.filter(part => part.type === 'tool_result') : []);
+  assert.equal(results.length, 24);
+  assert.ok(results.every(part => part.content === 'synthetic tool output '.repeat(40000)));
+  assert.match(drive, /CHAT_CRASH_PROOF -eq '1'\) \{ \$standIn\.crashProof = \$true \}/);
+});
+
 test('full-history copy proof distinguishes message 10 from 100 and rejects lost, repeated or reordered messages', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'history-copy-proof-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

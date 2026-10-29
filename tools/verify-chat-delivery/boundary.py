@@ -553,6 +553,13 @@ def shell():
             fake_event("assistant", message=dict(role="assistant", id="switch-" + str(i), content=[dict(type="text", text=text)]))
         return 0
     if op == "history":
+        if state().get("crashProof"):
+            import gzip
+            fixture = Path(__file__).resolve().parent.parent / "fixtures/IGSH-1152/original-history.jsonl.gz"
+            for line in gzip.decompress(fixture.read_bytes()).splitlines():
+                row = json.loads(line)
+                fake_event(row["type"], message=row["message"])
+            return 0
         for i in range(320 if state().get("longChatProof") else 24):
             fake_event("user", message=dict(role="user", content=f"IGSH815 user {i:02d}"))
             fake_event("assistant", message=dict(role="assistant", id="msg_" + uuid.uuid4().hex[:12], model="claude-opus-5-5", content=[dict(type="text", text=f"IGSH815 assistant {i:02d}")]))
