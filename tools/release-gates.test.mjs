@@ -62,6 +62,7 @@ test('publication and proof cancellation use separate concurrency lanes', () => 
   assert.match(workflow, /group: release-publication\s+cancel-in-progress: false/);
   const history = read('.github/workflows/release-gates.yml');
   assert.match(history, /workflows: \[Release, auto-release\]/);
+  assert.ok(history.includes('group: release-gates-${{ github.event_name }}-${{ github.event.workflow_run.id || github.ref }}'));
   assert.match(history, /startsWith\(github.event.workflow_run.head_branch, 'v'\)/);
 });
 
