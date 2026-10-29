@@ -183,9 +183,13 @@ try {
                 $deadline = [DateTime]::UtcNow.AddSeconds(30)
                 do {
                     $cardLog = -join (Get-Content $log -Raw)
-                    if ($cardLog -match '\[update\] quiet release waiting 9\.11\.0') { break }
+                    $quietMarker = [regex]::Match($cardLog, '(?m)\[update\] quiet release waiting 9\.11\.0\r?$')
+                    if ($quietMarker.Success) {
+                        $afterQuiet = $cardLog.Substring($quietMarker.Index + $quietMarker.Length)
+                        if ($afterQuiet -match '(?s)\[update\] restart button=-?\d+,-?\d+\r?\n.*?\[update\] card view=collapsed n=0 first=\r?\n') { break }
+                    }
                     Assert (-not $cardProcess.HasExited) 'Quiet update interrupted the app'
-                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Quiet release was not processed' }
+                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Quiet release update card was not painted with a Restart button' }
                     Start-Sleep -Milliseconds 100
                 } while ($true)
                 $cardProcess.Refresh()
@@ -196,7 +200,7 @@ try {
                 $dc = $graphics.GetHdc()
                 try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Quiet update screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
                 try { $bitmap.Save((Join-Path $Evidence 'update-card-quiet.png')) } finally { $bitmap.Dispose() }
-                Passed 'maintenance release waits without an update card'
+                Passed 'empty-note update remains visible with Restart available'
                 Select-Release 'v9.10.0'
                 Assert (Save-Update $cardExe '0.0.0' 'x64') 'Real product notes were not restored'
                 $deadline = [DateTime]::UtcNow.AddSeconds(30)

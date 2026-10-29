@@ -332,11 +332,19 @@ test('IGSH-1197 published executable proof measures switches without inventing i
 });
 
 
-test('IGSH-1197 branch workflow measures the fixed candidate, dispatch measures the signed release', () => {
+test('IGSH-1197 scheduled and manual workflow measures an authenticated published release', () => {
   const file = new URL('../.github/workflows/large-history-switch.yml', import.meta.url);
   assert.ok(fs.existsSync(file), 'Large-history proof workflow must ship');
   const flow = fs.readFileSync(file, 'utf8');
-  assert.match(flow, /name: Build exact branch candidate for pre-merge workflow proof\n        if: github.event_name == 'push'/);
-  assert.match(flow, /Copy-Item zig-out\/bin\/multiprompt.exe released\/multiprompt.exe/);
-  assert.match(flow, /-Revision "\$env:SWITCH_REVISION" -SwitchOnly/);
+  assert.match(flow, /on:\n  schedule:[\s\S]*  workflow_dispatch:/);
+  assert.match(flow, /RELEASE_TAG: \$\{\{ inputs.tag \}\}/);
+  assert.match(flow, /if \(-not \$env:RELEASE_TAG\) \{\s*\$env:RELEASE_TAG = gh api "repos\/\$env:GITHUB_REPOSITORY\/releases\/latest" --jq .tag_name/);
+  assert.match(flow, /gh release download \$env:RELEASE_TAG/);
+  assert.match(flow, /crypto.verify\(null,manifest,key,fs.readFileSync\('released\/SHA256SUMS.txt.sig'\)\)/);
+  assert.match(flow, /createHash\('sha256'\)/);
+  assert.match(flow, /MPVERSION=\x27\+process.env.RELEASE_TAG.slice\(1\)/);
+  assert.match(flow, /Switch fifty times through 400 MiB history/);
+  assert.match(flow, /-Exe released\/multiprompt.exe -Evidence evidence\/released -Revision "\$env:RELEASE_TAG" -SwitchOnly/);
+  assert.match(flow, /Require every visible switch below 200 ms/);
+  assert.match(flow, /assessSwitches\(data\)[\s\S]*if\(!verdict.pass\) process.exit\(1\)/);
 });
