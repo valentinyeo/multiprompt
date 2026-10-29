@@ -42,12 +42,12 @@ pub fn paintVersionStrip(dc: w.HANDLE) void {
     defer _ = w.SelectObject(dc, old);
     _ = w.SetTextColor(dc, if (state.g_light_theme) RGB(110, 110, 110) else RGB(90, 90, 90));
     var buffer: [128]u8 = undefined;
-    const text = if (updateReady())
+    const label = if (updateReady())
         std.fmt.bufPrint(&buffer, "Update ready: v{s} \xc2\xb7 Restart", .{state.g_update_ver[0..state.g_update_ver_len]}) catch "Update ready"
     else
         "Multiprompt v" ++ @import("main.zig").APP_VERSION;
     var rect = versionStripRect();
-    drawing.drawAscii(dc, text, &rect, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX | w.DT_END_ELLIPSIS);
+    drawing.drawAscii(dc, label, &rect, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX | w.DT_END_ELLIPSIS);
 }
 
 pub fn geometry(client: RECT, pill: RECT, count: usize) RECT {
@@ -272,7 +272,7 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
         w.WM_MOUSEWHEEL => {
             const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
             const card = geometry(bounds, anchor, snapshot.goal_count);
-            const overflow = @max(0, @as(i32, snapshot.goal_count) * px(109) - (card.bottom - card.top - px(90)));
+            const overflow = @max(0, @as(i32, @intCast(snapshot.goal_count)) * px(109) - (card.bottom - card.top - px(90)));
             scroll = std.math.clamp(scroll - @divTrunc(@as(i32, delta) * px(54), 120), 0, overflow);
             _ = w.InvalidateRect(hwnd, null, 0);
             return 0;

@@ -7026,8 +7026,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_ACTIVATEAPP => {
             if (wp == 0) {
-                @import("usage_card.zig").close();
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
+                @import("usage_card.zig").close();
                 @import("chat_session.zig").chatReadDeactivate();
             } else {
                 focusGuardNoteActivation();
