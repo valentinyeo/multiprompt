@@ -1154,7 +1154,7 @@ test "cache-first switch-back demand-paged tail" {
     chatFileOnReady();
     try std.testing.expectEqual(@as(u64, 0), one.before);
     try std.testing.expectEqual(@as(u64, 419000000), one.history.start);
-    try std.testing.expectEqual(ticks, one.loaded_ms);
+    try std.testing.expectEqual(@as(i64, @intCast(ticks)), one.loaded_ms);
     try std.testing.expect(!one.resync);
     try std.testing.expectEqual(@as(usize, 1), one.history.blocks.items.len);
     try std.testing.expectEqual(@as(usize, 0), one.backfill.pages.items.len);
