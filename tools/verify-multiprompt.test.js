@@ -2488,3 +2488,28 @@ test('IGSH-1161 immediate key-pair deadline includes first injection time withou
   assert.throws(() => pair(350), /Alt\+A pair exceeded 300 ms/);
   assert.throws(() => pair(0, 60), /Alt\+A pair exceeded 300 ms/);
 });
+
+test('slow browser scenario reacquires owned foreground after immediate-close pairs', () => {
+  const journey = read(skill + 'control-feature-browser-pane-stuck.ps1');
+  const transition = journey.slice(journey.indexOf("                Assert-ImmediateBrowserPairs 'blank'"), journey.indexOf("                $slowPane = Assert-BrowserPane 'open' 'slow-open'"));
+  assert.match(transition, /Assert-ImmediateBrowserPairs 'blank'\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+Wait-Foreground\s+Press/);
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = require('node:child_process');
+  const run = body => spawnSync('powershell.exe', ['-NoProfile', '-Command', `
+$ErrorActionPreference = 'Stop'
+Add-Type 'public class VerifyNative { public static bool Owned; public static int Keys; public static void BringToForeground(System.IntPtr hwnd) { if (hwnd.ToInt64() != 17) throw new System.Exception("Wrong target"); Owned = true; } }'
+$script:window = [IntPtr]17
+function Assert-ImmediateBrowserPairs($Page) { [VerifyNative]::Owned = $false }
+function Wait-Foreground { if (-not [VerifyNative]::Owned) { throw 'Foreign input was refused' } }
+function Press($Keys, $Label) { Wait-Foreground; [VerifyNative]::Keys++ }
+${body}
+if ([VerifyNative]::Keys -ne 1) { throw 'Slow navigation input missing' }
+Write-Host 'OWNED_SLOW_BROWSER_TRANSITION_OK'
+`], { encoding: 'utf8', timeout: 20000 });
+  const red = run(transition.replace('[VerifyNative]::BringToForeground($script:window)', ''));
+  assert.notEqual(red.status, 0, red.stdout + red.stderr);
+  assert.match(red.stderr, /Foreign input was refused/);
+  const green = run(transition);
+  assert.equal(green.status, 0, green.stdout + green.stderr);
+  assert.match(green.stdout, /OWNED_SLOW_BROWSER_TRANSITION_OK/);
+});
