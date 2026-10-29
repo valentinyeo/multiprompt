@@ -553,7 +553,7 @@ def shell():
             fake_event("assistant", message=dict(role="assistant", id="switch-" + str(i), content=[dict(type="text", text=text)]))
         return 0
     if op == "history":
-        if state().get("crashProof"):
+        if state().get("name") == "live-delivery" and state().get("longChatProof"):
             import gzip
             fixture = Path(__file__).resolve().parent.parent / "fixtures/IGSH-1152/original-history.jsonl.gz"
             for line in gzip.decompress(fixture.read_bytes()).splitlines():
