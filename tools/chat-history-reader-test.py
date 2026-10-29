@@ -1465,6 +1465,10 @@ class HistoryReaderTest(unittest.TestCase):
             self.assertEqual(reader.agent_pid_for_panes([40], table, 'claude'), 61)
             with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '40\t60\n', '')):
                 self.assertIsNone(reader.agent_pid_for_panes([10], table, 'claude'))
+            with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'no server')):
+                self.assertIsNone(reader.agent_pid_for_panes([10], table, 'claude'))
+            with patch.object(reader.subprocess, 'run', side_effect=PermissionError()):
+                self.assertIsNone(reader.agent_pid_for_panes([10], table, 'claude'))
 
     def test_proc_snapshot_reads_tcp_socket_inodes_and_tolerates_inaccessible_fds(self):
         root = self.home / 'proc'
