@@ -1,5 +1,5 @@
 name: Released large-history switching
-run-name: Large-history switches ${{ inputs.tag || 'v0.28.1010' }}
+run-name: Large-history switches ${{ inputs.tag || 'latest' }}
 on:
   schedule:
     - cron: '24 3 * * *'
@@ -7,8 +7,7 @@ on:
     inputs:
       tag:
         description: Published release tag
-        required: true
-        default: v0.28.1010
+        required: false
         type: string
 permissions:
   contents: read
@@ -17,7 +16,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     env:
-      RELEASE_TAG: ${{ inputs.tag || 'v0.28.1010' }}
+      RELEASE_TAG: ${{ inputs.tag }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Keep LF line endings
@@ -34,6 +33,11 @@ jobs:
       - name: Download and authenticate published executable
         shell: pwsh
         run: |
+          if (-not $env:RELEASE_TAG) {
+            $env:RELEASE_TAG = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq .tag_name
+            if ($LASTEXITCODE -ne 0) { throw 'Latest release lookup failed' }
+          }
+          "RELEASE_TAG=$env:RELEASE_TAG" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
           New-Item -ItemType Directory -Force released | Out-Null
           gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir released --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern 'SHA256SUMS.txt*'
@@ -41,6 +45,7 @@ jobs:
           node --input-type=module -e "import fs from 'node:fs'; import crypto from 'node:crypto'; const manifest=fs.readFileSync('released/SHA256SUMS.txt'); const raw=Buffer.from(fs.readFileSync('src/release_signing_public_key.txt','utf8').trim(),'base64'); const key=crypto.createPublicKey({key:Buffer.concat([Buffer.from('302a300506032b6570032100','hex'),raw]),format:'der',type:'spki'}); if(!crypto.verify(null,manifest,key,fs.readFileSync('released/SHA256SUMS.txt.sig'))) throw Error('Invalid signature'); for(const name of ['multiprompt-x64.exe','zigshell-bridge-x64.exe']) { const bytes=fs.readFileSync('released/'+name); const hash=crypto.createHash('sha256').update(bytes).digest('hex'); if(!manifest.toString().split(/\r?\n/).some(line=>line.trim()===hash+'  '+name)) throw Error('Release digest mismatch'); if(name==='multiprompt-x64.exe'&&!bytes.includes(Buffer.from('MPVERSION='+process.env.RELEASE_TAG.slice(1)+';'))) throw Error('Version mismatch'); }"
           if ($LASTEXITCODE -ne 0) { throw 'Release authentication failed' }
           Copy-Item released/multiprompt-x64.exe released/multiprompt.exe
+          Copy-Item released/zigshell-bridge-x64.exe released/zigshell-bridge.exe
       - name: Install fixture compiler
         shell: pwsh
         run: |
