@@ -1042,7 +1042,7 @@ with tempfile.TemporaryDirectory() as temp:
         return 'Ready\n❯ typed draft\n' + '─' * 50 + '\n'
     scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys,os=os,time=time,capture_screen=capture_screen)
     exec(compile(ast.Module(body=[function],type_ignores=[]), '<boundary-watch>', 'exec'), scope)
-    with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True), patch.object(subprocess,'run',side_effect=AssertionError('stream spawned a capture process')):
+    with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.dict(sys.modules, pwd=None), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True), patch.object(subprocess,'run',side_effect=AssertionError('stream spawned a capture process')):
         try: scope['watch_reader']()
         except RuntimeError as error: assert str(error) == 'fixture finished'
     frames = [json.loads(line) for line in output.getvalue().splitlines()]
