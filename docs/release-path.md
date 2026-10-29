@@ -21,6 +21,7 @@ TruffleHog runs on scheduled and manual scans.
 
 Nightly and manual workflow inventory:
 
+- `account-bundle.yml`
 - `account-journey.yml`
 - `background-close.yml`
 - `bot-avatars.yml`
