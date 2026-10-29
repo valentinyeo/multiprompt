@@ -178,6 +178,19 @@ def agent_pid_for_panes(pane_pids, table, agent):
                          process_basename(argv[0]) in ("node", "bun") and len(argv) > 1 and
                          process_basename(argv[1]) in (agent, agent + ".js")):
                 return pid
+            if argv and process_basename(argv[0]) == "tmux" and pwd is not None:
+                try:
+                    user = pwd.getpwuid(Path(f"/proc/{pid}").stat().st_uid)
+                    if user.pw_uid != 0:
+                        clients = subprocess.run(["sudo", "-n", "-H", "-u", user.pw_name, "--", "tmux", "list-clients", "-F", "#{client_pid}\t#{pane_pid}"],
+                                                 capture_output=True, text=True, timeout=3, check=False)
+                        if clients.returncode == 0:
+                            for line in clients.stdout.splitlines():
+                                fields = line.split()
+                                if len(fields) == 2 and fields[0] == str(pid) and fields[1].isdigit():
+                                    queue.append(int(fields[1]))
+                except (OSError, KeyError, subprocess.SubprocessError):
+                    pass
             queue.extend(children.get(pid, []))
     return None
 
@@ -1925,10 +1938,12 @@ def watch_changes(q, resolved, source, as_owner):
 def watch(source, as_owner=False):
     q = json.loads(sys.stdin.buffer.readline())
     owner = conversation_owner(q.get("cwd", "")) if not q.get("codex") else None
-    if owner and owner[1] != HOME and not as_owner:
-        discovered = tmux_owner_process("claude", q["tmux"], source) if q.get("tmux") else None
-        if discovered and discovered[1] == owner:
+    if not as_owner and q.get("tmux"):
+        discovered = tmux_owner_process("codex" if q.get("codex") else "claude", q["tmux"], source)
+        if discovered:
+            owner = discovered[1]
             q = dict(q, discovery_pid=discovered[0])
+    if owner and owner[1] != HOME and not as_owner:
         bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"
         child = subprocess.Popen(["sudo", "-n", "-H", "-u", owner[0], "--", "python3", "-u", "-c", bootstrap, "--watch", "--owner"], stdin=subprocess.PIPE)
         try:

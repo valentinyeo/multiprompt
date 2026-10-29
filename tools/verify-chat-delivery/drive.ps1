@@ -625,6 +625,15 @@ foreach ($plan in $plans) {
         } elseif ($isLiveDelivery) {
             . "$PSScriptRoot/live-delivery.ps1"
         } elseif ($isRemote) {
+            Press @(0x11, 0x4B) 'Ctrl+K: choose the existing theme'
+            foreach ($letter in 'themes'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+            Press @(0x0D) 'Enter: open theme choices'
+            foreach ($letter in 'amoled'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+            Press @(0x0D) 'Enter: choose AMOLED'
+            [void](Wait-For 'app saved AMOLED theme' { (Read-Shared "$settings/theme-mode.txt").Trim() -eq 'amoled' })
+            Copy-Item "$settings/theme-mode.txt" "$caseDir/theme-mode.txt"
+            Press @(0x1B) 'Esc: close Themes'
+            [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
             [void](Wait-For 'initial remote transcript read' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
             Bind-Transcript
             foreach ($turn in 1..3) {

@@ -1450,6 +1450,26 @@ class HistoryReaderTest(unittest.TestCase):
         ipv6 = ('00000000000000000000000001000000:ABCD', '00000000000000000000000001000000:0016')
         self.assertEqual(reader.agent_pid_for_panes([10], reader.link_local_ssh(table.copy(), {11: [ipv6], 30: [ipv6[::-1]]}), 'claude'), 33)
 
+    def test_IGSH_1064_ssh_bridge_follows_only_its_attached_tmux_client_pane(self):
+        table = {10: (1, ['ssh', '-t', 'secondary@localhost']),
+                 30: (10, ['sshd: secondary@pts/1']),
+                 31: (30, ['/usr/bin/tmux', 'attach', '-t', 'design']),
+                 40: (2, ['/usr/bin/tmux', 'attach', '-t', 'other']),
+                 50: (2, ['bash']), 51: (50, ['claude']),
+                 60: (2, ['bash']), 61: (60, ['claude'])}
+        clients = subprocess.CompletedProcess([], 0, '40\t60\n31\t50\n', '')
+        with patch.object(Path, 'stat', return_value=types.SimpleNamespace(st_uid=1001)), \
+                patch.object(reader.pwd, 'getpwuid', return_value=self.owner()), \
+                patch.object(reader.subprocess, 'run', return_value=clients):
+            self.assertEqual(reader.agent_pid_for_panes([10], table, 'claude'), 51)
+            self.assertEqual(reader.agent_pid_for_panes([40], table, 'claude'), 61)
+            with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '40\t60\n', '')):
+                self.assertIsNone(reader.agent_pid_for_panes([10], table, 'claude'))
+            with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'no server')):
+                self.assertIsNone(reader.agent_pid_for_panes([10], table, 'claude'))
+            with patch.object(reader.subprocess, 'run', side_effect=PermissionError()):
+                self.assertIsNone(reader.agent_pid_for_panes([10], table, 'claude'))
+
     def test_proc_snapshot_reads_tcp_socket_inodes_and_tolerates_inaccessible_fds(self):
         root = self.home / 'proc'
         (root / 'net').mkdir(parents=True)
@@ -2020,6 +2040,28 @@ class HistoryReaderTest(unittest.TestCase):
         supplied, forwarded = child.stdin.payload.splitlines()
         self.assertEqual(base64.b64decode(supplied).decode(), reader.READER_SOURCE)
         self.assertEqual(json.loads(forwarded), dict(query, discovery_pid=99))
+
+    def test_IGSH_1064_watch_discovers_owner_without_a_remote_cwd(self):
+        owner = ('secondary', Path('/home/secondary'))
+        query = dict(self.query, cwd='', follow=True)
+        class Input(io.BytesIO):
+            def close(self):
+                self.payload = self.getvalue()
+                super().close()
+        incoming = types.SimpleNamespace(buffer=io.BytesIO(json.dumps(query).encode() + b'\n'), fileno=lambda: 55)
+        child = types.SimpleNamespace(stdin=Input(), wait=lambda: 0)
+        output = io.StringIO()
+        with patch.object(reader, 'tmux_owner_process', return_value=(99, owner)), \
+                patch.object(reader.subprocess, 'Popen', return_value=child) as start, \
+                patch.object(reader.sys, 'stdin', incoming), patch.object(reader.sys, 'stdout', output), \
+                patch.object(reader.os, 'read', return_value=b''), \
+                patch.object(reader, 'resolve_response_path', return_value=('claude', '', None, reader.missing_response(query, 'session transcript not found'))):
+            reader.watch(reader.READER_SOURCE)
+        self.assertTrue(start.called, 'watch must delegate to discovered owner instead of returning one missing frame')
+        supplied, forwarded = child.stdin.payload.splitlines()
+        self.assertEqual(base64.b64decode(supplied).decode(), reader.READER_SOURCE)
+        self.assertEqual(json.loads(forwarded), dict(query, discovery_pid=99))
+        self.assertEqual(output.getvalue(), '')
 
     @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux'), 'requires isolated Linux tmux')
     def test_watch_reuses_control_capture_without_spawning_tmux_per_update(self):
