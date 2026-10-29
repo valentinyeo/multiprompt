@@ -3,7 +3,7 @@ const w = @import("win32.zig");
 const L = std.unicode.utf8ToUtf16LeStringLiteral;
 const HRESULT = i32;
 const Slot = *const anyopaque;
-const DWRITE_MEASURING_MODE_GDI_CLASSIC = 1;
+const DWRITE_MEASURING_MODE_NATURAL = 0;
 const DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC = 5;
 
 const Factory = extern struct {
@@ -330,7 +330,7 @@ pub fn drawPositioned(hdc: w.HANDLE, text: []const u16, advances: []const f32, x
                 }
             }
             const run = GlyphRun{ .face = face, .em_size = @floatFromInt(metric.height - metric.internal_leading), .count = @intCast(count), .indices = indices.ptr, .advances = zero_advances.ptr, .offsets = @ptrCast(offsets.ptr) };
-            if (t.v.drawGlyphRun(t, @floatFromInt(x - clip.left), @floatFromInt(y - clip.top + metric.ascent), DWRITE_MEASURING_MODE_GDI_CLASSIC, &run, params.?, color, null) < 0) return false;
+            if (t.v.drawGlyphRun(t, @floatFromInt(x - clip.left), @floatFromInt(y - clip.top + metric.ascent), DWRITE_MEASURING_MODE_NATURAL, &run, params.?, color, null) < 0) return false;
             break;
         }
     }
@@ -370,7 +370,7 @@ fn paint(hdc: w.HANDLE, text: []const u16, rect: w.RECT, flags: u32) ?i32 {
     const em = metric.height - metric.internal_leading;
     if (em <= 0) return null;
     const run = GlyphRun{ .face = face, .em_size = @floatFromInt(em), .count = @intCast(segment.count), .indices = &segment.indices, .advances = &segment.advances };
-    if (t.v.drawGlyphRun(t, @floatFromInt(x), @floatFromInt(y + metric.ascent), DWRITE_MEASURING_MODE_GDI_CLASSIC, &run, params.?, color, null) < 0) return null;
+    if (t.v.drawGlyphRun(t, @floatFromInt(x), @floatFromInt(y + metric.ascent), DWRITE_MEASURING_MODE_NATURAL, &run, params.?, color, null) < 0) return null;
     if (metric.underlined != 0) {
         var post: [12]u8 = undefined;
         var head: [20]u8 = undefined;
