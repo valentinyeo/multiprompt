@@ -167,21 +167,6 @@ fn chatFileOnReady() void { std.debug.assert(g_chat_browser_swap.shell_id == 0);
 fn refreshChatTranscript(_: bool) void { std.debug.assert(g_chat_browser_swap.shell_id == 0); refreshes += 1; }
 `;
   const cases = `
-test "deferred switches persist once after their first paint, not twice" {
-    const idx: u32 = 0;
-    const prev: u32 = 1;
-    const unarchived_on_open = false;
-    const defer_browser = true;
-    saves = 0;
-    ${saveGuard}
-    try std.testing.expectEqual(@as(usize, 0), saves);
-    g_chat_browser_swap.request(7, 1000);
-    _ = g_chat_browser_swap.didPaint(7);
-    chatSwitchBrowserTick();
-    try std.testing.expectEqual(@as(usize, 1), saves);
-    chatSwitchBrowserTick();
-    try std.testing.expectEqual(@as(usize, 1), saves);
-}
 test "missing paint releases through the production timer exactly once" {
     g_chat_browser_swap.request(7, 1000);
     test_now = 1299;
@@ -249,6 +234,21 @@ test "stale timer cannot release a newer target early or a different active shel
     chatSwitchBrowserTick();
     try std.testing.expectEqual(@as(usize, 0), reveals);
     try std.testing.expectEqual(@as(usize, 1), exchanges);
+}
+test "deferred switches persist once after their first paint, not twice" {
+    const idx: u32 = 0;
+    const prev: u32 = 1;
+    const unarchived_on_open = false;
+    const defer_browser = true;
+    saves = 0;
+    ${saveGuard}
+    try std.testing.expectEqual(@as(usize, 0), saves);
+    g_chat_browser_swap.request(7, 1000);
+    _ = g_chat_browser_swap.didPaint(7);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 1), saves);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 1), saves);
 }
 `;
   try {
