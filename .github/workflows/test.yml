@@ -670,6 +670,7 @@ jobs:
           "SPEED_HEAD=$((git rev-parse HEAD).Trim())" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "SPEED_BASE=$base" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Measure baseline session speed
+        continue-on-error: true
         shell: powershell
         run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multiprompt.exe -Evidence evidence/base -Revision "$env:SPEED_BASE"
       - name: Measure candidate session speed
