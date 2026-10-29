@@ -1,4 +1,11 @@
 [void](Wait-For 'reaction transcript loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
+Press @(0x11, 0x4B) 'Ctrl+K: open theme picker'
+foreach ($letter in 'themes'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+Press @(0x0D) 'Enter: Themes'
+foreach ($letter in 'amoled'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
+Press @(0x0D) 'Enter: AMOLED'
+[void](Wait-For 'app saved AMOLED theme' { (Read-Shared "$settings/theme-mode.txt").Trim() -eq 'amoled' })
+Press @(0x1B) 'Esc: close Themes'
 Bind-Transcript
 Type-Composer $plan.text
 $bounds = $views[0].Current.BoundingRectangle
@@ -105,3 +112,43 @@ Shell-Run @('reaction-fallback')
     $LASTEXITCODE -eq 0
 })
 [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+
+$copyStart = (Read-Shared "$settings/debug.log").Length
+Press @(0x11, 0x4B) 'Ctrl+K: select all messages'
+$query = 'chat view select all'
+foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+[void](Wait-For 'emoji select-all command ready' { (Read-Shared "$settings/debug.log").Substring($copyStart) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=\d+') })
+Press @(0x0D) 'Enter: select all messages'
+Press @(0x11, 0x43) 'Ctrl+C: copy emoji source'
+$copied = [Windows.Forms.Clipboard]::GetText()
+$skin = $up + [char]::ConvertFromUtf32(0x1f3fd)
+$family = [char]::ConvertFromUtf32(0x1f468) + [char]0x200d + [char]::ConvertFromUtf32(0x1f469) + [char]0x200d + [char]::ConvertFromUtf32(0x1f467)
+$expectedEmoji = [string][char]0x2713 + ' ' + [char]0x26a0 + ' ' + $up + ' ' + $skin + ' ' + $family + ' ' + $heart
+if (-not $copied.Contains($expectedEmoji) -or $copied.Contains([string][char]0x2705)) { throw 'Emoji copy changed the original source characters' }
+[IO.File]::WriteAllText("$caseDir/emoji-copied.txt", $copied)
+Shot 'reactions-selection'
+Press @(0x1B) 'Esc: clear emoji selection'
+[void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
+
+$scrollStart = (Read-Shared "$settings/debug.log").Length
+Shell-Run @('messages', '200')
+$cache = Wait-For 'long emoji transcript cached' { Get-ChildItem "$settings/chatcache/*.jsonl" | Where-Object { try { (Read-Shared $_.FullName).Contains('New message 199') } catch [IO.FileNotFoundException] { $false } } | Select-Object -First 1 }
+[void](Wait-For 'long emoji transcript painted' {
+    $painted = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($scrollStart), 'PERF\[chat\]: receive to paint ms=\d+ size=(\d+)')
+    $painted.Count -gt 0 -and [int]$painted[$painted.Count - 1].Groups[1].Value -ge 200
+})
+Bind-Transcript
+$scrollView = [IntPtr]$views[0].Current.NativeWindowHandle
+$measurements = @()
+foreach ($round in 1..7) {
+    $samples = @()
+    foreach ($step in 1..20) {
+        $samples += [ChatDeliveryDesktop]::TimedTranscriptWheel($main, $app.Id, $scrollView, 120)
+    }
+    if ($round -eq 1) { Shot 'reactions-scroll-before' }
+    if ($round -gt 1) { $measurements += @{round=$round; milliseconds=$samples} }
+}
+Shot 'reactions-scroll-after'
+$wheel = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($scrollStart), '\[chat\] wheel delta=120 moved=(\d+) scale_px=\d+')
+if ($wheel.Count -ne 140 -or @($wheel | Where-Object { [int]$_.Groups[1].Value -le 0 }).Count -gt 0) { throw 'Timed wheels did not all move the real transcript' }
+Save @{method='synchronous WM_MOUSEWHEEL through production window procedure, RedrawWindow and GdiFlush'; messages=200; movedWheels=$wheel.Count; sourceBytes=(Get-Item $cache.FullName).Length; rounds=$measurements; cpuMs=$app.TotalProcessorTime.TotalMilliseconds} "$caseDir/emoji-scroll.json"

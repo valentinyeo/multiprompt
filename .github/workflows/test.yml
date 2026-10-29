@@ -62,7 +62,7 @@ jobs:
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
       - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
@@ -74,7 +74,7 @@ jobs:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Restore Zig (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
@@ -513,7 +513,7 @@ jobs:
   build-windows:
     name: build-windows (${{ matrix.arch }})
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
