@@ -150,7 +150,7 @@ fn initialize() bool {
         if (f.v.createRenderingParams(f, &defaults) < 0) return false;
         const p = defaults orelse return false;
         defer _ = p.v.release(p);
-        if (f.v.createCustomRenderingParams(f, p.v.getGamma(p), p.v.getEnhancedContrast(p), 0, 0, DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC, &params) < 0) return false;
+        if (f.v.createCustomRenderingParams(f, p.v.getGamma(p), 0, 0, 0, DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC, &params) < 0) return false;
     }
     return interop != null and params != null;
 }

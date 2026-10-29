@@ -53,6 +53,12 @@ test('IGSH-731 source connects native EDIT geometry, hidden native ink, repaint 
   assert.match(painter, /switch defaults on and only zero/);
 });
 
+test('shared 15px text uses grayscale coverage without subpixel contrast amplification', () => {
+  const dwrite = read('src/dwrite_text.zig');
+  assert.match(dwrite, /createCustomRenderingParams\(f, p.v.getGamma\(p\), 0, 0, 0, DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC, &params\)/);
+  assert.match(read('src/design_tokens.zig'), /pub const body_size: i32 = 15;/);
+});
+
 test('IGSH-731 Windows proof uses production painter and every scale/DPI with the real native fallback', () => {
   const proof = read('src/chat_composer_text_proof.zig');
   assert.match(read('src/chat_composer_text.zig'), /@import\("chat_composer_text_proof.zig"\)/);
