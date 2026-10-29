@@ -338,17 +338,17 @@ pub fn chatViewLayout() ChatViewLayout {
     const right = left + content.width;
     const content_top = slot.top + threadTitleHeight();
     const bottom = slot.bottom;
+    const send_size = uiScaled(32);
+    const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
     const composer_card = RECT{
-        .left = left,
+        .left = left + send_size + uiScaled(8),
         .top = bottom - composer_h,
         .right = right,
         .bottom = bottom,
     };
-    const send_size = uiScaled(32);
-    const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
     const slots = chatSendSlots(composer_card, send_size, send_margin, @import("window_layout.zig").chatStopVisible(), chatComposerHasText() or chat_dictation_state != .idle);
     const send_btn = slots.send;
-    const mic_w = chatDictationMicFit(chatDictationMicWidth(chat_dictation_state), slots.left - uiScaled(6) - (composer_card.left + send_margin + send_size + uiScaled(12)));
+    const mic_w = chatDictationMicFit(chatDictationMicWidth(chat_dictation_state), slots.left - uiScaled(6) - (composer_card.left + uiScaled(14)));
     const mic_btn = RECT{
         .left = slots.left - uiScaled(6) - mic_w,
         .top = send_btn.top,
@@ -356,9 +356,9 @@ pub fn chatViewLayout() ChatViewLayout {
         .bottom = send_btn.bottom,
     };
     const attach_btn = RECT{
-        .left = composer_card.left + send_margin,
+        .left = left,
         .top = send_btn.top,
-        .right = composer_card.left + send_margin + send_size,
+        .right = left + send_size,
         .bottom = send_btn.bottom,
     };
     const transcript_bottom = composer_card.top - gap - chatWorkingIndicatorH() - chatNewMessagesHeight();
@@ -378,7 +378,7 @@ pub fn chatViewLayout() ChatViewLayout {
         },
         .composer_card = composer_card,
         .composer = .{
-            .left = attach_btn.right + uiScaled(10),
+            .left = composer_card.left + uiScaled(14),
             .top = composer_card.top + chatReplyBarH() + uiScaled(12),
             .right = mic_btn.left - uiScaled(12),
             .bottom = composer_card.bottom - uiScaled(10),
@@ -534,7 +534,7 @@ fn chatComposerButtonsRefresh() void {
     if (!app_state.g_chat_active or app_state.g_main_hwnd == null) return;
     layoutChatControls();
     const layout = chatViewLayout();
-    var rc = RECT{ .left = layout.composer_card.left, .top = layout.transcript.bottom, .right = layout.composer_card.right, .bottom = layout.composer_card.bottom };
+    var rc = RECT{ .left = layout.attach_btn.left, .top = layout.transcript.bottom, .right = layout.composer_card.right, .bottom = layout.composer_card.bottom };
     _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
 }
 
@@ -1425,6 +1425,10 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
         if (wp == 0x0D) dropPendingEnterChar(hwnd);
         return 0;
     }
+    if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) {
+        if (wp == 0x0D) dropPendingEnterChar(hwnd);
+        return 0;
+    }
     if (msg == WM_KEYDOWN and @import("more_menu.zig").key(wp)) {
         if (wp == 0x0D) dropPendingEnterChar(hwnd);
         return 0;
@@ -1751,8 +1755,7 @@ pub fn openChatView() void {
     layoutChatControls();
     _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_SHOW);
     _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_SHOW);
-    _ = SetForegroundWindow(app_state.g_main_hwnd);
-    _ = SetFocus(app_state.g_chat_composer_hwnd);
+    focusActiveShell();
     for (&app_state.g_voice_deferred_text) |*pending| {
         if (pending.shell_id == app_state.shells[app_state.active_shell].shell_id and pending.len != 0) {
             insertTextIntoChatComposer(pending.text[0..pending.len]);

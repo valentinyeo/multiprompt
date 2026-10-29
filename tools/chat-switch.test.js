@@ -101,6 +101,9 @@ test('production switch timer releases missing paints, defers all overlays and i
   const os = require('node:os'), path = require('node:path');
   const { spawnSync } = require('node:child_process');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-switch-deadline-'));
+  const switching = body('switchToShell');
+  const saveAt = switching.indexOf('saveSession();');
+  const saveGuard = switching.slice(switching.lastIndexOf('    if (', saveAt), switching.indexOf('\n    }', saveAt) + 6).replaceAll('@import("launch_cache.zig").', 'launch_cache.');
   const prelude = `
 const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -114,7 +117,7 @@ var g_chat_browser_swap: chat_switch.Pending = .{};
 var g_chat_active = true;
 var active_shell: u32 = 0;
 var shell_count: u32 = 1;
-var shells = [_]struct { shell_id: u32 = 7, browser_frozen: bool = false, browser_window_id: u32 = 0 }{.{}};
+var shells = [_]struct { shell_id: u32 = 7, browser_frozen: bool = false, browser_window_id: u32 = 0, browser_enabled: bool = false }{.{}};
 var g_main_hwnd: ?usize = 1;
 var g_chat_transcript_hwnd: ?usize = 2;
 var g_chat_composer_hwnd: ?usize = 3;
@@ -154,7 +157,10 @@ fn wakeBrowserPaneFromFreeze(_: u32) void {}
 fn updateBrowserVisibility() void { exchanges += 1; }
 fn browserPaneActive() bool { return false; }
 fn armBrowserVisibilitySettle(_: u32) void {}
-fn saveSession() void {}
+var saves: usize = 0;
+var g_focus_user_action_tick: u64 = 0;
+const launch_cache = struct { const pending = false; };
+fn saveSession() void { saves += 1; }
 fn writePaneSessionFileForShell(_: u32) void {}
 fn chatSwitchLogBrowserShown() void {}
 fn chatFileOnReady() void { std.debug.assert(g_chat_browser_swap.shell_id == 0); ready += 1; }
@@ -229,6 +235,26 @@ test "stale timer cannot release a newer target early or a different active shel
     try std.testing.expectEqual(@as(usize, 0), reveals);
     try std.testing.expectEqual(@as(usize, 1), exchanges);
 }
+test "browserless switches save selection immediately without another queued write" {
+    const idx: u32 = 0;
+    const prev: u32 = 1;
+    const unarchived_on_open = false;
+    saves = 0;
+    ${saveGuard}
+    try std.testing.expectEqual(@as(usize, 1), saves);
+    g_chat_browser_swap.request(7, 1000);
+    _ = g_chat_browser_swap.didPaint(7);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 1), saves);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 1), saves);
+    shells[0].browser_enabled = true;
+    g_chat_browser_swap.request(7, 1000);
+    _ = g_chat_browser_swap.didPaint(7);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 2), saves);
+    shells[0].browser_enabled = false;
+}
 `;
   try {
     copyZig(['chat_switch.zig'], dir);
@@ -297,6 +323,67 @@ test "cached target is presented before queued browser work, never for a termina
     g_chat_transcript_hwnd = null;
     finishSwitch();
     try std.testing.expectEqual(@as(usize, 1), painted);
+}
+`);
+    const run = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.match(run.stderr, /All 1 tests passed/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('IGSH-1147 Chat View to terminal restores a parked native browser without an existing settle timer', () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const { spawnSync } = require('node:child_process');
+  const consoleSource = fs.readFileSync(require('node:path').join(__dirname, '../src/console.zig'), 'utf8');
+  const switchStart = consoleSource.indexOf('pub fn switchToShell(');
+  const switching = consoleSource.slice(switchStart, consoleSource.indexOf('\n}', switchStart) + 2);
+  const start = switching.lastIndexOf('    if (!defer_browser and defer_native_browser');
+  assert.ok(start > 0);
+  const finish = switching.slice(start, -2).replaceAll('app_state.', '').replaceAll('@import("win32.zig").', '');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-terminal-handoff-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'test.zig'), `
+const std = @import("std");
+var defer_browser = false;
+var defer_native_browser = true;
+var g_browser_switch_preparing = true;
+var g_browser_settle_ticks: i32 = 0;
+const g_main_hwnd: usize = 1;
+const WM_TIMER: u32 = 0x113;
+const TIMER_BROWSER_SETTLE: usize = 17;
+var messages: u32 = 0;
+var visible = false;
+fn armBrowserVisibilitySettle(ticks: i32) void {
+    if (g_browser_settle_ticks < ticks) g_browser_settle_ticks = ticks;
+}
+fn PostMessageW(_: usize, _: u32, timer: usize, _: isize) i32 {
+    std.debug.assert(timer == TIMER_BROWSER_SETTLE);
+    messages += 1;
+    visible = !g_browser_switch_preparing;
+    return 1;
+}
+fn finishSwitch() void {
+${finish}
+}
+test "parked native pane returns after chat cancelled the settle timer" {
+    finishSwitch();
+    try std.testing.expect(visible);
+    try std.testing.expectEqual(@as(u32, 1), messages);
+    try std.testing.expect(g_browser_settle_ticks > 0);
+    visible = false;
+    g_browser_switch_preparing = true;
+    g_browser_settle_ticks = 6;
+    finishSwitch();
+    try std.testing.expect(visible);
+    try std.testing.expectEqual(@as(u32, 2), messages);
+    defer_browser = true;
+    finishSwitch();
+    try std.testing.expectEqual(@as(u32, 2), messages);
+    defer_browser = false;
+    defer_native_browser = false;
+    finishSwitch();
+    try std.testing.expectEqual(@as(u32, 2), messages);
 }
 `);
     const run = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1'], { cwd: dir, encoding: 'utf8', timeout: 120000 });

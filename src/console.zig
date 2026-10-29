@@ -2012,6 +2012,9 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
     } else if (app_state.g_single_window and !app_state.g_restoring) app_state.shells[idx].workspace = app_state.g_active_workspace;
     app_state.shells[idx].font_gen = app_state.g_font_gen;
     app_state.shell_count += 1;
+    if (!app_state.g_restoring) {
+        if (tmux_session) |session| app_state.g_tmux_closed.reopen(app_state.g_pending_tmux_host, session);
+    }
     if (!app_state.g_restoring and background_workspace == null) app_state.shells[idx].last_active = nowFileTime();
     registerShellExitWait(idx);
     if (cmd_hwnd == null and pi.hProcess != null) @import("chat_send.zig").sshDisconnect(idx, "startup-console-missing");
@@ -2418,6 +2421,11 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
     if (idx >= app_state.shell_count) return;
     @import("chat_composer.zig").chatDraftCloseForShell(idx);
     accountRecordClose(idx);
+    if (remember_closed) {
+        if (!@import("launch_cache.zig").pending) app_state.g_tmux_closed.restored = true;
+        const closing = &app_state.shells[idx];
+        app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len]) catch debugLog("Could not remember closed tmux session");
+    }
     chatOutboxDropForShell(idx);
     _ = parkMainWindowBeforeActiveShellRemoval(idx);
     if (webView2OwnsShell(idx)) closeWebView2();
@@ -2690,12 +2698,6 @@ pub fn switchToShell(idx: u32) void {
         logUnarchive(idx, "opened after new output");
     }
     if (idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or !app_state.shells[idx].browser_native) hideBrowserEdgeMasks();
-    ensureActiveVisible();
-    if (!app_state.g_restoring and (idx != prev or unarchived_on_open or
-        (@import("launch_cache.zig").pending and app_state.g_focus_user_action_tick != 0 and idx < app_state.shell_count)))
-    {
-        saveSession();
-    }
     if (idx < app_state.shell_count) {
         app_state.shells[idx].notified = false;
         if (app_state.g_skip_view_bump) {
@@ -2705,6 +2707,14 @@ pub fn switchToShell(idx: u32) void {
         }
         app_state.shells[idx].needs_attention = false;
         if (!app_state.g_restoring and !app_state.g_skip_view_bump) app_state.shells[idx].last_viewed = nowFileTime();
+    }
+    ensureActiveVisible();
+    if (!app_state.g_restoring and (idx != prev or unarchived_on_open or
+        (@import("launch_cache.zig").pending and app_state.g_focus_user_action_tick != 0 and idx < app_state.shell_count)))
+    {
+        saveSession();
+    }
+    if (idx < app_state.shell_count) {
         if (app_state.g_all_sessions_active) {
             hideShellsForOverlay();
             updateBrowserVisibility();
@@ -2772,8 +2782,9 @@ pub fn switchToShell(idx: u32) void {
         writePaneSessionFileForShell(idx);
     }
     syncMouseHookForUrlClicks();
-    if (!defer_browser and defer_native_browser and app_state.g_browser_settle_ticks > 0) {
+    if (!defer_browser and defer_native_browser) {
         app_state.g_browser_switch_preparing = false;
+        armBrowserVisibilitySettle(12);
         _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_TIMER, @import("win32.zig").TIMER_BROWSER_SETTLE, 0);
     }
 }

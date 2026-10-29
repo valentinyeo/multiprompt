@@ -807,6 +807,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     if (job.kind != .signout and !writeDpapiFile("account-device.dat", response.bytes)) return error.Storage;
     const access = try account_client.field(response.bytes, "access_token");
     defer freeSecret(access);
+    @import("report_upload.zig").setAccess(access);
     if (job.kind == .signout or job.kind == .revoke) {
         const device = if (job.device) |id| try a.dupe(u8, id) else try account_client.field(response.bytes, "device_id");
         defer a.free(device);
@@ -817,6 +818,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         if (revoked.status == 401) reply.unauthorized = true;
         if (revoked.status != 200) return error.Revoke;
         if (job.kind == .signout) {
+            @import("report_upload.zig").setAccess("");
             accountDeleteToken();
             reply.signed_out = true;
             return;
@@ -996,7 +998,12 @@ pub fn applyServerLayout(json: []const u8) !void {
     const local = try captureSessionLayout(a, true);
     var owned: [MAX_SHELLS]bool = undefined;
     for (app_state.shells[0..app_state.shell_count], 0..) |s, i| owned[i] = s.sync_owned;
-    const desired = try account_layout.apply(a, local, owned[0..app_state.shell_count], server.value, MAX_LWS, MAX_SHELLS);
+    var desired = try account_layout.apply(a, local, owned[0..app_state.shell_count], server.value, MAX_LWS, MAX_SHELLS);
+    var kept: std.ArrayList(session_layout.Tab) = .empty;
+    for (desired.tabs) |tab| {
+        if (!app_state.g_tmux_closed.contains(tab.tmux_host, tab.tmux_session)) try kept.append(a, tab);
+    }
+    desired.tabs = kept.items;
     app_state.g_account_applying = true;
     defer app_state.g_account_applying = false;
     const old_restoring = app_state.g_restoring;

@@ -1050,33 +1050,21 @@ fn chatConsoleTableRows(raw: []const u16, width: usize, scratch: []u16, table_ro
     }
 }
 
-pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?usize {
-    if (shell_index >= app_state.shell_count or out.len < 2) return null;
-    const pid = app_state.shells[shell_index].pid;
-    if (pid == 0) return null;
+pub fn pollChatStatus(shell_index: u32) void {
+    if (shell_index >= app_state.shell_count) return;
+    const shell = app_state.shells[shell_index];
+    if (shell.pid == 0) return;
+    const snapshot = @import("console_snapshot.zig").poll(shell.pid, shell.shell_id) orelse return;
+    @memcpy(app_state.g_chat_raw[0..snapshot.raw.len], snapshot.raw);
+    chatCaptureStatus(shell_index, snapshot.width, @intCast(snapshot.raw.len), snapshot.rows);
+    if (@import("diagnostics.zig").verboseLoggingEnabled()) {
+        var message: [128]u8 = undefined;
+        @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&message, "chat-status-snapshot: sid={d} rows={d} chars={d}", .{ shell.shell_id, snapshot.rows, snapshot.raw.len }) catch "chat-status-snapshot: error");
+    }
+}
+
+fn chatCaptureStatus(shell_index: u32, width: usize, chars_read: DWORD, rows: usize) void {
     app_state.g_chat_screen_status_len = 0;
-
-    _ = FreeConsole();
-    if (AttachConsole(pid) == 0) return null;
-    defer _ = FreeConsole();
-    const handle = openAttachedConsoleOutput() orelse return null;
-    defer _ = CloseHandle(handle);
-
-    var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
-    if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
-    if (info.dwSize.x <= 0 or info.dwSize.y <= 0) return null;
-    const width: usize = @intCast(info.dwSize.x);
-    if (width == 0 or width > app_state.g_chat_raw.len) return null;
-    const end_row_i32 = @min(@as(i32, info.dwSize.y) - 1, @max(@as(i32, info.dwCursorPosition.y), @as(i32, info.srWindow.bottom)));
-    const rows_cap = @min(@min(app_state.g_chat_line_starts.len, @divTrunc(app_state.g_chat_raw.len, width)), @as(usize, if (status_only) 70 else 1200));
-    if (rows_cap == 0) return null;
-    const available_rows: usize = @intCast(end_row_i32 + 1);
-    const rows = @min(rows_cap, available_rows);
-    const start_row: i16 = @intCast(end_row_i32 - @as(i32, @intCast(rows)) + 1);
-    const cells: DWORD = @intCast(rows * width);
-    var chars_read: DWORD = 0;
-    if (ReadConsoleOutputCharacterW(handle, &app_state.g_chat_raw, cells, .{ .x = 0, .y = start_row }, &chars_read) == 0) return null;
-
     app_state.g_chat_raw_len = chars_read;
     app_state.g_chat_raw_sid = app_state.shells[shell_index].shell_id;
     chatPermissionCaptureRows(shell_index, width, chars_read, rows);
@@ -1122,6 +1110,37 @@ pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?u
         app_state.g_chat_screen_status_len = status_len;
         @import("window_layout.zig").chatWorkingTimesPoll();
     }
+}
+
+pub fn captureChatTranscript(shell_index: u32, out: []u16, status_only: bool) ?usize {
+    if (shell_index >= app_state.shell_count or out.len < 2) return null;
+    const pid = app_state.shells[shell_index].pid;
+    if (pid == 0) return null;
+    @import("console_snapshot.zig").invalidate();
+    app_state.g_chat_screen_status_len = 0;
+
+    _ = FreeConsole();
+    if (AttachConsole(pid) == 0) return null;
+    defer _ = FreeConsole();
+    const handle = openAttachedConsoleOutput() orelse return null;
+    defer _ = CloseHandle(handle);
+
+    var info: CONSOLE_SCREEN_BUFFER_INFO = undefined;
+    if (GetConsoleScreenBufferInfo(handle, &info) == 0) return null;
+    if (info.dwSize.x <= 0 or info.dwSize.y <= 0) return null;
+    const width: usize = @intCast(info.dwSize.x);
+    if (width == 0 or width > app_state.g_chat_raw.len) return null;
+    const end_row_i32 = @min(@as(i32, info.dwSize.y) - 1, @max(@as(i32, info.dwCursorPosition.y), @as(i32, info.srWindow.bottom)));
+    const rows_cap = @min(@min(app_state.g_chat_line_starts.len, @divTrunc(app_state.g_chat_raw.len, width)), @as(usize, if (status_only) 70 else 1200));
+    if (rows_cap == 0) return null;
+    const available_rows: usize = @intCast(end_row_i32 + 1);
+    const rows = @min(rows_cap, available_rows);
+    const start_row: i16 = @intCast(end_row_i32 - @as(i32, @intCast(rows)) + 1);
+    const cells: DWORD = @intCast(rows * width);
+    var chars_read: DWORD = 0;
+    if (ReadConsoleOutputCharacterW(handle, &app_state.g_chat_raw, cells, .{ .x = 0, .y = start_row }, &chars_read) == 0) return null;
+
+    chatCaptureStatus(shell_index, width, chars_read, rows);
     if (status_only) return 0;
 
     var table_rows: [1200]bool = @splat(false);

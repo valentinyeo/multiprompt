@@ -361,17 +361,20 @@ function assertsDispatchOnly(source) {
   assert.ok(featureMatrix(source).available.includes('browser-switch-speed'));
 }
 
-test('PR journeys use feature-owned smoke while master retains existing coverage', () => {
+test('IGSH-1033 master smoke stays small while release candidates retain feature-owned coverage', async () => {
+  const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
   const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'settings-panel', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
   function contract(source) {
-    assert.match(source, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083, ceo\/IGSH-1079\]\n  workflow_dispatch:/m);
+    verifyPushBranches(source);
     assert.deepEqual(journeyMatrix(source, 'pull_request'), featureMatrix(source).pr);
     assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), featureMatrix(source).pr);
-    for (const feature of full) assert.ok(journeyMatrix(source, 'push').includes(feature));
+    assert.deepEqual(journeyMatrix(source, 'push'), ['appearance', 'relaunch-saved-sessions']);
+    for (const feature of full) assert.ok(journeyMatrix(source, 'push', 'all').includes(feature));
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1072-proof-1'), ['chat-dictation']);
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1061-recovery'), ['browser-pane-stuck']);
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1083'), ['appearance']);
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1079'), ['appearance']);
+    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1055-hax2'), ['browser-pane-stuck', 'chat-messages-only']);
     for (const feature of full) assert.ok(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837').includes(feature));
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
   }
@@ -379,7 +382,7 @@ test('PR journeys use feature-owned smoke while master retains existing coverage
   for (const [before, after] of [
     ['fromJSON(needs.journeys.outputs.pr)', 'fromJSON(needs.journeys.outputs.full)'],
     ['fromJSON(needs.journeys.outputs.full)', 'fromJSON(needs.journeys.outputs.pr)'],
-    ["(github.event_name == 'push' ||", "(github.event_name == 'pull_request' ||"],
+    [`github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]')`, `github.event_name == 'pull_request' && fromJSON('["appearance", "relaunch-saved-sessions"]')`],
     ["inputs.feature == 'all'", "inputs.feature == 'appearance'"],
   ]) {
     const broken = workflow.replace(before, after);
@@ -400,7 +403,7 @@ test('switch timing is dispatch-only while allowlists and artifact contracts ret
     assert.notEqual(broken, workflow, before);
     assert.throws(() => assertsDispatchOnly(broken), assert.AssertionError);
   }
-  assert.throws(() => assertsDispatchOnly(workflow.replace(/inputs\.feature\)\) \}\}/, 'inputs.other)) }}')));
+  assert.throws(() => assertsDispatchOnly(workflow.replaceAll(`fromJSON(format('["{0}"]', inputs.feature))`, `fromJSON(format('["{0}"]', inputs.other))`)));
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('browser-switch-speed'));
   assert.match(control, /ValidateSet\([^\n]*'browser-switch-speed'/);

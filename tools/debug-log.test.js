@@ -91,3 +91,54 @@ test('unserialized pre-fix logger loses records under the same contention oracle
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stderr, /FAIL \(TestExpectedEqual\)/);
 });
+
+
+test('IGSH-1149 audit escaping preserves every byte without a file write per character', () => {
+  const extract = name => {
+    const start = source.indexOf(`fn ${name}(`);
+    assert.ok(start >= 0, name);
+    return source.slice(start, source.indexOf('\n}', start) + 2);
+  };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-batches-'));
+  try {
+    const code = String.raw`const std = @import("std");
+const HANDLE = usize;
+var output: [20000]u8 = undefined;
+var used: usize = 0;
+var writes: usize = 0;
+fn win32WriteAll(_: HANDLE, bytes: []const u8) void {
+    @memcpy(output[used..][0..bytes.len], bytes);
+    used += bytes.len;
+    writes += 1;
+}
+${extract('writeAuditEscapedBytes')}
+${extract('writeAuditEscapedWideAscii')}
+test "complete audit text keeps escaping and uses batched writes" {
+    const plain: [3000]u8 = @splat('a');
+    writeAuditEscapedBytes(1, &plain);
+    try std.testing.expectEqualSlices(u8, &plain, output[0..used]);
+    try std.testing.expectEqual(@as(usize, 1), writes);
+    used = 0; writes = 0;
+    writeAuditEscapedBytes(1, &.{'a', '\\', '"', '\r', '\n', 'b'});
+    try std.testing.expectEqualSlices(u8, &.{'a', '\\', '\\', '\\', '"', '\\', 'r', '\\', 'n', 'b'}, output[0..used]);
+    used = 0; writes = 0;
+    const wide: [10000]u16 = @splat('z');
+    writeAuditEscapedWideAscii(1, &wide);
+    try std.testing.expectEqual(@as(usize, wide.len), used);
+    for (output[0..used]) |c| try std.testing.expectEqual(@as(u8, 'z'), c);
+    try std.testing.expect(writes <= 3);
+    used = 0; writes = 0;
+    writeAuditEscapedWideAscii(1, &.{'a', '\\', 0x65e5, '\n', '"'});
+    try std.testing.expectEqualSlices(u8, &.{'a', '\\', '\\', '?', '?', '\\', '"'}, output[0..used]);
+    used = 0; writes = 0;
+    writeAuditEscapedBytes(1, "");
+    writeAuditEscapedWideAscii(1, &.{});
+    try std.testing.expectEqual(@as(usize, 0), used);
+    try std.testing.expectEqual(@as(usize, 0), writes);
+}
+`;
+    fs.writeFileSync(path.join(dir, 'audit.zig'), code);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'audit.zig')], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

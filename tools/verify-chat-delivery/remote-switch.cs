@@ -11,6 +11,20 @@ public sealed class RemoteSwitchFrames : IDisposable {
     [DllImport("kernel32.dll")] static extern bool SetWaitableTimer(IntPtr timer, ref long due, int period, IntPtr completion, IntPtr argument, bool resume);
     [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle, uint timeout);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll")] static extern IntPtr OpenThread(uint access, bool inherit, uint tid);
+    [DllImport("kernel32.dll")] static extern bool GetThreadTimes(IntPtr thread, out long created, out long exited, out long kernel, out long user);
+    public static double UiCpuMs(IntPtr view, uint pid) {
+        uint owner;
+        uint tid = GetWindowThreadProcessId(view, out owner);
+        if (owner != pid || tid == 0) throw new InvalidOperationException("CPU window owner mismatch");
+        IntPtr thread = OpenThread(0x0800, false, tid);
+        if (thread == IntPtr.Zero) throw new InvalidOperationException("CPU thread unavailable");
+        try {
+            long created, exited, kernel, user;
+            if (!GetThreadTimes(thread, out created, out exited, out kernel, out user)) throw new InvalidOperationException("CPU thread accounting failed");
+            return (kernel + user) / 10000.0;
+        } finally { CloseHandle(thread); }
+    }
     public sealed class Frame { public double completedMs, gapMs, paintMs; public bool painted; }
     readonly IntPtr view;
     readonly Thread thread;

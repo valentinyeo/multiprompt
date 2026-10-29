@@ -679,6 +679,7 @@ const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
+const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -1244,6 +1245,7 @@ comptime {
         _ = @import("vps.zig");
         _ = @import("chat_composer.zig");
         _ = @import("chat_capture.zig");
+        _ = @import("console_snapshot.zig");
         _ = @import("chat_session.zig");
         _ = @import("chat_render.zig");
         _ = @import("chat_find_ui.zig");
@@ -1256,6 +1258,7 @@ comptime {
         _ = @import("drawing.zig");
         _ = @import("smooth.zig");
         _ = @import("telemetry_panel.zig");
+        _ = @import("usage_card.zig");
         _ = @import("clipboard.zig");
         _ = @import("notifications.zig");
         _ = @import("browser_bridge.zig");
@@ -1352,6 +1355,7 @@ fn recordFrontVisit() void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (freeze_recorder.heartbeat(msg, wp)) return 0;
     freeze_recorder.note(msg, app_state.active_shell, if (app_state.g_inbox_active) .inbox else if (app_state.g_all_sessions_active) .sessions else if (app_state.g_search_active) .search else if (app_state.g_shortcuts_active) .shortcuts else if (app_state.g_changelog_active) .changelog else if (app_state.g_browser_focus_mode) .browser else if (app_state.g_chat_active) .chat else .terminal);
     if (msg == update_release.WM_RESPONSIVE) {
         update_release.ready();
@@ -1424,6 +1428,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (@import("fonts.zig").menuChar(wp)) |result| return result;
     }
     if (@import("fonts.zig").menuMessage(msg, lp)) |result| return result;
+    if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) return 0;
     if (app_state.g_account_locked) {
         switch (msg) {
             WM_PAINT => {
@@ -1555,6 +1560,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SIZE => {
+            @import("usage_card.zig").close();
             more_menu.close();
             @import("workspace_switcher.zig").close();
             @import("settings_panel.zig").reposition();
@@ -1942,6 +1948,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 {
+                    if (@import("usage_card.zig").versionStripHit(mx, my)) {
+                        updateCardRelaunch(hwnd);
+                        return 0;
+                    }
                     const upd_hit = updateCardHit(mx, my);
                     if (upd_hit != 0) {
                         app_state.g_shell_focused = false;
@@ -2104,6 +2114,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
             if (pt.x >= 0 and pt.x < SIDEBAR_W() and pt.y >= 0) {
                 const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
+                if (@import("update_card.zig").updateCardScroll(pt.x, pt.y, delta)) return 0;
                 if (sidebarStickyCardHitTest(pt.y)) {
                     cycleSidebarStatusCard(if (delta < 0) 1 else -1);
                     return 0;
@@ -2142,6 +2153,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_status_card_hover = false;
                 _ = InvalidateRect(hwnd, null, 0);
             }
+            if (app_state.g_sidebar_hover != null) {
+                app_state.g_sidebar_hover = null;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             if (app_state.g_workspace_hover != null) {
                 app_state.g_workspace_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2157,6 +2172,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOUSEMOVE => {
+            const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_Y(lp) + app_state.g_sidebar_scroll)) {
+                .tab => |index| index,
+                else => null,
+            } else null;
+            if (sidebar_hover != app_state.g_sidebar_hover) {
+                app_state.g_sidebar_hover = sidebar_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (sidebar_hover != null) {
+                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                _ = TrackMouseEvent(&tracking);
+            }
             {
                 const card_hover = sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp));
                 if (card_hover != app_state.g_status_card_hover) {
@@ -3487,6 +3514,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_all_sessions_tab = AS_TAB_ARCHIVED;
                     openAllSessions(hwnd);
                 },
+                @intFromEnum(more_menu.Item.resync) => @import("chat_session.zig").chatResync(),
                 @intFromEnum(more_menu.Item.waiting) => hideActiveTabUntilAttention(),
                 @intFromEnum(more_menu.Item.remind) => if (tmux) {
                     _ = PostMessageW(hwnd, WM_APP_REMIND_PRESETS_OPEN, 0, 0);
@@ -4674,6 +4702,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     chatCopySelection();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_CHAT_RESYNC_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    @import("chat_session.zig").chatResync();
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -6990,6 +7028,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_ACTIVATEAPP => {
             if (wp == 0) {
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
+                @import("usage_card.zig").close();
                 @import("chat_session.zig").chatReadDeactivate();
             } else {
                 focusGuardNoteActivation();
@@ -7990,6 +8029,8 @@ pub fn main(init: std.process.Init) void {
         usage_telemetry.main(init) catch {};
         return;
     }
+    if (@import("console_snapshot.zig").runIfRequested(args)) return;
+    defer @import("console_snapshot.zig").close();
     if (update_release.runHelperIfRequested(args)) return;
 
     debugLog("launch process-start version=" ++ APP_VERSION);
@@ -8182,6 +8223,8 @@ pub fn main(init: std.process.Init) void {
     app_state.g_main_hwnd = hwnd;
     @import("browser_pane.zig").installBrowserDockHooks();
     defer @import("browser_pane.zig").uninstallBrowserDockHooks();
+    @import("report_upload.zig").start();
+    defer @import("report_upload.zig").stop();
     freeze_recorder.start(hwnd, APP_VERSION);
     defer freeze_recorder.stop();
     defer if (app_state.g_account_instance_mutex != null) {

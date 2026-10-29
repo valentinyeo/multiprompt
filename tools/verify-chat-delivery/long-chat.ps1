@@ -1,5 +1,21 @@
 $sourceBytes = (Get-Item $transcript).Length
 if ($sourceBytes -le 18MB) { throw 'Expected a transcript over 18 MB' }
+Press @(0x11, 0x4B) 'Ctrl+K: create a second tab for long-chat switching'
+foreach ($letter in 'new cmd'.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
+[void](Wait-For 'long-chat second-tab command ready' { (Read-Shared "$settings/debug.log") -match '\[palette\] ready chars=7 count=\d+ target=\d+' })
+Press @(0x0D) 'Enter: create long-chat switch target'
+$expectedShells = 2
+[void](Wait-For 'long-chat second tab published' { @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count -eq 2 })
+Press @(0x11, 0x31) 'Ctrl+1: return to long chat before disconnect'
+Bind-Transcript
+Assert-FullHistory 'switch-before'
+Press @(0x12, 0x43) 'Alt+C: explicitly choose terminal during long-chat replay'
+[void](Wait-For 'explicit terminal choice hides the composer' { [ChatDeliveryDesktop]::Composer($main) -eq [IntPtr]::Zero })
+[void](Wait-For 'explicit terminal choice persisted' { @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs | Where-Object { $_.kind -eq 'tmux' -and $_.tmux_session -eq 'verify-agent' -and (-not $_.PSObject.Properties['cv'] -or -not $_.cv) }).Count -eq 1 })
+Shot 'long-chat-explicit-terminal'
+Press @(0x12, 0x43) 'Alt+C: restore long chat after explicit terminal choice'
+Bind-Transcript
+Assert-FullHistory 'toggle-return'
 Shell-Run @('detach-console')
 [void](Wait-For 'console transport disconnect observed' { (Read-Shared "$settings/debug.log").Contains('markSshTabDisconnected: preserving SSH/tmux tab') })
 Press @(0x11, 0x4B) 'Ctrl+K: cover disconnected long chat'
@@ -41,6 +57,9 @@ do {
     $samples.Add(@{ms=[int]$watch.ElapsedMilliseconds; width=$rect.Width; height=$rect.Height; ink=$ink})
     if ($watch.Elapsed.TotalSeconds -lt $duration) { Start-Sleep -Seconds 1 }
 } while ($watch.Elapsed.TotalSeconds -lt $duration)
+Press @(0x11, 0x32) 'Ctrl+2: leave disconnected long chat after thirty minutes'
+Press @(0x11, 0x31) 'Ctrl+1: restore disconnected long chat after thirty minutes'
+Bind-Transcript
 Assert-FullHistory 'sustained'
 Shot 'long-chat-sustained'
 Save @{sourceBytes=$sourceBytes; restoreMs=[int]$restore.ElapsedMilliseconds; sustainedMs=[int]$watch.ElapsedMilliseconds; samples=$samples.ToArray()} "$caseDir/long-chat.json"

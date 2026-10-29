@@ -10,20 +10,19 @@ try {
   assert.equal(observation.error, null);
   const source = fs.readFileSync(path.join(root, 'full-history/transcript.jsonl'), 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line));
   const messages = source.filter(row => typeof row.message?.content === 'string' || row.message?.content?.some(part => part.type === 'text')).map(row => typeof row.message.content === 'string' ? row.message.content : row.message.content.find(part => part.type === 'text').text);
-  assert.equal(messages.length, 50);
+  const rounds = process.env.CHAT_LONG_PROOF === '1' ? 320 : 24;
+  assert.equal(messages.length, 2 + rounds * 2);
   for (const stage of ['open', 'restart']) {
     const measured = json(`full-history/${stage}.json`);
     const copied = fs.readFileSync(path.join(root, `full-history/${stage}-copied.txt`), 'utf8');
     assert.equal(measured.messages, messages.length);
-    assert.equal(measured.blocks, messages.length + 24);
+    assert.equal(measured.blocks, messages.length + rounds + (process.env.CHAT_LONG_PROOF === '1' ? 300 : 0));
     assert.equal(measured.polled, true);
-    let offset = 0;
-    for (const message of messages) {
-      const at = copied.indexOf(message, offset);
-      assert.ok(at >= offset, `${stage}: missing or reordered ${message}`);
-      assert.equal(copied.indexOf(message, at + message.length), -1, `${stage}: duplicated ${message}`);
-      offset = at + message.length;
-    }
+    const latest = json(`full-history/${stage}-latest.json`);
+    assert.equal(latest.latest, `IGSH815 assistant ${String(rounds - 1).padStart(2, '0')}`);
+    assert.ok(latest.visibleMs > 0 && latest.visibleMs <= 2000);
+    const actual = copied.split(/\r?\n/).filter(line => /^(?:IGSH815 (?:user|assistant) \d+|start the fake session|The fake session is ready\.)$/.test(line));
+    assert.deepEqual(actual, messages, `${stage}: missing, reordered or duplicated messages`);
     const bytes = fs.readFileSync(path.join(root, `full-history-${stage}.png`));
     assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.ok(bytes.length > 10000);
@@ -44,7 +43,7 @@ try {
     assert.ok(continuity.samples.length >= (build.tag ? 1500 : 3));
     for (const sample of continuity.samples) assert.ok(sample.ink >= 8 && sample.width >= 200 && sample.height >= 100);
     const copied = fs.readFileSync(path.join(root, 'full-history/sustained-copied.txt'), 'utf8');
-    assert.ok(copied.includes('IGSH815 assistant 23'));
+    assert.ok(copied.includes(`IGSH815 assistant ${rounds - 1}`));
   }
   const build = json('build.json');
   const doctor = json('full-history/doctor.json');

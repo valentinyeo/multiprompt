@@ -661,6 +661,7 @@ pub const WS_PILL_GAP: i32 = 5;
 pub const WS_STRIP_LEFT: i32 = 8;
 pub const WS_NEW_PILL: u8 = 0xFF;
 pub var g_workspace_hover: ?u8 = null;
+pub var g_sidebar_hover: ?u32 = null;
 pub var g_inbox_button_hover: bool = false;
 pub var g_chat_stop_hover: bool = false;
 pub var g_chat_stop_shown: bool = false;
@@ -732,6 +733,8 @@ pub const ClosedShell = struct {
 pub const MAX_CLOSED_HISTORY = 10;
 pub var g_closed_history: [MAX_CLOSED_HISTORY]ClosedShell = undefined;
 pub var g_closed_count: u32 = 0;
+
+pub var g_tmux_closed: @import("tmux_closed.zig").Closed = .{};
 
 pub const MAX_TMUX_SESSIONS = 512;
 pub const TmuxSessionEntry = struct {
@@ -1373,6 +1376,7 @@ pub const SEARCH_CHAT_TODO_OFFSET: usize = 6398;
 pub const SEARCH_CHAT_TOOL_STEPS_OFFSET: usize = 6395;
 pub const SEARCH_CHAT_NEWEST_OFFSET: usize = 6465;
 pub const SEARCH_CHAT_MORE_MENU_OFFSET: usize = 6466;
+pub const SEARCH_CHAT_RESYNC_OFFSET: usize = 6493;
 pub const SEARCH_CHAT_COPY_CODE_OFFSET: usize = 6362;
 pub const SEARCH_CHAT_COPY_SELECTION_OFFSET: usize = 6363;
 pub const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET: usize = 6469;
@@ -1557,6 +1561,18 @@ pub const AiPace = enum(u8) {
     behind,
 };
 
+pub const AiPaceComparison = struct {
+    ratio: f64,
+    verdict: AiPace,
+};
+
+pub const AiUsagePace = struct {
+    per_hour: ?f64 = null,
+    per_day: ?f64 = null,
+    empty_hours: ?f64 = null,
+    comparison: ?AiPaceComparison = null,
+};
+
 pub const AiPaceGoal = struct {
     label: [128]u8 = std.mem.zeroes([128]u8),
     label_len: usize = 0,
@@ -1580,6 +1596,9 @@ pub const AiPaceGoal = struct {
     five_hour_reset_filetime: u64 = 0,
     has_bonus_reset: bool = false,
     bonus_reset_filetime: u64 = 0,
+    week_elapsed_tenths: ?u16 = null,
+    weekly_pace: AiUsagePace = .{},
+    five_hour_pace: AiUsagePace = .{},
     pace: AiPace = .on_pace,
     status: AiPaceStatus = .unavailable,
     cluster: [64]u8 = std.mem.zeroes([64]u8),
@@ -2610,6 +2629,7 @@ pub const ChatHistoryEntry = struct {
     push_pending: bool = false,
     stream: ?*ChatHistoryStream = null,
     retired: bool = false,
+    resync: bool = false,
     cache_cancelled: std.atomic.Value(bool) = .init(false),
     loaded_ms: i64 = 0,
     disk_loaded: bool = false,

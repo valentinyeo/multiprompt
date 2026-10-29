@@ -110,6 +110,9 @@ int main(int argc, char **argv) {
         snprintf(path, sizeof(path), "%s\\sessions.txt", root);
         FILE *f = fopen(path, "ab"); if (!f) return 91; fprintf(f, "%s\n", name); fclose(f);
     } else if (!exists(name)) { fprintf(stderr, "can't find session: %s\n", name); return 1; }
+    snprintf(path, sizeof(path), "%s\\window-%lu.txt", root, GetCurrentProcessId());
+    FILE *window = fopen(path, "wb"); if (!window) return 95;
+    fprintf(window, "%llu\n", (unsigned long long)(ULONG_PTR)GetConsoleWindow()); fclose(window);
     snprintf(path, sizeof(path), "%s\\transport-%lu.txt", root, GetCurrentProcessId());
     FILE *f = fopen(path, "wb"); if (!f) return 92; fprintf(f, "%s\n", name); fclose(f);
     printf("Connected to verification session %s\r\nverify> ", name); fflush(stdout);

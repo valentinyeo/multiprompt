@@ -49,6 +49,7 @@ const AiPace = @import("app_state.zig").AiPace;
 const AiPaceStatus = @import("app_state.zig").AiPaceStatus;
 const AiPaceProvider = @import("app_state.zig").AiPaceProvider;
 const AiPaceGoal = @import("app_state.zig").AiPaceGoal;
+const AiUsagePace = @import("app_state.zig").AiUsagePace;
 const AiPaceSnapshot = @import("app_state.zig").AiPaceSnapshot;
 const win32OpenRead = @import("file_io.zig").win32OpenRead;
 const win32ReadAll = @import("file_io.zig").win32ReadAll;
@@ -410,6 +411,28 @@ fn ladderWindowFields(win: ?std.json.Value, used: *u16, has_used: *bool, reset: 
     }
 }
 
+fn ladderPaceNumber(value: ?std.json.Value) ?f64 {
+    const number = aiPaceJsonNumber(value) orelse return null;
+    return if (std.math.isFinite(number) and number >= 0) number else null;
+}
+
+fn ladderWindowPace(value: ?std.json.Value) AiUsagePace {
+    const window = value orelse return .{};
+    if (window != .object) return .{};
+    const pace = window.object.get("pace") orelse return .{};
+    if (pace != .object) return .{};
+    const object = pace.object;
+    const word = aiPaceJsonString(object.get("verdict")) orelse "unknown";
+    const verdict: ?AiPace = if (std.mem.eql(u8, word, "above")) .ahead else if (std.mem.eql(u8, word, "on")) .on_pace else if (std.mem.eql(u8, word, "below")) .behind else null;
+    const ratio = ladderPaceNumber(object.get("ratio"));
+    return .{
+        .per_hour = ladderPaceNumber(object.get("per_hour")),
+        .per_day = ladderPaceNumber(object.get("per_day")),
+        .empty_hours = ladderPaceNumber(object.get("empty_hours")),
+        .comparison = if (verdict != null and ratio != null) .{ .verdict = verdict.?, .ratio = ratio.? } else null,
+    };
+}
+
 fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []const u8, default_provider: []const u8, now_secs: f64) void {
     if (item != .object) return;
     if (next.goal_count >= next.goals.len) return;
@@ -429,6 +452,11 @@ fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []c
     }
     ladderWindowFields(o.get("week"), &goal.total_used_tenths, &goal.has_total_used, &goal.weekly_reset_filetime, &goal.has_weekly_reset);
     ladderWindowFields(o.get("five_hour"), &goal.five_hour_used_tenths, &goal.has_five_hour_used, &goal.five_hour_reset_filetime, &goal.has_five_hour_reset);
+    if (o.get("week")) |week| {
+        if (week == .object) goal.week_elapsed_tenths = aiPacePercentTenths(week.object.get("time_gone"));
+    }
+    goal.weekly_pace = ladderWindowPace(o.get("week"));
+    goal.five_hour_pace = ladderWindowPace(o.get("five_hour"));
     if (o.get("resets")) |resets| {
         if (resets == .array) {
             const now = ladderUnixToFileTime(now_secs);
@@ -449,6 +477,8 @@ fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []c
     if (o.get("error")) |err| flagged_stale = flagged_stale or err == .string;
     if (!goal.has_total_used or flagged_stale) {
         goal.status = .stale;
+        goal.weekly_pace = .{};
+        goal.five_hour_pace = .{};
         return;
     }
     goal.has_daily_goal = true;
@@ -463,6 +493,7 @@ fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []c
             }
         }
     }
+    if (goal.weekly_pace.comparison) |comparison| goal.pace = comparison.verdict;
     goal.status = if (goal.pace == .behind) .to_go else .done;
 }
 
@@ -732,9 +763,9 @@ test "AI reset detail text uses fixed local time and countdown" {
 }
 
 test "AI pace words distinguish ahead on pace and behind" {
-    try std.testing.expectEqualStrings("AHEAD", aiPaceWord(.ahead));
-    try std.testing.expectEqualStrings("ON PACE", aiPaceWord(.on_pace));
-    try std.testing.expectEqualStrings("BEHIND", aiPaceWord(.behind));
+    try std.testing.expectEqualStrings("Above pace", aiPaceWord(.ahead));
+    try std.testing.expectEqualStrings("On pace", aiPaceWord(.on_pace));
+    try std.testing.expectEqualStrings("Below pace", aiPaceWord(.behind));
 }
 
 test "Ladder clusters, short labels and in_ladder" {
@@ -846,7 +877,7 @@ fn aiPaceStatusColor(status: AiPaceStatus, dim: DWORD) DWORD {
     };
 }
 
-fn formatAiPacePercent(buf: []u8, tenths: anytype) []const u8 {
+pub fn formatAiPacePercent(buf: []u8, tenths: anytype) []const u8 {
     if (tenths % 10 == 0) {
         return std.fmt.bufPrint(buf, "{d}%", .{tenths / 10}) catch "?";
     }
@@ -868,13 +899,13 @@ fn formatAiPaceResetCountdown(buf: []u8, reset_filetime: u64) []const u8 {
 
 fn aiPaceWord(pace: AiPace) []const u8 {
     return switch (pace) {
-        .ahead => "AHEAD",
-        .on_pace => "ON PACE",
-        .behind => "BEHIND",
+        .ahead => "Above pace",
+        .on_pace => "On pace",
+        .behind => "Below pace",
     };
 }
 
-fn aiPaceLocalTime(filetime: u64) ?SYSTEMTIME {
+pub fn aiPaceLocalTime(filetime: u64) ?SYSTEMTIME {
     const ft = FILETIME{ .dwLowDateTime = @truncate(filetime), .dwHighDateTime = @truncate(filetime >> 32) };
     var local_ft: FILETIME = undefined;
     var local: SYSTEMTIME = undefined;
@@ -918,7 +949,7 @@ fn aiPaceStaleCount() u8 {
     return count;
 }
 
-fn aiPoolShortLabel(buf: []u8, snapshot: *const AiPaceSnapshot, slot: usize) []const u8 {
+pub fn aiPoolShortLabel(buf: []u8, snapshot: *const AiPaceSnapshot, slot: usize) []const u8 {
     const goals = snapshot.goals[0..@min(snapshot.goal_count, snapshot.goals.len)];
     const provider = goals[slot].provider;
     var ordinal: usize = 0;
@@ -943,8 +974,16 @@ fn paintAiPaceWeekRuns(hdc: HANDLE, start_x: i32, rect: RECT, limit: i32, dim: D
         var segment_buf: [24]u8 = undefined;
         var label_buf: [16]u8 = undefined;
         const segment = status_line.formatWeekSegment(&segment_buf, aiPoolShortLabel(&label_buf, &app_state.g_ai_pace, slot), goal.available and goal.has_total_used, goal.total_used_tenths);
-        _ = SetTextColor(hdc, mono orelse if (goal.available) aiPaceProviderColor(goal, slot) else dim);
+        _ = SetTextColor(hdc, if (app_state.g_ai_pace.from_ladder) aiUsagePaceColor(goal.weekly_pace) else mono orelse if (goal.available) aiPaceProviderColor(goal, slot) else dim);
         x = drawAsciiRun(hdc, segment, x, rect.top, rect.bottom, limit);
+        if (app_state.g_ai_pace.from_ladder) {
+            x = drawAsciiRun(hdc, aiUsagePaceMark(goal.weekly_pace), x, rect.top, rect.bottom, limit);
+            if (goal.has_five_hour_used) {
+                _ = SetTextColor(hdc, aiUsagePaceColor(goal.five_hour_pace));
+                x = drawAsciiRun(hdc, "/", x, rect.top, rect.bottom, limit);
+                x = drawAsciiRun(hdc, aiUsagePaceMark(goal.five_hour_pace), x, rect.top, rect.bottom, limit);
+            }
+        }
     }
     return x;
 }
@@ -982,8 +1021,49 @@ fn paintSidebarAiPaceCard(hdc: HANDLE, rect: RECT, font_subtitle: HANDLE) void {
     _ = paintAiPaceWeekRuns(hdc, x, rect, limit, text, text);
 }
 
-fn createAiUsageMenu(snapshot: AiPaceSnapshot) HANDLE {
+fn aiUsagePaceColor(pace: AiUsagePace) DWORD {
+    const comparison = pace.comparison orelse return customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
+    return switch (comparison.verdict) {
+        .ahead => aiPaceStatusColor(.to_go, 0),
+        .behind => aiPaceStatusColor(.done, 0),
+        .on_pace => customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(255, 255, 255)),
+    };
+}
+
+fn aiUsagePaceMark(pace: AiUsagePace) []const u8 {
+    const comparison = pace.comparison orelse return "?";
+    return switch (comparison.verdict) {
+        .ahead => "+",
+        .on_pace => "=",
+        .behind => "-",
+    };
+}
+
+fn formatAiUsagePace(buf: []u8, pace: AiUsagePace) []const u8 {
+    const comparison = pace.comparison orelse return "Unknown pace";
+    return std.fmt.bufPrint(buf, "{s} {d:.2}x", .{ aiPaceWord(comparison.verdict), comparison.ratio }) catch "Unknown pace";
+}
+
+fn formatAiUsageRate(buf: []u8, value: ?f64) []const u8 {
+    const rate = value orelse return "unknown";
+    if (rate == 0) return "0%";
+    if (rate < 0.01) return "<0.01%";
+    return std.fmt.bufPrint(buf, "{d:.2}%", .{rate}) catch "unknown";
+}
+
+fn formatAiUsageEmpty(buf: []u8, pace: AiUsagePace) []const u8 {
+    if (pace.empty_hours) |hours| {
+        if (hours == 0) return "empty now";
+        if (hours < 0.1) return "empty in <0.1h";
+        return std.fmt.bufPrint(buf, "empty in {d:.1}h", .{hours}) catch "empty time unknown";
+    }
+    if (pace.per_hour != null and pace.per_hour.? == 0) return "not burning";
+    return "empty time unknown";
+}
+
+fn createAiUsageMenu(snapshot: AiPaceSnapshot, inks: *[256]?DWORD) HANDLE {
     const w = @import("win32.zig");
+    inks.* = @splat(null);
     const menu = w.CreatePopupMenu() orelse return null;
     const count = @min(snapshot.goal_count, snapshot.goals.len);
     if (count == 0) _ = w.AppendMenuW(menu, w.MF_STRING, 1, L("Usage is loading"));
@@ -991,30 +1071,48 @@ fn createAiUsageMenu(snapshot: AiPaceSnapshot) HANDLE {
         if (slot > 0) _ = w.AppendMenuW(menu, 0x0800, 0, null);
         var short_buf: [16]u8 = undefined;
         var percent_buf: [24]u8 = undefined;
-        var title_buf: [160]u8 = undefined;
+        var title_buf: [256]u8 = undefined;
+        var pace_buf: [64]u8 = undefined;
         var reset_buf: [32]u8 = undefined;
         var reset_detail_buf: [96]u8 = undefined;
+        var week_reset_buf: [160]u8 = undefined;
+        var week_empty_buf: [48]u8 = undefined;
+        var week_hour_buf: [32]u8 = undefined;
+        var week_day_buf: [32]u8 = undefined;
+        var week_burn_buf: [96]u8 = undefined;
         var five_buf: [20]u8 = undefined;
         var five_reset_buf: [32]u8 = undefined;
+        var five_pace_buf: [64]u8 = undefined;
+        var five_reset_detail_buf: [112]u8 = undefined;
+        var five_empty_buf: [48]u8 = undefined;
+        var five_hour_buf: [32]u8 = undefined;
+        var five_day_buf: [32]u8 = undefined;
+        var five_burn_buf: [96]u8 = undefined;
         var fable_buf: [20]u8 = undefined;
         var secondary_buf: [160]u8 = undefined;
         var today_buf: [64]u8 = undefined;
         var progress_buf: [20]u8 = undefined;
         var bonus_buf: [20]u8 = undefined;
         const used = if (goal.has_total_used) formatAiPacePercent(&percent_buf, goal.total_used_tenths) else "unknown";
-        const title = std.fmt.bufPrint(&title_buf, "{s} {s}: {s} week used{s}{s}{s}", .{ aiPoolShortLabel(&short_buf, &snapshot, slot), aiPaceProviderLabel(&goal), used, if (snapshot.from_ladder) " | " else "", if (snapshot.from_ladder) aiPaceWord(goal.pace) else "", if (goal.retrying) " (retrying)" else "" }) catch continue;
+        const title = std.fmt.bufPrint(&title_buf, "{s} {s}: {s} week used{s}{s}{s}", .{ aiPoolShortLabel(&short_buf, &snapshot, slot), aiPaceProviderLabel(&goal), used, if (snapshot.from_ladder) " | " else "", if (snapshot.from_ladder) formatAiUsagePace(&pace_buf, goal.weekly_pace) else "", if (goal.retrying) " (retrying)" else "" }) catch continue;
         const reset = formatAiPaceWeeklyReset(&reset_buf, goal);
         const reset_detail = if (goal.has_weekly_reset) detail: {
             const local = aiPaceLocalTime(goal.weekly_reset_filetime) orelse break :detail "Reset unknown";
             break :detail formatAiPaceResetDetail(&reset_detail_buf, local, reset);
         } else "Reset unknown";
+        const week_reset = if (snapshot.from_ladder) std.fmt.bufPrint(&week_reset_buf, "{s} | {s}", .{ reset_detail, formatAiUsageEmpty(&week_empty_buf, goal.weekly_pace) }) catch reset_detail else reset_detail;
+        const week_burn = if (snapshot.from_ladder) std.fmt.bufPrint(&week_burn_buf, "Burn: {s}/h | {s}/day", .{ formatAiUsageRate(&week_hour_buf, goal.weekly_pace.per_hour), formatAiUsageRate(&week_day_buf, goal.weekly_pace.per_day) }) catch "" else "";
         const five = if (goal.has_five_hour_used) formatAiPacePercent(&five_buf, goal.five_hour_used_tenths) else "unknown";
         const five_reset = formatAiPaceFiveHourReset(&five_reset_buf, goal);
         const fable = if (goal.has_fable_used) formatAiPacePercent(&fable_buf, goal.fable_used_tenths) else "";
-        const secondary = if (goal.has_fable_used)
+        const secondary = if (snapshot.from_ladder and goal.has_five_hour_used)
+            std.fmt.bufPrint(&secondary_buf, "5H {s} | {s}{s}{s}", .{ five, formatAiUsagePace(&five_pace_buf, goal.five_hour_pace), if (goal.has_fable_used) " | Fable " else "", fable }) catch continue
+        else if (goal.has_fable_used)
             std.fmt.bufPrint(&secondary_buf, "5H {s} | reset {s} | Fable {s}", .{ five, if (five_reset.len > 0) five_reset else "unknown", fable }) catch continue
         else
             std.fmt.bufPrint(&secondary_buf, "5H {s} | reset {s}", .{ five, if (five_reset.len > 0) five_reset else "unknown" }) catch continue;
+        const five_detail = if (snapshot.from_ladder and goal.has_five_hour_used) std.fmt.bufPrint(&five_reset_detail_buf, "Reset {s} | {s}", .{ if (five_reset.len > 0) five_reset else "unknown", formatAiUsageEmpty(&five_empty_buf, goal.five_hour_pace) }) catch "" else "";
+        const five_burn = if (snapshot.from_ladder and goal.has_five_hour_used) std.fmt.bufPrint(&five_burn_buf, "Burn: {s}/h | {s}/day", .{ formatAiUsageRate(&five_hour_buf, goal.five_hour_pace.per_hour), formatAiUsageRate(&five_day_buf, goal.five_hour_pace.per_day) }) catch "" else "";
         const today = if (!snapshot.from_ladder and goal.has_daily_goal)
             std.fmt.bufPrint(&today_buf, "Today: {s} of daily goal", .{formatAiPacePercent(&progress_buf, goal.progress_tenths)}) catch ""
         else
@@ -1024,26 +1122,33 @@ fn createAiUsageMenu(snapshot: AiPaceSnapshot) HANDLE {
             const text = formatAiPaceBonusReset(&bonus_buf, local);
             break :detail if (text.len > 3) text[3..] else "";
         } else "";
-        const lines = [_][]const u8{ title, reset_detail, secondary, today, bonus };
+        const lines = [_]struct { text: []const u8, ink: ?DWORD = null }{
+            .{ .text = title, .ink = if (snapshot.from_ladder) aiUsagePaceColor(goal.weekly_pace) else null },
+            .{ .text = week_reset },
+            .{ .text = week_burn },
+            .{ .text = secondary, .ink = if (snapshot.from_ladder) aiUsagePaceColor(goal.five_hour_pace) else null },
+            .{ .text = five_detail },
+            .{ .text = five_burn },
+            .{ .text = today },
+            .{ .text = bonus },
+        };
         for (lines, 0..) |line, index| {
-            if (line.len == 0) continue;
+            if (line.text.len == 0) continue;
             var wide: [257]u16 = @splat(0);
-            const length = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], line) catch continue;
+            const length = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], line.text) catch continue;
             wide[length] = 0;
-            _ = w.AppendMenuW(menu, w.MF_STRING, 1 + slot * lines.len + index, wide[0..length :0].ptr);
+            if (w.AppendMenuW(menu, w.MF_STRING, 1 + slot * lines.len + index, wide[0..length :0].ptr) != 0) inks[@intCast(w.GetMenuItemCount(menu) - 1)] = line.ink;
         }
+    }
+    if (snapshot.from_ladder and count > 0) {
+        _ = w.AppendMenuW(menu, 0x0800, 0, null);
+        if (w.AppendMenuW(menu, w.MF_STRING, 240, L("Week / 5h. + above; = on; - below; ? unknown.")) != 0) inks[@intCast(w.GetMenuItemCount(menu) - 1)] = aiUsagePaceColor(.{});
     }
     return menu;
 }
 
 pub fn showSidebarAiUsageMenu() void {
-    const w = @import("win32.zig");
-    const menu = createAiUsageMenu(app_state.g_ai_pace) orelse return;
-    defer _ = w.DestroyMenu(menu);
-    const card = sidebarStickyCardRect();
-    var point = w.POINT{ .x = card.left, .y = card.top - @import("window_layout.zig").paneGap() };
-    _ = w.ClientToScreen(app_state.g_main_hwnd, &point);
-    _ = @import("fonts.zig").trackPopupMenu(menu, w.TPM_RETURNCMD | 0x0020, point.x, point.y, 0, app_state.g_main_hwnd, null);
+    @import("usage_card.zig").open();
 }
 
 test "IGSH-908 native usage menu retains distinct pools, quota data and reset rows" {
@@ -1062,7 +1167,8 @@ test "IGSH-908 native usage menu retains distinct pools, quota data and reset ro
     }
     snapshot.goals[0].has_fable_used = true;
     snapshot.goals[0].fable_used_tenths = 180;
-    const menu = createAiUsageMenu(snapshot) orelse return error.TestUnexpectedResult;
+    var inks: [256]?DWORD = undefined;
+    const menu = createAiUsageMenu(snapshot, &inks) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyMenu(menu);
     try std.testing.expectEqual(@as(i32, 11), w.GetMenuItemCount(menu));
     const expected = [_][]const u8{ "CL1 Primary: 13% week used", "CX Codex: 32% week used", "CL2 Secondary: 56% week used", "5H 20% | reset unknown | Fable 18%" };
@@ -1081,6 +1187,80 @@ test "IGSH-908 native usage menu retains distinct pools, quota data and reset ro
     }
     for (found) |count| try std.testing.expectEqual(@as(usize, 1), count);
     try std.testing.expectEqual(@as(usize, 3), reset_rows);
+}
+
+test "IGSH-997 native menu retains per-window rates ratio verdict and exhaustion" {
+    const snapshot = try parseLadderStatus(
+        \\{"ts":1000,"mode":"codex","accounts":[
+        \\{"id":"claude","label":"Claude","provider":"claude","week":{"used":40,"time_gone":20,"pace":{"per_hour":2,"per_day":12,"ratio":2,"verdict":"above","empty_hours":30}},"five_hour":{"used":30,"time_gone":50,"pace":{"per_hour":12,"per_day":283,"ratio":0.6,"verdict":"below","empty_hours":5.8333}}},
+        \\{"id":"codex","label":"Codex","provider":"codex","week":{"used":10,"time_gone":50,"pace":{"per_hour":0.5,"per_day":5,"ratio":0.2,"verdict":"below","empty_hours":180}}}]}
+    , 1000);
+    try std.testing.expectEqual(@as(f64, 2), snapshot.goals[0].weekly_pace.per_hour.?);
+    try std.testing.expectEqual(@as(f64, 283), snapshot.goals[0].five_hour_pace.per_day.?);
+    try std.testing.expectEqual(AiPace.ahead, snapshot.goals[0].weekly_pace.comparison.?.verdict);
+    try std.testing.expectEqual(AiPace.behind, snapshot.goals[0].five_hour_pace.comparison.?.verdict);
+    try std.testing.expectEqualStrings("+", aiUsagePaceMark(snapshot.goals[0].weekly_pace));
+    try std.testing.expectEqualStrings("-", aiUsagePaceMark(snapshot.goals[0].five_hour_pace));
+    const w = @import("win32.zig");
+    var inks: [256]?DWORD = undefined;
+    const menu = createAiUsageMenu(snapshot, &inks) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyMenu(menu);
+    try std.testing.expectEqual(@as(i32, 13), w.GetMenuItemCount(menu));
+    const expected = [_][]const u8{
+        "CL Claude: 40% week used | Above pace 2.00x",
+        "Burn: 2.00%/h | 12.00%/day",
+        "Reset unknown | empty in 30.0h",
+        "5H 30% | Below pace 0.60x",
+        "Burn: 12.00%/h | 283.00%/day",
+        "Reset unknown | empty in 5.8h",
+        "CX Codex: 10% week used | Below pace 0.20x",
+        "Burn: 0.50%/h | 5.00%/day",
+        "Reset unknown | empty in 180.0h",
+        "Week / 5h. + above; = on; - below; ? unknown.",
+    };
+    var found = [_]usize{0} ** expected.len;
+    for (0..13) |index| {
+        var wide: [257]u16 = @splat(0);
+        const length = w.GetMenuStringW(menu, @intCast(index), &wide, wide.len, 0x0400);
+        var buffer: [1024]u8 = undefined;
+        const text_length = try std.unicode.utf16LeToUtf8(&buffer, wide[0..@intCast(length)]);
+        for (expected, 0..) |want, item| {
+            if (std.mem.eql(u8, buffer[0..text_length], want)) found[item] += 1;
+        }
+    }
+    for (found) |count| try std.testing.expectEqual(@as(usize, 1), count);
+    try std.testing.expectEqual(aiUsagePaceColor(snapshot.goals[0].weekly_pace), inks[0].?);
+    try std.testing.expectEqual(aiUsagePaceColor(snapshot.goals[0].five_hour_pace), inks[3].?);
+    try std.testing.expect(inks[0].? != inks[3].?);
+}
+
+test "IGSH-997 missing invalid and stale pace never becomes zero burn" {
+    const snapshot = try parseLadderStatus(
+        \\{"ts":1000,"mode":"codex","accounts":[
+        \\{"id":"missing","week":{"used":40,"pace":{"per_hour":null,"per_day":0,"ratio":null,"verdict":"unknown","empty_hours":null}}},
+        \\{"id":"invalid","week":{"used":10,"pace":{"per_hour":-1,"per_day":true,"ratio":-2,"verdict":"above","empty_hours":-1}}},
+        \\{"id":"word","week":{"used":10,"pace":{"per_hour":1,"ratio":2,"verdict":"faster"}}},
+        \\{"id":"stale","stale":true,"week":{"used":10,"pace":{"per_hour":2,"per_day":3,"ratio":2,"verdict":"above","empty_hours":4}}}]}
+    , 1000);
+    const missing = snapshot.goals[0].weekly_pace;
+    try std.testing.expect(missing.per_hour == null and missing.comparison == null and missing.empty_hours == null);
+    try std.testing.expectEqual(@as(f64, 0), missing.per_day.?);
+    const invalid = snapshot.goals[1].weekly_pace;
+    try std.testing.expect(invalid.per_hour == null and invalid.per_day == null and invalid.comparison == null and invalid.empty_hours == null);
+    try std.testing.expectEqual(@as(f64, 1), snapshot.goals[2].weekly_pace.per_hour.?);
+    try std.testing.expect(snapshot.goals[2].weekly_pace.comparison == null);
+    try std.testing.expectEqual(AiPaceStatus.stale, snapshot.goals[3].status);
+    try std.testing.expect(snapshot.goals[3].weekly_pace.per_hour == null and snapshot.goals[3].weekly_pace.comparison == null);
+    var buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("unknown", formatAiUsageRate(&buf, null));
+    try std.testing.expectEqualStrings("0%", formatAiUsageRate(&buf, 0));
+    try std.testing.expectEqualStrings("<0.01%", formatAiUsageRate(&buf, 0.0001));
+    try std.testing.expectEqualStrings("Unknown pace", formatAiUsagePace(&buf, missing));
+    try std.testing.expectEqualStrings("?", aiUsagePaceMark(missing));
+    try std.testing.expectEqualStrings("empty time unknown", formatAiUsageEmpty(&buf, .{}));
+    try std.testing.expectEqualStrings("not burning", formatAiUsageEmpty(&buf, .{ .per_hour = 0 }));
+    try std.testing.expectEqualStrings("empty now", formatAiUsageEmpty(&buf, .{ .empty_hours = 0 }));
+    try std.testing.expectEqualStrings("empty in <0.1h", formatAiUsageEmpty(&buf, .{ .empty_hours = 0.001 }));
 }
 
 const SidebarOverviewStatus = struct { label: []const u8, color: DWORD };

@@ -29,7 +29,7 @@ function fixture(t) {
   fs.mkdirSync(path.join(dir, 'src'));
   fs.mkdirSync(path.join(dir, 'tools'));
   fs.writeFileSync(path.join(dir, 'src/changelog.zig'), changelog);
-  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'auto-release-admit.sh']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
+  for (const file of ['release-version.mjs', 'version-stamp.mjs', 'strip-comments.mjs', 'auto-release-admit.sh']) fs.copyFileSync(path.join(root, 'tools', file), path.join(dir, 'tools', file));
   fs.writeFileSync(path.join(dir, 'src/main.zig'), 'pub const APP_VERSION = build_config.app_version orelse "1.2.3";\n');
   git('add', '.');
   git('commit', '-m', 'fixture');
@@ -62,6 +62,10 @@ if (args[0] === 'run' && args.includes('verify.yml')) {
 if (args[0] === 'run') {
   const sha = args[args.indexOf('--commit') + 1];
   console.log(JSON.stringify(sha === process.env.TESTED_SHA ? [{ databaseId: 1, event: 'push', status: 'completed', conclusion: process.env.TEST_CONCLUSION || 'success' }] : []));
+  process.exit(0);
+}
+if (args[0] === 'api' && args[1].endsWith('/releases/latest')) {
+  console.log(process.env.PUBLISHED_TAG || 'v1.2.8');
   process.exit(0);
 }
 if (args[0] === 'api') {
@@ -131,11 +135,45 @@ test('workflow preserves tag and manual triggers with reusable release, both arc
   assert.equal((tests.match(/node --test tools\/release-version.test.mjs/g) || []).length, 2);
 });
 
+test('release downloads exclude verification evidence from published update assets', t => {
+  const f = fixture(t);
+  const artifacts = new Map([
+    ['multiprompt-x64', ['multiprompt-x64.exe', 'zigshell-bridge-x64.exe']],
+    ['multiprompt-arm64', ['multiprompt-arm64.exe', 'zigshell-bridge-arm64.exe']],
+    ['verify-tmux-binding', ['binding-name-reused-stderr.log', 'result.json']],
+    ['verify-browser', ['journey.json', 'screenshot.png']],
+  ]);
+  const release = workflow.split('\n  release:\n')[1].split('\n  runner-sessions:\n')[0];
+  const downloads = [...release.matchAll(/      - uses: actions\/download-artifact@[^\n]+\n        with:\n((?:          [^\n]+\n)+)/g)];
+  assert.ok(downloads.length > 0, 'Release must download build artifacts');
+  for (const [, inputs] of downloads) {
+    const name = inputs.match(/^          name: (.+)$/m)?.[1];
+    const destination = inputs.match(/^          path: (.+)$/m)?.[1];
+    assert.equal(destination, 'dist');
+    for (const [artifact, files] of artifacts) {
+      if (name && artifact !== name) continue;
+      const directory = path.join(f.dir, destination, !name && !inputs.includes('merge-multiple: true') ? artifact : '');
+      fs.mkdirSync(directory, { recursive: true });
+      for (const file of files) fs.writeFileSync(path.join(directory, file), '');
+    }
+  }
+  const generated = ['multiprompt-extension.zip', 'release-notes.json', 'SHA256SUMS.txt', 'SHA256SUMS.txt.sig'];
+  for (const file of generated) fs.writeFileSync(path.join(f.dir, 'dist', file), '');
+  const result = f.run('Publish release');
+  assert.equal(result.status, 0, result.stderr);
+  const published = f.calls().find(args => args[0] === 'release' && args[1] === 'create');
+  assert.ok(published, 'Release must publish');
+  const assets = published.filter(arg => arg.startsWith('dist/')).map(arg => path.basename(arg));
+  assert.deepEqual(assets.sort(), [...artifacts.get('multiprompt-x64'), ...artifacts.get('multiprompt-arm64'), ...generated].sort());
+});
+
 test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', () => {
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   assert.equal(jobs['pr-build'], undefined);
   assert.match(jobs.prepare, /if: github.event_name != 'pull_request'/);
-  assert.match(jobs.build, /needs: prepare/);
+  assert.match(jobs.build, /needs: \[prepare, journeys\]/);
+  assert.match(jobs.journeys, /feature: all/);
+  assert.match(jobs.journeys, /revision: \$\{\{ needs.prepare.outputs.sha \}\}/);
   assert.match(jobs.release, /needs: \[prepare, build\]/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
@@ -371,7 +409,10 @@ test('release builds inject the tag, stage matching notes and reject wrong embed
 test('auto-release creates only a tag ref on the tested commit under a branch-rejecting remote', { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   f.git('tag', 'v1.2.8');
-  f.git('commit', '--allow-empty', '-m', 'tested improvement');
+  fs.mkdirSync(path.join(f.dir, 'changelog.d'));
+  fs.writeFileSync(path.join(f.dir, 'changelog.d/DEMO-1-chat.md'), 'Your chats keep their saved order.\n');
+  f.git('add', 'changelog.d');
+  f.git('commit', '-m', 'tested improvement');
   const tested = f.git('rev-parse', 'HEAD');
   f.git('push', 'origin', 'master');
   fs.writeFileSync(path.join(f.remote, 'hooks/update'), '#!/bin/sh\ncase "$1" in refs/heads/*) exit 1;; esac\n', { mode: 0o755 });
@@ -383,6 +424,7 @@ test('auto-release creates only a tag ref on the tested commit under a branch-re
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'master'), tested);
   assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v1.2.9'), tested);
   assert.deepEqual(f.calls(), [
+    ['api', 'repos/example/multiprompt/releases/latest', '--jq', '.tag_name'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'test.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'release-gate.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
     ['run', 'list', '-R', 'example/multiprompt', '-w', 'verify.yml', '-b', 'master', '--commit', tested, '--limit', '100', '--json', 'databaseId,event,status,conclusion'],
@@ -390,7 +432,10 @@ test('auto-release creates only a tag ref on the tested commit under a branch-re
     ['api', '-X', 'POST', 'repos/example/multiprompt/git/refs', '-f', 'ref=refs/tags/v1.2.9', '-f', `sha=${tested}`],
   ]);
   f.git('fetch', '--tags', 'origin');
-  const second = f.admit();
+  const retry = f.admit();
+  assert.equal(retry.status, 0, retry.stderr);
+  assert.equal(retry.stdout, `tag=v1.2.9\nsha=${tested}\n`);
+  const second = f.admit({ PUBLISHED_TAG: 'v1.2.9' });
   assert.equal(second.status, 0, second.stderr);
   assert.equal(second.stdout, '');
 });
@@ -398,7 +443,10 @@ test('auto-release creates only a tag ref on the tested commit under a branch-re
 for (const reason of ['skip', 'red', 'green']) test(`auto-release admission: ${reason}`, { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   f.git('tag', 'v1.2.8');
-  f.git('commit', '--allow-empty', '-m', reason === 'skip' ? 'maintenance [skip release]' : 'release candidate');
+  fs.mkdirSync(path.join(f.dir, 'changelog.d'));
+  fs.writeFileSync(path.join(f.dir, 'changelog.d/DEMO-1-chat.md'), 'Your chats keep their saved order.\n');
+  f.git('add', 'changelog.d');
+  f.git('commit', '-m', reason === 'skip' ? 'maintenance [skip release]' : 'release candidate');
   const tested = f.git('rev-parse', 'HEAD');
   f.git('push', 'origin', 'master');
   const result = f.admit({ TEST_CONCLUSION: reason === 'red' ? 'failure' : 'success' });
@@ -424,4 +472,18 @@ test('IGSH-1115 release proof builds both architectures without publishing and a
   assert.match(release, /if: github\.event_name != 'pull_request' && !inputs\.proof/);
   const notes = release.split('      - name: Publish plain versioned update notes\n')[1].split('      - name: Package extension')[0];
   assert.match(notes, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+});
+
+
+test('IGSH-1033 a proof builds unchanged application source without inventing release notes', () => {
+  const build = workflow.split('\n  build:\n')[1].split('\n  release:\n')[0];
+  assert.match(build, /PROOF: \$\{\{ inputs\.proof \}\}/);
+  const stamp = script('Build').split('zig build ')[0];
+  for (const proof of ['true', 'false', '']) {
+    const result = spawnSync('bash', ['-e', '-c', `node() { printf 'STAMP_REQUIRED'; return 1; }\n${stamp}`], {
+      encoding: 'utf8', env: { ...process.env, TAG: 'v1.2.3', PROOF: proof },
+    });
+    assert.equal(result.status, proof === 'true' ? 0 : 1, result.stdout + result.stderr);
+    assert.equal(result.stdout, proof === 'true' ? '' : 'STAMP_REQUIRED');
+  }
 });

@@ -109,10 +109,11 @@ test('IGSH-1113 required appearance verification cannot be filtered out for any 
   assert.ok(featureMatrix(workflow).pr.includes('appearance'));
 });
 
-test('release tags reuse master verification instead of starting another full Windows matrix', () => {
+test('release tags reuse master verification instead of starting another full Windows matrix', async () => {
   const push = workflow.match(/^  push:\r?\n((?:    [^\n]*\r?\n)+)/m);
   assert.ok(push, 'master pushes still trigger full verification');
-  assert.match(push[1], /^    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery, ceo\/IGSH-1083, ceo\/IGSH-1079\]\r?$/m);
+  const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
+  verifyPushBranches(workflow);
   assert.ok(workflow.includes(`github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck'))`), 'recovery branch runs only its failing browser journey');
   assert.doesNotMatch(push[1], /^    tags(?:-ignore)?:/m, 'release tags must not duplicate the tested master matrix');
 });
@@ -297,7 +298,7 @@ function assertsOwnedInput(source) {
   assert.equal((press.match(/::Chord\(/g) || []).length, 1);
   assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 0);
   assert.doesNotMatch(press, /Wait-Until|Start-Sleep|catch|\b(?:for|while)\s*\(/);
-  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Assert-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
+  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Wait-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
   assert.match(type, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/);
   assert.equal((type.match(/::Text\(/g) || []).length, 1);
   assert.doesNotMatch(type, /SetForegroundWindow|SetFocus|BringToForeground/);
@@ -314,7 +315,7 @@ test('IGSH-807: foreground ownership is bounded, refuses foreign input and is re
     ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', '    [void][VerifyNative]::SetForegroundWindow($script:window)\n    [void][VerifyNative]::SetForegroundWindow($script:window)\n'],
     ['    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)\n    [VerifyNative]::Chord($Keys)'],
     ['    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)\n    [VerifyNative]::Text($Text)'],
-    ["    Doctor\n    Assert-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
+    ["    Doctor\n    Wait-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
     ['$attempt -lt 50', '$true'],
     ['$attempt -lt 49', '$true'],
     ['    Assert-Foreground\n}\n\nfunction Press(', '    try { Assert-Foreground } catch {}\n}\n\nfunction Press('],
@@ -448,6 +449,10 @@ Refuses { Press @(0x41) 'lost before chord' }
 Reset
 $script:loseOnRecord = $true
 Refuses { Type-Text 'lost before text' }
+Reset
+[VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 2
+Type-Text 'recovered text'
+Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 2) 'Text did not recover owned foreground'
 Reset
 Type-Text 'owned text'
 Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 0) 'Text repaired focus or failed to inject'
@@ -603,7 +608,7 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(transport, /WriteAllText[\s\S]*?\.reply.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
   assertsOwnedInput(control);
-  assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
+  assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Wait-Foreground/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-ScratchPath \$scratch/);
 });
@@ -1202,7 +1207,9 @@ test('ISSUE-569 selection assertions resolve published active identity and requi
 test('ISSUE-569 selection persistence is independent of deferred browser startup and stale snapshots', () => {
   function contract(session, console, cache, main) {
     const switching = console.slice(console.indexOf('pub fn switchToShell(idx:'), console.indexOf('var startup_completed:'));
-    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        app_state.shells[idx].notified = false;'));
+    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        if (app_state.g_all_sessions_active) {'));
+    const attention = switching.indexOf('app_state.shells[idx].needs_attention = false;');
+    assert.ok(attention >= 0 && attention < switching.indexOf('saveSession();'), 'persist final attention state before returning to the browser queue');
     assert.match(save, /if \(!app_state.g_restoring and \(idx != prev or unarchived_on_open or/);
     assert.doesNotMatch(save, /defer_browser/);
     assert.doesNotMatch(save, /selected_shell_id\s*=/);
@@ -1552,8 +1559,9 @@ test('IGSH-908 status-card journey keeps compact pages and proves the existing-s
   assert.match(journey, /if \(\$height -gt 30 -or \$height -lt 20\) \{ throw/);
   assert.match(journey, /IGSH-908: usage pill has no frame at the sidebar bottom/);
   for (const check of ['usage panel closes on second click', 'usage panel closes on Escape', 'usage panel closes on outside click']) assert.ok(journey.includes(check));
-  assert.match(journey, /MenuLook/);
-  assert.match(journey, /\$look\.cornerShown/);
+  assert.match(journey, /Assert-UsageCardPixels 'pill-open'/);
+  assert.match(journey, /MultiPromptUsageCard/);
+  assert.match(journey, /Assert-AppVersionInk 'pill-closed'/);
   assert.match(journey, /usagePill = \$true/);
   assert.match(journey, /Snapshot 'pill-closed'/);
   assert.match(journey, /Snapshot 'pill-open'/);
@@ -2204,7 +2212,7 @@ test('IGSH-1108 workflow consumes feature-owned matrices without changing requir
   assert.match(workflow, /full: \$\{\{ steps.features.outputs.full \}\}/);
   assert.match(workflow, /- id: features\n        run: node tools\/verify-features.cjs/);
   assert.match(workflow, /github.event_name == 'pull_request' && fromJSON\(needs.journeys.outputs.pr\)/);
-  assert.match(workflow, /\(github.event_name == 'push' \|\| inputs.feature == 'all'\) && fromJSON\(needs.journeys.outputs.full\)/);
+  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
   assert.ok(features.pr.includes('appearance'));
   assert.ok(features.full.length >= 21);
   const registered = [...control.match(/ValidateSet\(([^\n)]+)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
@@ -2261,5 +2269,91 @@ test('IGSH-1108 CLI writes JSON job outputs and rejects unavailable or unsafe fe
     const result = cli(feature);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Unsupported desktop journey/);
+  }
+});
+
+test('IGSH-1033 shared tracked quarantine protects rollback and release execution', () => {
+  assert.ok(fs.existsSync(path.join(root, 'tools/journey-policy.json')), 'Shared quarantine policy must ship');
+  assert.deepEqual(JSON.parse(read('tools/journey-policy.json')), { quarantined: {} });
+  const policy = JSON.parse(read('tools/fixtures/IGSH-1033/journey-policy.json'));
+  assert.deepEqual(Object.keys(policy.quarantined).sort(), ['browser-pane-stuck', 'chat-messages-only']);
+  assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \}\}/);
+  assert.match(workflow, /quarantined: \$\{\{ steps.policy.outputs.quarantined \}\}/);
+  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
+  assert.match(workflow, /github.event_name == 'push' && fromJSON\('\["appearance", "relaunch-saved-sessions"\]'\)/);
+  for (const entry of Object.values(policy.quarantined)) {
+    assert.equal(entry.ticket, 'https://app.hypertask.ai/detail/project-2060/1055');
+    assert.deepEqual(entry.runs, ['https://github.com/valentinyeo/multiprompt/actions/runs/40450143181', 'https://github.com/valentinyeo/multiprompt/actions/runs/40454057302']);
+  }
+});
+
+test('IGSH-1033 historical controls stay outside master and release candidates', () => {
+  for (const name of ['Build IGSH-807 pre-fix focus-ring control', 'Require visible pre-fix focus rings with unchanged input cycling', 'Build the pre-fix commit 42cecfd3 negative control', 'Require pre-fix 42cecfd3 to show activity rows with the identical journey']) {
+    const step = workflow.slice(workflow.indexOf('      - name: ' + name)).split(/\n      - /)[0];
+    assert.match(step, /if: github.event_name == 'workflow_dispatch' && inputs.revision == '' &&/);
+  }
+});
+
+test('group proof samples and clicks below the workspace picker at every supported scale', () => {
+  const source = read(skill + 'control-native.cs');
+  const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
+  const expression = group.match(/int top = ([^;]+);/)[1];
+  const top = new Function('origin', 'frame', 'dpi', 'scale', 'hidePills', 'S', `return ${expression};`);
+  const pane = source.slice(source.indexOf('public static class PaneLayoutProof {'));
+  const rowExpression = pane.match(/int rowTop = ([^;]+);/)[1];
+  const rowTop = new Function('client', 'gap', 'dpi', 'scale', 'hidePills', 'S', `return ${rowExpression};`);
+  for (const [dpi, scale, hidePills, expected] of [
+    [96, 100, false, 125], [96, 100, true, 91],
+    [120, 100, false, 140], [144, 100, false, 155],
+    [96, 125, false, 140], [144, 125, true, 143],
+  ]) {
+    assert.equal(top({ Y: 231 }, { Top: 200 }, dpi, scale, hidePills,
+      (value, d, s) => Math.trunc(value * d * s / 9600)), expected,
+    `group headline must clear the workspace picker: dpi=${dpi} scale=${scale} hidePills=${hidePills}`);
+    assert.equal(rowTop({ Top: 31 }, Math.trunc(8 * dpi * scale / 9600), dpi, scale, hidePills,
+      (value, d, s) => Math.trunc(value * d * s / 9600)), expected + 28,
+    `pane icon scan must follow the group headline: dpi=${dpi} scale=${scale} hidePills=${hidePills}`);
+  }
+});
+
+test('native group pixel proof reports the current header and member rectangles', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-proof-'));
+  const source = read(skill + 'control-native.cs');
+  const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
+  const script = `$ErrorActionPreference = 'Stop'
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+public static class VerifyNative {
+    public struct Rect { public int Left, Top, Right, Bottom; }
+    public struct Point { public int X, Y; }
+}
+${group}
+'@
+$image = New-Object System.Drawing.Bitmap 800, 900
+try { $image.Save((Join-Path $PSScriptRoot 'sidebar.png')) } finally { $image.Dispose() }
+$frame = New-Object VerifyNative+Rect
+$frame.Left = 200; $frame.Top = 200
+$origin = New-Object VerifyNative+Point
+$origin.X = 208; $origin.Y = 231
+foreach ($collapsed in @($false, $true)) {
+    $proof = [GroupRailProof]::Check((Join-Path $PSScriptRoot 'sidebar.png'), $frame, $origin, 96, 100, $false, $collapsed)
+    if ($proof.headerTops[0] -ne 125) { throw 'First group overlaps the workspace picker' }
+    $second = if ($collapsed) { 153 } else { 229 }
+    if ($proof.headerTops[1] -ne $second -or $proof.sidebarRect[3] -ne ($second + 104)) { throw 'Member rectangles do not track group collapse' }
+    if (-not $proof.noFill -or -not $proof.noRail -or $proof.flushLeft) { throw 'Pixel checks no longer inspect the blank image faithfully' }
+}
+Write-Host 'NATIVE_GROUP_GEOMETRY_OK'
+`;
+  try {
+    const file = path.join(dir, 'group-proof.ps1');
+    fs.writeFileSync(file, script);
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', file], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /NATIVE_GROUP_GEOMETRY_OK/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

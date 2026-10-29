@@ -106,7 +106,7 @@ test('ISSUE-716 hook bypasses Find only for the shared focus chord, preserves la
 test('ISSUE-716 startup retains cached and restored composer focus, and activation repairs null/frame focus', () => {
   assert.match(read('src/launch_cache.zig'), /if \(s.chat\) \{[\s\S]*?@import\("chat_composer.zig"\).openChatView\(\);/);
   assert.match(main, /launch_cache.bindRestoredChat\(\);\s*@import\("chat_composer.zig"\).applySessionView\(\);/);
-  assert.match(body(composer, 'openChatView'), /SetForegroundWindow\(app_state.g_main_hwnd\);\s*_ = SetFocus\(app_state.g_chat_composer_hwnd\);/);
+  assert.match(body(composer, 'openChatView'), /ShowWindow\(app_state.g_chat_composer_hwnd, SW_SHOW\);\s*focusActiveShell\(\);/);
   assert.match(body(focus, 'focusGuardActivationTarget'), /chatComposerFocusAllowed\(\) and \(focused == null or focused == app_state.g_main_hwnd\)/);
   assert.match(main, /if \(focusGuardComposerRepairAllowed\(\)\) \{\s*_ = SetFocus\(app_state.g_chat_composer_hwnd\);\s*altqLog\("composer_focus site=activate/);
   assert.match(body(composer, 'chatFocusDrifted'), /f == null or f == app_state.g_main_hwnd or f == app_state.g_chat_transcript_hwnd/);

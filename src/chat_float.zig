@@ -4,7 +4,7 @@ const w32 = @import("win32.zig");
 const RECT = w32.RECT;
 
 const RGN_DIFF: i32 = 4;
-const MAX_HOLES = 6 + std.meta.tags(@import("chat_permission.zig").Action).len;
+const MAX_HOLES = 7 + std.meta.tags(@import("chat_permission.zig").Action).len;
 
 pub fn moat() i32 {
     return @import("drawing.zig").uiScaled(6);
@@ -38,6 +38,7 @@ pub fn collectHoles(out: *HoleList) void {
     const drawing = @import("drawing.zig");
     const layout = chat_composer.chatViewLayout();
     out.addFloating(layout.composer_card, window_layout.chatSurfaceRadius());
+    out.addFloating(layout.attach_btn, @divTrunc(layout.attach_btn.bottom - layout.attach_btn.top, 2));
     var main_rc: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = w32.GetClientRect(app_state.g_main_hwnd, &main_rc);
     out.add(@import("window_frame.zig").controlsRect(main_rc.right), 0);
@@ -46,7 +47,7 @@ pub fn collectHoles(out: *HoleList) void {
     } else if (drawing.chatTitleLayout()) |title| {
         out.addFloating(title.pill, @divTrunc(title.pill.bottom - title.pill.top, 2));
         out.addFloating(title.more, @divTrunc(title.more.bottom - title.more.top, 2));
-        if (title.has_meta) out.addFloating(title.meta_pill, @divTrunc(title.meta_pill.bottom - title.meta_pill.top, 2));
+        if (title.meta.len > 0) out.addFloating(title.meta_pill, @divTrunc(title.meta_pill.bottom - title.meta_pill.top, 2));
     }
     if (chat_composer.chatNewMessagesRect()) |pill| out.addFloating(pill, drawing.uiScaled(13));
     if (window_layout.chatPermissionVisible()) {

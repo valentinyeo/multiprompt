@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-    branches: [master]
+    branches: [master, ceo/IGSH-1019]
 
 permissions:
   contents: read
@@ -35,7 +35,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -111,6 +111,13 @@ jobs:
       - name: Run tests
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3 ${{ matrix.group == 2 && '-j1' || '' }}
+      - name: Save approved shared chat proof
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shared-chat-style-proof
+          path: chat-shared-*.bmp
+          if-no-files-found: error
       - name: Save native header capacity proof
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -173,7 +180,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Test plain changelog fragments and update card notes
@@ -279,7 +286,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -343,7 +350,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -452,7 +459,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -522,7 +529,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -605,7 +612,7 @@ jobs:
   check-red-run:
     uses: ./.github/workflows/check-red-run.yml
     with:
-      base: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && github.event.before) || 'origin/master' }}
+      base: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && (github.event.before || format('{0}^', github.sha))) || 'origin/master' }}
       head: ${{ github.event.pull_request.head.sha || github.sha }}
 
   switch-performance:
@@ -641,7 +648,7 @@ jobs:
       - name: Build baseline and candidate
         shell: pwsh
         env:
-          BASE: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && github.event.before) || 'origin/master' }}
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && (github.event.before || format('{0}^', github.sha))) || 'origin/master' }}
         run: |
           $base = (git merge-base $env:BASE HEAD).Trim()
           git worktree add --detach baseline $base

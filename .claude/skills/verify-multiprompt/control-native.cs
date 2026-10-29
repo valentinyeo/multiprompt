@@ -167,6 +167,7 @@ public static class VerifyNative {
             { "visible", IsWindowVisible(hwnd) }
         };
     }
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
     public static List<Dictionary<string, object>> DesktopWindows() {
         var windows = new List<Dictionary<string, object>>();
         EnumWindows(delegate(IntPtr hwnd, IntPtr data) {
@@ -880,7 +881,7 @@ public static class GroupRailProof {
             int clientLeft = origin.X - frame.Left;
             int left = clientLeft + S(8, dpi, scale);
             int right = clientLeft + S(220, dpi, scale) - S(8, dpi, scale) / 2;
-            int top = origin.Y - frame.Top + S(8, dpi, scale) + (hidePills ? 0 : 34);
+            int top = origin.Y - frame.Top + S(8, dpi, scale) + (hidePills ? 0 : 34) + S(52, dpi, scale);
             int headerHeight = 28, rowHeight = S(38, dpi, scale);
             int secondHeader = top + headerHeight + (collapsed ? 0 : 2 * rowHeight);
             int groupBottom = secondHeader + headerHeight + 2 * rowHeight;
@@ -1197,7 +1198,7 @@ public static class PaneLayoutProof {
             proof["gapRect"] = new int[] { gapLeft, client.Top, browserLeft, client.Bottom };
             proof["gripPixels"] = gripPixels;
             Require(forbidden == 0 && gapLeft >= right, "clean-gap", "forbidden ring/divider pixels=" + forbidden);
-            int rowTop = client.Top + gap + (hidePills ? 0 : 34) + 28;
+            int rowTop = client.Top + gap + (hidePills ? 0 : 34) + S(52, dpi, scale) + 28;
             int rowBottom = rowTop + S(38, dpi, scale);
             var railColor = System.Drawing.Color.FromArgb(145, 149, 157);
             int railPixels = 0;

@@ -17,6 +17,7 @@ Start-Transcript "$Evidence/driver.log"
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
+if ($Feature -eq 'chat-full-history') { Add-Type -Path "$PSScriptRoot/chat-switch-observer.cs" -ReferencedAssemblies System.Drawing }
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 if ($env:CHAT_REPLY_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reply proof requires chat-delivery' }
 if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Fresh skills proof requires chat-delivery' }
@@ -47,6 +48,8 @@ if ($env:CHAT_MISSING_PROOF -eq '1') { $plans = @(@{name='missing-transcript'; m
 if ($env:CHAT_NOTES_PROOF -eq '1') { $plans = @(@{name='session-notes'; mode='idle'; text='runner note disclosure'}) }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') { $plans = @(@{name='reactions'; mode='busy'; text='draft stays here'}) }
 if ($env:CHAT_REPLY_PROOF -eq '1') { $plans = @(@{name='reply-reference'; mode='idle'; text='compact reply navigation'}) }
+if ($env:CHAT_RESYNC_PROOF -eq '1') { $plans = @(@{name='resync'; mode='busy'; text='draft stays here'}) }
+if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 $results = @($plans | ForEach-Object { @{name=$_.name; passed=$false; detail='Case has not completed'} })
 $actions = [Collections.Generic.List[object]]::new()
@@ -68,7 +71,7 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 60)
 function Shot([string]$Name) {
     if ($Name -eq 'new-messages-visible') {
         [void](Wait-For 'unread badge reaches the screen' {
-            $bounds = $views[0].Current.BoundingRectangle
+            $bounds = Transcript-Viewport
             $probe = [Drawing.Bitmap]::new(60, 100)
             $draw = [Drawing.Graphics]::FromImage($probe)
             try {
@@ -99,9 +102,10 @@ function Doctor([bool]$Chat = $false) {
         Save @{offscreen=$element.Current.IsOffscreen; pid=$element.Current.ProcessId; title=$title; hwnd=$main.ToInt64()} "$caseDir/doctor-window.json"
         throw 'Doctor: visible versioned UI Automation identity missing'
     }
-    $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
-    if (@($published.shells).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 3 }).Count -ne 1 -or
-        ($expectedShells -eq 2 -and @($published.shells | Where-Object { $_.kind -eq 0 }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not published' }
+    $session = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+    $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1') { $expectedShells } else { 1 }
+    if (@($session.tabs).Count -ne $expectedShells -or @($session.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -ne $expectedTmux -or
+        ($expectedShells -eq 2 -and @($session.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
     if ($Chat) {
         $focus = [ChatDeliveryDesktop]::Focus($main)
         if ($focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Doctor: owned composer must have foreground typing focus' }
@@ -167,6 +171,13 @@ function Queue-View {
     $labels = New-Object System.Collections.Generic.List[string]
     foreach ($item in $parsed) { $labels.Add([string]$item.state + ':' + [string]$item.text) }
     $labels -join '|'
+}
+function Transcript-Viewport {
+    $frames = [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] frame transcript (\d+),(\d+),(\d+),(\d+) edit')
+    if ($frames.Count -eq 0) { throw 'App-reported transcript viewport is missing' }
+    $frame = $frames[$frames.Count - 1].Groups
+    $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
+    New-Object Drawing.Rectangle(($origin.X + [int]$frame[1].Value), ($origin.Y + [int]$frame[2].Value), ([int]$frame[3].Value - [int]$frame[1].Value), ([int]$frame[4].Value - [int]$frame[2].Value))
 }
 function New-MessageState([int]$LogStart = 0) {
     $log = Read-Shared "$settings/debug.log"
@@ -251,22 +262,43 @@ function Clear-Composer {
     for ($i = 0; $i -lt $length; $i++) { Press @(0x08) 'Backspace: clear composer' $true }
 }
 function Assert-FullHistory([string]$Stage) {
+    $rounds = if ($env:CHAT_LONG_PROOF -eq '1') { 320 } else { 24 }
+    $blocks = 2 + 3 * $rounds + $(if ($env:CHAT_LONG_PROOF -eq '1') { 300 } else { 0 })
+    if ($Stage -in @('open', 'restart')) {
+        $latest = 'IGSH815 assistant {0:00}' -f ($rounds - 1)
+        [Windows.Forms.Clipboard]::Clear()
+        [void](Wait-For 'latest retained message reaches the real rendered transcript' {
+            [ChatSwitchObserver]::CopyTranscript($app.Id, $main)
+            try { [Windows.Forms.Clipboard]::GetText().Contains($latest) }
+            catch {
+                if ($_.Exception.InnerException -isnot [Runtime.InteropServices.ExternalException]) { throw }
+                $false
+            }
+        } 2)
+        Shot "full-history-$Stage-latest"
+        $latestClock.Stop()
+        Save @{latest=$latest; visibleMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/$Stage-latest.json"
+        if ($latestClock.ElapsedMilliseconds -gt 2000) { throw "Latest long-chat message exceeded two seconds at $Stage" }
+        Doctor $true
+        Press @(0x1B) 'Esc: clear latest-message selection'
+    }
     $offset = (Read-Shared "$settings/debug.log").Length
     $complete = Step 'all session rows reach the renderer' {
         Press @(0x11, 0x30) 'Ctrl+0: measure every rendered session row'
         $log = (Read-Shared "$settings/debug.log").Substring($offset)
         $frames = [regex]::Matches($log, '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
-        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq 74
+        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq $blocks
     }
     if (-not $complete) { throw "IGSH-815 incomplete session at $Stage" }
     $pollOffset = (Read-Shared "$settings/debug.log").Length
-    [void](Wait-For 'normal transcript poll completes after full history loads' {
+    Shell-Run @('history-refresh')
+    [void](Wait-For 'changed transcript delivery completes after full history loads' {
         (Read-Shared "$settings/debug.log").Substring($pollOffset) -match '(?s)\[chat\] transcript request shell=(\d+) offset=\d+ before=0.*?\[chat\] transcript load shell=\1 ok'
     })
     $offset = (Read-Shared "$settings/debug.log").Length
     Press @(0x11, 0x30) 'Ctrl+0: measure every session row after polling'
     $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
-    if ($frames.Count -eq 0 -or [int]$frames[$frames.Count - 1].Groups[1].Value -ne 74) { throw "IGSH-815 session rows lost after polling at $Stage" }
+    if ($frames.Count -eq 0 -or [int]$frames[$frames.Count - 1].Groups[1].Value -ne $blocks) { throw "IGSH-815 session rows lost after polling at $Stage" }
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
     $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
@@ -282,7 +314,7 @@ function Assert-FullHistory([string]$Stage) {
     $copied = [Windows.Forms.Clipboard]::GetText()
     [IO.File]::WriteAllText("$caseDir/$Stage-copied.txt", $copied)
     $actual = @([regex]::Matches($copied, 'IGSH815 (?:user|assistant) \d+') | ForEach-Object { $_.Value })
-    $expected = @(0..23 | ForEach-Object { 'IGSH815 user {0:00}' -f $_; 'IGSH815 assistant {0:00}' -f $_ })
+    $expected = @(0..($rounds - 1) | ForEach-Object { 'IGSH815 user {0:00}' -f $_; 'IGSH815 assistant {0:00}' -f $_ })
     if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-815 incomplete copied messages at $Stage" }
     Shot "full-history-$Stage"
     Press @(0x1B) 'Esc: clear transcript selection'
@@ -327,7 +359,7 @@ function Assert-FullHistory([string]$Stage) {
     Save @{stage=$Stage; wheel_notch_px=$moved; browser_notch_px=$browserNotch; thumb_height=[int]$scrollUi.Groups[2].Value; button_click=@($clickX, $clickY)} "$caseDir/$Stage-scroll-ui.json"
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Doctor $true
-    Save @{stage=$Stage; blocks=74; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
+    Save @{stage=$Stage; blocks=$blocks; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 function Retention-Copy([string]$Stage, [int]$Count) {
     $offset = (Read-Shared "$settings/debug.log").Length
@@ -432,11 +464,13 @@ foreach ($plan in $plans) {
     $job = $null
     $main = [IntPtr]::Zero
     $composer = [IntPtr]::Zero
+    $isResync = $plan.name -eq 'resync'
     $isReaction = $plan.name -eq 'reactions'
     $isAccepted = $plan.name -eq 'accepted-message'
     $isSwitch = $plan.name -eq 'remote-switch'
     $isRemote = $plan.name -eq 'remote-sync' -or $isSwitch
     $isQueue = $plan.name -eq 'queue-draft-sync'
+    $isHax = $env:CHAT_HAX_PROOF -eq '1'
     $isSendStays = $plan.name -eq 'send-stays-gone'
     $isMissing = $plan.name -eq 'missing-transcript'
     $isActivity = $plan.name -eq 'messages-only'
@@ -445,7 +479,7 @@ foreach ($plan in $plans) {
     $isNotes = $plan.name -eq 'session-notes'
     $isSending = $env:CHAT_SENDING_PROOF -eq '1'
     $isLiveDelivery = $plan.name -eq 'live-delivery'
-    $hasTranscript = $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote
+    $hasTranscript = $isResync -or $isLiveDelivery -or $isReply -or $isNotes -or $isReaction -or $isAccepted -or $isQueue -or $isSendStays -or $isActivity -or $isHistory -or $isSending -or $isRemote -or $isHax
     $steps = [Collections.Generic.List[object]]::new()
     $procDir = $null
     $transcript = $null
@@ -488,6 +522,14 @@ foreach ($plan in $plans) {
             $observation.texts = $queueTexts
             $observation.steps = $steps
         }
+        if ($isHax) {
+            $standIn.hax = $true
+            $standIn.sessions = @('runner-alpha', 'runner-beta', 'runner-gamma', 'runner-empty')
+            $standIn.panes = @{'runner-alpha'=4242; 'runner-beta'=4243; 'runner-gamma'=4244; 'runner-empty'=4245}
+            $standIn.procRoot = [IO.Path]::GetPathRoot($profile) + 'proc'
+            $standIn.home = "$profile/home"
+            $standIn.cwd = 'C:/verify/shared-runners'
+        }
         Save $standIn "$state/state.json"
         if ($env:CHAT_SKILLS_PROOF -eq '1') {
             New-Item -ItemType Directory -Force "$profile/home/.claude/skills/verify-zebra" | Out-Null
@@ -496,14 +538,20 @@ foreach ($plan in $plans) {
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-yak/SKILL.md", "---`nname: verify-yak`ndescription: Cached selection fixture`n---`nFixture")
         }
         if ($hasTranscript) { Shell-Run @('init') }
+        if ($isResync) { Shell-Run @('resync-init') }
         if ($isReply) { Shell-Run @('reply-reference') }
         if ($isNotes) { Shell-Run @('session-notes') }
+        if ($isLiveDelivery -and $env:CHAT_LONG_PROOF -eq '1') { Shell-Run @('history') }
         if ($isHistory) { Shell-Run @($(if ($env:CHAT_RETENTION_PROOF -eq '1') { 'retention-init' } else { 'history' })) }
         if ($isSwitch) { Shell-Run @('switch-history') }
         [IO.File]::WriteAllText("$state/agent-buffer.jsonl", '')
         $savedSession = @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='tmux'; name='Verify agent'; manual=$true; tmux_host=0; tmux_session='verify-agent'; cv=$false; pid=0})}
         if ($env:CHAT_SKILLS_PROOF -eq '1') { $savedSession.tabs[0].csid = 'a1b2c3d4-0923-4000-8000-000000000923' }
         if ($isNotes) { $savedSession.tabs[0].name = 'Mini Boss CEO' }
+        if ($isHax) {
+            $savedSession.tabs = @($standIn.sessions | ForEach-Object { @{kind='tmux'; name=$_; manual=$true; tmux_host=0; tmux_session=$_; cv=$false; pid=0} })
+            $expectedShells = 4
+        }
         Save $savedSession "$settings/session.json"
         if ($isRemote) {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
@@ -521,11 +569,16 @@ foreach ($plan in $plans) {
         Press @(0x11, 0x31) 'Ctrl+1: select saved tmux tab'
         Shot "$($plan.name)-before"
         if ($plan.name -eq 'busy-send') { Shot 'before' }
+        $latestClock = [Diagnostics.Stopwatch]::StartNew()
         Press @(0x12, 0x43) 'Alt+C: open Chat View'
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
-        if ($env:CHAT_SKILLS_PROOF -eq '1') {
+        if ($isResync) {
+            . "$PSScriptRoot/resync.ps1"
+        } elseif ($isHax) {
+            . "$PSScriptRoot/hax-sessions.ps1"
+        } elseif ($env:CHAT_SKILLS_PROOF -eq '1') {
             Type-Composer '/verify-zebra'
             if ([ChatDeliveryDesktop]::Text($composer) -cne '/verify-zebra') { throw 'Skill fixture did not type the slash and hyphen' }
             [void](Wait-For 'initial skill fetch applied' { (Read-Shared "$settings/debug.log") -match 'chat-ac: fetched host=0 bytes=[1-9]' } 20)
@@ -642,13 +695,16 @@ foreach ($plan in $plans) {
             Save $stopped "$caseDir/restart-process-tree.json"
             $job.Dispose()
             $job = [VerifyJob]::new()
+            $latestClock = [Diagnostics.Stopwatch]::StartNew()
             $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
             $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-            [void](Wait-For 'restarted owned app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
+            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
+            $windowMs = [int]$latestClock.ElapsedMilliseconds
             $composer = Wait-For 'restored native Chat View composer with owned typing focus' {
                 $h = [ChatDeliveryDesktop]::Composer($main)
                 if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $h)) { $h }
             }
+            Save @{windowMs=$windowMs; focusedMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/restart-ready.json"
             Assert-FullHistory 'restart'
             if ($env:CHAT_LONG_PROOF -eq '1') { . "$PSScriptRoot/long-chat.ps1" }
         } elseif ($isReply) {
@@ -723,19 +779,43 @@ foreach ($plan in $plans) {
             $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
             $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
             $todoStatus = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Static')
-            [void](Wait-For 'owned status row above the transcript once the todo is read' {
+            [void](Wait-For 'owned status row inside the transcript host once the todo is read' {
                 $viewRows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
                 if ($viewRows.Count -ne 1) { return $false }
                 $viewBounds = $viewRows[0].Current.BoundingRectangle
                 @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $todoStatus) | Where-Object {
                     $r = $_.Current.BoundingRectangle
-                    -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $viewBounds.Left -and $r.Width -eq $viewBounds.Width -and $r.Bottom -eq $viewBounds.Top -and $r.Height -gt 0
+                    -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $viewBounds.Left -and $r.Width -eq $viewBounds.Width -and ($r.Bottom -eq $viewBounds.Top -or ($r.Top -ge $viewBounds.Top -and $r.Bottom -lt $viewBounds.Bottom)) -and $r.Height -gt 0
                 }).Count -eq 1
             })
             $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
             if ($views.Count -ne 1) { throw 'Expected one owned visible transcript' }
-            $bounds = $views[0].Current.BoundingRectangle
-            $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
+            $hostBounds = $views[0].Current.BoundingRectangle
+            $statusRows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $todoStatus) | Where-Object {
+                $r = $_.Current.BoundingRectangle
+                -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $hostBounds.Left -and $r.Width -eq $hostBounds.Width -and ($r.Bottom -eq $hostBounds.Top -or ($r.Top -ge $hostBounds.Top -and $r.Bottom -lt $hostBounds.Bottom)) -and $r.Height -gt 0
+            })
+            if ($statusRows.Count -ne 1) { throw 'CLEAN chat proof requires one owned status/footer control' }
+            $statusBounds = $statusRows[0].Current.BoundingRectangle
+            $composerBounds = [System.Windows.Automation.AutomationElement]::FromHandle($composer).Current.BoundingRectangle
+            if ($statusBounds.Bottom -eq $hostBounds.Top) {
+                $bounds = $hostBounds
+                $observation.transcript = @{left=[int]$bounds.Left; top=[int]$bounds.Top; width=[int]$bounds.Width; height=[int]$bounds.Height}
+            } else {
+                $viewport = Transcript-Viewport
+                Save @{
+                    viewport=@{left=$viewport.Left; top=$viewport.Top; width=$viewport.Width; height=$viewport.Height}
+                    host=@{left=[int]$hostBounds.Left; top=[int]$hostBounds.Top; width=[int]$hostBounds.Width; height=[int]$hostBounds.Height}
+                    status=@{left=[int]$statusBounds.Left; top=[int]$statusBounds.Top; width=[int]$statusBounds.Width; height=[int]$statusBounds.Height}
+                    composer=@{left=[int]$composerBounds.Left; top=[int]$composerBounds.Top; width=[int]$composerBounds.Width; height=[int]$composerBounds.Height}
+                } "$caseDir/geometry-input.json"
+                $geometry = & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --geometry
+                if ($LASTEXITCODE -ne 0) { throw 'Owned transcript geometry was invalid' }
+                $geometry = $geometry | ConvertFrom-Json
+                $observation.transcript = $geometry.transcript
+                $observation.cleanChat = @{rows=$geometry.rows; working=$geometry.working}
+                $bounds = New-Object Drawing.Rectangle($geometry.transcript.left, $geometry.transcript.top, $geometry.transcript.width, $geometry.transcript.height)
+            }
             Press @(0x11, 0x30) 'Ctrl+0: lay out the baseline transcript' $true
             Copy-Item $cache.FullName "$caseDir/app-cache-before.jsonl"
             Shot 'messages-only-before-tools'
@@ -769,8 +849,8 @@ foreach ($plan in $plans) {
             $observation.actionMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Shell-Input 'activity'
             [void](Wait-For 'all twelve completed tool calls in app-written cache' {
-                $rows = (Read-Shared $cache.FullName) -split "`n" | Select-Object -Skip 1 | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json }
-                @($rows | Where-Object { $_.role -eq 'tool' -and $_.status -eq 'ok' -and $_.detail.Contains('verified') }).Count -eq 12
+                $completed = & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $cache.FullName --tool-count
+                $LASTEXITCODE -eq 0 -and [int]$completed -eq 12
             })
             Copy-Item $cache.FullName "$caseDir/app-cache.jsonl"
             if ([ChatDeliveryDesktop]::Text($composer) -cne $plan.text) { throw 'Tool updates changed the composer' }
@@ -781,22 +861,7 @@ foreach ($plan in $plans) {
             Shot 'messages-only-after-tools'
             & node "$PSScriptRoot/../chat-messages-only-proof.mjs" $Evidence --tools-only
             if ($LASTEXITCODE -ne 0) { throw ((Get-Content "$Evidence/messages-only-measurement.json" -Raw | ConvertFrom-Json).error) }
-            $statusCondition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Static')
-            $statusRows = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $statusCondition) | Where-Object {
-                $r = $_.Current.BoundingRectangle
-                -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id -and $r.Left -eq $bounds.Left -and $r.Width -eq $bounds.Width -and $r.Bottom -eq $bounds.Top -and $r.Height -gt 0
-            })
-            if ($statusRows.Count -ne 1) { throw 'CLEAN chat proof requires one owned painted status/footer row' }
-            $statusBounds = $statusRows[0].Current.BoundingRectangle
-            $composerBounds = [System.Windows.Automation.AutomationElement]::FromHandle($composer).Current.BoundingRectangle
-            $composerTopPad = [int][math]::Floor(12 * $statusBounds.Height / 28)
-            $workingHeight = [int]($composerBounds.Top - $composerTopPad - $bounds.Bottom)
-            $expectedGapHeight = [int][math]::Floor(14 * $statusBounds.Height / 28)
-            if ($workingHeight -ne $expectedGapHeight) { throw 'IGSH-849 removed working strip still reserves space' }
-            $observation.cleanChat = @{
-                rows=@{left=[int]$statusBounds.Left; top=[int]$statusBounds.Top; width=[int]$statusBounds.Width; height=[int]$statusBounds.Height}
-                working=@{left=[int]$bounds.Left; top=[int]$bounds.Bottom; width=[int]$bounds.Width; height=$workingHeight}
-            }
+            if (-not $observation.Contains('cleanChat')) { throw 'Complete CLEAN proof requires current measured layout' }
             foreach ($mode in @('on', 'off')) {
                 $paletteLogStart = (Read-Shared "$settings/debug.log").Length
                 Press @(0x11, 0x4B) 'Ctrl+K: open CLEAN chat palette' $true
@@ -834,7 +899,7 @@ foreach ($plan in $plans) {
             $arrivalLogStart = (Read-Shared "$settings/debug.log").Length
             Shell-Input 'messages' '2'
             $pill = Require-NewMessages 2 1 1 'two new arrivals while reading' $arrivalLogStart
-            $bounds = $views[0].Current.BoundingRectangle
+            $bounds = Transcript-Viewport
             $pillOrigin = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.left, $pill.top)
             $pillEnd = [ChatDeliveryDesktop]::ScreenPoint($main, $pill.right, $pill.bottom)
             if ($pill.bottom -le $pill.top -or $pill.left -ge $pill.right -or $pillOrigin.Y -lt $bounds.Bottom -or [math]::Abs(($pillOrigin.X + $pillEnd.X) / 2 - ($bounds.Left + $bounds.Right) / 2) -gt 2) { throw 'New-message pill overlaps the transcript or is not centered' }
@@ -899,10 +964,12 @@ foreach ($plan in $plans) {
             $actions.Add(@{case=$plan.name; input='pinned arrival'; state=$pinned})
             Shot 'pinned-after-arrival'
             $upLogStart = (Read-Shared "$settings/debug.log").Length
-            $viewH = [int]$bounds.Height
+            $visibleBounds = Transcript-Viewport
+            $visibleTop = [int]($visibleBounds.Top - $bounds.Top)
+            $viewH = [int]$visibleBounds.Height
             $dividerProof.reopened = Wait-For 'scroll up until the unread line is painted above the first unread message' {
                 $f = Divider-State $upLogStart
-                if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll -and $f.y -lt $f.scroll + $viewH - 40) { return $f }
+                if ($f -and $f.count -eq 1 -and $f.y -ge $f.scroll + $visibleTop -and $f.y -lt $f.scroll + $visibleTop + $viewH - 40) { return $f }
                 [void](Scroll-Transcript 120)
                 $null
             }
@@ -1133,11 +1200,17 @@ foreach ($plan in $plans) {
             if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$caseDir/session-after.json" }
             if (Test-Path "$settings/crashes") {
                 New-Item -ItemType Directory -Force "$caseDir/crashes" | Out-Null
-                Copy-Item "$settings/crashes/*.txt" "$caseDir/crashes/" -ErrorAction SilentlyContinue
+                Get-ChildItem -LiteralPath "$settings/crashes" -File |
+                    Where-Object { $_.Extension -in @('.txt', '.dmp') } |
+                    Copy-Item -Destination "$caseDir/crashes/" -ErrorAction Stop
             }
             if ($isActivity -and (Test-Path "$settings/chatcache")) { Copy-Item "$settings/chatcache" "$caseDir/chatcache" -Recurse -Force }
             if ($hasTranscript -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }
             $cleanup.evidence_preserved = (Test-Path "$caseDir/debug.log") -and (Test-Path "$caseDir/stand-in/ready.json")
+            if ($isHax) {
+                Copy-Item "$profile/home/.local/state/hax/sessions" "$caseDir/hax-sessions" -Recurse -Force
+                foreach ($pidValue in $standIn.panes.Values) { Remove-Item -LiteralPath "$($standIn.procRoot)/$pidValue" -Recurse -Force -ErrorAction SilentlyContinue }
+            }
             if ($hasTranscript -and $procDir) {
                 Remove-Item -LiteralPath $procDir -Recurse -Force -ErrorAction SilentlyContinue
                 $procRoot = Split-Path $procDir
@@ -1158,6 +1231,10 @@ Save $doctors "$Evidence/doctor.json"
 $cleanups = @($plans | ForEach-Object { Get-Content "$Evidence/$($_.name)/cleanup.json" -Raw | ConvertFrom-Json })
 Save @{remaining_owned_processes=($cleanups | Measure-Object remaining_owned_processes -Sum).Sum; evidence_preserved=(@($cleanups | Where-Object { -not $_.evidence_preserved }).Count -eq 0); scratch_removed=(@($cleanups | Where-Object { -not $_.scratch_removed }).Count -eq 0)} "$Evidence/cleanup.json"
 Stop-Transcript
+if ($env:CHAT_RESYNC_PROOF -eq '1') {
+    & node "$PSScriptRoot/../chat-resync-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_LIVE_DELIVERY_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-delivery-live-proof.mjs" $Evidence
     exit $LASTEXITCODE
@@ -1170,6 +1247,10 @@ if ($env:CHAT_NOTES_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-notes-proof.mjs" verify $Evidence
     exit $LASTEXITCODE
 }
+if ($env:CHAT_HAX_PROOF -eq '1') {
+    & node "$PSScriptRoot/../hax-sessions-proof.mjs" $Evidence
+    exit $LASTEXITCODE
+}
 if ($env:CHAT_REACTIONS_PROOF -eq '1') {
     & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence
     exit $LASTEXITCODE
@@ -1179,7 +1260,11 @@ if ($env:CHAT_ACCEPTED_PROOF -eq '1') {
     exit $LASTEXITCODE
 }
 if ($env:CHAT_SWITCH_PROOF -eq '1') {
-    & node "$PSScriptRoot/../remote-switch-proof.mjs" $Evidence
+    if ($env:CHAT_SWITCH_PAIRED -eq '1') {
+        & node "$PSScriptRoot/../remote-switch-proof.mjs" $Evidence --measure
+    } else {
+        & node "$PSScriptRoot/../remote-switch-proof.mjs" $Evidence
+    }
     exit $LASTEXITCODE
 }
 if ($env:CHAT_REMOTE_PROOF -eq '1') {

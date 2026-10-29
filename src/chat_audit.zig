@@ -128,7 +128,7 @@ pub fn main(init: std.process.Init) !void {
         defer newest = @max(newest, stamp);
         if (row.settlement) |fact| {
             if (!std.mem.eql(u8, fact.operation, "enqueue") or fact.content.len == 0) continue;
-            const text = try std.unicode.utf8ToUtf16LeAlloc(a, fact.content);
+            const text = try normalized(a, try std.unicode.utf8ToUtf16LeAlloc(a, fact.content));
             if (transcript.injectedMessage(text) != null or std.mem.startsWith(u8, std.mem.trimStart(u8, fact.content, " \r\n\t"), "<task-notification>")) continue;
             var eligible = false;
             for (rows.items[ri + 1 ..]) |later| {

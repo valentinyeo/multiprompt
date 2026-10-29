@@ -5,8 +5,12 @@ if ($initial.tabs[$initial.active_tab].PSObject.Properties['cv'] -and $initial.t
     Press @(0x12, 0x43) 'Alt+C: show console for link setup'
 }
 Wait-WorkspaceSurface $initial.active_workspace $initial.active_tab $false
-$first = 'http://127.0.0.1:1/picker-first'
-$second = 'http://127.0.0.1:1/picker-second'
+$listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+$listener.Start()
+try {
+$port = $listener.LocalEndpoint.Port
+$first = "http://127.0.0.1:$port/picker-first"
+$second = "http://127.0.0.1:$port/picker-second
 $command = 'echo ' + $first + ' ' + $second + ' .'
 Type-Text $command
 Wait-ConsoleText $command
@@ -71,7 +75,20 @@ Wait-Until { -not [VerifyNative]::IsWindowVisible($transcript) } 'picker reopene
 Press @(0x28) 'Down: select second link'
 Snapshot 'second-selection'
 Press @(0x0D) 'Enter: open selected second link'
-Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].PSObject.Properties['burl'] -and $state.tabs[$state.active_tab].burl -ceq $second -and [VerifyNative]::DockedPaneWindow($script:window) -ne [IntPtr]::Zero } 'selected second URL opened in a native browser pane' 60
+Wait-Until { $listener.Pending() } 'browser requests the selected link' 60
+$client = $listener.AcceptTcpClient()
+try {
+    $stream = $client.GetStream()
+    $stream.ReadTimeout = 10000
+    $reader = New-Object IO.StreamReader($stream)
+    $request = $reader.ReadLine()
+    if ($request -cne 'GET /picker-second HTTP/1.1') { throw "Wrong selected link request: $request" }
+    Save-Json @{ request = $request; selectedUrl = $second; port = $port } 'link-request.json'
+    $body = '<html><title>Selected second link</title><body>Selected second link</body></html>'
+    $reply = [Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/html`r`nContent-Length: $($body.Length)`r`nConnection: close`r`n`r`n$body")
+    $stream.Write($reply, 0, $reply.Length)
+} finally { $client.Dispose() }
 Wait-Until { [VerifyNative]::IsWindowVisible($transcript) } 'chat restored after Enter'
 Snapshot 'after'
 $result.checks += @{ name = 'link-picker'; theme = 'amoled'; transcriptHidden = $true; escapeRestored = $true; enterRestored = $true; selectedUrl = $second; fillPixels = $fill; outlinePixels = $outline; bluePixels = $blue; version = $ExpectedVersion }
+} finally { $listener.Stop() }

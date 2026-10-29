@@ -13,6 +13,9 @@ on:
       - .github/workflows/verify-reconnect.yml
       - tools/verify-reconnect/**
       - tools/verify-reconnect.test.js
+      - src/command_palette.zig
+      - src/sidebar.zig
+      - src/shortcuts.zig
       - src/ssh_reconnect.zig
       - src/chat_send.zig
       - src/console.zig
