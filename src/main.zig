@@ -938,7 +938,6 @@ const closeShell = @import("console.zig").closeShell;
 const clampSidebarScroll = @import("console.zig").clampSidebarScroll;
 const ensureActiveVisible = @import("console.zig").ensureActiveVisible;
 const switchToShell = @import("console.zig").switchToShell;
-const nthVisibleShell = @import("console.zig").nthVisibleShell;
 const workspaceDisplayName = @import("workspaces.zig").workspaceDisplayName;
 const switchToWorkspace = @import("workspaces.zig").switchToWorkspace;
 const copyBlueDotHookInstructions = @import("workspaces.zig").copyBlueDotHookInstructions;
@@ -1134,6 +1133,7 @@ const searchFooterH = @import("drawing.zig").searchFooterH;
 const searchOverlayOy = @import("drawing.zig").searchOverlayOy;
 const searchOverlayOx = @import("drawing.zig").searchOverlayOx;
 const searchResultRowAtClientPoint = @import("drawing.zig").searchResultRowAtClientPoint;
+const nthVisibleShell = @import("console.zig").nthVisibleShell;
 const paintSidebar = @import("sidebar.zig").paintSidebar;
 const keepSearchSelectionVisible = @import("command_palette.zig").keepSearchSelectionVisible;
 const updateSearchResults = @import("command_palette.zig").updateSearchResults;
@@ -3044,12 +3044,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_SWITCH_TAB => {
             const want: u32 = @intCast(wp);
-            const target: ?u32 = if (app_state.g_single_window) nthVisibleShell(want) else (if (want < app_state.shell_count) want else null);
-            if (target) |idx| {
-                app_state.g_ws_switch_focus_grace = GetTickCount64() + 1500;
-                app_state.g_skip_view_bump = true;
-                @import("console.zig").switchToShellByUser(idx);
-                if (!activeShellHasForegroundFocus()) requestShellRefocus(120, 8);
+            if (nthVisibleShell(want)) |row| {
+                if (row.kind == .inbox) {
+                    jumpToInboxRow(row.shell_idx);
+                } else {
+                    app_state.g_ws_switch_focus_grace = GetTickCount64() + 1500;
+                    app_state.g_skip_view_bump = true;
+                    @import("console.zig").switchToShellByUser(row.shell_idx);
+                    if (!activeShellHasForegroundFocus()) requestShellRefocus(120, 8);
+                }
             }
             return 0;
         },
