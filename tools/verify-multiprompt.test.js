@@ -21,10 +21,10 @@ const bridge = read('src/browser_bridge.zig');
 const journey = control.slice(control.indexOf("        'session-open' {"), control.indexOf("        'inbox' {"));
 const transport = control.slice(control.indexOf('function Invoke-Zsb('), control.indexOf('function Select-Theme('));
 
-function evaluateConcurrencyGroup(template, context) {
+function evaluateWorkflowExpression(template, context) {
   return template.replace(/\$\{\{([\s\S]*?)\}\}/g, (_, expression) => {
     const source = expression.trim();
-    const lexer = /\s*('(?:[^']|'')*'|(?:github|inputs)\.[a-z_]+|format|==|!=|&&|\|\||[(),])/gy;
+    const lexer = /\s*('(?:[^']|'')*'|needs\.journeys\.outputs\.(?:pr|full)|(?:github|inputs)\.[a-z_]+|format|fromJSON|startsWith|==|!=|!|&&|\|\||[(),])/gy;
     const tokens = [];
     while (lexer.lastIndex < source.length) {
       const token = lexer.exec(source);
@@ -41,6 +41,24 @@ function evaluateConcurrencyGroup(template, context) {
         expect(')');
         return value;
       }
+      if (token === '!') {
+        const value = primary();
+        return () => !value();
+      }
+      if (token === 'startsWith') {
+        expect('(');
+        const value = or();
+        expect(',');
+        const prefix = or();
+        expect(')');
+        return () => value().toLowerCase().startsWith(prefix().toLowerCase());
+      }
+      if (token === 'fromJSON') {
+        expect('(');
+        const value = or();
+        expect(')');
+        return () => JSON.parse(value());
+      }
       if (token === 'format') {
         expect('(');
         const pattern = or();
@@ -54,9 +72,8 @@ function evaluateConcurrencyGroup(template, context) {
       }
       assert.ok(token, 'missing concurrency operand');
       if (token.startsWith("'")) return () => token.slice(1, -1).replace(/''/g, "'");
-      assert.match(token, /^(github\.(workflow|ref|event_name|run_attempt|sha)|inputs\.[a-z_]+)$/);
-      const [object, key] = token.split('.');
-      return () => context[object]?.[key] ?? '';
+      assert.match(token, /^(github\.(workflow|ref|event_name|run_attempt|sha)|inputs\.[a-z_]+|needs\.journeys\.outputs\.(pr|full))$/);
+      return () => token.split('.').reduce((value, key) => value?.[key], context) ?? '';
     }
     function equality() {
       let left = primary();
@@ -91,7 +108,7 @@ function evaluateConcurrencyGroup(template, context) {
 }
 
 test('concurrency evaluator respects precedence, short-circuiting, format and string literals', () => {
-  const evaluate = expression => evaluateConcurrencyGroup('${{ ' + expression + ' }}', {});
+  const evaluate = expression => evaluateWorkflowExpression('${{ ' + expression + ' }}', {});
   assert.equal(evaluate("'a' == 'A' && format('{0}-{1}', 'it''s', 'ok') || 'wrong'"), "it's-ok");
   assert.equal(evaluate("'kept' || '' && 'wrong'"), 'kept');
   assert.equal(evaluate("'1' != '2' && 'differs' || 'same'"), 'differs');
@@ -130,7 +147,7 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
     github: { workflow: 'Verify desktop', ref: 'refs/heads/master', event_name: event, run_attempt: attempt, sha: 'abc123' },
     inputs: { feature, tag },
   });
-  const dispatch = (feature, tag) => evaluateConcurrencyGroup(group[1], context('workflow_dispatch', feature, tag));
+  const dispatch = (feature, tag) => evaluateWorkflowExpression(group[1], context('workflow_dispatch', feature, tag));
   assert.notEqual(dispatch('chat-delivery'), dispatch('chat-sync-audit'), 'different dispatch features need different concurrency groups');
   assert.equal(dispatch('chat-delivery', 'v0.28.823'), dispatch('chat-delivery', 'v0.28.823'));
   assert.notEqual(dispatch('chat-delivery', 'v0.28.823'), dispatch('chat-delivery'));
@@ -139,16 +156,32 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
       const current = context(event);
       current.inputs = inputs;
       const gate = event === 'push' && inputs ? `-gate-${current.github.sha}` : '';
-      assert.equal(evaluateConcurrencyGroup(group[1], current), `${current.github.workflow}-${current.github.ref}${gate}`);
+      const feature = inputs ? `-feature-${inputs.feature}` : '';
+      assert.equal(evaluateWorkflowExpression(group[1], current), `${current.github.workflow}-${current.github.ref}${gate}${feature}`);
     }
-    const first = evaluateConcurrencyGroup(group[1], context(event));
-    const rerun = evaluateConcurrencyGroup(group[1], context(event, undefined, '', '2'));
+    const first = evaluateWorkflowExpression(group[1], context(event));
+    const rerun = evaluateWorkflowExpression(group[1], context(event, undefined, '', '2'));
     assert.notEqual(rerun, first, `${event} reruns leave the group a new push cancels`);
   }
   const gateOne = context('push', 'relaunch-saved-sessions');
   const gateTwo = context('push', 'relaunch-saved-sessions');
   gateTwo.github.sha = 'def456';
-  assert.notEqual(evaluateConcurrencyGroup(group[1], gateOne), evaluateConcurrencyGroup(group[1], gateTwo), 'the release gate run of each master commit has its own group and never queues behind another commit');
+  assert.notEqual(evaluateWorkflowExpression(group[1], gateOne), evaluateWorkflowExpression(group[1], gateTwo), 'the release gate run of each master commit has its own group and never queues behind another commit');
+});
+
+test('IGSH-1028 reusable PR journeys select their requested feature and cannot cancel each other', () => {
+  const group = workflow.match(/^  group: (.+)$/m)[1];
+  const matrix = workflow.match(/^        feature: (.+)$/m)[1];
+  const discovered = featureMatrix(workflow);
+  const context = feature => ({ github: { workflow: 'Title pill transparency', ref: 'refs/pull/579/merge', event_name: 'pull_request', run_attempt: '1', sha: 'head' }, inputs: { feature }, needs: { journeys: { outputs: { pr: JSON.stringify(discovered.pr), full: JSON.stringify(discovered.full) } } } });
+  assert.notEqual(evaluateWorkflowExpression(group, context('pane-layout')), evaluateWorkflowExpression(group, context('browser-pane-stuck')));
+  for (const feature of ['pane-layout', 'browser-pane-stuck']) assert.equal(evaluateWorkflowExpression(matrix, context(feature)), feature);
+  assert.equal(evaluateWorkflowExpression(matrix, context(undefined)), discovered.pr.join(','));
+  assert.equal(evaluateWorkflowExpression(matrix, context('all')), discovered.pr.join(','));
+  const dictation = context(undefined);
+  dictation.github.event_name = 'push';
+  dictation.github.ref = 'refs/heads/ceo/IGSH-1072';
+  assert.equal(evaluateWorkflowExpression(matrix, dictation), 'chat-dictation');
 });
 
 function allowsSessionOpen(text) {
@@ -252,7 +285,8 @@ test('G2: offline startup uses the actual ephemeral app-owned loopback listener'
 test('G2: transport encodes the CLI bytes with bounded TCP and no external harness process', () => {
   assert.ok(cli.includes('sess="workspace"'));
   assert.ok(cli.includes('payload = base64.b64encode(("\\x1f".join(args) + "\\x1f").encode()).decode()'));
-  assert.ok(cli.includes('sock.sendall(f"AUTH:{token}:ZSB:{session}:{payload}\\n".encode())'));
+  assert.ok(cli.includes('request = f"ZSB:{session}:{payload}\\n"'));
+  assert.ok(cli.includes('sock.sendall((request if endpoint else f"AUTH:{token}:" + request).encode())'));
   assert.ok(transport.includes('[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($Arguments -join [char]0x1F) + [char]0x1F))'));
   assert.ok(transport.includes('[Text.Encoding]::UTF8.GetBytes("ZSB:workspace:${payload}`n")'));
   assert.match(transport, /Doctor\s+Assert-Foreground\s+Record/);
@@ -451,8 +485,12 @@ $script:loseOnRecord = $true
 Refuses { Type-Text 'lost before text' }
 Reset
 [VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 2
-Type-Text 'recovered text'
-Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 2) 'Text did not recover owned foreground'
+Type-Text 'recovered after late browser activation'
+Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 2 -and [VerifyNative]::Allows -eq 2) 'Text did not reacquire owned focus after late browser activation'
+Reset
+[VerifyNative]::Foreign()
+Refuses { Type-Text 'foreign text' }
+Require ([VerifyNative]::Activations -eq 50 -and [VerifyNative]::Allows -eq 50) 'Text did not bound foreign focus recovery'
 Reset
 Type-Text 'owned text'
 Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 0) 'Text repaired focus or failed to inject'
@@ -467,6 +505,16 @@ Write-Host 'IGSH-807 owned foreground and bounded retry behaviour passed'
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('pane layout samples the grouped row below the permanent workspace header', () => {
+  const expression = control.match(/int rowTop = ([^;]+);/)[1];
+  const { runInNewContext } = require('node:vm');
+  const S = (value, dpi, scale) => Math.trunc(value * dpi * scale / 9600);
+  const context = { client: { Top: 0 }, gap: 8, hidePills: true, dpi: 96, scale: 100, S };
+  assert.equal(runInNewContext(expression, context), 88);
+  assert.equal(runInNewContext(expression, { ...context, hidePills: false }), 122);
+  assert.equal(runInNewContext(expression, { ...context, client: { Top: 30 } }), 118);
 });
 
 function assertsPaneFocusGeometry(source, workflowText) {
@@ -2277,7 +2325,7 @@ test('IGSH-1108 CLI writes JSON job outputs and rejects unavailable or unsafe fe
 
 test('IGSH-1033 shared tracked quarantine protects rollback and release execution', () => {
   assert.ok(fs.existsSync(path.join(root, 'tools/journey-policy.json')), 'Shared quarantine policy must ship');
-  assert.deepEqual(JSON.parse(read('tools/journey-policy.json')), { quarantined: {} });
+  assert.deepEqual(Object.keys(JSON.parse(read('tools/journey-policy.json')).quarantined), ['browser-pane-stuck']);
   const policy = JSON.parse(read('tools/fixtures/IGSH-1033/journey-policy.json'));
   assert.deepEqual(Object.keys(policy.quarantined).sort(), ['browser-pane-stuck', 'chat-messages-only']);
   assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \}\}/);
@@ -2440,4 +2488,29 @@ test('IGSH-1161 immediate key-pair deadline includes first injection time withou
   }
   assert.throws(() => pair(350), /Alt\+A pair exceeded 300 ms/);
   assert.throws(() => pair(0, 60), /Alt\+A pair exceeded 300 ms/);
+});
+
+test('slow browser scenario reacquires owned foreground after immediate-close pairs', () => {
+  const journey = read(skill + 'control-feature-browser-pane-stuck.ps1');
+  const transition = journey.slice(journey.indexOf("                Assert-ImmediateBrowserPairs 'blank'"), journey.indexOf("                $slowPane = Assert-BrowserPane 'open' 'slow-open'"));
+  assert.match(transition, /Assert-ImmediateBrowserPairs 'blank'\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+Wait-Foreground\s+Press/);
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = require('node:child_process');
+  const run = body => spawnSync('powershell.exe', ['-NoProfile', '-Command', `
+$ErrorActionPreference = 'Stop'
+Add-Type 'public class VerifyNative { public static bool Owned; public static int Keys; public static void BringToForeground(System.IntPtr hwnd) { if (hwnd.ToInt64() != 17) throw new System.Exception("Wrong target"); Owned = true; } }'
+$script:window = [IntPtr]17
+function Assert-ImmediateBrowserPairs($Page) { [VerifyNative]::Owned = $false }
+function Wait-Foreground { if (-not [VerifyNative]::Owned) { throw 'Foreign input was refused' } }
+function Press($Keys, $Label) { Wait-Foreground; [VerifyNative]::Keys++ }
+${body}
+if ([VerifyNative]::Keys -ne 1) { throw 'Slow navigation input missing' }
+Write-Host 'OWNED_SLOW_BROWSER_TRANSITION_OK'
+`], { encoding: 'utf8', timeout: 20000 });
+  const red = run(transition.replace('[VerifyNative]::BringToForeground($script:window)', ''));
+  assert.notEqual(red.status, 0, red.stdout + red.stderr);
+  assert.match(red.stderr, /Foreign input was refused/);
+  const green = run(transition);
+  assert.equal(green.status, 0, green.stdout + green.stderr);
+  assert.match(green.stdout, /OWNED_SLOW_BROWSER_TRANSITION_OK/);
 });

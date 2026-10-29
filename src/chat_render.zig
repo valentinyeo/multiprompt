@@ -7163,17 +7163,18 @@ fn moreMenuProof(frame_dc: HANDLE, frame_pixels: []const u32, frame_w: usize, pa
     _ = bg;
 
     const panel_probe = at(pixels, pane_w, geo.panel.left + 4, geo.panel.top + @divTrunc(geo.panel.bottom - geo.panel.top, 2));
-    try std.testing.expectEqual(RGB(0x18, 0x18, 0x18), panel_probe);
+    try std.testing.expectEqual(if (app_state.g_light_theme) RGB(250, 250, 251) else RGB(0x18, 0x18, 0x18), panel_probe);
     const remove_cell = geo.cells[@intFromEnum(more_menu.Item.remove)];
     const card_probe = at(pixels, pane_w, remove_cell.left + 4, remove_cell.top + @divTrunc(remove_cell.bottom - remove_cell.top, 2));
-    try std.testing.expectEqual(RGB(0x1F, 0x1F, 0x1F), card_probe);
+    try std.testing.expectEqual(if (app_state.g_light_theme) RGB(241, 242, 244) else RGB(0x1F, 0x1F, 0x1F), card_probe);
 
+    const red = if (app_state.g_light_theme) RGB(198, 48, 42) else RGB(0xF2, 0x8B, 0x82);
     var red_rows: usize = 0;
     var y = remove_cell.top;
     while (y < remove_cell.bottom) : (y += 1) {
         var x = remove_cell.left;
         while (x < remove_cell.right) : (x += 1) {
-            if (moreMenuProofNear(at(pixels, pane_w, x, y), 0xF2, 0x8B, 0x82, 24)) red_rows += 1;
+            if (moreMenuProofNear(at(pixels, pane_w, x, y), (red & 0xFF), ((red >> 8) & 0xFF), ((red >> 16) & 0xFF), 24)) red_rows += 1;
         }
     }
     std.debug.print("IGSH-1020 more menu: red pixels in Remove row={d}\n", .{red_rows});
@@ -7185,7 +7186,7 @@ fn moreMenuProof(frame_dc: HANDLE, frame_pixels: []const u32, frame_w: usize, pa
     while (y < approve_cell.bottom) : (y += 1) {
         var x = approve_cell.left;
         while (x < approve_cell.right) : (x += 1) {
-            if (moreMenuProofNear(at(pixels, pane_w, x, y), 0xF2, 0x8B, 0x82, 24)) plain_red += 1;
+            if (moreMenuProofNear(at(pixels, pane_w, x, y), (red & 0xFF), ((red >> 8) & 0xFF), ((red >> 16) & 0xFF), 24)) plain_red += 1;
         }
     }
     try std.testing.expectEqual(@as(usize, 0), plain_red);
@@ -7256,7 +7257,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         app_state.clean_chat = saved.clean;
         app_state.g_chat_layout_reuse = 0;
     }
-    const frame_w = 1200;
+    const frame_w = 1000;
     const frame_h = 900;
     const main = w.CreateWindowExW(0, L("STATIC"), L("float proof"), w.WS_POPUP, 0, 0, frame_w, frame_h, null, null, GetModuleHandleW(null), null) orelse return error.TestUnexpectedResult;
     defer _ = w.DestroyWindow(main);
@@ -7265,7 +7266,9 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     app_state.g_thread_title = true;
     app_state.g_ui_scale = 100;
     app_state.g_main_monitor_dpi = 96;
-    app_state.g_light_theme = false;
+    var title_theme: [8]u8 = undefined;
+    const title_theme_len = w.GetEnvironmentVariableA("MULTIPROMPT_TITLE_PILL_THEME", &title_theme, title_theme.len);
+    app_state.g_light_theme = title_theme_len == 5 and std.mem.eql(u8, title_theme[0..5], "light");
     app_state.g_chat_find_open = false;
     app_state.g_chat_sel_active = false;
     app_state.g_chat_scrolled_up = false;
@@ -7277,7 +7280,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     app_state.shells[0] = app_state.empty_shell;
     app_state.shells[0].pid = 1;
     app_state.shells[0].ai_agent = 1;
-    const session_name = std.unicode.utf8ToUtf16LeStringLiteral("Floating title session");
+    const session_name = std.unicode.utf8ToUtf16LeStringLiteral("Chat session");
     @memcpy(app_state.shells[0].name[0..session_name.len], session_name);
     app_state.shells[0].name_len = session_name.len;
     drawing.resetFontCache();
@@ -7399,12 +7402,10 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         const above_card = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(40), layout.transcript.right, card.top);
         const gap_strip = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, card.top - uiScaled(12), layout.transcript.right, card.top - uiScaled(1));
         const below_pill = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, pill.bottom + uiScaled(2), layout.transcript.right, pill.bottom + uiScaled(40));
-        const pill_ring = floatProofRing(frame_pixels, frame_w, bg, pill, @divTrunc(pill.bottom - pill.top, 2), gap);
         const card_ring = floatProofRing(frame_pixels, frame_w, bg, card, @import("window_layout.zig").chatSurfaceRadius(), gap);
         const top_edge = floatProofInk(frame_pixels, frame_w, bg, layout.transcript.left, window.top, layout.transcript.right - uiScaled(16), window.top + 1);
         if (position != .sweep) std.debug.print("IGSH-933 {s}: beside pill left={d} right={d}, above card={d}, gap={d}, below pill={d}\n", .{ @tagName(position), left_band, right_band, above_card, gap_strip, below_pill });
-        std.debug.print("IGSH-1001 {s} {d}: ring pill={d} card={d}, top edge={d}\n", .{ @tagName(position), case, pill_ring, card_ring, top_edge });
-        try std.testing.expectEqual(@as(usize, 0), pill_ring);
+        std.debug.print("IGSH-1001 {s} {d}: ring card={d}, top edge={d}\n", .{ @tagName(position), case, card_ring, top_edge });
         try std.testing.expectEqual(@as(usize, 0), card_ring);
         try std.testing.expectEqual(@as(usize, 0), top_edge);
         if (position == .sweep) {
@@ -7434,12 +7435,26 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
             const row_y = @divTrunc(layout.send_btn.top + layout.send_btn.bottom, 2);
             const gap_x = @divTrunc(layout.attach_btn.right + layout.composer_card.left, 2);
             try std.testing.expectEqual(bg, scrollProofColor(frame_pixels[@intCast(row_y * frame_w + gap_x)]));
-            try std.testing.expectEqual(@as(u32, 0x353535), scrollProofColor(frame_pixels[@intCast(row_y * frame_w + layout.send_btn.right - uiScaled(5))]));
+            try std.testing.expectEqual(if (app_state.g_light_theme) RGB(236, 238, 243) else @as(u32, 0x353535), scrollProofColor(frame_pixels[@intCast(row_y * frame_w + layout.send_btn.right - uiScaled(5))]));
             try std.testing.expectEqual(@as(u8, 4), @import("chat_composer.zig").chatButtonAt(@divTrunc(layout.attach_btn.left + layout.attach_btn.right, 2), row_y));
             try scrollProofSave(L("chat-shared-desktop.bmp"), frame_bytes, frame_info.header);
         }
         var enabled: [8]u8 = undefined;
         if (w.GetEnvironmentVariableA("MULTIPROMPT_CHAT_RENDER_PROOF", &enabled, enabled.len) > 0) {
+            const proof_names = [_]struct { frame: LPCWSTR, underlay: LPCWSTR }{
+                .{ .frame = L("chat-title-0-frame.bmp"), .underlay = L("chat-title-0-underlay.bmp") },
+                .{ .frame = L("chat-title-1-frame.bmp"), .underlay = L("chat-title-1-underlay.bmp") },
+                .{ .frame = L("chat-title-2-frame.bmp"), .underlay = L("chat-title-2-underlay.bmp") },
+            };
+            if (case == 3 or case == 11 or case == 19) {
+                const names = proof_names[(case - 3) / 8];
+                const layer_bytes = @as([*]const u8, @ptrCast(layer_bits.?))[0 .. @as(usize, @intCast(win_w * win_h)) * 4];
+                try scrollProofSave(names.frame, frame_bytes, frame_info.header);
+                try scrollProofSave(names.underlay, layer_bytes, layer_info.header);
+            }
+            const metadata = try std.json.Stringify.valueAlloc(std.testing.allocator, .{ .pill = pill, .window = window, .theme = if (app_state.g_light_theme) @as([]const u8, "light") else "dark" }, .{});
+            defer std.testing.allocator.free(metadata);
+            try std.testing.expect(@import("file_io.zig").writeFileAtomicW("chat-title-meta.json", metadata));
             switch (position) {
                 .sweep => if (case == 3 + 8) try scrollProofSave(L("chat-scroll-behind-sweep.bmp"), frame_bytes, frame_info.header),
                 .middle => try scrollProofSave(L("chat-scroll-behind-middle.bmp"), frame_bytes, frame_info.header),

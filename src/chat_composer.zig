@@ -776,7 +776,8 @@ pub fn layoutChatControls() void {
     app_state.g_chat_layout_browser_reserved = browserSlotReserved();
     var layout = chatViewLayout();
     const font = ensureChatFont();
-    _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x0030, @intFromPtr(font), 1);
+    if (SendMessageW(app_state.g_chat_composer_hwnd, 0x0031, 0, 0) != @as(isize, @bitCast(@intFromPtr(font))))
+        _ = SendMessageW(app_state.g_chat_composer_hwnd, 0x0030, @intFromPtr(font), 1);
     const base_h = chatComposerBaseEditH();
     const content_h = chatComposerMeasureContentH(layout.composer.right - layout.composer.left);
     const new_extra = clampComposerHeight(content_h, base_h) - base_h;

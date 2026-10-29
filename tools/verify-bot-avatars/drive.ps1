@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)][string]$Exe,
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
-    [Parameter(Mandatory)][string]$Evidence
+    [Parameter(Mandatory)][string]$Evidence,
+    [string]$WorkspaceName = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -42,7 +43,8 @@ function Appearance([string]$Name) {
     foreach ($byte in [Text.Encoding]::UTF8.GetBytes($Name)) {
         $hash = (($hash -bxor [uint64]$byte) * [uint64]16777619) -band [uint64]4294967295
     }
-    @{face=[int]($hash % 20); color=[int]([Math]::Floor($hash / 20) % 8)}
+    $color = switch ($WorkspaceName) { 'inne' { 2 } 'Hypertask' { 5 } 'Software Factory' { 4 } default { 0 } }
+    @{face=[int]($hash % 20); color=$color}
 }
 function Layouts {
     $matches = [regex]::Matches((Read-Log), '\[bots\] face=(\d+) color=(\d+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
@@ -67,10 +69,13 @@ function Check-Pixels($Row, [string]$Name) {
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try {
         $graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, $bitmap.Size)
-        $bright = 0; $dark = 0; $tint = 0
+        $bright = 0; $dark = 0; $tint = 0; $workspaceTint = 0
         for ($y = 0; $y -lt $Row.size; $y++) {
             for ($x = 0; $x -lt $Row.size; $x++) {
                 $p = $bitmap.GetPixel($x, $y)
+                if (($Row.color -eq 2 -and $p.R -gt $p.G * 1.1 -and $p.G -gt $p.B * 1.1) -or
+                    ($Row.color -eq 4 -and $p.B -gt $p.R * 1.1 -and $p.G -gt $p.R * 1.05) -or
+                    ($Row.color -eq 5 -and $p.B -gt $p.G * 1.1 -and $p.R -gt $p.G * 1.05)) { $workspaceTint++ }
                 if ([Math]::Min($p.R, [Math]::Min($p.G, $p.B)) -gt 215) { $bright++ }
                 if ([Math]::Max($p.R, [Math]::Max($p.G, $p.B)) -lt 40) { $dark++ }
                 if ([Math]::Max($p.R, [Math]::Max($p.G, $p.B)) - [Math]::Min($p.R, [Math]::Min($p.G, $p.B)) -gt 16) { $tint++ }
@@ -78,8 +83,9 @@ function Check-Pixels($Row, [string]$Name) {
         }
         $area = $Row.size * $Row.size
         if ($bright -lt $area * .01 -or $dark -lt $area * .15 -or ($Row.color -ne 0 -and $tint -lt $area * .12)) { throw "Robot pixels absent: $Name bright=$bright dark=$dark tint=$tint area=$area" }
+        if ($Row.color -in @(2, 4, 5) -and $workspaceTint -lt $area * .08) { throw "Workspace hue absent: $Name" }
         $bitmap.Save("$Evidence/$Name.png")
-        $checks.Add(@{name=$Name; passed=$true; face=$Row.face; color=$Row.color; size=$Row.size; bright=$bright; dark=$dark; tint=$tint})
+        $checks.Add(@{name=$Name; passed=$true; face=$Row.face; color=$Row.color; size=$Row.size; bright=$bright; dark=$dark; tint=$tint; workspaceTint=$workspaceTint})
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 try {
@@ -104,7 +110,7 @@ try {
     Save $console "$state/claude.json"
     $tabs = @()
     for ($i = 0; $i -lt $names.Count; $i++) { $tabs += @{kind='tmux'; name=$displayNames[$i]; manual=$true; tmux_host=0; tmux_session=$names[$i]; pinned_top=($i -lt 2); cv=$false; pid=0} }
-    Save @{active_tab=0; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=$tabs} "$settings/session.json"
+    Save @{active_tab=0; single_window=$true; workspace_count=1; workspaces=@(@{name=$WorkspaceName; wid='default'}); chat_active=$false; amoled_theme=$true; tabs=$tabs} "$settings/session.json"
     [IO.File]::WriteAllText("$settings/theme-mode.txt", 'amoled')
     [IO.File]::WriteAllText("$settings/ssh-path.txt", (Join-Path (Split-Path $Exe) 'ssh.exe'))
     $job = [VerifyJob]::new()
@@ -118,6 +124,9 @@ try {
         @($published.shells | Where-Object { $_.pv -like '*Robot previews are ready*' }).Count -eq 6
     })
     $checks.Add(@{name='last-message-previews'; passed=$true})
+    $expectedColor = (Appearance $names[0]).color
+    if (@($rows | Where-Object { $_.color -ne $expectedColor }).Count) { throw 'Workspace robot color mismatch' }
+    $checks.Add(@{name='workspace-colors'; passed=$true; workspace=$WorkspaceName; color=$expectedColor})
     $rows = @(Layouts)
     $pins = @($rows | Where-Object { $_.size -eq 56 } | Sort-Object x)
     $list = @($rows | Where-Object { $_.size -eq 40 } | Sort-Object y)

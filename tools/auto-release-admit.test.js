@@ -340,7 +340,7 @@ test('the release gate workflow runs the journey once per master commit without 
   assert.match(gate, /feature: relaunch-saved-sessions/);
   assert.match(verify, /workflow_call:/);
   assert.match(verify, /inputs\.feature && github\.event_name == 'push' && format\('-gate-\{0\}', github\.sha\)/);
-  assert.match(verify, /inputs\.feature && github\.event_name == 'push' && fromJSON\(format\('\["\{0\}"\]', inputs\.feature\)\)/);
+  assert.match(verify, /inputs\.feature && inputs\.feature != 'all' && fromJSON\(format\('\["\{0\}"\]', inputs\.feature\)\)/);
 });
 
 test('the release tag is created through the git refs API and never pushed with git, so workflow-file commits cannot block it', () => {
