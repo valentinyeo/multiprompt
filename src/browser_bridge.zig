@@ -1324,8 +1324,7 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
             (std.mem.eql(u8, argv[0], "cdp") and
                 (std.mem.eql(u8, arg, "--script") or std.mem.eql(u8, arg, "--out"))) or
             (std.mem.eql(u8, argv[0], "screenshot") and
-                (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output") or std.mem.startsWith(u8, arg, "--output="))))
-        {
+                (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output") or std.mem.startsWith(u8, arg, "--output=")))) {
             zsbSendJsonError(client, "bad_args", "command requires the local CLI", session, null);
             return;
         }

@@ -123,15 +123,18 @@ test "ISSUE-502 snapshot rejects invalid row identities and unsafe block ranges"
 
 test "IGSH-556 launch snapshot preserves both memberships with legacy defaults" {
     const a = std.testing.allocator;
-    const bytes = try encode(a, .{ .active = 1, .rows = &.{.{ .id = 1, .name = &.{ 'C', 'M', 'D' }, .group_id = 17, .starred_group_id = 29 }} });
+    const bytes = try encode(a, .{ .active = 1, .rows = &.{.{ .id = 1, .name = &.{ 'C', 'M', 'D' }, .group_id = 17, .starred_group_id = 29, .starred_pinned_top = true }} });
     defer a.free(bytes);
     const restored = (try decode(a, bytes)).?;
     defer restored.deinit();
     try std.testing.expectEqual(@as(u32, 17), restored.value.rows[0].group_id);
     try std.testing.expectEqual(@as(u32, 29), restored.value.rows[0].starred_group_id);
+    try std.testing.expect(restored.value.rows[0].starred_pinned_top);
+    try std.testing.expect(!restored.value.rows[0].pinned);
     const legacy = (try decode(a, "{\"active\":1,\"rows\":[{\"id\":1,\"name\":[67],\"group_id\":17}]}")).?;
     defer legacy.deinit();
     try std.testing.expectEqual(@as(u32, 0), legacy.value.rows[0].starred_group_id);
+    try std.testing.expect(!legacy.value.rows[0].starred_pinned_top);
 }
 
 test "ISSUE-569 launch snapshot round trips the Starred selection pair" {
