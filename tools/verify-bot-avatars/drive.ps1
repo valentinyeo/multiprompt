@@ -37,6 +37,13 @@ function Read-Log {
     $reader = [IO.StreamReader]::new($stream)
     try { $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
+function Appearance([string]$Name) {
+    $hash = [uint64]2166136261
+    foreach ($byte in [Text.Encoding]::UTF8.GetBytes($Name)) {
+        $hash = (($hash -bxor [uint64]$byte) * [uint64]16777619) -band [uint64]4294967295
+    }
+    @{face=[int]($hash % 20); color=[int]([Math]::Floor($hash / 20) % 8)}
+}
 function Layouts {
     $matches = [regex]::Matches((Read-Log), '\[bots\] face=(\d+) color=(\d+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
     $unique = @{}
@@ -80,6 +87,8 @@ try {
     if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Binary version mismatch' }
     $displayNames = @('inne Chief of Staff', 'Mini Boss CEO', 'HT Product Lead', 'SF Design Lead', 'HT Design Lead', 'Triage')
     $names = @($displayNames | ForEach-Object { $_.Replace(' ', '-') })
+    $looks = @($names | ForEach-Object { $a = Appearance $_; "$($a.face):$($a.color)" } | Select-Object -Unique)
+    if ($looks.Count -ne $names.Count) { throw 'Fixture bot identities must be visually distinct' }
     $settings = "$profile/roaming/ZigShell"
     $state = "$profile/remote-state"
     New-Item -ItemType Directory -Force $settings, $state, "$profile/local", "$profile/home" | Out-Null
@@ -111,11 +120,18 @@ try {
         $selected = Wait-For 'clicked raw session selected' {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
             $tab = @($saved.tabs)[$saved.active_tab]
-            $index = if ($entry.name -eq 'pin-one') { 0 } elseif ($entry.name -eq 'pin-two') { 1 } else { -1 }
-            if (($index -ge 0 -and $tab.tmux_session -ceq $names[$index]) -or ($index -lt 0 -and $tab.tmux_session -in $names[2..5])) { $tab.tmux_session }
+            $expected = Appearance $tab.tmux_session
+            $isPin = $entry.name -ne 'list-one'
+            $member = if ($isPin) { $tab.tmux_session -in $names[0..1] } else { $tab.tmux_session -in $names[2..5] }
+            if ($member -and $expected.face -eq $entry.row.face -and $expected.color -eq $entry.row.color) { $tab.tmux_session }
         }
         $checks.Add(@{name=($entry.name + '-click'); passed=$true; selected=$selected})
-        Check-Pixels $entry.row $entry.name
+        $expected = Appearance $selected
+        $painted = Wait-For 'selected robot repainted' {
+            $v = @(Layouts | Where-Object { $_.size -eq $entry.row.size -and $_.face -eq $expected.face -and $_.color -eq $expected.color })
+            if ($v.Count) { $v[-1] }
+        }
+        Check-Pixels $painted $entry.name
     }
     [void](Wait-For 'real console messages reach list previews' {
         $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
@@ -144,6 +160,9 @@ try {
     if (Test-Path "$state/invocations.jsonl") { Copy-Item "$state/invocations.jsonl" "$Evidence/invocations.jsonl" }
     if (Test-Path "$state/unsupported.jsonl") { Copy-Item "$state/unsupported.jsonl" "$Evidence/unsupported.jsonl" }
     if (Test-Path $state) { Get-ChildItem $state -Filter 'reader-*.stderr.log' | Copy-Item -Destination $Evidence }
+    foreach ($file in @('session.json', 'inbox-default.json')) {
+        if (Test-Path "$settings/$file") { Copy-Item "$settings/$file" "$Evidence/final-$file" }
+    }
     Save $result "$Evidence/result.json"
     if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
 }
