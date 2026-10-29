@@ -774,6 +774,7 @@ pub fn parkMainWindowBeforeActiveShellRemoval(idx: usize) bool {
     if (!foregroundHwndIsOurs(fg) or !focusGuard(app_state.g_main_hwnd)) return false;
     if (fg == app_state.g_main_hwnd) return true;
 
+    unlockBrowserForeground();
     const our_thread = GetCurrentThreadId();
     const fg_thread = if (fg != null) GetWindowThreadProcessId(fg, null) else 0;
     const attached_fg = fg_thread != 0 and fg_thread != our_thread and AttachThreadInput(our_thread, fg_thread, 1) != 0;

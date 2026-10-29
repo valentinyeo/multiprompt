@@ -181,3 +181,51 @@ test('issue: the bridge bad_args reply keeps its own hint', async () => {
   assert.equal(JSON.parse(result.stdout).error, 'bad_args');
   assert.doesNotMatch(result.stderr, /[Rr]estart|[Rr]econnect|[Rr]eload/);
 });
+
+test('owner broker socket controls a pane without reading a vault token', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-owner-'));
+  const endpoint = path.join(dir, 'browser.sock');
+  const server = net.createServer(socket => socket.once('data', data => {
+    assert.match(data.toString(), /^ZSB:inne-cro:/);
+    assert.doesNotMatch(data.toString(), /AUTH:/);
+    socket.end('{"ok":true,"session":"inne-cro"}\n');
+  }));
+  await new Promise(resolve => server.listen(endpoint, resolve));
+  try {
+    const result = await run(['status'], () => assert.fail('broker fell back to TCP'), wrapper,
+      { HOME: dir, ZSB_SESSION: 'inne-cro', ZSB_SOCKET: endpoint, MULTIPROMP_NOTIFY_RELAY_TOKEN: '' });
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.equal(JSON.parse(result.stdout).session, 'inne-cro');
+    assert.doesNotMatch(result.stdout + result.stderr, /token|AUTH:/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('missing owner broker never falls back to the shared relay', { skip: process.platform === 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zsb-owner-missing-'));
+  try {
+    const result = await run(['status'], () => assert.fail('broker fell back to TCP'), wrapper,
+      { ZSB_SOCKET: path.join(dir, 'missing') });
+    assert.equal(result.code, 1);
+    assert.equal(JSON.parse(result.stdout).error, 'tunnel_down');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('owner browser proof keeps disposable credentials outside evidence', () => {
+  const file = path.join(__dirname, '../.claude/skills/verify-multiprompt/owner-browser-proof.ps1');
+  assert.ok(fs.existsSync(file), 'Cross-user proof must ship with its credential cleanup');
+  const script = fs.readFileSync(file, 'utf8');
+  assert.match(script, /StrictHostKeyChecking=yes/);
+  assert.match(script, /\$authHandle = \$auth\.Handle/);
+  assert.match(script, /\$remoteHandle = \$remote\.Handle/);
+  assert.match(script, /OwningProcess -eq \$process.Id/);
+  assert.match(script, /foreignDenied/);
+  assert.match(script, /globalDenied/);
+  assert.match(script, /credentialsPrivate/);
+  assert.match(script, /Remove-Item -LiteralPath \$key/);
+  assert.doesNotMatch(script, /StrictHostKeyChecking=no|SendKeys|AppActivate/);
+  const journey = fs.readFileSync(path.join(__dirname, '../.claude/skills/verify-multiprompt/control-feature-browser-own-profile.ps1'), 'utf8');
+  assert.match(journey, /}\s*Snapshot 'after'\s*$/);
+});

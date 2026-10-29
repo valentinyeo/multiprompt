@@ -129,6 +129,11 @@ on:
         required: false
         default: false
         type: boolean
+      owner_browser_proof:
+        description: Optional JSON with disposable SSH target, public host key, session and proof socket paths
+        required: false
+        default: ''
+        type: string
   workflow_call:
     inputs:
       revision:
@@ -239,7 +244,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}${{ inputs.feature && format('-feature-{0}', inputs.feature) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -356,7 +361,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11' && fromJSON('["chat-delivery"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature != 'all' && inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.chat_reactions_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || inputs.feature == 'all' && fromJSON(needs.journeys.outputs.full) || github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ inputs.feature && inputs.feature != 'all' && fromJSON(format('["{0}"]', inputs.feature)) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11' && fromJSON('["chat-delivery"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature != 'all' && inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.chat_reactions_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || inputs.feature == 'all' && fromJSON(needs.journeys.outputs.full) || github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
         app-revision: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["5d2a820355969173090f0fcd0c72a7b3bd222141","{0}"]', github.sha)) || fromJSON('[""]') }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
@@ -388,6 +393,7 @@ jobs:
       USAGE_PACE_PROOF: ${{ inputs.usage_pace_proof && '1' || '' }}
       USAGE_PACE_STATUS: ${{ inputs.usage_pace_status || '' }}
       VERIFY_APP_REVISION: ${{ matrix.app-revision }}
+      OWNER_BROWSER_PROOF: ${{ inputs.owner_browser_proof || '' }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
@@ -398,6 +404,20 @@ jobs:
           ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+      - name: Prepare disposable owner-browser tunnel key
+        if: env.OWNER_BROWSER_PROOF != ''
+        shell: pwsh
+        run: |
+          if ($env:FEATURE -ne 'browser-own-profile') { throw 'Owner browser proof requires browser-own-profile' }
+          python -c "import os,subprocess; subprocess.run(['ssh-keygen','-q','-t','ed25519','-N','','-f',os.path.join(os.environ['RUNNER_TEMP'],'owner-browser-key')],check=True)"
+          if ($LASTEXITCODE -ne 0) { throw 'Disposable tunnel key generation failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: env.OWNER_BROWSER_PROOF != ''
+        with:
+          name: owner-browser-public-key
+          path: ${{ runner.temp }}/owner-browser-key.pub
+          retention-days: 1
+          if-no-files-found: error
       - name: Check verification contracts
         run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/chat-shape-switch.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js tools/capture-usage-pace.test.js tools/usage-pace-ink.test.js
       - name: Check remote sync proof oracle

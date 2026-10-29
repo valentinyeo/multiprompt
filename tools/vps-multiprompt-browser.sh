@@ -609,14 +609,25 @@ if "ZSB_TIMEOUT" not in os.environ and "ZSB_TIMEOUT_SECONDS" in os.environ:
             raise ValueError()
     except ValueError:
         fail("bad_timeout", "ZSB_TIMEOUT_SECONDS must be greater than 0 and at most 300")
-try:
-    token = os.environ.get("MULTIPROMP_NOTIFY_RELAY_TOKEN")
-    if not token:
-        token = subprocess.run([str(pathlib.Path.home() / ".local/bin/yeo-key"), "Multiprompt Notify Relay Token", "MULTIPROMP_NOTIFY_RELAY_TOKEN"], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout.rstrip("\n")
-    if not token:
-        raise ValueError()
-except (OSError, subprocess.SubprocessError, ValueError):
-    fail("notify_token_unavailable", "Notify relay token unavailable; set MULTIPROMP_NOTIFY_RELAY_TOKEN or unlock the Multiprompt Notify Relay Token item in Yeo UX Agents.")
+endpoint = os.environ.get("ZSB_SOCKET")
+if not endpoint:
+    config = pathlib.Path(os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")) / "multiprompt/browser-socket"
+    try:
+        endpoint = config.read_text().strip()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        fail("tunnel_down", "Cannot read this user's browser socket configuration")
+token = None
+if not endpoint:
+    try:
+        token = os.environ.get("MULTIPROMP_NOTIFY_RELAY_TOKEN")
+        if not token:
+            token = subprocess.run([str(pathlib.Path.home() / ".local/bin/yeo-key"), "Multiprompt Notify Relay Token", "MULTIPROMP_NOTIFY_RELAY_TOKEN"], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout.rstrip("\n")
+        if not token:
+            raise ValueError()
+    except (OSError, subprocess.SubprocessError, ValueError):
+        fail("notify_token_unavailable", "Notify relay token unavailable; set MULTIPROMP_NOTIFY_RELAY_TOKEN or unlock the Multiprompt Notify Relay Token item in Yeo UX Agents.")
 
 started = time.monotonic()
 deadline = started + timeout
@@ -624,13 +635,19 @@ payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode()).decode()
 if script_mode and len(payload) + len(session.encode()) + 6 > 64 * 1024:
     fail("bad_args", "CDP script exceeds the remote command transport limit (64 KiB encoded)")
 try:
-    sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
+    if endpoint:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(min(5, timeout))
+        sock.connect(endpoint)
+    else:
+        sock = socket.create_connection(("127.0.0.1", int(port)), timeout=min(5, timeout))
 except OSError:
     fail("tunnel_down", "multiprompt app not reachable (SSH tunnel down). Reconnect this SSH/tmux session from multiprompt.")
 try:
     with sock:
         sock.settimeout(max(0.001, deadline - time.monotonic()))
-        sock.sendall(f"AUTH:{token}:ZSB:{session}:{payload}\n".encode())
+        request = f"ZSB:{session}:{payload}\n"
+        sock.sendall((request if endpoint else f"AUTH:{token}:" + request).encode())
         chunks, size = [], 0
         while True:
             remaining = deadline - time.monotonic()
