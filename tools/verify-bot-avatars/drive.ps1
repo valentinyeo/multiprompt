@@ -78,7 +78,8 @@ function Check-Pixels($Row, [string]$Name) {
 try {
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedHash) { throw 'Binary checksum mismatch' }
     if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Binary version mismatch' }
-    $names = @('inne Chief of Staff', 'Mini Boss CEO', 'HT Product Lead', 'SF Design Lead', 'HT Design Lead', 'Triage')
+    $displayNames = @('inne Chief of Staff', 'Mini Boss CEO', 'HT Product Lead', 'SF Design Lead', 'HT Design Lead', 'Triage')
+    $names = @($displayNames | ForEach-Object { $_.Replace(' ', '-') })
     $settings = "$profile/roaming/ZigShell"
     $state = "$profile/remote-state"
     New-Item -ItemType Directory -Force $settings, $state, "$profile/local", "$profile/home" | Out-Null
@@ -93,7 +94,7 @@ try {
     $console | Add-Member -NotePropertyName turns -NotePropertyValue (,@('Show the next step', 'Robot previews are ready.')) -Force
     Save $console "$state/claude.json"
     $tabs = @()
-    for ($i = 0; $i -lt $names.Count; $i++) { $tabs += @{kind='tmux'; name=$names[$i]; manual=$true; tmux_host=0; tmux_session=$names[$i]; pinned_top=($i -lt 2); cv=$false; pid=0} }
+    for ($i = 0; $i -lt $names.Count; $i++) { $tabs += @{kind='tmux'; name=$displayNames[$i]; manual=$true; tmux_host=0; tmux_session=$names[$i]; pinned_top=($i -lt 2); cv=$false; pid=0} }
     Save @{active_tab=0; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=$tabs} "$settings/session.json"
     [IO.File]::WriteAllText("$settings/theme-mode.txt", 'amoled')
     [IO.File]::WriteAllText("$settings/ssh-path.txt", (Join-Path (Split-Path $Exe) 'ssh.exe'))
@@ -142,6 +143,7 @@ try {
     if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/debug.log" }
     if (Test-Path "$state/invocations.jsonl") { Copy-Item "$state/invocations.jsonl" "$Evidence/invocations.jsonl" }
     if (Test-Path "$state/unsupported.jsonl") { Copy-Item "$state/unsupported.jsonl" "$Evidence/unsupported.jsonl" }
+    if (Test-Path $state) { Get-ChildItem $state -Filter 'reader-*.stderr.log' | Copy-Item -Destination $Evidence }
     Save $result "$Evidence/result.json"
     if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
 }

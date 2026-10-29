@@ -7389,7 +7389,8 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
         try std.testing.expectEqual(fill, scrollProofColor(frame_pixels[@as(usize, @intCast(card.top + uiScaled(6))) * frame_w + @as(usize, @intCast(card_x))]));
         const pill_cx = pill.left + @divTrunc(pill.right - pill.left, 2);
         const pill_cy = pill.top + @divTrunc(pill.bottom - pill.top, 2);
-        try std.testing.expectEqual(fill, scrollProofColor(frame_pixels[@as(usize, @intCast(pill_cy)) * frame_w + @as(usize, @intCast(pill.left + uiScaled(8)))]));
+        try std.testing.expect(title_layout.has_icon);
+        try std.testing.expectEqual(fill, scrollProofColor(frame_pixels[@as(usize, @intCast(pill_cy)) * frame_w + @as(usize, @intCast(pill.right - uiScaled(8)))]));
         const outline = scrollProofColor(frame_pixels[@as(usize, @intCast(pill.top)) * frame_w + @as(usize, @intCast(pill_cx))]);
         try std.testing.expect(outline != bg and outline != fill);
 
