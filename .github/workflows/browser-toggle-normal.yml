@@ -6,8 +6,7 @@ on:
     inputs:
       tag:
         description: Published Windows release
-        required: true
-        default: v0.28.1011
+        required: false
         type: string
 permissions:
   contents: read
@@ -16,7 +15,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 180
     env:
-      RELEASE_TAG: ${{ inputs.tag || 'v0.28.1011' }}
+      RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
@@ -51,10 +50,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if (-not $env:RELEASE_TAG) {
+            $env:RELEASE_TAG = gh api "repos/$env:GITHUB_REPOSITORY/releases/latest" --jq .tag_name
+            if ($LASTEXITCODE -ne 0) { throw 'Latest release lookup failed' }
+          }
+          "RELEASE_TAG=$env:RELEASE_TAG" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           New-Item -ItemType Directory -Force verify-bin | Out-Null
-          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir verify-bin --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern SHA256SUMS.txt
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir verify-bin --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern SHA256SUMS.txt --pattern SHA256SUMS.txt.sig
           if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+          node --input-type=module -e "import fs from 'node:fs'; import crypto from 'node:crypto'; const manifest=fs.readFileSync('verify-bin/SHA256SUMS.txt'); const raw=Buffer.from(fs.readFileSync('src/release_signing_public_key.txt','utf8').trim(),'base64'); const key=crypto.createPublicKey({key:Buffer.concat([Buffer.from('302a300506032b6570032100','hex'),raw]),format:'der',type:'spki'}); if(!crypto.verify(null,manifest,key,fs.readFileSync('verify-bin/SHA256SUMS.txt.sig'))) throw Error('Invalid signature');"
+          if ($LASTEXITCODE -ne 0) { throw 'Release signature authentication failed' }
           foreach ($asset in @('multiprompt', 'zigshell-bridge')) {
             $checks = @(Get-Content verify-bin/SHA256SUMS.txt | Where-Object { $_ -match ('^[a-fA-F0-9]{64} [ *]' + $asset + '-x64\.exe$') })
             if ($checks.Count -ne 1) { throw "Expected one checksum for $asset" }
