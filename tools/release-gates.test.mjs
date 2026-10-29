@@ -44,8 +44,9 @@ Assert-ReleaseTiming $Name $Value 'test sample'
     assert.notEqual(run('ui-hang', 5001).status, 0);
     assert.notEqual(run('unclassified-check', 1).status, 0);
     assert.notEqual(run('browser-switch-gap', -1).status, 0);
+    assert.notEqual(run('browser-switch-gap', 5001).status, 0);
     const samples = fs.readFileSync(path.join(dir, 'speed-trend.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-    assert.deepEqual(samples.map(sample => sample.value), [51, 500, 5000, 5001]);
+    assert.deepEqual(samples.map(sample => sample.value), [51, 500, 5000, 5001, 5001, 5001]);
     assert.equal(samples[0].status, 'warning');
     assert.equal(samples[1].largeRegression, true);
     assert.equal(samples[2].status, 'passed');
