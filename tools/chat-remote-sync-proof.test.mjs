@@ -16,6 +16,7 @@ test('remote proof rejects stale sessions, missing rendered turns and late deliv
   const observation = { error: null, remoteHome: 'remote/home', clientHome: 'client/home', turns };
   try {
     write('remote-sync/observation.json', observation);
+    write('remote-sync/theme-mode.txt', 'amoled');
     write('remote-sync/seed-session.json', { tabs: [{ tmux_host: 2 }] });
     write('cleanup.json', { remaining_owned_processes: 0, scratch_removed: true, evidence_preserved: true });
     write('remote-sync/stand-in/frames.jsonl', turns.map(turn => JSON.stringify({ screen: `${turn.question}\n${turn.answer}` })).join('\n'));
@@ -24,6 +25,9 @@ test('remote proof rejects stale sessions, missing rendered turns and late deliv
       for (const surface of ['chat', 'terminal']) write(`remote-turn-${turn.turn}-${surface}.png`, Buffer.from('89504e470d0a1a0a', 'hex'));
     }
     assert.equal(verifyRemoteSync(root).status, 'passed');
+    write('remote-sync/theme-mode.txt', 'dark');
+    assert.throws(() => verifyRemoteSync(root), /AMOLED theme saved by the app/);
+    write('remote-sync/theme-mode.txt', 'amoled');
     turns[2].session = 'first';
     write('remote-sync/observation.json', observation);
     assert.throws(() => verifyRemoteSync(root), /resume changes session identity/);
