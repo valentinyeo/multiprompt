@@ -13,9 +13,9 @@ $profile = Join-Path $env:RUNNER_TEMP "shared-sidebar-$PID"
 $settings = "$profile/roaming/ZigShell"
 $job = $null
 $result = @{passed=$false; error=$null; cleanup='pending'; comparisons=@(); actions=@()}
-function Wait-For([string]$Description, [scriptblock]$Check) {
+function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 30) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
-    do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($watch.Elapsed.TotalSeconds -lt 30)
+    do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($watch.Elapsed.TotalSeconds -lt $Seconds)
     throw "Timed out: $Description"
 }
 function Save($Value, [string]$File) { [IO.File]::WriteAllText($File, ($Value | ConvertTo-Json -Depth 15), [Text.UTF8Encoding]::new($false)) }
@@ -86,6 +86,15 @@ try {
         $inbox = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
         @($inbox.shells).Count -eq 3
     })
+    [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
+    [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
+    [void](Wait-For 'initial console previews' {
+        $inbox = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
+        @($inbox.shells | Where-Object { $_.pv }).Count -eq 3
+    } 60)
+    Focus
+    [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
+    [void](Wait-For 'initial shell view' { -not (Chat-On) })
     Compare-Views 'expanded'
     $previous = (Session).active_tab
     [ChatDeliveryDesktop]::PressClient($main, $app.Id, 120, 171)
