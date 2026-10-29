@@ -31,6 +31,8 @@ Preconditions: baseline Doctor passes on a fresh single-window instance with its
 
 - IGSH-890 continues after the muted-starred check: normally close the owned app, stop its owned descendants, and occupy every production notification port with fixture TCP listeners. Restart the same executable/profile, require both the `no free notify port` diagnostic and completed `launch step=browser`, then switch Home/Favorites four times with a fresh Inbox refresh each time. The saved tab count must stay unchanged, every CMD tab must have a real PID, and the selected favorite must keep its Favorites group. Restart again while the fixture still owns the ports; retain `favorites-no-duplicates.png`, four refresh snapshots and `favorites-no-duplicates.json`. Fixture sockets close in `finally`. This is isolated GitHub Windows only, not a user's desktop.
 
+- IGSH-1185 pins through the existing palette in Starred, requires `starred_pinned_top` without the home `pinned_top`, captures `starred-pins-before.png` and `starred-pins-after.png`, checks the same state after both restarts in `starred-pins-restarted.png`, then unpins into the unchanged group and captures `starred-pins-unpinned.png`.
+
 ## Gotchas
 
 - Groups use their real default saved names. This journey does not type into an inline rename editor or seed JSON.

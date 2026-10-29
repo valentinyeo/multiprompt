@@ -126,7 +126,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.claude_sid_len = copyString(obj, "csid", &tab.claude_sid);
         tab.claude_cwd_len = copyString(obj, "ccwd", &tab.claude_cwd);
         tab.burl_len = copyString(obj, "burl", &tab.burl);
-        inline for (.{ "sync_owned", "manual", "sem", "claude_session", "muted", "keep_alive", "pinned_top", "inbox_excluded", "favorite", "bon", "kaw", "cv", "cso", "fw" }) |key| {
+        inline for (.{ "sync_owned", "manual", "sem", "claude_session", "muted", "keep_alive", "pinned_top", "starred_pinned_top", "inbox_excluded", "favorite", "bon", "kaw", "cv", "cso", "fw" }) |key| {
             @field(tab, key) = boolTrue(obj, key);
         }
         const mode = string(field(root, "chat_view_mode")) orelse "";
@@ -170,6 +170,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         if (tab.starred_group_id == 0) tab.starred_group_id = @truncate(uint(saved, "starred_group_id"));
         tab.cv = tab.cv or boolTrue(saved, "cv");
         tab.pinned_top = tab.pinned_top or boolTrue(saved, "pinned_top");
+        tab.starred_pinned_top = tab.starred_pinned_top or boolTrue(saved, "starred_pinned_top");
     }
     return count;
 }

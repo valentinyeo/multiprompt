@@ -13,6 +13,7 @@ pub const Row = struct {
     starred_group_id: u32 = 0,
     agent: u8 = 0,
     pinned: bool = false,
+    starred_pinned_top: bool = false,
     favorite: bool = false,
     muted: bool = false,
     unread: bool = false,
@@ -136,7 +137,7 @@ test "IGSH-556 launch snapshot preserves both memberships with legacy defaults" 
 test "ISSUE-569 launch snapshot round trips the Starred selection pair" {
     const a = std.testing.allocator;
     for ([_]bool{ false, true }) |starred| {
-        const bytes = try encode(a, .{ .active = 42, .workspace = 0, .starred = starred, .rows = &.{.{ .id = 42, .workspace = 1, .favorite = true, .name = &.{ 'B' } }} });
+        const bytes = try encode(a, .{ .active = 42, .workspace = 0, .starred = starred, .rows = &.{.{ .id = 42, .workspace = 1, .favorite = true, .name = &.{'B'} }} });
         defer a.free(bytes);
         const parsed = (try decode(a, bytes)).?;
         defer parsed.deinit();

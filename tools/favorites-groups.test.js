@@ -37,3 +37,14 @@ test('IGSH-556: persistence and lifecycle paths retain the independent field', (
   const main = read('src/main.zig');
   for (const file of ['sidebar', 'session', 'launch_snapshot']) assert.ok(main.includes(`_ = @import("${file}.zig");`));
 });
+
+test('IGSH-1185: Starred pins persist independently through all local restore boundaries', () => {
+  const sidebar = read('src/sidebar.zig');
+  assert.match(sidebar, /return if \(app_state.g_starred_workspace\) app_state.shells\[i\].starred_pinned_top else app_state.shells\[i\].pinned_top/);
+  assert.doesNotMatch(sidebar.slice(sidebar.indexOf('pub fn layoutRows('), sidebar.indexOf('pub fn rowTotalHeight(')), /or app_state.g_starred_workspace/);
+  for (const file of ['app_state', 'session', 'json_reader', 'launch_snapshot', 'launch_cache', 'console', 'reminders', 'workspaces']) {
+    assert.ok(read(`src/${file}.zig`).includes('starred_pinned_top'), file);
+  }
+  const journey = read('.claude/skills/verify-multiprompt/control-feature-favorites-groups.ps1');
+  for (const name of ['starred-pins-before', 'starred-pins-after', 'starred-pins-restarted', 'starred-pins-unpinned']) assert.ok(journey.includes(name), name);
+});

@@ -314,6 +314,11 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             @memcpy(json_buf[pos .. pos + pf.len], pf);
             pos += pf.len;
         }
+        if (app_state.shells[i].starred_pinned_top) {
+            const pf = ",\"starred_pinned_top\":true";
+            @memcpy(json_buf[pos .. pos + pf.len], pf);
+            pos += pf.len;
+        }
         if (app_state.shells[i].inbox_excluded) {
             const ix = ",\"inbox_excluded\":true";
             @memcpy(json_buf[pos .. pos + ix.len], ix);
@@ -913,6 +918,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     shell.sync_owned = tab.sync_owned;
     shell.keep_alive = tab.keep_alive;
     shell.pinned_top = tab.pinned_top;
+    shell.starred_pinned_top = tab.starred_pinned_top;
     shell.inbox_excluded = tab.inbox_excluded;
     shell.favorite = tab.favorite;
     shell.last_used = tab.last_used;
@@ -1389,6 +1395,7 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     app_state.shells[idx].sync_owned = tabs[t].sync_owned;
     app_state.shells[idx].keep_alive = tabs[t].keep_alive;
     app_state.shells[idx].pinned_top = tabs[t].pinned_top;
+    app_state.shells[idx].starred_pinned_top = tabs[t].starred_pinned_top;
     app_state.shells[idx].inbox_excluded = tabs[t].inbox_excluded;
     app_state.shells[idx].favorite = tabs[t].favorite;
     app_state.shells[idx].last_used = tabs[t].last_used;
@@ -1602,9 +1609,17 @@ pub fn restoreSession() u32 {
             var name: [64]u16 = @splat(0);
             for (entry.name[0..entry.len], 0..) |c, i| name[i] = c;
             app_state.g_closed_history[app_state.g_closed_count] = .{
-                .kind = .tmux, .name = name, .name_len = @intCast(entry.len),
-                .tmux_session = entry.name, .tmux_session_len = @intCast(entry.len), .tmux_host = entry.host,
-                .cached_cwd = @splat(0), .cached_cwd_len = 0, .was_manual = true, .was_sem = false, .closed_at = 0,
+                .kind = .tmux,
+                .name = name,
+                .name_len = @intCast(entry.len),
+                .tmux_session = entry.name,
+                .tmux_session_len = @intCast(entry.len),
+                .tmux_host = entry.host,
+                .cached_cwd = @splat(0),
+                .cached_cwd_len = 0,
+                .was_manual = true,
+                .was_sem = false,
+                .closed_at = 0,
             };
             app_state.g_closed_count += 1;
         }
@@ -1889,6 +1904,7 @@ test "IGSH-556 saved session round trip keeps both group ids and legacy defaults
     app_state.shells[0].favorite = true;
     app_state.shells[0].group_id = 17;
     app_state.shells[0].starred_group_id = 29;
+    app_state.shells[0].starred_pinned_top = true;
     var temp: [512]u8 = undefined;
     const len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
     try std.testing.expect(len > 0 and len < temp.len);
@@ -1910,9 +1926,12 @@ test "IGSH-556 saved session round trip keeps both group ids and legacy defaults
     try std.testing.expectEqual(@as(u32, 1), parseSessionTabs(bytes, &tabs));
     try std.testing.expectEqual(@as(u32, 17), tabs[0].group_id);
     try std.testing.expectEqual(@as(u32, 29), tabs[0].starred_group_id);
+    try std.testing.expect(tabs[0].starred_pinned_top);
+    try std.testing.expect(!tabs[0].pinned_top);
     try std.testing.expectEqual(@as(u32, 1), parseSessionTabs("{\"tabs\":[{\"kind\":\"cmd\",\"name\":\"Old\",\"group_id\":17}]}", &tabs));
     try std.testing.expectEqual(@as(u32, 17), tabs[0].group_id);
     try std.testing.expectEqual(@as(u32, 0), tabs[0].starred_group_id);
+    try std.testing.expect(!tabs[0].starred_pinned_top);
 }
 
 test "ISSUE-569 stable selection survives skipped tabs and the saved tab cap" {

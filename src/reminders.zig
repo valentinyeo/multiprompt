@@ -197,6 +197,7 @@ pub fn loadRemindersIfNeeded() void {
         e.group_color = if (e.group_color_set) @intCast(@min(json_reader.uint(obj, "group_color"), GROUP_COLORS.len - 1)) else 7;
         e.group_collapsed = json_reader.boolTrue(obj, "group_collapsed");
         e.pinned_top = json_reader.boolTrue(obj, "pinned_top");
+        e.starred_pinned_top = json_reader.boolTrue(obj, "starred_pinned_top");
         e.favorite = json_reader.boolTrue(obj, "favorite");
         e.last_used = json_reader.uint(obj, "used");
         e.input = json_reader.uint(obj, "input");
@@ -382,6 +383,11 @@ fn saveReminders() bool {
             @memcpy(json_buf[pos .. pos + pinned.len], pinned);
             pos += pinned.len;
         }
+        if (e.starred_pinned_top) {
+            const pinned = ",\"starred_pinned_top\":true";
+            @memcpy(json_buf[pos .. pos + pinned.len], pinned);
+            pos += pinned.len;
+        }
         const used = ",\"used_unix\":true,\"used\":";
         @memcpy(json_buf[pos .. pos + used.len], used);
         pos += used.len;
@@ -440,6 +446,7 @@ fn reminderFromShell(idx: usize, due_at: u64) ?ReminderEntry {
     e.tmux_persisted = true;
     e.favorite = app_state.shells[idx].favorite;
     e.starred_group_id = app_state.shells[idx].starred_group_id;
+    e.starred_pinned_top = app_state.shells[idx].starred_pinned_top;
     e.starred_group = if (findGroupIdx(e.starred_group_id)) |gi| app_state.groups[gi] else null;
     e.last_used = app_state.shells[idx].last_used;
     e.input = app_state.shells[idx].input;
@@ -575,6 +582,7 @@ fn restoreReminderEntry(e: *const ReminderEntry) bool {
             app_state.shells[si].name_source = .manual;
         }
         app_state.shells[si].favorite = e.favorite;
+        app_state.shells[si].starred_pinned_top = e.starred_pinned_top;
         app_state.shells[si].last_used = e.last_used;
         app_state.shells[si].input = e.input;
         app_state.shells[si].visits = e.visits;

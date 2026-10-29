@@ -1177,8 +1177,12 @@ inline fn effLa(i: usize) u64 {
     return app_state.shells[i].last_active;
 }
 
-inline fn effPinnedTop(i: usize) bool {
-    return app_state.shells[i].pinned_top;
+pub inline fn effPinnedTop(i: usize) bool {
+    return if (app_state.g_starred_workspace) app_state.shells[i].starred_pinned_top else app_state.shells[i].pinned_top;
+}
+
+pub fn setPinnedTop(i: usize, pinned: bool) void {
+    if (app_state.g_starred_workspace) app_state.shells[i].starred_pinned_top = pinned else app_state.shells[i].pinned_top = pinned;
 }
 
 pub inline fn shellSidebarTier(i: usize) SidebarTier {
@@ -1402,6 +1406,12 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
+        for (0..app_state.shell_count) |i| {
+            if (!tabInCurrentWorkspace(i) or !effPinnedTop(i)) continue;
+            out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
+            count += 1;
+            y += tabRowH();
+        }
         for (0..app_state.group_count) |gi| {
             const gid = app_state.groups[gi].id;
             if (!groupInCurrentWorkspace(gid)) continue;
@@ -1410,14 +1420,14 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
             y += GROUP_HEADER_H;
             if (app_state.groups[gi].collapsed) continue;
             for (0..app_state.shell_count) |i| {
-                if (!tabInCurrentWorkspace(i) or tabGroupId(i) != gid) continue;
+                if (!tabInCurrentWorkspace(i) or tabGroupId(i) != gid or effPinnedTop(i)) continue;
                 out[count] = .{ .kind = .tab, .gidx = @intCast(gi), .shell_idx = @intCast(i), .y = y };
                 count += 1;
                 y += tabRowH();
             }
         }
         for (0..app_state.shell_count) |i| {
-            if (!@import("workspaces.zig").starredShellVisible(i) or tabGroupId(i) != 0) continue;
+            if (!@import("workspaces.zig").starredShellVisible(i) or tabGroupId(i) != 0 or effPinnedTop(i)) continue;
             out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
             count += 1;
             y += tabRowH();
@@ -1540,7 +1550,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
 pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
     var rows: [MAX_ROWS]Row = undefined;
     const count = layoutRowsInner(&rows);
-    if (count == 0 or app_state.g_sidebar_collapsed or app_state.g_starred_workspace) {
+    if (count == 0 or app_state.g_sidebar_collapsed) {
         @memcpy(out[0..count], rows[0..count]);
         return count;
     }
@@ -3345,7 +3355,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         var ka_hint_rc = RECT{ .left = ox + overlay_w - 80, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("persist"), -1, &ka_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_pin_top) {
-                        const pin_on = app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].pinned_top;
+                        const pin_on = app_state.active_shell < app_state.shell_count and effPinnedTop(app_state.active_shell);
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
                         var pt_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
@@ -3797,7 +3807,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_favorite = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].favorite else false;
                             const tc_muted = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].muted else false;
                             const tc_ka = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].keep_alive else false;
-                            const tc_pinned = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].pinned_top else false;
+                            const tc_pinned = if (findShellById(app_state.g_tabctx_sid)) |ti| effPinnedTop(ti) else false;
                             const tc_kaw = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].keep_awake else false;
                             const tc_browser_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].browser_enabled else false;
                             const tc_has_tmux = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].tmux_session_len > 0 else false;
@@ -4538,4 +4548,61 @@ test "IGSH-556 Favorites and home grouping keep independent memberships and grou
     try std.testing.expect(removeTabOrSelectionFromGroup(1));
     try std.testing.expectEqual(other_home, app_state.shells[0].group_id);
     try std.testing.expectEqual(@as(u32, 0), app_state.shells[0].starred_group_id);
+}
+
+test "IGSH-1185 Starred tiles pin independently above collapsed groups and unpin in place" {
+    const saved_starred = app_state.g_starred_workspace;
+    const saved_count = app_state.shell_count;
+    const saved_groups = app_state.group_count;
+    const saved_group = app_state.groups[0];
+    const saved_shells = app_state.shells[0..3].*;
+    const saved_collapsed = app_state.g_sidebar_collapsed;
+    const saved_inbox = app_state.g_inbox_row_count;
+    defer {
+        app_state.g_starred_workspace = saved_starred;
+        app_state.shell_count = saved_count;
+        app_state.group_count = saved_groups;
+        app_state.groups[0] = saved_group;
+        app_state.shells[0..3].* = saved_shells;
+        app_state.g_sidebar_collapsed = saved_collapsed;
+        app_state.g_inbox_row_count = saved_inbox;
+    }
+    app_state.g_starred_workspace = true;
+    app_state.g_sidebar_collapsed = false;
+    app_state.g_inbox_row_count = 0;
+    app_state.shell_count = 3;
+    app_state.group_count = 1;
+    app_state.groups[0] = .{ .id = 17, .name = @splat(0), .name_len = 0, .collapsed = true, .color = 7 };
+    for (0..3) |i| {
+        app_state.shells[i] = app_state.empty_shell;
+        app_state.shells[i].favorite = true;
+        app_state.shells[i].workspace = app_state.g_active_workspace;
+    }
+    app_state.shells[0].pinned_top = true;
+    app_state.shells[1].starred_group_id = 17;
+    setPinnedTop(1, true);
+    try std.testing.expect(!app_state.shells[1].pinned_top);
+    var rows: [MAX_ROWS]Row = undefined;
+    const count = layoutRows(&rows);
+    try std.testing.expectEqual(@as(u32, 4), count);
+    try std.testing.expect(rows[0].tile);
+    try std.testing.expectEqual(@as(u32, 1), rows[0].shell_idx);
+    try std.testing.expectEqual(uiScaled(96), rowTotalHeight(rows[0]));
+    try std.testing.expect(rows[1].kind == .header);
+    try std.testing.expect(!rows[2].tile);
+    try std.testing.expectEqual(@as(u32, 0), rows[2].shell_idx);
+    try std.testing.expect(rows[0].y < rows[1].y);
+    app_state.g_starred_workspace = false;
+    try std.testing.expect(effPinnedTop(0));
+    try std.testing.expect(!effPinnedTop(1));
+    app_state.g_starred_workspace = true;
+    setPinnedTop(1, false);
+    app_state.groups[0].collapsed = false;
+    const unpinned = layoutRows(&rows);
+    try std.testing.expectEqual(@as(u32, 4), unpinned);
+    try std.testing.expect(rows[0].kind == .header);
+    try std.testing.expect(!rows[1].tile);
+    try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
+    try std.testing.expectEqual(@as(u32, 17), app_state.shells[1].starred_group_id);
+    try std.testing.expect(app_state.shells[0].pinned_top);
 }

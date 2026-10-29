@@ -562,7 +562,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
             SEARCH_TABCTX_FAVORITE => if (tab != null and tab.?.favorite) "unfavorite" else "favorite",
             SEARCH_TABCTX_MUTE => if (tab != null and tab.?.muted) "unmute tab" else "mute tab",
             SEARCH_TABCTX_KEEPALIVE => if (tab != null and tab.?.keep_alive) "keep alive: on" else "keep alive: off",
-            SEARCH_TABCTX_PIN_TOP => if (tab != null and tab.?.pinned_top) "unpin from top" else "pin to top",
+            SEARCH_TABCTX_PIN_TOP => if (tab != null and @import("sidebar.zig").effPinnedTop(findShellById(app_state.g_tabctx_sid).?)) "unpin from top" else "pin to top",
             SEARCH_TABCTX_KEEPAWAKE => if (tab != null and tab.?.keep_awake) "keep tab awake: on" else "keep tab awake: off",
             SEARCH_TABCTX_WSMOVE => "move to workspace",
             SEARCH_TABCTX_GROUP_NEW => "add to new group",
@@ -2129,7 +2129,7 @@ pub fn updateSearchResults() void {
             }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
-            const tc_pinned = if (tc_idx) |ti| app_state.shells[ti].pinned_top else false;
+            const tc_pinned = if (tc_idx) |ti| @import("sidebar.zig").effPinnedTop(ti) else false;
             const pin_str: []const u8 = if (tc_pinned) "Unpin from Top" else "Pin to Top";
             if (app_state.g_search_len == 0 or labelsMatchQuery(&[_][]const u8{ pin_str, "pin", "pinned", "unpin", "top", "sidebar top" }, app_state.g_search_buf[0..app_state.g_search_len])) {
                 app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_PIN_TOP;

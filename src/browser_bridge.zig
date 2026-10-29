@@ -408,6 +408,7 @@ fn diagAppendShellJson(out: []u8, pos: *usize, i: usize) bool {
     if (!diagJsonBoolField(out, pos, &first, "muted", s.muted)) return false;
     if (!diagJsonBoolField(out, pos, &first, "keep_alive", s.keep_alive)) return false;
     if (!diagJsonBoolField(out, pos, &first, "pinned_top", s.pinned_top)) return false;
+    if (!diagJsonBoolField(out, pos, &first, "starred_pinned_top", s.starred_pinned_top)) return false;
     if (!diagJsonBoolField(out, pos, &first, "disconnected", s.disconnected)) return false;
     if (!diagJsonBoolField(out, pos, &first, "inbox_archived", s.inbox_archived)) return false;
     if (!diagJsonBoolField(out, pos, &first, "tab_hidden", isTabHidden(@intCast(i)))) return false;
@@ -1323,7 +1324,8 @@ fn zsbWorkerThread(ctx_ptr: usize) void {
             (std.mem.eql(u8, argv[0], "cdp") and
                 (std.mem.eql(u8, arg, "--script") or std.mem.eql(u8, arg, "--out"))) or
             (std.mem.eql(u8, argv[0], "screenshot") and
-                (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output") or std.mem.startsWith(u8, arg, "--output=")))) {
+                (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--output") or std.mem.startsWith(u8, arg, "--output="))))
+        {
             zsbSendJsonError(client, "bad_args", "command requires the local CLI", session, null);
             return;
         }
