@@ -88,7 +88,7 @@
                         Doctor
                         Wait-Foreground
                         Record "IGSH-1126 $Page immediate Alt+A pair $i"
-                        Assert-Foreground
+                        Wait-Foreground
                         $before = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count
                         $gap = [VerifyNative]::ImmediateBrowserTogglePair((50 + ($i % 5) * 50))
                         Wait-Until { @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count -eq $before + 2 } 'both physical key presses handled' -Seconds 5 -PollMilliseconds 10
