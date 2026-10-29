@@ -1618,7 +1618,7 @@ fn browserWindowProfileMatches(hwnd: HANDLE, idx: u32) bool {
 pub fn pendingBrowserWindowOwnsForeground(hwnd: HANDLE) bool {
     const idx = app_state.g_browser_adopt_target_idx;
     if (idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or app_state.shells[idx].browser_launch_tick == 0) return false;
-    if (!edgeWindowClassMatches(hwnd) or browserSnapshotContains(hwnd)) return false;
+    if (!edgeWindowClassMatches(hwnd)) return false;
     return browserWindowProfileMatches(hwnd, idx);
 }
 

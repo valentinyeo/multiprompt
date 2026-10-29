@@ -107,7 +107,7 @@ test "opening pane owner is authoritative before shell browser_hwnd is populated
     try std.testing.expect(foregroundHwndIsOurs(@ptrFromInt(10)));
     try std.testing.expect(foregroundHwndIsOurs(@ptrFromInt(40)));
     try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(50)));
-    try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(60)));
+    try std.testing.expect(foregroundHwndIsOurs(@ptrFromInt(60)));
     try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(70)));
     shells[0].browser_enabled = false;
     try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(40)));
