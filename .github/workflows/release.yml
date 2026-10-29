@@ -124,7 +124,7 @@ jobs:
     if: github.event_name != 'pull_request' && !inputs.proof
     runs-on: ubuntu-latest
     concurrency:
-      group: release-${{ needs.prepare.outputs.tag }}
+      group: release-publication
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -176,8 +176,19 @@ jobs:
             echo "Release $TAG already exists; skipping publication"
             exit 0
           fi
+          published_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
+          latest=$(node --input-type=module - "$TAG" "$published_tag" <<'NODE'
+          const versions = process.argv.slice(2).map(tag => {
+            const match = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(tag);
+            if (!match) throw new Error(`Invalid release tag: ${tag}`);
+            return match.slice(1).map(BigInt);
+          });
+          const index = versions[0].findIndex((part, index) => part !== versions[1][index]);
+          console.log(index !== -1 && versions[0][index] > versions[1][index]);
+          NODE
+          )
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$BUILT_SHA" \
-            --latest --title "multiprompt $TAG" --generate-notes
+            --latest="$latest" --title "multiprompt $TAG" --generate-notes
 
   runner-sessions:
     needs: [prepare, release]

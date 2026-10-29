@@ -65,7 +65,8 @@ if (args[0] === 'run') {
   process.exit(0);
 }
 if (args[0] === 'api' && args[1].endsWith('/releases/latest')) {
-  console.log(process.env.PUBLISHED_TAG || 'v1.2.8');
+  if (process.env.LATEST_READ_FAIL === '1') process.exit(1);
+  console.log(process.env.GH_STATE && fs.existsSync(process.env.GH_STATE) ? JSON.parse(fs.readFileSync(process.env.GH_STATE)).latest : process.env.PUBLISHED_TAG || 'v1.2.8');
   process.exit(0);
 }
 if (args[0] === 'api') {
@@ -75,12 +76,18 @@ if (args[0] === 'api') {
 }
 if (args[1] === 'view') process.exit(process.env.RELEASE_EXISTS === '1' ? 0 : 1);
 if (args[1] !== 'create') process.exit(2);
+if (process.env.GH_STATE) {
+  const state = fs.existsSync(process.env.GH_STATE) ? JSON.parse(fs.readFileSync(process.env.GH_STATE)) : { latest: process.env.PUBLISHED_TAG, releases: [] };
+  state.releases.push(args[2]);
+  if (args.includes('--latest') || args.includes('--latest=true')) state.latest = args[2];
+  fs.writeFileSync(process.env.GH_STATE, JSON.stringify(state));
+}
 execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/tags/' + args[2], process.env.BUILT_SHA]);
 `, { mode: 0o755 });
   return { dir, git, sha, remote, log,
     run: (name, env = {}, source = workflow) => spawnSync('bash', ['-euo', 'pipefail', '-c', script(name, source)], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: 'example/multiprompt',
-        TAG: tag, BUILT_SHA: sha, PUBLISHED_TAG: 'v1.2.2', REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } }),
+        TAG: tag, BUILT_SHA: sha, PUBLISHED_TAG: 'v1.2.2', GH_STATE: path.join(dir, 'release-state.json'), REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } }),
     admit: (env = {}) => spawnSync('bash', ['tools/auto-release-admit.sh'], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_REPOSITORY: 'example/multiprompt',
         GH_LOG: log, TEST_REMOTE: remote, TESTED_SHA: git('rev-parse', 'HEAD'), ...env } }),
@@ -509,6 +516,24 @@ for (const [published, candidate, latest] of [
 for (const published of ['', 'unknown', 'v1.2', 'v1.2.3-beta']) test(`publication rejects unreadable latest version: ${published}`, { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   const result = f.run('Publish release', { PUBLISHED_TAG: published || 'unknown', GITHUB_EVENT_NAME: 'workflow_dispatch' });
+  assert.notEqual(result.status, 0);
+  assert.equal(f.calls().filter(args => args[1] === 'create').length, 0);
+});
+
+test('finishing an older release retains both downloads and the newer desktop feed', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  for (const candidate of ['v0.28.999', 'v0.28.995']) {
+    const result = f.run('Publish release', { TAG: candidate, GITHUB_EVENT_NAME: 'workflow_dispatch' });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, 'release-state.json'), 'utf8')), {
+    latest: 'v0.28.999', releases: ['v0.28.999', 'v0.28.995'],
+  });
+});
+
+test('latest-feed read failures cannot replace the desktop update', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  const result = f.run('Publish release', { LATEST_READ_FAIL: '1', GITHUB_EVENT_NAME: 'workflow_dispatch' });
   assert.notEqual(result.status, 0);
   assert.equal(f.calls().filter(args => args[1] === 'create').length, 0);
 });
