@@ -9,6 +9,20 @@ function Record([string]$Action) {
     Save-Json @($script:actions.ToArray()) 'actions.json'
 }
 
+function Release-ScratchConsoleFonts([string]$Path) {
+    $fontRoot = Join-Path $Path 'local/ZigShell/fonts'
+    if (-not (Test-Path -LiteralPath $fontRoot)) { return }
+    $released = @()
+    foreach ($entry in Get-ChildItem -LiteralPath $fontRoot -Force) {
+        if ($entry -isnot [IO.FileInfo] -or $entry.Extension -ine '.ttf' -or
+            ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+        $count = 0
+        while ([VerifyNative]::RemoveFontResourceEx($entry.FullName, 0, [IntPtr]::Zero)) { $count++ }
+        $released += @{ name = $entry.Name; registrations = $count }
+    }
+    Save-Json @($released) 'console-font-cleanup.json'
+}
+
 function Test-VanishedScratchItem($Failure, [string]$Path) {
     if (Test-Path -LiteralPath $Path) { return $false }
     $exception = $Failure.Exception
