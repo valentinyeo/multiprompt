@@ -15,6 +15,15 @@ spec = importlib.util.spec_from_file_location('triage', ${JSON.stringify(script)
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 row = dict(device_id='desktop', report_id='freeze-one', captured_at=100, received_at=101, app_version='0.28.1', thread='main', summary='Windows freeze', stack_trace='exception_code: 0x0\\nstack_rvas:\\n  0x1234\\n')
+with patch.object(m, 'board', side_effect=[dict(success=True, tasks=[], nextCursor='next'), dict(success=True, tasks=[dict(title='matching', ticketNumber='IGSH-9')])]) as pages:
+    assert m.find_ticket('matching')['ticketNumber'] == 'IGSH-9'
+    assert pages.call_args.args[-2:] == ('--cursor', 'next')
+with patch.object(m, 'board', return_value=dict(success=True, tasks=[], nextCursor='loop')):
+    try:
+        m.find_ticket('missing')
+        raise AssertionError('Repeated cursor accepted')
+    except RuntimeError:
+        pass
 tasks, logs, events = [], {}, []
 def board(*args):
     if args[:2] == ('task', 'list'):

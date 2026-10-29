@@ -62,10 +62,21 @@ def save(path, state):
 
 
 def find_ticket(title):
-    result = board('task', 'list', '--project', '2060', '--search', title, '--limit', '500')
-    if result.get('has_more') or result.get('nextCursor'):
-        raise RuntimeError('Ticket search incomplete')
-    matches = [t for t in result['tasks'] if t['title'] == title]
+    args = ['task', 'list', '--project', '2060', '--search', title, '--limit', '500']
+    matches = []
+    cursors = set()
+    while True:
+        result = board(*args)
+        matches.extend(t for t in result['tasks'] if t['title'] == title)
+        cursor = result.get('nextCursor')
+        if not cursor:
+            if result.get('has_more'):
+                raise RuntimeError('Ticket search incomplete')
+            break
+        if cursor in cursors:
+            raise RuntimeError('Ticket search cursor repeated')
+        cursors.add(cursor)
+        args = args[:8] + ['--cursor', cursor]
     if len(matches) > 1:
         raise RuntimeError('Duplicate report tickets need reconciliation')
     return matches[0] if matches else None
