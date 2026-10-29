@@ -211,7 +211,7 @@ function assertsJourney(source) {
 test('four warm twenty-sample and two frozen five-sample sets enforce all matching 50ms gaps and retain null failure evidence', () => {
   assertsJourney(journey);
   for (const [before, after] of [
-    ['$sample -lt $sampleCount', '$sample -lt 2'], ["Assert-ReleaseTiming 'browser-switch-gap'", "Assert-ReleaseTiming 'unknown'"],
+    ['$sample -lt $sampleCount', '$sample -lt 2'], ['([Math]::Max(0, $pair.gap_ms))', '([Math]::Max(0, 0))'],
     ["$pane.browser_state -eq 'connected'", '$true'], ['finally {', 'if ($false) {'],
     ["name = 'switch-gap'; status = 'failed'", "name = 'switch-gap'; status = 'passed'"],
     ["@('chat_browser_off', 'chat_browser_on')", "@('browser_off', 'browser_on')"],

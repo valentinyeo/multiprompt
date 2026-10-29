@@ -715,8 +715,8 @@ test('IGSH-1033 a quarantined failure cannot mask an eligible parent regression'
 
 test('IGSH-1033 repaired journeys remain blocking after quarantine retirement', () => {
   assert.ok(fs.existsSync(`${__dirname}/journey-policy.json`), 'Shared quarantine policy must ship');
-  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(`${__dirname}/journey-policy.json`, 'utf8')).quarantined), ['browser-pane-stuck']);
-  for (const key of ['chat-messages-only']) {
+  assert.deepEqual(JSON.parse(fs.readFileSync(`${__dirname}/journey-policy.json`, 'utf8')), { quarantined: {} });
+  for (const key of ['browser-pane-stuck', 'chat-messages-only']) {
     const input = fixture();
     input.jobs = [{ name: `verify (${key})`, conclusion: 'failure' }];
     input.history[0].jobs = [{ name: `verify (${key})`, conclusion: 'success' }];
