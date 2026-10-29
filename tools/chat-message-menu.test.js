@@ -92,7 +92,7 @@ test('IGSH-718 enabled button backgrounds are neutral, hover is lighter, disable
   assert.match(paint, /RGB\(255, 255, 255\) else RGB\(235, 235, 235\)/);
   assert.doesNotMatch(paint, /selected_bg|const accent/);
   assert.match(paint, /tokens.roundButton\(&canvas, @bitCast\(rc\), fill\)/);
-  assert.match(read('src/design_tokens.zig'), /canvas.roundRect\(rect, @divTrunc\(rect.bottom - rect.top, 2\), fill\)/);
+  assert.match(read('src/design_tokens.zig'), /canvas.roundRect\(rect, @divTrunc\(@min\(rect.right - rect.left, rect.bottom - rect.top\), 2\), fill\)/);
   assert.match(read('src/design_canvas.zig'), /fillRoundRectAA\(self.hdc, @bitCast\(rect\), radius, color\)/);
 });
 
