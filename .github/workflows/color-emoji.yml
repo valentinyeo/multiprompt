@@ -38,9 +38,9 @@ jobs:
         run: |
           if [ "$RELEASE_EVENT" != true ]; then exit 0; fi
           tag=$(gh release view --json tagName --jq .tagName)
-          git cat-file -e "$tag:src/color_emoji.cpp" 2>/dev/null || exit 0
+          test -n "$(git ls-tree --name-only "$tag" -- src/color_emoji.cpp)" || exit 0
           previous=$(git describe --tags --match 'v*' --abbrev=0 "$tag^")
-          if git cat-file -e "$previous:src/color_emoji.cpp" 2>/dev/null; then exit 0; fi
+          if [ -n "$(git ls-tree --name-only "$previous" -- src/color_emoji.cpp)" ]; then exit 0; fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   pixels:
