@@ -514,7 +514,8 @@ pub fn chatFileRequest(key: chat_transcript.Identity) void {
 }
 
 pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool) void {
-    chatHistoryStreamsKeep(if (app_state.g_chat_active) key.shell_id else 0);
+    const live_shell_id = if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+    chatHistoryStreamsKeep(live_shell_id);
     if ((!delivery and !app_state.g_chat_active) or key.shell_id == 0) return;
     if (app_state.g_main_hwnd == null or (!delivery and (IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0))) return;
     const entry = chatHistoryEntry(key) orelse return;
@@ -531,7 +532,7 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     if (key.cwd[0] == 0) entry.key.cwd = known.cwd;
     if (!load_disk and entry.before > 0) chatHistoryStreamStop(entry);
     var pushed: ?ChatHistoryPush = null;
-    if (!load_disk and entry.before == 0 and entry.backfill.pages.items.len == 0 and !entry.history.restore_full and !chatBenchEnabled()) {
+    if (key.shell_id == live_shell_id and !load_disk and entry.before == 0 and entry.backfill.pages.items.len == 0 and !entry.history.restore_full and !chatBenchEnabled()) {
         if (entry.stream == null) {
             app_state.g_chat_file_request_id +%= 1;
             entry.stream = chatHistoryStreamStart(entry.key, app_state.g_chat_file_request_id, entry.history.cursor()) orelse {

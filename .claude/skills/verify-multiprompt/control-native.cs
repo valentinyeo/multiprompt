@@ -140,7 +140,8 @@ public static class VerifyNative {
         };
         var clock = System.Diagnostics.Stopwatch.StartNew();
         chord();
-        Thread.Sleep(delay);
+        double remaining = delay - clock.Elapsed.TotalMilliseconds;
+        if (remaining > 0) Thread.Sleep((int)(remaining));
         double gap = clock.Elapsed.TotalMilliseconds;
         chord();
         if (gap > 300) throw new InvalidOperationException("Alt+A pair exceeded 300 ms: " + gap);

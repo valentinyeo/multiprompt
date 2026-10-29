@@ -2415,3 +2415,29 @@ test('release sidebar pixel oracles use the live width and approved expanded row
     for (const call of driver.matchAll(/\[(?:GroupRailProof|PaneLayoutProof)\]::(?:Check|Labels|FocusMargins)\([^\n]+/g)) assert.match(call[0], /, \$sidebarLogical\)$/);
   }
 });
+
+test('IGSH-1161 immediate key-pair deadline includes first injection time without relaxing the 300ms bound', () => {
+  const native = read(skill + 'control-native.cs');
+  const method = native.split('public static double ImmediateBrowserTogglePair(int delay)')[1].split('public static void OpenAndCloseBrowserPane()')[0];
+  const timing = method.slice(method.indexOf('var clock ='), method.indexOf('return gap;') + 'return gap;'.length)
+    .replace(/\b(?:var|double|int) (\w+) =/g, 'let $1 =')
+    .replace(/\(int\)/g, 'Math.trunc')
+    .replace(/new InvalidOperationException/g, 'new Error');
+  function pair(injectionMs, oversleep = 0) {
+    let now = 0;
+    const starts = [];
+    const clock = { Elapsed: { get TotalMilliseconds() { return now; } } };
+    const gap = require('node:vm').runInNewContext(`(function() { ${timing} })()`, {
+      delay: 250,
+      System: { Diagnostics: { Stopwatch: { StartNew: () => clock } } },
+      Thread: { Sleep: milliseconds => { now += milliseconds + oversleep; } },
+      chord: () => { starts.push(now); now += injectionMs; },
+    });
+    return { gap, starts };
+  }
+  for (const injectionMs of [0, 20, 52, 100]) {
+    assert.deepEqual(pair(injectionMs), { gap: 250, starts: [0, 250] });
+  }
+  assert.throws(() => pair(350), /Alt\+A pair exceeded 300 ms/);
+  assert.throws(() => pair(0, 60), /Alt\+A pair exceeded 300 ms/);
+});
