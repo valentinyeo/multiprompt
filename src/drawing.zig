@@ -853,7 +853,7 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
     }
 }
 
-test "IGSH-910 active ETA leaves Chat View header pixels and title space unchanged" {
+test "IGSH-910 ETA and IGSH-1152 notice expiry preserve Chat View header pixels" {
     const w = @import("win32.zig");
     const gdi = struct {
         extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
@@ -869,6 +869,8 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
         .light = app_state.g_light_theme,
         .reauth = app_state.g_account_reauth,
         .cap_until = app_state.g_cap_msg_until,
+        .cap_text = app_state.g_cap_msg_text,
+        .cap_len = app_state.g_cap_msg_len,
         .voice = app_state.g_voice_mode_active,
         .scale = app_state.g_ui_scale,
         .dpi = app_state.g_main_monitor_dpi,
@@ -884,6 +886,8 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
         app_state.g_light_theme = saved.light;
         app_state.g_account_reauth = saved.reauth;
         app_state.g_cap_msg_until = saved.cap_until;
+        app_state.g_cap_msg_text = saved.cap_text;
+        app_state.g_cap_msg_len = saved.cap_len;
         app_state.g_voice_mode_active = saved.voice;
         app_state.g_ui_scale = saved.scale;
         app_state.g_main_monitor_dpi = saved.dpi;
@@ -960,6 +964,43 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
             try std.testing.expectEqualDeep(idle_rect, title_rect);
         }
     }
+    const Expire = struct {
+        var next: @TypeOf(app_state.g_gdip_api.fill_path) = undefined;
+        var calls: usize = 0;
+
+        fn fill(graphics: HANDLE, brush: HANDLE, path: HANDLE) callconv(w.WINAPI) app_state.GpStatus {
+            calls += 1;
+            app_state.g_cap_msg_until = 0;
+            return next(graphics, brush, path);
+        }
+    };
+    try std.testing.expect(smooth.gdipLoad());
+    Expire.next = app_state.g_gdip_api.fill_path;
+    Expire.calls = 0;
+    app_state.g_gdip_api.fill_path = &Expire.fill;
+    defer app_state.g_gdip_api.fill_path = Expire.next;
+    const notice = L("Copied");
+    @memcpy(app_state.g_cap_msg_text[0..notice.len], notice);
+    app_state.g_cap_msg_len = notice.len;
+    app_state.g_cap_msg_until = std.math.maxInt(u64);
+    const notice_layout = chatTitleLayout() orelse return error.TestUnexpectedResult;
+    @memset(pixels, 0);
+    paintChatTitlePill(dc);
+    _ = gdi.GdiFlush();
+    try std.testing.expect(Expire.calls > 0);
+    try std.testing.expectEqual(@as(u64, 0), app_state.g_cap_msg_until);
+    var notice_ink: usize = 0;
+    var y = notice_layout.meta_text.top;
+    while (y < notice_layout.meta_text.bottom) : (y += 1) {
+        var x = notice_layout.meta_text.left;
+        while (x < notice_layout.meta_text.right) : (x += 1) {
+            const color = w.GetPixel(dc, x, y);
+            if (color & 0xff > 150 and (color >> 8) & 0xff > 80 and (color >> 16) & 0xff < 150) notice_ink += 1;
+        }
+    }
+    try std.testing.expect(notice_ink > 4);
+    try std.testing.expectEqual(@as(i32, 0), (chatTitleLayout() orelse return error.TestUnexpectedResult).meta_pill.right);
+    std.debug.print("IGSH-1152 notice expired during native paint; retained ink={d}\n", .{notice_ink});
 }
 
 pub fn paintInboxButtonTooltip(hdc: HANDLE, in_overlay: bool) void {
