@@ -182,7 +182,7 @@ test('IGSH-1161 owned browser foreground restores shortcut delivery without main
 const HANDLE = ?*anyopaque;
 const DWORD = u32;
 const LONG = i32;
-const WINAPI = .c;
+const WINAPI: std.builtin.CallingConvention = .c;
 const EVENT_SYSTEM_FOREGROUND = 3;
 const OBJID_WINDOW = 0;
 const app_state = @This();
