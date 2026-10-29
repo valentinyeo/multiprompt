@@ -21,13 +21,8 @@ try {
     const latest = json(`full-history/${stage}-latest.json`);
     assert.equal(latest.latest, `IGSH815 assistant ${String(rounds - 1).padStart(2, '0')}`);
     assert.ok(latest.visibleMs > 0 && latest.visibleMs <= 2000);
-    let offset = 0;
-    for (const message of messages) {
-      const at = copied.indexOf(message, offset);
-      assert.ok(at >= offset, `${stage}: missing or reordered ${message}`);
-      assert.equal(copied.indexOf(message, at + message.length), -1, `${stage}: duplicated ${message}`);
-      offset = at + message.length;
-    }
+    const actual = copied.split(/\r?\n/).filter(line => /^(?:IGSH815 (?:user|assistant) \d+|start the fake session|The fake session is ready\.)$/.test(line));
+    assert.deepEqual(actual, messages, `${stage}: missing, reordered or duplicated messages`);
     const bytes = fs.readFileSync(path.join(root, `full-history-${stage}.png`));
     assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.ok(bytes.length > 10000);
