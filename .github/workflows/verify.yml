@@ -887,6 +887,13 @@ jobs:
             }
             $failure | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
+      - name: Upload speed trend independently of journey outcome
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: speed-trend-${{ env.FEATURE }}${{ matrix.app-revision && format('-{0}', matrix.app-revision) || '' }}
+          path: evidence/**/speed-trend.jsonl
+          if-no-files-found: ignore
       - name: Upload durable verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

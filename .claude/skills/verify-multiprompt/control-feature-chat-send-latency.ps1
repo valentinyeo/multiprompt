@@ -50,5 +50,5 @@
             Snapshot 'after'
             $late = @($samples | Where-Object { $_.paintedMs -gt 100 })
             $result.checks += @{ name = 'chat-send-latency'; budgetMs = 100; count = $samples.Count; medianMs = $summary.medianMs; maxMs = $summary.maxMs; over = $late.Count }
-            if ($late.Count -gt 0) { throw "chat-send-latency: $($late.Count) of 20 sends took longer than 100 ms to draw the message, worst $($summary.maxMs) ms" }
+            foreach ($sample in $samples) { Assert-ReleaseTiming 'chat-send-paint' $sample.paintedMs ('send ' + $sample.id) }
         

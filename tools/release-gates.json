@@ -1,0 +1,19 @@
+{
+  "checks": {
+    "ui-hang": { "kind": "stability", "limit": 5000 },
+    "browser-switch-gap": { "kind": "speed", "limit": 50, "largeRegression": 200 },
+    "chat-switch": { "kind": "speed", "limit": 150, "largeRegression": 500 },
+    "chat-window-response": { "kind": "speed", "limit": 100, "largeRegression": 500 },
+    "chat-send-paint": { "kind": "speed", "limit": 100, "largeRegression": 500 },
+    "dictation-transcript": { "kind": "speed", "limit": 1000, "largeRegression": 3000 },
+    "changelog-response": { "kind": "speed", "limit": 100, "largeRegression": 500 },
+    "browser-handoff": { "kind": "speed", "limit": 3000, "largeRegression": 4000 },
+    "chat-latest-message": { "kind": "speed", "limit": 2000, "largeRegression": 4000 },
+    "remote-turn": { "kind": "speed", "limit": 2000, "largeRegression": 4000 },
+    "idle-switch-p95": { "kind": "speed", "limit": 100, "largeRegression": 500 },
+    "idle-poll-median": { "kind": "speed", "limit": 5, "largeRegression": 100 }
+  },
+  "defaultKind": "stability",
+  "quarantineFailureRate": 0.1,
+  "historyRuns": 20
+}

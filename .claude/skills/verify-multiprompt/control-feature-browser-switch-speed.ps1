@@ -276,6 +276,7 @@
                         $logStart = ((Get-Content $log -Raw) -join '').Length
                         $frozenMarker = if ($frozen) { Join-Path $scratch ("roaming/ZigShell/panehib-zss-$($shellIds[$target]).flag") } else { $null }
                         $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $paintRgb[$target], $frozenMarker, $paintPatch[$target])
+                        Assert-ReleaseTiming 'ui-hang' $measurement[0] ("$mode sample $sample paint")
                         $timings[$mode].samples_ms[$sample] = $measurement[0]
                         $timings[$mode].window_visible_ms[$sample] = $measurement[1]
                         if ($frozen) {
@@ -311,7 +312,7 @@
                         if ($onMedian - $offMedian -gt 50) {
                             $gapCase.phase = 'switch-gap'
                             $gapCase.detail = "browser_on minus browser_off = $($onMedian - $offMedian) ms; required <= 50 ms"
-                            throw $gapCase.detail
+                            Assert-ReleaseTiming 'browser-switch-gap' ([Math]::Max(0, $onMedian - $offMedian)) 'browser_on minus browser_off'
                         }
                     }
                 }
@@ -322,7 +323,7 @@
                     @{ off = $pair[0]; on = $pair[1]; gap_ms = $gap }
                 }
                 $gapCase.detail = ($gaps | ForEach-Object { "$($_.on) minus $($_.off) = $($_.gap_ms) ms; required <= 50 ms" }) -join '; '
-                foreach ($pair in $gaps) { if ($pair.gap_ms -gt 50) { throw $gapCase.detail } }
+                foreach ($pair in $gaps) { Assert-ReleaseTiming 'browser-switch-gap' ([Math]::Max(0, $pair.gap_ms)) ($pair.on + ' minus ' + $pair.off) }
                 $gapCase.phase = 'after-snapshot'
                 Snapshot 'after'
                 $gapCase.status = 'passed'

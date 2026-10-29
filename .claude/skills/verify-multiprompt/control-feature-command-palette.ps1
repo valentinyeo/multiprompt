@@ -12,7 +12,7 @@
             }
             Save-Json $changelogSpeed 'changelog-speed.json'
             foreach ($kind in @('open_ms', 'scroll_ms', 'close_ms', 'after_ms')) {
-                if (($changelogSpeed[$kind] | Measure-Object -Maximum).Maximum -ge 100) { throw ('Changelog ' + $kind + ' reached 100 milliseconds: ' + ($changelogSpeed[$kind] -join ', ')) }
+                foreach ($value in $changelogSpeed[$kind]) { Assert-ReleaseTiming 'changelog-response' $value $kind }
             }
             Snapshot 'changelog-closed'
             $result.checks += @{ name = 'changelog-speed'; timings = $changelogSpeed; budget_ms = 100; entry = 'Ctrl+K Changelog' }

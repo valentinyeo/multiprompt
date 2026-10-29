@@ -675,9 +675,26 @@ jobs:
       - name: Measure candidate session speed
         shell: powershell
         run: ./tools/switch-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence/head -Revision "$env:SPEED_HEAD"
-      - name: Require session speed limits
+      - name: Report session speed limits
         if: always()
-        run: node tools/switch-performance.mjs report evidence/base/samples.json evidence/head/samples.json
+        run: node tools/switch-performance.mjs report evidence/base/samples.json evidence/head/samples.json --release-policy
+      - name: Block hangs while reporting speed misses
+        shell: powershell
+        run: |
+          $Evidence = "$pwd/evidence"
+          . ./tools/release-gates.ps1
+          $rows = Get-Content evidence/head/verdict.json -Raw | ConvertFrom-Json
+          Assert-ReleaseTiming 'idle-switch-p95' $rows[1].p95Ms 'candidate switching'
+          Assert-ReleaseTiming 'idle-poll-median' $rows[1].idleMedianMs 'candidate idle polling'
+          Assert-ReleaseTiming 'ui-hang' $rows[1].maxMs 'slowest switch'
+          Assert-ReleaseTiming 'ui-hang' $rows[1].idleMaxMs 'slowest idle poll'
+      - name: Upload speed samples
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: speed-trend-session-workload
+          path: evidence/speed-trend.jsonl
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

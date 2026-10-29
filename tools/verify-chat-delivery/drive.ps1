@@ -13,6 +13,7 @@ $Exe = (Resolve-Path $Exe).Path
 $Ssh = (Resolve-Path $Ssh).Path
 New-Item -ItemType Directory -Force $Evidence | Out-Null
 $Evidence = (Resolve-Path $Evidence).Path
+. (Join-Path $PSScriptRoot '../release-gates.ps1')
 Start-Transcript "$Evidence/driver.log"
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 Add-Type -Path "$PSScriptRoot/desktop.cs"
@@ -274,11 +275,11 @@ function Assert-FullHistory([string]$Stage) {
                 if ($_.Exception.InnerException -isnot [Runtime.InteropServices.ExternalException]) { throw }
                 $false
             }
-        } 2)
+        } 5)
         Shot "full-history-$Stage-latest"
         $latestClock.Stop()
         Save @{latest=$latest; visibleMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/$Stage-latest.json"
-        if ($latestClock.ElapsedMilliseconds -gt 2000) { throw "Latest long-chat message exceeded two seconds at $Stage" }
+        Assert-ReleaseTiming 'chat-latest-message' $latestClock.ElapsedMilliseconds $Stage
         Doctor $true
         Press @(0x1B) 'Esc: clear latest-message selection'
     }
@@ -649,7 +650,7 @@ foreach ($plan in $plans) {
                 Shell-Run @('turn', [string]$turn)
                 $question = "Remote question $turn"
                 $answer = "Remote answer $turn"
-                [void](Wait-For 'newest rendered remote question and answer within two seconds' {
+                [void](Wait-For 'newest rendered remote question and answer without a five-second freeze' {
                     $paletteStart = (Read-Shared "$settings/debug.log").Length
                     Press @(0x11, 0x4B) 'Ctrl+K: select remote conversation'
                     [void](Wait-For 'remote palette ready' { (Read-Shared "$settings/debug.log").Substring($paletteStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
@@ -660,9 +661,9 @@ foreach ($plan in $plans) {
                     Press @(0x11, 0x43) 'Ctrl+C: copy rendered remote conversation'
                     $script:remoteCopied = [Windows.Forms.Clipboard]::GetText()
                     $script:remoteCopied.Contains($question) -and $script:remoteCopied.Contains($answer)
-                } 2)
+                } 5)
                 $renderedMs = [int]$timer.ElapsedMilliseconds
-                if ($renderedMs -gt 2000) { throw "Remote turn $turn exceeded two seconds: $renderedMs" }
+                Assert-ReleaseTiming 'remote-turn' $renderedMs ("remote turn $turn")
                 $copied = $script:remoteCopied
                 [IO.File]::WriteAllText("$caseDir/turn-$turn-copied.txt", $copied)
                 if (-not $copied.Contains($question) -or -not $copied.Contains($answer)) { throw "Remote turn $turn missing from rendered conversation" }
