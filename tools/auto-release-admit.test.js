@@ -138,7 +138,7 @@ test('HEAD moved past green commits: publishes newest green SHA, not HEAD, and n
     ['run', 'view', '700', '-R', 'example/multiprompt', '--json', 'jobs'],
     ['api', '-X', 'POST', 'repos/example/multiprompt/git/refs', '-f', 'ref=refs/tags/v0.0.2', '-f', `sha=${f.green}`],
   ]);
-  skipped(f);
+  skipped(f, { PUBLISHED_TAG: 'v0.0.2' });
 });
 
 test('no green commit since release: exits successfully without tagging', t => {
@@ -151,7 +151,7 @@ test('no green commit since release: exits successfully without tagging', t => {
 test('newest green already released: never selects an older commit', t => {
   const f = fixture(t);
   f.git('tag', '-a', 'v0.0.2', f.green, '-m', 'already released');
-  skipped(f);
+  skipped(f, { PUBLISHED_TAG: 'v0.0.2' });
   assert.deepEqual(f.calls().filter(args => args[0] === 'run').map(args => args[args.indexOf('--commit') + 1]), [f.tip]);
 });
 
@@ -410,3 +410,49 @@ for (const workflow of ['release-gate.yml', 'verify.yml']) {
     });
   }
 }
+
+for (const annotated of [false, true]) {
+  test(`IGSH-1159 retries an unpublished ${annotated ? 'annotated' : 'lightweight'} reservation without moving its tag`, t => {
+    const f = fixture(t);
+    f.git('tag', ...(annotated ? ['-a', '-m', 'stopped release'] : []), 'v0.0.2', f.green);
+    f.git('push', 'origin', 'v0.0.2');
+    const before = f.git('--git-dir', f.remote, 'show-ref', '--tags');
+    selected(f.admit([]), f.green);
+    selected(f.admit([]), f.green);
+    assert.equal(f.git('--git-dir', f.remote, 'show-ref', '--tags'), before);
+    assert.equal(f.git('rev-parse', 'v0.0.2^{commit}'), f.green);
+    assert.equal(f.calls().filter(args => args.includes('POST')).length, 0);
+    skipped(f, { PUBLISHED_TAG: 'v0.0.2' });
+  });
+}
+
+test('IGSH-1159 an unpublished reservation does not block a newer green change', t => {
+  const f = fixture(t);
+  f.git('tag', 'v0.0.2', f.older);
+  const result = f.admit([]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, `tag=v0.0.3\nsha=${f.green}\n`);
+  assert.equal(f.git('--git-dir', f.remote, 'rev-parse', 'v0.0.3^{commit}'), f.green);
+  assert.equal(f.git('rev-parse', 'v0.0.2^{commit}'), f.older);
+});
+
+for (const conclusion of ['failure', 'cancelled', null]) {
+  test(`IGSH-1159 a reserved commit with non-green Tests (${conclusion}) cannot retry`, t => {
+    const f = fixture(t);
+    f.git('tag', 'v0.0.2', f.green);
+    skipped(f, { TEST_RUNS: JSON.stringify({ [f.green]: [{ databaseId: 2, event: 'push', status: conclusion === null ? 'in_progress' : 'completed', conclusion }] }) });
+  });
+  test(`IGSH-1159 a reserved commit with a non-green journey (${conclusion}) cannot retry`, t => {
+    const f = fixture(t);
+    f.git('tag', 'v0.0.2', f.green);
+    const result = skipped(f, gateEnv({ [f.green]: verifyPush(901) }, { 901: { jobs: [{ name: gateJourney, conclusion }] } }));
+    assert.match(result.stderr, /no green relaunch-saved-sessions/);
+  });
+}
+
+test('IGSH-1159 a reservation without useful unpublished notes cannot retry', t => {
+  const f = fixture(t);
+  f.git('tag', 'v0.0.2', f.green);
+  const result = skipped(f, { PUBLISHED_TAG: f.green });
+  assert.match(result.stderr, /no unpublished product notes/);
+});
