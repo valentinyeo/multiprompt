@@ -22,6 +22,8 @@ test('number shortcuts activate sidebar sessions in displayed order, including r
   assert.ok(ready > 0 && ready < journey.indexOf("    Select-Number 1 'Pinned first'"),
     'seeded session.json is not proof of restored live sessions');
   assert.match(journey.slice(ready, journey.indexOf('    Focus', ready)), /inbox-default\.json[^]*\$live\.shells/);
+  assert.match(journey, /Wait-For 'isolated profile removed'[^]*Remove-Item[^]*catch \[IO\.IOException\]/,
+    'OS console teardown must finish before removing its working directory');
   const start = source.indexOf('        WM_APP_SWITCH_TAB => {');
   const end = source.indexOf('        WM_APP_SWITCH_WORKSPACE =>', start);
   const handler = source.slice(start, end).replace('WM_APP_SWITCH_TAB => {', 'fn select(wp: usize) i32 {').replace(/},\s*$/, '}');

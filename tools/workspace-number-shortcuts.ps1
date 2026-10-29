@@ -114,7 +114,10 @@ try {
     if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() }
     foreach ($name in @('session.json', 'debug.log', 'inbox-default.json')) { if (Test-Path "$settings/$name") { Copy-Item "$settings/$name" "$Output/$name" } }
     Save $result "$Output/result.json"
-    if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
+    [void](Wait-For 'isolated profile removed' {
+        if (-not (Test-Path -LiteralPath $profile)) { return $true }
+        try { Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction Stop; return $true } catch [IO.IOException] { $false }
+    })
 }
 if (-not $result.passed -or $result.cleanup -ne 0) { throw 'Workspace number shortcut journey failed; see result.json' }
 Write-Host 'WORKSPACE_NUMBER_JOURNEY_OK'
