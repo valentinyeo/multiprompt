@@ -1,0 +1,81 @@
+name: Color emoji
+
+on:
+  workflow_run:
+    workflows: [auto-release]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag for the live journey, empty builds this branch
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: color-emoji-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-source:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_EVENT: ${{ github.event_name == 'workflow_run' }}
+        run: |
+          if [ "$RELEASE_EVENT" != true ]; then exit 0; fi
+          tag=$(gh release view --json tagName --jq .tagName)
+          test -n "$(git ls-tree --name-only "$tag" -- src/color_emoji.cpp)" || exit 0
+          previous=$(git describe --tags --match 'v*' --abbrev=0 "$tag^")
+          if [ -n "$(git ls-tree --name-only "$previous" -- src/color_emoji.cpp)" ]; then exit 0; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  pixels:
+    if: github.event_name != 'workflow_run'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Check shared rendering path
+        run: node --test tools/color-emoji.test.js
+      - name: Paint actual Windows color fonts
+        run: zig build test-emoji --summary all
+      - name: Save native before and after proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: color-emoji
+          path: emoji-*.bmp
+          if-no-files-found: error
+          retention-days: 14
+
+  live:
+    needs: release-source
+    if: github.event_name != 'workflow_run' || needs.release-source.outputs.tag != ''
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_reactions_proof: true
+      tag: ${{ needs.release-source.outputs.tag || inputs.tag || (contains(github.event.head_commit.message, '[emoji-baseline]') && 'v0.28.963' || '') }}

@@ -521,7 +521,12 @@ pub fn menuMessage(msg: w.UINT, lp: w.LPARAM) ?w.LRESULT {
         defer _ = w.SetTextColor(item.dc, old_color);
         var text_rect = item.rect;
         text_rect.left += if (style) |theme| (if (theme.show_icons) @as(i32, 36) else 28) else 28;
-        _ = w.DrawTextW(item.dc, &label.text, label.len, &text_rect, w.DT_SINGLELINE | w.DT_VCENTER);
+        const reaction = label.id >= @intFromEnum(MessageMenuItem.reaction_like) and label.id <= @intFromEnum(MessageMenuItem.reaction_heart);
+        if (reaction) {
+            _ = @import("dwrite_text.zig").draw(item.dc, &label.text, label.len, &text_rect, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX);
+        } else {
+            _ = w.DrawTextW(item.dc, &label.text, label.len, &text_rect, w.DT_SINGLELINE | w.DT_VCENTER);
+        }
         const icons_on = if (style) |theme| theme.show_icons else false;
         if (icons_on) {
             if (std.enums.fromInt(MessageMenuItem, label.id)) |action| {

@@ -81,7 +81,7 @@ pub fn paint(dc: w.HANDLE, items: []const Item, hover: ?usize, light: bool) void
                 .reaction_dislike => L("👎"),
                 else => L("❤️"),
             };
-            _ = w.DrawTextW(dc, glyph, -1, &text, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_NOPREFIX);
+            _ = @import("dwrite_text.zig").draw(dc, glyph, -1, &text, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_NOPREFIX);
         } else {
             _ = w.SelectObject(dc, text_font);
             text.left += scaled(34);

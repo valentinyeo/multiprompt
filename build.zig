@@ -2,6 +2,15 @@ const std = @import("std");
 
 const MAIN_STACK_SIZE: u64 = 64 * 1024 * 1024;
 
+fn linkColorEmoji(b: *std.Build, module: *std.Build.Module) void {
+    module.addCSourceFile(.{ .file = b.path("src/color_emoji.cpp"), .flags = &.{ "-std=c++17", "-fno-exceptions", "-fno-rtti" } });
+    module.link_libcpp = true;
+    module.linkSystemLibrary("gdi32", .{});
+    module.linkSystemLibrary("msimg32", .{});
+    module.linkSystemLibrary("d2d1", .{});
+    module.linkSystemLibrary("dwrite", .{});
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -45,6 +54,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    linkColorEmoji(b, exe.root_module);
     if (b.option(bool, "symbols", "Retain native profiling symbols") orelse false) exe.root_module.strip = false;
     exe.root_module.addObject(revision_object);
     exe.subsystem = .Windows;
@@ -93,6 +103,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    linkColorEmoji(b, dev_exe.root_module);
     dev_exe.root_module.addObject(revision_object);
     dev_exe.subsystem = .Windows;
     dev_exe.stack_size = MAIN_STACK_SIZE;
@@ -194,6 +205,21 @@ pub fn build(b: *std.Build) void {
     run_clean_chat_tests.has_side_effects = true;
     b.step("test-clean-chat", "Run every CLEAN chat pixel test with visible results").dependOn(&run_clean_chat_tests.step);
 
+    const emoji_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/dwrite_text.zig"),
+            .target = target,
+            .optimize = stable_optimize,
+            .link_libc = true,
+        }),
+        .filters = &.{"IGSH-1089"},
+    });
+    emoji_tests.stack_size = MAIN_STACK_SIZE;
+    linkColorEmoji(b, emoji_tests.root_module);
+    const run_emoji_tests = b.addRunArtifact(emoji_tests);
+    run_emoji_tests.has_side_effects = true;
+    b.step("test-emoji", "Run native color emoji pixel regressions").dependOn(&run_emoji_tests.step);
+
     const run_exe_tests = b.addRunArtifact(exe_tests);
     run_exe_tests.has_side_effects = b.option(bool, "render-proof", "Always rerun desktop tests to write Chat View render proof") orelse false;
     const main_test_step = b.step("test-main", "Run desktop module tests");
@@ -211,11 +237,15 @@ pub fn build(b: *std.Build) void {
     const run_usage_telemetry_tests = b.addRunArtifact(usage_telemetry_tests);
 
     const test_step = b.step(if (b.graph.host.result.os.tag == .windows) "test" else "test-desktop", "Run desktop tests");
+    const emoji_source_tests = b.addSystemCommand(&.{ "node", "--test", "tools/color-emoji.test.js" });
+    test_step.dependOn(&emoji_source_tests.step);
+    test_step.dependOn(&run_emoji_tests.step);
     const font_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/fonts.zig"),
         .target = target,
         .optimize = .Debug,
     }) });
+    linkColorEmoji(b, font_tests.root_module);
     test_step.dependOn(&b.addRunArtifact(font_tests).step);
     const livetest_tests = b.addTest(.{ .root_module = livetest_exe.root_module });
     test_step.dependOn(&b.addRunArtifact(livetest_tests).step);

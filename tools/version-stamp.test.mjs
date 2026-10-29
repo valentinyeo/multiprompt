@@ -163,13 +163,14 @@ test('PR runs only restore Zig caches while master pushes can save them', () => 
     const caches = workflow.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
     const windows = workflow.split('\n  build-windows:\n')[1]?.split('\n  test-result:\n')[0];
     const updateSource = workflow.split('\n  test-update-source:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
+    const native = workflow.split('\n  test:\n')[1]?.split('\n  test-update-source:\n')[0];
     for (const cache of caches) {
       const pathGuard = file === 'test.yml' ? "steps\\.paths\\.outputs\\.heavy == 'true' && " : '';
       const guard = windows?.includes(cache) || updateSource?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
       assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
       assert.match(cache, new RegExp(`if: ${pathGuard}${guard}\\(?github\\.event_name == '`));
       if (cache.includes('uses: actions/cache/restore@')) {
-        const event = windows?.includes(cache) ? "\\(github\\.event_name == 'pull_request' \\|\\| github\\.event_name == 'workflow_dispatch' \\|\\| \\(github\\.event_name == 'push' && github\\.ref != 'refs/heads/master'\\)\\)" : "github\\.event_name == 'pull_request'";
+        const event = windows?.includes(cache) ? "\\(github\\.event_name == 'pull_request' \\|\\| github\\.event_name == 'workflow_dispatch' \\|\\| \\(github\\.event_name == 'push' && github\\.ref != 'refs/heads/master'\\)\\)" : native?.includes(cache) ? "\\(github\\.event_name == 'pull_request' \\|\\| github\\.event_name == 'workflow_dispatch'\\)" : "github\\.event_name == 'pull_request'";
         assert.match(cache, new RegExp(`if: ${pathGuard}${guard}${event}\n`));
       } else {
         assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
