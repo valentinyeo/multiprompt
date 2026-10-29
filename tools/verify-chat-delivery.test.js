@@ -1205,7 +1205,7 @@ test('long-chat reproduction includes hundreds of visible exchanges rather than 
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const transcript = path.join(dir, 'transcript.jsonl');
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
-    name: 'full-history', mode: 'busy', fake: true, sid: 'sid-history', longChatProof: true,
+    name: 'full-history', mode: 'busy', suggestion: queueTexts.suggestion, fake: true, sid: 'sid-history', longChatProof: true,
     transcript, meta: path.join(dir, 'sessions/4242.json'), procDir: path.join(dir, 'proc/4242'),
     cwd: 'C:/verify/work', panePid: 4242,
   }));
