@@ -94,9 +94,9 @@ try {
     })
     Toggle-View
     [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
-    [void](Wait-For 'initial console previews' {
-        $inbox = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
-        @($inbox.shells | Where-Object { $_.pv }).Count -eq 3
+    [void](Wait-For 'initial console poll' {
+        if (-not (Test-Path "$settings/debug.log")) { return $false }
+        (Get-Content "$settings/debug.log" -Raw) -match 'POLL\[t=[^\r\n]+,#1\]'
     } 60)
     Focus
     Toggle-View
