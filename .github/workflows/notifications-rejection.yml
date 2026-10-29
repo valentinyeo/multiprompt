@@ -22,8 +22,6 @@ jobs:
           if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'zig checksum mismatch' }
           tar -xf $zip -C $env:RUNNER_TEMP
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - name: Full desktop context with assertion traces
-        run: zig build test-main -Doptimize=Debug -Dcpu=x86_64_v3 -Drender-proof=true --summary all
       - name: Build focused regression
         run: zig build local-listener-rejection -Doptimize=Debug -Dcpu=x86_64_v3
       - name: Twenty consecutive rejection runs

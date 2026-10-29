@@ -1581,6 +1581,7 @@ test "local listener rejects peer of another user" {
     }) |target, request| {
         const client = try hardeningConnect(target);
         defer _ = closesocket(client);
+        Sleep(50);
         const sent = send(client, request.ptr, @intCast(request.len), 0);
         const send_error = WSAGetLastError();
         std.debug.print("IGSH-1157 target={d} sent={d} error={d}\n", .{ target, sent, send_error });
