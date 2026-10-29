@@ -783,14 +783,15 @@ public static class VerifyNative {
         using (var pixels = new System.Drawing.Bitmap(rect[2] - rect[0], rect[3] - rect[1])) {
             using (var graphics = System.Drawing.Graphics.FromImage(pixels)) graphics.CopyFromScreen(origin.X + rect[0], origin.Y + rect[1], 0, 0, pixels.Size);
             pixels.Save(output, System.Drawing.Imaging.ImageFormat.Png);
-            int fill = 0, ink = 0;
+            int fill = 0, ink = 0, white = 0;
             for (int y = 0; y < pixels.Height; y++) for (int x = 0; x < pixels.Width; x++) {
                 var c = pixels.GetPixel(x, y);
-                if (c.R == 63 && c.G == 83 && c.B == 113) fill++;
-                int r = active ? 80 : 137, g = active ? 150 : 146, b = active ? 255 : 164;
+                if (c.R == 53 && c.G == 53 && c.B == 53) fill++;
+                if (c.R >= 227 && c.G >= 227 && c.B >= 227) white++;
+                int r = active ? 242 : 137, g = active ? 242 : 146, b = active ? 242 : 164;
                 if (Math.Abs(c.R - r) <= 15 && Math.Abs(c.G - g) <= 15 && Math.Abs(c.B - b) <= 15) ink++;
             }
-            return new int[] { fill, ink, pixels.Width * pixels.Height };
+            return new int[] { fill, ink, pixels.Width * pixels.Height, white };
         }
     }
     public static List<int[]> GreyButtonPixels(string image, IntPtr owner, int[] card, int[] stop, int[] send) {

@@ -59,10 +59,10 @@ function journeyContract(source) {
     "[VerifyNative]::Class($Composer) -cne 'Edit'", '$transcript.Current.ProcessId -ne $process.Id',
     'GetAncestor($transcriptHandle, 2) -ne $script:window', '$left -lt $edit.Right - $origin.X',
     '[VerifyNative]::GetDpiForWindow($script:window) / 96.0', '::DictationMicPixels(',
-    '$pixels[1] -ge 3', '$pixels[0] -gt $pixels[2] / 2', '$pixels[0] -eq 0',
+    '$pixels[1] -ge 3', '$pixels[0] -gt $pixels[2] / 2', '$pixels[3] -eq 0',
   ]) assert.ok(geometry.includes(required), required);
   const pixels = source.slice(source.indexOf('public static int[] DictationMicPixels('), source.indexOf('public static List<int[]> GreyButtonPixels('));
-  for (const required of ['WindowFromPoint(center) != owner', 'graphics.CopyFromScreen(', 'pixels.Save(output,', 'c.R == 63 && c.G == 83 && c.B == 113', 'active ? 80 : 137', 'active ? 150 : 146', 'active ? 255 : 164']) assert.ok(pixels.includes(required), required);
+  for (const required of ['WindowFromPoint(center) != owner', 'graphics.CopyFromScreen(', 'pixels.Save(output,', 'c.R == 53 && c.G == 53 && c.B == 53', 'active ? 242 : 137', 'active ? 242 : 146', 'active ? 242 : 164']) assert.ok(pixels.includes(required), required);
 }
 
 test('IGSH-812 real Windows inputs, visible mic pixels and immediate owned native Edit text are mandatory', () => {
@@ -219,7 +219,7 @@ test('IGSH-812 registration is additive and existing contract checks remain on t
   assert.match(workflow, /run: node --test [^\n]*tools\/chat-dictation.test.js/);
   assert.ok(workflow.includes('- tools/chat-dictation.test.js'));
   assert.ok(workflow.includes('- tools/fixtures/IGSH-812/**'));
-  assert.match(workflow, /FEATURE -eq 'chat-dictation' -and \$env:RELEASE_TAG\) \{ throw/);
+  assert.doesNotMatch(workflow, /FEATURE -eq 'chat-dictation' -and \$env:RELEASE_TAG\) \{ throw/);
   for (const required of ['Check verification contracts', 'Check workspace focus journey contract', 'Check browser recovery journey contract', 'Validate journey and syntax', 'node tools/check-workspace-focus.mjs', 'node tools/check-browser-pane-stuck.mjs', 'Language.Parser]::ParseFile', 'Build branch executable', 'Launch Doctor Drive Evidence Cleanup', 'Upload durable verification evidence']) assert.ok(workflow.includes(required), required);
   const map = read(skill + 'features/chat-dictation.md');
   assert.deepEqual(map.match(/^## .+$/gm), ['## Sub-features', '## How to get to it (user POV)', '## Driving it with control.ps1', '## Gotchas']);

@@ -4,7 +4,7 @@ Verify on: push
 
 ## Sub-features
 
-- Ctrl+D starts the existing dictation state; the microphone, left of the send button, visibly changes from the idle glyph to an accented glyph on a filled background.
+- Ctrl+D starts the existing dictation state; the microphone, left of the send button, visibly changes from the idle glyph to a white stop square, timer and eight waveform bars on a neutral raised background.
 - Enter, a second Ctrl+D, and a real microphone click each stop listening and append the transcript immediately to the native message box, without another keystroke or send.
 - The send button sits at the far right in every state, with the microphone to its left. While dictating, one press on send, or Ctrl+Enter, stops the dictation, keeps every spoken word and sends the whole message; the sent message holds the typed and spoken words exactly once, read from the app outbox after the box empties. Stopping with the microphone still only fills the box.
 - Normal composer typing remains available while listening, and that typed draft survives transcription.
@@ -22,7 +22,7 @@ Run this journey on GitHub Windows:
 gh workflow run verify.yml -f feature=chat-dictation
 ```
 
-Leave `tag` empty for the offline fixture boundary. Windows runtime proof now exists. Two first-attempt journeys passed on `d7437dd7`: [40263673090](https://github.com/valentinyeo/multiprompt/actions/runs/40263673090) and [40264332073](https://github.com/valentinyeo/multiprompt/actions/runs/40264332073). Repeat with independent dispatches for a longer streak.
+Use the branch, or set `tag` to a published build containing the offline fixture boundary. Windows runtime proof now exists. Two first-attempt journeys passed on `d7437dd7`: [40263673090](https://github.com/valentinyeo/multiprompt/actions/runs/40263673090) and [40264332073](https://github.com/valentinyeo/multiprompt/actions/runs/40264332073). Repeat with independent dispatches for a longer streak.
 
 The five-minute step cap leaves time for uploads. Each wait logs its condition and timeout. Launch, Doctor, Drive, Evidence, and Cleanup print progress. Failure uploads retain screenshots and logs.
 
@@ -35,7 +35,7 @@ The normal control.ps1 Launch / Doctor / Drive / Evidence / Cleanup contract app
 For each stop method (`dictation-enter`, `dictation-ctrl-d`, `dictation-mic-click`):
 
 1. Require an empty native Edit, press Ctrl+D and require the recorded audio to reach the production capture worker.
-2. Capture microphone pixels: more than half the button must be the Dark active fill (63,83,113), with the accent microphone glyph (80,150,255). Baseline and stopped samples instead require no active fill and the idle glyph (137,146,164).
+2. Capture microphone pixels: more than half the active pill must be the Dark raised fill (53,53,53), with foreground stop, timer and waveform ink (242,242,242). Baseline and stopped samples require no white ink and the idle glyph (137,146,164). The idle fill may match the active fill; ink and expanded pill geometry distinguish the states.
 3. Type a distinct marker and require exact WM_GETTEXT while the microphone is still active, with native focus still on the original Edit.
 4. Stop with real Enter, Ctrl+D or a mouse click inside the ownership-checked microphone rectangle. Require exact `typing-<method> Go forward ten meters.` through bounded Unicode WM_GETTEXT within **1000 ms** from the stop input, before any additional input or screenshot. Both the poll and an independent monotonic elapsed-time assertion enforce the bound.
 5. Require the idle microphone, the production audio/response/status/composer-delivery audit stages, and retain the draft. Only normal Ctrl+A / Backspace clear between cases.

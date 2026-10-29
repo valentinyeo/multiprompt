@@ -249,7 +249,7 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, sto
 
 fn paintChatMicPill(hdc: HANDLE, rc: RECT, ink: DWORD, fill: DWORD) void {
     var canvas = DesignCanvas{ .hdc = hdc };
-    tokens.micPill(&canvas, @bitCast(rc), @intCast(app_state.g_main_monitor_dpi), ink, fill, @import("chat_composer.zig").chatDictationElapsedNow() / 1000, @import("chat_composer.zig").chat_dictation_wave);
+    tokens.micPill(&canvas, @bitCast(rc), uiScaled(96), ink, fill, @import("chat_composer.zig").chatDictationElapsedNow() / 1000, @import("chat_composer.zig").chat_dictation_wave);
 }
 
 fn paintChatMicButton(hdc: HANDLE, rc: RECT) void {

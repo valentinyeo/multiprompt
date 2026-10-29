@@ -217,3 +217,28 @@ test "shared bubble preserves gradient outline and balanced clipping" {
     try std.testing.expectEqual(ReaderCard, canvas.colors[8]);
     try std.testing.expectEqual(@as(usize, 0), canvas.clips);
 }
+
+pub fn hex(value: u24) u32 {
+    const rgb: u32 = value;
+    return ((rgb & 0xff0000) >> 16) | (rgb & 0x00ff00) | ((rgb & 0x0000ff) << 16);
+}
+
+pub const provider_colors = struct {
+    pub const youtube = hex(0xC52828);
+    pub const instagram = hex(0xE1306C);
+    pub const facebook = hex(0x1877F2);
+    pub const signal = hex(0x3A76F0);
+    pub const telegram = hex(0x2AABEE);
+    pub const whatsapp = hex(0x25D366);
+};
+
+pub const SenderColor = struct { r: u8, g: u8, b: u8 };
+
+pub const sender_palette = [_]SenderColor{
+    .{ .r = 0, .g = 168, .b = 132 },
+    .{ .r = 83, .g = 189, .b = 235 },
+    .{ .r = 235, .g = 140, .b = 84 },
+    .{ .r = 178, .g = 132, .b = 235 },
+    .{ .r = 235, .g = 195, .b = 84 },
+    .{ .r = 235, .g = 110, .b = 150 },
+};

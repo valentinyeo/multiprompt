@@ -453,7 +453,6 @@ jobs:
           node tools/verify-features.cjs $env:FEATURE
           if ($LASTEXITCODE -ne 0) { throw 'Unsupported desktop journey' }
           if ($env:FEATURE -eq 'appearance' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master' -and $env:HEAD_COMMIT_MESSAGE.Split([char]10)[0].Contains('IGSH-837 red proof') -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')) { throw 'IGSH-837 deliberate red master proof' }
-          if ($env:FEATURE -eq 'chat-dictation' -and $env:RELEASE_TAG) { throw 'Chat dictation requires the branch offline fixture boundary' }
           if ($env:CHAT_SHAPE_PROOF -eq '1' -and $env:FEATURE -ne 'chat-switch-speed') { throw 'Shape proof requires chat-switch-speed' }
           if ($env:CHAT_SWITCH_PROFILE -eq '1' -and $env:CHAT_SHAPE_PROOF -ne '1' -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profile requires a native switching journey' }
           if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed', 'chat-switch-speed', 'title-bar') -and $env:RELEASE_TAG) {

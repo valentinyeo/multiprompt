@@ -1015,10 +1015,10 @@ function Assert-DictationMic([int[]]$Rect, [bool]$Active, [string]$Step) {
     Wait-Until {
         [void][VerifyNative]::DwmFlush()
         $pixels = [VerifyNative]::DictationMicPixels($script:window, $Rect, $Active, (Join-Path $Evidence ($Step + '-mic.png')))
-        $pixels[1] -ge 3 -and $(if ($Active) { $pixels[0] -gt $pixels[2] / 2 } else { $pixels[0] -eq 0 })
+        $pixels[1] -ge 3 -and $(if ($Active) { $pixels[0] -gt $pixels[2] / 2 } else { $pixels[3] -eq 0 })
     } ("IGSH-812 visible microphone active=$Active at $Step") -Seconds 2 -PollMilliseconds 20
     $pixels = [VerifyNative]::DictationMicPixels($script:window, $Rect, $Active, (Join-Path $Evidence ($Step + '-mic.png')))
-    Save-Json @{ active = $Active; rect = $Rect; fillPixels = $pixels[0]; glyphPixels = $pixels[1]; area = $pixels[2] } ($Step + '-mic.json')
+    Save-Json @{ active = $Active; rect = $Rect; fillPixels = $pixels[0]; glyphPixels = $pixels[1]; area = $pixels[2]; whitePixels = $pixels[3] } ($Step + '-mic.json')
 }
 
 function Wait-ChatFocus([string]$Class, [string]$Step) {
