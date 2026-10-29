@@ -143,7 +143,6 @@ const sessionFileIsValid = @import("session.zig").sessionFileIsValid;
 const GetClassNameW = @import("win32.zig").GetClassNameW;
 const findWindowByClassAndPid = @import("console.zig").findWindowByClassAndPid;
 const reclaimShell = @import("console.zig").reclaimShell;
-const WM_CLOSE = @import("app_state.zig").WM_CLOSE;
 const ZigShellWindowList = @import("app_state.zig").ZigShellWindowList;
 const titleHasDevMarker = @import("console.zig").titleHasDevMarker;
 const listZigShellWindowsEnum = @import("console.zig").listZigShellWindowsEnum;
@@ -840,7 +839,7 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
     if (findLiveWorkspaceTarget(id)) |t| {
         if (t.slot >= 0) return false;
         const target: HANDLE = @ptrFromInt(t.hwnd);
-        _ = PostMessageW(target, WM_CLOSE, 0, 0);
+        app_state.requestAppClose(target, .workspace_delete);
         var waited: u32 = 0;
         while (IsWindow(target) != 0 and waited < 10000) : (waited += 100) Sleep(100);
         if (IsWindow(target) != 0) return false;
@@ -3973,7 +3972,7 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
         return;
     }
     if (app_state.g_lws_count <= 1) {
-        _ = PostMessageW(app_state.g_main_hwnd, WM_CLOSE, 0, 0);
+        app_state.requestAppClose(app_state.g_main_hwnd, .workspace_close);
         return;
     }
     ensureWorkspaceSlotId(slot);
@@ -4442,7 +4441,7 @@ fn collapseOtherWindowsIntoThis() void {
             }
         }
         debugLog2("collapse: closing sibling workspace ", id);
-        _ = PostMessageW(target, WM_CLOSE, 0, 0);
+        app_state.requestAppClose(target, .workspace_collapse);
         var waited: u32 = 0;
         while (IsWindow(target) != 0 and waited < 10000) : (waited += 100) Sleep(100);
         if (IsWindow(target) != 0) {

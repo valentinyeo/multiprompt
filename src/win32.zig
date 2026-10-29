@@ -696,6 +696,7 @@ pub extern "advapi32" fn RegCreateKeyExW(HANDLE, LPCWSTR, DWORD, ?LPCWSTR, DWORD
 pub extern "advapi32" fn RegSetValueExW(HANDLE, ?LPCWSTR, DWORD, DWORD, ?*const anyopaque, DWORD) callconv(WINAPI) LONG;
 pub extern "advapi32" fn RegCloseKey(HANDLE) callconv(WINAPI) LONG;
 pub extern "user32" fn GetWindowThreadProcessId(HANDLE, ?*DWORD) callconv(WINAPI) DWORD;
+pub extern "user32" fn InSendMessageEx(?*anyopaque) callconv(WINAPI) DWORD;
 pub extern "kernel32" fn GetCurrentThreadId() callconv(WINAPI) DWORD;
 pub extern "kernel32" fn GetEnvironmentVariableA([*:0]const u8, ?[*]u8, DWORD) callconv(WINAPI) DWORD;
 pub extern "kernel32" fn SetEnvironmentVariableW(name: [*:0]const u16, value: ?[*:0]const u16) callconv(WINAPI) BOOL;

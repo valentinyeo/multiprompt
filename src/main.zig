@@ -1426,6 +1426,30 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     }
     if (@import("fonts.zig").menuMessage(msg, lp)) |result| return result;
     if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) return 0;
+    if (msg == WM_SYSCOMMAND and (wp & 0xFFF0) == 0xF060) {
+        debugLog("close-command source=SC_CLOSE sender=unavailable");
+        app_state.requestAppClose(hwnd, .window_control);
+        return 0;
+    }
+    if (msg == WM_CLOSE) {
+        const reason = std.enums.fromInt(app_state.CloseReason, wp);
+        const foreground = GetForegroundWindow();
+        const intentional = reason != null or foreground == hwnd or @import("win32.zig").IsChild(hwnd, foreground) != 0;
+        var foreground_pid: DWORD = 0;
+        _ = GetWindowThreadProcessId(foreground, &foreground_pid);
+        var close_log: [384]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&close_log, "close-request action={s} reason={s} sender={s} declared_sender_pid={d} receiver_pid={d} transport={s} foreground_hwnd={X} foreground_pid={d}", .{
+            @as([]const u8, if (intentional) "accept" else "ignore"),
+            if (reason) |r| @tagName(r) else if (intentional) "foreground_close" else "unsolicited",
+            @as([]const u8, if (reason != null) "declared" else "unavailable"),
+            lp,
+            @import("win32.zig").GetCurrentProcessId(),
+            @as([]const u8, if (@import("win32.zig").InSendMessageEx(null) != 0) "sent" else "posted-or-local"),
+            if (foreground) |fg| @intFromPtr(fg) else 0,
+            foreground_pid,
+        }) catch "close-request log-overflow");
+        if (!intentional) return 0;
+    }
     if (app_state.g_account_locked) {
         switch (msg) {
             WM_PAINT => {
@@ -2946,7 +2970,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_APP_QUIT_ALL => {
             app_state.g_quit_all_in_progress = true;
             rememberOpenWorkspaceForQuit();
-            _ = PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            app_state.requestAppClose(hwnd, .quit_all);
             return 0;
         },
         WM_APP_RESTART => {
@@ -2991,7 +3015,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (pi.hThread != null) _ = CloseHandle(pi.hThread);
                 }
             }
-            _ = PostMessageW(app_state.g_main_hwnd, WM_CLOSE, 0, 0);
+            app_state.requestAppClose(app_state.g_main_hwnd, .restart);
             return 0;
         },
         WM_APP_NEXT_TAB => {
@@ -5941,7 +5965,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     } else {
                         app_state.g_shell_focused = false;
-                        _ = PostMessageW(app_state.g_main_hwnd, WM_CLOSE, 0, 0);
+                        app_state.requestAppClose(app_state.g_main_hwnd, .workspace_close);
                     }
                     return 0;
                 }

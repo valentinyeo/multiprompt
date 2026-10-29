@@ -89,7 +89,6 @@ const ReleaseMutex = @import("win32.zig").ReleaseMutex;
 const verboseLoggingEnabled = @import("diagnostics.zig").verboseLoggingEnabled;
 const debugLog = @import("diagnostics.zig").debugLog;
 const saveSession = @import("session.zig").saveSession;
-const WM_CLOSE = @import("app_state.zig").WM_CLOSE;
 const appendSshExe = @import("console.zig").appendSshExe;
 const tmuxSshTarget = @import("console.zig").tmuxSshTarget;
 const appendWideAscii = @import("console.zig").appendWideAscii;
@@ -193,7 +192,7 @@ pub fn chatBenchTick() void {
         var fields = std.mem.tokenizeAny(u8, buf[0..n], " \r\n");
         app_state.g_chat_bench_seq = std.fmt.parseInt(u32, fields.next() orelse "", 10) catch return;
         const idx = std.fmt.parseInt(u32, fields.next() orelse "", 10) catch {
-            _ = PostMessageW(app_state.g_main_hwnd, WM_CLOSE, 0, 0);
+            app_state.requestAppClose(app_state.g_main_hwnd, .bench_exit);
             return;
         };
         app_state.g_chat_bench_started = GetTickCount64();

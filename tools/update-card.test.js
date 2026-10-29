@@ -57,7 +57,7 @@ test('a pinned session on the last window takes the quit-all close path, no pin 
   assert.match(relaunch, /g_update_relaunching = true;\s*quitAllZigShellWindows\(hwnd\)/);
   const quit = fnBody('fn quitAllZigShellWindows(');
   assert.doesNotMatch(quit, /rejectPinned/);
-  assert.match(quit, /rememberOpenWorkspaceForQuit\(\)[^]*?g_quit_all_in_progress = true[^]*?WM_CLOSE/);
+  assert.match(quit, /rememberOpenWorkspaceForQuit\(\)[^]*?g_quit_all_in_progress = true[^]*?requestAppClose\(hwnd, \.quit_all\)/);
   assert.match(main, /WM_APP_QUIT_ALL => \{\s*g_quit_all_in_progress = true;/);
   assert.match(main, /WM_CLOSE => \{\s*if \(g_app_closing\) return 0;\s*if \(@import\("archive\.zig"\)\.anyPinnedSession\(\) and !@import\("console\.zig"\)\.hasOtherZigShellWindows\(\)\) g_quit_all_in_progress = true;\s*if \(!g_quit_all_in_progress and @import\("archive\.zig"\)\.rejectPinnedCloseAll\(\)\) return 0;[^]*?g_current_workspace_restore = g_quit_all_in_progress;\s*g_workspace_restore_exclusive = false;\s*saveSession\(\);/);
   assert.match(main, /fn hasOtherZigShellWindows\(\) bool \{[^}]*current = g_main_hwnd/);

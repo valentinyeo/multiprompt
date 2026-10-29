@@ -1754,6 +1754,20 @@ pub var g_graceful_exit: bool = false;
 pub var g_quit_all_in_progress: bool = false;
 pub var g_app_closing: bool = false;
 
+pub const CloseReason = enum(usize) {
+    window_control = 0x4D504301,
+    quit_all,
+    restart,
+    workspace_close,
+    workspace_delete,
+    workspace_collapse,
+    bench_exit,
+};
+
+pub fn requestAppClose(target: HANDLE, reason: CloseReason) void {
+    _ = PostMessageW(target, WM_CLOSE, @intFromEnum(reason), @intCast(@import("win32.zig").GetCurrentProcessId()));
+}
+
 pub const SPAWN_TITLE_CAP: usize = 1024;
 
 var next_console_title_id: u32 = 1;

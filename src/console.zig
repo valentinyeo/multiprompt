@@ -1068,7 +1068,7 @@ pub fn quitAllZigShellWindows(hwnd: HANDLE) void {
         const target = ctx.hwnds[i];
         if (target != hwnd) _ = PostMessageW(target, WM_APP_QUIT_ALL, 0, 0);
     }
-    _ = PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    app_state.requestAppClose(hwnd, .quit_all);
 }
 
 pub fn cleanupStaleWindows() void {

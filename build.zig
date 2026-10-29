@@ -754,6 +754,8 @@ pub fn build(b: *std.Build) void {
     wine_tests.step.dependOn(b.getInstallStep());
     wine_step.dependOn(&wine_tests.step);
 
+    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/background-close.test.js" }).step);
+
     const test_groups = [_]*std.Build.Step{
         b.step("test-group-1", "Run desktop, telemetry and chat CPU tests"),
         b.step("test-group-2", "Run Chat View regression, pane spacing and upload fixtures"),
