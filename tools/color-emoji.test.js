@@ -3,7 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const root = path.join(__dirname, '..');
-const read = name => fs.readFileSync(path.join(root, name), 'utf8');
+const read = name => {
+  assert.ok(fs.existsSync(path.join(root, name)), `production input exists: ${name}`);
+  return fs.readFileSync(path.join(root, name), 'utf8');
+};
 
 test('Chat View and reaction menu share the native color-font painter', () => {
   assert.match(read('src/dwrite_text.zig'), /mp_draw_color_text\(hdc, text,/);
