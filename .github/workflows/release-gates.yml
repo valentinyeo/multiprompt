@@ -1,0 +1,26 @@
+name: Release gate policy
+on:
+  workflow_dispatch:
+  push:
+    branches: [ceo/IGSH-1171]
+  pull_request:
+    paths:
+      - tools/release-gates*
+      - .github/workflows/release.yml
+      - .github/workflows/release-gates.yml
+      - .claude/skills/verify-multiprompt/control*.ps1
+permissions:
+  contents: read
+concurrency:
+  group: release-gates-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  policy:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Prove speed warnings and blocking stability
+        run: node --test tools/release-gates.test.mjs
