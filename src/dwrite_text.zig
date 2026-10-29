@@ -400,7 +400,10 @@ pub fn draw(hdc: w.HANDLE, text: [*]const u16, count: i32, rect: *w.RECT, flags:
     if (count != 0) {
         const len: usize = if (count < 0) std.mem.len(@as([*:0]const u16, @ptrCast(text))) else @intCast(count);
         const height = mp_draw_color_text(hdc, text, @intCast(len), rect, flags, &drawPlain);
-        if (height != 0) return height;
+        if (height != 0) {
+            if (enabled()) painted_runs += 1;
+            return height;
+        }
     }
     if (enabled() and count != 0) {
         const len: usize = if (count < 0) std.mem.len(@as([*:0]const u16, @ptrCast(text))) else @intCast(count);

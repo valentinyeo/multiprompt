@@ -64,3 +64,7 @@ test('Native pixel regression is discovered directly and required by the full te
   assert.match(graph, /root_source_file = b.path\("src\/dwrite_text.zig"\)/);
   assert.match(graph, /test_step.dependOn\(&run_emoji_tests.step\)/);
 });
+
+test('Successful color-font runs remain visible to native rendering diagnostics', () => {
+  assert.match(read('src/dwrite_text.zig'), /if \(height != 0\) \{\s*if \(enabled\(\)\) painted_runs \+= 1;\s*return height;/);
+});
