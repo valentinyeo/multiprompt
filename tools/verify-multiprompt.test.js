@@ -2445,7 +2445,9 @@ test('IGSH-1161 immediate key-pair deadline includes first injection time withou
 
 
 test('owner browser proof keeps disposable credentials outside evidence', () => {
-  const script = fs.readFileSync(path.join(__dirname, '../.claude/skills/verify-multiprompt/owner-browser-proof.ps1'), 'utf8');
+  const file = path.join(__dirname, '../.claude/skills/verify-multiprompt/owner-browser-proof.ps1');
+  assert.ok(fs.existsSync(file), 'Cross-user proof must ship with its credential cleanup');
+  const script = fs.readFileSync(file, 'utf8');
   assert.match(script, /StrictHostKeyChecking=yes/);
   assert.match(script, /OwningProcess -eq \$process.Id/);
   assert.match(script, /foreignDenied/);
