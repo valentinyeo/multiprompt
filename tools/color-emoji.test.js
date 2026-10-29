@@ -5,7 +5,7 @@ const path = require('node:path');
 const root = path.join(__dirname, '..');
 const read = name => {
   assert.ok(fs.existsSync(path.join(root, name)), `production input exists: ${name}`);
-  return fs.readFileSync(path.join(root, name), 'utf8');
+  return fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
 };
 
 test('Chat View and reaction menu share the native color-font painter', () => {
