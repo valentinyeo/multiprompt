@@ -1,1 +1,2 @@
-Sessions under another server user can control their own browser pane without sharing anyone else's keys.
+Separate users now control their own browser panes.
+Your keys stay private.

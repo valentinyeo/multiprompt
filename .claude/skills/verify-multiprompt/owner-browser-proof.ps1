@@ -1,4 +1,6 @@
 $ownerProof = $env:OWNER_BROWSER_PROOF | ConvertFrom-Json
+if ($ownerProof.target -notmatch '^[a-z_][a-z0-9_-]*@[A-Za-z0-9.-]+$' -or $ownerProof.tunnel -notmatch '^/tmp/mp-proof-[a-z0-9-]+/tunnels/[a-z0-9.-]+\.sock$') { throw 'Expected a disposable proof host and socket' }
+if ($ownerProof.knownHost -notmatch '^[A-Za-z0-9.-]+ ssh-ed25519 [A-Za-z0-9+/]+={0,2}$' -or -not $ownerProof.knownHost.StartsWith(($ownerProof.target -split '@')[-1] + ' ')) { throw 'Expected the pinned proof host public key' }
 if ($ownerProof.session -notmatch '^mp-proof-[a-z0-9-]+$') { throw 'Expected an isolated proof session' }
 $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
 $listeners = [regex]::Matches((Read-SharedText $log), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
