@@ -19,6 +19,81 @@ const skill = '.claude/skills/verify-multiprompt/';
 const drive = read('tools/verify-chat-delivery/drive.ps1');
 const workflow = read('.github/workflows/verify.yml');
 
+test('IGSH-1181 startup subscriptions do not count as interrupted live replies, but new readers do', () => {
+  const source = read('tools/verify-chat-delivery/live-delivery.ps1');
+  const start = source.match(/^\$readerStart = .+$/m)?.[0];
+  assert.ok(start, 'snapshot reader count before observing live replies');
+  const loop = source.indexOf('foreach ($round in 1..$roundCount)');
+  assert.ok(source.indexOf(start) > source.indexOf('Save $retained'));
+  assert.ok(source.indexOf(start) < loop);
+  const end = source.slice(source.indexOf('$readers = ', loop), source.indexOf('if ($longDelivery) {', loop));
+  assert.match(end, /if \(\$readerStart -lt 1 -or \$readers.Count -ne \$readerStart\)/);
+  assert.match(start, /Get-ChildItem \"\$state\/reader-subscriptions\/\*\.json\"/);
+  assert.match(end, /Get-ChildItem \"\$state\/reader-subscriptions\/\*\.json\"/);
+  assert.doesNotMatch(start + end, /ConvertFrom-Json/);
+  if (process.platform !== 'win32') return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-reader-window-'));
+  try {
+    const script = `
+$ErrorActionPreference = 'Stop'
+$state = $env:READER_FIXTURE
+foreach ($startup in @(1, 3)) {
+    foreach ($added in @(0, 1)) {
+        $observation = @{}
+        Remove-Item "$state/reader-subscriptions" -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item "$state/reader-subscriptions" -ItemType Directory | Out-Null
+        foreach ($number in 1..$startup) { '{}' | Set-Content "$state/reader-subscriptions/$number.json" }
+        'nd"}' | Set-Content "$state/invocations.jsonl"
+        ${start}
+        if ($added) { '{}' | Set-Content "$state/reader-subscriptions/new.json" }
+        @{kind='reader'; argv=@('--serve')} | ConvertTo-Json -Compress | Add-Content "$state/invocations.jsonl"
+        @{kind='list'; argv=@('--watch')} | ConvertTo-Json -Compress | Add-Content "$state/invocations.jsonl"
+        $rejected = $false
+        try { ${end} } catch {
+            if ($_.Exception.Message -notlike 'Background delivery replaced the visible reader:*') { throw }
+            $rejected = $true
+        }
+        if ($rejected -ne [bool]$added) { throw "Wrong interruption result: startup=$startup added=$added" }
+    }
+}
+'READER_WINDOW_OK'
+`;
+    const file = path.join(dir, 'reader-window.ps1');
+    fs.writeFileSync(file, script);
+    assert.match(execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file], {
+      env: { ...process.env, READER_FIXTURE: dir }, encoding: 'utf8', timeout: 30000,
+    }), /READER_WINDOW_OK/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('IGSH-1181 watcher receipts have independent files even when the shared log is damaged', () => {
+  const script = String.raw`
+import ast, json, os, pathlib, sys, tempfile, time, uuid
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+record = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'record')
+with tempfile.TemporaryDirectory() as temp:
+    root = pathlib.Path(temp)
+    scope = dict(ROOT=root, state=lambda: dict(name='live-delivery'), time=time, os=os, json=json, uuid=uuid)
+    exec(compile(ast.Module(body=[record], type_ignores=[]), '<boundary-record>', 'exec'), scope)
+    (root / 'invocations.jsonl').write_text('nd"}\n')
+    for i in range(3): scope['record']('invocations.jsonl', kind='reader', argv=['--watch'])
+    scope['record']('invocations.jsonl', kind='reader', argv=['--serve'])
+    scope['record']('invocations.jsonl', kind='list', argv=['--watch'])
+    receipts = list((root / 'reader-subscriptions').glob('*.json'))
+    assert len(receipts) == 3, receipts
+    for file in receipts:
+        row = json.loads(file.read_text())
+        assert row['kind'] == 'reader' and row['argv'] == ['--watch'] and row['pid'] == os.getpid()
+print('INDEPENDENT_READER_RECEIPTS_OK')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], {
+    encoding: 'utf8', timeout: 30000,
+  }), /INDEPENDENT_READER_RECEIPTS_OK/);
+});
+
 test('IGSH-1152 header paint uses the same notice text measured before expiry', () => {
   const source = read('src/drawing.zig');
   const layout = source.slice(source.indexOf('pub fn chatTitleLayout('), source.indexOf('pub fn chatTitleHoleRect('));
