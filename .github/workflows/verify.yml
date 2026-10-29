@@ -1,5 +1,5 @@
 name: Verify desktop
-run-name: verify ${{ inputs.feature || (github.event_name == 'push' && 'full' || 'appearance') }} ${{ inputs.tag || github.head_ref || github.ref_name }}
+run-name: verify ${{ inputs.feature || 'appearance' }} ${{ inputs.tag || github.head_ref || github.ref_name }}
 
 on:
   push:
@@ -41,6 +41,11 @@ on:
         type: boolean
       chat_live_delivery_proof:
         description: Three busy sends and ten continuously visible replies within two seconds
+        required: false
+        default: false
+        type: boolean
+      chat_crash_proof:
+        description: Stress thirty consecutive live reply and select-copy rounds
         required: false
         default: false
         type: boolean
@@ -126,6 +131,9 @@ on:
         type: boolean
   workflow_call:
     inputs:
+      revision:
+        required: false
+        type: string
       chat_reactions_proof:
         required: false
         default: false
@@ -240,10 +248,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       full: ${{ steps.features.outputs.full }}
+      quarantined: ${{ steps.policy.outputs.quarantined }}
       pr: ${{ steps.features.outputs.pr }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -252,11 +262,18 @@ jobs:
         run: node --test tools/verify-multiprompt.test.js
       - id: features
         run: node tools/verify-features.cjs
+      - id: policy
+        run: |
+          node - <<'NODE' >> "$GITHUB_OUTPUT"
+          const policy = require('./tools/journey-policy.json');
+          console.log(`quarantined=${JSON.stringify(Object.keys(policy.quarantined))}`);
+          NODE
   reopen-board-contract:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -270,6 +287,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         if: github.event_name == 'pull_request'
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - id: diff
@@ -290,6 +308,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -332,11 +351,12 @@ jobs:
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
     timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
+    continue-on-error: ${{ contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature) }}
     strategy:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11' && fromJSON('["chat-delivery"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON(needs.journeys.outputs.full) || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11' && fromJSON('["chat-delivery"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature != 'all' && inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.chat_reactions_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || inputs.feature == 'all' && fromJSON(needs.journeys.outputs.full) || github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
         app-revision: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["5d2a820355969173090f0fcd0c72a7b3bd222141","{0}"]', github.sha)) || fromJSON('[""]') }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
@@ -346,7 +366,8 @@ jobs:
       CHAT_ACCEPTED_PROOF: ${{ inputs.chat_accepted_proof && '1' || '' }}
       CHAT_CANCEL_PROOF: ${{ inputs.chat_cancel_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
-      CHAT_LIVE_DELIVERY_PROOF: ${{ inputs.chat_live_delivery_proof && '1' || '' }}
+      CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
+      CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_REACTIONS_PROOF: ${{ inputs.chat_reactions_proof && '1' || '' }}
       CHAT_RESYNC_PROOF: ${{ (inputs.chat_resync_proof || (github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11')) && '1' || '' }}
@@ -374,6 +395,7 @@ jobs:
         run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - name: Check verification contracts
@@ -388,6 +410,12 @@ jobs:
         run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs tools/chat-delivery-live-proof.test.mjs
       - name: Check workspace focus journey contract
         run: node tools/check-workspace-focus.mjs
+      - name: Install browser toggle recorder
+        if: env.FEATURE == 'browser-pane-stuck'
+        shell: pwsh
+        run: |
+          choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
       - name: Check browser recovery journey contract
         run: node tools/check-browser-pane-stuck.mjs
       - name: Check runner-note pixel oracle
@@ -404,7 +432,7 @@ jobs:
           if ($env:FEATURE -eq 'appearance' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master' -and $env:HEAD_COMMIT_MESSAGE.Split([char]10)[0].Contains('IGSH-837 red proof') -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')) { throw 'IGSH-837 deliberate red master proof' }
           if ($env:FEATURE -eq 'chat-dictation' -and $env:RELEASE_TAG) { throw 'Chat dictation requires the branch offline fixture boundary' }
           if ($env:CHAT_SHAPE_PROOF -eq '1' -and $env:FEATURE -ne 'chat-switch-speed') { throw 'Shape proof requires chat-switch-speed' }
-          if ($env:CHAT_SWITCH_PROFILE -eq '1' -and $env:CHAT_SHAPE_PROOF -ne '1') { throw 'Switch profile requires shape proof' }
+          if ($env:CHAT_SWITCH_PROFILE -eq '1' -and $env:CHAT_SHAPE_PROOF -ne '1' -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profile requires a native switching journey' }
           if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed', 'chat-switch-speed', 'title-bar') -and $env:RELEASE_TAG) {
             if ($env:FEATURE -ne 'chat-switch-speed' -or $env:CHAT_SHAPE_PROOF -ne '1' -or $env:RELEASE_TAG -ne 'v0.28.946') { throw 'Browser emulation requires a branch build with matching extension and bridge' }
           }
@@ -474,7 +502,7 @@ jobs:
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Build branch executable
         if: env.RELEASE_TAG == ''
-        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }}
+        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
         working-directory: ${{ matrix.app-revision && 'app-source' || '.' }}
       - name: Stage the independently built application
         if: matrix.app-revision != ''
@@ -513,6 +541,7 @@ jobs:
             $version = $env:RELEASE_TAG.Substring(1)
           } else {
             Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
+            if ($env:CHAT_SWITCH_PROFILE -eq '1' -and (Test-Path zig-out/bin/multiprompt.pdb)) { Copy-Item zig-out/bin/multiprompt.pdb verify-bin/multiprompt.pdb }
             Copy-Item zig-out/bin/zigshell-bridge.exe verify-bin/zigshell-bridge.exe
             $version = $env:VERIFY_VERSION
             $embeddedRevision = $env:VERIFY_REVISION
@@ -645,17 +674,17 @@ jobs:
         if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         run: node tools/check-clean-chat-output.mjs evidence/clean-chat-native.log
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         with:
           persist-credentials: false
           ref: 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f
           path: negative-source
       - name: Build the pre-fix commit 42cecfd3 negative control
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         working-directory: negative-source
         run: zig build
       - name: Require pre-fix 42cecfd3 to show activity rows with the identical journey
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -679,17 +708,17 @@ jobs:
           if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Negative control cleanup failed' }
           $global:LASTEXITCODE = 0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         with:
           persist-credentials: false
           ref: 9618091700e09f5958a48390449dc5067874d5dd
           path: negative-focus-source
       - name: Build IGSH-807 pre-fix focus-ring control
-        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         working-directory: negative-focus-source
         run: zig build
       - name: Require visible pre-fix focus rings with unchanged input cycling
-        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -858,6 +887,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:

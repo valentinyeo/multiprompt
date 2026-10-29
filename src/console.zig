@@ -128,7 +128,7 @@ const Row = @import("app_state.zig").Row;
 const MAX_ROWS = @import("app_state.zig").MAX_ROWS;
 const layoutRows = @import("sidebar.zig").layoutRows;
 const rowTotalHeight = @import("sidebar.zig").rowTotalHeight;
-const tabRowY = @import("sidebar.zig").tabRowY;
+const tabRowForShell = @import("sidebar.zig").tabRowForShell;
 const ClosedShell = @import("app_state.zig").ClosedShell;
 const MAX_CLOSED_HISTORY = @import("app_state.zig").MAX_CLOSED_HISTORY;
 const tmuxHostLongLabel = @import("capacity.zig").tmuxHostLongLabel;
@@ -1068,7 +1068,7 @@ pub fn quitAllZigShellWindows(hwnd: HANDLE) void {
         const target = ctx.hwnds[i];
         if (target != hwnd) _ = PostMessageW(target, WM_APP_QUIT_ALL, 0, 0);
     }
-    _ = PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    app_state.requestAppClose(hwnd, .quit_all);
 }
 
 pub fn cleanupStaleWindows() void {
@@ -2587,8 +2587,9 @@ pub fn ensureActiveVisible() void {
             if (app_state.groups[gidx].collapsed) app_state.groups[gidx].collapsed = false;
         }
     }
-    const top: i32 = tabRowY(app_state.active_shell) orelse return;
-    const bot: i32 = top + tabRowH();
+    const row = tabRowForShell(app_state.active_shell) orelse return;
+    const top = row.y;
+    const bot = top + rowTotalHeight(row);
     const vis_h = sidebarVisibleH();
     const visible_top = @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (top - app_state.g_sidebar_scroll < visible_top) {
@@ -2698,12 +2699,6 @@ pub fn switchToShell(idx: u32) void {
         logUnarchive(idx, "opened after new output");
     }
     if (idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or !app_state.shells[idx].browser_native) hideBrowserEdgeMasks();
-    ensureActiveVisible();
-    if (!app_state.g_restoring and (idx != prev or unarchived_on_open or
-        (@import("launch_cache.zig").pending and app_state.g_focus_user_action_tick != 0 and idx < app_state.shell_count)))
-    {
-        saveSession();
-    }
     if (idx < app_state.shell_count) {
         app_state.shells[idx].notified = false;
         if (app_state.g_skip_view_bump) {
@@ -2713,6 +2708,14 @@ pub fn switchToShell(idx: u32) void {
         }
         app_state.shells[idx].needs_attention = false;
         if (!app_state.g_restoring and !app_state.g_skip_view_bump) app_state.shells[idx].last_viewed = nowFileTime();
+    }
+    ensureActiveVisible();
+    if (!app_state.g_restoring and (idx != prev or unarchived_on_open or
+        (@import("launch_cache.zig").pending and app_state.g_focus_user_action_tick != 0 and idx < app_state.shell_count)))
+    {
+        saveSession();
+    }
+    if (idx < app_state.shell_count) {
         if (app_state.g_all_sessions_active) {
             hideShellsForOverlay();
             updateBrowserVisibility();

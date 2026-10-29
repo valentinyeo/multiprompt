@@ -101,6 +101,9 @@ test('production switch timer releases missing paints, defers all overlays and i
   const os = require('node:os'), path = require('node:path');
   const { spawnSync } = require('node:child_process');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-switch-deadline-'));
+  const switching = body('switchToShell');
+  const saveAt = switching.indexOf('saveSession();');
+  const saveGuard = switching.slice(switching.lastIndexOf('    if (', saveAt), switching.indexOf('\n    }', saveAt) + 6).replaceAll('@import("launch_cache.zig").', 'launch_cache.');
   const prelude = `
 const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -114,7 +117,7 @@ var g_chat_browser_swap: chat_switch.Pending = .{};
 var g_chat_active = true;
 var active_shell: u32 = 0;
 var shell_count: u32 = 1;
-var shells = [_]struct { shell_id: u32 = 7, browser_frozen: bool = false, browser_window_id: u32 = 0 }{.{}};
+var shells = [_]struct { shell_id: u32 = 7, browser_frozen: bool = false, browser_window_id: u32 = 0, browser_enabled: bool = false }{.{}};
 var g_main_hwnd: ?usize = 1;
 var g_chat_transcript_hwnd: ?usize = 2;
 var g_chat_composer_hwnd: ?usize = 3;
@@ -154,7 +157,10 @@ fn wakeBrowserPaneFromFreeze(_: u32) void {}
 fn updateBrowserVisibility() void { exchanges += 1; }
 fn browserPaneActive() bool { return false; }
 fn armBrowserVisibilitySettle(_: u32) void {}
-fn saveSession() void {}
+var saves: usize = 0;
+var g_focus_user_action_tick: u64 = 0;
+const launch_cache = struct { const pending = false; };
+fn saveSession() void { saves += 1; }
 fn writePaneSessionFileForShell(_: u32) void {}
 fn chatSwitchLogBrowserShown() void {}
 fn chatFileOnReady() void { std.debug.assert(g_chat_browser_swap.shell_id == 0); ready += 1; }
@@ -228,6 +234,26 @@ test "stale timer cannot release a newer target early or a different active shel
     chatSwitchBrowserTick();
     try std.testing.expectEqual(@as(usize, 0), reveals);
     try std.testing.expectEqual(@as(usize, 1), exchanges);
+}
+test "browserless switches save selection immediately without another queued write" {
+    const idx: u32 = 0;
+    const prev: u32 = 1;
+    const unarchived_on_open = false;
+    saves = 0;
+    ${saveGuard}
+    try std.testing.expectEqual(@as(usize, 1), saves);
+    g_chat_browser_swap.request(7, 1000);
+    _ = g_chat_browser_swap.didPaint(7);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 1), saves);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 1), saves);
+    shells[0].browser_enabled = true;
+    g_chat_browser_swap.request(7, 1000);
+    _ = g_chat_browser_swap.didPaint(7);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 2), saves);
+    shells[0].browser_enabled = false;
 }
 `;
   try {

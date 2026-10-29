@@ -1139,10 +1139,7 @@ const keepSearchSelectionVisible = @import("command_palette.zig").keepSearchSele
 const updateSearchResults = @import("command_palette.zig").updateSearchResults;
 const paletteRowIsHeader = @import("command_palette.zig").paletteRowIsHeader;
 const stepOverPaletteHeaders = @import("command_palette.zig").stepOverPaletteHeaders;
-const BROWSER_SHORTCUT_OPEN_GUARD_MS = @import("app_state.zig").BROWSER_SHORTCUT_OPEN_GUARD_MS;
-const claimBrowserToggleEvent = @import("shortcuts.zig").claimBrowserToggleEvent;
 const physicalBrowserShortcutShouldRecover = @import("shortcuts.zig").physicalBrowserShortcutShouldRecover;
-const physicalBrowserShortcutMayClose = @import("shortcuts.zig").physicalBrowserShortcutMayClose;
 const startStaleAltMouseHookThread = @import("shortcuts.zig").startStaleAltMouseHookThread;
 const recordNativeBrowserDropGesture = @import("shortcuts.zig").recordNativeBrowserDropGesture;
 const openUrlAtScreenPoint = @import("clipboard.zig").openUrlAtScreenPoint;
@@ -1258,6 +1255,7 @@ comptime {
         _ = @import("drawing.zig");
         _ = @import("smooth.zig");
         _ = @import("telemetry_panel.zig");
+        _ = @import("usage_card.zig");
         _ = @import("clipboard.zig");
         _ = @import("notifications.zig");
         _ = @import("browser_bridge.zig");
@@ -1427,6 +1425,31 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (@import("fonts.zig").menuChar(wp)) |result| return result;
     }
     if (@import("fonts.zig").menuMessage(msg, lp)) |result| return result;
+    if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) return 0;
+    if (msg == WM_SYSCOMMAND and (wp & 0xFFF0) == 0xF060) {
+        debugLog("close-command source=SC_CLOSE sender=unavailable");
+        app_state.requestAppClose(hwnd, .window_control);
+        return 0;
+    }
+    if (msg == WM_CLOSE) {
+        const reason = std.enums.fromInt(app_state.CloseReason, wp);
+        const foreground = GetForegroundWindow();
+        const intentional = reason != null or foreground == hwnd or @import("win32.zig").IsChild(hwnd, foreground) != 0;
+        var foreground_pid: DWORD = 0;
+        _ = GetWindowThreadProcessId(foreground, &foreground_pid);
+        var close_log: [384]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&close_log, "close-request action={s} reason={s} sender={s} declared_sender_pid={d} receiver_pid={d} transport={s} foreground_hwnd={X} foreground_pid={d}", .{
+            @as([]const u8, if (intentional) "accept" else "ignore"),
+            if (reason) |r| @tagName(r) else if (intentional) "foreground_close" else "unsolicited",
+            @as([]const u8, if (reason != null) "declared" else "unavailable"),
+            lp,
+            @import("win32.zig").GetCurrentProcessId(),
+            @as([]const u8, if (@import("win32.zig").InSendMessageEx(null) != 0) "sent" else "posted-or-local"),
+            if (foreground) |fg| @intFromPtr(fg) else 0,
+            foreground_pid,
+        }) catch "close-request log-overflow");
+        if (!intentional) return 0;
+    }
     if (app_state.g_account_locked) {
         switch (msg) {
             WM_PAINT => {
@@ -1558,6 +1581,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SIZE => {
+            @import("usage_card.zig").close();
             more_menu.close();
             @import("workspace_switcher.zig").close();
             @import("settings_panel.zig").reposition();
@@ -1945,6 +1969,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 {
+                    if (@import("usage_card.zig").versionStripHit(mx, my)) {
+                        updateCardRelaunch(hwnd);
+                        return 0;
+                    }
                     const upd_hit = updateCardHit(mx, my);
                     if (upd_hit != 0) {
                         app_state.g_shell_focused = false;
@@ -1964,7 +1992,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_shell_focused = false;
                 _ = InvalidateRect(hwnd, null, 0);
                 const logical_my = my + app_state.g_sidebar_scroll;
-                const target = hitTestSidebar(logical_my);
+                const target = hitTestSidebar(mx, logical_my);
                 switch (target) {
                     .inbox => |ri| {
                         jumpToInboxRow(ri);
@@ -1976,7 +2004,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     },
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) {
-                            if (!app_state.g_sidebar_collapsed and mx > SIDEBAR_W() - 30) {
+                            if (!app_state.g_sidebar_collapsed and !app_state.shells[tab_idx].pinned_top and mx > SIDEBAR_W() - 30) {
                                 closeShell(tab_idx);
                             } else if (isCtrlDown()) {
                                 commitRename();
@@ -2146,6 +2174,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_status_card_hover = false;
                 _ = InvalidateRect(hwnd, null, 0);
             }
+            if (app_state.g_sidebar_hover != null) {
+                app_state.g_sidebar_hover = null;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             if (app_state.g_workspace_hover != null) {
                 app_state.g_workspace_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2161,6 +2193,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOUSEMOVE => {
+            const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll)) {
+                .tab => |index| index,
+                else => null,
+            } else null;
+            if (sidebar_hover != app_state.g_sidebar_hover) {
+                app_state.g_sidebar_hover = sidebar_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (sidebar_hover != null) {
+                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                _ = TrackMouseEvent(&tracking);
+            }
             {
                 const card_hover = sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp));
                 if (card_hover != app_state.g_status_card_hover) {
@@ -2304,7 +2348,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (sidebarStickyCardHitTest(my)) return 0;
 
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
-                    const ht = hitTestSidebar(logical_my_drag);
+                    const ht = hitTestSidebar(mx, logical_my_drag);
                     var target_gidx: ?u32 = null;
                     switch (ht) {
                         .tab => |ti| {
@@ -2395,7 +2439,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const sidebar_w_for_reorder = SIDEBAR_W();
                 if (my >= 0 and !sidebarStickyCardHitTest(my) and mx >= -REORDER_X_MARGIN and mx < sidebar_w_for_reorder + REORDER_X_MARGIN) {
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
-                    const ht = hitTestSidebar(logical_my_drag);
+                    const ht = hitTestSidebar(mx, logical_my_drag);
                     if (sidebarTierForDrop(ht)) |want_tier| {
                         if (app_state.drag_src < app_state.shell_count and shellSidebarTier(app_state.drag_src) != want_tier) {
                             switch (want_tier) {
@@ -2530,7 +2574,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
                 if (sidebarStickyCardHitTest(my)) return 0;
                 const logical_my = my + app_state.g_sidebar_scroll;
-                const ht = hitTestSidebar(logical_my);
+                const ht = hitTestSidebar(mx, logical_my);
                 switch (ht) {
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) openTabContextPalette(hwnd, tab_idx);
@@ -2592,7 +2636,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 const logical_my = my + app_state.g_sidebar_scroll;
-                const ht = hitTestSidebar(logical_my);
+                const ht = hitTestSidebar(mx, logical_my);
                 switch (ht) {
                     .tab => |tab_idx| {
                         if (mx <= SIDEBAR_W() - 30 and tab_idx < app_state.shell_count and tab_idx == app_state.active_shell) {
@@ -2735,14 +2779,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (physical_shortcut) {
                 const event_time: u32 = @truncate(@as(usize, @bitCast(lp)));
                 browserTraceN("shortcutToggle event=", event_time);
-                if (!claimBrowserToggleEvent(event_time, &app_state.g_browser_toggle_last_handled_event_time)) {
-                    browserTrace("shortcutToggle suppressed duplicate event time");
-                    return 0;
-                }
             }
             if (wp == 2 and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) {
-                app_state.g_browser_shortcut_open_guard_shell_id = app_state.shells[app_state.active_shell].shell_id;
-                app_state.g_browser_shortcut_open_guard_until = GetTickCount64() + BROWSER_SHORTCUT_OPEN_GUARD_MS;
                 openBrowserPaneForShell(app_state.active_shell, "");
                 return 0;
             }
@@ -2760,15 +2798,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.shells[target_idx].browser_enabled,
                     browser_hwnd_live,
                     app_state.shells[target_idx].browser_launch_tick,
+                    app_state.shells[target_idx].browser_connection_id != 0 or app_state.shells[target_idx].browser_hwnd != null or
+                        app_state.shells[target_idx].browser_relaunch_after_tick != 0,
                 );
-                if (physical_shortcut and app_state.shells[target_idx].browser_enabled and !recover_dead_pane and !physicalBrowserShortcutMayClose(
-                    app_state.shells[target_idx].shell_id,
-                    app_state.shells[target_idx].browser_launch_tick,
-                    app_state.shells[target_idx].browser_hwnd == null,
-                    GetTickCount64(),
-                    app_state.g_browser_shortcut_open_guard_shell_id,
-                    app_state.g_browser_shortcut_open_guard_until,
-                )) return 0;
                 if (app_state.g_webview2_active) {
                     closeWebView2();
                     if (app_state.active_shell < app_state.shell_count) _ = showShellConsole(app_state.active_shell, SW_SHOW, "wndProc.WM_APP_BROWSER_TOGGLE");
@@ -2779,18 +2811,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 } else {
                     app_state.shells[target_idx].browser_enabled = !app_state.shells[target_idx].browser_enabled;
                 }
+                if (physical_shortcut) browserTraceN("shortcutToggle enabled=", @intFromBool(app_state.shells[target_idx].browser_enabled));
                 if (app_state.shells[target_idx].browser_enabled) {
-                    if (physical_shortcut) {
-                        app_state.g_browser_shortcut_open_guard_shell_id = app_state.shells[target_idx].shell_id;
-                        app_state.g_browser_shortcut_open_guard_until = GetTickCount64() + BROWSER_SHORTCUT_OPEN_GUARD_MS;
-                        browserTrace("shortcutToggle armed 10s open guard");
-                    }
                     ensureBrowserDefaultUrl(target_idx);
                     updateBrowserVisibility();
                 } else {
-                    if (app_state.g_browser_shortcut_open_guard_shell_id == app_state.shells[target_idx].shell_id) {
-                        app_state.g_browser_shortcut_open_guard_until = 0;
-                    }
                     discardBrowserUrlBarEdit();
                     if (target_idx == app_state.active_shell) {
                         app_state.g_browser_focus_mode = false;
@@ -2945,7 +2970,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_APP_QUIT_ALL => {
             app_state.g_quit_all_in_progress = true;
             rememberOpenWorkspaceForQuit();
-            _ = PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            app_state.requestAppClose(hwnd, .quit_all);
             return 0;
         },
         WM_APP_RESTART => {
@@ -2990,7 +3015,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (pi.hThread != null) _ = CloseHandle(pi.hThread);
                 }
             }
-            _ = PostMessageW(app_state.g_main_hwnd, WM_CLOSE, 0, 0);
+            app_state.requestAppClose(app_state.g_main_hwnd, .restart);
             return 0;
         },
         WM_APP_NEXT_TAB => {
@@ -5698,7 +5723,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_active = false;
                     app_state.g_browser_focus_mode = false;
                     app_state.g_shell_focused = true;
-                    app_state.g_browser_shortcut_open_guard_until = 0;
                     clearSearchBackdrop();
                     discardBrowserUrlBarEdit();
                     closeWebView2();
@@ -5941,7 +5965,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     } else {
                         app_state.g_shell_focused = false;
-                        _ = PostMessageW(app_state.g_main_hwnd, WM_CLOSE, 0, 0);
+                        app_state.requestAppClose(app_state.g_main_hwnd, .workspace_close);
                     }
                     return 0;
                 }
@@ -7005,6 +7029,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_ACTIVATEAPP => {
             if (wp == 0) {
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
+                @import("usage_card.zig").close();
                 @import("chat_session.zig").chatReadDeactivate();
             } else {
                 focusGuardNoteActivation();

@@ -8,8 +8,10 @@ export function verifyLiveDelivery(root) {
   const json = name => JSON.parse(read(name));
   const observed = json('live-delivery/observation.json');
   assert.equal(observed.error, null);
-  const sustained = observed.longDelivery && json('build.json').tag;
-  const count = sustained ? 31 : 10;
+  const crashes = path.join(root, 'live-delivery/crashes');
+  assert.ok(!fs.existsSync(crashes) || !fs.readdirSync(crashes).some(name => name.startsWith('crash-')), 'native chat crashed during delivery');
+  const sustained = observed.longDelivery && json('build.json').tag && !observed.crashStress;
+  const count = observed.crashStress ? 30 : sustained ? 31 : 10;
   assert.deepEqual(observed.rounds.map(row => row.round), Array.from({ length: count }, (_, i) => i + 1));
   const truth = read('live-delivery/stand-in/live-turns.jsonl').trim().split(/\r?\n/).map(JSON.parse);
   const frames = read('live-delivery/stand-in/frames.jsonl').trim().split(/\r?\n/).map(JSON.parse);

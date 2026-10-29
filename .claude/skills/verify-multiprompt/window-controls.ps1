@@ -8,7 +8,11 @@ $dpi = $geometry[8]
 if ($dpi -ne [int]$env:CAPTION_DPI) { throw 'Window control journey did not reach the requested real monitor DPI' }
 $buttonW = [int][Math]::Floor(44 * $dpi / 96)
 $buttonH = [int][Math]::Floor(32 * $dpi / 96)
-$sidebar = [int][Math]::Floor(220 * $dpi / 96)
+$snapshotPath = Join-Path $env:APPDATA 'ZigShell/session.json.launch.json'
+Wait-Until { (Test-Path $snapshotPath) -and (Get-Content $snapshotPath -Raw | ConvertFrom-Json).sidebar_width -ge 100 } 'app publishes its actual sidebar width'
+$sidebarLogical = [int](Get-Content $snapshotPath -Raw | ConvertFrom-Json).sidebar_width
+if ($sidebarLogical -gt 1000) { throw 'Published sidebar width is outside the app range' }
+$sidebar = [int][Math]::Floor($sidebarLogical * $dpi / 96)
 $monitor = [VerifyNative]::MonitorFromWindow($script:window, 2)
 $info = New-Object VerifyNative+MonitorInfo
 $info.Size = [Runtime.InteropServices.Marshal]::SizeOf($info)

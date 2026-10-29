@@ -27,7 +27,6 @@ pub fn build(b: *std.Build) void {
         if (std.mem.allEqual(u8, &key, 0)) @panic("Release signing public key is still the all-zero placeholder; configure it before publishing");
     }
 
-
     const mod = b.addModule("multiprompt", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -46,6 +45,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    if (b.option(bool, "symbols", "Retain native profiling symbols") orelse false) exe.root_module.strip = false;
     exe.root_module.addObject(revision_object);
     exe.subsystem = .Windows;
     exe.stack_size = MAIN_STACK_SIZE;
@@ -177,6 +177,13 @@ pub fn build(b: *std.Build) void {
     const install_listener_helper = b.addInstallArtifact(listener_helper, .{ .dest_sub_path = "local-listener-helper.exe" });
     b.step("local-listener-helper", "Build the local listener account test helper").dependOn(&install_listener_helper.step);
 
+    const listener_rejection = b.addTest(.{
+        .root_module = exe.root_module,
+        .filters = &.{"local listener rejects peer of another user"},
+    });
+    const install_listener_rejection = b.addInstallArtifact(listener_rejection, .{ .dest_sub_path = "local-listener-rejection.exe" });
+    b.step("local-listener-rejection", "Build the local listener rejection regression").dependOn(&install_listener_rejection.step);
+
     const clean_chat_tests = b.addTest(.{
         .root_module = exe.root_module,
         .filters = &.{"IGSH-816 CLEAN"},
@@ -237,6 +244,7 @@ pub fn build(b: *std.Build) void {
     const chat_view_gaps_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-gaps.test.js" });
     vps_test_step.dependOn(&chat_view_gaps_tests.step);
     const pane_spacing_tests = b.addSystemCommand(&.{ "node", "--test", "tools/pane-spacing.test.js", "tools/group-palette.test.js" });
+    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/bot-avatar.test.js" }).step);
     pane_spacing_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&pane_spacing_tests.step);
     vps_test_step.dependOn(&pane_spacing_tests.step);
@@ -616,7 +624,7 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&browser_own_profile_tests.step);
     const browser_profile_isolation_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-profile-isolation.test.js", "tools/chrome-launch.test.js", "tools/browser-profile-adoption.test.js", "tools/browser-native-profile.test.js" });
     test_step.dependOn(&browser_profile_isolation_tests.step);
-    const browser_engine_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-engine-selection.test.js" });
+    const browser_engine_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-engine-selection.test.js", "tools/browser-toggle-immediate.test.js" });
     test_step.dependOn(&browser_engine_selection_tests.step);
     const zsb_session_isolation_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-isolation.test.js" });
     test_step.dependOn(&zsb_session_isolation_tests.step);
@@ -718,6 +726,8 @@ pub fn build(b: *std.Build) void {
     const live_delivery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-delivery-live-proof.test.mjs" });
     test_step.dependOn(&live_delivery_tests.step);
     vps_test_step.dependOn(&live_delivery_tests.step);
+    const usage_card_tests = b.addSystemCommand(&.{ "node", "--test", "tools/usage-card.test.js" });
+    test_step.dependOn(&usage_card_tests.step);
     const test_wiring_tests = b.addSystemCommand(&.{ "node", "--test", "tools/test-wiring.test.js", "tools/heavy-guard.test.js" });
     test_step.dependOn(&test_wiring_tests.step);
     vps_test_step.dependOn(&test_wiring_tests.step);
@@ -743,6 +753,8 @@ pub fn build(b: *std.Build) void {
     const wine_tests = b.addSystemCommand(&.{ "node", "--test", "--test-concurrency=1", "tools/live-test-window.test.mjs", "tools/second-launch.test.mjs", "tools/chat-reply.test.mjs", "tools/chat-select.test.mjs" });
     wine_tests.step.dependOn(b.getInstallStep());
     wine_step.dependOn(&wine_tests.step);
+
+    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/background-close.test.js" }).step);
 
     const test_groups = [_]*std.Build.Step{
         b.step("test-group-1", "Run desktop, telemetry and chat CPU tests"),

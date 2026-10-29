@@ -95,7 +95,7 @@ test('IGSH-1061: palette typing waits for owned foreground after asynchronous br
   const workflow = read('.github/workflows/palette-dialog-design.yml');
   assert.match(workflow, /red-control:\s+if: github\.ref != 'refs\/heads\/master'\s+uses: \.\/\.github\/workflows\/check-red-run\.yml/);
   assert.match(workflow, /base: \$\{\{ github\.event\.pull_request\.base\.sha \|\| 'origin\/master' \}\}/);
-  assert.match(workflow, /head: \$\{\{ github\.sha \}\}/);
+  assert.match(workflow, /head: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
   assert.match(workflow, /palette-dialog-design:\s+needs: red-control/);
   assert.match(workflow, /needs\.red-control\.result == 'success' \|\| needs\.red-control\.result == 'skipped'/);
   assert.match(read('.github/workflows/check-red-run.yml'), /runs-on: ubuntu-latest/);

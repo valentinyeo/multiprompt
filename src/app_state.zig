@@ -402,7 +402,7 @@ pub const empty_shell = Shell{
 };
 
 pub const MAX_SHELLS = 256;
-pub var g_sidebar_w_full: i32 = if (LOOK_UNIFIED) 220 else 320;
+pub var g_sidebar_w_full: i32 = if (LOOK_UNIFIED) 300 else 320;
 pub const SIDEBAR_W_COLLAPSED: i32 = 44;
 pub const SIDEBAR_W_MIN: i32 = 150;
 pub const SIDEBAR_W_MAX: i32 = 500;
@@ -661,6 +661,7 @@ pub const WS_PILL_GAP: i32 = 5;
 pub const WS_STRIP_LEFT: i32 = 8;
 pub const WS_NEW_PILL: u8 = 0xFF;
 pub var g_workspace_hover: ?u8 = null;
+pub var g_sidebar_hover: ?u32 = null;
 pub var g_inbox_button_hover: bool = false;
 pub var g_chat_stop_hover: bool = false;
 pub var g_chat_stop_shown: bool = false;
@@ -697,6 +698,9 @@ pub const Row = struct {
     shell_idx: u32,
     section_tier: SidebarTier = .recent,
     y: i32,
+    x: i32 = 0,
+    width: i32 = 0,
+    tile: bool = false,
 };
 pub const MAX_ROWS: usize = MAX_SHELLS + INBOX_MAX_ROWS + MAX_GROUPS + 6;
 pub const SECTION_HEADER_H: i32 = 24;
@@ -1595,6 +1599,7 @@ pub const AiPaceGoal = struct {
     five_hour_reset_filetime: u64 = 0,
     has_bonus_reset: bool = false,
     bonus_reset_filetime: u64 = 0,
+    week_elapsed_tenths: ?u16 = null,
     weekly_pace: AiUsagePace = .{},
     five_hour_pace: AiUsagePace = .{},
     pace: AiPace = .on_pace,
@@ -1748,6 +1753,20 @@ pub var g_tunnel_relay_mode: [3]std.atomic.Value(u32) = .{ .init(0), .init(0), .
 pub var g_graceful_exit: bool = false;
 pub var g_quit_all_in_progress: bool = false;
 pub var g_app_closing: bool = false;
+
+pub const CloseReason = enum(usize) {
+    window_control = 0x4D504301,
+    quit_all,
+    restart,
+    workspace_close,
+    workspace_delete,
+    workspace_collapse,
+    bench_exit,
+};
+
+pub fn requestAppClose(target: HANDLE, reason: CloseReason) void {
+    _ = PostMessageW(target, WM_CLOSE, @intFromEnum(reason), @intCast(@import("win32.zig").GetCurrentProcessId()));
+}
 
 pub const SPAWN_TITLE_CAP: usize = 1024;
 
@@ -3323,6 +3342,7 @@ pub var g_font_shell_tab_title: HANDLE = null;
 pub var g_font_subtitle: HANDLE = null;
 pub var g_font_status_card: HANDLE = null;
 pub var g_font_close: HANDLE = null;
+pub var g_font_bot: [3]HANDLE = @splat(null);
 pub var g_font_inbox_title: HANDLE = null;
 pub var g_font_inbox_sub: HANDLE = null;
 pub var g_font_thread_title: HANDLE = null;
@@ -3331,7 +3351,6 @@ pub const WM_SYSKEYDOWN: u32 = 0x0104;
 pub var g_win_held: bool = false;
 pub var g_native_paste_passthrough_until: u64 = 0;
 pub var g_browser_toggle_chord_held: bool = false;
-pub var g_browser_toggle_last_event_time: u32 = 0;
 pub var g_chat_toggle_chord_held: bool = false;
 pub var g_chat_toggle_last_event_time: u32 = 0;
 pub var g_voice_toggle_chord_held: bool = false;
@@ -3346,11 +3365,7 @@ pub var g_palette_chord_held: bool = false;
 pub var g_screenshot_chord_held: bool = false;
 pub var g_tab_url_chord_held: bool = false;
 pub var g_dictation_toggle_chord_held: bool = false;
-pub var g_browser_toggle_last_handled_event_time: u32 = 0;
 pub const BROWSER_TOGGLE_DEBOUNCE_MS: u32 = 1500;
-pub var g_browser_shortcut_open_guard_shell_id: u32 = 0;
-pub var g_browser_shortcut_open_guard_until: u64 = 0;
-pub const BROWSER_SHORTCUT_OPEN_GUARD_MS: u64 = 10_000;
 
 pub const STALE_ALT_REPAIR_EXTRA_INFO: usize = 0x4D505341;
 

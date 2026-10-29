@@ -2,16 +2,18 @@
 
 Verify on: push
 
-Verify all three compact status pages. The AI page is a grey floating pill; click it to expand the existing themed data menu.
+Verify all three compact status pages. The AI page is a grey floating pill; click it to expand the approved usage card.
 
 ## Sub-features
 
 - Overview and VPS remain compact 20–30 px cards, with their existing hover detail.
 - AI usage uses a fully rounded grey pill. Repeated provider pools have distinct labels, such as CL1, CX and CL2.
-- Clicking the AI pill opens the existing native themed menu above it, showing each pool's usage, reset date/countdown and secondary quota data.
+- Clicking the AI pill opens a rounded usage card above it. Each account shows weekly usage, an elapsed-week tick, reset details and its five-hour window. Missing windows say not reported.
 - Second click, Escape and outside click dismiss the panel without changing the AI page.
 - Ctrl+Shift+G and the wheel retain the existing three-page navigation.
-- Optional pace proof covers each plan window.
+- The installed version stays visible above the pill. A pending update replaces this line with the existing Restart action.
+- The card footer shows the installed version and opens release notes through Tab, Enter or a click.
+- Optional pace proof covers each plan window in the compact pill.
 
 ## How to get to it (user POV)
 
@@ -25,7 +27,7 @@ The private GitHub profile receives the normal collector file `usage-telemetry.j
 
 The journey measures all three frames with screenshots and DPI normalization, preserving the 20–30 px compact-height checks. The AI frame must also be at the sidebar bottom, so an earlier unrelated frame cannot satisfy it. The original plain AI line fails this condition.
 
-Capture `pill-closed.png`, click with SendInput, require the app-owned `#32768` menu, and capture `pill-open.png`. The same `MenuLook` checks used for existing right-click menus require rounded clipping and matching fill at both edges. Real second click, Escape and outside click must remove the menu. The saved page must remain AI. `status-card.json` and `result.json` retain each outcome; `action.png` and `after.png` remain available to the shared harness.
+Capture `pill-closed.png` and require version text pixels above the pill. Click with SendInput, require the app-owned `MultiPromptUsageCard` child, then capture `pill-open.png`. The screenshot must contain the approved dark panel, neutral quota tracks, bright used portions and readable grey details. Real second click, Escape and outside click must remove the card. Tab and Enter open release notes. The saved page must remain AI. `status-card.json` and `result.json` retain each outcome; `action.png` and `after.png` remain available to the shared harness.
 
 Set `usage_pace_proof=true` for pace checks.
 Optional `usage_pace_status` accepts base64 sanitized status JSON.
@@ -37,7 +39,8 @@ The external SSH stand-in only answers status reads.
 Startup may await the normal three-minute refresh.
 Reader setup waits up to four minutes.
 Fixture snapshots live under `tools/fixtures/IGSH-997/`.
-Closed pill and panel must show expected colors.
+The closed pill must show expected pace colors.
+The expanded card uses approved neutral bars.
 Screenshots and source JSON remain in `pace-*` folders.
 Only `ts` advances to the replay clock.
 Snapshots keep usage, rates, ratios, forecasts and resets.

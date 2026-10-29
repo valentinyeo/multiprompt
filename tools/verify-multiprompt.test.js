@@ -512,7 +512,7 @@ function assertsPaneFocusGeometry(source, workflowText) {
     assert.ok(capture.indexOf('$dpi =') < capture.indexOf('Snapshot '));
     assert.doesNotMatch(capture, /\$console =|\$browser =/);
   }
-  assert.match(final, /Save-Json[^\n]+ 'pane-layout-rects.json'\s+Snapshot 'pane-layout'\s+\$proof = \[PaneLayoutProof\]::Check\([^\n]+, \$frame, \$client, \$consoleRect, \$browserRect, \$dpi, \$scale, \$hidePills\)/);
+  assert.match(final, /Save-Json[^\n]+ 'pane-layout-rects.json'\s+Snapshot 'pane-layout'\s+\$proof = \[PaneLayoutProof\]::Check\([^\n]+, \$frame, \$client, \$consoleRect, \$browserRect, \$dpi, \$scale, \$hidePills, \$sidebarLogical\)/);
   assert.match(final, /Fresh console UIA and HWND identity\/bounds disagree/);
   for (const required of [
     "'9618091700e09f5958a48390449dc5067874d5dd'",
@@ -991,6 +991,9 @@ test('ISSUE-559 real Windows cleanup rejects the old vanished-lockfile race and 
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /ISSUE-559 old cleanup rejected:/);
   assert.match(result.stdout, /ISSUE-559 production cleanup passed/);
+  assert.match(result.stdout, /GLOBAL_FONT_KILLED_REGISTRAR_LOCK_PROVEN/);
+  assert.match(result.stdout, /GLOBAL_FONT_OWNED_CLEANUP_OK/);
+  console.log(result.stdout);
 });
 
 test('ISSUE-559 setup waits for rendered browser readiness and retries only owned-frame activation', () => {
@@ -1207,7 +1210,9 @@ test('ISSUE-569 selection assertions resolve published active identity and requi
 test('ISSUE-569 selection persistence is independent of deferred browser startup and stale snapshots', () => {
   function contract(session, console, cache, main) {
     const switching = console.slice(console.indexOf('pub fn switchToShell(idx:'), console.indexOf('var startup_completed:'));
-    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        app_state.shells[idx].notified = false;'));
+    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        if (app_state.g_all_sessions_active) {'));
+    const attention = switching.indexOf('app_state.shells[idx].needs_attention = false;');
+    assert.ok(attention >= 0 && attention < switching.indexOf('saveSession();'), 'persist final attention state before returning to the browser queue');
     assert.match(save, /if \(!app_state.g_restoring and \(idx != prev or unarchived_on_open or/);
     assert.doesNotMatch(save, /defer_browser/);
     assert.doesNotMatch(save, /selected_shell_id\s*=/);
@@ -1557,8 +1562,9 @@ test('IGSH-908 status-card journey keeps compact pages and proves the existing-s
   assert.match(journey, /if \(\$height -gt 30 -or \$height -lt 20\) \{ throw/);
   assert.match(journey, /IGSH-908: usage pill has no frame at the sidebar bottom/);
   for (const check of ['usage panel closes on second click', 'usage panel closes on Escape', 'usage panel closes on outside click']) assert.ok(journey.includes(check));
-  assert.match(journey, /MenuLook/);
-  assert.match(journey, /\$look\.cornerShown/);
+  assert.match(journey, /Assert-UsageCardPixels 'pill-open'/);
+  assert.match(journey, /MultiPromptUsageCard/);
+  assert.match(journey, /Assert-AppVersionInk 'pill-closed'/);
   assert.match(journey, /usagePill = \$true/);
   assert.match(journey, /Snapshot 'pill-closed'/);
   assert.match(journey, /Snapshot 'pill-open'/);
@@ -2209,7 +2215,7 @@ test('IGSH-1108 workflow consumes feature-owned matrices without changing requir
   assert.match(workflow, /full: \$\{\{ steps.features.outputs.full \}\}/);
   assert.match(workflow, /- id: features\n        run: node tools\/verify-features.cjs/);
   assert.match(workflow, /github.event_name == 'pull_request' && fromJSON\(needs.journeys.outputs.pr\)/);
-  assert.match(workflow, /\(github.event_name == 'push' \|\| inputs.feature == 'all'\) && fromJSON\(needs.journeys.outputs.full\)/);
+  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
   assert.ok(features.pr.includes('appearance'));
   assert.ok(features.full.length >= 21);
   const registered = [...control.match(/ValidateSet\(([^\n)]+)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
@@ -2269,6 +2275,28 @@ test('IGSH-1108 CLI writes JSON job outputs and rejects unavailable or unsafe fe
   }
 });
 
+test('IGSH-1033 shared tracked quarantine protects rollback and release execution', () => {
+  assert.ok(fs.existsSync(path.join(root, 'tools/journey-policy.json')), 'Shared quarantine policy must ship');
+  assert.deepEqual(JSON.parse(read('tools/journey-policy.json')), { quarantined: {} });
+  const policy = JSON.parse(read('tools/fixtures/IGSH-1033/journey-policy.json'));
+  assert.deepEqual(Object.keys(policy.quarantined).sort(), ['browser-pane-stuck', 'chat-messages-only']);
+  assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \}\}/);
+  assert.match(workflow, /quarantined: \$\{\{ steps.policy.outputs.quarantined \}\}/);
+  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
+  assert.match(workflow, /github.event_name == 'push' && fromJSON\('\["appearance", "relaunch-saved-sessions"\]'\)/);
+  for (const entry of Object.values(policy.quarantined)) {
+    assert.equal(entry.ticket, 'https://app.hypertask.ai/detail/project-2060/1055');
+    assert.deepEqual(entry.runs, ['https://github.com/valentinyeo/multiprompt/actions/runs/40450143181', 'https://github.com/valentinyeo/multiprompt/actions/runs/40454057302']);
+  }
+});
+
+test('IGSH-1033 historical controls stay outside master and release candidates', () => {
+  for (const name of ['Build IGSH-807 pre-fix focus-ring control', 'Require visible pre-fix focus rings with unchanged input cycling', 'Build the pre-fix commit 42cecfd3 negative control', 'Require pre-fix 42cecfd3 to show activity rows with the identical journey']) {
+    const step = workflow.slice(workflow.indexOf('      - name: ' + name)).split(/\n      - /)[0];
+    assert.match(step, /if: github.event_name == 'workflow_dispatch' && inputs.revision == '' &&/);
+  }
+});
+
 test('group proof samples and clicks below the workspace picker at every supported scale', () => {
   const source = read(skill + 'control-native.cs');
   const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
@@ -2297,6 +2325,7 @@ test('native group pixel proof reports the current header and member rectangles'
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-proof-'));
   const source = read(skill + 'control-native.cs');
   const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
+  const pane = source.slice(source.indexOf('public static class PaneLayoutProof {'), source.indexOf('public static class CodeFontProof {'));
   const script = `$ErrorActionPreference = 'Stop'
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
@@ -2304,8 +2333,11 @@ using System.Collections.Generic;
 public static class VerifyNative {
     public struct Rect { public int Left, Top, Right, Bottom; }
     public struct Point { public int X, Y; }
+    public static List<Dictionary<string, object>> DesktopWindows() { throw new NotSupportedException(); }
+    public static bool GetWindowRect(IntPtr hwnd, out Rect rect) { throw new NotSupportedException(); }
 }
 ${group}
+${pane}
 '@
 $image = New-Object System.Drawing.Bitmap 800, 900
 try { $image.Save((Join-Path $PSScriptRoot 'sidebar.png')) } finally { $image.Dispose() }
@@ -2314,12 +2346,32 @@ $frame.Left = 200; $frame.Top = 200
 $origin = New-Object VerifyNative+Point
 $origin.X = 208; $origin.Y = 231
 foreach ($collapsed in @($false, $true)) {
-    $proof = [GroupRailProof]::Check((Join-Path $PSScriptRoot 'sidebar.png'), $frame, $origin, 96, 100, $false, $collapsed)
+    $proof = [GroupRailProof]::Check((Join-Path $PSScriptRoot 'sidebar.png'), $frame, $origin, 96, 100, $false, $collapsed, 300)
     if ($proof.headerTops[0] -ne 125) { throw 'First group overlaps the workspace picker' }
-    $second = if ($collapsed) { 153 } else { 229 }
-    if ($proof.headerTops[1] -ne $second -or $proof.sidebarRect[3] -ne ($second + 104)) { throw 'Member rectangles do not track group collapse' }
+    $second = if ($collapsed) { 153 } else { 269 }
+    if ($proof.headerTops[1] -ne $second -or $proof.sidebarRect[3] -ne ($second + 144)) { throw 'Member rectangles do not track group collapse' }
     if (-not $proof.noFill -or -not $proof.noRail -or $proof.flushLeft) { throw 'Pixel checks no longer inspect the blank image faithfully' }
 }
+$frame.Left = 0; $frame.Top = 0
+$origin.X = 0; $origin.Y = 0
+$fixtures = '${path.join(root, 'tools/fixtures/IGSH-1150').replace(/'/g, "''")}'
+$baseline = Join-Path $fixtures 'group-rail-selected-1.png'
+$proof = [GroupRailProof]::Check($baseline, $frame, $origin, 96, 100, $true, $false, 300)
+if (-not $proof.noFill -or -not $proof.noRail -or -not $proof.flushLeft) { throw ('Shipped screenshot failed: ' + ($proof | ConvertTo-Json -Compress)) }
+$labels = [GroupRailProof]::Labels($baseline, $frame, $origin, 96, 100, $proof.sidebarRect[3], $proof.nameX[0], $proof.rowHeight, 300)
+if (-not $labels.sameStyle -or -not $labels.noArrow -or -not $labels.plusOnly) { throw ('Shipped labels failed: ' + ($labels | ConvertTo-Json -Compress)) }
+$toggle = [GroupRailProof]::Toggle($baseline, (Join-Path $fixtures 'group-rail-collapsed.png'), (Join-Path $fixtures 'group-rail-restored.png'), $proof.sessionTextX[0], ($proof.headerTops[0] + $proof.headerHeight), $proof.rowHeight, $proof.headerTops[0], ($proof.sidebarRect[3] + 24 + 2 * $proof.rowHeight), 96, 100)
+if (-not $toggle.membersDisappearAndReturn) { throw 'Shipped member rows do not disappear and return' }
+$frame.Left = -8; $frame.Top = -8
+$client = New-Object VerifyNative+Rect
+$browser = New-Object VerifyNative+Rect
+$browser.Left = 558; $browser.Top = 40; $browser.Right = 1016; $browser.Bottom = 712
+$mask = New-Object 'Collections.Generic.Dictionary[string,object]'
+$mask['rect'] = [int[]]@(868, 38, 1018, 74); $mask['handle'] = [long]1
+$masks = [Collections.Generic.Dictionary[string,object][]]@($mask)
+$colors = [PaneLayoutProof]::MeasureMasks((Join-Path $fixtures 'pane-layout-mask-dark.png'), 'dark', $frame, $client, $browser, $masks, 96, 100)
+[PaneLayoutProof]::CheckMasks($colors, 'dark')
+if (($colors.appColor -join ',') -cne '16,16,16') { throw 'App comparison sampled a session label, not the quiet gutter' }
 Write-Host 'NATIVE_GROUP_GEOMETRY_OK'
 `;
   try {
@@ -2330,5 +2382,36 @@ Write-Host 'NATIVE_GROUP_GEOMETRY_OK'
     assert.match(result.stdout, /NATIVE_GROUP_GEOMETRY_OK/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('IGSH-1161 owned global console fonts are released after process teardown and before scratch removal', () => {
+  const driver = read(skill + 'control.ps1');
+  const library = read(skill + 'control-library.ps1');
+  const native = read(skill + 'control-native.cs');
+  const stop = driver.indexOf('$stopped = $job.Stop()');
+  const release = driver.indexOf('Release-ScratchConsoleFonts $scratch', stop);
+  const copy = driver.indexOf('Prepare-ScratchEvidence $scratch', stop);
+  assert.ok(stop >= 0 && release > stop && copy > release, 'release global font references only after owned processes stop');
+  assert.match(native, /\[DllImport\("gdi32\.dll", CharSet=CharSet\.Unicode\)\] public static extern bool RemoveFontResourceEx\(string path, uint flags, IntPtr reserved\);/);
+  assert.match(library, /function Release-ScratchConsoleFonts\(\[string\]\$Path\)/);
+  const cleanup = library.slice(library.indexOf('function Release-ScratchConsoleFonts('), library.indexOf('function Test-VanishedScratchItem('));
+  assert.ok(cleanup.includes("Join-Path $Path 'local/ZigShell/fonts'"));
+  assert.ok(cleanup.includes('[VerifyNative]::RemoveFontResourceEx($entry.FullName, 0, [IntPtr]::Zero)'));
+  assert.ok(cleanup.includes("'console-font-cleanup.json'"));
+});
+
+test('release sidebar pixel oracles use the live width and approved expanded row height', () => {
+  const source = read(skill + 'control-native.cs');
+  const groups = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class CodeFontProof {'));
+  assert.doesNotMatch(groups, /S\(220, dpi, scale\)|S\(38, dpi, scale\)/);
+  const height = Number(read('src/browser_pane.zig').match(/!app_state.g_sidebar_collapsed\) (\d+)/)[1]);
+  assert.equal(Number(groups.match(/headerHeight = 28, rowHeight = S\((\d+),/)[1]), height);
+  assert.match(groups, /rowBottom = rowTop \+ S\(58, dpi, scale\)/);
+  for (const feature of ['group-rail', 'pane-layout']) {
+    const driver = read(skill + `control-feature-${feature}.ps1`);
+    assert.match(driver, /session.json.launch.json/);
+    assert.match(driver, /\$sidebarLogical = \[int\].*sidebar_width/);
+    for (const call of driver.matchAll(/\[(?:GroupRailProof|PaneLayoutProof)\]::(?:Check|Labels|FocusMargins)\([^\n]+/g)) assert.match(call[0], /, \$sidebarLogical\)$/);
   }
 });

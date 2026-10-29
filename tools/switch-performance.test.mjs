@@ -240,7 +240,7 @@ function Get-Content {
 $snapshot = Session
 @{ attempts=$script:reads; active=$snapshot.active_tab; tabs=@($snapshot.tabs).Count } | ConvertTo-Json -Compress
 `;
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 10000 });
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout.trim()), { attempts: 4, active: 1, tabs: 2 });
 });
@@ -272,8 +272,11 @@ test('diagnostic instrumentation qualifies capture logging and keeps ordinary bu
     const original = fs.readFileSync(captureFile, 'utf8');
     instrument(directory, true);
     const capture = fs.readFileSync(captureFile, 'utf8');
+    assert.match(capture, /QueryPerformanceCounter\(&profile_read\);\n    chatCaptureStatus/);
     assert.match(capture, /@import\("diagnostics.zig"\)\.debugLog\(std\.fmt\.bufPrint\(&message, "idle-capture:/);
     assert.notEqual(capture, original);
+    assert.match(fs.readFileSync(path.join(target, 'diagnostics.zig'), 'utf8'), /defer @import\("switch_cpu_profile.zig"\)\.end\(\.logging/);
+    assert.match(fs.readFileSync(path.join(target, 'switch_cpu_profile.zig'), 'utf8'), /QueryThreadCycleTime/);
     assert.match(fs.readFileSync(path.join(target, 'main.zig'), 'utf8'), /ready_us=\{d\} transcript_us=\{d\}/);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

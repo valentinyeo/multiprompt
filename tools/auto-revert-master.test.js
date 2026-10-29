@@ -56,6 +56,7 @@ function runtime(input, event = 'workflow_dispatch', failure = null, rateLimits 
   const process = { env: { AUTO_REVERT_RUN_ID: String(input.run.id), GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: repository, GITHUB_STEP_SUMMARY: '/summary' }, exitCode: 0 };
   const module = { exports: {} };
   const require = name => {
+    if (name === './journey-policy.json') return input.policy || JSON.parse(fs.readFileSync(`${__dirname}/journey-policy.json`, 'utf8'));
     if (name === 'node:fs') return { appendFileSync(file, text) { assert.equal(file, '/summary'); summaries.push(text); } };
     assert.equal(name, 'node:child_process');
     return { execFileSync(command, args) {
@@ -561,7 +562,7 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
   const release = fs.readFileSync(`${__dirname}/../.github/workflows/release.yml`, 'utf8');
   assert.ok(featureMatrix(verify).pr.includes('appearance'));
-  assert.match(verify, /github.event_name == 'push' \|\| inputs.feature == 'all'/);
+  assert.doesNotMatch(verify, /github.event_name == 'push' \|\| inputs.feature == 'all'/);
   const matrices = [featureMatrix(verify).pr, featureMatrix(verify).full];
   assert.ok(matrices[1].length >= 21);
   assert.ok(matrices[1].includes('settings-panel'));
@@ -581,6 +582,9 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
   });
   assert.deepEqual(JSON.parse(JSON.stringify(targeted)), ['browser-pane-stuck', 'chat-messages-only']);
   assert.doesNotMatch(release, /gh workflow run verify\.yml/);
+  assert.match(release, /journeys:\n    needs: prepare\n    uses: \.\/\.github\/workflows\/verify\.yml\n    with:\n      feature: all\n      revision: \$\{\{ needs.prepare.outputs.sha \}\}/);
+  assert.equal((release.match(/feature: all/g) || []).length, 1);
+  assert.match(release, /build:\n    needs: \[prepare, journeys\]/);
 });
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
@@ -683,5 +687,39 @@ test('auto-revert PRs pass the changelog and red-run admission rules that a reve
     assert.equal(revert.status, 0, `${tool}: ${revert.stdout}${revert.stderr}`);
     const normal = admit(tool, args, 'ceo/DEMO-1');
     assert.equal(normal.status, 1, `${tool}: ${normal.stdout}${normal.stderr}`);
+  }
+});
+
+for (const key of ['browser-pane-stuck', 'chat-messages-only']) {
+  test(`IGSH-1033 quarantined ${key} never reverts or opens a failure issue`, () => {
+    const input = fixture();
+    input.jobs = [{ name: `verify (${key})`, conclusion: 'failure' }];
+    input.history[0].jobs = [{ name: `verify (${key})`, conclusion: 'success' }];
+    input.policy = JSON.parse(fs.readFileSync(`${__dirname}/fixtures/IGSH-1033/journey-policy.json`, 'utf8'));
+    const result = runtime(input, 'workflow_run');
+    assert.equal(result.process.exitCode, 0, result.output);
+    assert.equal(result.calls.some(call => call[0] === 'git' && call[1] === 'revert'), false);
+    assert.equal(result.calls.some(call => call[0] === 'gh' && call.includes('POST')), false);
+  });
+}
+test('IGSH-1033 a quarantined failure cannot mask an eligible parent regression', () => {
+  const input = fixture();
+  input.jobs.push({ name: 'verify (browser-pane-stuck)', conclusion: 'failure' });
+  input.policy = JSON.parse(fs.readFileSync(`${__dirname}/fixtures/IGSH-1033/journey-policy.json`, 'utf8'));
+  const result = runtime(input, 'workflow_run');
+  assert.equal(result.process.exitCode, 0, result.output);
+  const board = result.calls.find(call => call[0] === 'node' && call[1] === 'tools/auto-revert-board.js');
+  assert.ok(board, result.output);
+  assert.equal(board[4], 'session-restore, chat-focus');
+});
+
+test('IGSH-1033 repaired journeys remain blocking after quarantine retirement', () => {
+  assert.ok(fs.existsSync(`${__dirname}/journey-policy.json`), 'Shared quarantine policy must ship');
+  assert.deepEqual(JSON.parse(fs.readFileSync(`${__dirname}/journey-policy.json`, 'utf8')), { quarantined: {} });
+  for (const key of ['browser-pane-stuck', 'chat-messages-only']) {
+    const input = fixture();
+    input.jobs = [{ name: `verify (${key})`, conclusion: 'failure' }];
+    input.history[0].jobs = [{ name: `verify (${key})`, conclusion: 'success' }];
+    assert.equal(decide(input).action, 'revert');
   }
 });

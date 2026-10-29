@@ -70,6 +70,49 @@ export function instrument(root, profile = false) {
     const times = calls.map((_, index) => `@divTrunc((poll_stages[${index}] -| ${index ? `poll_stages[${index - 1}]` : 'poll_started'}) * 1_000_000, @max(1, frequency))`);
     poll = poll.replace('.{@divTrunc((now -| poll_started) * 1_000_000, @max(1, frequency))}', `.{@divTrunc((now -| poll_started) * 1_000_000, @max(1, frequency)), ${times.join(', ')}}`);
     source = source.slice(0, start) + poll + source.slice(end);
+    const stages = [
+      ['chat_render.zig', 'chatPaintTranscriptContent', 'paint'],
+      ['chat_render.zig', 'chatRelayout', 'layout'],
+      ['dwrite_text.zig', 'draw', 'text'],
+      ['dwrite_text.zig', 'prepare', 'shape'],
+      ['diagnostics.zig', 'debugLog', 'logging'],
+      ['session.zig', 'saveSession', 'save'],
+    ];
+    for (const [name, fn, stage] of stages) {
+      const file = path.join(root, 'src', name);
+      let body = fs.readFileSync(file, 'utf8');
+      const signature = new RegExp(`(fn ${fn}\\([^\\n]+\\{)`);
+      if (!signature.test(body)) throw new Error(`Unknown CPU profile boundary: ${name}:${fn}`);
+      body = body.replace(signature, `$1\n    const cpu_profile_start = @import("switch_cpu_profile.zig").start();\n    defer @import("switch_cpu_profile.zig").end(.${stage}, cpu_profile_start);`);
+      fs.writeFileSync(file, body);
+    }
+    const textFile = path.join(root, 'src/dwrite_text.zig');
+    let renderer = fs.readFileSync(textFile, 'utf8');
+    renderer = renderer.replace(/    if \((t\.v\.drawGlyphRun\([^\n]+\)) < 0\) return null;/, `    const raster_start = @import("switch_cpu_profile.zig").start();
+    const raster_result = $1;
+    @import("switch_cpu_profile.zig").end(.raster, raster_start);
+    if (raster_result < 0) return null;`);
+    fs.writeFileSync(textFile, renderer);
+    fs.writeFileSync(path.join(root, 'src/switch_cpu_profile.zig'), `
+const std = @import("std");
+const win = @import("win32.zig");
+extern "kernel32" fn QueryThreadCycleTime(win.HANDLE, *u64) callconv(win.WINAPI) win.BOOL;
+const Stage = enum { paint, layout, text, logging, save, shape, raster };
+threadlocal var cycles: [7]u64 = @splat(0);
+pub fn start() u64 {
+    var value: u64 = 0;
+    _ = QueryThreadCycleTime(@ptrFromInt(std.math.maxInt(usize) - 1), &value);
+    return value;
+}
+pub fn end(stage: Stage, before: u64) void { cycles[@intFromEnum(stage)] += start() -| before; }
+pub fn report() void {
+    const measured = cycles;
+    cycles = @splat(0);
+    var message: [256]u8 = undefined;
+    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&message, "UI-CYCLES paint={d} layout={d} text={d} logging={d} save={d} shape={d} raster={d}", .{ measured[0], measured[1], measured[2], measured[3], measured[4], measured[5], measured[6] }) catch return);
+}
+`);
+    source = source.replace('                    const poll_revision =', '                    defer @import("switch_cpu_profile.zig").report();\n                    const poll_revision =');
     const captureFile = path.join(root, 'src/chat_capture.zig');
     let capture = fs.readFileSync(captureFile, 'utf8');
     const boundary = '    _ = FreeConsole();';
@@ -93,7 +136,7 @@ export function instrument(root, profile = false) {
     }
 ` + boundary);
     body = body.replace('    defer _ = FreeConsole();', '    defer _ = FreeConsole();\n    _ = @import("win32.zig").QueryPerformanceCounter(&profile_attach);');
-    body = body.replace('    app_state.g_chat_raw_len = chars_read;', '    _ = @import("win32.zig").QueryPerformanceCounter(&profile_read);\n    app_state.g_chat_raw_len = chars_read;');
+    body = body.replace('    chatCaptureStatus(shell_index, width, chars_read, rows);', '    _ = @import("win32.zig").QueryPerformanceCounter(&profile_read);\n    chatCaptureStatus(shell_index, width, chars_read, rows);');
     fs.writeFileSync(captureFile, capture.slice(0, from) + body);
   }
   fs.writeFileSync(file, source);

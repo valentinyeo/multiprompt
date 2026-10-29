@@ -107,3 +107,12 @@ ConvertTo-Json -InputObject $results -Compress
     assert.deepEqual(JSON.parse(result.stdout.trim()), cases.map(({ name, accepted }) => ({ name, accepted })), label);
   }
 });
+
+
+test('window pixels use the actual app-published sidebar width rather than the retired 220px layout', () => {
+  assert.match(journey, /session\.json\.launch\.json/);
+  assert.match(journey, /ConvertFrom-Json\)\.sidebar_width/);
+  assert.match(journey, /Floor\(\$sidebarLogical \* \$dpi \/ 96\)/);
+  assert.doesNotMatch(journey, /Floor\(220 \* \$dpi/);
+  assert.match(native, /start = leftGap \+ sidebar \+ 16 \* dpi \/ 96/);
+});

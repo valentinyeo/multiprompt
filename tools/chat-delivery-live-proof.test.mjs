@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-async function fixture(t, sustained = false) {
+async function fixture(t, sustained = false, crashStress = false) {
   const file = new URL('./chat-delivery-live-proof.mjs', import.meta.url);
   assert.ok(fs.existsSync(file), 'The continuous native delivery oracle must ship');
   const { verifyLiveDelivery } = await import(file);
@@ -15,11 +15,11 @@ async function fixture(t, sustained = false) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value));
   };
-  const count = sustained ? 31 : 10;
-  const interval = sustained ? 60000 : 10000;
+  const count = crashStress ? 30 : sustained ? 31 : 10;
+  const interval = sustained && !crashStress ? 60000 : 10000;
   const rounds = Array.from({ length: count }, (_, i) => ({ round: i + 1, messages: Array.from({ length: 3 }, (_, j) => `Live request ${i + 1} part ${j + 1}`), shownMs: 1000 + i * interval + 1500 }));
   const truth = rounds.map(row => ({ turn: row.round, ms: row.shownMs - 1500, accepted: row.messages, answer: `Live answer ${row.round}` }));
-  const observed = { error: null, rounds, recordedFrames: Array(2 * count).fill('native-frame'), longDelivery: sustained };
+  const observed = { error: null, rounds, recordedFrames: Array(2 * count).fill('native-frame'), longDelivery: sustained, crashStress };
   write('live-delivery/observation.json', observed);
   write('live-delivery/stand-in/live-turns.jsonl', truth.map(JSON.stringify).join('\n'));
   write('live-delivery/stand-in/frames.jsonl', truth.map(row => JSON.stringify({ op: 'live-turn', screen: row.answer, queue: [] })).join('\n'));
@@ -46,6 +46,21 @@ test('ten fresh replies and thirty accepted busy messages pass', async t => {
   const f = await fixture(t);
   assert.equal(f.check().replies, 10);
   assert.equal(f.check().maxReplyMs, 1500);
+});
+
+test('IGSH-1152 crash stress requires thirty rounds and cannot claim thirty minutes', async t => {
+  const f = await fixture(t, true, true);
+  assert.equal(f.check().replies, 30);
+  assert.ok(f.check().sustainedMs < 1800000);
+  f.observed.crashStress = false;
+  f.write('live-delivery/observation.json', f.observed);
+  assert.throws(f.check, assert.AssertionError);
+});
+
+test('IGSH-1152 a crash report fails even with complete reply receipts', async t => {
+  const f = await fixture(t);
+  f.write('live-delivery/crashes/crash-recorded.txt', 'ACCESS_VIOLATION');
+  assert.throws(f.check, /native chat crashed/);
 });
 
 test('slow replies, stale copies, unsent ghosts and view-refresh tricks fail', async t => {

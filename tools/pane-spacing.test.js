@@ -400,7 +400,7 @@ test "all production pane consumers share outer margins and gaps" {
                             }
                             const content = chat_style.contentColumn(inner.left, inner.right - inner.left, uiScaled(960));
                             try std.testing.expectEqual(content.left, c.transcript.left);
-                            try std.testing.expectEqual(content.width, c.composer_card.right - c.composer_card.left);
+                            try std.testing.expectEqual(content.width, c.composer_card.right - c.attach_btn.left);
                             const margin = if (hidden) uiScaled(8) else burn.left;
                             const sidebar_gap = if (hidden) primary.left else primary.left - burn.right;
                             var right_margin = test_client.right - primary.right;
@@ -445,8 +445,9 @@ test "all production pane consumers share outer margins and gaps" {
                             for (gaps) |gap| equalGap(margin, gap) catch { failures += 1; };
                             if (!hidden) equalGap(margin, test_client.bottom - burn.bottom) catch { failures += 1; };
                             if (chat_on) {
-                                try std.testing.expectEqual(c.transcript.left, c.composer_card.left);
+                                try std.testing.expectEqual(c.transcript.left, c.attach_btn.left);
                                 try std.testing.expectEqual(c.transcript.right, c.composer_card.right);
+                                try std.testing.expectEqual(uiScaled(8), c.composer_card.left - c.attach_btn.right);
                             }
                         }
                     }

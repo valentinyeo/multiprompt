@@ -58,7 +58,7 @@ test('ISSUE-444 big rounded fills use GDI interiors and only small corner paths'
   const fill = body(source('smooth.zig'), 'fillRounded');
   assert.match(fill, /g\.width \* g\.height <= 4096/);
   assert.match(fill, /w\.FillRect/);
-  assert.match(fill, /for \(specs\) \|corner\| \{\s*var corners/);
+  assert.match(fill, /for \(specs\) \|corner\| \{[^]*?var corners/);
   assert.match(fill, /self\.fill\(corners, color\)/);
   assert.doesNotMatch(fill.slice(fill.indexOf('const api')), /self\.fill\(path/);
   assert.match(source('smooth.zig'), /paint_hdc == hdc/);
@@ -88,10 +88,136 @@ test('ISSUE-444 main graphics live with the backbuffer rather than each paint', 
 
 test('ISSUE-444 main and transcript backbuffers expose DIB pixels to the shared graphics', () => {
   const main = body(source('drawing.zig'), 'ensurePaintBackbuffer');
-  const transcript = body(source('chat_render.zig'), 'chatTranscriptWndProc');
+  const transcript = body(source('chat_render.zig'), 'ensureTranscriptBackbuffer');
   for (const paint of [main, transcript]) {
     assert.match(paint, /CreateDIBSection/);
     assert.match(paint, /\.height = -(?:h|height)\b/);
     assert.doesNotMatch(paint, /CreateCompatibleBitmap/);
   }
+});
+
+
+test('IGSH-1149 clipped gradient strips build only corners that can reach painted pixels', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clipped-corners-'));
+  const code = `
+const std = @import("std");
+const HANDLE = ?*anyopaque;
+const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+const RoundGeometry = struct { x: f32, y: f32, width: f32, height: f32, diameter_x: f32, diameter_y: f32 };
+var clip = RECT{ .left = 0, .top = 0, .right = 200, .bottom = 100 };
+var fills: usize = 0;
+const w = struct {
+    fn CreateSolidBrush(_: u32) HANDLE { return @ptrFromInt(1); }
+    fn DeleteObject(_: HANDLE) i32 { return 1; }
+    fn FillRect(_: HANDLE, _: *const RECT, _: HANDLE) i32 { return 1; }
+    fn RectVisible(_: HANDLE, rc: *const RECT) i32 {
+        return @intFromBool(rc.right > clip.left and rc.left < clip.right and rc.bottom > clip.top and rc.top < clip.bottom);
+    }
+};
+const Api = struct {
+    create_path: *const fn (i32, *HANDLE) i32 = create,
+    delete_path: *const fn (HANDLE) i32 = one,
+    start_figure: *const fn (HANDLE) i32 = one,
+    close_figure: *const fn (HANDLE) i32 = one,
+    add_path_arc: *const fn (HANDLE, f32, f32, f32, f32, f32, f32) i32 = arc,
+    add_path_line: *const fn (HANDLE, f32, f32, f32, f32) i32 = line,
+    fn create(_: i32, path: *HANDLE) i32 { path.* = @ptrFromInt(1); return 0; }
+    fn one(_: HANDLE) i32 { return 0; }
+    fn arc(_: HANDLE, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) i32 { return 0; }
+    fn line(_: HANDLE, _: f32, _: f32, _: f32, _: f32) i32 { return 0; }
+};
+const app_state = struct { var g_gdip_api: Api = .{}; };
+const Canvas = struct {
+    hdc: HANDLE = @ptrFromInt(1),
+    fn fill(_: *Canvas, _: HANDLE, _: u32) bool { fills += 1; return true; }
+    ${body(source('smooth.zig'), 'fillRounded')}
+};
+test "native gradient clip retains visible corners and skips invisible paths" {
+    var canvas: Canvas = .{};
+    const g = RoundGeometry{ .x = 0, .y = 0, .width = 200, .height = 100, .diameter_x = 20, .diameter_y = 20 };
+    try std.testing.expect(canvas.fillRounded(@ptrFromInt(1), g, 0xffffff));
+    try std.testing.expectEqual(@as(usize, 4), fills);
+    fills = 0;
+    clip.top = 20; clip.bottom = 80;
+    try std.testing.expect(canvas.fillRounded(@ptrFromInt(1), g, 0xffffff));
+    try std.testing.expectEqual(@as(usize, 0), fills);
+    fills = 0;
+    clip.top = 0; clip.bottom = 10;
+    try std.testing.expect(canvas.fillRounded(@ptrFromInt(1), g, 0xffffff));
+    try std.testing.expectEqual(@as(usize, 2), fills);
+    fills = 0;
+    clip.left = 190; clip.top = 90; clip.bottom = 100;
+    try std.testing.expect(canvas.fillRounded(@ptrFromInt(1), g, 0xffffff));
+    try std.testing.expectEqual(@as(usize, 1), fills);
+}
+`;
+  try {
+    fs.writeFileSync(path.join(dir, 'corners.zig'), code);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'corners.zig')], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test('IGSH-1149 transcript paint resources survive repeated frames and release on growth or destruction', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'transcript-paint-'));
+  try {
+    const render = source('chat_render.zig');
+    assert.match(body(render, 'chatTranscriptWndProc'), /ensureTranscriptBackbuffer\(hdc, w, h\)/);
+    assert.match(body(render, 'chatTranscriptWndProc'), /WM_DESTROY => \{\s*resetTranscriptBackbuffer\(\)/);
+    const fields = render.slice(render.indexOf('var transcript_paint_dc:'), render.indexOf('fn resetTranscriptBackbuffer('));
+    const code = `
+const std = @import("std");
+const HANDLE = ?*anyopaque;
+var allocated: usize = 0;
+var deleted: usize = 0;
+var dc_deleted: usize = 0;
+var fail_bitmap = false;
+fn CreateCompatibleDC(_: HANDLE) HANDLE { return @ptrFromInt(1); }
+fn DeleteDC(_: HANDLE) i32 { dc_deleted += 1; return 1; }
+fn DeleteObject(_: HANDLE) i32 { deleted += 1; return 1; }
+fn SelectObject(_: HANDLE, _: HANDLE) HANDLE { return @ptrFromInt(2); }
+${fields}
+${body(render, 'resetTranscriptBackbuffer')}
+${body(render, 'ensureTranscriptBackbuffer')}
+test "reuse, resize, failed allocation and teardown" {
+    try std.testing.expect(ensureTranscriptBackbuffer(null, 0, 100) == null);
+    for (0..120) |_| try std.testing.expect(ensureTranscriptBackbuffer(null, 700, 500) != null);
+    try std.testing.expectEqual(@as(usize, 1), allocated);
+    try std.testing.expectEqual(@as(usize, 0), deleted);
+    try std.testing.expect(ensureTranscriptBackbuffer(null, 900, 500) != null);
+    try std.testing.expectEqual(@as(usize, 2), allocated);
+    try std.testing.expectEqual(@as(usize, 1), deleted);
+    resetTranscriptBackbuffer();
+    try std.testing.expectEqual(@as(usize, 2), deleted);
+    try std.testing.expectEqual(@as(usize, 2), dc_deleted);
+    resetTranscriptBackbuffer();
+    try std.testing.expectEqual(@as(usize, 2), deleted);
+    fail_bitmap = true;
+    try std.testing.expect(ensureTranscriptBackbuffer(null, 900, 500) == null);
+    try std.testing.expectEqual(@as(usize, 3), dc_deleted);
+    fail_bitmap = false;
+    try std.testing.expect(ensureTranscriptBackbuffer(null, 900, 500) != null);
+    resetTranscriptBackbuffer();
+    try std.testing.expectEqual(@as(usize, 3), deleted);
+}
+`;
+    fs.writeFileSync(path.join(dir, 'paint.zig'), code);
+    fs.writeFileSync(path.join(dir, 'win32.zig'), `
+const main = @import("paint.zig");
+pub const BITMAPINFO = struct { header: struct { width: i32, height: i32 } };
+pub fn CreateDIBSection(_: ?*anyopaque, _: *const BITMAPINFO, _: i32, _: *?*anyopaque, _: ?*anyopaque, _: i32) ?*anyopaque {
+    if (main.fail_bitmap) return null;
+    main.allocated += 1;
+    return @ptrFromInt(3);
+}
+`);
+    fs.writeFileSync(path.join(dir, 'paint.zig'), code.replace('var allocated:', 'pub var allocated:').replace('var fail_bitmap', 'pub var fail_bitmap'));
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'paint.zig')], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

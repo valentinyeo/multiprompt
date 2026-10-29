@@ -17,6 +17,7 @@ Start-Transcript "$Evidence/driver.log"
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
+if ($Feature -eq 'chat-full-history') { Add-Type -Path "$PSScriptRoot/chat-switch-observer.cs" -ReferencedAssemblies System.Drawing }
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 if ($env:CHAT_REPLY_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reply proof requires chat-delivery' }
 if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Fresh skills proof requires chat-delivery' }
@@ -102,10 +103,10 @@ function Doctor([bool]$Chat = $false) {
         Save @{offscreen=$element.Current.IsOffscreen; pid=$element.Current.ProcessId; title=$title; hwnd=$main.ToInt64()} "$caseDir/doctor-window.json"
         throw 'Doctor: visible versioned UI Automation identity missing'
     }
-    $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
+    $session = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
     $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1') { $expectedShells } else { 1 }
-    if (@($published.shells).Count -ne $expectedShells -or @($published.shells | Where-Object { $_.kind -eq 3 }).Count -ne $expectedTmux -or
-        ($expectedShells -eq 2 -and @($published.shells | Where-Object { $_.kind -eq 0 }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not published' }
+    if (@($session.tabs).Count -ne $expectedShells -or @($session.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -ne $expectedTmux -or
+        ($expectedShells -eq 2 -and @($session.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
     if ($Chat) {
         $focus = [ChatDeliveryDesktop]::Focus($main)
         if ($focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Doctor: owned composer must have foreground typing focus' }
@@ -296,22 +297,43 @@ function Clear-Composer {
     for ($i = 0; $i -lt $length; $i++) { Press @(0x08) 'Backspace: clear composer' $true }
 }
 function Assert-FullHistory([string]$Stage) {
+    $rounds = if ($env:CHAT_LONG_PROOF -eq '1') { 320 } else { 24 }
+    $blocks = 2 + 3 * $rounds + $(if ($env:CHAT_LONG_PROOF -eq '1') { 300 } else { 0 })
+    if ($Stage -in @('open', 'restart')) {
+        $latest = 'IGSH815 assistant {0:00}' -f ($rounds - 1)
+        [Windows.Forms.Clipboard]::Clear()
+        [void](Wait-For 'latest retained message reaches the real rendered transcript' {
+            [ChatSwitchObserver]::CopyTranscript($app.Id, $main)
+            try { [Windows.Forms.Clipboard]::GetText().Contains($latest) }
+            catch {
+                if ($_.Exception.InnerException -isnot [Runtime.InteropServices.ExternalException]) { throw }
+                $false
+            }
+        } 2)
+        Shot "full-history-$Stage-latest"
+        $latestClock.Stop()
+        Save @{latest=$latest; visibleMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/$Stage-latest.json"
+        if ($latestClock.ElapsedMilliseconds -gt 2000) { throw "Latest long-chat message exceeded two seconds at $Stage" }
+        Doctor $true
+        Press @(0x1B) 'Esc: clear latest-message selection'
+    }
     $offset = (Read-Shared "$settings/debug.log").Length
     $complete = Step 'all session rows reach the renderer' {
         Press @(0x11, 0x30) 'Ctrl+0: measure every rendered session row'
         $log = (Read-Shared "$settings/debug.log").Substring($offset)
         $frames = [regex]::Matches($log, '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
-        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq 74
+        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq $blocks
     }
     if (-not $complete) { throw "IGSH-815 incomplete session at $Stage" }
     $pollOffset = (Read-Shared "$settings/debug.log").Length
-    [void](Wait-For 'normal transcript poll completes after full history loads' {
+    Shell-Run @('history-refresh')
+    [void](Wait-For 'changed transcript delivery completes after full history loads' {
         (Read-Shared "$settings/debug.log").Substring($pollOffset) -match '(?s)\[chat\] transcript request shell=(\d+) offset=\d+ before=0.*?\[chat\] transcript load shell=\1 ok'
     })
     $offset = (Read-Shared "$settings/debug.log").Length
     Press @(0x11, 0x30) 'Ctrl+0: measure every session row after polling'
     $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
-    if ($frames.Count -eq 0 -or [int]$frames[$frames.Count - 1].Groups[1].Value -ne 74) { throw "IGSH-815 session rows lost after polling at $Stage" }
+    if ($frames.Count -eq 0 -or [int]$frames[$frames.Count - 1].Groups[1].Value -ne $blocks) { throw "IGSH-815 session rows lost after polling at $Stage" }
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($main)
     $condition = [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
     $views = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen -and $_.Current.ProcessId -eq $app.Id })
@@ -327,7 +349,7 @@ function Assert-FullHistory([string]$Stage) {
     $copied = [Windows.Forms.Clipboard]::GetText()
     [IO.File]::WriteAllText("$caseDir/$Stage-copied.txt", $copied)
     $actual = @([regex]::Matches($copied, 'IGSH815 (?:user|assistant) \d+') | ForEach-Object { $_.Value })
-    $expected = @(0..23 | ForEach-Object { 'IGSH815 user {0:00}' -f $_; 'IGSH815 assistant {0:00}' -f $_ })
+    $expected = @(0..($rounds - 1) | ForEach-Object { 'IGSH815 user {0:00}' -f $_; 'IGSH815 assistant {0:00}' -f $_ })
     if (($actual -join '|') -cne ($expected -join '|') -or -not $copied.Contains('start the fake session') -or -not $copied.Contains('The fake session is ready.')) { throw "IGSH-815 incomplete copied messages at $Stage" }
     Shot "full-history-$Stage"
     Press @(0x1B) 'Esc: clear transcript selection'
@@ -372,7 +394,7 @@ function Assert-FullHistory([string]$Stage) {
     Save @{stage=$Stage; wheel_notch_px=$moved; browser_notch_px=$browserNotch; thumb_height=[int]$scrollUi.Groups[2].Value; button_click=@($clickX, $clickY)} "$caseDir/$Stage-scroll-ui.json"
     [void][ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)
     Doctor $true
-    Save @{stage=$Stage; blocks=74; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
+    Save @{stage=$Stage; blocks=$blocks; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 function Retention-Copy([string]$Stage, [int]$Count) {
     $offset = (Read-Shared "$settings/debug.log").Length
@@ -583,6 +605,7 @@ foreach ($plan in $plans) {
         Press @(0x11, 0x31) 'Ctrl+1: select saved tmux tab'
         Shot "$($plan.name)-before"
         if ($plan.name -eq 'busy-send') { Shot 'before' }
+        $latestClock = [Diagnostics.Stopwatch]::StartNew()
         Press @(0x12, 0x43) 'Alt+C: open Chat View'
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
@@ -708,13 +731,16 @@ foreach ($plan in $plans) {
             Save $stopped "$caseDir/restart-process-tree.json"
             $job.Dispose()
             $job = [VerifyJob]::new()
+            $latestClock = [Diagnostics.Stopwatch]::StartNew()
             $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
             $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-            [void](Wait-For 'restarted owned app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
+            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
+            $windowMs = [int]$latestClock.ElapsedMilliseconds
             $composer = Wait-For 'restored native Chat View composer with owned typing focus' {
                 $h = [ChatDeliveryDesktop]::Composer($main)
                 if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $h)) { $h }
             }
+            Save @{windowMs=$windowMs; focusedMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/restart-ready.json"
             Assert-FullHistory 'restart'
             if ($env:CHAT_LONG_PROOF -eq '1') { . "$PSScriptRoot/long-chat.ps1" }
         } elseif ($isReply) {
@@ -1246,7 +1272,9 @@ foreach ($plan in $plans) {
             if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$caseDir/session-after.json" }
             if (Test-Path "$settings/crashes") {
                 New-Item -ItemType Directory -Force "$caseDir/crashes" | Out-Null
-                Copy-Item "$settings/crashes/*.txt" "$caseDir/crashes/" -ErrorAction SilentlyContinue
+                Get-ChildItem -LiteralPath "$settings/crashes" -File |
+                    Where-Object { $_.Extension -in @('.txt', '.dmp') } |
+                    Copy-Item -Destination "$caseDir/crashes/" -ErrorAction Stop
             }
             if ($isActivity -and (Test-Path "$settings/chatcache")) { Copy-Item "$settings/chatcache" "$caseDir/chatcache" -Recurse -Force }
             if ($hasTranscript -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }
@@ -1308,7 +1336,11 @@ if ($env:CHAT_ACCEPTED_PROOF -eq '1') {
     exit $LASTEXITCODE
 }
 if ($env:CHAT_SWITCH_PROOF -eq '1') {
-    & node "$PSScriptRoot/../remote-switch-proof.mjs" $Evidence
+    if ($env:CHAT_SWITCH_PAIRED -eq '1') {
+        & node "$PSScriptRoot/../remote-switch-proof.mjs" $Evidence --measure
+    } else {
+        & node "$PSScriptRoot/../remote-switch-proof.mjs" $Evidence
+    }
     exit $LASTEXITCODE
 }
 if ($env:CHAT_REMOTE_PROOF -eq '1') {

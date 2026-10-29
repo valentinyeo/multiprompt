@@ -132,6 +132,7 @@ fn IsWindowVisible(_: HANDLE) BOOL { return @intFromBool(visible); }
 fn ShowWindowAsync(hwnd: HANDLE, cmd: i32) BOOL { return ShowWindow(hwnd, cmd); }
 fn verboseLoggingEnabled() bool { return debug_enabled; }
 fn debugLog(line: []const u8) void { @memcpy(log[0..line.len], line); log_len = line.len; }
+fn layoutChatControls() void {}
 fn updateBrowserVisibility() void {}
 fn focusActiveShell() void {}
 fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) i32 { return 1; }
@@ -263,22 +264,22 @@ test('executed production Zig decision, show, picker-close and input paths pass;
     copyZig(['chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, (harness(source)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-    const run = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
-    assert.equal(run.status, 0, run.stdout + run.stderr);
+    const run = spawnSync(zig, ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(run.status, 0, run.stdout + run.stderr + JSON.stringify({ signal: run.signal, error: run.error?.message }));
     assert.match(run.stderr, /All \d+ tests passed/);
     console.log(run.stderr.trim());
     const broken = source.replace('if (!shellConsoleShouldBeVisible(idx)) {', 'if (false) {');
     assert.notEqual(broken, source);
     fs.writeFileSync(file, (harness(broken)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-    const negative = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+    const negative = spawnSync(zig, ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(negative.status, 0, 'an unconditional show must fail real execution');
-    assert.match(negative.stderr, /URL picker close[^]*FAIL/);
+    assert.match(negative.stderr, /URL picker close[^]*FAIL/, JSON.stringify({ status: negative.status, signal: negative.signal, error: negative.error?.message, stdout: negative.stdout }));
     const oldPicker = source.replace(fn(source, 'closeUrlPickerInternal'), fn(source, 'closeUrlPickerInternal').replace('showShellConsole(active_shell, SW_SHOW, "closeUrlPickerInternal")', 'ShowWindow(shells[active_shell].hwnd, SW_SHOW)'));
     assert.notEqual(oldPicker, source);
     fs.writeFileSync(file, (harness(oldPicker)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
-    const baseline = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
+    const baseline = spawnSync(zig, ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
     assert.notEqual(baseline.status, 0, 'a raw-show picker mutation must fail real execution');
-    assert.match(baseline.stderr, /URL picker close[^]*FAIL/);
+    assert.match(baseline.stderr, /URL picker close[^]*FAIL/, JSON.stringify({ status: baseline.status, signal: baseline.signal, error: baseline.error?.message, stdout: baseline.stdout }));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -451,4 +452,107 @@ test('IGSH-955 production chat handoff transfers cross-thread foreground before 
     assert.match(result.stderr, /All 5 tests passed/);
     console.log(result.stderr.trim());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Alt+W hides native chat children, restores on Escape or Enter, and keeps one-link behavior', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'url-picker-'));
+  try {
+    const production = ['openUrlPicker', 'closeUrlPickerInternal', 'hideShellsForOverlay'].map(name => fn(source, name)).join('\n');
+    fs.writeFileSync(path.join(dir, 'test.zig'), `const std = @import("std");
+const HANDLE = ?usize;
+const SW_HIDE = 0;
+const SW_SHOW = 5;
+const SW_SHOWNOACTIVATE = 4;
+const SWP_HIDEWINDOW = 128;
+const SWP_NOMOVE = 2;
+const SWP_NOSIZE = 1;
+const SWP_NOZORDER = 4;
+const SWP_NOACTIVATE = 16;
+const g_main_hwnd: HANDLE = 1;
+const g_chat_transcript_hwnd: HANDLE = 2;
+const g_chat_composer_hwnd: HANDLE = 3;
+const g_chat_status_hwnd: HANDLE = 4;
+var g_chat_active = true;
+var g_url_picker_active = false;
+var g_url_picker_count: u32 = 2;
+var g_url_picker_sel: u32 = 0;
+var shell_count: u32 = 1;
+var active_shell: u32 = 0;
+var shells = [_]struct { hwnd: HANDLE = 5 }{.{}};
+var visible = [_]bool{false, true, true, true, true, false};
+var browser_visible = true;
+var focused: HANDLE = null;
+var opened: ?u32 = null;
+var autocomplete = true;
+fn scanUrlsInActiveShell() void {}
+fn openUrlByIndex(index: u32) void { opened = index; }
+fn ShowWindow(hwnd: HANDLE, command: i32) i32 { if (hwnd) |h| { visible[h] = command != SW_HIDE; } return 1; }
+fn SetWindowPos(hwnd: HANDLE, _: HANDLE, _: i32, _: i32, _: i32, _: i32, flags: u32) i32 { if (flags & SWP_HIDEWINDOW != 0) { _ = ShowWindow(hwnd, SW_HIDE); } return 1; }
+fn SetFocus(hwnd: HANDLE) HANDLE { focused = hwnd; return null; }
+fn InvalidateRect(_: HANDLE, _: ?usize, _: i32) i32 { return 1; }
+fn hideActiveBrowser() void { browser_visible = false; }
+fn hideAllBrowserChrome() void { browser_visible = false; }
+fn closeWebView2() void {}
+fn chatAcClose() void { autocomplete = false; }
+fn showShellConsole(hwnd: u32, command: i32, _: []const u8) i32 { return ShowWindow(shells[hwnd].hwnd, if (g_chat_active) SW_HIDE else command); }
+fn updateBrowserVisibility() void { browser_visible = !g_url_picker_active; }
+fn focusActiveShell() void { focused = if (g_chat_active) g_chat_composer_hwnd else shells[active_shell].hwnd; }
+fn layoutChatControls() void { _ = ShowWindow(g_chat_status_hwnd, if (g_url_picker_active) SW_HIDE else SW_SHOW); }
+${production}
+test "chat picker hides every child and autocomplete, then restores without stealing Enter focus" {
+    for ([_]bool{ true, false }) |refocus| {
+        visible = .{ false, true, true, true, true, false };
+        browser_visible = true;
+        autocomplete = true;
+        openUrlPicker();
+        try std.testing.expect(g_url_picker_active);
+        try std.testing.expect(!visible[2] and !visible[3] and !visible[4]);
+        try std.testing.expect(!browser_visible and !autocomplete);
+        try std.testing.expectEqual(g_main_hwnd, focused);
+        closeUrlPickerInternal(refocus);
+        try std.testing.expect(!g_url_picker_active);
+        try std.testing.expect(visible[2] and visible[3] and visible[4]);
+        try std.testing.expect(!visible[5] and browser_visible);
+        try std.testing.expectEqual(if (refocus) g_chat_composer_hwnd else g_main_hwnd, focused);
+    }
+}
+test "no links leaves chat alone; one link opens directly" {
+    g_url_picker_active = false;
+    opened = null;
+    g_url_picker_count = 0;
+    openUrlPicker();
+    try std.testing.expect(!g_url_picker_active and opened == null);
+    g_url_picker_count = 1;
+    openUrlPicker();
+    try std.testing.expect(!g_url_picker_active);
+    try std.testing.expectEqual(@as(?u32, 0), opened);
+}
+test "terminal picker hides and restores the shell" {
+    g_chat_active = false;
+    g_url_picker_count = 2;
+    visible[5] = true;
+    openUrlPicker();
+    try std.testing.expect(!visible[5]);
+    closeUrlPickerInternal(true);
+    try std.testing.expect(visible[5]);
+    try std.testing.expectEqual(shells[0].hwnd, focused);
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '-j1'], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr + JSON.stringify({ signal: result.signal, error: result.error?.message }));
+    assert.match(result.stderr, /All 3 tests passed/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('link selection uses the approved rounded dark control and outline, never the legacy blue fill', () => {
+  const sidebar = fs.readFileSync(path.join(__dirname, '../src/sidebar.zig'), 'utf8');
+  const picker = sidebar.slice(sidebar.indexOf('if (app_state.g_url_picker_active and app_state.g_url_picker_count > 0)'));
+  const selected = picker.slice(picker.indexOf('if (abs_idx == app_state.g_url_picker_sel)'), picker.indexOf('var draw_buf:'));
+  assert.match(selected, /design_tokens\.zig"\)\.ReaderControl/);
+  assert.match(selected, /design_tokens\.zig"\)\.ReaderOutline/);
+  assert.match(selected, /CreatePen\(0, 1,/);
+  assert.match(selected, /drawRoundRect/);
+  assert.doesNotMatch(selected, /RGB\(0, 122, 204\)|FillRect/);
 });

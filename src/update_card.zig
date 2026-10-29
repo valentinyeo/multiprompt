@@ -107,6 +107,7 @@ pub fn stopUpdateCardWatch() void {
 }
 
 pub fn updateCardVisible() bool {
+    if (app_state.g_sidebar_status_card == 2) return false;
     if (card_notes.count == 0 or app_state.g_update_ver_len == 0 or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed or app_state.g_update_relaunching) return false;
     const cur = app_state.g_update_ver[0..app_state.g_update_ver_len];
     return !std.mem.eql(u8, cur, app_state.g_update_dismissed[0..app_state.g_update_dismissed_len]);
@@ -181,9 +182,9 @@ pub fn updateCardRect() RECT {
     const sticky = sidebarStickyCardRect();
     return .{
         .left = sticky.left,
-        .top = sticky.top - @import("window_layout.zig").paneGap() - updateCardHeight(),
+        .top = sticky.top - @import("window_layout.zig").paneGap() - updateCardHeight() - uiScaled(22),
         .right = sticky.right,
-        .bottom = sticky.top - @import("window_layout.zig").paneGap(),
+        .bottom = sticky.top - uiScaled(22) - @import("window_layout.zig").paneGap(),
     };
 }
 

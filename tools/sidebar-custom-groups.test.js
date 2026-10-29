@@ -13,7 +13,7 @@ function bodyOf(signature) {
 }
 
 test("custom groups are top-level workspace blocks with pinned-first members", () => {
-  const layout = bodyOf("fn layoutRows(out: *[MAX_ROWS]Row) u32 {");
+  const layout = bodyOf("fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {");
   assert.match(layout, /for \(0\.\.group_count\) \|gidx\|/);
   assert.match(layout, /member_tier_pass: i32 = @intFromEnum\(SidebarTier\.pinned\)/);
   assert.match(layout, /shells\[i\]\.group_id != gid/);

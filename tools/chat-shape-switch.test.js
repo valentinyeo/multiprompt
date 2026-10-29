@@ -78,6 +78,11 @@ function ownedProfile(source) {
   const guard = source.indexOf('if ($started)', replay);
   const stop = source.indexOf('$recorder -stop $trace', guard);
   assert.ok(status >= 0 && idle > status && start > idle && owned > start && replay > owned && guard > replay && stop > guard);
+  assert.match(source, /Copy-Item -LiteralPath \$target\.Path -Destination \$image/);
+  assert.match(source, /Get-FileHash -LiteralPath \$image -Algorithm SHA256/);
+  assert.match(workflow, /CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true'/);
+  assert.match(control, /if \(\$shapeProfile -and -not \$shapeProof -and \$env:CHAT_SWITCH_PROOF -ne '1'\)/);
+  assert.match(read('build.zig'), /b\.option\(bool, "symbols"[^]*?exe\.root_module\.strip = false/);
   assert.ok(source.includes('analyzed = $false'));
   assert.ok(source.includes('separate_from_acceptance = $true'));
   assert.doesNotMatch(source, /-cancel|Stop-Process|taskkill/);

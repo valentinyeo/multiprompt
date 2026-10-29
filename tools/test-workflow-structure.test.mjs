@@ -22,7 +22,7 @@ function verifyRouting(text) {
     const classify = steps[checkout + 1];
     assert.match(classify, /id: paths\n        shell: bash\n/);
     assert.match(classify, /EVENT: \$\{\{ github.event_name \}\}/);
-    assert.match(classify, /BASE: \$\{\{ github.event.pull_request.base.sha \|\| github.event.before \}\}/);
+    assert.match(classify, /BASE: \$\{\{ github.event.pull_request.base.sha \|\| \(github.ref != 'refs\/heads\/master' && 'origin\/master'\) \|\| github.event.before \}\}/);
     assert.match(classify, /HEAD: \$\{\{ github.event.pull_request.head.sha \|\| github.sha \}\}/);
     assert.match(classify, /run: bash -e -o pipefail tools\/classify-test-paths.sh/);
     for (const step of steps.slice(checkout + 2)) {
@@ -77,7 +77,8 @@ test('branch reaction proof uses the shared journey without changing production 
   assert.match(adapter, /feature: chat-delivery/);
   assert.match(adapter, /chat_reactions_proof: true/);
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
-  assert.match(verify, /workflow_call:\n    inputs:\n      chat_reactions_proof:/);
+  assert.match(verify, /workflow_call:\n    inputs:\n(?:      [\s\S]*?)      chat_reactions_proof:/);
+  assert.match(verify, /workflow_call:\n    inputs:\n      revision:\n        required: false\n        type: string/);
   const checker = new URL('./verify-workflow-branches.mjs', import.meta.url);
   assert.ok(fs.existsSync(checker), 'shared workflow branch checker exists');
   const { verifyPushBranches } = await import(checker);

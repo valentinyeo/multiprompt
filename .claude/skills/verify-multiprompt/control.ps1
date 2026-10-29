@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -12,7 +12,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Ru
 $shapeProof = $env:CHAT_SHAPE_PROOF -eq '1'
 $shapeProfile = $env:CHAT_SWITCH_PROFILE -eq '1'
 if ($shapeProof -and $Feature -ne 'chat-switch-speed') { throw 'Shape proof requires the chat-switch-speed journey' }
-if ($shapeProfile -and -not $shapeProof) { throw 'Switch profiling requires the shape-proof journey' }
+if ($shapeProfile -and -not $shapeProof -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profiling requires a native switching journey' }
 switch ($Feature) {
         'app-icon' {
             & "$PSScriptRoot/../../../tools/verify-app-icon/drive.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
@@ -471,6 +471,9 @@ try {
         'status-card' {
             . (Join-Path $PSScriptRoot 'control-feature-status-card.ps1')
         }
+        'link-picker' {
+            . "$PSScriptRoot/link-picker.ps1"
+        }
         'command-palette' {
             . (Join-Path $PSScriptRoot 'control-feature-command-palette.ps1')
         }
@@ -507,6 +510,7 @@ try {
                     $warmupStopped = $warmupJob.Stop()
                     Save-Json @{ activeAfterStop = $warmupStopped.ActiveProcesses } 'browser-setup-process-tree.json'
                 }
+                Release-ScratchConsoleFonts $scratch
             } finally {
                 if ($null -ne $switchNativeRegistry) {
                     Remove-Item -LiteralPath $switchNativeRegistry -Recurse -Force
