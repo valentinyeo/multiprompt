@@ -343,7 +343,7 @@ jobs:
   verify:
     needs: journeys
     if: inputs.feature != 'chat-sync-audit'
-    runs-on: windows-2022
+    runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
     timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
     continue-on-error: ${{ contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature) }}

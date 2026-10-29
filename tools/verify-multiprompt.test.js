@@ -626,7 +626,7 @@ test('audit verification is isolated from unchanged desktop journeys and retains
   assert.match(auditJob, /file zig-out\/bin\/chat-audit \| tee evidence\/renderer-file\.txt/);
   assert.match(auditJob, /uses: actions\/upload-artifact@[a-f0-9]{40}\r?\n        with:\r?\n          name: chat-audit-linux\r?\n          path: zig-out\/bin\/chat-audit\r?\n          retention-days: 30\r?\n          if-no-files-found: error/);
   for (const ending of ['\n', '\r\n']) {
-    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    needs: journeys\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-2022/);
+    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    needs: journeys\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
   }
   assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(\.\.\/diagnostics\/chat-sync-audit.md\)/);
   assert.match(read(skill + 'diagnostics/chat-sync-audit.md'), /not a Windows desktop journey/);
@@ -2356,4 +2356,20 @@ Write-Host 'NATIVE_GROUP_GEOMETRY_OK'
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('IGSH-1161 owned global console fonts are released after process teardown and before scratch removal', () => {
+  const driver = read(skill + 'control.ps1');
+  const library = read(skill + 'control-library.ps1');
+  const native = read(skill + 'control-native.cs');
+  const stop = driver.indexOf('$stopped = $job.Stop()');
+  const release = driver.indexOf('Release-ScratchConsoleFonts $scratch', stop);
+  const copy = driver.indexOf('Prepare-ScratchEvidence $scratch', stop);
+  assert.ok(stop >= 0 && release > stop && copy > release, 'release global font references only after owned processes stop');
+  assert.match(native, /\[DllImport\("gdi32\.dll", CharSet=CharSet\.Unicode\)\] public static extern bool RemoveFontResourceEx\(string path, uint flags, IntPtr reserved\);/);
+  assert.match(library, /function Release-ScratchConsoleFonts\(\[string\]\$Path\)/);
+  const cleanup = library.slice(library.indexOf('function Release-ScratchConsoleFonts('), library.indexOf('function Test-VanishedScratchItem('));
+  assert.ok(cleanup.includes("Join-Path $Path 'local/ZigShell/fonts'"));
+  assert.ok(cleanup.includes('[VerifyNative]::RemoveFontResourceEx($entry.FullName, 0, [IntPtr]::Zero)'));
+  assert.ok(cleanup.includes("'console-font-cleanup.json'"));
 });

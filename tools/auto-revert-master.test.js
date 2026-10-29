@@ -589,7 +589,7 @@ test('PR smoke and full master matrix stay wired without duplicate release-tag j
 
 test('verify journey jobs keep the plain name the ruleset and revert parser read', () => {
   const verify = fs.readFileSync(`${__dirname}/../.github/workflows/verify.yml`, 'utf8');
-  assert.match(verify, /^  verify:\n    needs: journeys\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-2022\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
+  assert.match(verify, /^  verify:\n    needs: journeys\n    if: inputs\.feature != 'chat-sync-audit'\n    runs-on: windows-latest\n    name: \$\{\{ inputs\.feature == 'title-bar' && format\('verify \(\{0\}, \{1\}, \{2\}\)', matrix\.feature, matrix\.caption-dpi, matrix\.caption-browser-theme\) \|\| inputs\.feature == 'window-controls' && format\('verify \(\{0\}, \{1\}\)', matrix\.feature, matrix\.caption-dpi\) \|\| format\('verify \(\{0\}\)', matrix\.feature\) \}\}\n/m);
 });
 
 test('controlled red proof requires the marker on appearance master pushes and excludes reverts', () => {
