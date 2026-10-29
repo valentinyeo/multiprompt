@@ -1,3 +1,6 @@
+            $snapshotPath = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
+            Wait-Until { (Test-Path $snapshotPath) -and (Get-Content $snapshotPath -Raw | ConvertFrom-Json).sidebar_width -ge 100 } 'app publishes its actual sidebar width'
+            $sidebarLogical = [int](Get-Content $snapshotPath -Raw | ConvertFrom-Json).sidebar_width
 
             Write-Host "group-rail verified release tag=$env:RELEASE_TAG version=$ExpectedVersion"
             Select-Theme 'dark' 'group-rail-dark'
@@ -83,7 +86,7 @@
                 $frame = New-Object VerifyNative+Rect
                 $origin = New-Object VerifyNative+Point
                 if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'group-rail native geometry unavailable' }
-                $proof = [GroupRailProof]::Check((Join-Path $Evidence ($shot + '.png')), $frame, $origin, $dpi, $scale, $hidePills, $false)
+                $proof = [GroupRailProof]::Check((Join-Path $Evidence ($shot + '.png')), $frame, $origin, $dpi, $scale, $hidePills, $false, $sidebarLogical)
                 Save-Json @{ pixels = $proof; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; session = Read-Session; tag = $env:RELEASE_TAG; version = $ExpectedVersion } ($shot + '.json')
                 $noFill = $noFill -and $proof['noFill']
                 $noRail = $noRail -and $proof['noRail']
@@ -93,7 +96,7 @@
             if ($noFill) { Write-Host 'sidebar-headline no-fill PASS' } else { Write-Host 'sidebar-headline no-fill FAIL' }
             if ($noRail) { Write-Host 'sidebar-headline no-rail PASS' } else { Write-Host 'sidebar-headline no-rail FAIL' }
             if ($flushLeft) { Write-Host 'sidebar-headline flush-left PASS' } else { Write-Host 'sidebar-headline flush-left FAIL' }
-            $labels = [GroupRailProof]::Labels((Join-Path $Evidence 'group-rail-selected-1.png'), $frame, $origin, $dpi, $scale, [int]$proof['sidebarRect'][3], [int]$proof['nameX'][0], [int]$proof['rowHeight'])
+            $labels = [GroupRailProof]::Labels((Join-Path $Evidence 'group-rail-selected-1.png'), $frame, $origin, $dpi, $scale, [int]$proof['sidebarRect'][3], [int]$proof['nameX'][0], [int]$proof['rowHeight'], $sidebarLogical)
             Save-Json @{ labels = $labels; pixels = $proof; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; tag = $env:RELEASE_TAG; version = $ExpectedVersion } 'group-rail-labels.json'
             $result.checks += @{ name = 'sidebar-label-parity'; pixels = $labels }
             $sameStyle = [bool]$labels['sameStyle']
@@ -118,7 +121,7 @@
                     $savedGroup.Count -eq 1 -and $savedGroup[0].PSObject.Properties['collapsed'] -and $savedGroup[0].collapsed
                 } 'headline click persisted the existing group collapsed memory'
                 Snapshot 'group-rail-collapsed'
-                $hidden = [GroupRailProof]::Check((Join-Path $Evidence 'group-rail-collapsed.png'), $frame, $origin, $dpi, $scale, $hidePills, $true)
+                $hidden = [GroupRailProof]::Check((Join-Path $Evidence 'group-rail-collapsed.png'), $frame, $origin, $dpi, $scale, $hidePills, $true, $sidebarLogical)
                 Save-Json @{ pixels = $hidden; session = Read-Session; frame = $frame; origin = $origin; dpi = $dpi; scale = $scale; tag = $env:RELEASE_TAG; version = $ExpectedVersion } 'group-rail-collapsed.json'
                 Doctor
                 Record 'Click the same headline to restore its member sessions'
@@ -130,7 +133,7 @@
                     $savedGroup.Count -eq 1 -and (-not $savedGroup[0].PSObject.Properties['collapsed'] -or -not $savedGroup[0].collapsed)
                 } 'headline click persisted expanded group memory'
                 Snapshot 'group-rail-restored'
-                $restored = [GroupRailProof]::Check((Join-Path $Evidence 'group-rail-restored.png'), $frame, $origin, $dpi, $scale, $hidePills, $false)
+                $restored = [GroupRailProof]::Check((Join-Path $Evidence 'group-rail-restored.png'), $frame, $origin, $dpi, $scale, $hidePills, $false, $sidebarLogical)
                 $firstRow = [int]$proof['headerTops'][0] + [int]$proof['headerHeight']
                 $scanBottom = [int]$proof['sidebarRect'][3] + 24 + 2 * [int]$proof['rowHeight']
                 $toggle = [GroupRailProof]::Toggle((Join-Path $Evidence 'group-rail-selected-1.png'), (Join-Path $Evidence 'group-rail-collapsed.png'), (Join-Path $Evidence 'group-rail-restored.png'), [int]$proof['sessionTextX'][0], $firstRow, [int]$proof['rowHeight'], [int]$proof['headerTops'][0], $scanBottom, $dpi, $scale)

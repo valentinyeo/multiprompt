@@ -512,7 +512,7 @@ function assertsPaneFocusGeometry(source, workflowText) {
     assert.ok(capture.indexOf('$dpi =') < capture.indexOf('Snapshot '));
     assert.doesNotMatch(capture, /\$console =|\$browser =/);
   }
-  assert.match(final, /Save-Json[^\n]+ 'pane-layout-rects.json'\s+Snapshot 'pane-layout'\s+\$proof = \[PaneLayoutProof\]::Check\([^\n]+, \$frame, \$client, \$consoleRect, \$browserRect, \$dpi, \$scale, \$hidePills\)/);
+  assert.match(final, /Save-Json[^\n]+ 'pane-layout-rects.json'\s+Snapshot 'pane-layout'\s+\$proof = \[PaneLayoutProof\]::Check\([^\n]+, \$frame, \$client, \$consoleRect, \$browserRect, \$dpi, \$scale, \$hidePills, \$sidebarLogical\)/);
   assert.match(final, /Fresh console UIA and HWND identity\/bounds disagree/);
   for (const required of [
     "'9618091700e09f5958a48390449dc5067874d5dd'",
@@ -2325,6 +2325,7 @@ test('native group pixel proof reports the current header and member rectangles'
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-proof-'));
   const source = read(skill + 'control-native.cs');
   const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
+  const pane = source.slice(source.indexOf('public static class PaneLayoutProof {'), source.indexOf('public static class CodeFontProof {'));
   const script = `$ErrorActionPreference = 'Stop'
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
@@ -2332,8 +2333,11 @@ using System.Collections.Generic;
 public static class VerifyNative {
     public struct Rect { public int Left, Top, Right, Bottom; }
     public struct Point { public int X, Y; }
+    public static List<Dictionary<string, object>> DesktopWindows() { throw new NotSupportedException(); }
+    public static bool GetWindowRect(IntPtr hwnd, out Rect rect) { throw new NotSupportedException(); }
 }
 ${group}
+${pane}
 '@
 $image = New-Object System.Drawing.Bitmap 800, 900
 try { $image.Save((Join-Path $PSScriptRoot 'sidebar.png')) } finally { $image.Dispose() }
@@ -2342,12 +2346,32 @@ $frame.Left = 200; $frame.Top = 200
 $origin = New-Object VerifyNative+Point
 $origin.X = 208; $origin.Y = 231
 foreach ($collapsed in @($false, $true)) {
-    $proof = [GroupRailProof]::Check((Join-Path $PSScriptRoot 'sidebar.png'), $frame, $origin, 96, 100, $false, $collapsed)
+    $proof = [GroupRailProof]::Check((Join-Path $PSScriptRoot 'sidebar.png'), $frame, $origin, 96, 100, $false, $collapsed, 300)
     if ($proof.headerTops[0] -ne 125) { throw 'First group overlaps the workspace picker' }
-    $second = if ($collapsed) { 153 } else { 229 }
-    if ($proof.headerTops[1] -ne $second -or $proof.sidebarRect[3] -ne ($second + 104)) { throw 'Member rectangles do not track group collapse' }
+    $second = if ($collapsed) { 153 } else { 269 }
+    if ($proof.headerTops[1] -ne $second -or $proof.sidebarRect[3] -ne ($second + 144)) { throw 'Member rectangles do not track group collapse' }
     if (-not $proof.noFill -or -not $proof.noRail -or $proof.flushLeft) { throw 'Pixel checks no longer inspect the blank image faithfully' }
 }
+$frame.Left = 0; $frame.Top = 0
+$origin.X = 0; $origin.Y = 0
+$fixtures = '${path.join(root, 'tools/fixtures/IGSH-1150').replace(/'/g, "''")}'
+$baseline = Join-Path $fixtures 'group-rail-selected-1.png'
+$proof = [GroupRailProof]::Check($baseline, $frame, $origin, 96, 100, $true, $false, 300)
+if (-not $proof.noFill -or -not $proof.noRail -or -not $proof.flushLeft) { throw ('Shipped screenshot failed: ' + ($proof | ConvertTo-Json -Compress)) }
+$labels = [GroupRailProof]::Labels($baseline, $frame, $origin, 96, 100, $proof.sidebarRect[3], $proof.nameX[0], $proof.rowHeight, 300)
+if (-not $labels.sameStyle -or -not $labels.noArrow -or -not $labels.plusOnly) { throw ('Shipped labels failed: ' + ($labels | ConvertTo-Json -Compress)) }
+$toggle = [GroupRailProof]::Toggle($baseline, (Join-Path $fixtures 'group-rail-collapsed.png'), (Join-Path $fixtures 'group-rail-restored.png'), $proof.sessionTextX[0], ($proof.headerTops[0] + $proof.headerHeight), $proof.rowHeight, $proof.headerTops[0], ($proof.sidebarRect[3] + 24 + 2 * $proof.rowHeight), 96, 100)
+if (-not $toggle.membersDisappearAndReturn) { throw 'Shipped member rows do not disappear and return' }
+$frame.Left = -8; $frame.Top = -8
+$client = New-Object VerifyNative+Rect
+$browser = New-Object VerifyNative+Rect
+$browser.Left = 558; $browser.Top = 40; $browser.Right = 1016; $browser.Bottom = 712
+$mask = New-Object 'Collections.Generic.Dictionary[string,object]'
+$mask['rect'] = [int[]]@(868, 38, 1018, 74); $mask['handle'] = [long]1
+$masks = [Collections.Generic.Dictionary[string,object][]]@($mask)
+$colors = [PaneLayoutProof]::MeasureMasks((Join-Path $fixtures 'pane-layout-mask-dark.png'), 'dark', $frame, $client, $browser, $masks, 96, 100)
+[PaneLayoutProof]::CheckMasks($colors, 'dark')
+if (($colors.appColor -join ',') -cne '16,16,16') { throw 'App comparison sampled a session label, not the quiet gutter' }
 Write-Host 'NATIVE_GROUP_GEOMETRY_OK'
 `;
   try {
@@ -2375,4 +2399,19 @@ test('IGSH-1161 owned global console fonts are released after process teardown a
   assert.ok(cleanup.includes("Join-Path $Path 'local/ZigShell/fonts'"));
   assert.ok(cleanup.includes('[VerifyNative]::RemoveFontResourceEx($entry.FullName, 0, [IntPtr]::Zero)'));
   assert.ok(cleanup.includes("'console-font-cleanup.json'"));
+});
+
+test('release sidebar pixel oracles use the live width and approved expanded row height', () => {
+  const source = read(skill + 'control-native.cs');
+  const groups = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class CodeFontProof {'));
+  assert.doesNotMatch(groups, /S\(220, dpi, scale\)|S\(38, dpi, scale\)/);
+  const height = Number(read('src/browser_pane.zig').match(/!app_state.g_sidebar_collapsed\) (\d+)/)[1]);
+  assert.equal(Number(groups.match(/headerHeight = 28, rowHeight = S\((\d+),/)[1]), height);
+  assert.match(groups, /rowBottom = rowTop \+ S\(58, dpi, scale\)/);
+  for (const feature of ['group-rail', 'pane-layout']) {
+    const driver = read(skill + `control-feature-${feature}.ps1`);
+    assert.match(driver, /session.json.launch.json/);
+    assert.match(driver, /\$sidebarLogical = \[int\].*sidebar_width/);
+    for (const call of driver.matchAll(/\[(?:GroupRailProof|PaneLayoutProof)\]::(?:Check|Labels|FocusMargins)\([^\n]+/g)) assert.match(call[0], /, \$sidebarLogical\)$/);
+  }
 });
