@@ -2,8 +2,6 @@ name: Shared sidebar
 run-name: shared sidebar ${{ inputs.tag || github.ref_name }}
 
 on:
-  push:
-    branches: [ceo/IGSH-1164]
   workflow_dispatch:
     inputs:
       tag:

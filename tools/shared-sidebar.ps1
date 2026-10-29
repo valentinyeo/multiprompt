@@ -22,7 +22,16 @@ function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 30)
 function Save($Value, [string]$File) { [IO.File]::WriteAllText($File, ($Value | ConvertTo-Json -Depth 15), [Text.UTF8Encoding]::new($false)) }
 function Flag($Value, [string]$Name) { $property = $Value.PSObject.Properties[$Name]; $null -ne $property -and $property.Value -eq $true }
 function Chat-On { $s = Session; Flag $s.tabs[$s.active_tab] 'cv' }
-function Session { Get-Content "$settings/session.json" -Raw | ConvertFrom-Json }
+function Read-Json([string]$Path) {
+    Wait-For 'readable saved state' {
+        try {
+            $document = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+            if ($null -ne $document) { return $document }
+        } catch { return $false }
+        $false
+    }
+}
+function Session { Read-Json "$settings/session.json" }
 function Focus {
     [void](Wait-For 'owned app foreground' {
         $target = [ChatDeliveryDesktop]::Composer($main)
@@ -89,14 +98,14 @@ try {
     [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(900, 500)
     [void](Wait-For 'three sidebar sessions published' {
         if (-not (Test-Path "$settings/inbox-default.json")) { return $false }
-        $inbox = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
+        $inbox = Read-Json "$settings/inbox-default.json"
         @($inbox.shells).Count -eq 3
     })
     Toggle-View
     [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
     [void](Wait-For 'initial console poll' {
         if (-not (Test-Path "$settings/debug.log")) { return $false }
-        (Get-Content "$settings/debug.log" -Raw) -match 'POLL\[t=[^\r\n]+,#1\]'
+        try { (Get-Content "$settings/debug.log" -Raw) -match 'POLL\[t=[^\r\n]+,#1\]' } catch { $false }
     } 60)
     Focus
     Toggle-View
