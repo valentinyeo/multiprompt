@@ -41,7 +41,7 @@
             Snapshot 'starred-pins-before'
             Focus-Palette 'pin to top' 6293
             Press @(0x0D) 'Enter: pin this session in Starred only'
-            Wait-Until { $state = Read-Session; $state.tabs[$tabIndex].starred_pinned_top -eq $true -and -not $state.tabs[$tabIndex].pinned_top } 'Starred pin saved independently from home pin'
+            Wait-Until { $state = Read-Session; $state.tabs[$tabIndex].starred_pinned_top -eq $true -and (-not $state.tabs[$tabIndex].PSObject.Properties['pinned_top'] -or -not $state.tabs[$tabIndex].pinned_top) } 'Starred pin saved independently from home pin'
             Save-Json (Read-Session) 'starred-pins-after.json'
             Snapshot 'starred-pins-after'
 
@@ -128,12 +128,12 @@
                 Wait-Until { $state = Read-Session; $null -ne $state -and $state.starred_view -and @($state.tabs).Count -eq $expectedTabs -and $state.tabs[$state.active_tab].starred_group_id -eq $favoritesGroupId } 'second restart keeps one grouped favorite without growth'
                 Save-Json (Read-Session) 'favorites-no-duplicates.json'
                 Snapshot 'favorites-no-duplicates'
-                Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].starred_pinned_top -eq $true -and -not $state.tabs[$state.active_tab].pinned_top } 'Starred pin survives two app restarts without pinning home'
+                Wait-Until { $state = Read-Session; $state.tabs[$state.active_tab].starred_pinned_top -eq $true -and (-not $state.tabs[$state.active_tab].PSObject.Properties['pinned_top'] -or -not $state.tabs[$state.active_tab].pinned_top) } 'Starred pin survives two app restarts without pinning home'
                 Save-Json (Read-Session) 'starred-pins-restarted.json'
                 Snapshot 'starred-pins-restarted'
                 Focus-Palette 'unpin from top' 6293
                 Press @(0x0D) 'Enter: unpin from Starred back into its group'
-                Wait-Until { $state = Read-Session; -not $state.tabs[$state.active_tab].starred_pinned_top -and -not $state.tabs[$state.active_tab].pinned_top -and $state.tabs[$state.active_tab].starred_group_id -eq $favoritesGroupId } 'Unpin returns session to its unchanged Starred group'
+                Wait-Until { $state = Read-Session; (-not $state.tabs[$state.active_tab].PSObject.Properties['starred_pinned_top'] -or -not $state.tabs[$state.active_tab].starred_pinned_top) -and (-not $state.tabs[$state.active_tab].PSObject.Properties['pinned_top'] -or -not $state.tabs[$state.active_tab].pinned_top) -and $state.tabs[$state.active_tab].starred_group_id -eq $favoritesGroupId } 'Unpin returns session to its unchanged Starred group'
                 Save-Json (Read-Session) 'starred-pins-unpinned.json'
                 Snapshot 'starred-pins-unpinned'
                 $result.checks += @{ name = 'IGSH-1185 independent-pins-restart-unpin'; restarts = 2; homePinned = $false }
