@@ -523,7 +523,7 @@ for (const published of ['', 'unknown', 'v1.2', 'v1.2.3-beta']) test(`publicatio
 test('finishing an older release retains both downloads and the newer desktop feed', { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   for (const candidate of ['v0.28.999', 'v0.28.995']) {
-    const result = f.run('Publish release', { TAG: candidate, GITHUB_EVENT_NAME: 'workflow_dispatch' });
+    const result = f.run('Publish release', { TAG: candidate, PUBLISHED_TAG: 'v0.28.994', GITHUB_EVENT_NAME: 'workflow_dispatch' });
     assert.equal(result.status, 0, result.stderr);
   }
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, 'release-state.json'), 'utf8')), {
