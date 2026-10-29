@@ -1569,7 +1569,9 @@ test "local listener rejects peer of another user" {
     const accepted = accept(srv, null, null);
     try std.testing.expect(accepted != INVALID_SOCKET);
     defer _ = closesocket(accepted);
-    try std.testing.expect(peer.peerIsSameUser(accepted));
+    const same_user = peer.peerIsSameUser(accepted);
+    std.debug.print("IGSH-1157 same_user={any}\n", .{same_user});
+    try std.testing.expect(same_user);
     LocalListenerChecks.calls.store(0, .release);
     const saved_check = @atomicRmw(*const fn (SOCKET) bool, &peer.peer_check, .Xchg, LocalListenerChecks.reject, .acq_rel);
     defer @atomicStore(*const fn (SOCKET) bool, &peer.peer_check, saved_check, .release);
@@ -1580,10 +1582,14 @@ test "local listener rejects peer of another user" {
         const client = try hardeningConnect(target);
         defer _ = closesocket(client);
         const sent = send(client, request.ptr, @intCast(request.len), 0);
-        try std.testing.expect(sent == @as(i32, @intCast(request.len)) or (sent == -1 and WSAGetLastError() == 10054));
+        const send_error = WSAGetLastError();
+        std.debug.print("IGSH-1157 target={d} sent={d} error={d}\n", .{ target, sent, send_error });
+        try std.testing.expect(sent == @as(i32, @intCast(request.len)) or (sent == -1 and send_error == 10054));
         var response: [256]u8 = undefined;
         const n = recv(client, &response, response.len, 0);
-        try std.testing.expect(n == 0 or (n == -1 and WSAGetLastError() == 10054));
+        const recv_error = WSAGetLastError();
+        std.debug.print("IGSH-1157 target={d} recv={d} error={d} calls={d} pending={any} shot={d}\n", .{ target, n, recv_error, LocalListenerChecks.calls.load(.acquire), app_state.g_zsb_workspace_pending, app_state.g_shot_paste_count });
+        try std.testing.expect(n == 0 or (n == -1 and recv_error == 10054));
         var payload: [NOTIFY_PAYLOAD_CAP]u8 = undefined;
         var queued_len = dequeueNotification(&payload);
         const deadline = GetTickCount64() + 1000;

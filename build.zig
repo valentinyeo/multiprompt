@@ -178,6 +178,13 @@ pub fn build(b: *std.Build) void {
     const install_listener_helper = b.addInstallArtifact(listener_helper, .{ .dest_sub_path = "local-listener-helper.exe" });
     b.step("local-listener-helper", "Build the local listener account test helper").dependOn(&install_listener_helper.step);
 
+    const listener_rejection = b.addTest(.{
+        .root_module = exe.root_module,
+        .filters = &.{"local listener rejects peer of another user"},
+    });
+    const install_listener_rejection = b.addInstallArtifact(listener_rejection, .{ .dest_sub_path = "local-listener-rejection.exe" });
+    b.step("local-listener-rejection", "Build the local listener rejection regression").dependOn(&install_listener_rejection.step);
+
     const clean_chat_tests = b.addTest(.{
         .root_module = exe.root_module,
         .filters = &.{"IGSH-816 CLEAN"},
