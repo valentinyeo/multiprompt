@@ -1187,6 +1187,58 @@ class HistoryReaderTest(unittest.TestCase):
         fields, rows = self.read()
         self.assertEqual([r['text'] for r in rows], ['ę second'])
 
+    def test_igsh1154_oversized_delta_records_keep_messages_and_cursor(self):
+        for codex in (False, True):
+            for incomplete in (False, True):
+                with self.subTest(codex=codex, incomplete=incomplete):
+                    self.query = dict(id=7, codex=codex, sid='sid', tmux='', cwd='/work/demo',
+                                      cached_sid='', inode=0, offset=0, no_jump=True)
+                    if codex:
+                        self.path = self.home / '.codex/sessions/rollout-2026-sid.jsonl'
+                        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+                    def event(text):
+                        if codex:
+                            return dict(type='response_item', payload=dict(type='message', role='assistant',
+                                        content=[dict(type='output_text', text=text)]))
+                        return self.event(text)
+
+                    self.write(event('anchor'))
+                    _, initial = self.read()
+                    self.assertEqual([row['text'] for row in initial if row['role'] == 'assistant'], ['anchor'])
+                    anchor = self.query['offset']
+                    self.assertGreater(anchor, 0)
+                    self.assertEqual(self.query['cached_sid'], 'sid')
+                    self.assertEqual(self.query['inode'], self.path.stat().st_ino)
+                    large = 'large ' + 'x' * (512 * 1024) + ' end'
+                    record = (json.dumps(event(large)) + '\n').encode()
+                    following = (json.dumps(event('after large')) + '\n').encode()
+                    self.assertGreater(len(record), reader.SCAN_BYTES)
+                    with self.path.open('ab') as target:
+                        target.write(record[:-1] if incomplete else record + following)
+                    if incomplete:
+                        fields, rows = self.read()
+                        self.assertEqual(fields[13], 'delta')
+                        self.assertEqual(int(fields[5]), anchor)
+                        self.assertEqual(int(fields[6]), anchor)
+                        self.assertEqual(fields[8], '0')
+                        self.assertEqual([row for row in rows if row['role'] in ('user', 'assistant')], [])
+                        with self.path.open('ab') as target:
+                            target.write(b'\n' + following)
+                    fields, rows = self.read()
+                    self.assertEqual(fields[13], 'delta')
+                    self.assertEqual(int(fields[5]), anchor)
+                    self.assertEqual(int(fields[6]), anchor + len(record))
+                    self.assertEqual(fields[8], '1')
+                    self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant'], [large])
+                    fields, rows = self.read()
+                    self.assertEqual(fields[13], 'delta')
+                    self.assertEqual(int(fields[5]), anchor + len(record))
+                    self.assertEqual(int(fields[6]), anchor + len(record) + len(following))
+                    self.assertEqual(fields[8], '0')
+                    self.assertEqual([row['text'] for row in rows if row['role'] == 'assistant'], ['after large'])
+                    self.assertEqual(self.query['offset'], self.path.stat().st_size)
+
     def test_tool_only_pages_advance_without_dropping_next_message(self):
         self.write(self.event('first'))
         self.read()
