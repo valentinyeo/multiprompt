@@ -133,7 +133,7 @@
                 Assert-ImmediateBrowserPairs 'slow'
                 Get-Content $debug | Where-Object { $_ -match 'shortcutToggle' } | Set-Content -Encoding UTF8 (Join-Path $Evidence 'toggle-keys.log')
                 Snapshot 'immediate-after'
-                if (-not $recorder.WaitForExit(60000) -or $recorder.ExitCode -ne 0 -or (Get-Item $video).Length -le 0) { throw 'Toggle screen recording failed' }
+                if (-not $recorder.WaitForExit(120000) -or $recorder.ExitCode -ne 0 -or (Get-Item $video).Length -le 0) { throw 'Toggle screen recording failed' }
                 $recorder.Dispose()
                 $slowServer.Dispose()
             } finally {

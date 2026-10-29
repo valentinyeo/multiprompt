@@ -63,6 +63,9 @@ test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', 
   for (const token of ['$i -lt 20', 'ImmediateBrowserTogglePair((50 + ($i % 5) * 50))', "$before + 2", 'SLOW_LOADING', 'SLOW_FINISHED', "'toggle-keys.log'", 'immediate-toggle.mp4', "Assert-ImmediateBrowserPairs 'blank'", "Assert-ImmediateBrowserPairs 'slow'"]) assert.ok(journey.includes(token), token);
   assert.match(read('.github/workflows/verify.yml'), /name: Install browser toggle recorder\n\s+if: env\.FEATURE == 'browser-pane-stuck'[\s\S]*choco install ffmpeg --version=7\.1\.1/);
   assert.doesNotMatch(journey, /\$job\.Start\(/);
+  const recordingSeconds = Number(journey.match(/-t (\d+) -vf/)[1]);
+  const settleMilliseconds = Number(journey.match(/\$recorder\.WaitForExit\((\d+)\)/)[1]);
+  assert.ok(settleMilliseconds >= recordingSeconds * 1000, 'recorder settlement covers its entire recording duration');
   for (const token of ['$serverJob = New-Object VerifyJob', '$recordJob = New-Object VerifyJob', '$helper.Stop()', '$helper.Dispose()', 'toggle-helper-process-tree.json']) assert.ok(journey.includes(token), token);
   const native = read('.claude/skills/verify-multiprompt/control-native.cs').split('public static double ImmediateBrowserTogglePair(int delay)')[1]?.split('public static void OpenAndCloseBrowserPane()')[0];
   assert.ok(native);
