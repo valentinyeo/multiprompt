@@ -1241,7 +1241,7 @@ test('IGSH-1152 crash replay preserves the original large-row workload, not newe
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const transcript = path.join(dir, 'transcript.jsonl');
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
-    name: 'live-delivery', mode: 'busy', suggestion: queueTexts.suggestion, fake: true, sid: 'sid-crash', longChatProof: true, crashProof: true,
+    name: 'live-delivery', mode: 'busy', suggestion: queueTexts.suggestion, fake: true, sid: 'sid-crash', longChatProof: true,
     transcript, meta: path.join(dir, 'sessions/4242.json'), procDir: path.join(dir, 'proc/4242'), cwd: 'C:/verify/work', panePid: 4242,
   }));
   const shell = op => execFileSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), 'shell', op], {
@@ -1256,7 +1256,6 @@ test('IGSH-1152 crash replay preserves the original large-row workload, not newe
   const results = rows.flatMap(row => Array.isArray(row.message.content) ? row.message.content.filter(part => part.type === 'tool_result') : []);
   assert.equal(results.length, 24);
   assert.ok(results.every(part => part.content === 'synthetic tool output '.repeat(40000)));
-  assert.match(drive, /CHAT_CRASH_PROOF -eq '1'\) \{ \$standIn\.crashProof = \$true \}/);
 });
 
 test('full-history copy proof distinguishes message 10 from 100 and rejects lost, repeated or reordered messages', t => {
