@@ -37,6 +37,10 @@ $remote = Start-Process -FilePath $ssh -ArgumentList $arguments -PassThru -NoNew
     $proof = Get-Content (Join-Path $Evidence 'owner-browser-live.json') -Raw | ConvertFrom-Json
     if (-not $proof.ok -or $proof.uid -le 0 -or $proof.session -cne $ownerProof.session -or $proof.before -notlike '*Not clicked*' -or $proof.after -notlike '*Clicked*' -or -not $proof.foreignDenied -or -not $proof.globalDenied -or -not $proof.credentialsPrivate) { throw 'Owner browser command proof incomplete' }
     [IO.File]::WriteAllBytes((Join-Path $Evidence 'owner-browser-pane.png'), [Convert]::FromBase64String($proof.screenshot))
+    $proof | Add-Member -NotePropertyName screenshotSha256 -NotePropertyValue (Get-FileHash (Join-Path $Evidence 'owner-browser-pane.png') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $proof | Add-Member -NotePropertyName appVersion -NotePropertyValue $ExpectedVersion
+    $proof | Add-Member -NotePropertyName appSha256 -NotePropertyValue $ExpectedHash
+    $proof | Add-Member -NotePropertyName releaseTag -NotePropertyValue $env:RELEASE_TAG
     $proof.PSObject.Properties.Remove('screenshot')
     Save-Json $proof 'owner-browser-live.json'
     Snapshot 'owner-browser-desktop'

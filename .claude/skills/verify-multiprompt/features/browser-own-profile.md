@@ -41,3 +41,18 @@ Run the GitHub verify.yml journey with feature `browser-own-profile`; it is in t
 - Chrome deletes and recreates transient top-level folders like `BrowserMetrics` while running, so the missing check counts only profile folders and `Local State`; the `foreign` check still reads the full listing.
 - The journey never seeds session JSON and never touches the shared profile's contents; it only lists folder names.
 - Chrome for Testing honors `--load-extension` and cannot alone detect the branded-Chrome regression. The stable phase is mandatory, never a skipped prerequisite, and starts a new own profile without warming or copying extensions into it.
+
+### Cross-user browser proof
+
+The optional `owner_browser_proof` dispatch input adds a real Unix-user round
+trip after this journey. Its JSON contains `target`, `knownHost`, `session`
+and `tunnel`; the session must start with `mp-proof-`. The workflow uploads
+only a fresh SSH public key before building. Authorize that key temporarily,
+restricted to `tools/agent-notifications/owner_browser_live.py` in an isolated
+proof directory. That directory holds `proof-config.json` with `user` and
+`session`, the wrapper, and a separate broker/tunnel. No production socket or
+worker is used. Revoke the public key after verification; the private key
+never leaves the disposable runner. Retain `owner-browser-live.json`,
+`owner-browser-pane.png` and `owner-browser-desktop.png` as proof. The round trip
+requires the actual Unix user's open/read/click plus foreign-session and
+global-command denial against the real hosted native browser.
