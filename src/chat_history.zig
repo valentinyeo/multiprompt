@@ -579,7 +579,7 @@ pub const History = struct {
         if (!prepend and mode != null and self.rows.items.len > 0) {
             if (inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and end < self.offset) return error.InvalidHistory;
             try next.retainRows(a, self.*);
-            if (inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and oldest <= self.offset) next.start = @min(next.start, self.start);
+            if (!self.restore_full and inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and oldest <= self.offset) next.start = @min(next.start, self.start);
         }
         if (prepend) {
             var tail = self.cursor();

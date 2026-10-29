@@ -937,3 +937,55 @@ test "cache-first switch-back Resync success notice requires live source" {
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All 1 tests passed/);
 });
+
+
+test('IGSH-1059 a truncated restart cache still requests the missing conversation prefix', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'partial-restart-history-'));
+  try {
+    copyZig(['chat_history.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'partial-restart.zig'), String.raw`
+const std = @import("std");
+const history = @import("chat_history.zig");
+const transcript = @import("chat_transcript.zig");
+test "partial restart prefix" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1059, 0, false, "term-1", "");
+    var live: history.History = .{};
+    defer live.deinit(a);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    try wire.appendSlice(a, "@mp\t1\thistory\tok\tsid\t0\t1000\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n");
+    for (0..1000) |i| {
+        const row = try std.fmt.allocPrint(a, "{{\"role\":\"assistant\",\"id\":\"msg-{d}\",\"text\":\"message {d}\",\"detail\":\"{s}\",\"offset\":{d},\"end\":{d}}}\n", .{ i, i, "x" ** 1024, i, i + 1 });
+        defer a.free(row);
+        try wire.appendSlice(a, row);
+    }
+    try wire.appendSlice(a, "@@MP_END@@\n");
+    try live.apply(a, wire.items, 1, key);
+    const disk = try live.encode(a, key);
+    defer a.free(disk);
+    var restored = try history.History.decode(a, disk, key);
+    defer restored.deinit(a);
+    try std.testing.expect(restored.blocks.items.len > 0 and restored.blocks.items.len < 1000);
+    try restored.apply(a, "@mp\t2\thistory\tok\tsid\t900\t1000\t9\t0\tclaude\tterm-1\t0\t\ttail\t900\n{\"role\":\"assistant\",\"id\":\"msg-999\",\"text\":\"message 999\",\"offset\":999,\"end\":1000}\n@@MP_END@@\n", 2, key);
+    try std.testing.expectEqual(@as(u64, 900), restored.start);
+    wire.clearRetainingCapacity();
+    try wire.appendSlice(a, "@mp\t3\thistory\tok\tsid\t0\t900\t9\t0\tclaude\tterm-1\t0\t\tolder\t0\n");
+    for (0..900) |i| {
+        const row = try std.fmt.allocPrint(a, "{{\"role\":\"assistant\",\"id\":\"msg-{d}\",\"text\":\"message {d}\",\"offset\":{d},\"end\":{d}}}\n", .{ i, i, i, i + 1 });
+        defer a.free(row);
+        try wire.appendSlice(a, row);
+    }
+    try wire.appendSlice(a, "@@MP_END@@\n");
+    try restored.apply(a, wire.items, 3, key);
+    try std.testing.expectEqual(@as(u64, 0), restored.start);
+    try std.testing.expectEqual(@as(usize, 1000), restored.blocks.items.len);
+    try std.testing.expectEqualSlices(u16, live.text.items, restored.text.items);
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'partial-restart.zig'), '--test-filter', 'partial restart prefix'], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}\nsignal=${result.signal} error=${result.error || ''}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

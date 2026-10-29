@@ -9,6 +9,13 @@ $expectedShells = 2
 Press @(0x11, 0x31) 'Ctrl+1: return to long chat before disconnect'
 Bind-Transcript
 Assert-FullHistory 'switch-before'
+Press @(0x12, 0x43) 'Alt+C: explicitly choose terminal during long-chat replay'
+[void](Wait-For 'explicit terminal choice hides the composer' { [ChatDeliveryDesktop]::Composer($main) -eq [IntPtr]::Zero })
+[void](Wait-For 'explicit terminal choice persisted' { @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs | Where-Object { $_.tmux_session -eq 'verify-agent' -and -not $_.cv }).Count -eq 1 })
+Shot 'long-chat-explicit-terminal'
+Press @(0x12, 0x43) 'Alt+C: restore long chat after explicit terminal choice'
+Bind-Transcript
+Assert-FullHistory 'toggle-return'
 Shell-Run @('detach-console')
 [void](Wait-For 'console transport disconnect observed' { (Read-Shared "$settings/debug.log").Contains('markSshTabDisconnected: preserving SSH/tmux tab') })
 Press @(0x11, 0x4B) 'Ctrl+K: cover disconnected long chat'
