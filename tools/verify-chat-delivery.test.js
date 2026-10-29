@@ -19,6 +19,13 @@ const skill = '.claude/skills/verify-multiprompt/';
 const drive = read('tools/verify-chat-delivery/drive.ps1');
 const workflow = read('.github/workflows/verify.yml');
 
+test('IGSH-1152 native crash evidence retains the minidump before scratch cleanup', () => {
+  const copy = drive.indexOf('Get-ChildItem -LiteralPath "$settings/crashes" -File');
+  const cleanup = drive.indexOf('Remove-Item -LiteralPath $profile -Recurse -Force', copy);
+  assert.ok(copy >= 0 && cleanup > copy);
+  assert.match(drive.slice(copy, cleanup), /Where-Object \{ \$_\.Extension -in @\('\.txt', '\.dmp'\) \}[\s\S]*Copy-Item -Destination "\$caseDir\/crashes\/" -ErrorAction Stop/);
+});
+
 const ps51Rules = [
   [/\[\s*(?:ushort|uint|ulong|short|sbyte|semver|bigint)\s*\]/i, '[ushort][char]::ToUpperInvariant($letter)'],
   [/\?\?|\?\.|\?\[/, '$value ?? $fallback'],
