@@ -959,7 +959,10 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
                 entry.backfill.stage(a, &history) catch {
                     ok = false;
                 };
-                if (ok and (entry.backfill.start == 0 or entry.show_older)) {
+                const has_messages = for (entry.history.blocks.items) |block| {
+                    if (block.role != .tool) break true;
+                } else false;
+                if (ok and (entry.backfill.start == 0 or entry.show_older or !has_messages)) {
                     history.deinit(a);
                     history = entry.backfill.finish(a, entry.history) catch blk: {
                         ok = false;

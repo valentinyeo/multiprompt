@@ -1012,3 +1012,32 @@ test "partial restart prefix" {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('IGSH-1059 the first visible reply paints before the remaining older history finishes', () => {
+  const cases = String.raw`
+test "cache-first switch-back tools-only tail must not hide the first reply" {
+    const a = std.heap.page_allocator;
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", ""), .disk_loaded = true, .before = 190 };
+    defer one.history.deinit(a);
+    defer one.backfill.deinit(a);
+    try g_chat_histories.append(a, &one);
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    try one.history.apply(a, "@mp\t1\thistory\tok\tsid\t190\t200\t9\t0\tclaude\tterm-1\t0\t\ttail\t190\n{\"role\":\"tool\",\"id\":\"tail-tool\",\"text\":\"Tool completed\",\"offset\":190,\"end\":200}\n@@MP_END@@\n", 1, one.key);
+    remote_pages = &.{ "@mp\t2\thistory\tok\tsid\t100\t190\t9\t0\tclaude\tterm-1\t0\t\tolder\t100\n{\"role\":\"assistant\",\"id\":\"latest\",\"text\":\"Latest reply\",\"offset\":100,\"end\":190}\n@@MP_END@@\n" };
+    remote_calls = 0;
+    one.pending = true;
+    chatFileFetchThread(&one, one.key, 2, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(usize, 2), g_chat_block_count);
+    try std.testing.expect(std.mem.indexOf(u16, g_chat_capture[0..g_chat_last_len], std.unicode.utf8ToUtf16LeStringLiteral("Latest reply")) != null);
+    try std.testing.expectEqual(@as(u64, 100), one.before);
+    try std.testing.expectEqual(@as(usize, 0), one.backfill.pages.items.len);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
