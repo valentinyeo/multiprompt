@@ -25,7 +25,7 @@ test('production skips duplicate journeys but keeps build, startup, updater and 
   assert.match(jobs['update-test'], /\$job.Stop\(\)/);
   assert.match(jobs.release, /needs: \[prepare, build, update-test\]/);
   for (const name of ['update-test', 'release']) {
-    const condition = jobs[name].match(/^    if: \$\{\{ (.+) \}\}$/m)[1];
+    const condition = jobs[name].match(/^    if: \$\{\{ (.+) \}\}$/m)[1].replaceAll('needs.update-test', "needs['update-test']");
     assert.match(condition, /!cancelled\(\)/);
     const allowed = new Function('needs', 'inputs', 'github', 'cancelled', `return (${condition});`);
     for (const prepare of ['success', 'failure', 'cancelled', 'skipped']) {
