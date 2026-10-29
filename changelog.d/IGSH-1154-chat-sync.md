@@ -1,1 +1,1 @@
-Chat View keeps receiving replies while another session awaits delivery.
+Other sessions no longer interrupt incoming chat replies.
