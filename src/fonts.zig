@@ -2,7 +2,7 @@ const std = @import("std");
 const w = @import("win32.zig");
 const L = std.unicode.utf8ToUtf16LeStringLiteral;
 
-pub const UI_FACE = "IBM Plex Sans";
+pub const UI_FACE = @import("design_tokens.zig").font_face;
 pub const UI_MEDIUM_FACE = "IBM Plex Sans Medm";
 pub const CHAT_QUALITY: w.DWORD = 4;
 pub const CHAT_LINE_HEIGHT_PERMILLE: i32 = 1000;

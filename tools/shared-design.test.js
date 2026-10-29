@@ -30,6 +30,7 @@ test('the actual composer calls the shared pill with live timer and microphone b
   assert.match(shared, /pub const body_size: i32 = 15;/);
   assert.match(shared, /pub const column_width: i32 = 920;/);
   assert.match(read('build.zig'), /"src\/design_tokens.zig"/);
+  assert.match(read('src/fonts.zig'), /UI_FACE = @import\("design_tokens.zig"\)\.font_face/);
 });
 
 test('bubbles composer fields buttons and menus use the same shared painters', () => {
