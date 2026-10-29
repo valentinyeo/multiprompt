@@ -1,3 +1,10 @@
 {
-  "quarantined": {}
+  "quarantined": {
+    "browser-pane-stuck": {
+      "ticket": "https://app.hypertask.ai/detail/project-2060/1171",
+      "runs": [
+        "https://github.com/valentinyeo/multiprompt/actions/runs/40856903959"
+      ]
+    }
+  }
 }
