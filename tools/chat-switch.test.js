@@ -117,7 +117,7 @@ var g_chat_browser_swap: chat_switch.Pending = .{};
 var g_chat_active = true;
 var active_shell: u32 = 0;
 var shell_count: u32 = 1;
-var shells = [_]struct { shell_id: u32 = 7, browser_frozen: bool = false, browser_window_id: u32 = 0 }{.{}};
+var shells = [_]struct { shell_id: u32 = 7, browser_frozen: bool = false, browser_window_id: u32 = 0, browser_enabled: bool = false }{.{}};
 var g_main_hwnd: ?usize = 1;
 var g_chat_transcript_hwnd: ?usize = 2;
 var g_chat_composer_hwnd: ?usize = 3;
@@ -235,20 +235,25 @@ test "stale timer cannot release a newer target early or a different active shel
     try std.testing.expectEqual(@as(usize, 0), reveals);
     try std.testing.expectEqual(@as(usize, 1), exchanges);
 }
-test "deferred switches persist once after their first paint, not twice" {
+test "browserless switches save selection immediately without another queued write" {
     const idx: u32 = 0;
     const prev: u32 = 1;
     const unarchived_on_open = false;
-    const defer_browser = true;
     saves = 0;
     ${saveGuard}
-    try std.testing.expectEqual(@as(usize, 0), saves);
+    try std.testing.expectEqual(@as(usize, 1), saves);
     g_chat_browser_swap.request(7, 1000);
     _ = g_chat_browser_swap.didPaint(7);
     chatSwitchBrowserTick();
     try std.testing.expectEqual(@as(usize, 1), saves);
     chatSwitchBrowserTick();
     try std.testing.expectEqual(@as(usize, 1), saves);
+    shells[0].browser_enabled = true;
+    g_chat_browser_swap.request(7, 1000);
+    _ = g_chat_browser_swap.didPaint(7);
+    chatSwitchBrowserTick();
+    try std.testing.expectEqual(@as(usize, 2), saves);
+    shells[0].browser_enabled = false;
 }
 `;
   try {
