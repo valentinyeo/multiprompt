@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { verifyRemoteSwitch, verifyPairedRemoteSwitch } from './remote-switch-proof.mjs';
+import * as oracle from './remote-switch-proof.mjs';
+
+const { verifyRemoteSwitch, verifyPairedRemoteSwitch } = oracle;
 
 test('remote switch proof rejects each broken acceptance condition', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'remote-switch-'));

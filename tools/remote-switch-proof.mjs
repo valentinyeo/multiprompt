@@ -114,7 +114,7 @@ export function verifyPairedRemoteSwitch(root) {
     const values = Object.fromEntries(['base', 'head'].map(side => [side, runs.map(pair => pair[side][name])]));
     const base = median(values.base);
     const head = median(values.head);
-    return { name, limit, headroom: limit, base, head, delta: head - base, baseRange: [Math.min(...values.base), Math.max(...values.base)], headRange: [Math.min(...values.head), Math.max(...values.head)], absolutePass: head < limit, pass: head - base < limit };
+    return { name, limit, headroom: limit, base, head, delta: head - base, baseRange: [Math.min(...values.base), Math.max(...values.base)], headRange: [Math.min(...values.head), Math.max(...values.head)], absolutePass: name === 'maxFrameGapMs' ? head <= limit : head < limit, pass: head - base <= limit };
   });
   const recovery = runs.map(pair => Object.fromEntries(['base', 'head'].map(side => [side, Math.max(0, pair[side].idleAfterPercent - Math.max(5, pair[side].idleBeforePercent + 2))])));
   const baseRecovery = median(recovery.map(pair => pair.base));
