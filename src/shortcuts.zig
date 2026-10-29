@@ -490,19 +490,15 @@ test "browser toggle debounce uses original event time across delayed delivery" 
     try std.testing.expect(claimBrowserToggleEvent(21_501, &handled_event_time));
 }
 
-pub fn physicalBrowserShortcutMayClose(shell_id: u32, launch_tick: u64, hwnd_missing: bool, now: u64, guard_shell_id: u32, guard_until: u64) bool {
-    if (launch_tick != 0 and !hwnd_missing) return false;
-    return shell_id != guard_shell_id or now >= guard_until;
-}
-
-test "Alt browser open guard rejects a delayed complete second chord" {
-    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, true, 56_000, 42, 65_000));
-    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 0, true, 58_344, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, true, 65_000, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(43, 0, true, 58_344, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(42, 55_000, true, 65_000, 42, 65_000));
-    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, false, 65_000, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, false, 65_000, 42, 65_000));
+test "Alt browser toggle accepts twenty immediate released presses" {
+    var held = false;
+    for (0..20) |_| {
+        try std.testing.expect(claimBrowserFocusPress(true, &held));
+        try std.testing.expect(!claimBrowserFocusPress(true, &held));
+        try std.testing.expect(!claimBrowserFocusPress(false, &held));
+        try std.testing.expect(claimBrowserFocusPress(true, &held));
+        try std.testing.expect(!claimBrowserFocusPress(false, &held));
+    }
 }
 
 pub fn physicalBrowserShortcutShouldRecover(enabled: bool, hwnd_live: bool, launch_tick: u64) bool {
@@ -626,6 +622,11 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         }
         const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
         app_state.g_last_main_keyboard_event_time.store(kb.time, .release);
+        const browser_toggle_owned = (kb.vkCode == 0x41 or kb.vkCode == 0x42) and foregroundIsOurs();
+        if (kb.vkCode == 0x41 or kb.vkCode == 0x42) {
+            const fg = GetForegroundWindow();
+            altqLog("browser_key event={} vk={X} wp={X} flags={X} fg={X} owner={X} ours={} held={}", .{ kb.time, kb.vkCode, wp, kb.flags, @intFromPtr(fg), @intFromPtr(@import("win32.zig").GetAncestor(fg, 3)), browser_toggle_owned, app_state.g_browser_toggle_chord_held });
+        }
         const prior_focus_action = app_state.g_focus_user_action_tick;
         defer app_state.g_focus_user_action_tick = prior_focus_action;
         app_state.g_focus_user_action_tick = 0;
@@ -671,11 +672,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         }
 
         if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) {
-            if (chatSteerChord(&chat_steer_chord_pending, kb.vkCode, isCtrlDown(),
-                (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0,
-                isAltDown(kb.flags) or app_state.g_win_held,
-                chatViewOwnsInput() and foregroundIsOurs() and !activeBrowserHasForegroundFocus()))
-            {
+            if (chatSteerChord(&chat_steer_chord_pending, kb.vkCode, isCtrlDown(), (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0, isAltDown(kb.flags) or app_state.g_win_held, chatViewOwnsInput() and foregroundIsOurs() and !activeBrowserHasForegroundFocus())) {
                 _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_SEND, 1, 0);
                 return 1;
             }
@@ -697,7 +694,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             (kb.flags & 0x10) == 0 and duplex.voiceKeyStopsSpeech(kb.vkCode, (kb.flags & 0x20) != 0) and activeShellHasForegroundFocus())
             app_state.g_voice_console_key_tick.store(kb.time, .release);
         if ((kb.vkCode == 0x41 or kb.vkCode == 0x42) and (wp == WM_KEYUP or wp == WM_SYSKEYUP)) {
-            _ = claimBrowserTogglePress(false, kb.time, &app_state.g_browser_toggle_chord_held, &app_state.g_browser_toggle_last_event_time);
+            _ = claimBrowserFocusPress(false, &app_state.g_browser_toggle_chord_held);
         }
         if (kb.vkCode == 0x43 and (wp == WM_KEYUP or wp == WM_SYSKEYUP)) {
             _ = claimBrowserTogglePress(false, kb.time, &app_state.g_chat_toggle_chord_held, &app_state.g_chat_toggle_last_event_time);
@@ -998,8 +995,8 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             return 1;
         }
-        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and (kb.vkCode == 0x41 or kb.vkCode == 0x42) and foregroundIsOurs()) {
-            if (!claimBrowserTogglePress(true, kb.time, &app_state.g_browser_toggle_chord_held, &app_state.g_browser_toggle_last_event_time)) return 1;
+        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and (kb.vkCode == 0x41 or kb.vkCode == 0x42) and browser_toggle_owned) {
+            if (!claimBrowserFocusPress(true, &app_state.g_browser_toggle_chord_held)) return 1;
             app_state.g_sysmenu_pending = false;
             keybd_event(0xFF, 0, 0, 0);
             keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
