@@ -2376,3 +2376,16 @@ test('IGSH-1161 owned global console fonts are released after process teardown a
   assert.ok(cleanup.includes('[VerifyNative]::RemoveFontResourceEx($entry.FullName, 0, [IntPtr]::Zero)'));
   assert.ok(cleanup.includes("'console-font-cleanup.json'"));
 });
+
+test('IGSH-1161 group pixel rectangles follow the shipped expanded sidebar dimensions', () => {
+  const native = read(skill + 'control-native.cs');
+  const group = native.slice(native.indexOf('public static class GroupRailProof {'), native.indexOf('public static class PaneLayoutProof {'));
+  const state = read('src/app_state.zig');
+  const pane = read('src/browser_pane.zig');
+  const width = Number(state.match(/g_sidebar_w_full: i32 = if \(LOOK_UNIFIED\) (\d+)/)[1]);
+  const row = Number(pane.match(/return uiScaled\(if \(LOOK_UNIFIED and !app_state\.g_sidebar_collapsed\) (\d+)/)[1]);
+  assert.ok(width > 0 && row > 0);
+  assert.match(group, new RegExp(`rowHeight = S\\(${row}, dpi, scale\\)`));
+  assert.ok(group.includes(`clientLeft + S(${width}, dpi, scale)`));
+  assert.doesNotMatch(group, /S\(220, dpi, scale\)|rowHeight = S\(38, dpi, scale\)/);
+});
