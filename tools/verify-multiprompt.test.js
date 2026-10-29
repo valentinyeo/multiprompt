@@ -2325,6 +2325,7 @@ test('native group pixel proof reports the current header and member rectangles'
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-proof-'));
   const source = read(skill + 'control-native.cs');
   const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
+  const pane = source.slice(source.indexOf('public static class PaneLayoutProof {'), source.indexOf('public static class CodeFontProof {'));
   const script = `$ErrorActionPreference = 'Stop'
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
@@ -2332,8 +2333,11 @@ using System.Collections.Generic;
 public static class VerifyNative {
     public struct Rect { public int Left, Top, Right, Bottom; }
     public struct Point { public int X, Y; }
+    public static List<Dictionary<string, object>> DesktopWindows() { throw new NotSupportedException(); }
+    public static bool GetWindowRect(IntPtr hwnd, out Rect rect) { throw new NotSupportedException(); }
 }
 ${group}
+${pane}
 '@
 $image = New-Object System.Drawing.Bitmap 800, 900
 try { $image.Save((Join-Path $PSScriptRoot 'sidebar.png')) } finally { $image.Dispose() }
@@ -2358,6 +2362,16 @@ $labels = [GroupRailProof]::Labels($baseline, $frame, $origin, 96, 100, $proof.s
 if (-not $labels.sameStyle -or -not $labels.noArrow -or -not $labels.plusOnly) { throw ('Shipped labels failed: ' + ($labels | ConvertTo-Json -Compress)) }
 $toggle = [GroupRailProof]::Toggle($baseline, (Join-Path $fixtures 'group-rail-collapsed.png'), (Join-Path $fixtures 'group-rail-restored.png'), $proof.sessionTextX[0], ($proof.headerTops[0] + $proof.headerHeight), $proof.rowHeight, $proof.headerTops[0], ($proof.sidebarRect[3] + 24 + 2 * $proof.rowHeight), 96, 100)
 if (-not $toggle.membersDisappearAndReturn) { throw 'Shipped member rows do not disappear and return' }
+$frame.Left = -8; $frame.Top = -8
+$client = New-Object VerifyNative+Rect
+$browser = New-Object VerifyNative+Rect
+$browser.Left = 558; $browser.Top = 40; $browser.Right = 1016; $browser.Bottom = 712
+$mask = New-Object 'Collections.Generic.Dictionary[string,object]'
+$mask['rect'] = [int[]]@(868, 38, 1018, 74); $mask['handle'] = [long]1
+$masks = [Collections.Generic.Dictionary[string,object][]]@($mask)
+$colors = [PaneLayoutProof]::MeasureMasks((Join-Path $fixtures 'pane-layout-mask-dark.png'), 'dark', $frame, $client, $browser, $masks, 96, 100)
+[PaneLayoutProof]::CheckMasks($colors, 'dark')
+if (($colors.appColor -join ',') -cne '16,16,16') { throw 'App comparison sampled a session label, not the quiet gutter' }
 Write-Host 'NATIVE_GROUP_GEOMETRY_OK'
 `;
   try {

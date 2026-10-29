@@ -1147,7 +1147,7 @@ public static class PaneLayoutProof {
         Require(candidates == 1, "mask-top-right-" + theme, "Expected one frame-side controls mask, found " + candidates);
         int y = selected[1] + Math.Max(1, S(12, dpi, scale));
         int maskX = (selected[0] + selected[2]) / 2, referenceX = selected[0] - Math.Max(1, S(4, dpi, scale));
-        int appX = client.Left + S(180, dpi, scale), appY = client.Top + S(200, dpi, scale);
+        int appX = client.Left + S(2, dpi, scale), appY = client.Top + S(200, dpi, scale);
         foreach (var mask in masks) {
             var rect = (int[])mask["rect"];
             if (referenceX >= rect[0] && referenceX < rect[2] && y >= rect[1] && y < rect[3])
