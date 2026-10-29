@@ -7085,18 +7085,24 @@ test "IGSH-1189 the scroll-down button has a thin theme outline without a cleari
     const old_bitmap = SelectObject(dc, bitmap);
     defer _ = SelectObject(dc, old_bitmap);
     const pixels = @as([*]const u32, @ptrCast(@alignCast(bits.?)))[0 .. width * height];
+    const old_input_color = app_state.g_chat_input_color;
+    const old_counter = app_state.g_chat_new_messages;
     const old_content = app_state.g_chat_content_h;
     const old_scroll = app_state.g_chat_scroll_y;
     const old_up = app_state.g_chat_scrolled_up;
     const old_last = chat_scroll_last_ms;
     const old_drag = chat_scroll_drag;
     defer {
+        app_state.g_chat_input_color = old_input_color;
+        app_state.g_chat_new_messages = old_counter;
         app_state.g_chat_content_h = old_content;
         app_state.g_chat_scroll_y = old_scroll;
         app_state.g_chat_scrolled_up = old_up;
         chat_scroll_last_ms = old_last;
         chat_scroll_drag = old_drag;
     }
+    app_state.g_chat_input_color = RGB(35, 45, 55);
+    app_state.g_chat_new_messages = .{};
     app_state.g_chat_content_h = 3000;
     app_state.g_chat_scroll_y = 1200;
     app_state.g_chat_scrolled_up = true;
@@ -7113,8 +7119,16 @@ test "IGSH-1189 the scroll-down button has a thin theme outline without a cleari
     _ = GdiFlush();
     const box = chatScrollJumpBox(width, height);
     const cy = box.top + @divTrunc(box.bottom - box.top, 2);
-    const beside = pixels[@as(usize, @intCast(cy)) * width + @as(usize, @intCast(box.left - 4))];
-    try std.testing.expectEqual(ink, scrollProofColor(beside));
+    const margin = @import("window_layout.zig").chatSurfaceBorderW() + 1;
+    var y = box.top - margin;
+    while (y <= box.bottom + margin) : (y += 1) {
+        var x = box.left - margin;
+        while (x <= box.right + margin) : (x += 1) {
+            if (x != box.left - margin and x != box.right + margin and y != box.top - margin and y != box.bottom + margin) continue;
+            const pixel = pixels[@as(usize, @intCast(y)) * width + @as(usize, @intCast(x))];
+            try std.testing.expectEqual(ink, scrollProofColor(pixel));
+        }
+    }
     const face = pixels[@as(usize, @intCast(cy)) * width + @as(usize, @intCast(box.left + 4))];
     try std.testing.expectEqual(app_state.g_chat_input_color, scrollProofColor(face));
     const bytes = @as([*]const u8, @ptrCast(bits.?))[0 .. width * height * 4];
