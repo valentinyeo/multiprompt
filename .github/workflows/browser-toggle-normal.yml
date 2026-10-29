@@ -1,5 +1,7 @@
 name: Browser normal-spacing evidence
 on:
+  push:
+    branches: [ceo/IGSH-1165]
   workflow_dispatch:
     inputs:
       tag:
