@@ -13,16 +13,22 @@ $profile = Join-Path $env:RUNNER_TEMP "shared-sidebar-$PID"
 $settings = "$profile/roaming/ZigShell"
 $job = $null
 $result = @{passed=$false; error=$null; cleanup='pending'; comparisons=@(); actions=@()}
-function Wait-For([string]$Name, [scriptblock]$Check) {
+function Wait-For([string]$Description, [scriptblock]$Check) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($watch.Elapsed.TotalSeconds -lt 30)
-    throw "Timed out: $Name"
+    throw "Timed out: $Description"
 }
 function Save($Value, [string]$File) { [IO.File]::WriteAllText($File, ($Value | ConvertTo-Json -Depth 15), [Text.UTF8Encoding]::new($false)) }
 function Flag($Value, [string]$Name) { $property = $Value.PSObject.Properties[$Name]; $null -ne $property -and $property.Value -eq $true }
 function Chat-On { $s = Session; Flag $s.tabs[$s.active_tab] 'cv' }
 function Session { Get-Content "$settings/session.json" -Raw | ConvertFrom-Json }
-function Focus { [void](Wait-For 'owned main foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) }) }
+function Focus {
+    [void](Wait-For 'owned app foreground' {
+        $target = [ChatDeliveryDesktop]::Composer($main)
+        if ($target -eq [IntPtr]::Zero) { $target = $main }
+        [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $target)
+    })
+}
 function Capture([string]$Name) {
     $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
     $bitmap = [Drawing.Bitmap]::new(299, 320)
@@ -53,8 +59,8 @@ function Compare-Views([string]$Name) {
     [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
     [void](Wait-For 'Chat View visible' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
     Focus
-    Shot "$Name-chat"
     $hash = Wait-For 'sidebar unchanged across shell and chat' { $h = Capture "$Name-chat-sidebar"; if ($h -eq $before) { $h } }
+    Shot "$Name-chat"
     if ((Session).active_tab -ne $selected) { throw 'View toggle changed selection' }
     $result.comparisons += @{name=$Name; shell=$before; chat=$hash; selected=$selected}
     [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
