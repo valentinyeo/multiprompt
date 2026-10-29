@@ -47,10 +47,9 @@ pub fn paint(dc: w.HANDLE, items: []const Item, hover: ?usize, light: bool) void
     const fill: u32 = if (light) 0xFAFAFA else tokens.ReaderControl;
     const outline: u32 = if (light) 0xDEDEDE else tokens.ReaderOutline;
     const hint: u32 = if (light) 0x696969 else tokens.ReaderHint;
-    const round = @import("smooth.zig").fillRoundRect;
+    var canvas = @import("design_canvas.zig"){ .hdc = dc };
     const edge = @max(1, scaled(1));
-    round(dc, g.panel, scaled(16), outline);
-    round(dc, .{ .left = edge, .top = edge, .right = g.panel.right - edge, .bottom = g.panel.bottom - edge }, scaled(16) - edge, fill);
+    tokens.field(&canvas, @bitCast(g.panel), scaled(tokens.menu_radius), edge, fill, outline);
     const old_mode = w.SetBkMode(dc, w.TRANSPARENT);
     defer _ = w.SetBkMode(dc, old_mode);
     const text_font = fonts.create(-scaled(14), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, L(fonts.UI_FACE));
@@ -71,7 +70,7 @@ pub fn paint(dc: w.HANDLE, items: []const Item, hover: ?usize, light: bool) void
     defer _ = w.DeleteObject(emoji_font);
     for (items, 0..) |item, i| {
         const cell = g.cells[i];
-        if (hover == i) round(dc, cell, scaled(10), if (light) 0xE4E4E4 else tokens.ReaderRaised);
+        if (hover == i) tokens.row(&canvas, @bitCast(cell), scaled(tokens.row_radius), if (light) 0xE4E4E4 else tokens.ReaderRaised);
         var text = cell;
         _ = w.SetTextColor(dc, if (light) 0x1C1C1C else tokens.ReaderForeground);
         if (@intFromEnum(item) >= 8 and @intFromEnum(item) <= 10) {

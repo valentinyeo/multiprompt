@@ -333,12 +333,12 @@ pub fn chatViewLayout() ChatViewLayout {
     const gap = uiScaled(14);
     const composer_h = chatComposerBaseCardH() + app_state.g_chat_composer_extra_h + chatReplyBarH();
     const slot = @import("window_layout.zig").activePaneContentRect(rc);
-    const content = chat_style.contentColumn(slot.left, slot.right - slot.left, uiScaled(960));
+    const content = chat_style.contentColumn(slot.left, slot.right - slot.left, uiScaled(@import("design_tokens.zig").column_width));
     const left = content.left;
     const right = left + content.width;
     const content_top = slot.top + threadTitleHeight();
     const bottom = slot.bottom;
-    const send_size = uiScaled(32);
+    const send_size = uiScaled(@import("design_tokens.zig").button_size);
     const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
     const composer_card = RECT{
         .left = left + send_size + uiScaled(8),

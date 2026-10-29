@@ -398,7 +398,7 @@ test "all production pane consumers share outer margins and gaps" {
                                 try std.testing.expectEqual(inner.top + threadTitleHeight(), shell_rect.top);
                                 try std.testing.expectEqual(inner.bottom, shell_rect.bottom);
                             }
-                            const content = chat_style.contentColumn(inner.left, inner.right - inner.left, uiScaled(960));
+                            const content = chat_style.contentColumn(inner.left, inner.right - inner.left, uiScaled(@import("design_tokens.zig").column_width));
                             try std.testing.expectEqual(content.left, c.transcript.left);
                             try std.testing.expectEqual(content.width, c.composer_card.right - c.attach_btn.left);
                             const margin = if (hidden) uiScaled(8) else burn.left;
@@ -463,6 +463,7 @@ test('extracted production pane rectangles have equal spacing at 1920x1032', () 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-spacing-'));
   try {
     const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(path.join(dir, 'design_tokens.zig'), read('design_tokens'));
     fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
@@ -516,6 +517,7 @@ test('IGSH-886 selected session background is visible neutral gray in built-in t
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sidebar-gray-'));
   try {
     const file = path.join(dir, 'test.zig');
+    fs.writeFileSync(path.join(dir, 'design_tokens.zig'), read('design_tokens'));
     fs.writeFileSync(file, `const std = @import("std");
 const DWORD = u32;
 const app_state = @This();

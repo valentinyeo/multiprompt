@@ -32,51 +32,17 @@ pub fn bubbleMaxWidth(width: i32, narrow_width: i32) i32 {
 pub fn agentBubbleWidth(width: i32, narrow_width: i32) i32 {
     return bubbleMaxWidth(width, narrow_width);
 }
-pub fn cornerRadius(w: i32, h: i32, want: i32) i32 {
-    return @max(0, @min(want, @divTrunc(@min(w, h), 2)));
-}
-pub fn argb(c: u32) u32 {
-    return 0xFF000000 | ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF);
-}
-fn channelShift(v: u32, delta: i32) u32 {
-    return @intCast(std.math.clamp(@as(i32, @intCast(v)) + delta, 0, 255));
-}
-pub fn shift(c: u32, delta: i32) u32 {
-    return channelShift(c & 0xFF, delta) | (channelShift((c >> 8) & 0xFF, delta) << 8) | (channelShift((c >> 16) & 0xFF, delta) << 16);
-}
-pub fn isDark(c: u32) bool {
-    const lum = (2126 * (c & 0xFF) + 7152 * ((c >> 8) & 0xFF) + 722 * ((c >> 16) & 0xFF)) / 10000;
-    return lum < 128;
-}
-pub fn scrollThumbColor(bg: u32) u32 {
-    return shift(bg, if (isDark(bg)) 44 else -60);
-}
-pub const BubbleColors = struct { user: u32, agent: u32, injected: u32 };
-pub fn bubbleColors(bg: u32) BubbleColors {
-    if (bg == tokens.ReaderBackground) return .{ .user = tokens.ReaderUserCard, .agent = tokens.ReaderCard, .injected = 0x4F2F1E };
-    if (isDark(bg)) return .{ .user = shift(bg, 53), .agent = shift(bg, 36), .injected = 0x4F2F1E };
-    return .{ .user = shift(bg, -26), .agent = shift(bg, -11), .injected = 0xF7E6D6 };
-}
-pub const BubbleLook = struct { top: u32, bottom: u32, outline: u32 };
-pub const BUBBLE_GRADIENT_STEPS = 8;
-pub fn bubbleLook(fill: u32) BubbleLook {
-    if (fill == tokens.ReaderCard or fill == tokens.ReaderUserCard) return .{ .top = shift(fill, 8), .bottom = fill, .outline = shift(fill, 16) };
-    if (isDark(fill)) return .{ .top = shift(fill, 8), .bottom = fill, .outline = shift(fill, 12) };
-    return .{ .top = shift(fill, 6), .bottom = fill, .outline = shift(fill, -22) };
-}
-fn lerpChannel(a: u32, b: u32, num: u32, den: u32) u32 {
-    const av: i32 = @intCast(a);
-    const bv: i32 = @intCast(b);
-    return @intCast(av + @divTrunc((bv - av) * @as(i32, @intCast(num)), @as(i32, @intCast(den))));
-}
-pub fn gradientColor(look: BubbleLook, step: u32, steps: u32) u32 {
-    if (steps <= 1) return look.bottom;
-    const num = @min(step, steps - 1);
-    const den = steps - 1;
-    return lerpChannel(look.top & 0xFF, look.bottom & 0xFF, num, den) |
-        (lerpChannel((look.top >> 8) & 0xFF, (look.bottom >> 8) & 0xFF, num, den) << 8) |
-        (lerpChannel((look.top >> 16) & 0xFF, (look.bottom >> 16) & 0xFF, num, den) << 16);
-}
+pub const cornerRadius = tokens.cornerRadius;
+pub const argb = tokens.argb;
+pub const shift = tokens.shift;
+pub const isDark = tokens.isDark;
+pub const scrollThumbColor = tokens.scrollThumbColor;
+pub const BubbleColors = tokens.BubbleColors;
+pub const bubbleColors = tokens.bubbleColors;
+pub const BubbleLook = tokens.BubbleLook;
+pub const BUBBLE_GRADIENT_STEPS = tokens.BUBBLE_GRADIENT_STEPS;
+pub const bubbleLook = tokens.bubbleLook;
+pub const gradientColor = tokens.gradientColor;
 pub const RunBounds = struct { first: usize, last: usize };
 pub fn runBounds(pos: []const BubblePos, i: usize) RunBounds {
     var first = i;

@@ -2478,46 +2478,11 @@ const gdipProc = @import("smooth.zig").gdipProc;
 const gdipLoad = @import("smooth.zig").gdipLoad;
 pub const fillRoundRectAA = @import("smooth.zig").fillRoundRect;
 
-fn fillBubbleAA(hdc: HANDLE, rc: RECT, radius: i32, color: DWORD, round_top: bool, round_bottom: bool) void {
-    if (round_top and round_bottom) return fillRoundRectAA(hdc, rc, radius, color);
-    const over = 2 * radius + 2;
-    const saved = SaveDC(hdc);
-    _ = IntersectClipRect(hdc, rc.left, rc.top, rc.right, rc.bottom);
-    var ext = rc;
-    if (!round_top) ext.top -= over;
-    if (!round_bottom) ext.bottom += over;
-    fillRoundRectAA(hdc, ext, radius, color);
-    _ = RestoreDC(hdc, saved);
-}
-
 var g_bubble_span: ?[2]i32 = null;
 
 fn fillBubbleStyled(hdc: HANDLE, rc: RECT, radius: i32, fill: DWORD, round_top: bool, round_bottom: bool) void {
-    if (rc.right <= rc.left or rc.bottom <= rc.top) return;
-    const look = chat_style.bubbleLook(fill);
-    fillBubbleAA(hdc, rc, radius, look.outline, round_top, round_bottom);
-    const edge = @max(1, uiScaled(1));
-    const inner = RECT{
-        .left = rc.left + edge,
-        .top = rc.top + (if (round_top) edge else 0),
-        .right = rc.right - edge,
-        .bottom = rc.bottom - (if (round_bottom) edge else 0),
-    };
-    if (inner.right <= inner.left or inner.bottom <= inner.top) return;
-    const span = g_bubble_span orelse [2]i32{ rc.top, rc.bottom };
-    const height = @max(1, span[1] - span[0]);
-    const steps: i32 = chat_style.BUBBLE_GRADIENT_STEPS;
-    const inner_radius = @max(0, radius - edge);
-    var step: i32 = 0;
-    while (step < steps) : (step += 1) {
-        const y0 = if (step == 0) inner.top else @max(inner.top, span[0] + @divTrunc(height * step, steps));
-        const y1 = if (step == steps - 1) inner.bottom else @min(inner.bottom, span[0] + @divTrunc(height * (step + 1), steps));
-        if (y1 <= y0) continue;
-        const saved = SaveDC(hdc);
-        _ = IntersectClipRect(hdc, inner.left, y0, inner.right, y1);
-        fillBubbleAA(hdc, inner, inner_radius, chat_style.gradientColor(look, @intCast(step), chat_style.BUBBLE_GRADIENT_STEPS), round_top, round_bottom);
-        _ = RestoreDC(hdc, saved);
-    }
+    var canvas = @import("design_canvas.zig"){ .hdc = hdc };
+    @import("design_tokens.zig").bubble(&canvas, @bitCast(rc), radius, @max(1, uiScaled(1)), fill, round_top, round_bottom, g_bubble_span orelse [2]i32{ rc.top, rc.bottom });
 }
 
 fn bubbleRunSpan(i: usize) ?[2]i32 {
@@ -3436,14 +3401,12 @@ pub fn shotFocusTick() void {
 }
 
 pub fn paintChatAttachButton(hdc: HANDLE, rc: RECT) void {
+    var canvas = @import("design_canvas.zig"){ .hdc = hdc };
     if (@import("themes.zig").themeReaderDark()) {
-        const edge = @import("window_layout.zig").chatSurfaceBorderW();
-        @import("smooth.zig").fillEllipse(hdc, rc, @import("window_layout.zig").chatSurfaceBorderColor());
-        @import("smooth.zig").fillEllipse(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, app_state.g_chat_input_color);
+        @import("design_tokens.zig").field(&canvas, @bitCast(rc), @divTrunc(rc.bottom - rc.top, 2), @import("window_layout.zig").chatSurfaceBorderW(), app_state.g_chat_input_color, @import("window_layout.zig").chatSurfaceBorderColor());
     } else {
         const base = app_state.g_chat_input_color;
-        const fill = chat_style.shift(base, if (chat_style.isDark(base)) 22 else -14);
-        @import("smooth.zig").fillEllipse(hdc, rc, fill);
+        @import("design_tokens.zig").roundButton(&canvas, @bitCast(rc), chat_style.shift(base, if (chat_style.isDark(base)) 22 else -14));
     }
     const cx = rc.left + @divTrunc(rc.right - rc.left, 2);
     const cy = rc.top + @divTrunc(rc.bottom - rc.top, 2);

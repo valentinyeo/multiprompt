@@ -1,6 +1,7 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
 const tokens = @import("design_tokens.zig");
+const DesignCanvas = @import("design_canvas.zig");
 const LOOK_UNIFIED = @import("main.zig").LOOK_UNIFIED;
 const DWORD = @import("win32.zig").DWORD;
 const HANDLE = @import("win32.zig").HANDLE;
@@ -223,16 +224,8 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, sto
     const grey: u8 = if (app_state.g_light_theme) (if (hover) 128 else 104) else (if (hover) 84 else 64);
     const bg = if (enabled) RGB(grey, grey, grey) else customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(236, 238, 243) else RGB(38, 42, 52));
     const fill = if (!app_state.g_light_theme and !hover and (glyph == .send or (enabled and @import("themes.zig").themeReaderDark()))) tokens.ReaderRaised else bg;
-    const brush = CreateSolidBrush(fill);
-    const pen = CreatePen(0, 1, fill);
-    const old_brush = SelectObject(hdc, brush);
-    const old_pen = SelectObject(hdc, pen);
-    const radius = rc.bottom - rc.top;
-    _ = @import("smooth.zig").drawRoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
-    _ = SelectObject(hdc, old_brush);
-    _ = SelectObject(hdc, old_pen);
-    _ = DeleteObject(brush);
-    _ = DeleteObject(pen);
+    var canvas = DesignCanvas{ .hdc = hdc };
+    tokens.roundButton(&canvas, @bitCast(rc), fill);
     const ink = if (enabled)
         (if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(235, 235, 235))
     else
@@ -254,50 +247,16 @@ fn paintChatButton(hdc: HANDLE, rc: RECT, enabled: bool, glyph: enum { send, sto
     _ = DeleteObject(glyph_font);
 }
 
-fn paintChatMicWave(hdc: HANDLE, rc: RECT, ink: DWORD) void {
-    const bars = @import("chat_composer.zig").chat_dictation_wave;
-    const count: i32 = @intCast(bars.len);
-    const width = rc.right - rc.left;
-    const slot_w = @divTrunc(width, count);
-    if (slot_w < 2) return;
-    const bar_w = @max(1, @divTrunc(slot_w * 2, 3));
-    const mid = @divTrunc(rc.top + rc.bottom, 2);
-    const max_half = @max(2, @divTrunc(rc.bottom - rc.top, 2));
-    const min_half = @max(1, uiScaled(2));
-    for (bars, 0..) |level, i| {
-        const half = min_half + @divTrunc((max_half - min_half) * @as(i32, level), 255);
-        const left = rc.left + @as(i32, @intCast(i)) * slot_w + @divTrunc(slot_w - bar_w, 2);
-        fillRoundRectAA(hdc, .{ .left = left, .top = mid - half, .right = left + bar_w, .bottom = mid + half }, @divTrunc(bar_w, 2), ink);
-    }
-}
-
 fn paintChatMicPill(hdc: HANDLE, rc: RECT, ink: DWORD, fill: DWORD) void {
-    const h = rc.bottom - rc.top;
-    fillRoundRectAA(hdc, rc, @divTrunc(h, 2), fill);
-    const square = @max(uiScaled(8), @divTrunc(h * 34, 100));
-    const sq_left = rc.left + @divTrunc(h - square, 2);
-    const sq_top = rc.top + @divTrunc(h - square, 2);
-    fillRoundRectAA(hdc, .{ .left = sq_left, .top = sq_top, .right = sq_left + square, .bottom = sq_top + square }, uiScaled(2), ink);
-    var digits: [8]u16 = undefined;
-    const text = @import("chat_composer.zig").chatDictationElapsedText(&digits, @import("chat_composer.zig").chatDictationElapsedNow());
-    const text_h = @max(uiScaled(10), @divTrunc(h * 40, 100));
-    const font = @import("fonts.zig").chat(-text_h, false, false, false, .{ .body_weight = 500 });
-    const old_font = SelectObject(hdc, font);
-    _ = SetBkMode(hdc, 1);
-    _ = SetTextColor(hdc, ink);
-    const text_left = sq_left + square + uiScaled(8);
-    var text_rc = RECT{ .left = text_left, .top = rc.top, .right = text_left + uiScaled(34), .bottom = rc.bottom };
-    _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-    _ = SelectObject(hdc, old_font);
-    _ = DeleteObject(font);
-    paintChatMicWave(hdc, .{ .left = text_rc.right + uiScaled(6), .top = rc.top + uiScaled(6), .right = rc.right - @divTrunc(h, 2), .bottom = rc.bottom - uiScaled(6) }, ink);
+    var canvas = DesignCanvas{ .hdc = hdc };
+    tokens.micPill(&canvas, @bitCast(rc), @intCast(app_state.g_main_monitor_dpi), ink, fill, @import("chat_composer.zig").chatDictationElapsedNow() / 1000, @import("chat_composer.zig").chat_dictation_wave);
 }
 
 fn paintChatMicButton(hdc: HANDLE, rc: RECT) void {
     const active = @import("chat_composer.zig").chat_dictation_state != .idle;
-    const ink = if (active) customColorOr("accent", RGB(80, 150, 255)) else customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164));
+    const ink = if (active) @import("themes.zig").themeConsoleFg() else customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164));
     const base = app_state.g_chat_input_color;
-    const fill = if (active) customColorOr("selected_bg", if (app_state.g_light_theme) RGB(222, 235, 252) else RGB(63, 83, 113)) else @import("chat_style.zig").shift(base, if (@import("chat_style.zig").isDark(base)) 22 else -14);
+    const fill = if (active) @import("themes.zig").themeRaised() else @import("chat_style.zig").shift(base, if (@import("chat_style.zig").isDark(base)) 22 else -14);
     if (active) {
         paintChatMicPill(hdc, rc, ink, fill);
         return;
@@ -327,9 +286,8 @@ pub fn chatSurfaceBorderColor() DWORD {
 }
 
 fn paintChatSurface(hdc: HANDLE, rc: RECT, color: DWORD, border_color: DWORD, radius: i32) void {
-    const edge = chatSurfaceBorderW();
-    fillRoundRectAA(hdc, rc, radius, border_color);
-    fillRoundRectAA(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, @max(0, radius - edge), color);
+    var canvas = DesignCanvas{ .hdc = hdc };
+    tokens.field(&canvas, @bitCast(rc), radius, chatSurfaceBorderW(), color, border_color);
 }
 
 pub fn chatWorkingIndicatorH() i32 {

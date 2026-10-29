@@ -53,8 +53,8 @@ gate('timestamps are absent and reserve no row; attribution survives and no Read
 }, 'chat_render', 'fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool) void {', 'fn chatPaintTime(hdc: HANDLE, block: ChatBlock, area: RECT, right: bool) void {\n    _ = block.time;');
 
 gate('chat bubbles and composer use rounded corners rather than the old four pixels', s => {
-  assert.match(s.app_state, /CHAT_BUBBLE_RADIUS = 20;/);
+  assert.match(s.app_state, /CHAT_BUBBLE_RADIUS = @import\("design_tokens.zig"\).bubble_radius;/);
   requires(body(s.window_layout, 'chatSurfaceRadius'), 'uiScaled(CHAT_BUBBLE_RADIUS)');
   requires(body(s.chat_render, 'chatPaintBlock'), 'uiScaled(CHAT_BUBBLE_RADIUS)');
-  requires(body(s.window_layout, 'paintChatButton'), 'const radius = rc.bottom - rc.top;');
-}, 'app_state', 'CHAT_BUBBLE_RADIUS = 20;', 'CHAT_BUBBLE_RADIUS = 4;');
+  requires(body(s.window_layout, 'paintChatButton'), 'tokens.roundButton(&canvas, @bitCast(rc), fill);');
+}, 'app_state', 'CHAT_BUBBLE_RADIUS = @import("design_tokens.zig").bubble_radius;', 'CHAT_BUBBLE_RADIUS = 4;');

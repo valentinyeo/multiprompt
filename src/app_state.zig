@@ -1110,7 +1110,7 @@ pub var g_chat_ac_dialog_len: usize = 0;
 pub var g_chat_composer_extra_h: i32 = 0;
 pub var g_chat_composer_scroll_shown: bool = false;
 pub var g_chat_font_pt: i32 = CHAT_FONT_DEFAULT_PT;
-pub const CHAT_FONT_DEFAULT_PT: i32 = 14;
+pub const CHAT_FONT_DEFAULT_PT: i32 = @import("design_tokens.zig").body_size;
 pub var g_chat_font: HANDLE = null;
 pub var g_chat_bg_brush: HANDLE = null;
 pub var g_chat_input_brush: HANDLE = null;
@@ -2715,7 +2715,7 @@ pub var g_chat_prepend_pending = false;
 pub const ChatHit = struct { x: i32, y: i32, char: ?*usize = null, find: ?struct { position: usize, y: *i32 } = null };
 
 pub const CHAT_BUBBLE_PAD = 12;
-pub const CHAT_BUBBLE_RADIUS = 20;
+pub const CHAT_BUBBLE_RADIUS = @import("design_tokens.zig").bubble_radius;
 pub const CHAT_PARA_GAP = 8;
 pub const CHAT_AGENT_PAD_X = 12;
 pub const CHAT_AGENT_PAD_Y = 10;

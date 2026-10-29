@@ -70,7 +70,7 @@ test "production reading column caps at 960 and stays centered inside the shared
             for ([_]i32{0, 1, 40, 600, 960, 961, 1700, 3000}) |width| {
                 shells[0].full_width = true;
                 const full = chatColumn(width);
-                const want = @min(width, uiScaled(960));
+                const want = @min(width, uiScaled(@import("design_tokens.zig").column_width));
                 try std.testing.expectEqual(220 + @divTrunc(width - want, 2), full.left);
                 try std.testing.expectEqual(want, full.width);
                 shells[0].full_width = false;
@@ -158,7 +158,7 @@ test('ISSUE-440 executes the production toggle without resetting the Chat View c
     const old = run(oldHandler);
     assert.notEqual(old.status, 0);
     assert.match(old.stderr, /production toggle[^]*FAIL/);
-    const unbounded = run(toggle(source), content(source).replace('uiScaled(960)', 'slot.right - slot.left'));
+    const unbounded = run(toggle(source), content(source).replace('uiScaled(@import("design_tokens.zig").column_width)', 'slot.right - slot.left'));
     assert.notEqual(unbounded.status, 0);
     assert.match(unbounded.stderr, /production reading column[^]*FAIL/);
     const styleFile = path.join(dir, 'chat_style.zig');

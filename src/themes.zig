@@ -664,6 +664,12 @@ pub fn themeConsoleFg() DWORD {
     return app_state.g_dev_theme.console_fg;
 }
 
+pub fn themeRaised() DWORD {
+    if (themeReaderDark()) return tokens.ReaderRaised;
+    const base = customColorOr("overlay_input_bg", if (app_state.g_light_theme) RGB(255, 255, 255) else themeSidebarBg());
+    return tokens.shift(base, if (tokens.isDark(base)) 22 else -14);
+}
+
 pub fn themeTitleBarBg() DWORD {
     if (app_state.g_multiprompt_theme) return multipromptColorOr("titlebar_bg", RGB(18, 19, 21));
     if (devThemeOn()) {
