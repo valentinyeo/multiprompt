@@ -2,8 +2,6 @@ name: Workspace number shortcuts
 run-name: workspace numbers ${{ inputs.tag || github.ref_name }}
 
 on:
-  push:
-    branches: [ceo/IGSH-1186]
   workflow_dispatch:
     inputs:
       tag:
