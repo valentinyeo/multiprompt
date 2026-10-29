@@ -81,7 +81,7 @@
                 $video = Join-Path $Evidence 'immediate-toggle.mp4'
                 $recordJob = New-Object VerifyJob
                 $helperJobs += $recordJob
-                $recorder = $recordJob.Start($ffmpeg, $scratch, (Join-Path $Evidence 'video-out.log'), (Join-Path $Evidence 'video-error.log'), ('-y -f gdigrab -framerate 10 -i desktop -t 45 -vf scale=960:-2 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "' + $video + '"'))
+                $recorder = $recordJob.Start($ffmpeg, $scratch, (Join-Path $Evidence 'video-out.log'), (Join-Path $Evidence 'video-error.log'), ('-y -f gdigrab -framerate 10 -i desktop -t 90 -vf scale=960:-2 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "' + $video + '"'))
                 $script:immediatePairs = @()
                 function Assert-ImmediateBrowserPairs([string]$Page) {
                     for ($i = 0; $i -lt 20; $i++) {
@@ -90,7 +90,7 @@
                         Record "IGSH-1126 $Page immediate Alt+A pair $i"
                         Assert-Foreground
                         $before = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count
-                        $gap = [VerifyNative]::ImmediateBrowserTogglePair()
+                        $gap = [VerifyNative]::ImmediateBrowserTogglePair((50 + ($i % 5) * 50))
                         Wait-Until { @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count -eq $before + 2 } 'both physical key presses handled' -Seconds 5 -PollMilliseconds 10
                         $states = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=' | Select-Object -Last 2 | ForEach-Object { $_.Line })
                         if ($states[0] -notmatch 'enabled= 1$' -or $states[1] -notmatch 'enabled= 0$') { throw 'Immediate pair did not open then close' }
@@ -101,7 +101,18 @@
                 }
                 Assert-ImmediateBrowserPairs 'blank'
                 $slowPane = Open-BrowserPane 'slow-open'
-                Press @(0x12, 0x4C) 'Alt+L: navigate browser pane'
+                $browser = [VerifyNative]::DockedPaneWindow($script:window)
+                [uint32]$browserPid = 0
+                [void][VerifyNative]::GetWindowThreadProcessId($browser, [ref]$browserPid)
+                Record 'Focus owned browser before native address-bar navigation'
+                [VerifyNative]::FocusOwnedWindow($browser, $browserPid, $script:window)
+                if ([VerifyNative]::GetForegroundWindow() -ne $browser) { throw 'Browser lost focus before Ctrl+L' }
+                Press @(0x11, 0x4C) 'Ctrl+L: navigate browser pane'
+                Wait-Until {
+                    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+                    $focused.Current.ClassName -eq 'OmniboxViewViews' -and $focused.Current.HasKeyboardFocus -and
+                        [VerifyNative]::GetForegroundWindow() -eq $browser
+                } 'verified browser address bar has keyboard focus'
                 Type-Text "http://127.0.0.1:$port/slow"
                 Press @(0x0D) 'Enter: start slow page'
                 Wait-Until { (Test-Path $serverLog) -and (Get-Content $serverLog -Raw) -match 'SLOW_LOADING' } 'browser received unfinished page'

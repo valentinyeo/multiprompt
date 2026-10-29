@@ -125,11 +125,11 @@ public static class VerifyNative {
         }
         Thread.Sleep(250);
     }
-    public static double ImmediateBrowserTogglePair() {
+    public static double ImmediateBrowserTogglePair(int delay) {
         Action chord = () => { Key(0x12, 0, 0); Key(0x41, 0, 0); Key(0x41, 0, 2); Key(0x12, 0, 2); };
         var clock = System.Diagnostics.Stopwatch.StartNew();
         chord();
-        Thread.Sleep(100);
+        Thread.Sleep(delay);
         double gap = clock.Elapsed.TotalMilliseconds;
         chord();
         if (gap > 300) throw new InvalidOperationException("Alt+A pair exceeded 300 ms: " + gap);
