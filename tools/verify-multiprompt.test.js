@@ -2449,6 +2449,8 @@ test('owner browser proof keeps disposable credentials outside evidence', () => 
   assert.ok(fs.existsSync(file), 'Cross-user proof must ship with its credential cleanup');
   const script = fs.readFileSync(file, 'utf8');
   assert.match(script, /StrictHostKeyChecking=yes/);
+  assert.match(script, /\$authHandle = \$auth\.Handle/);
+  assert.match(script, /\$remoteHandle = \$remote\.Handle/);
   assert.match(script, /OwningProcess -eq \$process.Id/);
   assert.match(script, /foreignDenied/);
   assert.match(script, /globalDenied/);
