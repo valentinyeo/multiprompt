@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)][string]$Exe,
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
-    [Parameter(Mandatory)][string]$Evidence
+    [Parameter(Mandatory)][string]$Evidence,
+    [string]$WorkspaceName = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -42,7 +43,8 @@ function Appearance([string]$Name) {
     foreach ($byte in [Text.Encoding]::UTF8.GetBytes($Name)) {
         $hash = (($hash -bxor [uint64]$byte) * [uint64]16777619) -band [uint64]4294967295
     }
-    @{face=[int]($hash % 20); color=[int]([Math]::Floor($hash / 20) % 8)}
+    $color = switch ($WorkspaceName) { 'inne' { 2 } 'Hypertask' { 5 } 'Software Factory' { 4 } default { 0 } }
+    @{face=[int]($hash % 20); color=$color}
 }
 function Layouts {
     $matches = [regex]::Matches((Read-Log), '\[bots\] face=(\d+) color=(\d+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')
@@ -104,7 +106,7 @@ try {
     Save $console "$state/claude.json"
     $tabs = @()
     for ($i = 0; $i -lt $names.Count; $i++) { $tabs += @{kind='tmux'; name=$displayNames[$i]; manual=$true; tmux_host=0; tmux_session=$names[$i]; pinned_top=($i -lt 2); cv=$false; pid=0} }
-    Save @{active_tab=0; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=$tabs} "$settings/session.json"
+    Save @{active_tab=0; single_window=$true; workspace_count=1; workspaces=@(@{name=$WorkspaceName; wid='default'}); chat_active=$false; amoled_theme=$true; tabs=$tabs} "$settings/session.json"
     [IO.File]::WriteAllText("$settings/theme-mode.txt", 'amoled')
     [IO.File]::WriteAllText("$settings/ssh-path.txt", (Join-Path (Split-Path $Exe) 'ssh.exe'))
     $job = [VerifyJob]::new()
@@ -118,6 +120,9 @@ try {
         @($published.shells | Where-Object { $_.pv -like '*Robot previews are ready*' }).Count -eq 6
     })
     $checks.Add(@{name='last-message-previews'; passed=$true})
+    $expectedColor = (Appearance $names[0]).color
+    if (@($rows | Where-Object { $_.color -ne $expectedColor }).Count) { throw 'Workspace robot color mismatch' }
+    $checks.Add(@{name='workspace-colors'; passed=$true; workspace=$WorkspaceName; color=$expectedColor})
     $rows = @(Layouts)
     $pins = @($rows | Where-Object { $_.size -eq 56 } | Sort-Object x)
     $list = @($rows | Where-Object { $_.size -eq 40 } | Sort-Object y)
