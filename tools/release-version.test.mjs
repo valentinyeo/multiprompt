@@ -181,7 +181,8 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   assert.match(jobs.build, /needs: \[prepare, journeys\]/);
   assert.match(jobs.journeys, /feature: all/);
   assert.match(jobs.journeys, /revision: \$\{\{ needs.prepare.outputs.sha \}\}/);
-  assert.match(jobs.release, /needs: \[prepare, build\]/);
+  assert.match(jobs.journeys, /if: inputs.proof/);
+  assert.match(jobs.release, /needs: \[prepare, build, update-test\]/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
@@ -476,7 +477,7 @@ test('IGSH-1115 release proof builds both architectures without publishing and a
   assert.match(workflow, /proof:\n        description: Build both architectures without publishing\n        type: boolean\n        default: false/);
   assert.match(prepare, /if: inputs\.proof\n        run: node --test tools\/version-stamp\.test\.mjs tools\/release-version\.test\.mjs/);
   assert.match(build, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  assert.match(release, /if: github\.event_name != 'pull_request' && !inputs\.proof/);
+  assert.match(release, /if: \$\{\{ !cancelled\(\) && github\.event_name != 'pull_request' && !inputs\.proof/);
   const notes = release.split('      - name: Publish plain versioned update notes\n')[1].split('      - name: Package extension')[0];
   assert.match(notes, /GH_TOKEN: \$\{\{ github\.token \}\}/);
 });
