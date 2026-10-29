@@ -1,7 +1,7 @@
 name: Browser normal-spacing evidence
 on:
-  push:
-    branches: [ceo/IGSH-1165]
+  schedule:
+    - cron: '13 2 * * *'
   workflow_dispatch:
     inputs:
       tag:

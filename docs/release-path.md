@@ -25,6 +25,7 @@ Nightly and manual workflow inventory:
 - `background-close.yml`
 - `bot-avatars.yml`
 - `browser-corners.yml`
+- `browser-toggle-normal.yml`
 - `chat-bench-ab.yml`
 - `chat-history-retention.yml`
 - `chat-perf-bisect.yml`
