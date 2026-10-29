@@ -73,7 +73,7 @@ test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', 
   assert.ok(journey.includes("(Read-Session).tabs[0].burl -eq $slowUrl"));
   assert.doesNotMatch(journey, /Alt\+L: navigate browser pane/);
   assert.match(journey, /Press @\(0x12, 0x41\) 'Alt\+A: open browser for slow navigation'/);
-  assert.match(journey, /Record "IGSH-1126 \$Page immediate Alt\+A pair \$i"\s+Wait-Foreground/);
+  assert.match(journey, /Record "IGSH-1126 \$Page immediate Alt\+A pair \$i"\s+\[VerifyNative\]::BringToForeground\(\$script:window\)\s+Wait-Foreground/);
 });
 
 test('IGSH-1126 a launch-owned browser belongs to the app before adoption', () => {

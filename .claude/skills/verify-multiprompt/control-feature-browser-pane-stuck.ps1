@@ -86,8 +86,8 @@
                 function Assert-ImmediateBrowserPairs([string]$Page) {
                     for ($i = 0; $i -lt 20; $i++) {
                         Doctor
-                        Wait-Foreground
                         Record "IGSH-1126 $Page immediate Alt+A pair $i"
+                        [VerifyNative]::BringToForeground($script:window)
                         Wait-Foreground
                         $before = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count
                         $gap = [VerifyNative]::ImmediateBrowserTogglePair((50 + ($i % 5) * 50))
