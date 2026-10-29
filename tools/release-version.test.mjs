@@ -139,7 +139,9 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   assert.equal(jobs['pr-build'], undefined);
   assert.match(jobs.prepare, /if: github.event_name != 'pull_request'/);
-  assert.match(jobs.build, /needs: prepare/);
+  assert.match(jobs.build, /needs: \[prepare, journeys\]/);
+  assert.match(jobs.journeys, /feature: all/);
+  assert.match(jobs.journeys, /revision: \$\{\{ needs.prepare.outputs.sha \}\}/);
   assert.match(jobs.release, /needs: \[prepare, build\]/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
@@ -435,4 +437,18 @@ test('IGSH-1115 release proof builds both architectures without publishing and a
   assert.match(release, /if: github\.event_name != 'pull_request' && !inputs\.proof/);
   const notes = release.split('      - name: Publish plain versioned update notes\n')[1].split('      - name: Package extension')[0];
   assert.match(notes, /GH_TOKEN: \$\{\{ github\.token \}\}/);
+});
+
+
+test('IGSH-1033 a proof builds unchanged application source without inventing release notes', () => {
+  const build = workflow.split('\n  build:\n')[1].split('\n  release:\n')[0];
+  assert.match(build, /PROOF: \$\{\{ inputs\.proof \}\}/);
+  const stamp = script('Build').split('zig build ')[0];
+  for (const proof of ['true', 'false', '']) {
+    const result = spawnSync('bash', ['-e', '-c', `node() { printf 'STAMP_REQUIRED'; return 1; }\n${stamp}`], {
+      encoding: 'utf8', env: { ...process.env, TAG: 'v1.2.3', PROOF: proof },
+    });
+    assert.equal(result.status, proof === 'true' ? 0 : 1, result.stdout + result.stderr);
+    assert.equal(result.stdout, proof === 'true' ? '' : 'STAMP_REQUIRED');
+  }
 });

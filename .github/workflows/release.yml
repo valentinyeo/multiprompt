@@ -61,8 +61,15 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-  build:
+  journeys:
     needs: prepare
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: all
+      revision: ${{ needs.prepare.outputs.sha }}
+
+  build:
+    needs: [prepare, journeys]
     name: build-${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
@@ -88,8 +95,11 @@ jobs:
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
+          PROOF: ${{ inputs.proof }}
         run: |
-          node tools/version-stamp.mjs build "$TAG"
+          if [ "$PROOF" != true ]; then
+            node tools/version-stamp.mjs build "$TAG"
+          fi
           zig build -Dtarget=${{ matrix.target }} -Drelease=${{ github.event_name != 'pull_request' }} -Dversion="${TAG#v}"
           node --input-type=module - "$TAG" <<'NODE'
           import fs from 'node:fs';

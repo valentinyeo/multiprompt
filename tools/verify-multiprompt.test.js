@@ -2209,7 +2209,7 @@ test('IGSH-1108 workflow consumes feature-owned matrices without changing requir
   assert.match(workflow, /full: \$\{\{ steps.features.outputs.full \}\}/);
   assert.match(workflow, /- id: features\n        run: node tools\/verify-features.cjs/);
   assert.match(workflow, /github.event_name == 'pull_request' && fromJSON\(needs.journeys.outputs.pr\)/);
-  assert.match(workflow, /\(github.event_name == 'push' \|\| inputs.feature == 'all'\) && fromJSON\(needs.journeys.outputs.full\)/);
+  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
   assert.ok(features.pr.includes('appearance'));
   assert.ok(features.full.length >= 21);
   const registered = [...control.match(/ValidateSet\(([^\n)]+)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
@@ -2266,6 +2266,28 @@ test('IGSH-1108 CLI writes JSON job outputs and rejects unavailable or unsafe fe
     const result = cli(feature);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /Unsupported desktop journey/);
+  }
+});
+
+test('IGSH-1033 shared tracked quarantine protects rollback and release execution', () => {
+  assert.ok(fs.existsSync(path.join(root, 'tools/journey-policy.json')), 'Shared quarantine policy must ship');
+  assert.deepEqual(JSON.parse(read('tools/journey-policy.json')), { quarantined: {} });
+  const policy = JSON.parse(read('tools/fixtures/IGSH-1033/journey-policy.json'));
+  assert.deepEqual(Object.keys(policy.quarantined).sort(), ['browser-pane-stuck', 'chat-messages-only']);
+  assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \}\}/);
+  assert.match(workflow, /quarantined: \$\{\{ steps.policy.outputs.quarantined \}\}/);
+  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
+  assert.match(workflow, /github.event_name == 'push' && fromJSON\('\["appearance", "relaunch-saved-sessions"\]'\)/);
+  for (const entry of Object.values(policy.quarantined)) {
+    assert.equal(entry.ticket, 'https://app.hypertask.ai/detail/project-2060/1055');
+    assert.deepEqual(entry.runs, ['https://github.com/valentinyeo/multiprompt/actions/runs/40450143181', 'https://github.com/valentinyeo/multiprompt/actions/runs/40454057302']);
+  }
+});
+
+test('IGSH-1033 historical controls stay outside master and release candidates', () => {
+  for (const name of ['Build IGSH-807 pre-fix focus-ring control', 'Require visible pre-fix focus rings with unchanged input cycling', 'Build the pre-fix commit 42cecfd3 negative control', 'Require pre-fix 42cecfd3 to show activity rows with the identical journey']) {
+    const step = workflow.slice(workflow.indexOf('      - name: ' + name)).split(/\n      - /)[0];
+    assert.match(step, /if: github.event_name == 'workflow_dispatch' && inputs.revision == '' &&/);
   }
 });
 

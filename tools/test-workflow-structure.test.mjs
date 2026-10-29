@@ -77,7 +77,8 @@ test('branch reaction proof uses the shared journey without changing production 
   assert.match(adapter, /feature: chat-delivery/);
   assert.match(adapter, /chat_reactions_proof: true/);
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
-  assert.match(verify, /workflow_call:\n    inputs:\n      chat_reactions_proof:/);
+  assert.match(verify, /workflow_call:\n    inputs:\n(?:      [\s\S]*?)      chat_reactions_proof:/);
+  assert.match(verify, /workflow_call:\n    inputs:\n      revision:\n        required: false\n        type: string/);
   const checker = new URL('./verify-workflow-branches.mjs', import.meta.url);
   assert.ok(fs.existsSync(checker), 'shared workflow branch checker exists');
   const { verifyPushBranches } = await import(checker);
