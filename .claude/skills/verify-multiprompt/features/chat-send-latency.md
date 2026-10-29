@@ -17,7 +17,7 @@ Press Alt+C to open Chat View, type a message and press Enter.
 
 - Branch: `gh workflow run verify.yml --ref ceo/IGSH-977 -f feature=chat-send-latency`. It also runs in the full matrix on every master push.
 - The driver first starts a PowerShell console in the isolated CMD session with the title `claude agent` and a `❯` prompt, so the app treats it as a local coding agent at an idle prompt and sends through direct console input, the path that waits before pressing Enter. Then it opens Chat View, types `latency probe <n>` with real keyboard input and presses Enter, 20 times with 1.5 seconds between sends. After each send it waits for the new log line and for the message box to empty.
-- `chat-send-latency.json` holds all 20 samples in milliseconds (`enqueueMs`, `paintedMs`), the median and the maximum. `result.json` names the check `chat-send-latency` with `over`, the number of sends slower than 100 ms. Any value above 100 ms fails the run.
+- `chat-send-latency.json` holds all 20 samples in milliseconds (`enqueueMs`, `paintedMs`), the median and the maximum. `result.json` names the check `chat-send-latency` with `over`, the number of sends slower than 100 ms. Any value above 100 ms warns. Missing samples and five-second stalls still fail.
 
 ## Gotchas
 

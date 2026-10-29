@@ -45,6 +45,7 @@ jobs:
       - name: Record release failures and speed trends
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ github.event.workflow_run.id }}
         run: node tools/release-gates-history.mjs "$GITHUB_REPOSITORY" release-report ${{ github.event_name == 'workflow_run' && '--file-regressions' || '' }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

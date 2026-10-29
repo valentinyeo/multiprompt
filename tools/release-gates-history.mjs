@@ -87,9 +87,11 @@ export function collect(repo, output) {
 }
 
 export function fileRegressions(repo, report) {
-  const existing = api(`repos/${repo}/issues?state=all&per_page=100`);
+  const regressions = report.regressions.filter(row => !process.env.RELEASE_RUN_ID || row.run.endsWith('/' + process.env.RELEASE_RUN_ID));
+  if (!regressions.length) return;
+  const existing = api(`repos/${repo}/issues?state=open&per_page=100`);
   const names = new Set();
-  for (const regression of report.regressions) {
+  for (const regression of regressions) {
     if (names.has(regression.name)) continue;
     names.add(regression.name);
     const title = `Speed regression: ${regression.name}`;

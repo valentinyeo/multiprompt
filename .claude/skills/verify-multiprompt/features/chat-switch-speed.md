@@ -6,7 +6,7 @@
 - Click-to-chat-shown time: from the native SendInput call until the app log holds `[switch] chat content shown shell=<id>` for the target session. That line is written on the first paint after the switch where the transcript has blocks, the layout is not dirty and the transcript cache belongs to the target session. An empty "Loading conversation..." area never counts as shown.
 - Window hang probe: a native thread sends WM_NULL to the main window every 2 ms and records the longest round trip in each sample window (from the switch input until 1.2 s later, so the delayed second layout and save are included).
 - First frame already final: the `chat content shown` line also carries `layout_w` (the width the transcript was laid out for) and `client_w` (the width of the transcript window at that paint). They must be equal, and no `[chat] frame` or `[reposition]` line may follow the shown line inside the sample window, so nothing moves after the first frame with content.
-- The named `chat-switch-speed` case fails if any median is above 150 ms, any single window hang is above 100 ms, any switch never shows its chat, any first frame has the wrong width, or any layout moves after the first frame.
+- Medians above 150 ms warn. Window responses above 100 ms warn. Missing chat or incorrect layouts still fail. Switches or freezes over five seconds fail.
 
 ## How to get to it (user POV)
 

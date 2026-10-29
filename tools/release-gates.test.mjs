@@ -90,3 +90,35 @@ test('speed-only warnings retain the complete repeated workload and invalid samp
   assert.match(read('.github/workflows/test.yml'), /report evidence\/base\/samples.json evidence\/head\/samples.json --release-policy/);
   assert.match(read('.github/workflows/test.yml'), /Assert-ReleaseTiming 'ui-hang' \$rows\[1\].maxMs/);
 });
+
+test('large warnings file one tracking issue, not old warnings or duplicates', { skip: process.platform === 'win32' }, async () => {
+  assert.ok(exists('tools/release-gates-history.mjs'), 'Large regressions need a tracked outcome');
+  const { fileRegressions } = await import('./release-gates-history.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-issues-'));
+  const previous = { PATH: process.env.PATH, RELEASE_RUN_ID: process.env.RELEASE_RUN_ID, RELEASE_ISSUE_LOG: process.env.RELEASE_ISSUE_LOG };
+  try {
+    const log = path.join(dir, 'calls.jsonl');
+    fs.writeFileSync(path.join(dir, 'gh'), `#!${process.execPath}
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.RELEASE_ISSUE_LOG, JSON.stringify(args) + '\\n');
+if (args[0] === 'api') console.log(JSON.stringify([{ title: 'Speed regression: already-tracked' }]));
+`, { mode: 0o755 });
+    process.env.PATH = dir + path.delimiter + previous.PATH;
+    process.env.RELEASE_RUN_ID = '123';
+    process.env.RELEASE_ISSUE_LOG = log;
+    const sample = { value: 500, target: 50, run: 'https://example.org/123', sha: 'measured-commit' };
+    fileRegressions('fixture/repo', { regressions: [{ ...sample, name: 'fresh' }, { ...sample, name: 'fresh' }, { ...sample, name: 'already-tracked' }, { ...sample, name: 'old', run: 'https://example.org/122' }] });
+    const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+    const created = calls.filter(args => args[0] === 'issue');
+    assert.equal(created.length, 1);
+    assert.equal(created[0][created[0].indexOf('--title') + 1], 'Speed regression: fresh');
+    assert.match(created[0][created[0].indexOf('--body') + 1], /500 ms[\s\S]*https:\/\/example.org\/123[\s\S]*measured-commit/);
+  } finally {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
