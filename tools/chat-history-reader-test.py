@@ -50,6 +50,20 @@ class HistoryReaderTest(unittest.TestCase):
         self.query.pop('before', None)
         return fields, [json.loads(line) for line in lines[1:-1]]
 
+    def test_held_queue_rejects_unbound_workspace_neighbour(self):
+        self.assertTrue(callable(getattr(reader, 'enqueue_response', None)), 'safe held-send boundary is missing')
+        self.write(self.event('unrelated completed turn'))
+        with patch.object(reader, 'subprocess') as processes, \
+                patch.object(reader, 'process_table', return_value={99: (1, ['claude'])}), \
+                patch.object(reader, 'read_process_cwd', return_value='/work/demo'), \
+                patch.object(reader, 'open_claude_transcript', return_value=None), \
+                patch.object(reader, 'held_queue_ready', return_value=True), \
+                patch.object(reader, 'send_response') as send:
+            processes.run.return_value = types.SimpleNamespace(returncode=0, stdout='99\n')
+            reply = reader.enqueue_response(dict(id=1, tmux='term-1', text='must not reach a neighbour', queued_at=1, message_id='bound-message'))
+        self.assertIn('\tsend\terror\tagent_unavailable\t', reply)
+        send.assert_not_called()
+
     def test_igsh1063_only_structured_pending_questions(self):
         questions = [dict(question="Which colour?", header="Accent", multiSelect=False,
                           options=[dict(label="Lime", description="Bright contrast"),
@@ -2776,6 +2790,183 @@ class SharedQueueDraftTest(unittest.TestCase):
         source = (ROOT / 'src/chat_history_reader.py').read_text(encoding='utf-8')
         self.assertIn('query.get("op") == "draft"', source)
         self.assertIn('"send_queued", "edit_queued"', source)
+
+
+
+class HeldQueueTest(unittest.TestCase):
+    def setUp(self):
+        self.assertTrue(callable(getattr(reader, 'enqueue_response', None)), 'safe held-send boundary is missing')
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.path = self.home / 'session.jsonl'
+        self.path.write_text('')
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)).start()
+        self.send = patch.object(reader, 'send_response', return_value='@mp\t1\tsend\tok\t-\t0\n@@MP_END@@\n').start()
+        self.ready = patch.object(reader, 'held_queue_ready', return_value=False).start()
+
+    def enqueue(self, text, stamp):
+        return reader.enqueue_response(dict(id=1, tmux='term-1', text=text, queued_at=stamp, message_id=f'message-{stamp}'))
+
+    def cancel(self, text, stamp):
+        return reader.cancel_queued_response(dict(id=2, tmux='term-1', text=text, queued_at=stamp, message_id=f'message-{stamp}'))
+
+    def test_cancel_before_handoff_never_reaches_terminal(self):
+        self.assertIn('\tsend\tok\t', self.enqueue('target', 1))
+        self.assertIn('\tcancel_queued\tok\t', self.cancel('target', 1))
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.send.assert_not_called()
+        self.assertIn('\tcancel_queued\tok\t', self.cancel('target', 1))
+
+    def test_cancel_preserves_other_messages_and_order(self):
+        for stamp, text in enumerate(['first', 'target', 'third'], 1):
+            self.enqueue(text, stamp)
+        self.cancel('target', 2)
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual([call.args[0]['text'] for call in self.send.call_args_list], ['first'])
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'], ['third'])
+
+    def test_after_handoff_cancel_refused_even_without_receipt(self):
+        self.ready.return_value = True
+        self.enqueue('target', 1)
+        self.assertIn('\tcancel_queued\terror\tnot_queued\t', self.cancel('target', 1))
+        self.send.assert_called_once()
+
+    def test_terminal_failure_does_not_lose_unrelated_messages(self):
+        self.enqueue('first', 1)
+        self.enqueue('third', 3)
+        self.ready.return_value = True
+        self.send.side_effect = subprocess.TimeoutExpired(['tmux'], 5)
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'], ['third'])
+        self.assertIn('\tcancel_queued\terror\tnot_queued\t', self.cancel('first', 1))
+        self.assertIn('\tcancel_queued\tok\t', self.cancel('third', 3))
+
+    def test_duplicate_text_cancel_identifies_only_requested_message(self):
+        self.enqueue('same', 1)
+        self.enqueue('same', 2)
+        self.cancel('same', 2)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['queue'], ['same'])
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.send.assert_called_once()
+
+    def test_enqueue_retry_and_cancel_tombstone_are_idempotent(self):
+        self.enqueue('target', 1)
+        self.enqueue('target', 1)
+        self.cancel('target', 1)
+        self.enqueue('target', 1)
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.send.assert_not_called()
+
+    def test_new_session_never_receives_previous_sessions_queue(self):
+        self.enqueue('target', 1)
+        self.ready.return_value = True
+        reader.drain_held_queue('term-1', 'other-sid', self.path)
+        self.send.assert_not_called()
+
+    def test_real_receipt_required_and_unrelated_answer_not_receipt(self):
+        self.ready.return_value = True
+        self.enqueue('target', 1)
+        self.path.write_text(json.dumps(dict(type='assistant', message=dict(role='assistant', content=[dict(type='text', text='answer')], stop_reason='end_turn'))) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [])
+        with self.path.open('a') as source:
+            source.write(json.dumps(dict(type='user', message=dict(role='user', content='target'), timestamp='2026-10-28T20:00:00Z')) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['target'])
+        self.assertIn('\tcancel_queued\terror\tnot_queued\t', self.cancel('target', 1))
+
+
+
+    def test_cancel_wins_race_before_submission_claim(self):
+        self.enqueue('target', 1)
+        def cancel_before_claim(*args):
+            self.assertIn('\tcancel_queued\tok\t', self.cancel('target', 1))
+            return True
+        self.ready.side_effect = cancel_before_claim
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.send.assert_not_called()
+
+    def test_submission_wins_race_before_terminal_receipt(self):
+        import threading
+        entered, release = threading.Event(), threading.Event()
+        self.ready.return_value = True
+        errors = []
+        def handing_off(q):
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError('test did not release terminal handoff')
+            return '@mp\t0\tsend\tok\t-\t0\n@@MP_END@@\n'
+        self.send.side_effect = handing_off
+        def enqueue():
+            try:
+                self.enqueue('target', 1)
+            except BaseException as error:
+                errors.append(error)
+        worker = threading.Thread(target=enqueue)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            self.assertIn('\tcancel_queued\terror\tnot_queued\t', self.cancel('target', 1))
+        finally:
+            release.set()
+            worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.send.assert_called_once()
+
+
+    def test_queue_removal_not_receipt_but_queued_command_is(self):
+        self.ready.return_value = True
+        self.enqueue('target', 1)
+        self.path.write_text(json.dumps(dict(type='queue-operation', operation='remove', content='target')) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], [])
+        with self.path.open('a') as source:
+            source.write(json.dumps(dict(type='attachment', attachment=dict(type='queued_command', prompt='target'), timestamp='2026-10-28T20:00:00Z')) + '\n')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['target'])
+
+
+    def test_offline_reconciliation_cannot_borrow_a_matching_message(self):
+        self.enqueue('target', 1)
+        self.path.write_text(json.dumps(dict(type='user', message=dict(role='user', content='target'), timestamp='2026-10-28T20:00:00Z')) + '\n')
+        query = dict(id=7, tmux='term-1', texts=['target'], message_ids=['message-1'], after_ms=0)
+        with patch.object(reader, 'resolve_response_path', return_value=('claude', 'sid', self.path, None)):
+            wire = reader.settle_response(query)
+            self.assertEqual(json.loads(wire.splitlines()[1])['delivered_ms'], 0)
+            self.cancel('target', 1)
+            wire = reader.settle_response(query)
+            self.assertEqual(json.loads(wire.splitlines()[1])['delivered_ms'], 0)
+        self.send.assert_not_called()
+
+
+    def test_worker_lock_never_strands_a_new_session(self):
+        import fcntl
+        import hashlib
+        self.enqueue('old target', 1)
+        lock_path = reader.held_queue_path('term-1').with_suffix('.' + hashlib.sha256(b'sid').hexdigest() + '.worker')
+        with lock_path.open('a') as lock, reader.held_queue_path('term-1').with_suffix('.worker').open('a') as shared, patch.object(reader.subprocess, 'Popen') as spawn:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(shared, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            reader.start_held_worker('term-1', 'sid', self.path, 'pass')
+            spawn.assert_not_called()
+            with patch.object(reader, 'resolve_tmux_agent', return_value=('new-sid', self.path)):
+                self.enqueue('new target', 2)
+            reader.start_held_worker('term-1', 'new-sid', self.path, 'pass')
+            spawn.assert_called_once()
+            self.assertEqual(spawn.call_args.args[0][-2], 'new-sid')
+
+    def test_held_send_ignores_a_dim_prompt_suggestion(self):
+        shown = 'Claude Code\nReady\n❯ \x1b[2mTry a suggestion\x1b[0m\n' + '─' * 40 + '\n'
+        with patch.object(reader.subprocess, 'run', return_value=types.SimpleNamespace(stdout=shown, returncode=0)):
+            self.assertEqual(reader.prompt_box_text('=term-1:'), '')
 
 
 if __name__ == '__main__':

@@ -1042,7 +1042,7 @@ with tempfile.TemporaryDirectory() as temp:
         return 'Ready\n❯ typed draft\n' + '─' * 50 + '\n'
     scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys,os=os,time=time,capture_screen=capture_screen)
     exec(compile(ast.Module(body=[function],type_ignores=[]), '<boundary-watch>', 'exec'), scope)
-    with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True), patch.object(subprocess,'run',side_effect=AssertionError('stream spawned a capture process')):
+    with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.dict(sys.modules, pwd=None), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True), patch.object(subprocess,'run',side_effect=AssertionError('stream spawned a capture process')):
         try: scope['watch_reader']()
         except RuntimeError as error: assert str(error) == 'fixture finished'
     frames = [json.loads(line) for line in output.getvalue().splitlines()]
@@ -1211,6 +1211,33 @@ print('NATIVE_WINDOWS_WATCH_ROOT_OK')
   assert.match(execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { encoding: 'utf8', timeout: 10000 }), /NATIVE_WINDOWS_WATCH_ROOT_OK/);
 });
 
+test('held cancellation evidence rejects terminal delivery and unrelated removal', () => {
+  assert.ok(fs.existsSync(path.join(root, 'tools/chat-cancel-proof.cjs')), 'native held-cancellation verifier must accompany its journey');
+  const { evaluate } = require('./chat-cancel-proof.cjs');
+  const texts = ['cancel keep one', 'cancel target two', 'cancel keep three'];
+  const steps = ['transcript-loaded', 'three-messages-held', 'middle-message-offers-cancel', 'middle-message-cancelled',
+    'other-messages-still-held', 'survivors-received-in-order', 'survivor-echoes-settled', 'delivered-message-has-no-cancel'];
+  const data = {
+    'cancel-held/observation.json': { error: null, steps: steps.map(name => ({ name, ok: true })) },
+    'cancel-held/outbox-held.json': { queues: [{ messages: texts.map(t => ({ t, s: 3 })) }] },
+    'cancel-held/outbox-cancelled.json': { queues: [{ messages: texts.map((t, i) => ({ t, s: i === 1 ? 4 : 3 })) }] },
+    'cancel-held/outbox-final.json': { queues: [{ messages: [{ t: texts[1], s: 4 }] }] },
+    'cancel-held/transcript.jsonl': [texts[0], texts[2]].map(content => ({ type: 'user', message: { content } })),
+    'cancel-held/stand-in/agent-buffer.jsonl': [texts[0], texts[2]].map(text => ({ argv: ['send-keys', '-l', '--', text] })),
+    'cleanup.json': { remaining_owned_processes: 0, scratch_removed: true },
+  };
+  const check = values => evaluate(file => values[file]);
+  assert.equal(check(data).cancelled, texts[1]);
+  const bad = structuredClone(data);
+  bad['cancel-held/transcript.jsonl'].push({ type: 'user', message: { content: texts[1] } });
+  assert.throws(() => check(bad));
+  const recall = structuredClone(data);
+  recall['cancel-held/stand-in/agent-buffer.jsonl'].push({ argv: ['send-keys', 'Up'] });
+  assert.throws(() => check(recall));
+  const lost = structuredClone(data);
+  lost['cancel-held/outbox-cancelled.json'].queues[0].messages.pop();
+  assert.throws(() => check(lost));
+});
 
 test('Doctor checks owned tabs through saved session state, not a delayed inbox index', () => {
   const doctor = drive.slice(drive.indexOf('function Doctor('), drive.indexOf('function Press('));
@@ -1314,4 +1341,16 @@ test('full-history copy proof distinguishes message 10 from 100 and rejects lost
   fs.writeFileSync(path.join(dir, 'full-history/open-copied.txt'), messages.join('\n\n'));
   json('full-history/restart-latest.json', { latest: 'IGSH815 assistant 319', visibleMs: 2001 });
   assert.equal(evaluate().status, 'failed');
+});
+
+
+test('held cancellation stays callable within GitHub manual input limits', () => {
+  const workflow = read('.github/workflows/verify.yml');
+  const dispatch = workflow.match(/^  workflow_dispatch:\n([^]*?)(?=^  [a-z_]+:)/m)[1];
+  assert.ok([...dispatch.matchAll(/^      [a-z_]+:/gm)].length <= 25);
+  const callable = workflow.match(/^  workflow_call:\n([^]*?)(?=^  [a-z_]+:)/m)[1];
+  assert.match(callable, /      chat_cancel_proof:\n        required: false\n        default: false\n        type: boolean/);
+  const journey = read('.github/workflows/held-queue.yml');
+  assert.match(journey, /  ui:\n[^]*?uses: \.\/.github\/workflows\/verify.yml\n    with:\n      feature: chat-delivery\n      chat_cancel_proof: true/);
+  assert.match(journey, /tag: \$\{\{ inputs.tag \|\| '' \}\}/);
 });

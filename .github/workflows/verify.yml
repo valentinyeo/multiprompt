@@ -138,6 +138,10 @@ on:
         required: false
         default: false
         type: boolean
+      chat_cancel_proof:
+        required: false
+        default: false
+        type: boolean
       chat_reactions_proof:
         required: false
         default: false
@@ -368,6 +372,7 @@ jobs:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_ACCEPTED_PROOF: ${{ inputs.chat_accepted_proof && '1' || '' }}
+      CHAT_CANCEL_PROOF: ${{ inputs.chat_cancel_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
       CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
       CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}

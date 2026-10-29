@@ -297,7 +297,7 @@ fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const chat_echo = @import("chat_echo.zig");
 const Entry = struct {
-    state: chat_echo.OutboxState = .delivered, id: u64 = 1, channel_pending: bool = false,
+    state: chat_echo.OutboxState = .delivered, host_held: bool = false, id: u64 = 1, channel_pending: bool = false,
     transcript_queued: bool = false, retryable: bool = false, left_box_ms: u64 = 0,
     key: [1]u8 = .{0}, key_len: usize = 0, delivery_watch: chat_echo.DeliveryWatch = .{},
     anchor: chat_echo.Anchor = .{ .sent_ms = 8_000_000 }, sent_tick_ms: i64 = 100_000,
@@ -315,6 +315,7 @@ const shells = [_]struct { activity: enum { idle, active } = .idle }{.{}};
 fn GetTickCount64() u64 { return fake_tick; }
 fn nowFileTime() u64 { return @as(u64, @intCast(fake_wall)) * 10000 + 116444736000000000; }
 fn chatTmuxSendFinish() void {}
+fn chatCancelFinish() void {}
 fn chatFullSettleFinish() void {}
 fn chatTmuxSettle() void {}
 fn saveChatOutbox() bool { return true; }
@@ -336,6 +337,11 @@ test "ISSUE-501 injected clock jump" {
     fake_tick += 1;
     chatOutboxTick();
     try std.testing.expectEqual(chat_echo.OutboxState.not_sent, storage[0].state);
+    storage[0] = .{ .host_held = true };
+    fake_tick += 3_600_000;
+    chatOutboxTick();
+    try std.testing.expectEqual(chat_echo.OutboxState.delivered, storage[0].state);
+    try std.testing.expect(!storage[0].retryable);
 }
 `;
       await zig(code, 'ISSUE-501 injected', ['chat_echo.zig']);
