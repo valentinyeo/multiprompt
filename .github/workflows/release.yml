@@ -140,7 +140,7 @@ jobs:
 
   update-test:
     needs: [prepare, build]
-    if: ${{ !inputs.proof }}
+    if: ${{ !cancelled() && !inputs.proof && needs.prepare.result == 'success' && needs.build.result == 'success' }}
     permissions:
       contents: read
       actions: read
@@ -206,7 +206,7 @@ jobs:
     needs: [prepare, build, update-test]
     permissions:
       contents: write
-    if: github.event_name != 'pull_request' && !inputs.proof
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && !inputs.proof && needs.prepare.result == 'success' && needs.build.result == 'success' && needs.update-test.result == 'success' }}
     runs-on: ubuntu-latest
     concurrency:
       group: release-publication

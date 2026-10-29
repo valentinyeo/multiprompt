@@ -24,6 +24,22 @@ test('production skips duplicate journeys but keeps build, startup, updater and 
   assert.match(jobs['update-test'], /\$process.HasExited/);
   assert.match(jobs['update-test'], /\$job.Stop\(\)/);
   assert.match(jobs.release, /needs: \[prepare, build, update-test\]/);
+  for (const name of ['update-test', 'release']) {
+    const condition = jobs[name].match(/^    if: \$\{\{ (.+) \}\}$/m)[1];
+    assert.match(condition, /!cancelled\(\)/);
+    const allowed = new Function('needs', 'inputs', 'github', 'cancelled', `return (${condition});`);
+    for (const prepare of ['success', 'failure', 'cancelled', 'skipped']) {
+      for (const build of ['success', 'failure', 'cancelled', 'skipped']) {
+        for (const updater of ['success', 'failure', 'cancelled', 'skipped']) {
+          const needs = { prepare: { result: prepare }, build: { result: build }, 'update-test': { result: updater } };
+          const expected = prepare === 'success' && build === 'success' && (name !== 'release' || updater === 'success');
+          assert.equal(allowed(needs, { proof: false }, { event_name: 'push' }, () => false), expected);
+          assert.equal(allowed(needs, { proof: true }, { event_name: 'push' }, () => false), false);
+          assert.equal(allowed(needs, { proof: false }, { event_name: 'push' }, () => true), false);
+        }
+      }
+    }
+  }
   assert.match(jobs.release, /run: node tools\/sign-release.mjs/);
   assert.match(jobs.build, /Executable embedded version does not match release tag/);
   assert.match(jobs['runner-sessions'], /needs: \[prepare, release\]/);
