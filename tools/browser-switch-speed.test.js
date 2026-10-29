@@ -665,7 +665,7 @@ test('a completed warm pair reports its speed while every run still checks every
   const earlyStart = journey.indexOf("\n                    if ($mode -eq 'browser_on') {");
   assert.ok(earlyStart >= 0);
   const early = journey.slice(earlyStart, journey.indexOf('foreach ($mode in $modes) { $timings[$mode].median_ms'));
-  for (const literal of ['Get-SwitchMedian $timings.browser_off.samples_ms', 'Get-SwitchMedian $timings.browser_on.samples_ms', 'if ($onMedian - $offMedian -gt 50)', "$gapCase.phase = 'switch-gap'", "Assert-ReleaseTiming 'browser-switch-gap'"]) assert.ok(early.includes(literal), literal);
+  for (const literal of ['Get-SwitchMedian $timings.browser_off.samples_ms', 'Get-SwitchMedian $timings.browser_on.samples_ms', 'if ($onMedian - $offMedian -gt $browserGapLimitMs)', "$gapCase.phase = 'switch-gap'", "Assert-ReleaseTiming 'browser-switch-gap'"]) assert.ok(early.includes(literal), literal);
   assert.ok(earlyStart > journey.indexOf('$timings[$mode].samples_ms[$sample] = $measurement[0]'));
   assertsJourney(journey);
   assertsFrozen(journey, control, browser, workflow);

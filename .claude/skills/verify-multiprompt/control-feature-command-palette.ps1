@@ -15,7 +15,7 @@
                 foreach ($value in $changelogSpeed[$kind]) { Assert-ReleaseTiming 'changelog-response' $value $kind }
             }
             Snapshot 'changelog-closed'
-            $result.checks += @{ name = 'changelog-speed'; timings = $changelogSpeed; budget_ms = 100; entry = 'Ctrl+K Changelog' }
+            $result.checks += @{ name = 'changelog-speed'; timings = $changelogSpeed; budget_ms = $releaseGatePolicy.checks.'changelog-response'.limit; entry = 'Ctrl+K Changelog' }
             Palette 'interface'
             Snapshot 'action'
             Press @(0x0D) 'Enter: UI Size: Increase'

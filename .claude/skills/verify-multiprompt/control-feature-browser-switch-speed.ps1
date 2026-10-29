@@ -2,6 +2,7 @@
             $modes = @('browser_off', 'browser_on', 'frozen_browser_on', 'chat_browser_off', 'chat_browser_on', 'chat_frozen_browser_on')
             $timings = [ordered]@{ steps = @{} }
             $traces = @{}
+            $browserGapLimitMs = $releaseGatePolicy.checks.'browser-switch-gap'.limit
             foreach ($mode in $modes) {
                 $sampleCount = if ($mode.Contains('frozen_')) { 5 } else { 20 }
                 $timings[$mode] = @{ samples_ms = @($null) * $sampleCount; median_ms = $null; window_visible_ms = @($null) * $sampleCount; window_visible_median_ms = $null }
@@ -309,9 +310,9 @@
                     if ($mode -eq 'browser_on') {
                         $offMedian = Get-SwitchMedian $timings.browser_off.samples_ms
                         $onMedian = Get-SwitchMedian $timings.browser_on.samples_ms
-                        if ($onMedian - $offMedian -gt 50) {
+                        if ($onMedian - $offMedian -gt $browserGapLimitMs) {
                             $gapCase.phase = 'switch-gap'
-                            $gapCase.detail = "browser_on minus browser_off = $($onMedian - $offMedian) ms; required <= 50 ms"
+                            $gapCase.detail = "browser_on minus browser_off = $($onMedian - $offMedian) ms; target <= $browserGapLimitMs ms"
                             Assert-ReleaseTiming 'browser-switch-gap' ([Math]::Max(0, $onMedian - $offMedian)) 'browser_on minus browser_off'
                         }
                     }
@@ -322,7 +323,7 @@
                     $gap = $timings[$pair[1]].median_ms - $timings[$pair[0]].median_ms
                     @{ off = $pair[0]; on = $pair[1]; gap_ms = $gap }
                 }
-                $gapCase.detail = ($gaps | ForEach-Object { "$($_.on) minus $($_.off) = $($_.gap_ms) ms; required <= 50 ms" }) -join '; '
+                $gapCase.detail = ($gaps | ForEach-Object { "$($_.on) minus $($_.off) = $($_.gap_ms) ms; target <= $browserGapLimitMs ms" }) -join '; '
                 foreach ($pair in $gaps) { Assert-ReleaseTiming 'browser-switch-gap' ([Math]::Max(0, $pair.gap_ms)) ($pair.on + ' minus ' + $pair.off) }
                 $gapCase.phase = 'after-snapshot'
                 Snapshot 'after'
