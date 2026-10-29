@@ -775,6 +775,8 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&chat_drop_tests.step);
     const crash_reports_tests = b.addSystemCommand(&.{ "node", "--test", "tools/crash-reports.test.js" });
     vps_test_step.dependOn(&crash_reports_tests.step);
+    const crash_report_tickets_tests = b.addSystemCommand(&.{ "node", "--test", "tools/crash-report-tickets.test.js" });
+    vps_test_step.dependOn(&crash_report_tickets_tests.step);
     const idle_front_tests = b.addSystemCommand(&.{ "node", "--test", "tools/issue-513-idle-front.test.js" });
     idle_front_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&idle_front_tests.step);
