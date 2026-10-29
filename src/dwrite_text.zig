@@ -726,3 +726,43 @@ test "IGSH-1089 partially scrolled emoji keep the message background and clippin
     try std.testing.expect(background > 10);
     try std.testing.expectEqualSlices(u8, &.{ 32, 32, 32 }, pixels[0..3]);
 }
+
+test "IGSH-1089 color emoji preserve nonuniform rounded badge backgrounds" {
+    const fonts = @import("fonts.zig");
+    try std.testing.expect(fonts.register());
+    defer fonts.unregister();
+    const dc = w.CreateCompatibleDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteDC(dc);
+    const width = 120;
+    const height = 40;
+    const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(bitmap);
+    const old_bitmap = w.SelectObject(dc, bitmap);
+    defer _ = w.SelectObject(dc, old_bitmap);
+    const font = fonts.chat(-24, false, false, false, .{}) orelse return error.TestUnexpectedResult;
+    defer _ = w.DeleteObject(font);
+    defer resetFonts();
+    const old_font = w.SelectObject(dc, font);
+    defer _ = w.SelectObject(dc, old_font);
+    const pixels = @as([*]u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    for (0..height) |y| {
+        @memset(pixels[y * width * 4 ..][0 .. width * 4], @as(u8, @intCast(16 + y * 3)));
+    }
+    _ = w.SetBkMode(dc, w.TRANSPARENT);
+    _ = w.SetTextColor(dc, 0xffffff);
+    var rect = w.RECT{ .left = 20, .top = 0, .right = 100, .bottom = height };
+    _ = draw(dc, L("👍"), 2, &rect, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX);
+    _ = GdiFlush();
+    var colored: usize = 0;
+    for (0..height) |y| {
+        for (0..width) |x| {
+            const pixel = pixels[(y * width + x) * 4 ..][0..3];
+            if (pixel[0] == pixel[1] and pixel[1] == pixel[2]) {
+                try std.testing.expectEqual(@as(u8, @intCast(16 + y * 3)), pixel[0]);
+            } else colored += 1;
+        }
+    }
+    try std.testing.expect(colored > 5);
+}

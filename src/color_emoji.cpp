@@ -107,9 +107,31 @@ struct Painter {
         DWRITE_TEXT_METRICS metrics;
         if (SUCCEEDED(layout->GetMetrics(&metrics)) && metrics.widthIncludingTrailingWhitespace > bounds.right - bounds.left)
             layout->SetFontSize(em * (bounds.right - bounds.left) / metrics.widthIncludingTrailingWhitespace, {0, length});
-        const auto background = GetBkMode(dc) == OPAQUE ? GetBkColor(dc) : GetPixel(dc, visible.left, visible.top);
+        const int width = visible.right - visible.left, height = visible.bottom - visible.top;
+        BITMAPINFO info = {};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = width;
+        info.bmiHeader.biHeight = -height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        void *pixels = nullptr;
+        HDC snapshot = CreateCompatibleDC(dc);
+        HBITMAP bitmap = snapshot ? CreateDIBSection(dc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0) : nullptr;
+        ID2D1Bitmap *background = nullptr;
+        if (bitmap) {
+            HGDIOBJ previous = SelectObject(snapshot, bitmap);
+            if (BitBlt(snapshot, 0, 0, width, height, dc, visible.left, visible.top, SRCCOPY) && GdiFlush())
+                target->CreateBitmap(D2D1::SizeU(width, height), pixels, width * 4,
+                    D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE)), &background);
+            SelectObject(snapshot, previous);
+            DeleteObject(bitmap);
+        }
+        if (snapshot) DeleteDC(snapshot);
+        if (!background) { layout->Release(); return false; }
         target->BeginDraw();
-        target->Clear(D2D1::ColorF(GetRValue(background) / 255.0f, GetGValue(background) / 255.0f, GetBValue(background) / 255.0f));
+        target->DrawBitmap(background);
+        background->Release();
         const auto color = GetTextColor(dc);
         brush->SetColor(D2D1::ColorF(GetRValue(color) / 255.0f, GetGValue(color) / 255.0f, GetBValue(color) / 255.0f));
         target->DrawTextLayout(D2D1::Point2F(float(bounds.left - visible.left), float(bounds.top - visible.top)), layout, brush,

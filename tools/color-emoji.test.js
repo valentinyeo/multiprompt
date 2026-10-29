@@ -68,3 +68,14 @@ test('Native pixel regression is discovered directly and required by the full te
 test('Successful color-font runs remain visible to native rendering diagnostics', () => {
   assert.match(read('src/dwrite_text.zig'), /if \(height != 0\) \{\s*if \(enabled\(\)\) painted_runs \+= 1;\s*return height;/);
 });
+
+test('Color glyphs composite over the actual message and rounded badge pixels', () => {
+  const source = read('src/color_emoji.cpp');
+  assert.match(source, /BitBlt\(snapshot, 0, 0, width, height, dc, visible.left, visible.top, SRCCOPY\)/);
+  assert.match(source, /target->DrawBitmap\(background\)/);
+  assert.doesNotMatch(source, /target->Clear\(/);
+});
+
+test('Cross-build budget covers native color-font linkage', () => {
+  assert.match(read('.github/workflows/test.yml'), /build-windows:\s*name:[^\n]+\s*runs-on: ubuntu-latest\s*timeout-minutes: 10/);
+});
