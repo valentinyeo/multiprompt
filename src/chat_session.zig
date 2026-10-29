@@ -999,8 +999,11 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
             var snapshot_ok = true;
             if (entry.incremental or entry.unchanged) {
                 const old = entry.history.rows.items;
-                const from = old.len -| chat_history.TAIL_BYTES;
-                snapshot.rows.appendSlice(a, old[from..]) catch {
+                const cached = entry.history.cacheRows(a) catch blk: {
+                    snapshot_ok = false;
+                    break :blk old[old.len..];
+                };
+                snapshot.rows.appendSlice(a, cached) catch {
                     snapshot_ok = false;
                 };
                 if (entry.incremental) {
@@ -1009,7 +1012,7 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
                         snapshot_ok = false;
                     };
                 }
-                snapshot.restore_full = from > 0 or entry.history.restore_full;
+                snapshot.restore_full = cached.len < old.len or entry.history.restore_full;
             }
             const encoded = if (snapshot_ok) (if (entry.incremental or entry.unchanged) snapshot else history).encode(a, key) else error.OutOfMemory;
             if (encoded) |bytes| {

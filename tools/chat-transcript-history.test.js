@@ -969,7 +969,17 @@ test "partial restart prefix" {
     try live.apply(a, wire.items, 1, key);
     const disk = try live.encode(a, key);
     defer a.free(disk);
-    var restored = try history.History.decode(a, disk, key);
+    try std.testing.expect(disk.len <= history.TAIL_BYTES);
+    var preview = try history.History.decode(a, disk, key);
+    defer preview.deinit(a);
+    try std.testing.expect(preview.restore_full);
+    try std.testing.expect(std.mem.indexOf(u16, preview.text.items, std.unicode.utf8ToUtf16LeStringLiteral("message 999")) != null);
+    const header_end = std.mem.indexOfScalar(u8, disk, '\n').?;
+    const from = live.rows.items.len - (history.TAIL_BYTES - 512);
+    const row_start = from + std.mem.indexOfScalar(u8, live.rows.items[from..], '\n').? + 1;
+    const legacy = try std.fmt.allocPrint(a, "{s}\n{s}", .{ disk[0..header_end], live.rows.items[row_start..] });
+    defer a.free(legacy);
+    var restored = try history.History.decode(a, legacy, key);
     defer restored.deinit(a);
     try std.testing.expect(restored.blocks.items.len > 0);
     for (restored.blocks.items) |block| try std.testing.expectEqual(.tool, block.role);
@@ -1035,6 +1045,47 @@ test "cache-first switch-back tools-only tail must not hide the first reply" {
     try std.testing.expect(std.mem.indexOf(u16, g_chat_capture[0..g_chat_last_len], std.unicode.utf8ToUtf16LeStringLiteral("Latest reply")) != null);
     try std.testing.expectEqual(@as(u64, 100), one.before);
     try std.testing.expectEqual(@as(usize, 0), one.backfill.pages.items.len);
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
+
+test('IGSH-1059 ordinary poll snapshots keep the latest visible reply behind a tools-only tail', () => {
+  const cases = String.raw`
+test "cache-first switch-back poll snapshot retains visible preview" {
+    const a = std.heap.page_allocator;
+    capture_cache = true;
+    defer captured_cache.deinit(a);
+    for ([_]bool{ false, true }) |append| {
+        var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", ""), .disk_loaded = true, .cache_dirty = true };
+        defer one.history.deinit(a);
+        defer one.backfill.deinit(a);
+        var wire: std.ArrayList(u8) = .empty;
+        defer wire.deinit(a);
+        try wire.appendSlice(a, "@mp\t1\thistory\tok\tsid\t0\t301\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n{\"role\":\"assistant\",\"id\":\"reply\",\"text\":\"Latest visible reply\",\"offset\":0,\"end\":1}\n");
+        for (0..300) |i| {
+            const row = try std.fmt.allocPrint(a, "{{\"role\":\"tool\",\"id\":\"tool-{d}\",\"text\":\"tool\",\"detail\":\"{s}\",\"offset\":{d},\"end\":{d}}}\n", .{ i, "x" ** 4000, i + 1, i + 2 });
+            defer a.free(row);
+            try wire.appendSlice(a, row);
+        }
+        try wire.appendSlice(a, "@@MP_END@@\n");
+        try one.history.apply(a, wire.items, 1, one.key);
+        remote_pages = if (append) &.{ "@mp\t2\thistory\tok\tsid\t301\t302\t9\t0\tclaude\tterm-1\t0\t\tdelta\t0\n{\"role\":\"tool\",\"id\":\"last-tool\",\"text\":\"another hidden tool\",\"offset\":301,\"end\":302}\n@@MP_END@@\n" } else &.{ "@mp\t2\thistory\tok\tsid\t301\t301\t9\t0\tclaude\tterm-1\t0\t\tdelta\t0\n@@MP_END@@\n" };
+        remote_calls = 0;
+        one.pending = true;
+        chatFileFetchThread(&one, one.key, 2, false, null);
+        defer if (one.result) |*result| result.deinit(a);
+        try std.testing.expect(one.result != null);
+        try std.testing.expect(captured_cache.items.len <= chat_history.TAIL_BYTES);
+        var restored = try chat_history.History.decode(a, captured_cache.items, one.key);
+        defer restored.deinit(a);
+        try std.testing.expect(restored.restore_full);
+        try std.testing.expectEqual(@as(u64, if (append) 302 else 301), restored.offset);
+        try std.testing.expect(std.mem.indexOf(u16, restored.text.items, std.unicode.utf8ToUtf16LeStringLiteral("Latest visible reply")) != null);
+        try std.testing.expectEqual(@as(usize, 301), one.history.blocks.items.len);
+    }
 }
 `;
   const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
