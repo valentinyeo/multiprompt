@@ -193,6 +193,6 @@
             Wait-OwnProfilePipe $stableToken 'stable-restored-own'
             $null = Assert-WorkspaceBrowser 'stable-restored-own' $stableRoot $stableWorkspace
             $result.checks += @{ name = 'browser-own-profile branded Chrome stable cold and restored'; executable = $stableChrome; token = $stableToken; windowId = $stablePane.browser_window_id }
-            Snapshot 'after'
 
             }
+            Snapshot 'after'
