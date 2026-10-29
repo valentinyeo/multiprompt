@@ -29,11 +29,6 @@ on:
         description: Optional base64 sanitized live Token Ladder status snapshot
         required: false
         type: string
-      chat_cancel_proof:
-        description: Cancel held input before terminal handoff and prove receipt
-        required: false
-        default: false
-        type: boolean
       sending_status_proof:
         description: Capture the same message in flight and after delivery
         required: false
@@ -139,6 +134,10 @@ on:
       revision:
         required: false
         type: string
+      chat_cancel_proof:
+        required: false
+        default: false
+        type: boolean
       chat_reactions_proof:
         required: false
         default: false

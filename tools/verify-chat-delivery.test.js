@@ -1342,3 +1342,15 @@ test('full-history copy proof distinguishes message 10 from 100 and rejects lost
   json('full-history/restart-latest.json', { latest: 'IGSH815 assistant 319', visibleMs: 2001 });
   assert.equal(evaluate().status, 'failed');
 });
+
+
+test('held cancellation stays callable within GitHub manual input limits', () => {
+  const workflow = read('.github/workflows/verify.yml');
+  const dispatch = workflow.match(/^  workflow_dispatch:\n([^]*?)(?=^  [a-z_]+:)/m)[1];
+  assert.ok([...dispatch.matchAll(/^      [a-z_]+:/gm)].length <= 25);
+  const callable = workflow.match(/^  workflow_call:\n([^]*?)(?=^  [a-z_]+:)/m)[1];
+  assert.match(callable, /      chat_cancel_proof:\n        required: false\n        default: false\n        type: boolean/);
+  const journey = read('.github/workflows/held-queue.yml');
+  assert.match(journey, /  ui:\n[^]*?uses: \.\/.github\/workflows\/verify.yml\n    with:\n      feature: chat-delivery\n      chat_cancel_proof: true/);
+  assert.match(journey, /tag: \$\{\{ inputs.tag \|\| '' \}\}/);
+});

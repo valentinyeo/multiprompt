@@ -5,6 +5,10 @@ on:
     branches: [ceo/IGSH-1010-r9]
   workflow_dispatch:
     inputs:
+      tag:
+        description: Optional published desktop release to verify
+        type: string
+        default: ''
       app_ref:
         description: Optional desktop source control revision
         type: string
@@ -64,3 +68,11 @@ jobs:
         with:
           name: held-queue-${{ matrix.source }}-${{ matrix.mode }}
           path: verification-evidence/
+
+  ui:
+    if: inputs.expected_red != true && inputs.app_ref == ''
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_cancel_proof: true
+      tag: ${{ inputs.tag || '' }}
