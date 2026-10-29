@@ -1189,3 +1189,13 @@ print('NATIVE_WINDOWS_WATCH_ROOT_OK')
 `;
   assert.match(execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], { encoding: 'utf8', timeout: 10000 }), /NATIVE_WINDOWS_WATCH_ROOT_OK/);
 });
+
+
+test('Doctor checks owned tabs through saved session state, not a delayed inbox index', () => {
+  const doctor = drive.slice(drive.indexOf('function Doctor('), drive.indexOf('function Press('));
+  assert.match(doctor, /Get-Content "\$settings\/session\.json"/);
+  assert.doesNotMatch(doctor, /inbox-default|\$published/);
+  assert.match(doctor, /\$session\.tabs\)\.Count -ne \$expectedShells/);
+  assert.match(doctor, /\$_.kind -eq 'tmux'/);
+  assert.match(doctor, /\$_.kind -eq 'cmd'/);
+});

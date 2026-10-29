@@ -1207,7 +1207,9 @@ test('ISSUE-569 selection assertions resolve published active identity and requi
 test('ISSUE-569 selection persistence is independent of deferred browser startup and stale snapshots', () => {
   function contract(session, console, cache, main) {
     const switching = console.slice(console.indexOf('pub fn switchToShell(idx:'), console.indexOf('var startup_completed:'));
-    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        app_state.shells[idx].notified = false;'));
+    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        if (app_state.g_all_sessions_active) {'));
+    const attention = switching.indexOf('app_state.shells[idx].needs_attention = false;');
+    assert.ok(attention >= 0 && attention < switching.indexOf('saveSession();'), 'persist final attention state before returning to the browser queue');
     assert.match(save, /if \(!app_state.g_restoring and \(idx != prev or unarchived_on_open or/);
     assert.doesNotMatch(save, /defer_browser/);
     assert.doesNotMatch(save, /selected_shell_id\s*=/);

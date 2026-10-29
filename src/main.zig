@@ -2146,6 +2146,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_status_card_hover = false;
                 _ = InvalidateRect(hwnd, null, 0);
             }
+            if (app_state.g_sidebar_hover != null) {
+                app_state.g_sidebar_hover = null;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             if (app_state.g_workspace_hover != null) {
                 app_state.g_workspace_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2161,6 +2165,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOUSEMOVE => {
+            const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_Y(lp) + app_state.g_sidebar_scroll)) {
+                .tab => |index| index,
+                else => null,
+            } else null;
+            if (sidebar_hover != app_state.g_sidebar_hover) {
+                app_state.g_sidebar_hover = sidebar_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (sidebar_hover != null) {
+                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                _ = TrackMouseEvent(&tracking);
+            }
             {
                 const card_hover = sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp));
                 if (card_hover != app_state.g_status_card_hover) {

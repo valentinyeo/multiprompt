@@ -1552,7 +1552,7 @@ pub fn chatSwitchBrowserTick() void {
     if (app_state.shells[app_state.active_shell].browser_frozen) wakeBrowserPaneFromFreeze(app_state.active_shell);
     updateBrowserVisibility();
     if (browserPaneActive()) armBrowserVisibilitySettle(12);
-    if (!app_state.g_restoring) saveSession();
+    if (!app_state.g_restoring and app_state.shells[app_state.active_shell].browser_enabled) saveSession();
     if (app_state.shells[app_state.active_shell].browser_window_id != 0) writePaneSessionFileForShell(app_state.active_shell);
     app_state.g_chat_switch_browser_sid = app_state.shells[app_state.active_shell].shell_id;
     chatSwitchLogBrowserShown();

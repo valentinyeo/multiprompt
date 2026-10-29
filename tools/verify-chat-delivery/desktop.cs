@@ -36,22 +36,17 @@ public static class ChatDeliveryDesktop {
     public static uint Owner(IntPtr hwnd) { uint pid; GetWindowThreadProcessId(hwnd, out pid); return pid; }
     public static string Class(IntPtr hwnd) { var text = new StringBuilder(256); GetClassName(hwnd, text, text.Capacity); return text.ToString(); }
     public static IntPtr Window(uint pid) { IntPtr found = IntPtr.Zero; EnumWindows((h,p) => { if (Owner(h) == pid && IsWindowVisible(h) && Class(h) == "ZigShell") { found = h; return false; } return true; }, IntPtr.Zero); return found; }
-    public static IntPtr Menu(uint pid) { IntPtr found = IntPtr.Zero; EnumWindows((h,p) => { if (Owner(h) == pid && IsWindowVisible(h) && Class(h) == "#32768") { found = h; return false; } return true; }, IntPtr.Zero); return found; }
-    [StructLayout(LayoutKind.Sequential)] struct MenuBar { public uint Size; public Rect Rect; public IntPtr Menu, Window; public uint Focus; }
-    [DllImport("user32.dll")] static extern bool GetMenuBarInfo(IntPtr hwnd, int obj, int item, ref MenuBar info);
-    [DllImport("user32.dll")] static extern int GetMenuItemCount(IntPtr menu);
-    [DllImport("user32.dll")] static extern bool GetMenuItemRect(IntPtr window, IntPtr menu, uint item, out Rect rect);
-    public static Rect FirstMenuItem(IntPtr menu, uint pid, int count) {
-        if (Owner(menu) != pid || Class(menu) != "#32768" || !IsWindowVisible(menu)) throw new InvalidOperationException("Menu item ownership mismatch");
-        var bar = new MenuBar { Size = (uint)Marshal.SizeOf(typeof(MenuBar)) };
-        Rect rect;
-        if (!GetMenuBarInfo(menu, -4, 0, ref bar) || GetMenuItemCount(bar.Menu) != count ||
-            !GetMenuItemRect(IntPtr.Zero, bar.Menu, 0, out rect) || rect.Right <= rect.Left || rect.Bottom <= rect.Top) throw new InvalidOperationException("Native reaction menu geometry unavailable");
-        return rect;
+    public static IntPtr Menu(uint pid) { IntPtr found = IntPtr.Zero; EnumWindows((h,p) => { if (Owner(h) == pid && IsWindowVisible(h) && Class(h) == "MultiPromptMessageMenu") { found = h; return false; } return true; }, IntPtr.Zero); return found; }
+    public static Rect FirstMenuItem(IntPtr menu, uint pid) {
+        if (Owner(menu) != pid || Class(menu) != "MultiPromptMessageMenu" || !IsWindowVisible(menu)) throw new InvalidOperationException("Message panel ownership mismatch");
+        Rect bounds;
+        if (!GetWindowRect(menu, out bounds) || bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top) throw new InvalidOperationException("Message panel geometry unavailable");
+        double scale = (bounds.Right - bounds.Left) / 232.0;
+        return new Rect { Left = bounds.Left + (int)(8 * scale), Top = bounds.Top + (int)(8 * scale), Right = bounds.Left + (int)(50 * scale), Bottom = bounds.Top + (int)(46 * scale) };
     }
-    public static void PressOwnedMenu(IntPtr main, uint pid, IntPtr menu, int count) {
+    public static void PressOwnedMenu(IntPtr main, uint pid, IntPtr menu) {
         if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main) throw new InvalidOperationException("Menu click foreground ownership mismatch");
-        var rect = FirstMenuItem(menu, pid, count);
+        var rect = FirstMenuItem(menu, pid);
         var origin = ScreenPoint(menu, 0, 0);
         PressClient(menu, pid, (rect.Left + rect.Right) / 2 - origin.X, (rect.Top + rect.Bottom) / 2 - origin.Y);
     }
@@ -155,6 +150,14 @@ public static class ChatDeliveryDesktop {
         inputs[0].Data.Mouse.Flags = 2;
         inputs[1].Data.Mouse.Flags = 4;
         if (SendInput(2, inputs, Marshal.SizeOf(typeof(Input))) != 2) throw new InvalidOperationException("Transcript click input failed");
+    }
+    public static void HoverOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
+        if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||
+            Owner(transcript) != pid || !IsChild(main, transcript) || Class(transcript) != "ZigShellChatTranscript" ||
+            !IsWindowVisible(transcript) || WindowFromPoint(new Point { X = x, Y = y }) != transcript) throw new InvalidOperationException("Transcript hover ownership mismatch");
+        var inputs = new Input[1];
+        inputs[0].Data.Mouse = new Mouse { X = (int)Math.Round(x * 65535.0 / (GetSystemMetrics(0) - 1)), Y = (int)Math.Round(y * 65535.0 / (GetSystemMetrics(1) - 1)), Flags = 0x8001 };
+        if (SendInput(1, inputs, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Transcript hover input failed");
     }
     public static void RightClickOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int x, int y) {
         if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||

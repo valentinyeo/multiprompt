@@ -346,7 +346,7 @@ jobs:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11' && fromJSON('["chat-delivery"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature != 'all' && inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || inputs.feature == 'all' && fromJSON(needs.journeys.outputs.full) || github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11' && fromJSON('["chat-delivery"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature != 'all' && inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.chat_reactions_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || inputs.feature == 'all' && fromJSON(needs.journeys.outputs.full) || github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
         app-revision: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["5d2a820355969173090f0fcd0c72a7b3bd222141","{0}"]', github.sha)) || fromJSON('[""]') }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
@@ -414,7 +414,7 @@ jobs:
           if ($env:FEATURE -eq 'appearance' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master' -and $env:HEAD_COMMIT_MESSAGE.Split([char]10)[0].Contains('IGSH-837 red proof') -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')) { throw 'IGSH-837 deliberate red master proof' }
           if ($env:FEATURE -eq 'chat-dictation' -and $env:RELEASE_TAG) { throw 'Chat dictation requires the branch offline fixture boundary' }
           if ($env:CHAT_SHAPE_PROOF -eq '1' -and $env:FEATURE -ne 'chat-switch-speed') { throw 'Shape proof requires chat-switch-speed' }
-          if ($env:CHAT_SWITCH_PROFILE -eq '1' -and $env:CHAT_SHAPE_PROOF -ne '1') { throw 'Switch profile requires shape proof' }
+          if ($env:CHAT_SWITCH_PROFILE -eq '1' -and $env:CHAT_SHAPE_PROOF -ne '1' -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profile requires a native switching journey' }
           if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed', 'chat-switch-speed', 'title-bar') -and $env:RELEASE_TAG) {
             if ($env:FEATURE -ne 'chat-switch-speed' -or $env:CHAT_SHAPE_PROOF -ne '1' -or $env:RELEASE_TAG -ne 'v0.28.946') { throw 'Browser emulation requires a branch build with matching extension and bridge' }
           }
@@ -484,7 +484,7 @@ jobs:
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Build branch executable
         if: env.RELEASE_TAG == ''
-        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }}
+        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
         working-directory: ${{ matrix.app-revision && 'app-source' || '.' }}
       - name: Stage the independently built application
         if: matrix.app-revision != ''
@@ -523,6 +523,7 @@ jobs:
             $version = $env:RELEASE_TAG.Substring(1)
           } else {
             Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
+            if ($env:CHAT_SWITCH_PROFILE -eq '1' -and (Test-Path zig-out/bin/multiprompt.pdb)) { Copy-Item zig-out/bin/multiprompt.pdb verify-bin/multiprompt.pdb }
             Copy-Item zig-out/bin/zigshell-bridge.exe verify-bin/zigshell-bridge.exe
             $version = $env:VERIFY_VERSION
             $embeddedRevision = $env:VERIFY_REVISION

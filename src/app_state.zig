@@ -661,6 +661,7 @@ pub const WS_PILL_GAP: i32 = 5;
 pub const WS_STRIP_LEFT: i32 = 8;
 pub const WS_NEW_PILL: u8 = 0xFF;
 pub var g_workspace_hover: ?u8 = null;
+pub var g_sidebar_hover: ?u32 = null;
 pub var g_inbox_button_hover: bool = false;
 pub var g_chat_stop_hover: bool = false;
 pub var g_chat_stop_shown: bool = false;

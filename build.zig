@@ -46,6 +46,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    if (b.option(bool, "symbols", "Retain native profiling symbols") orelse false) exe.root_module.strip = false;
     exe.root_module.addObject(revision_object);
     exe.subsystem = .Windows;
     exe.stack_size = MAIN_STACK_SIZE;

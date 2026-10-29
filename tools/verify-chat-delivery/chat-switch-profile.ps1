@@ -4,6 +4,11 @@ function Invoke-ChatSwitchProfile([int]$TargetProcessId, [scriptblock]$Switch, [
     $target = Get-Process -Id $TargetProcessId -ErrorAction Stop
     New-Item -ItemType Directory -Force $Directory | Out-Null
     $trace = Join-Path $Directory 'cpu.etl'
+    $image = Join-Path $Directory 'multiprompt.exe'
+    Copy-Item -LiteralPath $target.Path -Destination $image
+    $symbols = [IO.Path]::ChangeExtension($target.Path, '.pdb')
+    if (Test-Path -LiteralPath $symbols) { Copy-Item -LiteralPath $symbols -Destination (Join-Path $Directory 'multiprompt.pdb') }
+    if ((Get-FileHash -LiteralPath $image -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $target.Path -Algorithm SHA256).Hash) { throw 'Profile executable identity mismatch' }
     if (Test-Path -LiteralPath $trace) { throw 'Profile trace must be a new owned artifact' }
     $observation = [ordered]@{ target_pid = $TargetProcessId; process_started_utc = $target.StartTime.ToUniversalTime().ToString('o'); separate_from_acceptance = $true; route = $Route; recorder = 'Windows WPR CPU'; trace_scope = 'system-wide kernel samples; analyze only target_pid and the recorded switch interval'; analyzed = $false; status = 'not-started' }
     $started = $false

@@ -13,11 +13,12 @@ export function inspect(image, area) {
   const groups = { agent: [], user: [], dim: [], pill: [] };
   const colors = new Map();
   const reader = bg === 0x101010;
-  const badgeDelta = reader ? 34 : 56;
-  const ranges = reader ? [['agent', 14, 22], ['user', 42, 50], ['dim', 26, 33], ['pill', 34, 34]] : [['agent', 36, 48], ['user', 53, 65], ['dim', 26, 33]];
+  const badgeDelta = reader ? 37 : 56;
+  const ranges = reader ? [['agent', 14, 22], ['user', 42, 50], ['dim', 26, 29], ['pill', 37, 37]] : [['agent', 36, 48], ['user', 53, 65], ['dim', 26, 33]];
   for (const [kind, low, high] of ranges) {
     for (let delta = low; delta <= high; delta++) colors.set(shifted(delta), kind);
   }
+  if (reader) colors.set(0x353535, 'pill');
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const start = y * width + x;
     if (seen[start]) continue;
@@ -47,6 +48,7 @@ export function inspect(image, area) {
     groups[group].push({ left: left + area.left, right: right + area.left + 1, top: top + area.top, bottom: bottom + area.top + 1, ink });
   }
   for (const list of Object.values(groups)) list.sort((a, b) => a.top - b.top);
+  if (groups.user.length) groups.agent = groups.agent.filter(reply => reply.top >= groups.user[0].bottom);
   return groups;
 }
 
@@ -56,15 +58,34 @@ export function assertBadge(frame, users = 1) {
   assert.equal(frame.dim.length, 0, 'reaction must not add a queued bubble');
   assert.equal(frame.pill.length, 1, 'exactly one reaction badge');
   const [first, second] = frame.agent, [pill] = frame.pill;
-  assert.ok(pill.top >= first.bottom && pill.top - first.bottom <= 8 && pill.bottom < second.top && pill.left >= first.left && pill.right <= first.right, 'badge stays attached below the first same-prefix reply');
+  assert.ok(pill.top >= first.top && pill.bottom <= first.bottom && pill.bottom < second.top && pill.left >= first.left && pill.right <= first.right, 'badge stays inside the first same-prefix reply');
   assert.ok(pill.right - pill.left < 100 && pill.bottom - pill.top < 40, 'small badge, not a bubble');
   assert.ok(pill.ink > 8, 'badge glyph must actually be painted');
+}
+
+export function assertHoverActions(image, first) {
+  const y = first.bottom - 14;
+  for (let cell = 0; cell < 3; cell++) {
+    let ink = 0;
+    for (let py = y - 10; py < y + 10; py++) for (let px = first.right + 6 + cell * 28; px < first.right + 6 + (cell + 1) * 28; px++) {
+      const color = image.pixels.readUIntLE((py * image.width + px) * 4, 3);
+      if ([0, 8, 16].every(shift => ((color >> shift) & 255) >= 70)) ink++;
+    }
+    assert.ok(ink >= (cell === 2 ? 3 : 7), `hover action ${cell} is painted`);
+  }
+  return { insideX: first.left + 30, insideY: y, emojiX: first.right + 20, moreX: first.right + 76, y };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = process.argv[2];
   const json = name => JSON.parse(fs.readFileSync(path.join(root, name), 'utf8').replace(/^\uFEFF/, ''));
-  if (process.argv[3] === '--locate') {
+  if (process.argv[3] === '--hover') {
+    const image = readBmp(path.join(root, 'reactions-hover.bmp'));
+    const frame = inspect(image, json('reactions/area.json'));
+    assert.ok(frame.agent.length >= 2);
+    const first = frame.agent[0];
+    console.log(JSON.stringify(assertHoverActions(image, first)));
+  } else if (process.argv[3] === '--locate') {
     const frame = inspect(readBmp(path.join(root, 'reactions-before.bmp')), json('reactions/area.json'));
     assert.ok(frame.agent.length >= 2, 'fixture replies not painted');
     const first = frame.agent[0];
@@ -78,6 +99,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       assert.equal(observation.error, null);
       assert.equal(observation.composerText, 'draft stays here');
       assert.equal(observation.restartComposerText, 'draft stays here');
+      assert.equal(observation.copiedRequestId, 'msg_first');
+      assert.equal(observation.hoverMenusMatch, true);
       const clean = json('cleanup.json');
       assert.equal(clean.remaining_owned_processes, 0);
       assert.equal(clean.scratch_removed, true);
