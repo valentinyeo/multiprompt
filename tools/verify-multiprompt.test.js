@@ -285,7 +285,8 @@ test('G2: offline startup uses the actual ephemeral app-owned loopback listener'
 test('G2: transport encodes the CLI bytes with bounded TCP and no external harness process', () => {
   assert.ok(cli.includes('sess="workspace"'));
   assert.ok(cli.includes('payload = base64.b64encode(("\\x1f".join(args) + "\\x1f").encode()).decode()'));
-  assert.ok(cli.includes('sock.sendall(f"AUTH:{token}:ZSB:{session}:{payload}\\n".encode())'));
+  assert.ok(cli.includes('request = f"ZSB:{session}:{payload}\\n"'));
+  assert.ok(cli.includes('sock.sendall((request if endpoint else f"AUTH:{token}:" + request).encode())'));
   assert.ok(transport.includes('[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($Arguments -join [char]0x1F) + [char]0x1F))'));
   assert.ok(transport.includes('[Text.Encoding]::UTF8.GetBytes("ZSB:workspace:${payload}`n")'));
   assert.match(transport, /Doctor\s+Assert-Foreground\s+Record/);

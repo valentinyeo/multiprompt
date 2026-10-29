@@ -405,3 +405,95 @@ class Relay(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnerBrowser(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.directory = Path(self.temp.name)
+
+    @classmethod
+    def setUpClass(cls):
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        import user_browser
+        cls.browser = user_browser
+
+    def layout(self, tabs):
+        return {"ok": True, "workspaces": [{"tabs": tabs, "groups": []}]}
+
+    def tab(self, id=42, host="remote-1", session="inne-cro"):
+        return {"id": id, "host": host, "tmux": session, "title": "Owner"}
+
+    def command(self, args, session="inne-cro"):
+        import base64
+        payload = base64.b64encode(("\x1f".join(args) + "\x1f").encode())
+        return b"ZSB:" + session.encode() + b":" + payload + b"\n"
+
+    def owner_send(self, message):
+        left, right = socket.socketpair()
+        thread = threading.Thread(target=self.browser.handle, args=(right, self.directory, "remote-1", relay))
+        thread.start()
+        with left:
+            left.settimeout(2)
+            left.sendall(message)
+            data = left.recv(65536)
+        thread.join(2)
+        self.assertFalse(thread.is_alive())
+        return data
+
+    def test_peer_uid_and_trusted_owner_metadata_gate_browser_control(self):
+        import pwd
+        from types import SimpleNamespace
+        user = pwd.getpwuid(os.getuid()).pw_name
+        output = "inne-cro\t" + user + "\tinne-cro\nother\tforeign\tinne-cro\n"
+        with patch.object(self.browser.subprocess, "run", return_value=SimpleNamespace(stdout=output)) as tmux:
+            self.assertEqual(self.browser.owners(os.getuid(), "inne-cro"), {"inne-cro"})
+            self.assertEqual(self.browser.owners(os.getuid(), "other"), set())
+        self.assertEqual(tmux.call_args.args[0][0], "tmux")
+        self.assertNotIn("shell", tmux.call_args.kwargs)
+
+    def test_host_and_owner_resolve_to_one_shell_not_a_shared_session_name(self):
+        tabs = [self.tab(), self.tab(43, "remote-2"), self.tab(44, session="foreign")]
+        self.assertEqual(self.browser.resolve_tab(self.layout(tabs), "remote-1", {"inne-cro"}), b"zss-42")
+        for bad in [[], [self.tab(), self.tab(45)], [self.tab(), self.tab(99, session="zss-42")]]:
+            with self.assertRaises(ValueError):
+                self.browser.resolve_tab(self.layout(bad), "remote-1", {"inne-cro"})
+
+    def test_own_user_controls_only_the_resolved_pane_without_any_token(self):
+        seen = []
+        def upstream(path, session, payload, channel):
+            seen.append((session, payload))
+            if session == b"workspace":
+                return json.dumps(self.layout([self.tab(), self.tab(99, session="foreign")])).encode()
+            self.assertEqual(session, b"zss-42")
+            return b'{"ok":true,"result":{"text":"Own pane"}}\n'
+        with patch.object(self.browser, "owners", return_value={"inne-cro"}) as ownership, \
+                patch.object(relay, "sockets", return_value=[self.directory / "one.sock"]), \
+                patch.object(self.browser, "request", side_effect=upstream):
+            result = self.owner_send(self.command(["text"]))
+        ownership.assert_called_once_with(os.getuid(), "inne-cro")
+        self.assertEqual(json.loads(result)["result"]["text"], "Own pane")
+        self.assertEqual(len(seen), 2)
+        self.assertNotIn(b"AUTH", b"".join(session + payload for session, payload in seen))
+
+    def test_foreign_session_and_global_browser_commands_never_reach_a_tunnel(self):
+        with patch.object(self.browser, "owners", return_value=set()), \
+                patch.object(self.browser, "request") as upstream:
+            self.assertEqual(json.loads(self.owner_send(self.command(["text"], "foreign")))["error"], "owner_scope_denied")
+        upstream.assert_not_called()
+        for args in [["workspace-list"], ["session-open"], ["cdp", "Target.getTargets"],
+                     ["extension-reload"], ["resolve-window"], ["text", "--window", "99"],
+                     ["open", "file:///private"], ["navigate", "chrome://extensions"]]:
+            with self.subTest(args=args), patch.object(self.browser, "request") as upstream:
+                self.assertEqual(json.loads(self.owner_send(self.command(args)))["error"], "owner_scope_denied")
+                upstream.assert_not_called()
+
+    def test_duplicate_laptops_fail_closed_instead_of_picking_a_foreign_pane(self):
+        with patch.object(self.browser, "owners", return_value={"inne-cro"}), \
+                patch.object(relay, "sockets", return_value=[Path("one"), Path("two")]), \
+                patch.object(self.browser, "request", return_value=json.dumps(self.layout([self.tab()])).encode()) as upstream:
+            result = self.owner_send(self.command(["text"]))
+        self.assertEqual(json.loads(result)["error"], "owner_scope_denied")
+        self.assertTrue(all(call.args[1] == b"workspace" for call in upstream.call_args_list))

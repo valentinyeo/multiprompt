@@ -1,0 +1,12 @@
+[Unit]
+Description=Scoped session-owner browser control
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/multiprompt/owner-browser.env
+ExecStart=/usr/bin/python3 %h/.local/share/multiprompt-owner-browser/user_browser.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

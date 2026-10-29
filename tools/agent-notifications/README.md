@@ -369,3 +369,23 @@ existing machines stay unchanged.
 - [Cursor hooks](https://prod.cursor.com/docs/hooks)
 - [Pi lifecycle extensions](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md)
 - [Hax configuration](https://github.com/OleksandrChekhovskyi/hax/blob/master/docs/configuration.md)
+
+## Browser access for another Unix user
+
+Install the separate owner broker as the desktop SSH bridge user with
+`bash tools/install-owner-browser.sh <exact-desktop-SSH-host-name>`.
+It uses an isolated routing module; the existing notification service and
+clients are neither replaced nor restarted. No vault token is loaded.
+The endpoint is
+`/tmp/mp-browser-<relay-uid>/control.sock`. Install the other user's wrapper with
+`bash tools/install-user-browser.sh /tmp/mp-browser-<relay-uid>/control.sock`
+as that user. No vault tool or credential is installed.
+
+The socket verifies the caller's Unix peer UID. Only outer tmux panes whose
+trusted `@owner_user` and `@owner_session` metadata match that caller/session
+are eligible. `tools/user-tmux.sh` writes this metadata as the bridge owner.
+The broker resolves that exact host/session through the connected desktop's
+layout, then addresses its shell ID. Missing or ambiguous ownership fails
+closed, with no shared TCP fallback. Global app operations, raw CDP and browser
+administration are not available through this channel. Browser tab selectors
+remain confined to the resolved pane by the extension's existing checks.
