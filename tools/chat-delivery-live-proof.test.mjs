@@ -23,8 +23,10 @@ async function fixture(t, sustained = false, crashStress = false) {
   write('live-delivery/observation.json', observed);
   write('live-delivery/stand-in/live-turns.jsonl', truth.map(JSON.stringify).join('\n'));
   write('live-delivery/stand-in/frames.jsonl', truth.map(row => JSON.stringify({ op: 'live-turn', screen: row.answer, queue: [] })).join('\n'));
+  const received = [];
   for (const row of rounds) {
-    write(`live-delivery/round-${row.round}-copied.txt`, [...row.messages, `Live answer ${row.round}`].join('\n'));
+    received.push(...row.messages, `Live answer ${row.round}`);
+    write(`live-delivery/round-${row.round}-copied.txt`, received.join('\n'));
     write(`live-delivery/round-${row.round}-outbox.json`, { queues: [] });
     for (const kind of ['queued', 'round']) write(`live-${kind}-${String(row.round).padStart(2, '0')}.png`, Buffer.from('89504e470d0a1a0a', 'hex'));
   }
@@ -61,6 +63,19 @@ test('IGSH-1152 a crash report fails even with complete reply receipts', async t
   const f = await fixture(t);
   f.write('live-delivery/crashes/crash-recorded.txt', 'ACCESS_VIOLATION');
   assert.throws(f.check, /native chat crashed/);
+});
+
+test('every sample retains all earlier accepted messages and replies', async t => {
+  const f = await fixture(t);
+  f.write('live-delivery/round-2-copied.txt', [...f.rounds[1].messages, 'Live answer 2'].join('\n'));
+  assert.throws(f.check, /misses accepted text/);
+});
+
+test('reply ten cannot conceal a missing reply one', async t => {
+  const f = await fixture(t);
+  const copied = f.rounds.flatMap(row => [...row.messages, `Live answer ${row.round}`]).filter(text => text !== 'Live answer 1');
+  f.write('live-delivery/round-10-copied.txt', copied.join('\n'));
+  assert.throws(f.check, /misses accepted text/);
 });
 
 test('slow replies, stale copies, unsent ghosts and view-refresh tricks fail', async t => {

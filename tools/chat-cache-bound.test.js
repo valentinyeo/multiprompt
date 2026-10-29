@@ -129,6 +129,9 @@ fn SetEvent(_: HANDLE) i32 { return 1; }
 const ChatHistoryEntry = struct { stream: ?*ChatHistoryStream = null, push_pending: bool = false, key: chat_transcript.Identity = .{}, backfill: chat_history.Backfill = .{}, show_older: bool = false, disk_loaded: bool = false, pending: bool = false, loading_disk: bool = false, before: u64 = 0, next: u64 = 0, history: chat_history.History = .{} };
 var cached_entry: ChatHistoryEntry = .{};
 var g_chat_active = true;
+var active_shell: u32 = 0;
+var shell_count: u32 = 1;
+var shells = [_]struct { shell_id: u32 = 1 }{.{}};
 var g_main_hwnd: HANDLE = @ptrFromInt(1);
 var g_chat_file_request_id: u32 = 0;
 var acquisitions: usize = 0;
@@ -158,6 +161,16 @@ test "local cache bypasses busy remote worker and foreground reservation" {
     cached_entry.pending = false; cached_entry.disk_loaded = true;
     chatFileRequest(key);
     try std.testing.expect(!cached_entry.pending); // recent input still defers remote IO
+}
+test "local cache bypasses background stream creation while remote work is busy" {
+    cached_entry = .{ .disk_loaded = true };
+    acquisitions = 0;
+    g_chat_active = false;
+    defer g_chat_active = true;
+    const key = chat_transcript.Identity.init(1, 0, false, "cached", "");
+    chatFileRequestForDelivery(key, true);
+    try std.testing.expectEqual(@as(usize, 1), acquisitions);
+    try std.testing.expect(!cached_entry.pending and cached_entry.stream == null);
 }
 `;
     const file = path.join(dir, 'request.zig'); fs.writeFileSync(file, source.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));

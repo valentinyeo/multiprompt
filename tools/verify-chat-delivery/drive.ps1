@@ -103,9 +103,9 @@ function Doctor([bool]$Chat = $false) {
         throw 'Doctor: visible versioned UI Automation identity missing'
     }
     $session = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
-    $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1') { $expectedShells } else { 1 }
+    $expectedTmux = if ($env:CHAT_HAX_PROOF -eq '1' -or $env:CHAT_LIVE_DELIVERY_PROOF -eq '1') { $expectedShells } else { 1 }
     if (@($session.tabs).Count -ne $expectedShells -or @($session.tabs | Where-Object { $_.kind -eq 'tmux' }).Count -ne $expectedTmux -or
-        ($expectedShells -eq 2 -and @($session.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
+        ($expectedShells -eq 2 -and $env:CHAT_LIVE_DELIVERY_PROOF -ne '1' -and @($session.tabs | Where-Object { $_.kind -eq 'cmd' }).Count -ne 1)) { throw 'Doctor: expected owned tmux and local tabs were not saved' }
     if ($Chat) {
         $focus = [ChatDeliveryDesktop]::Focus($main)
         if ($focus[0] -ne $main.ToInt64() -or $focus[1] -ne $composer.ToInt64()) { throw 'Doctor: owned composer must have foreground typing focus' }
@@ -497,6 +497,7 @@ foreach ($plan in $plans) {
         if ($plan.ContainsKey('leftover')) { $seed.leftover = $plan.leftover; $observation.leftover = $plan.leftover }
         if ($isSending) { $seed.sendingProof = $true }
         $standIn = $seed
+        if ($isLiveDelivery) { $standIn.sessions = @('verify-agent', 'verify-background') }
         if ($env:CHAT_LONG_PROOF -eq '1') { $standIn.longChatProof = $true }
         if ($hasTranscript) {
             $sid = 'a1b2c3d4-0682-4000-8000-000000000682'
@@ -551,6 +552,12 @@ foreach ($plan in $plans) {
         if ($isHax) {
             $savedSession.tabs = @($standIn.sessions | ForEach-Object { @{kind='tmux'; name=$_; manual=$true; tmux_host=0; tmux_session=$_; cv=$false; pid=0} })
             $expectedShells = 4
+        }
+        if ($isLiveDelivery) {
+            $savedSession.tabs += @{kind='tmux'; name='Verify background'; manual=$true; tmux_host=0; tmux_session='verify-background'; cv=$false; pid=0}
+            $expectedShells = 2
+            $sent = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            Save @{version=2; queues=@(@{key='tmux:0:verify-background'; messages=@(@{t='Outstanding background delivery'; s=3; x=1; w=$sent})})} "$settings/chat-outbox.json"
         }
         Save $savedSession "$settings/session.json"
         if ($isRemote) {
