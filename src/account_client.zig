@@ -39,6 +39,7 @@ pub const Response = struct {
     bytes: []u8,
     hosts_supported: bool = false,
     removal_supported: bool = false,
+    colors_supported: bool = false,
     pub fn deinit(self: Response) void {
         std.crypto.secureZero(u8, self.bytes);
         a.free(self.bytes);
@@ -46,6 +47,9 @@ pub const Response = struct {
 };
 pub fn layoutSupportsHosts(headers: []const u8) bool {
     return layoutSupports(headers, "hosts");
+}
+pub fn layoutSupportsColors(headers: []const u8) bool {
+    return layoutSupports(headers, "workspace_color");
 }
 pub fn layoutSupportsRemoval(headers: []const u8) bool {
     return layoutSupports(headers, "host_removal");
@@ -86,6 +90,7 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
     if (WinHttpQueryHeaders(req, 19 | 0x20000000, null, &status, &size, null) == 0) return error.Network;
     var hosts_supported = false;
     var removal_supported = false;
+    var colors_supported = false;
     var header_buf: [8192]u16 = @splat(0);
     size = @sizeOf(@TypeOf(header_buf));
     if (WinHttpQueryHeaders(req, 22, null, &header_buf, &size, null) != 0) {
@@ -93,6 +98,7 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
         defer a.free(raw);
         hosts_supported = layoutSupportsHosts(raw);
         removal_supported = layoutSupportsRemoval(raw);
+        colors_supported = layoutSupportsColors(raw);
     }
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
@@ -101,7 +107,7 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
     while (GetTickCount64() < deadline) {
         var n: u32 = 0;
         if (WinHttpReadData(req, &chunk, chunk.len, &n) == 0) return error.Network;
-        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported, .removal_supported = removal_supported };
+        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported, .removal_supported = removal_supported, .colors_supported = colors_supported };
         if (out.items.len + n >= 1024 * 1024) return error.TooLarge;
         try out.appendSlice(a, chunk[0..n]);
     }
@@ -239,4 +245,10 @@ test "IGSH-600 removal support requires the exact advertised token" {
     try std.testing.expect(!layoutSupportsRemoval("X-Other: host_removal\r\n"));
     try std.testing.expect(!layoutSupportsRemoval("X-Layout-Features: hosts\r\n"));
     try std.testing.expect(!layoutSupportsRemoval(""));
+}
+
+test "workspace color support requires the exact feature token" {
+    try std.testing.expect(layoutSupportsColors("X-Layout-Features: hosts, workspace_color\r\n"));
+    try std.testing.expect(!layoutSupportsColors("X-Layout-Features: workspace_color_extra\r\n"));
+    try std.testing.expect(!layoutSupportsColors(""));
 }

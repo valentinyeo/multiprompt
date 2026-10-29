@@ -66,6 +66,24 @@ pub fn apply(a: Allocator, local: Layout, owned: []const bool, remote: Layout, m
     return .{ .settings = remote.settings, .revision = remote.revision, .hosts = remote.hosts, .removed_hosts = remote.removed_hosts, .workspaces = try ws.toOwnedSlice(a), .tabs = try tabs.toOwnedSlice(a) };
 }
 
+pub fn colorsFrom(a: Allocator, target: Layout, source: Layout) !Layout {
+    var result = target;
+    const workspaces = try a.dupe(layout.Workspace, target.workspaces);
+    for (workspaces) |*workspace| {
+        if (workspaceIndex(source.workspaces, workspace.name)) |i| workspace.color = source.workspaces[i].color;
+    }
+    result.workspaces = workspaces;
+    return result;
+}
+
+pub fn withoutColors(a: Allocator, target: Layout) !Layout {
+    var result = target;
+    const workspaces = try a.dupe(layout.Workspace, target.workspaces);
+    for (workspaces) |*workspace| workspace.color = null;
+    result.workspaces = workspaces;
+    return result;
+}
+
 pub fn keepHeld(a: Allocator, base: Layout, edited: Layout, closed: []const Tab) !Layout {
     var tabs: std.ArrayList(Tab) = .empty;
     try tabs.appendSlice(a, edited.tabs);
@@ -993,4 +1011,30 @@ test "IGSH-1172 colors rebase independently reset reorder and survive cache" {
     const rename_result = try rebase(a, base, renamed, base);
     try std.testing.expectEqualStrings("Spruce", rename_result.workspaces[0].name);
     try std.testing.expectEqual(@as(?u8, 1), rename_result.workspaces[0].color);
+}
+
+test "old server sync preserves pending workspace color until upgrade" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const base = Layout{ .workspaces = &.{.{ .name = "Other" }}, .tabs = &.{one} };
+    var renamed = one;
+    renamed.name = "Renamed";
+    renamed.manual = true;
+    const edited = Layout{ .workspaces = &.{.{ .name = "Other", .color = 4 }}, .tabs = &.{renamed} };
+    const rebased = try rebase(a, base, edited, base);
+    const outbound = try withoutColors(a, rebased);
+    const json = try layout.encode(a, outbound);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"color\"") == null);
+    try std.testing.expectEqualStrings("Renamed", outbound.tabs[0].name);
+    const old_ack = try apply(a, edited, &.{true}, outbound, 9, 256);
+    const preserved = try colorsFrom(a, outbound, edited);
+    try std.testing.expectEqual(@as(?u8, null), old_ack.workspaces[0].color);
+    try std.testing.expectEqual(@as(?u8, 4), preserved.workspaces[0].color);
+    const upgraded = try rebase(a, old_ack, preserved, outbound);
+    try std.testing.expectEqual(@as(?u8, 4), upgraded.workspaces[0].color);
+    const server_reset = Layout{ .workspaces = &.{.{ .name = "Other" }}, .tabs = &.{renamed} };
+    const honored = try rebase(a, upgraded, upgraded, server_reset);
+    try std.testing.expectEqual(@as(?u8, null), honored.workspaces[0].color);
+    try std.testing.expectEqual(@as(u8, 1), layout.workspaceColor(1, honored.workspaces[0].color));
 }
