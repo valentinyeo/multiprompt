@@ -39,6 +39,14 @@ test('IGSH-718 production pure item expressions preserve ordering and selection 
   assert.throws(() => menuModel(chat.replace('fn chatContextMenuItems(', 'fn removedMenu(')));
 });
 
+test('cancelling a held message cannot copy an assistant request ID', () => {
+  const items = fonts.match(/pub const MessageMenuItem = enum\(u32\) \{([^]*?)\n    pub fn/)[1];
+  const ids = [...items.matchAll(/(\w+) = (\d+)/g)].map(([, name, id]) => [name, Number(id)]);
+  assert.equal(new Set(ids.map(([, id]) => id)).size, ids.length);
+  const handler = chat.slice(chat.indexOf('fn chatMessageMenu('), chat.indexOf('fn chatNavEligible('));
+  assert.match(handler, /@intFromEnum\(@import\("fonts.zig"\).MessageMenuItem.cancel_queued\) => if \(echo_id\) \|id\| chatCancelQueuedFromMenu\(id\)/);
+});
+
 test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons, mnemonics and existing contextual actions', () => {
   const handler = chat.slice(chat.indexOf('fn chatMessageMenu('), chat.indexOf('fn chatNavEligible('));
   assert.doesNotMatch(handler, /Copy Message|Select All|2 => chatSelectAll|3 => chatCopyTextToClipboard/);

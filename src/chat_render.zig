@@ -5066,7 +5066,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
         1 => chatCopyTextToClipboard(if (items.copy_target == .selection) selection_text else message_text),
         5 => if (echo_id) |id| chatEchoSendAgain(id),
         6 => if (echo_id) |id| chatEchoRemove(id),
-        11 => if (echo_id) |id| chatCancelQueuedFromMenu(id),
+        @intFromEnum(@import("fonts.zig").MessageMenuItem.cancel_queued) => if (echo_id) |id| chatCancelQueuedFromMenu(id),
         4 => if (reply_text) |text| {
             app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
             chatNavClear();
