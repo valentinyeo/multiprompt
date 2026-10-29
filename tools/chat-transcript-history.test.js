@@ -939,7 +939,7 @@ test "cache-first switch-back Resync success notice requires live source" {
 });
 
 
-test('IGSH-1059 a truncated restart cache still requests the missing conversation prefix', () => {
+test('IGSH-1059 a tools-only restart cache restores the missing conversation instead of leaving Chat View blank', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'partial-restart-history-'));
   try {
     copyZig(['chat_history.zig'], dir);
@@ -954,9 +954,14 @@ test "partial restart prefix" {
     defer live.deinit(a);
     var wire: std.ArrayList(u8) = .empty;
     defer wire.deinit(a);
-    try wire.appendSlice(a, "@mp\t1\thistory\tok\tsid\t0\t1000\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n");
+    try wire.appendSlice(a, "@mp\t1\thistory\tok\tsid\t0\t1300\t9\t0\tclaude\tterm-1\t0\t\ttail\t0\n");
     for (0..1000) |i| {
         const row = try std.fmt.allocPrint(a, "{{\"role\":\"assistant\",\"id\":\"msg-{d}\",\"text\":\"message {d}\",\"detail\":\"{s}\",\"offset\":{d},\"end\":{d}}}\n", .{ i, i, "x" ** 1024, i, i + 1 });
+        defer a.free(row);
+        try wire.appendSlice(a, row);
+    }
+    for (0..300) |i| {
+        const row = try std.fmt.allocPrint(a, "{{\"role\":\"tool\",\"id\":\"tool-{d}\",\"text\":\"tool summary {d}\",\"detail\":\"{s}\",\"offset\":{d},\"end\":{d}}}\n", .{ i, i, "x" ** 4000, 1000 + i, 1001 + i });
         defer a.free(row);
         try wire.appendSlice(a, row);
     }
@@ -966,21 +971,39 @@ test "partial restart prefix" {
     defer a.free(disk);
     var restored = try history.History.decode(a, disk, key);
     defer restored.deinit(a);
-    try std.testing.expect(restored.blocks.items.len > 0 and restored.blocks.items.len < 1000);
-    try restored.apply(a, "@mp\t2\thistory\tok\tsid\t900\t1000\t9\t0\tclaude\tterm-1\t0\t\ttail\t900\n{\"role\":\"assistant\",\"id\":\"msg-999\",\"text\":\"message 999\",\"offset\":999,\"end\":1000}\n@@MP_END@@\n", 2, key);
-    try std.testing.expectEqual(@as(u64, 900), restored.start);
+    try std.testing.expect(restored.blocks.items.len > 0);
+    for (restored.blocks.items) |block| try std.testing.expectEqual(.tool, block.role);
+    const tail = try std.fmt.allocPrint(a, "@mp\t2\thistory\tok\tsid\t1200\t1300\t9\t0\tclaude\tterm-1\t0\t\ttail\t1200\n{{\"role\":\"tool\",\"id\":\"tool-299\",\"text\":\"tool summary 299\",\"detail\":\"{s}\",\"offset\":1299,\"end\":1300}}\n@@MP_END@@\n", .{"x" ** 4000});
+    defer a.free(tail);
+    try restored.apply(a, tail, 2, key);
+    try std.testing.expectEqual(@as(u64, 1200), restored.start);
     wire.clearRetainingCapacity();
-    try wire.appendSlice(a, "@mp\t3\thistory\tok\tsid\t0\t900\t9\t0\tclaude\tterm-1\t0\t\tolder\t0\n");
-    for (0..900) |i| {
+    try wire.appendSlice(a, "@mp\t3\thistory\tok\tsid\t0\t1200\t9\t0\tclaude\tterm-1\t0\t\tolder\t0\n");
+    for (0..1000) |i| {
         const row = try std.fmt.allocPrint(a, "{{\"role\":\"assistant\",\"id\":\"msg-{d}\",\"text\":\"message {d}\",\"offset\":{d},\"end\":{d}}}\n", .{ i, i, i, i + 1 });
+        defer a.free(row);
+        try wire.appendSlice(a, row);
+    }
+    for (0..200) |i| {
+        const row = try std.fmt.allocPrint(a, "{{\"role\":\"tool\",\"id\":\"tool-{d}\",\"text\":\"tool summary {d}\",\"detail\":\"{s}\",\"offset\":{d},\"end\":{d}}}\n", .{ i, i, "x" ** 4000, 1000 + i, 1001 + i });
         defer a.free(row);
         try wire.appendSlice(a, row);
     }
     try wire.appendSlice(a, "@@MP_END@@\n");
     try restored.apply(a, wire.items, 3, key);
     try std.testing.expectEqual(@as(u64, 0), restored.start);
-    try std.testing.expectEqual(@as(usize, 1000), restored.blocks.items.len);
-    try std.testing.expectEqualSlices(u16, live.text.items, restored.text.items);
+    try std.testing.expectEqual(@as(usize, 1300), restored.blocks.items.len);
+    var visible: usize = 0;
+    for (restored.blocks.items) |block| {
+        if (block.role == .tool) continue;
+        const expected = try std.fmt.allocPrint(a, "message {d}", .{visible});
+        defer a.free(expected);
+        const text = try std.unicode.utf8ToUtf16LeAlloc(a, expected);
+        defer a.free(text);
+        try std.testing.expectEqualSlices(u16, text, restored.text.items[block.start..][0..block.len]);
+        visible += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1000), visible);
 }
 `);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'partial-restart.zig'), '--test-filter', 'partial restart prefix'], { encoding: 'utf8', timeout: 60000 });

@@ -17,6 +17,7 @@ Start-Transcript "$Evidence/driver.log"
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
+if ($Feature -eq 'chat-full-history') { Add-Type -Path "$PSScriptRoot/chat-switch-observer.cs" -ReferencedAssemblies System.Drawing }
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 if ($env:CHAT_REPLY_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reply proof requires chat-delivery' }
 if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Fresh skills proof requires chat-delivery' }
@@ -262,7 +263,21 @@ function Clear-Composer {
 }
 function Assert-FullHistory([string]$Stage) {
     $rounds = if ($env:CHAT_LONG_PROOF -eq '1') { 320 } else { 24 }
-    $blocks = 2 + 3 * $rounds
+    $blocks = 2 + 3 * $rounds + $(if ($env:CHAT_LONG_PROOF -eq '1') { 300 } else { 0 })
+    if ($Stage -in @('open', 'restart')) {
+        $latest = 'IGSH815 assistant {0:00}' -f ($rounds - 1)
+        [Windows.Forms.Clipboard]::Clear()
+        [void](Wait-For 'latest retained message reaches the real rendered transcript' {
+            Doctor $true
+            [ChatSwitchObserver]::CopyTranscript($app.Id, $main)
+            [Windows.Forms.Clipboard]::GetText().Contains($latest)
+        } 2)
+        $latestClock.Stop()
+        Save @{latest=$latest; visibleMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/$Stage-latest.json"
+        Shot "full-history-$Stage-latest"
+        if ($latestClock.ElapsedMilliseconds -gt 2000) { throw "Latest long-chat message exceeded two seconds at $Stage" }
+        Press @(0x1B) 'Esc: clear latest-message selection'
+    }
     $offset = (Read-Shared "$settings/debug.log").Length
     $complete = Step 'all session rows reach the renderer' {
         Press @(0x11, 0x30) 'Ctrl+0: measure every rendered session row'
@@ -550,6 +565,7 @@ foreach ($plan in $plans) {
         Press @(0x11, 0x31) 'Ctrl+1: select saved tmux tab'
         Shot "$($plan.name)-before"
         if ($plan.name -eq 'busy-send') { Shot 'before' }
+        $latestClock = [Diagnostics.Stopwatch]::StartNew()
         Press @(0x12, 0x43) 'Alt+C: open Chat View'
         $composer = Wait-For 'native Chat View composer' { $h = [ChatDeliveryDesktop]::Composer($main); if ($h -ne [IntPtr]::Zero) { $h } } 20
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
@@ -675,6 +691,7 @@ foreach ($plan in $plans) {
             Save $stopped "$caseDir/restart-process-tree.json"
             $job.Dispose()
             $job = [VerifyJob]::new()
+            $latestClock = [Diagnostics.Stopwatch]::StartNew()
             $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
             $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
             [void](Wait-For 'restarted owned app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })

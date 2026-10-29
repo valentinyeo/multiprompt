@@ -1,1 +1,1 @@
-Long conversations restore their earlier messages after reopening the app.
+Long conversations restore messages instead of appearing blank.

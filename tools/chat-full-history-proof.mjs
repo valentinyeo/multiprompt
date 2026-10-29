@@ -16,8 +16,11 @@ try {
     const measured = json(`full-history/${stage}.json`);
     const copied = fs.readFileSync(path.join(root, `full-history/${stage}-copied.txt`), 'utf8');
     assert.equal(measured.messages, messages.length);
-    assert.equal(measured.blocks, messages.length + rounds);
+    assert.equal(measured.blocks, messages.length + rounds + (process.env.CHAT_LONG_PROOF === '1' ? 300 : 0));
     assert.equal(measured.polled, true);
+    const latest = json(`full-history/${stage}-latest.json`);
+    assert.equal(latest.latest, `IGSH815 assistant ${String(rounds - 1).padStart(2, '0')}`);
+    assert.ok(latest.visibleMs > 0 && latest.visibleMs <= 2000);
     let offset = 0;
     for (const message of messages) {
       const at = copied.indexOf(message, offset);
