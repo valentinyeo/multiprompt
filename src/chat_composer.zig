@@ -1425,6 +1425,10 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
         if (wp == 0x0D) dropPendingEnterChar(hwnd);
         return 0;
     }
+    if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) {
+        if (wp == 0x0D) dropPendingEnterChar(hwnd);
+        return 0;
+    }
     if (msg == WM_KEYDOWN and @import("more_menu.zig").key(wp)) {
         if (wp == 0x0D) dropPendingEnterChar(hwnd);
         return 0;

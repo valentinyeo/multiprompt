@@ -28,7 +28,8 @@ test('weekly tick uses elapsed time, not quota usage, and the native card keeps 
   assert.match(read('src/telemetry_panel.zig'), /week_elapsed_tenths = aiPacePercentTenths\(week.object.get\("time_gone"\)\)/);
   assert.match(card, /w.WS_CHILD \| w.WS_CLIPSIBLINGS/);
   assert.match(card, /w.HWND_TOP/);
-  assert.match(card, /wp == w.VK_ESCAPE\) close\(\)/);
+  assert.match(card, /w.VK_ESCAPE => close\(\)/);
+  for (const file of ['src/main.zig', 'src/chat_composer.zig']) assert.match(read(file), /@import\("usage_card.zig"\).key\(wp\)/);
   assert.match(card, /if \(!inside\(card, x, y\)\) close\(\)/);
   assert.match(card, /w.WM_APP_CHANGELOG_OPEN/);
   assert.match(card, /test "IGSH-1086 usage card keeps missing windows honest/);

@@ -1428,6 +1428,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (@import("fonts.zig").menuChar(wp)) |result| return result;
     }
     if (@import("fonts.zig").menuMessage(msg, lp)) |result| return result;
+    if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) return 0;
     if (app_state.g_account_locked) {
         switch (msg) {
             WM_PAINT => {

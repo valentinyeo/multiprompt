@@ -246,6 +246,25 @@ pub fn open() void {
     _ = w.InvalidateRect(window, null, 0);
 }
 
+pub fn key(value: usize) bool {
+    if (backdrop == null) return false;
+    switch (value) {
+        w.VK_ESCAPE => close(),
+        0x09 => {
+            footer_focused = true;
+            _ = w.InvalidateRect(window, null, 0);
+        },
+        0x0D => {
+            if (footer_focused) {
+                close();
+                _ = focus.PostMessageW(state.g_main_hwnd, w.WM_APP_CHANGELOG_OPEN, 0, 0);
+            }
+        },
+        else => {},
+    }
+    return true;
+}
+
 fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
     const action = state.g_focus_user_action_tick;
     state.g_focus_user_action_tick = focus.focusGuardDispatchTick(msg, wp, lp);
@@ -281,13 +300,7 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             return 0;
         },
         w.WM_KEYDOWN => {
-            if (wp == w.VK_ESCAPE) close() else if (wp == 0x09) {
-                footer_focused = true;
-                _ = w.InvalidateRect(hwnd, null, 0);
-            } else if (wp == 0x0D and footer_focused) {
-                close();
-                _ = focus.PostMessageW(state.g_main_hwnd, w.WM_APP_CHANGELOG_OPEN, 0, 0);
-            }
+            _ = key(wp);
             return 0;
         },
         w.WM_RBUTTONDOWN, w.WM_KILLFOCUS, 0x0215 => {
