@@ -167,6 +167,7 @@ public static class VerifyNative {
             { "visible", IsWindowVisible(hwnd) }
         };
     }
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
     public static List<Dictionary<string, object>> DesktopWindows() {
         var windows = new List<Dictionary<string, object>>();
         EnumWindows(delegate(IntPtr hwnd, IntPtr data) {

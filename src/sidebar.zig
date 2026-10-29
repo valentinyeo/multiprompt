@@ -2189,6 +2189,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
         paintSidebarStickyStatusCard(hdc, font_status_card);
         paintSidebarUpdateCard(hdc, font_title, font_status_card);
+        @import("usage_card.zig").paintVersionStrip(hdc);
 
         paintWorkspaceStrip(hdc, sidebar_bg);
         @import("workspace_switcher.zig").paintHeader(hdc);

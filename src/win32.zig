@@ -585,6 +585,7 @@ pub const EM_SCROLLCARET: UINT = 0x00B7;
 pub extern "user32" fn FillRect(HANDLE, *const RECT, HANDLE) callconv(WINAPI) i32;
 pub extern "user32" fn DrawTextW(HANDLE, [*]const u16, i32, *RECT, UINT) callconv(WINAPI) i32;
 extern "user32" fn MessageBeep(UINT) callconv(WINAPI) BOOL;
+pub extern "user32" fn GetCapture() callconv(WINAPI) HANDLE;
 pub extern "user32" fn SetCapture(HANDLE) callconv(WINAPI) HANDLE;
 pub extern "user32" fn ReleaseCapture() callconv(WINAPI) BOOL;
 pub extern "user32" fn DestroyWindow(HANDLE) callconv(WINAPI) BOOL;

@@ -452,6 +452,9 @@ fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []c
     }
     ladderWindowFields(o.get("week"), &goal.total_used_tenths, &goal.has_total_used, &goal.weekly_reset_filetime, &goal.has_weekly_reset);
     ladderWindowFields(o.get("five_hour"), &goal.five_hour_used_tenths, &goal.has_five_hour_used, &goal.five_hour_reset_filetime, &goal.has_five_hour_reset);
+    if (o.get("week")) |week| {
+        if (week == .object) goal.week_elapsed_tenths = aiPacePercentTenths(week.object.get("time_gone"));
+    }
     goal.weekly_pace = ladderWindowPace(o.get("week"));
     goal.five_hour_pace = ladderWindowPace(o.get("five_hour"));
     if (o.get("resets")) |resets| {
@@ -874,7 +877,7 @@ fn aiPaceStatusColor(status: AiPaceStatus, dim: DWORD) DWORD {
     };
 }
 
-fn formatAiPacePercent(buf: []u8, tenths: anytype) []const u8 {
+pub fn formatAiPacePercent(buf: []u8, tenths: anytype) []const u8 {
     if (tenths % 10 == 0) {
         return std.fmt.bufPrint(buf, "{d}%", .{tenths / 10}) catch "?";
     }
@@ -902,7 +905,7 @@ fn aiPaceWord(pace: AiPace) []const u8 {
     };
 }
 
-fn aiPaceLocalTime(filetime: u64) ?SYSTEMTIME {
+pub fn aiPaceLocalTime(filetime: u64) ?SYSTEMTIME {
     const ft = FILETIME{ .dwLowDateTime = @truncate(filetime), .dwHighDateTime = @truncate(filetime >> 32) };
     var local_ft: FILETIME = undefined;
     var local: SYSTEMTIME = undefined;
@@ -946,7 +949,7 @@ fn aiPaceStaleCount() u8 {
     return count;
 }
 
-fn aiPoolShortLabel(buf: []u8, snapshot: *const AiPaceSnapshot, slot: usize) []const u8 {
+pub fn aiPoolShortLabel(buf: []u8, snapshot: *const AiPaceSnapshot, slot: usize) []const u8 {
     const goals = snapshot.goals[0..@min(snapshot.goal_count, snapshot.goals.len)];
     const provider = goals[slot].provider;
     var ordinal: usize = 0;
@@ -1145,28 +1148,7 @@ fn createAiUsageMenu(snapshot: AiPaceSnapshot, inks: *[256]?DWORD) HANDLE {
 }
 
 pub fn showSidebarAiUsageMenu() void {
-    const w = @import("win32.zig");
-    var inks: [256]?DWORD = undefined;
-    const menu = createAiUsageMenu(app_state.g_ai_pace, &inks) orelse return;
-    defer _ = w.DestroyMenu(menu);
-    const card = sidebarStickyCardRect();
-    var point = w.POINT{ .x = card.left, .y = card.top - @import("window_layout.zig").paneGap() };
-    _ = w.ClientToScreen(app_state.g_main_hwnd, &point);
-    _ = @import("fonts.zig").trackPopupMenuWithInks(menu, w.TPM_RETURNCMD | 0x0020, point.x, point.y, 0, app_state.g_main_hwnd, null, &inks);
-    const closing_time: w.DWORD = @bitCast(w.GetMessageTime());
-    var pending: w.MSG = undefined;
-    if (w.PeekMessageW(&pending, app_state.g_main_hwnd, w.WM_LBUTTONDOWN, w.WM_LBUTTONDBLCLK, 0) == 0) return;
-    var mouse = pending.pt;
-    if (w.ScreenToClient(app_state.g_main_hwnd, &mouse) == 0) return;
-    var diagnostic: [192]u8 = undefined;
-    if (std.fmt.bufPrint(&diagnostic, "usage panel close: message={d} time={d} closing={d} x={d} y={d}", .{ pending.message, pending.time, closing_time, mouse.x, mouse.y })) |text| {
-        @import("diagnostics.zig").debugLog(text);
-    } else |_| {}
-    if ((pending.message == w.WM_LBUTTONDOWN or pending.message == w.WM_LBUTTONDBLCLK) and pending.time == closing_time and
-        mouse.x >= card.left and mouse.x < card.right and mouse.y >= card.top and mouse.y < card.bottom)
-    {
-        _ = w.PeekMessageW(&pending, app_state.g_main_hwnd, pending.message, pending.message, 1);
-    }
+    @import("usage_card.zig").open();
 }
 
 test "IGSH-908 native usage menu retains distinct pools, quota data and reset rows" {

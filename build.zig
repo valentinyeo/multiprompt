@@ -27,7 +27,6 @@ pub fn build(b: *std.Build) void {
         if (std.mem.allEqual(u8, &key, 0)) @panic("Release signing public key is still the all-zero placeholder; configure it before publishing");
     }
 
-
     const mod = b.addModule("multiprompt", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -726,6 +725,8 @@ pub fn build(b: *std.Build) void {
     const live_delivery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-delivery-live-proof.test.mjs" });
     test_step.dependOn(&live_delivery_tests.step);
     vps_test_step.dependOn(&live_delivery_tests.step);
+    const usage_card_tests = b.addSystemCommand(&.{ "node", "--test", "tools/usage-card.test.js" });
+    test_step.dependOn(&usage_card_tests.step);
     const test_wiring_tests = b.addSystemCommand(&.{ "node", "--test", "tools/test-wiring.test.js", "tools/heavy-guard.test.js" });
     test_step.dependOn(&test_wiring_tests.step);
     vps_test_step.dependOn(&test_wiring_tests.step);
