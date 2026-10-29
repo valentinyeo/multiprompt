@@ -1,9 +1,9 @@
 $ownerProof = $env:OWNER_BROWSER_PROOF | ConvertFrom-Json
 if ($ownerProof.session -notmatch '^mp-proof-[a-z0-9-]+$') { throw 'Expected an isolated proof session' }
 $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-$listener = [regex]::Match((Read-SharedText $log), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
-if (-not $listener.Success) { throw 'Owned browser listener missing' }
-$ownerPort = [int]$listener.Groups[1].Value
+$listeners = [regex]::Matches((Read-SharedText $log), 'notify-listener: tunnel-inbound listening port=(\d+) err=0')
+if ($listeners.Count -eq 0) { throw 'Owned browser listener missing' }
+$ownerPort = [int]$listeners[$listeners.Count - 1].Groups[1].Value
 if (@(Get-NetTCPConnection -State Listen -LocalAddress '127.0.0.1' -LocalPort $ownerPort | Where-Object { $_.OwningProcess -eq $process.Id }).Count -ne 1) { throw 'Browser listener does not belong to the verified app' }
 Palette 'move to group'
 Press @(0x0D) 'Enter: group menu'
@@ -22,15 +22,16 @@ $pageRoot = Join-Path $scratch 'owner-page'
 New-Item -ItemType Directory -Force $pageRoot | Out-Null
 [IO.File]::WriteAllText((Join-Path $pageRoot 'index.html'), ('<!doctype html><title>Owner browser proof</title><h1>' + $ownerProof.session + '</h1><button id="proof-button" onclick="document.getElementById(''proof-result'').textContent=''Clicked''">Click</button><p id="proof-result">Not clicked</p>'))
 $pageJob = New-Object VerifyJob
+$remote = $null
+$key = Join-Path $env:RUNNER_TEMP 'owner-browser-key'
+try {
 $pageServer = $pageJob.Start((Get-Command python.exe).Source, $pageRoot, (Join-Path $Evidence 'owner-page.stdout.log'), (Join-Path $Evidence 'owner-page.stderr.log'), '-m http.server 19283 --bind 127.0.0.1')
 Wait-Until { try { (Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:19283/').Content.Contains($ownerProof.session) } catch { $false } } 'owner proof web page'
-$key = Join-Path $env:RUNNER_TEMP 'owner-browser-key'
 $known = Join-Path $scratch 'owner-known-hosts'
 [IO.File]::WriteAllText($known, $ownerProof.knownHost + "`n")
 $ssh = Join-Path $env:WINDIR 'System32/OpenSSH/ssh.exe'
 $arguments = '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o StreamLocalBindUnlink=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o "UserKnownHostsFile=' + $known + '" -i "' + $key + '" -R "' + $ownerProof.tunnel + ':127.0.0.1:' + $ownerPort + '" ' + $ownerProof.target + ' proof'
 $remote = Start-Process -FilePath $ssh -ArgumentList $arguments -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $Evidence 'owner-browser-live.json') -RedirectStandardError (Join-Path $Evidence 'owner-browser-ssh.log')
-try {
     if (-not $remote.WaitForExit(180000)) { throw 'Owner browser proof did not finish' }
     if ($remote.ExitCode -ne 0) { throw 'Owner browser proof SSH command failed' }
     $proof = Get-Content (Join-Path $Evidence 'owner-browser-live.json') -Raw | ConvertFrom-Json
@@ -41,8 +42,10 @@ try {
     Snapshot 'owner-browser-desktop'
     $result.checks += @{ name = 'real Unix owner opens reads clicks hosted browser'; session = $proof.session; uid = $proof.uid; tab = $created.tab; foreignDenied = $proof.foreignDenied; globalDenied = $proof.globalDenied; credentialsPrivate = $proof.credentialsPrivate }
 } finally {
-    if (-not $remote.HasExited) { Stop-Process -Id $remote.Id -Force }
-    $remote.Dispose()
+    if ($null -ne $remote) {
+        if (-not $remote.HasExited) { Stop-Process -Id $remote.Id -Force }
+        $remote.Dispose()
+    }
     $null = $pageJob.Stop()
     $pageJob.Dispose()
     Remove-Item -LiteralPath $key, ($key + '.pub') -Force -ErrorAction SilentlyContinue
