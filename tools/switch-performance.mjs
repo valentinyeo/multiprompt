@@ -2,8 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const releasePolicy = JSON.parse(fs.readFileSync(new URL('./release-gates.json', import.meta.url), 'utf8'));
-
 export function assess(data) {
   if (data.sessionCount !== 10 || !Number.isSafeInteger(data.transcriptBytes) || data.transcriptBytes < 250 * 1024 * 1024) throw new Error('Missing ten-session 250 MiB workload');
   if (!Array.isArray(data.switches) || data.switches.length !== 50) throw new Error('Expected exactly 50 switches');
@@ -21,10 +19,10 @@ export function assess(data) {
   const middle = Math.floor(idle.length / 2);
   const idleMedianMs = idle.length % 2 ? idle[middle] : (idle[middle - 1] + idle[middle]) / 2;
   const idleMaxMs = idle.at(-1);
-  return { p95Ms, maxMs: sorted.at(-1), idleMedianMs, idleMaxMs, idleShell: data.idleShell, switches: sorted.length, idlePolls: data.idleUs.length, pass: p95Ms <= releasePolicy.checks['idle-switch-p95'].limit && idleMedianMs <= releasePolicy.checks['idle-poll-median'].limit };
+  return { p95Ms, maxMs: sorted.at(-1), idleMedianMs, idleMaxMs, idleShell: data.idleShell, switches: sorted.length, idlePolls: data.idleUs.length, pass: p95Ms <= 100 && idleMedianMs <= 5 };
 }
 
-export function assessRepeated(pairs, { speedWarnings = false } = {}) {
+export function assessRepeated(pairs) {
   if (!Array.isArray(pairs) || pairs.length !== 5) throw new Error('Expected five alternating pairs');
   const hashes = { base: pairs[0]?.base?.sha256, head: pairs[0]?.head?.sha256 };
   if (Object.values(hashes).some(sha => typeof sha !== 'string' || !/^[a-f0-9]{64}$/i.test(sha))) throw new Error('Missing executable hash');
@@ -35,7 +33,7 @@ export function assessRepeated(pairs, { speedWarnings = false } = {}) {
     if (!Number.isInteger(head.idleStatusReads) || head.idleStatusReads < 49) throw new Error("Missing live status acquisition during idle polls");
     const baseline = assess(base);
     const candidate = assess(head);
-    if (!candidate.pass && !speedWarnings) throw new Error('A candidate run exceeded unchanged session speed limits');
+    if (!candidate.pass) throw new Error('A candidate run exceeded unchanged session speed limits');
     return { baseline, candidate, observerCpuMs: { baseline: base.observerIdleCpuMs, candidate: head.observerIdleCpuMs }, appCpuMs: { baseline: base.appIdleCpuMs, candidate: head.appIdleCpuMs } };
   });
 }
@@ -147,25 +145,17 @@ pub fn report() void {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, ...files] = process.argv.slice(2);
   if (command === 'instrument' && (files.length === 1 || (files.length === 2 && files[1] === '--profile'))) instrument(files[0], files[1] === '--profile');
-  else if (command === 'repeated' && (files.length === 1 || (files.length === 2 && files[1] === '--release-policy'))) {
+  else if (command === 'repeated' && files.length === 1) {
     const pairs = Array.from({ length: 5 }, (_, index) => Object.fromEntries(['base', 'head'].map(side => [side, JSON.parse(fs.readFileSync(path.join(files[0], `run-${index + 1}`, side, 'samples.json'), 'utf8').replace(/^\uFEFF/, ''))])));
-    const rows = assessRepeated(pairs, { speedWarnings: files[1] === '--release-policy' });
+    const rows = assessRepeated(pairs);
     fs.writeFileSync(path.join(files[0], 'repeated-verdict.json'), JSON.stringify(rows, null, 2));
     console.log('REPEATED_IDLE_VERIFIED', JSON.stringify(rows));
-  } else if (command === 'report' && (files.length === 2 || (files.length === 3 && files[2] === '--release-policy'))) {
-    const candidate = JSON.parse(fs.readFileSync(files[1]));
-    const rows = [null, { revision: candidate.revision, ...assess(candidate) }];
-    try {
-      const baseline = JSON.parse(fs.readFileSync(files[0]));
-      rows[0] = { revision: baseline.revision, ...assess(baseline) };
-    } catch (error) {
-      if (files[2] !== '--release-policy') throw error;
-      rows[0] = { unavailable: true, error: 'Baseline measurement unavailable: ' + error.message };
-    }
-    const report = ['## Session speed', '', '| Build | Switch p95 | Slowest switch | Idle poll median | Idle poll max | Samples |', '| --- | ---: | ---: | ---: | ---: | ---: |', ...rows.map(row => row.unavailable ? '| Baseline unavailable | n/a | n/a | n/a | n/a | Inspect baseline evidence |' : `| ${row.revision} | ${row.p95Ms.toFixed(3)} ms | ${row.maxMs.toFixed(3)} ms | ${row.idleMedianMs.toFixed(3)} ms | ${row.idleMaxMs.toFixed(3)} ms | ${row.switches} switches / ${row.idlePolls} idle polls (session ${row.idleShell}) |`), '', 'Limits: switch p95 ≤100 ms; settled idle poll median ≤5 ms. Ten sessions, one 250 MiB transcript. Ten warmup idle polls are discarded before sampling an already loaded conversation after the switching cycle, not an ongoing history backfill. Diagnostic dispatch timing, with matching painted content; not input-to-pixel latency. Baseline receives identical idle-only diagnostic instrumentation. One run per build; no speedup claim.'].join('\n');
+  } else if (command === 'report' && files.length === 2) {
+    const rows = files.map(file => ({ revision: JSON.parse(fs.readFileSync(file)).revision, ...assess(JSON.parse(fs.readFileSync(file))) }));
+    const report = ['## Session speed', '', '| Build | Switch p95 | Slowest switch | Idle poll median | Idle poll max | Samples |', '| --- | ---: | ---: | ---: | ---: | ---: |', ...rows.map(row => `| ${row.revision} | ${row.p95Ms.toFixed(3)} ms | ${row.maxMs.toFixed(3)} ms | ${row.idleMedianMs.toFixed(3)} ms | ${row.idleMaxMs.toFixed(3)} ms | ${row.switches} switches / ${row.idlePolls} idle polls (session ${row.idleShell}) |`), '', 'Limits: switch p95 ≤100 ms; settled idle poll median ≤5 ms. Ten sessions, one 250 MiB transcript. Ten warmup idle polls are discarded before sampling an already loaded conversation after the switching cycle, not an ongoing history backfill. Diagnostic dispatch timing, with matching painted content; not input-to-pixel latency. Baseline receives identical idle-only diagnostic instrumentation. One run per build; no speedup claim.'].join('\n');
     console.log(report);
     if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + '\n');
     fs.writeFileSync(path.join(path.dirname(files[1]), 'verdict.json'), JSON.stringify(rows, null, 2));
-    if (!rows[1].pass && files[2] !== '--release-policy') process.exitCode = 1;
+    if (!rows[1].pass) process.exitCode = 1;
   } else throw new Error('usage: switch-performance.mjs instrument ROOT | report BASE.json HEAD.json');
 }

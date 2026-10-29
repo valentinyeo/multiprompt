@@ -181,7 +181,8 @@ test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', ()
   assert.match(jobs.build, /needs: \[prepare, journeys\]/);
   assert.match(jobs.journeys, /feature: all/);
   assert.match(jobs.journeys, /revision: \$\{\{ needs.prepare.outputs.sha \}\}/);
-  assert.match(jobs.release, /needs: \[prepare, build\]/);
+  assert.match(jobs.journeys, /if: inputs.proof/);
+  assert.match(jobs.release, /needs: \[prepare, build, update-test\]/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);

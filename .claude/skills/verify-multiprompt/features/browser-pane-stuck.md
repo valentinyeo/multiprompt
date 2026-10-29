@@ -10,7 +10,7 @@ Verify browser-pane close/reopen behavior and that a docked pane works without t
 - `pane-close-all`: Ctrl+K Close All Browser Panes closes every pane.
 - `pane-reopen`: each reopen has a new connection ID.
 - `connected-pane-stays-visible`: a docked pane with window ID 0 stays visible and connected past the 20-second opening deadline.
-- `chat-terminal-handoff`: selecting a terminal from Chat View reveals its existing browser within five seconds (three-second speed target warns), without another input or a new connection.
+- `chat-terminal-handoff`: selecting a terminal from Chat View reveals its existing browser within three seconds, without another input or a new connection.
 - `shifted-toggle`: Alt+Shift+A and Alt+Shift+B still toggle working panes.
 
 ## How to get to it (user POV)
@@ -30,7 +30,7 @@ Preconditions:
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=browser-pane-stuck`; pull requests run both appearance and browser-pane-stuck.
 - **Open.** Use Alt+C, then Ctrl+K `open browser` and Enter. Require opening or connected state and a positive connection ID. Before further input, wait up to 25 seconds for that connection to be connected with a visible docked pane, activate the main window with the harness's `SetForegroundWindow` entry point (the taskbar-selection equivalent), and observe its foreground root within 5 seconds. Apply the same handoff after each palette reopen and Alt+Shift+B. Capture `action.png`.
-- **Chat to terminal.** Create a second CMD in terminal view and open its browser. Select the initial Chat View, which parks the second pane. Send Ctrl+Tab once and require that same browser window to become visible within five seconds (three-second speed target warns). Do not send input during that observation. Preserve its connection identity and capture `chat-terminal-browser-handoff.json` and `.png`. Return to the initial Chat View.
+- **Chat to terminal.** Create a second CMD in terminal view and open its browser. Select the initial Chat View, which parks the second pane. Send Ctrl+Tab once and require that same browser window to become visible within three seconds. Do not send input during that observation. Preserve its connection identity and capture `chat-terminal-browser-handoff.json` and `.png`. Return to the initial Chat View.
 - **Close and reopen.** Close through Alt+A and Close All, reopening through Ctrl+K after each. For opening-only Close Browser Pane, queue palette open and palette close in one SendInput batch: input messages drain before the adoption WM_TIMER, so docking cannot race the close command. Require closed state with zero connection ID, then reopen normally with an ID that skips at least one connection since the last observed open ID, proving the batch opened an intermediate connection. The batch does not capture that intermediate opening ID.
 - **Connected pane stays visible.** Require connected state, window ID 0, and a visible owned browser window intersecting the app frame. Observe continuously for another 21 seconds and fail if it closes, hides, fails, or changes identity. Capture `connected.png`.
 - **Shifted shortcuts.** Alt+Shift+A closes the working pane; Alt+Shift+B reopens it with a fresh ID. Neither shortcut is restricted to failed-state Retry.

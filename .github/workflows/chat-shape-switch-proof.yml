@@ -5,7 +5,6 @@ on:
     branches: [ceo/IGSH-1040]
 permissions:
   contents: read
-  actions: read
 jobs:
   baseline:
     uses: ./.github/workflows/verify.yml

@@ -2230,7 +2230,7 @@ test('IGSH-857: debug.log is read with shared access so a live app write cannot 
   assert.equal(control.split('Read-SharedText $launchLog').length - 1, 1);
 });
 
-test('IGSH-977 chat-send-latency journey sends 20 messages and reports every paint through the release timing policy', () => {
+test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that takes over 100 ms to draw', () => {
   assert.match(control, /ValidateSet\([^\n)]*'chat-send-latency'/);
   assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
   assert.ok(featureMatrix(workflow).available.includes('chat-send-latency'));
@@ -2240,7 +2240,7 @@ test('IGSH-977 chat-send-latency journey sends 20 messages and reports every pai
   assert.match(journey, /for \(\$n = 1; \$n -le 20; \$n\+\+\)/);
   assert.match(journey, /Press @\(0x0D\)/);
   assert.match(journey, /send-latency id=/);
-  assert.match(journey, /Assert-ReleaseTiming 'chat-send-paint' \$sample.paintedMs/);
+  assert.match(journey, /took longer than 100 ms/);
   assert.doesNotMatch(journey, /Set-Content|Stop-Process/);
   assert.match(journey, /0x276F/);
   assert.match(journey, /claude agent/);
@@ -2325,7 +2325,7 @@ test('IGSH-1108 CLI writes JSON job outputs and rejects unavailable or unsafe fe
 
 test('IGSH-1033 shared tracked quarantine protects rollback and release execution', () => {
   assert.ok(fs.existsSync(path.join(root, 'tools/journey-policy.json')), 'Shared quarantine policy must ship');
-  assert.deepEqual(JSON.parse(read('tools/journey-policy.json')), { quarantined: {} });
+  assert.deepEqual(Object.keys(JSON.parse(read('tools/journey-policy.json')).quarantined), ['browser-pane-stuck']);
   const policy = JSON.parse(read('tools/fixtures/IGSH-1033/journey-policy.json'));
   assert.deepEqual(Object.keys(policy.quarantined).sort(), ['browser-pane-stuck', 'chat-messages-only']);
   assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \}\}/);

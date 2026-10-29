@@ -21,7 +21,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: title-pill-${{ github.ref }}

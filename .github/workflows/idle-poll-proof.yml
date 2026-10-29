@@ -5,16 +5,11 @@ on:
     branches: [ceo/IGSH-1111]
 permissions:
   contents: read
-  actions: read
 jobs:
   idle-poll-proof:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - name: Admit branch benchmark after master publication
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node tools/release-priority.mjs admit
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -95,19 +90,7 @@ jobs:
           }
           $global:LASTEXITCODE = 0
       - name: Require all five candidate workloads
-        run: node tools/switch-performance.mjs repeated evidence --release-policy
-      - name: Report speed without hiding hangs or invalid workloads
-        shell: powershell
-        run: |
-          $Evidence = "$pwd/evidence"
-          . ./tools/release-gates.ps1
-          $rows = Get-Content evidence/repeated-verdict.json -Raw | ConvertFrom-Json
-          foreach ($row in $rows) {
-            Assert-ReleaseTiming 'idle-switch-p95' $row.candidate.p95Ms 'ten sessions, fifty switches'
-            Assert-ReleaseTiming 'idle-poll-median' $row.candidate.idleMedianMs 'settled idle samples'
-            Assert-ReleaseTiming 'ui-hang' $row.candidate.maxMs 'slowest switch'
-            Assert-ReleaseTiming 'ui-hang' $row.candidate.idleMaxMs 'slowest idle poll'
-          }
+        run: node tools/switch-performance.mjs repeated evidence
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

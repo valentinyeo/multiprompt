@@ -2,7 +2,6 @@
             $modes = @('browser_off', 'browser_on', 'frozen_browser_on', 'chat_browser_off', 'chat_browser_on', 'chat_frozen_browser_on')
             $timings = [ordered]@{ steps = @{} }
             $traces = @{}
-            $browserGapLimitMs = $releaseGatePolicy.checks.'browser-switch-gap'.limit
             foreach ($mode in $modes) {
                 $sampleCount = if ($mode.Contains('frozen_')) { 5 } else { 20 }
                 $timings[$mode] = @{ samples_ms = @($null) * $sampleCount; median_ms = $null; window_visible_ms = @($null) * $sampleCount; window_visible_median_ms = $null }
@@ -277,7 +276,6 @@
                         $logStart = ((Get-Content $log -Raw) -join '').Length
                         $frozenMarker = if ($frozen) { Join-Path $scratch ("roaming/ZigShell/panehib-zss-$($shellIds[$target]).flag") } else { $null }
                         $measurement = [VerifyNative]::MeasureSessionSwitch($script:window, $consoles[$target], ('ZigShell-' + $shellIds[$target]), $browsers[$target], $docks[$target], $composerHandle, $drafts[$target], $paintRgb[$target], $frozenMarker, $paintPatch[$target])
-                        Assert-ReleaseTiming 'ui-hang' $measurement[0] ("$mode sample $sample paint")
                         $timings[$mode].samples_ms[$sample] = $measurement[0]
                         $timings[$mode].window_visible_ms[$sample] = $measurement[1]
                         if ($frozen) {
@@ -310,10 +308,10 @@
                     if ($mode -eq 'browser_on') {
                         $offMedian = Get-SwitchMedian $timings.browser_off.samples_ms
                         $onMedian = Get-SwitchMedian $timings.browser_on.samples_ms
-                        if ($onMedian - $offMedian -gt $browserGapLimitMs) {
+                        if ($onMedian - $offMedian -gt 50) {
                             $gapCase.phase = 'switch-gap'
-                            $gapCase.detail = "browser_on minus browser_off = $($onMedian - $offMedian) ms; target <= $browserGapLimitMs ms"
-                            Assert-ReleaseTiming 'browser-switch-gap' ([Math]::Max(0, $onMedian - $offMedian)) 'browser_on minus browser_off'
+                            $gapCase.detail = "browser_on minus browser_off = $($onMedian - $offMedian) ms; required <= 50 ms"
+                            throw $gapCase.detail
                         }
                     }
                 }
@@ -323,8 +321,8 @@
                     $gap = $timings[$pair[1]].median_ms - $timings[$pair[0]].median_ms
                     @{ off = $pair[0]; on = $pair[1]; gap_ms = $gap }
                 }
-                $gapCase.detail = ($gaps | ForEach-Object { "$($_.on) minus $($_.off) = $($_.gap_ms) ms; target <= $browserGapLimitMs ms" }) -join '; '
-                foreach ($pair in $gaps) { Assert-ReleaseTiming 'browser-switch-gap' ([Math]::Max(0, $pair.gap_ms)) ($pair.on + ' minus ' + $pair.off) }
+                $gapCase.detail = ($gaps | ForEach-Object { "$($_.on) minus $($_.off) = $($_.gap_ms) ms; required <= 50 ms" }) -join '; '
+                foreach ($pair in $gaps) { if ($pair.gap_ms -gt 50) { throw $gapCase.detail } }
                 $gapCase.phase = 'after-snapshot'
                 Snapshot 'after'
                 $gapCase.status = 'passed'

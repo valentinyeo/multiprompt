@@ -93,7 +93,6 @@ $original = @{}
 $originalFontSmoothing = $null
 
 . (Join-Path $PSScriptRoot 'control-library.ps1')
-. (Join-Path $PSScriptRoot '../../../tools/release-gates.ps1')
 try {
     if ($Feature -in @('title-bar', 'window-controls')) {
         Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot 'title-bar-native.cs')

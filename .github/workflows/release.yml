@@ -28,18 +28,12 @@ on:
 
 permissions:
   contents: write
-  actions: read
-
-concurrency:
-  group: release-${{ (inputs.proof || inputs.publication_proof) && format('proof-{0}', github.ref) || 'production' }}
-  cancel-in-progress: ${{ inputs.proof || inputs.publication_proof }}
 
 jobs:
   publication-proof:
     if: inputs.publication_proof
     permissions:
       contents: read
-      actions: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -48,17 +42,10 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Admit publication proof after master publication
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node tools/release-priority.mjs admit
       - name: Prove forward-only publication
         run: node --test tools/release-version.test.mjs
 
   prepare:
-    permissions:
-      contents: read
-      actions: write
     if: github.event_name != 'pull_request' && !inputs.publication_proof
     runs-on: ubuntu-latest
     outputs:
@@ -71,11 +58,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Put master publication before branch proof
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PRIORITY_MODE: ${{ (inputs.proof || inputs.publication_proof || (github.ref != 'refs/heads/master' && github.ref_type != 'tag')) && 'admit' || 'preempt' }}
-        run: node tools/release-priority.mjs "$PRIORITY_MODE"
       - name: Verify release history on the branch
         if: inputs.proof
         run: node --test tools/version-stamp.test.mjs tools/release-version.test.mjs
@@ -99,6 +81,7 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   journeys:
+    if: inputs.proof
     needs: prepare
     uses: ./.github/workflows/verify.yml
     with:
@@ -107,6 +90,7 @@ jobs:
 
   build:
     needs: [prepare, journeys]
+    if: always() && needs.prepare.result == 'success' && (needs.journeys.result == 'success' || needs.journeys.result == 'skipped')
     name: build-${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
@@ -154,8 +138,72 @@ jobs:
           name: multiprompt-${{ matrix.arch }}
           path: dist/*
 
-  release:
+  update-test:
     needs: [prepare, build]
+    if: ${{ !inputs.proof }}
+    permissions:
+      contents: read
+      actions: read
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.workflow_sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Require exact-source Lifecycle and Rollback proofs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: node tools/release-update-gate.mjs $env:SOURCE_SHA
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: multiprompt-x64
+          path: release-bin
+      - name: Start the actual release executable in an isolated profile
+        shell: powershell
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'release-startup'
+          $env:APPDATA = "$root/roaming"
+          $env:LOCALAPPDATA = "$root/local"
+          $env:USERPROFILE = "$root/profile"
+          $env:HOME = $env:USERPROFILE
+          $env:MULTIPROMPT_NO_LOGIN = '1'
+          $env:IGSH_246 = '1'
+          New-Item -ItemType Directory -Force $root, $env:APPDATA, $env:LOCALAPPDATA, $env:USERPROFILE, release-proof | Out-Null
+          Add-Type -Path tools/verify-chat-delivery/job.cs
+          $name = 'Local\MultipromptReleaseStartup-' + [guid]::NewGuid().ToString('N')
+          $event = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $name)
+          $job = [VerifyJob]::new()
+          $process = $null
+          try {
+            $exe = (Resolve-Path release-bin/multiprompt-x64.exe).Path
+            $process = $job.Start($exe, $root, "$pwd/release-proof/startup.stdout.log", "$pwd/release-proof/startup.stderr.log", "--single-window --no-window-restore --update-ready $name")
+            if (-not $event.WaitOne(15000) -or $process.HasExited) { throw 'Release executable did not become ready' }
+            $pidProof = $process.Id
+          } finally {
+            $stopped = $job.Stop()
+            $job.Dispose()
+            $event.Dispose()
+            if ($null -ne $process) { $process.Dispose() }
+          }
+          if ($stopped.ActiveProcesses -ne 0) { throw 'Startup proof left owned processes' }
+          @{ tag = $env:RELEASE_TAG; sha = $env:SOURCE_SHA; ready = $true; pid = $pidProof; remainingOwnedProcesses = $stopped.ActiveProcesses } | ConvertTo-Json | Set-Content -Encoding UTF8 release-proof/startup.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: release-startup-updater-proof
+          path: release-proof/
+          if-no-files-found: error
+
+  release:
+    needs: [prepare, build, update-test]
     permissions:
       contents: write
     if: github.event_name != 'pull_request' && !inputs.proof

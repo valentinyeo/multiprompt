@@ -18,8 +18,8 @@ function defaultPath(source) {
   assert.match(source, /else \{\s+& \$env:MP_VERIFY_PYTHON \$env:MP_VERIFY_BOUNDARY shell seed-many 400/);
   assert.match(source, /else \{\s+\$measured = \[VerifyNative\]::SwitchToSession\(/);
   assert.ok(source.includes("else { Join-Path $PSScriptRoot '../../../extension' }"));
-  assert.ok(source.includes("Assert-ReleaseTiming 'chat-switch' $timings[$mode].median_ms"));
-  assert.ok(source.includes("Assert-ReleaseTiming 'ui-hang' $timings[$mode].max_hang_ms"));
+  assert.ok(source.includes('$timings[$mode].median_ms -gt $chatLimitMs'));
+  assert.ok(source.includes('$timings[$mode].max_hang_ms -gt $hangLimitMs'));
   assert.ok(source.includes('$timings[$mode].first_frame_wrong_width -gt 0'));
   assert.ok(source.includes('$timings[$mode].moved_after_first_frame -gt 0'));
 }
@@ -27,7 +27,7 @@ function defaultPath(source) {
 test('IGSH-1040 keeps the original fixture, native input, extension and assertions when opt-in is absent', () => {
   defaultPath(control);
   assert.throws(() => defaultPath(control.replace('shell seed-many 400', 'shell seed-many 1')));
-  assert.throws(() => defaultPath(control.replace("Assert-ReleaseTiming 'ui-hang' $timings[$mode].max_hang_ms", '$false')));
+  assert.throws(() => defaultPath(control.replace('$timings[$mode].max_hang_ms -gt $hangLimitMs', '$false')));
 });
 
 test('IGSH-1040 opt-in keeps published946 app, bridge and extension together and uses ReleaseSmall for the candidate', () => {

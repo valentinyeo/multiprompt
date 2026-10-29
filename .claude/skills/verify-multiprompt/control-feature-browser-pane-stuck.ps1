@@ -29,9 +29,9 @@
                 $state.active_tab -eq 1 -and (-not $state.tabs[1].PSObject.Properties['cv'] -or -not $state.tabs[1].cv) -and
                     [VerifyNative]::DockedPaneWindow($script:window) -eq $terminalBrowser -and
                     [VerifyNative]::PaneVisible($script:window)
-            } 'same connected terminal browser visible without a five-second freeze' 5 -PollMilliseconds 20
+            } 'same connected terminal browser visible within three seconds' 3 -PollMilliseconds 20
             $handoff.Stop()
-            Assert-ReleaseTiming 'browser-handoff' $handoff.ElapsedMilliseconds 'Chat View to terminal browser'
+            if ($handoff.ElapsedMilliseconds -ge 3000) { throw 'Chat View to terminal browser took three seconds or longer' }
             $handoffPane = Read-BrowserPane
             if ($handoffPane.browser_connection_id -ne $terminalPane.browser_connection_id) { throw 'Handoff relaunched instead of revealing the connected browser' }
             Save-Json @{ elapsed_ms = $handoff.ElapsedMilliseconds; connection_id = $handoffPane.browser_connection_id; same_browser = $true; visible = $true } 'chat-terminal-browser-handoff.json'

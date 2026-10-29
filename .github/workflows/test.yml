@@ -8,28 +8,13 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  admission:
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Admit branch work only after master publication
-        if: github.ref != 'refs/heads/master' && github.ref_type != 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node tools/release-priority.mjs admit
-
   test:
-    needs: [admission]
     name: test-windows (${{ matrix.group }})
     runs-on: windows-latest
     timeout-minutes: ${{ matrix.group == 1 && 15 || 10 }}
@@ -184,7 +169,6 @@ jobs:
           if [ -d .zig-cache ]; then du -sh .zig-cache; fi
 
   test-update-source:
-    needs: [admission]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -282,7 +266,7 @@ jobs:
           echo 'Release placeholder rejected; ordinary tests remain buildable'
 
   test-windows-update:
-    needs: [admission, build-windows]
+    needs: [build-windows]
     runs-on: windows-latest
     timeout-minutes: 10
     strategy:
@@ -348,7 +332,6 @@ jobs:
           if-no-files-found: error
 
   test-vps:
-    needs: [admission]
     name: test-vps (${{ matrix.group }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -465,7 +448,6 @@ jobs:
           if [ -d .zig-cache ]; then du -sh .zig-cache; fi
 
   test-worker:
-    needs: [admission]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -529,7 +511,6 @@ jobs:
         run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js
 
   build-windows:
-    needs: [admission]
     name: build-windows (${{ matrix.arch }})
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -629,14 +610,12 @@ jobs:
 
 
   check-red-run:
-    needs: [admission]
     uses: ./.github/workflows/check-red-run.yml
     with:
       base: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && (github.event.before || format('{0}^', github.sha))) || 'origin/master' }}
       head: ${{ github.event.pull_request.head.sha || github.sha }}
 
   switch-performance:
-    needs: [admission]
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -691,32 +670,14 @@ jobs:
           "SPEED_HEAD=$((git rev-parse HEAD).Trim())" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "SPEED_BASE=$base" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Measure baseline session speed
-        continue-on-error: true
         shell: powershell
         run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multiprompt.exe -Evidence evidence/base -Revision "$env:SPEED_BASE"
       - name: Measure candidate session speed
         shell: powershell
         run: ./tools/switch-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence/head -Revision "$env:SPEED_HEAD"
-      - name: Report session speed limits
+      - name: Require session speed limits
         if: always()
-        run: node tools/switch-performance.mjs report evidence/base/samples.json evidence/head/samples.json --release-policy
-      - name: Block hangs while reporting speed misses
-        shell: powershell
-        run: |
-          $Evidence = "$pwd/evidence"
-          . ./tools/release-gates.ps1
-          $rows = Get-Content evidence/head/verdict.json -Raw | ConvertFrom-Json
-          Assert-ReleaseTiming 'idle-switch-p95' $rows[1].p95Ms 'candidate switching'
-          Assert-ReleaseTiming 'idle-poll-median' $rows[1].idleMedianMs 'candidate idle polling'
-          Assert-ReleaseTiming 'ui-hang' $rows[1].maxMs 'slowest switch'
-          Assert-ReleaseTiming 'ui-hang' $rows[1].idleMaxMs 'slowest idle poll'
-      - name: Upload speed samples
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: speed-trend-session-workload
-          path: evidence/speed-trend.jsonl
-          if-no-files-found: ignore
+        run: node tools/switch-performance.mjs report evidence/base/samples.json evidence/head/samples.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -727,7 +688,7 @@ jobs:
 
   test-result:
     name: test
-    needs: [admission, test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance]
+    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2

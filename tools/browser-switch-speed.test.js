@@ -200,7 +200,7 @@ function assertsJourney(source) {
   assert.match(source, /\$browsers\[0\] -eq \$browsers\[1\]/);
   assert.match(source, /@\(@\('browser_off', 'browser_on'\), @\('chat_browser_off', 'chat_browser_on'\), @\('browser_off', 'frozen_browser_on'\), @\('chat_browser_off', 'chat_frozen_browser_on'\)\)/);
   assert.match(source, /\$gap = \$timings\[\$pair\[1\]\].median_ms - \$timings\[\$pair\[0\]\].median_ms/);
-  assert.ok(source.includes("foreach ($pair in $gaps) { Assert-ReleaseTiming 'browser-switch-gap' ([Math]::Max(0, $pair.gap_ms))"));
+  assert.match(source, /foreach \(\$pair in \$gaps\) \{ if \(\$pair.gap_ms -gt 50\) \{ throw \$gapCase.detail \} \}/);
   assert.match(source, /name = 'switch-gap'; status = 'failed';[^\n]+phase = 'initial-console'/);
   assert.match(source, /catch \{\s+\$gapCase.detail = \$gapCase.phase \+ ': ' \+ \$_\.Exception.Message\s+throw\s+\} finally \{/);
   assert.match(source, /finally \{[\s\S]+Save-Json \$timings 'switch-timings.json'/);
@@ -211,12 +211,12 @@ function assertsJourney(source) {
 test('four warm twenty-sample and two frozen five-sample sets enforce all matching 50ms gaps and retain null failure evidence', () => {
   assertsJourney(journey);
   for (const [before, after] of [
-    ['$sample -lt $sampleCount', '$sample -lt 2'], ['([Math]::Max(0, $pair.gap_ms))', '([Math]::Max(0, 0))'],
+    ['$sample -lt $sampleCount', '$sample -lt 2'], ['$pair.gap_ms -gt 50', '$pair.gap_ms -gt 500'],
     ["$pane.browser_state -eq 'connected'", '$true'], ['finally {', 'if ($false) {'],
     ["name = 'switch-gap'; status = 'failed'", "name = 'switch-gap'; status = 'passed'"],
     ["@('chat_browser_off', 'chat_browser_on')", "@('browser_off', 'browser_on')"],
   ]) assert.throws(() => assertsJourney(journey.replace(before, after)));
-  const gapLimit = JSON.parse(read('tools/release-gates.json')).checks['browser-switch-gap'].limit;
+  const gapLimit = Number(journey.match(/if \(\$pair.gap_ms -gt (\d+)\)/)[1]);
   for (const [off, on, fails] of [[10, 60, false], [10, 60.001, true], [100, 90, false]]) assert.equal(on - off > gapLimit, fails);
   const median = control.slice(control.indexOf('function Get-SwitchMedian'), control.indexOf('function Doctor'));
   assert.match(median, /foreach \(\$value in \$Values\) \{ if \(\$null -eq \$value\) \{ return \$null \} \}/);
@@ -661,11 +661,11 @@ test('failure-only pixel diagnostics compare the same visible patch with and wit
   assert.doesNotMatch(native, /ReadSwitchScreenPatch/);
 });
 
-test('a completed warm pair reports its speed while every run still checks every warm and frozen pair', () => {
+test('a completed warm pair can fail fast at the same threshold while every successful run still checks every warm and frozen pair', () => {
   const earlyStart = journey.indexOf("\n                    if ($mode -eq 'browser_on') {");
   assert.ok(earlyStart >= 0);
   const early = journey.slice(earlyStart, journey.indexOf('foreach ($mode in $modes) { $timings[$mode].median_ms'));
-  for (const literal of ['Get-SwitchMedian $timings.browser_off.samples_ms', 'Get-SwitchMedian $timings.browser_on.samples_ms', 'if ($onMedian - $offMedian -gt $browserGapLimitMs)', "$gapCase.phase = 'switch-gap'", "Assert-ReleaseTiming 'browser-switch-gap'"]) assert.ok(early.includes(literal), literal);
+  for (const literal of ['Get-SwitchMedian $timings.browser_off.samples_ms', 'Get-SwitchMedian $timings.browser_on.samples_ms', 'if ($onMedian - $offMedian -gt 50)', "$gapCase.phase = 'switch-gap'", 'throw $gapCase.detail']) assert.ok(early.includes(literal), literal);
   assert.ok(earlyStart > journey.indexOf('$timings[$mode].samples_ms[$sample] = $measurement[0]'));
   assertsJourney(journey);
   assertsFrozen(journey, control, browser, workflow);
