@@ -113,10 +113,20 @@ try {
     [void](Wait-For 'foreground owned app' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
     [void](Wait-For 'all restored sessions' { if (Test-Path "$settings/inbox-default.json") { $doc = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json; if (@($doc.shells).Count -eq 6) { $true } } })
     $rows = Wait-For 'large pinned and list robots' { $v = @(Layouts); if (@($v | Where-Object { $_.size -eq 56 }).Count -ge 2 -and @($v | Where-Object { $_.size -eq 40 }).Count -ge 4) { ,$v } }
+    [void](Wait-For 'real console messages reach list previews' {
+        $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
+        @($published.shells | Where-Object { $_.pv -like '*Robot previews are ready*' }).Count -eq 6
+    })
+    $checks.Add(@{name='last-message-previews'; passed=$true})
+    $rows = @(Layouts)
     $pins = @($rows | Where-Object { $_.size -eq 56 } | Sort-Object x)
     $list = @($rows | Where-Object { $_.size -eq 40 } | Sort-Object y)
     foreach ($entry in @(@{row=$pins[0]; name='pin-one'}, @{row=$pins[1]; name='pin-two'}, @{row=$list[0]; name='list-one'})) {
-        [ChatDeliveryDesktop]::PressClient($main, $app.Id, ($entry.row.x + 10), ($entry.row.y + 15))
+        $live = Wait-For 'current clicked robot position' {
+            $v = @(Layouts | Where-Object { $_.size -eq $entry.row.size -and $_.face -eq $entry.row.face -and $_.color -eq $entry.row.color })
+            if ($v.Count) { $v[-1] }
+        }
+        [ChatDeliveryDesktop]::PressClient($main, $app.Id, ($live.x + 10), ($live.y + 15))
         $selected = Wait-For 'clicked raw session selected' {
             $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
             $tab = @($saved.tabs)[$saved.active_tab]
@@ -133,11 +143,6 @@ try {
         }
         Check-Pixels $painted $entry.name
     }
-    [void](Wait-For 'real console messages reach list previews' {
-        $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
-        @($published.shells | Where-Object { $_.pv -like '*Robot previews are ready*' }).Count -ge 4
-    })
-    $checks.Add(@{name='last-message-previews'; passed=$true})
     Shot 'sidebar-amoled'
     [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
     [void](Wait-For 'native chat composer' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero })
