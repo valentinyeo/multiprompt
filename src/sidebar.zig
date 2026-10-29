@@ -1706,11 +1706,11 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     if (shell.needs_attention or shell.disconnected) {
         drawAttentionDot(hdc, left + size - uiScaled(3), top + size - uiScaled(3), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
     }
-    _ = SelectObject(hdc, uiFontTitle());
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
     var name = RECT{ .left = column.left + uiScaled(60), .top = y + uiScaled(5), .right = right, .bottom = y + uiScaled(29) };
     if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-    _ = SelectObject(hdc, uiFontSubtitle());
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
     _ = SetTextColor(hdc, hint);
     var preview: [128]u16 = undefined;
     const len = std.unicode.utf8ToUtf16Le(&preview, shell.preview[0..shell.preview_len]) catch 0;
@@ -1733,7 +1733,7 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     const avatar = @import("bot_avatar.zig");
     avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(shell));
     if (shell.needs_attention or shell.disconnected) drawAttentionDot(hdc, left + size - uiScaled(4), top + size - uiScaled(4), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
-    _ = SelectObject(hdc, uiFontSubtitle());
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
     var name = RECT{ .left = row.x + uiScaled(4), .top = top + size + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
     if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);

@@ -126,6 +126,7 @@ test "tiles wrap and every mouse target remains the painted session" {
 
 
 test('robot proof reuses existing verified action pins', () => {
+  assert.ok(fs.existsSync(path.join(root, '.github/workflows/bot-avatars.yml')), 'Native robot proof must be wired');
   const workflow = read('.github/workflows/bot-avatars.yml');
   const existing = read('.github/workflows/verify.yml') + read('.github/workflows/test.yml');
   for (const [, action, pin] of workflow.matchAll(/uses: (actions\/[\w-]+)@([a-f0-9]{40})/g)) {

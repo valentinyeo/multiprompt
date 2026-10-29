@@ -124,7 +124,11 @@ try {
     Copy-Item "$settings/session.json" "$Evidence/session-selected.json"
     Save @(Layouts) "$Evidence/layouts.json"
     $result.passed = $true
-} catch { $result.error = $_.Exception.Message; Write-Host $result.error } finally {
+ } catch {
+    $result.error = $_.Exception.Message
+    Write-Host $result.error
+    if (Get-Variable main -ErrorAction SilentlyContinue) { Shot 'failure' }
+} finally {
     if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() }
     if (Test-Path "$settings/debug.log") { Copy-Item "$settings/debug.log" "$Evidence/debug.log" }
     if (Test-Path "$state/invocations.jsonl") { Copy-Item "$state/invocations.jsonl" "$Evidence/invocations.jsonl" }

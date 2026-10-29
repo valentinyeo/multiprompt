@@ -64,6 +64,26 @@ jobs:
           @{tag=$env:RELEASE_TAG; version=$version; sha256=$hash; revision=(git rev-parse HEAD).Trim()} | ConvertTo-Json | Set-Content evidence/build.json
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_HASH=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Reject the published pre-robot application
+        if: inputs.tag == ''
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force negative-bin, evidence/negative | Out-Null
+          gh release download v0.28.990 --dir negative-bin --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern SHA256SUMS.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Negative-control release download failed' }
+          foreach ($name in @('multiprompt', 'zigshell-bridge')) {
+            $line = @(Get-Content negative-bin/SHA256SUMS.txt | Where-Object { $_ -match ('^[a-fA-F0-9]{64} [ *]' + $name + '-x64\.exe$') })
+            if ($line.Count -ne 1 -or (Get-FileHash "negative-bin/$name-x64.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne ($line[0] -split '\s+')[0]) { throw 'Negative-control checksum mismatch' }
+            Move-Item "negative-bin/$name-x64.exe" "negative-bin/$name.exe"
+          }
+          Copy-Item verify-bin/ssh.exe, verify-bin/tmux.exe negative-bin/
+          $hash = (Get-FileHash negative-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          try { & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/negative-bin/multiprompt.exe" -ExpectedVersion '0.28.990' -ExpectedHash $hash -Evidence "$pwd/evidence/negative" } catch { Write-Host $_ }
+          $result = Get-Content evidence/negative/result.json -Raw | ConvertFrom-Json
+          if ($result.passed -or $result.cleanup -ne 0 -or $result.error -cne 'Timed out: large pinned and list robots') { throw 'Old application did not fail the robot outcome' }
+          Write-Host 'PRE_ROBOT_RELEASE_REJECTED'
       - name: Native robot pixels and sidebar clicks
         shell: powershell
         run: |

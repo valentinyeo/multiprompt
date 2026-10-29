@@ -3322,6 +3322,7 @@ pub var g_font_shell_tab_title: HANDLE = null;
 pub var g_font_subtitle: HANDLE = null;
 pub var g_font_status_card: HANDLE = null;
 pub var g_font_close: HANDLE = null;
+pub var g_font_bot: [3]HANDLE = @splat(null);
 pub var g_font_inbox_title: HANDLE = null;
 pub var g_font_inbox_sub: HANDLE = null;
 pub var g_font_thread_title: HANDLE = null;
