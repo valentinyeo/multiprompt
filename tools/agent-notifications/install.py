@@ -253,7 +253,6 @@ def install(with_eta=False):
     if os.name != "nt":
         install_tmux_hooks()
         write(DEST / "mp_notify_relay.py", (BASE / "mp_notify_relay.py").read_text(encoding="utf-8"))
-        write(DEST / "user_browser.py", (BASE / "user_browser.py").read_text(encoding="utf-8"))
         unit = HOME / ".config/systemd/user/mp-notify-relay.service"
         write(unit, (BASE / "mp-notify-relay.service").read_text(encoding="utf-8"))
         try:

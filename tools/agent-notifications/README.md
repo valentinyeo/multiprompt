@@ -372,9 +372,11 @@ existing machines stay unchanged.
 
 ## Browser access for another Unix user
 
-The relay can expose a scoped browser socket without sharing its vault token.
-Set `MP_BROWSER_HOST` to this server's exact desktop SSH host name in a relay
-service override, then restart the relay. The endpoint is
+Install the separate owner broker as the desktop SSH bridge user with
+`bash tools/install-owner-browser.sh <exact-desktop-SSH-host-name>`.
+It uses an isolated routing module; the existing notification service and
+clients are neither replaced nor restarted. No vault token is loaded.
+The endpoint is
 `/tmp/mp-browser-<relay-uid>/control.sock`. Install the other user's wrapper with
 `bash tools/install-user-browser.sh /tmp/mp-browser-<relay-uid>/control.sock`
 as that user. No vault tool or credential is installed.

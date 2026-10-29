@@ -282,11 +282,4 @@ if __name__ == "__main__":
     except OSError as error:
         print(f"Unsafe tmux notification FIFO: {error}", file=sys.stderr)
         sys.exit(UNSAFE_DIRECTORY)
-    if host := os.environ.get("MP_BROWSER_HOST"):
-        from user_browser import start
-        try:
-            start(directory, host, sys.modules[__name__])
-        except (OSError, ValueError) as error:
-            print(f"Owner browser channel unavailable: {error}", file=sys.stderr)
-            sys.exit(UNSAFE_DIRECTORY)
     sys.exit(serve(directory))

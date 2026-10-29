@@ -130,3 +130,10 @@ def start(directory, host, relay, root=None):
                 threading.Thread(target=handle, args=(client, directory, host, relay), daemon=True).start()
 
     threading.Thread(target=serve, daemon=True).start()
+
+
+if __name__ == "__main__":
+    import signal
+    import mp_notify_relay as relay
+    start(relay.socket_dir(), os.environ["MP_BROWSER_HOST"], relay)
+    signal.pause()
