@@ -12,6 +12,7 @@ Add-Type -Path "$PSScriptRoot/verify-chat-delivery/job.cs"
 $profile = Join-Path $env:RUNNER_TEMP "shared-sidebar-$PID"
 $settings = "$profile/roaming/ZigShell"
 $job = $null
+$script:toggleReady = [DateTime]::MinValue
 $result = @{passed=$false; error=$null; cleanup='pending'; comparisons=@(); actions=@()}
 function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 30) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
@@ -28,6 +29,11 @@ function Focus {
         if ($target -eq [IntPtr]::Zero) { $target = $main }
         [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $target)
     })
+}
+function Toggle-View {
+    [void](Wait-For 'existing shortcut debounce' { [DateTime]::UtcNow -ge $script:toggleReady })
+    [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
+    $script:toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
 }
 function Capture([string]$Name) {
     $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
@@ -56,14 +62,14 @@ function Compare-Views([string]$Name) {
         $false
     }
     Shot "$Name-shell"
-    [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
+    Toggle-View
     [void](Wait-For 'Chat View visible' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
     Focus
     $hash = Wait-For 'sidebar unchanged across shell and chat' { $h = Capture "$Name-chat-sidebar"; if ($h -eq $before) { $h } }
     Shot "$Name-chat"
     if ((Session).active_tab -ne $selected) { throw 'View toggle changed selection' }
     $result.comparisons += @{name=$Name; shell=$before; chat=$hash; selected=$selected}
-    [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
+    Toggle-View
     [void](Wait-For 'shell view restored' { -not (Chat-On) })
     Focus
     [void](Wait-For 'return sidebar unchanged' { (Capture "$Name-return-sidebar") -eq $before })
@@ -86,14 +92,14 @@ try {
         $inbox = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
         @($inbox.shells).Count -eq 3
     })
-    [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
+    Toggle-View
     [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
     [void](Wait-For 'initial console previews' {
         $inbox = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
         @($inbox.shells | Where-Object { $_.pv }).Count -eq 3
     } 60)
     Focus
-    [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
+    Toggle-View
     [void](Wait-For 'initial shell view' { -not (Chat-On) })
     Compare-Views 'expanded'
     $previous = (Session).active_tab
