@@ -18,7 +18,7 @@ if ($longDelivery) {
     }
     Save $retained "$caseDir/retained-header.json"
 }
-$readerStart = @(Get-Content "$state/invocations.jsonl" | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.kind -eq 'reader' -and $_.argv -contains '--watch' }).Count
+$readerStart = @(Get-ChildItem "$state/reader-subscriptions/*.json" -ErrorAction SilentlyContinue).Count
 $observation.startupReaderSubscriptions = $readerStart
 foreach ($round in 1..$roundCount) {
     if ($longDelivery -and $round -gt 1) { Shell-Run @('refresh-live-tail') }
@@ -73,7 +73,7 @@ foreach ($round in 1..$roundCount) {
     $observation.rounds.Add(@{round=$round; messages=$messages; answer=$answer; shownMs=$shownMs})
 }
 $observation.sustainedMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $firstReplyMs
-$readers = @(Get-Content "$state/invocations.jsonl" | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.kind -eq 'reader' -and $_.argv -contains '--watch' })
+$readers = @(Get-ChildItem "$state/reader-subscriptions/*.json" -ErrorAction SilentlyContinue)
 if ($readerStart -lt 1 -or $readers.Count -ne $readerStart) { throw "Background delivery replaced the visible reader: $($readers.Count - $readerStart) new subscriptions" }
 $observation.readerSubscriptions = $readers.Count
 if ($longDelivery) {

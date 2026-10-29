@@ -1364,8 +1364,9 @@ test('IGSH-1181 startup subscriptions do not count as interrupted live replies, 
   assert.ok(source.indexOf(start) < loop);
   const end = source.slice(source.indexOf('$readers = ', loop), source.indexOf('if ($longDelivery) {', loop));
   assert.match(end, /if \(\$readerStart -lt 1 -or \$readers.Count -ne \$readerStart\)/);
-  assert.match(start, /\$_.kind -eq 'reader' -and \$_.argv -contains '--watch'/);
-  assert.match(end, /\$_.kind -eq 'reader' -and \$_.argv -contains '--watch'/);
+  assert.match(start, /Get-ChildItem \"\$state\/reader-subscriptions\/\*\.json\"/);
+  assert.match(end, /Get-ChildItem \"\$state\/reader-subscriptions\/\*\.json\"/);
+  assert.doesNotMatch(start + end, /ConvertFrom-Json/);
   if (process.platform !== 'win32') return;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-reader-window-'));
   try {
@@ -1375,10 +1376,12 @@ $state = $env:READER_FIXTURE
 foreach ($startup in @(1, 3)) {
     foreach ($added in @(0, 1)) {
         $observation = @{}
-        $rows = @(1..$startup | ForEach-Object { @{kind='reader'; argv=@('--watch')} | ConvertTo-Json -Compress })
-        $rows | Set-Content "$state/invocations.jsonl"
+        Remove-Item "$state/reader-subscriptions" -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item "$state/reader-subscriptions" -ItemType Directory | Out-Null
+        foreach ($number in 1..$startup) { '{}' | Set-Content "$state/reader-subscriptions/$number.json" }
+        'nd"}' | Set-Content "$state/invocations.jsonl"
         ${start}
-        if ($added) { @{kind='reader'; argv=@('--watch')} | ConvertTo-Json -Compress | Add-Content "$state/invocations.jsonl" }
+        if ($added) { '{}' | Set-Content "$state/reader-subscriptions/new.json" }
         @{kind='reader'; argv=@('--serve')} | ConvertTo-Json -Compress | Add-Content "$state/invocations.jsonl"
         @{kind='list'; argv=@('--watch')} | ConvertTo-Json -Compress | Add-Content "$state/invocations.jsonl"
         $rejected = $false
@@ -1399,4 +1402,30 @@ foreach ($startup in @(1, 3)) {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+
+test('IGSH-1181 watcher receipts have independent files even when the shared log is damaged', () => {
+  const script = String.raw`
+import ast, json, os, pathlib, sys, tempfile, time, uuid
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+record = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'record')
+with tempfile.TemporaryDirectory() as temp:
+    root = pathlib.Path(temp)
+    scope = dict(ROOT=root, state=lambda: dict(name='live-delivery'), time=time, os=os, json=json, uuid=uuid)
+    exec(compile(ast.Module(body=[record], type_ignores=[]), '<boundary-record>', 'exec'), scope)
+    (root / 'invocations.jsonl').write_text('nd"}\n')
+    for i in range(3): scope['record']('invocations.jsonl', kind='reader', argv=['--watch'])
+    scope['record']('invocations.jsonl', kind='reader', argv=['--serve'])
+    scope['record']('invocations.jsonl', kind='list', argv=['--watch'])
+    receipts = list((root / 'reader-subscriptions').glob('*.json'))
+    assert len(receipts) == 3, receipts
+    for file in receipts:
+        row = json.loads(file.read_text())
+        assert row['kind'] == 'reader' and row['argv'] == ['--watch'] and row['pid'] == os.getpid()
+print('INDEPENDENT_READER_RECEIPTS_OK')
+`;
+  assert.match(execFileSync('python3', ['-I', '-c', script, path.join(root, 'tools/verify-chat-delivery/boundary.py')], {
+    encoding: 'utf8', timeout: 30000,
+  }), /INDEPENDENT_READER_RECEIPTS_OK/);
 });
