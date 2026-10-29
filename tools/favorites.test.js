@@ -157,7 +157,10 @@ test('IGSH-457 production Starred rows include other windows without duplicating
     const membershipEnd = sidebar.indexOf('pub fn groupFirstShellIdx(', membershipStart);
     assert.ok(groupIdStart >= 0 && groupIdEnd > groupIdStart);
     assert.ok(membershipStart >= 0 && membershipEnd > membershipStart);
-    const production = sidebar.slice(groupIdStart, groupIdEnd) + sidebar.slice(membershipStart, membershipEnd) +
+    const pinStart = sidebar.indexOf('inline fn effPinnedTop(');
+    const pinEnd = sidebar.indexOf('pub inline fn shellSidebarTier(', pinStart);
+    assert.ok(pinStart >= 0 && pinEnd > pinStart);
+    const production = sidebar.slice(pinStart, pinEnd) + sidebar.slice(groupIdStart, groupIdEnd) + sidebar.slice(membershipStart, membershipEnd) +
       sidebar.slice(start, end) + '    return 0;\n}\n';
     fs.writeFileSync(path.join(tmp, 'workspaces.zig'), 'pub fn starredShellVisible(_: usize) bool { return @import("integration.zig").local_favorite; }\n');
     fs.writeFileSync(path.join(tmp, 'window_layout.zig'), 'pub fn paneOuterMargin() i32 { return 8; }\n');
@@ -182,7 +185,7 @@ pub const app_state = struct {
     var g_single_window = true;
     var g_active_workspace: u8 = 0;
     var shell_count: u32 = 1;
-    var shells = [_]struct { group_id: u32 = 99, starred_group_id: u32 = 0, workspace: u8 = 0 }{.{}};
+    var shells = [_]struct { group_id: u32 = 99, starred_group_id: u32 = 0, workspace: u8 = 0, pinned_top: bool = false, starred_pinned_top: bool = false }{.{}};
     var group_count: u32 = 0;
     var groups = [_]struct { id: u32, collapsed: bool }{.{ .id = 17, .collapsed = false }};
     var g_main_hwnd: ?*anyopaque = @ptrFromInt(1);
@@ -220,6 +223,15 @@ test "IGSH-457 Starred mirrors local and other-account window favorites after st
     try std.testing.expectEqual(@as(u32, 2), layoutRowsInner(&rows));
     try std.testing.expectEqual(.header, rows[0].kind);
     try std.testing.expectEqual(.inbox, rows[1].kind);
+    app_state.shells[0].starred_pinned_top = true;
+    try std.testing.expect(effPinnedTop(0));
+    try std.testing.expect(!app_state.shells[0].pinned_top);
+    try std.testing.expectEqual(@as(u32, 3), layoutRowsInner(&rows));
+    try std.testing.expectEqual(.tab, rows[0].kind);
+    try std.testing.expectEqual(.header, rows[1].kind);
+    app_state.shells[0].starred_pinned_top = false;
+    try std.testing.expectEqual(@as(u32, 2), layoutRowsInner(&rows));
+    try std.testing.expectEqual(.header, rows[0].kind);
 }
 `).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(tmp, 'integration.zig'), '--test-filter', 'IGSH-457'], { encoding: 'utf8', timeout: 120000 });

@@ -35,9 +35,9 @@ test("sidebar mouse movement changes pin state without changing lock state", () 
     "mouse drag must resolve the tier for PINNED and RECENTS");
   assert.doesNotMatch(dragRouting, /\.locked => \{/,
     "lock is a close guard, not a draggable section");
-  assert.match(dragRouting, /\.pinned => \{\s*shells\[drag_src\]\.pinned_top = true/,
+  assert.match(dragRouting, /\.pinned => \{\s*@import\("sidebar.zig"\)\.setPinnedTop\(drag_src, true\)/,
     "dragging into PINNED must pin the session");
-  assert.match(dragRouting, /\.recent => \{\s*shells\[drag_src\]\.pinned_top = false/,
+  assert.match(dragRouting, /\.recent => \{\s*@import\("sidebar.zig"\)\.setPinnedTop\(drag_src, false\)/,
     "dragging into RECENTS must unpin the session");
   assert.doesNotMatch(dragRouting, /shells\[drag_src\]\.locked = false/,
     "pin changes must preserve the independent close guard");

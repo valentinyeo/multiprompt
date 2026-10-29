@@ -2049,6 +2049,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_muted = app_state.shells[idx].muted;
     const saved_inbox_excluded = app_state.shells[idx].inbox_excluded;
     const saved_pinned_top = app_state.shells[idx].pinned_top;
+    const saved_starred_pinned_top = app_state.shells[idx].starred_pinned_top;
     const saved_favorite = app_state.shells[idx].favorite;
     const saved_last_used = app_state.shells[idx].last_used;
     const saved_visits = app_state.shells[idx].visits;
@@ -2189,6 +2190,7 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .inbox_excluded = saved_inbox_excluded,
         .keep_alive = false,
         .pinned_top = saved_pinned_top,
+        .starred_pinned_top = saved_starred_pinned_top,
         .favorite = saved_favorite,
         .last_used = saved_last_used,
         .visits = saved_visits,

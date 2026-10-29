@@ -2123,6 +2123,7 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     transfer.keep_alive = if (shell.keep_alive) 1 else 0;
     transfer.reserved_lock = 0;
     transfer.pinned_top = if (shell.pinned_top) 1 else 0;
+    transfer.starred_pinned_top = if (shell.starred_pinned_top) 1 else 0;
     transfer.favorite = if (shell.favorite) 1 else 0;
     transfer.last_used = shell.last_used;
     transfer.input = shell.input;
@@ -3748,6 +3749,11 @@ fn exportSlotSessionFile(slot: u8) bool {
             @memcpy(json_buf[pos .. pos + pf.len], pf);
             pos += pf.len;
         }
+        if (app_state.shells[i].starred_pinned_top) {
+            const pf = ",\"starred_pinned_top\":true";
+            @memcpy(json_buf[pos .. pos + pf.len], pf);
+            pos += pf.len;
+        }
         if (app_state.shells[i].inbox_excluded) {
             const ix = ",\"inbox_excluded\":true";
             @memcpy(json_buf[pos .. pos + ix.len], ix);
@@ -4328,6 +4334,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.shells[idx].muted = tabs[t].muted;
             app_state.shells[idx].keep_alive = tabs[t].keep_alive;
             app_state.shells[idx].pinned_top = tabs[t].pinned_top;
+            app_state.shells[idx].starred_pinned_top = tabs[t].starred_pinned_top;
             app_state.shells[idx].inbox_excluded = tabs[t].inbox_excluded;
             app_state.shells[idx].favorite = tabs[t].favorite;
             app_state.shells[idx].last_used = tabs[t].last_used;

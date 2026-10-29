@@ -2444,10 +2444,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         if (app_state.drag_src < app_state.shell_count and shellSidebarTier(app_state.drag_src) != want_tier) {
                             switch (want_tier) {
                                 .pinned => {
-                                    app_state.shells[app_state.drag_src].pinned_top = true;
+                                    @import("sidebar.zig").setPinnedTop(app_state.drag_src, true);
                                 },
                                 .recent => {
-                                    app_state.shells[app_state.drag_src].pinned_top = false;
+                                    @import("sidebar.zig").setPinnedTop(app_state.drag_src, false);
                                 },
                             }
                             app_state.drag_detach_blocked = true;
@@ -5381,7 +5381,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (target == SEARCH_PIN_TOP_OFFSET) {
                     if (app_state.active_shell < app_state.shell_count) {
-                        app_state.shells[app_state.active_shell].pinned_top = !app_state.shells[app_state.active_shell].pinned_top;
+                        @import("sidebar.zig").setPinnedTop(app_state.active_shell, !@import("sidebar.zig").effPinnedTop(app_state.active_shell));
                         invalidateSidebar();
                         if (!app_state.g_restoring) saveSession();
                     }
@@ -6342,7 +6342,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             invalidateSidebar();
                             if (!app_state.g_restoring) saveSession();
                         } else if (target == SEARCH_TABCTX_PIN_TOP) {
-                            app_state.shells[ti].pinned_top = !app_state.shells[ti].pinned_top;
+                            @import("sidebar.zig").setPinnedTop(ti, !@import("sidebar.zig").effPinnedTop(ti));
                             invalidateSidebar();
                             if (!app_state.g_restoring) saveSession();
                         } else if (target == SEARCH_TABCTX_KEEPAWAKE) {
@@ -7808,6 +7808,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             new_shell.muted = transfer.muted != 0;
                             new_shell.keep_alive = transfer.keep_alive != 0;
                             new_shell.pinned_top = transfer.pinned_top != 0;
+                            new_shell.starred_pinned_top = transfer.starred_pinned_top != 0;
                             new_shell.favorite = transfer.favorite != 0;
                             new_shell.last_used = transfer.last_used;
                             new_shell.input = transfer.input;

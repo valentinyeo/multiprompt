@@ -102,6 +102,7 @@ pub fn restore() void {
         shell.starred_group_id = row.starred_group_id;
         shell.ai_agent = row.agent;
         shell.pinned_top = row.pinned;
+        shell.starred_pinned_top = row.starred_pinned_top;
         shell.favorite = row.favorite;
         shell.muted = row.muted;
         shell.needs_attention = row.unread;
@@ -263,6 +264,7 @@ pub fn save() void {
         .starred_group_id = shell.starred_group_id,
         .agent = shell.ai_agent,
         .pinned = shell.pinned_top,
+        .starred_pinned_top = shell.starred_pinned_top,
         .favorite = shell.favorite,
         .muted = shell.muted,
         .unread = shell.needs_attention,
