@@ -365,3 +365,48 @@ test('IGSH-1131 failed tags do not consume unpublished product notes', t => {
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(result.stdout, `tag=v0.0.3\nsha=${quiet}\n`);
 });
+
+for (const workflow of ['release-gate.yml', 'verify.yml']) {
+  test(`IGSH-1155 ${workflow} accepts the newest master dispatch, ignoring a newer PR run`, t => {
+    const f = fixture(t);
+    const runs = [
+      { databaseId: 903, event: 'pull_request', status: 'completed', conclusion: 'failure' },
+      { databaseId: 902, event: 'workflow_dispatch', status: 'completed', conclusion: 'success' },
+      { databaseId: 901, event: 'push', status: 'completed', conclusion: 'failure' },
+    ];
+    selected(f.admit(['--dry-run'], {
+      GATE_RUNS: JSON.stringify(workflow === 'release-gate.yml' ? { [f.green]: runs } : {}),
+      VERIFY_RUNS: JSON.stringify(workflow === 'verify.yml' ? { [f.green]: runs } : {}),
+      VERIFY_JOBS: JSON.stringify({
+        901: { jobs: [{ name: gateJourney, conclusion: 'failure' }] },
+        902: { jobs: [{ name: gateJourney, conclusion: 'success' }] },
+        903: { jobs: [{ name: gateJourney, conclusion: 'failure' }] },
+      }),
+    }), f.green);
+  });
+
+  for (const [label, latest, older, conclusion] of [
+    ['failed dispatch overrides green push', 'workflow_dispatch', 'push', 'failure'],
+    ['failed push overrides green dispatch', 'push', 'workflow_dispatch', 'failure'],
+    ['cancelled dispatch overrides green push', 'workflow_dispatch', 'push', 'cancelled'],
+    ['unfinished dispatch overrides green push', 'workflow_dispatch', 'push', null],
+    ['skipped dispatch overrides green push', 'workflow_dispatch', 'push', 'skipped'],
+  ]) {
+    test(`IGSH-1155 ${workflow}: ${label}`, t => {
+      const f = fixture(t);
+      const runs = [
+        { databaseId: 902, event: latest, status: conclusion === null ? 'in_progress' : 'completed', conclusion },
+        { databaseId: 901, event: older, status: 'completed', conclusion: 'success' },
+      ];
+      const candidates = { [f.green]: runs, [f.older]: runs };
+      skipped(f, {
+        GATE_RUNS: JSON.stringify(workflow === 'release-gate.yml' ? candidates : {}),
+        VERIFY_RUNS: JSON.stringify(workflow === 'verify.yml' ? candidates : {}),
+        VERIFY_JOBS: JSON.stringify({
+          901: { jobs: [{ name: gateJourney, conclusion: 'success' }] },
+          902: { jobs: [{ name: gateJourney, conclusion }] },
+        }),
+      });
+    });
+  }
+}

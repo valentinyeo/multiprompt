@@ -32,11 +32,11 @@ for sha in $commits; do
     fi
     gate_runs=$(gh run list -R "$GITHUB_REPOSITORY" -w release-gate.yml -b master --commit "$sha" --limit 100 \
         --json databaseId,event,status,conclusion)
-    verify_id=$(jq -r 'map(select(.event == "push")) | sort_by(.databaseId) | last | .databaseId // empty' <<< "$gate_runs")
+    verify_id=$(jq -r 'map(select(.event == "push" or .event == "workflow_dispatch")) | sort_by(.databaseId) | last | .databaseId // empty' <<< "$gate_runs")
     if [ -z "$verify_id" ]; then
         verify_runs=$(gh run list -R "$GITHUB_REPOSITORY" -w verify.yml -b master --commit "$sha" --limit 100 \
             --json databaseId,event,status,conclusion)
-        verify_id=$(jq -r 'map(select(.event == "push")) | sort_by(.databaseId) | last | .databaseId // empty' <<< "$verify_runs")
+        verify_id=$(jq -r 'map(select(.event == "push" or .event == "workflow_dispatch")) | sort_by(.databaseId) | last | .databaseId // empty' <<< "$verify_runs")
     fi
     if [ -z "$verify_id" ]; then
         echo "$sha has no release gate or verify run; relaunch-saved-sessions is missing, not releasing" >&2
