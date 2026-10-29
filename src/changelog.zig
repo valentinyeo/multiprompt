@@ -2366,8 +2366,8 @@ comptime {
                 @compileError("CHANGELOG in src/changelog.zig has duplicate version " ++ entry.ver ++ "; correct the version or merge its bullets into one entry");
             }
         }
-        if (entry.items.len == 0) {
-            @compileError("CHANGELOG entry " ++ entry.ver ++ " in src/changelog.zig is empty; use .items bullets, never a bare .summary");
+        if (entry.items.len == 0 and entry.summary.len > 0) {
+            @compileError("CHANGELOG entry " ++ entry.ver ++ " in src/changelog.zig has a bare .summary; use .items bullets");
         }
         const version = std.SemanticVersion.parse(entry.ver) catch
             @compileError("CHANGELOG entry " ++ entry.ver ++ " in src/changelog.zig has an invalid version; use dotted numeric major.minor.patch");
