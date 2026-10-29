@@ -86,10 +86,10 @@
                 function Assert-ImmediateBrowserPairs([string]$Page) {
                     for ($i = 0; $i -lt 20; $i++) {
                         Doctor
+                        $before = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count
                         Record "IGSH-1126 $Page immediate Alt+A pair $i"
                         [VerifyNative]::BringToForeground($script:window)
                         Wait-Foreground
-                        $before = @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count
                         $completion = [Diagnostics.Stopwatch]::StartNew()
                         $gap = [VerifyNative]::ImmediateBrowserTogglePair(50)
                         Wait-Until { @(Select-String -Path $debug -Pattern 'shortcutToggle enabled=').Count -eq $before + 2 } 'both physical key presses handled' -Seconds 5 -PollMilliseconds 10

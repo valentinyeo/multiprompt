@@ -2563,3 +2563,27 @@ Write-Host 'LATE_INPUT_WARNING_WITH_CLOSURE_OK'
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /LATE_INPUT_WARNING_WITH_CLOSURE_OK/);
 });
+
+test('IGSH-1165 log sampling cannot invalidate foreground before the first physical key', () => {
+  if (process.platform !== 'win32') return;
+  const journey = read(skill + 'control-feature-browser-pane-stuck.ps1');
+  const pairs = journey.slice(journey.indexOf('function Assert-ImmediateBrowserPairs('));
+  const prefix = pairs.slice(pairs.indexOf('                        Doctor'), pairs.indexOf('                        Wait-Until'));
+  const result = require('node:child_process').spawnSync('powershell.exe', ['-NoProfile', '-Command', `
+$ErrorActionPreference = 'Stop'
+Add-Type 'public class VerifyNative { public static bool Owned; public static int Keys; public static void BringToForeground(System.IntPtr hwnd) { if (hwnd.ToInt64() != 17) throw new System.Exception("Wrong target"); Owned = true; } public static double ImmediateBrowserTogglePair(int delay) { if (!Owned) throw new System.Exception("Physical input targeted a foreign window"); Keys += 2; return delay; } }'
+$script:window = [IntPtr]17
+$debug = 'fixture'
+$Page = 'blank'
+$i = 0
+function Doctor {}
+function Record($Text) {}
+function Select-String($Path, $Pattern) { [VerifyNative]::Owned = $false; 'one previous toggle' }
+function Wait-Foreground { if (-not [VerifyNative]::Owned) { throw 'Foreground unavailable' } }
+${prefix}
+if ([VerifyNative]::Keys -ne 2 -or $before -ne 1) { throw 'Physical pair or baseline log count missing' }
+Write-Host 'FIRST_PHYSICAL_KEY_TARGETED_OK'
+`], { encoding: 'utf8', timeout: 20000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /FIRST_PHYSICAL_KEY_TARGETED_OK/);
+});
