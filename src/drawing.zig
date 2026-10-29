@@ -980,7 +980,7 @@ test "IGSH-910 ETA and IGSH-1152 notice expiry preserve Chat View header pixels"
     Expire.calls = 0;
     app_state.g_gdip_api.fill_path = &Expire.fill;
     defer app_state.g_gdip_api.fill_path = Expire.next;
-    const notice = L("Copied");
+    const notice = std.mem.span(L("Copied"));
     @memcpy(app_state.g_cap_msg_text[0..notice.len], notice);
     app_state.g_cap_msg_len = notice.len;
     app_state.g_cap_msg_until = std.math.maxInt(u64);
