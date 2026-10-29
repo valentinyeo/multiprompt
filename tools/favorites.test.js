@@ -91,7 +91,7 @@ test('favorite marker is one small dot everywhere', async () => {
   assert.match(source, /FAVORITE_DOT_D: i32 = 6/);
   const draw = between('fn drawFavoriteDot(', 'fn paintAllSessions(');
   assert.ok(draw.includes('drawAttentionDot(hdc, cx, cy, @divTrunc(FAVORITE_DOT_D, 2), RGB(240, 196, 75));'));
-  assert.equal((source.match(/drawFavoriteDot\(hdc,/g) || []).length, 5);
+  assert.equal((source.match(/drawFavoriteDot\(hdc,/g) || []).length, 3);
   const sidebar = fs.readFileSync(path.join(__dirname, '../src/sidebar.zig'), 'utf8');
   assert.doesNotMatch(sidebar, /@as\(i32, 18\) else 0/);
   const shot = fs.readFileSync(path.join(__dirname, 'chat-bench/demo-shot.mjs'), 'utf8');

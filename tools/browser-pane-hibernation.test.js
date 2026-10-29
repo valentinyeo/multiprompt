@@ -161,14 +161,10 @@ test("right-click tab-context row toggles keep_awake on the captured tab, not th
   assert.match(source, /target > SEARCH_TABCTX_BACK and target <= SEARCH_TABCTX_FAVORITE\) \{/);
 });
 
-test("sidebar draws a keep-awake pin and a frozen/hibernated glyph in the live (LOOK_UNIFIED) tab row, not the dead Full-mode branch", () => {
-  const idx = source.indexOf("} else if (LOOK_UNIFIED) {", source.indexOf("fn paintSidebar("));
-  assert.notEqual(idx, -1, "the live compact tab-row branch must exist");
-  const nextBranch = source.indexOf("const base_text_left: i32 = 12;", idx);
-  const region = nextBranch === -1 ? source.slice(idx, idx + 4000) : source.slice(idx, nextBranch);
-  assert.match(region, /shells\[i\]\.browser_enabled\) \{/, "glyphs must be gated on the tab actually having a browser pane");
-  assert.match(region, /shells\[i\]\.keep_awake\) \{[\s\S]{0,500}u\{25C9\}/, "keep-awake pin glyph");
-  assert.match(region, /shells\[i\]\.browser_frozen or shells\[i\]\.browser_suspended\) \{[\s\S]{0,500}L\("z"\)/, "frozen/hibernated glyph, only shown when not pinned");
+test("shared sidebar uses session rows without the retired browser glyph rail", () => {
+  const sidebar = functionBody("paintSidebar");
+  assert.match(sidebar, /if \(!g_sidebar_collapsed\) \{\s*paintChatSidebarRow/);
+  assert.doesNotMatch(sidebar, /kaw_sb_rc|frz_sb_rc/);
 });
 
 test("F1 shortcuts overview lists Alt+P and the Hibernate Browser Panes Now command", () => {

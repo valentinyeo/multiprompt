@@ -1,0 +1,147 @@
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
+$Exe = (Resolve-Path $Exe).Path
+New-Item -ItemType Directory -Force $Output | Out-Null
+$Output = (Resolve-Path $Output).Path
+Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+Add-Type -Path "$PSScriptRoot/verify-chat-delivery/desktop.cs"
+Add-Type -Path "$PSScriptRoot/verify-chat-delivery/job.cs"
+[void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
+$profile = Join-Path $env:RUNNER_TEMP "shared-sidebar-$PID"
+$settings = "$profile/roaming/ZigShell"
+$job = $null
+$script:toggleReady = [DateTime]::MinValue
+$result = @{passed=$false; error=$null; cleanup='pending'; comparisons=@(); actions=@()}
+function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 30) {
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($watch.Elapsed.TotalSeconds -lt $Seconds)
+    throw "Timed out: $Description"
+}
+function Save($Value, [string]$File) { [IO.File]::WriteAllText($File, ($Value | ConvertTo-Json -Depth 15), [Text.UTF8Encoding]::new($false)) }
+function Flag($Value, [string]$Name) { $property = $Value.PSObject.Properties[$Name]; $null -ne $property -and $property.Value -eq $true }
+function Chat-On { $s = Session; Flag $s.tabs[$s.active_tab] 'cv' }
+function Read-Json([string]$Path) {
+    Wait-For 'readable saved state' {
+        try {
+            $document = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+            if ($null -ne $document) { return $document }
+        } catch { return $false }
+        $false
+    }
+}
+function Session { Read-Json "$settings/session.json" }
+function Focus {
+    [void](Wait-For 'owned app foreground' {
+        $target = [ChatDeliveryDesktop]::Composer($main)
+        if ($target -eq [IntPtr]::Zero) { $target = $main }
+        [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $target)
+    })
+}
+function Toggle-View {
+    [void](Wait-For 'existing shortcut debounce' { [DateTime]::UtcNow -ge $script:toggleReady })
+    [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
+    $script:toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+}
+function Capture([string]$Name) {
+    $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
+    $bitmap = [Drawing.Bitmap]::new(299, 320)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, $bitmap.Size)
+        $bitmap.Save("$Output/$Name.png")
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+    (Get-FileHash "$Output/$Name.png" -Algorithm SHA256).Hash
+}
+function Shot([string]$Name) {
+    $bounds = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bitmap = [Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try { $graphics.CopyFromScreen($bounds.Location, [Drawing.Point]::Empty, $bounds.Size); $bitmap.Save("$Output/$Name.png") } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
+function Compare-Views([string]$Name) {
+    Focus
+    $selected = (Session).active_tab
+    $script:previousHash = ''
+    $before = Wait-For 'stable shell sidebar' {
+        $hash = Capture "$Name-shell-sidebar"
+        if ($hash -eq $script:previousHash) { return $hash }
+        $script:previousHash = $hash
+        $false
+    }
+    Shot "$Name-shell"
+    Toggle-View
+    [void](Wait-For 'Chat View visible' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
+    Focus
+    $hash = Wait-For 'sidebar unchanged across shell and chat' { $h = Capture "$Name-chat-sidebar"; if ($h -eq $before) { $h } }
+    Shot "$Name-chat"
+    if ((Session).active_tab -ne $selected) { throw 'View toggle changed selection' }
+    $result.comparisons += @{name=$Name; shell=$before; chat=$hash; selected=$selected}
+    Toggle-View
+    [void](Wait-For 'shell view restored' { -not (Chat-On) })
+    Focus
+    [void](Wait-For 'return sidebar unchanged' { (Capture "$Name-return-sidebar") -eq $before })
+}
+try {
+    New-Item -ItemType Directory -Force $settings, "$profile/local", "$profile/home" | Out-Null
+    $env:APPDATA = "$profile/roaming"; $env:LOCALAPPDATA = "$profile/local"; $env:USERPROFILE = "$profile/home"; $env:HOME = "$profile/home"
+    $env:MULTIPROMPT_NO_LOGIN = '1'; $env:IGSH_246 = '0'; $env:ZIGSHELL_DEBUG = '1'
+    $tabs = @('First shell', 'Second shell', 'Third shell') | ForEach-Object { @{kind='cmd'; name=$_; manual=$true; cv=$false; pid=0} }
+    Save @{active_tab=0; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=@($tabs)} "$settings/session.json"
+    [IO.File]::WriteAllText("$settings/theme-mode.txt", 'amoled')
+    $job = [VerifyJob]::new()
+    $app = $job.Start($Exe, $profile, "$Output/stdout.log", "$Output/stderr.log", '--no-window-restore')
+    $main = Wait-For 'owned visible application' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    [void](Wait-For 'three restored sessions' { (Session).tabs.Count -eq 3 })
+    Focus
+    [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(900, 500)
+    [void](Wait-For 'three sidebar sessions published' {
+        if (-not (Test-Path "$settings/inbox-default.json")) { return $false }
+        $inbox = Read-Json "$settings/inbox-default.json"
+        @($inbox.shells).Count -eq 3
+    })
+    Toggle-View
+    [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
+    [void](Wait-For 'initial console poll' {
+        if (-not (Test-Path "$settings/debug.log")) { return $false }
+        try { (Get-Content "$settings/debug.log" -Raw) -match 'POLL\[t=[^\r\n]+,#1\]' } catch { $false }
+    } 60)
+    Focus
+    Toggle-View
+    [void](Wait-For 'initial shell view' { -not (Chat-On) })
+    Compare-Views 'expanded'
+    $previous = (Session).active_tab
+    [ChatDeliveryDesktop]::PressClient($main, $app.Id, 120, 171)
+    [void](Wait-For 'sidebar click changes the selected session' { (Session).active_tab -ne $previous })
+    $result.actions += 'sidebar-select'
+    Focus
+    [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(900, 500)
+    Compare-Views 'selected'
+    [ChatDeliveryDesktop]::PressClient($main, $app.Id, 100, 64)
+    [void](Wait-For 'Recents collapsed' { (Flag (Session) 'recents_section_collapsed') })
+    $result.actions += 'section-collapse'
+    Focus
+    [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(900, 500)
+    Compare-Views 'section-collapsed'
+    [ChatDeliveryDesktop]::PressClient($main, $app.Id, 100, 64)
+    [void](Wait-For 'Recents reopened' { -not (Flag (Session) 'recents_section_collapsed') })
+    $result.actions += 'section-expand'
+    $selectedName = (Session).tabs[(Session).active_tab].name
+    [ChatDeliveryDesktop]::PressClient($main, $app.Id, 285, 229)
+    [void](Wait-For 'sidebar close removes a session' { (Session).tabs.Count -eq 2 })
+    if ((Session).tabs[(Session).active_tab].name -cne $selectedName) { throw 'Closing another session changed selection' }
+    $result.actions += 'sidebar-close'
+    $result.passed = $true
+} catch {
+    $result.error = $_.Exception.Message
+    Write-Host $result.error
+    if (Get-Variable main -ErrorAction SilentlyContinue) { Shot 'failure' }
+} finally {
+    if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() }
+    foreach ($name in @('session.json', 'debug.log', 'inbox-default.json')) { if (Test-Path "$settings/$name") { Copy-Item "$settings/$name" "$Output/$name" } }
+    Save $result "$Output/result.json"
+    if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
+}
+if (-not $result.passed -or $result.cleanup -ne 0) { throw 'Shared sidebar journey failed; see result.json' }
+Write-Host 'SHARED_SIDEBAR_JOURNEY_OK'

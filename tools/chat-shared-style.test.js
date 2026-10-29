@@ -21,7 +21,7 @@ test('chat sidebar shows approved robots and previews, retaining unread and hove
   assert.match(row, /avatar\.draw/);
   assert.match(row, /shell\.preview/);
   assert.match(row, /chatDraftHasForShell/);
-  assert.match(sidebar, /if \(!app_state\.g_sidebar_collapsed and [^\n]+\) \{\s*paintChatSidebarRow/);
+  assert.match(sidebar, /if \(!app_state\.g_sidebar_collapsed\) \{\s*paintChatSidebarRow/);
 });
 
 test('chat title shares the bot identity without provider glyphs', () => {
@@ -78,4 +78,14 @@ test('composer separates attachment from its pill and paints the approved send s
   assert.match(holes, /out\.addFloating\(layout\.attach_btn,/);
   const paint = body(fs.readFileSync('src/window_layout.zig', 'utf8'), 'fn paintChatButton(');
   assert.match(paint, /!app_state\.g_light_theme[^]*?glyph == \.send[^]*?tokens\.ReaderRaised/);
+});
+
+
+test('sidebar labels and selection appearance ignore the content view', () => {
+  assert.doesNotMatch(body(sidebar, 'fn drawSidebarLabel('), /g_chat_active/);
+  const paint = body(sidebar, 'pub fn paintSidebar(');
+  const selection = paint.slice(paint.indexOf('if (i == app_state.active_shell'), paint.indexOf('if (app_state.shells[i].selected)'));
+  assert.ok(selection.length > 0);
+  assert.doesNotMatch(selection, /g_chat_active/);
+  assert.doesNotMatch(paint, /const fav_size: i32|const base_text_left: i32/);
 });
