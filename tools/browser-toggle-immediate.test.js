@@ -172,3 +172,61 @@ test "pending open closes, crashed connection still recovers" {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('IGSH-1161 owned browser foreground restores shortcut delivery without main activation', () => {
+  const callback = fn(read('src/focus.zig'), 'foregroundWinEventProc')
+    .replace('@import("main.zig").sessionFrontChanged()', 'sessionFrontChanged()');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-foreground-hook-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'foreground.zig'), `const std = @import("std");
+const HANDLE = ?*anyopaque;
+const DWORD = u32;
+const LONG = i32;
+const WINAPI = .c;
+const EVENT_SYSTEM_FOREGROUND = 3;
+const OBJID_WINDOW = 0;
+const app_state = @This();
+var g_main_hwnd: HANDLE = @ptrFromInt(10);
+var active_shell: u32 = 0;
+var shell_count: u32 = 1;
+var shells = [_]struct { browser_enabled: bool = true }{.{}};
+var g_pane_ring_state: u8 = 0;
+var installed = false;
+var delivered: usize = 0;
+fn installHook() void { installed = true; }
+fn sessionFrontChanged() void {}
+fn focusGuardReturnFromPane(_: HANDLE) bool { return false; }
+fn syncPaneFocusModeFromForeground(_: HANDLE, _: bool) void {}
+fn leftMouseButtonDown() bool { return false; }
+fn clearSelectedTabDotOnReturn() void {}
+fn foregroundHwndIsOurs(hwnd: HANDLE) bool { return hwnd == @as(HANDLE, @ptrFromInt(20)); }
+fn activeBrowserTransientPopupHasForegroundFocus() bool { return false; }
+fn browserTrace(_: []const u8) void {}
+fn suspendBrowserEdgeMaskRaiseForPopup() void {}
+fn armBrowserEdgeMaskRaise() void {}
+fn paneRingRepaintNeeded(_: *u8, _: u8) bool { return false; }
+fn paneRingState() u8 { return 0; }
+fn activePaneBorderOn() bool { return false; }
+fn InvalidateRect(_: HANDLE, _: ?*anyopaque, _: i32) i32 { return 1; }
+fn invalidateBrowserBottomMask() void {}
+fn pressShortcut() void { if (installed) { delivered += 1; } }
+${callback}
+test "an owned Edge foreground delivers the next shortcut after focus-loss removal" {
+    foregroundWinEventProc(null, EVENT_SYSTEM_FOREGROUND, @ptrFromInt(30), OBJID_WINDOW, 0, 0, 0);
+    try std.testing.expect(!installed);
+    foregroundWinEventProc(null, EVENT_SYSTEM_FOREGROUND, @ptrFromInt(20), OBJID_WINDOW, 1, 0, 0);
+    try std.testing.expect(!installed);
+    for (0..20) |_| {
+        installed = false;
+        foregroundWinEventProc(null, EVENT_SYSTEM_FOREGROUND, @ptrFromInt(20), OBJID_WINDOW, 0, 0, 0);
+        pressShortcut();
+    }
+    try std.testing.expectEqual(@as(usize, 20), delivered);
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, 'foreground.zig')], { cwd: dir, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
