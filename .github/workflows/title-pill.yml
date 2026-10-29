@@ -1,0 +1,102 @@
+name: Title pill transparency
+
+on:
+  pull_request:
+    paths:
+      - src/chat_float.zig
+      - src/chat_render.zig
+      - src/drawing.zig
+      - tools/title-pill-proof*
+      - .github/workflows/title-pill.yml
+  push:
+    branches: [master]
+  repository_dispatch:
+    types: [title-pill-release]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published tag whose native painter must be verified
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: title-pill-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pane-layout:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: pane-layout
+      tag: ${{ inputs.tag || github.event.client_payload.tag || '' }}
+  browser-pane-stuck:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: browser-pane-stuck
+      tag: ${{ inputs.tag || github.event.client_payload.tag || '' }}
+  pixels:
+    name: title-pill (${{ matrix.theme }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [dark, light]
+    env:
+      MULTIPROMPT_CHAT_RENDER_PROOF: '1'
+      MULTIPROMPT_TITLE_PILL_THEME: ${{ matrix.theme }}
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.tag || github.event.client_payload.tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Record tested source
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.client_payload.tag }}
+        run: |
+          @{ revision = (git rev-parse HEAD); tag = $env:RELEASE_TAG; theme = $env:MULTIPROMPT_TITLE_PILL_THEME } | ConvertTo-Json | Set-Content -Encoding utf8 build.json
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          tar -xf $zip -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Zig extraction failed' }
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Check independent pixel oracle
+        run: node --test tools/title-pill-proof.test.js
+      - name: Render scrolling Chat View with the real native painter
+        shell: pwsh
+        run: zig build test-main -Drender-proof=true --summary all
+      - name: Compare the title surround with its unmasked transcript
+        if: always() && !cancelled()
+        run: node tools/title-pill-proof.mjs .
+      - name: Save viewable Windows screenshots
+        if: always() && !cancelled()
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Get-ChildItem chat-title-*-frame.bmp | ForEach-Object {
+            $image = [Drawing.Bitmap]::FromFile($_.FullName)
+            try { $image.Save(($pwd.Path + '/' + $_.BaseName + '.png'), [Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
+          }
+      - name: Upload title transparency proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: title-pill-${{ matrix.theme }}
+          path: |
+            chat-title-*
+            title-pill-result.json
+            build.json
+          if-no-files-found: error

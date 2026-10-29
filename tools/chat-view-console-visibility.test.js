@@ -323,6 +323,7 @@ var controls_ready = true;
 var require_alt_unlock = false;
 var alt_unlocked = false;
 var alt_held = false;
+var g_native_browser_alt_unlocked_at: u64 = 0;
 var foreground_timer_armed = false;
 var g_inbox_active = false;
 var g_all_sessions_active = false;
@@ -375,6 +376,7 @@ fn ShowWindowAsync(hwnd: HANDLE, _: i32) i32 {
     hidden_while_foreground = foreground == hwnd;
     return 1;
 }
+${fn(text, 'unlockBrowserForeground')}
 ${fn(text, 'parkMainWindowBeforeActiveShellRemoval')}
 ${fn(text, 'focusActiveShell')}
 ${fn(text, 'focusActiveShellInner')}
@@ -402,6 +404,23 @@ test "IGSH-1142 denied frame parking still lands the owned composer through shar
     try std.testing.expectEqual(g_main_hwnd, foreground);
     try std.testing.expectEqual(g_chat_composer_hwnd, focused);
     try std.testing.expect(alt_unlocked);
+    try std.testing.expect(!attached);
+    require_alt_unlock = false;
+    alt_unlocked = false;
+}
+test "IGSH-1028 guarded console hide first unlocks the foreground handoff" {
+    foreground = 10;
+    focused = 10;
+    require_alt_unlock = true;
+    alt_unlocked = false;
+    hidden_while_foreground = false;
+    hide_requested = false;
+    openChatView();
+    try std.testing.expect(hide_requested);
+    try std.testing.expect(!hidden_while_foreground);
+    try std.testing.expectEqual(g_main_hwnd, foreground);
+    try std.testing.expectEqual(g_chat_composer_hwnd, focused);
+    try std.testing.expectEqual(@as(u64, 1000), g_native_browser_alt_unlocked_at);
     try std.testing.expect(!attached);
     require_alt_unlock = false;
     alt_unlocked = false;
@@ -449,7 +468,7 @@ test('IGSH-955 production chat handoff transfers cross-thread foreground before 
     fs.writeFileSync(file, chatHandoffHarness(source));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '-j1'], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.status, 0, JSON.stringify({ signal: result.signal, error: result.error, stdout: result.stdout, stderr: result.stderr }));
-    assert.match(result.stderr, /All 5 tests passed/);
+    assert.match(result.stderr, /All 6 tests passed/);
     console.log(result.stderr.trim());
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
@@ -555,4 +574,58 @@ test('link selection uses the approved rounded dark control and outline, never t
   assert.match(selected, /CreatePen\(0, 1,/);
   assert.match(selected, /drawRoundRect/);
   assert.doesNotMatch(selected, /RGB\(0, 122, 204\)|FillRect/);
+});
+
+test('repeated chat layout preserves composer font without redundant edit redraws', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const composer = require('./app-source').readAppSource();
+  const start = composer.indexOf('fn layoutChatControls()');
+  const end = composer.indexOf('    const base_h = chatComposerBaseEditH();', start);
+  assert.ok(start >= 0 && end > start);
+  const production = composer.slice(start, end) + '    _ = &layout;\n}\n';
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'composer-font-layout-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'test.zig'), `
+const std = @import("std");
+var g_chat_active = true;
+var g_chat_composer_hwnd: ?usize = 1;
+var g_chat_layout_browser_reserved = false;
+var current_font: usize = 0;
+var desired_font: usize = 42;
+var redraws: usize = 0;
+fn browserSlotReserved() bool { return false; }
+fn chatViewLayout() u8 { return 0; }
+fn ensureChatFont() ?*anyopaque { return @ptrFromInt(desired_font); }
+fn SendMessageW(_: ?usize, msg: u32, wp: usize, _: isize) isize {
+    if (msg == 0x0031) return @bitCast(current_font);
+    if (msg == 0x0030) {
+        current_font = wp;
+        redraws += 1;
+    }
+    return 0;
+}
+${production}
+test "font changes redraw once; repeated session layouts retain text and font" {
+    layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 42), current_font);
+    try std.testing.expectEqual(@as(usize, 1), redraws);
+    for (0..80) |_| layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 1), redraws);
+    desired_font = 43;
+    layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 43), current_font);
+    try std.testing.expectEqual(@as(usize, 2), redraws);
+    g_chat_active = false;
+    desired_font = 44;
+    layoutChatControls();
+    try std.testing.expectEqual(@as(usize, 43), current_font);
+    try std.testing.expectEqual(@as(usize, 2), redraws);
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
