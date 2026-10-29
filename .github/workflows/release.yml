@@ -90,7 +90,7 @@ jobs:
 
   build:
     needs: [prepare, journeys]
-    if: always() && needs.prepare.result == 'success' && (needs.journeys.result == 'success' || needs.journeys.result == 'skipped')
+    if: always() && !cancelled() && needs.prepare.result == 'success' && (needs.journeys.result == 'success' || needs.journeys.result == 'skipped')
     name: build-${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
