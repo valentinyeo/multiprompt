@@ -38,7 +38,8 @@ test('ISSUE-444 inbox background and glyph and Send button use smooth shapes', (
   assert.match(inbox, /drawRoundRect/);
   const send = body(source('window_layout.zig'), 'paintChatButton');
   assert.doesNotMatch(send, /\bRoundRect\s*\(/);
-  assert.match(send, /smooth\.zig/);
+  assert.match(send, /tokens\.roundButton\(&canvas/);
+  assert.match(source('design_canvas.zig'), /fillRoundRectAA/);
   assert.match(body(source('drawing.zig'), 'drawNativeLine'), /strokePenLine/);
 });
 

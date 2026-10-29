@@ -1,3 +1,7 @@
+            Add-Type -Path (Join-Path $PSScriptRoot '../../../tools/verify-chat-delivery/layout-capture.cs')
+            [LayoutCapture]::Display()
+            [void][VerifyNative]::ShowWindow($script:window, 9)
+            [void][LayoutCapture]::MoveWindow($script:window, 0, 0, 1920, 1032, $true)
 
             Select-Theme 'dark' 'dictation-dark'
             Press @(0x12, 0x43) 'Alt+C: open Chat View for dictation'
@@ -176,5 +180,14 @@
                 Snapshot ($way + '-sent')
                 $result.checks += @{ name = ('dictation-' + $way); passed = $true; delivered = $expected; elapsedMilliseconds = $elapsed; sendRect = $send; micRect = $mic }
             }
+            [VerifyNative]::ClickClient($handle, 8, 8)
+            Type-Text 'Shared design check'
+            Press @(0x11, 0x44) 'Ctrl+D: capture the shared white dictation design'
+            Assert-DictationMic $micLive $true 'shared-design'
+            WindowShot 'shared-design'
+            Save-Json @{ width = 1920; height = 1032; draft = [VerifyNative]::EditText($handle); pill = $micLive } 'shared-design.json'
+            Press @(0x1B) 'Escape: discard only the owned proof recording'
+            Assert-DictationMic $mic $false 'shared-design-stopped'
+            Press @(0x11, 0x41) 'Ctrl+A: select the proof draft'
+            Press @(0x08) 'Backspace: clear the proof draft'
             Snapshot 'after'
-        

@@ -1905,8 +1905,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
             if (i == app_state.active_shell and LOOK_UNIFIED) {
                 const reader = @import("themes.zig").themeReaderDark();
                 const hl = if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_amoled_theme) RGB(42, 42, 42) else tintColor(sidebar_bg, RGB(160, 160, 160), 1, 6);
-                var canvas = @import("design_canvas.zig"){ .hdc = hdc };
-                tokens.field(&canvas, .{ .left = column.left, .top = y + uiScaled(1), .right = column.right, .bottom = y + tabRowH() - uiScaled(1) }, uiScaled(tokens.row_radius), @max(1, uiScaled(1)), if (!app_state.g_sidebar_collapsed and !app_state.g_light_theme) tokens.ReaderRaised else if (reader or !app_state.g_light_theme) tokens.ReaderControl else hl, if (reader or !app_state.g_light_theme) tokens.ReaderOutline else customColorOr("overlay_border", hl));
+                var shared_canvas = @import("design_canvas.zig"){ .hdc = hdc };
+                tokens.field(&shared_canvas, .{ .left = column.left, .top = y + uiScaled(1), .right = column.right, .bottom = y + tabRowH() - uiScaled(1) }, uiScaled(tokens.row_radius), @max(1, uiScaled(1)), if (!app_state.g_sidebar_collapsed and !app_state.g_light_theme) tokens.ReaderRaised else if (reader or !app_state.g_light_theme) tokens.ReaderControl else hl, if (reader or !app_state.g_light_theme) tokens.ReaderOutline else customColorOr("overlay_border", hl));
             } else if (i == app_state.active_shell) {
                 const act_color: DWORD = themeConsoleBg();
                 const sidebar_color: DWORD = sidebar_bg;

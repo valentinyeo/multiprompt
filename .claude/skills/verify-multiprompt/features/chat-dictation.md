@@ -42,6 +42,8 @@ For each stop method (`dictation-enter`, `dictation-ctrl-d`, `dictation-mic-clic
 
 Artifact: `verify-chat-dictation`. Inspect `before.png`, `action.png`, `after.png`, each `*-listening.png` / `*-delivered.png`, `*-mic.png` and `*-mic.json`, each `<method>.text.json`, `actions.json`, `doctor.json`, `build.json`, `result.json`, `process-tree.json`, and `data/roaming/ZigShell/dictation-audit.log`. The text records contain exact WM_GETTEXT, expected text, HWND/PID and elapsed milliseconds. `result.json` retains all three named cases and the explicit boundary. No screenshot has been inspected until a real run is downloaded.
 
+The shared-design capture sets the GitHub desktop to 1920×1080, sizes the actual app to 1920×1032, and records the active pill with the same “Shared design check” draft as Postbox. `shared-design.png`, `shared-design-mic.png` and `shared-design.json` retain the native frame, white-pill crop and geometry.
+
 ## Gotchas
 
 The existing `chat_dictation_engine_toggle` unit-test seam replaces the engine and cannot prove the real app's transcription/delivery path. The added `MULTIPROMPT_DICTATION_FIXTURE` boundary in `src/voice.zig` is enabled only with `GITHUB_ACTIONS=true`, `RUNNER_OS=Windows` and `MULTIPROMPT_NO_LOGIN=1`. Only this journey sets it; the harness clears inherited values for other ordinary journeys and restores the environment during cleanup.
