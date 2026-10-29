@@ -11,7 +11,7 @@ Bind-Transcript
 Assert-FullHistory 'switch-before'
 Press @(0x12, 0x43) 'Alt+C: explicitly choose terminal during long-chat replay'
 [void](Wait-For 'explicit terminal choice hides the composer' { [ChatDeliveryDesktop]::Composer($main) -eq [IntPtr]::Zero })
-[void](Wait-For 'explicit terminal choice persisted' { @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs | Where-Object { $_.tmux_session -eq 'verify-agent' -and -not $_.cv }).Count -eq 1 })
+[void](Wait-For 'explicit terminal choice persisted' { @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs | Where-Object { $_.kind -eq 'tmux' -and $_.tmux_session -eq 'verify-agent' -and (-not $_.PSObject.Properties['cv'] -or -not $_.cv) }).Count -eq 1 })
 Shot 'long-chat-explicit-terminal'
 Press @(0x12, 0x43) 'Alt+C: restore long chat after explicit terminal choice'
 Bind-Transcript
