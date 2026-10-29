@@ -190,4 +190,7 @@
             $null = Assert-WorkspaceBrowser 'stable-restored-own' $stableRoot $stableWorkspace
             $result.checks += @{ name = 'browser-own-profile branded Chrome stable cold and restored'; executable = $stableChrome; token = $stableToken; windowId = $stablePane.browser_window_id }
             Snapshot 'after'
-        
+
+            if ($env:OWNER_BROWSER_PROOF) {
+                . (Join-Path $PSScriptRoot 'owner-browser-proof.ps1')
+            }

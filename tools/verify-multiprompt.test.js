@@ -2441,3 +2441,15 @@ test('IGSH-1161 immediate key-pair deadline includes first injection time withou
   assert.throws(() => pair(350), /Alt\+A pair exceeded 300 ms/);
   assert.throws(() => pair(0, 60), /Alt\+A pair exceeded 300 ms/);
 });
+
+
+test('owner browser proof keeps disposable credentials outside evidence', () => {
+  const script = fs.readFileSync(path.join(__dirname, '../.claude/skills/verify-multiprompt/owner-browser-proof.ps1'), 'utf8');
+  assert.match(script, /StrictHostKeyChecking=yes/);
+  assert.match(script, /OwningProcess -eq \$process.Id/);
+  assert.match(script, /foreignDenied/);
+  assert.match(script, /globalDenied/);
+  assert.match(script, /credentialsPrivate/);
+  assert.match(script, /Remove-Item -LiteralPath \$key/);
+  assert.doesNotMatch(script, /StrictHostKeyChecking=no|SendKeys|AppActivate/);
+});

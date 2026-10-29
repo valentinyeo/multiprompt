@@ -104,10 +104,10 @@ def handle(client, directory, host, relay):
                 pass
 
 
-def start(directory, host, relay):
+def start(directory, host, relay, root=None):
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", host):
         raise ValueError("Invalid configured browser host")
-    root = Path(f"/tmp/mp-browser-{os.getuid()}")
+    root = Path(f"/tmp/mp-browser-{os.getuid()}") if root is None else Path(root)
     root.mkdir(mode=0o755, exist_ok=True)
     info = root.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o755:
