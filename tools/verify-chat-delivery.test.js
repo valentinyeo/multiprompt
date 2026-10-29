@@ -19,6 +19,20 @@ const skill = '.claude/skills/verify-multiprompt/';
 const drive = read('tools/verify-chat-delivery/drive.ps1');
 const workflow = read('.github/workflows/verify.yml');
 
+test('IGSH-1152 header paint uses the same notice text measured before expiry', () => {
+  const source = read('src/drawing.zig');
+  const layout = source.slice(source.indexOf('pub fn chatTitleLayout('), source.indexOf('pub fn chatTitleHoleRect('));
+  const paint = source.slice(source.indexOf('fn paintChatTitlePill('), source.indexOf('pub fn paintThreadTitle('));
+  assert.match(source, /meta: \[\]const u16/);
+  assert.doesNotMatch(source, /has_meta: bool/);
+  assert.match(layout, /const meta = chatTitleMetaText\(now\);\s*layout\.meta = meta;/);
+  assert.match(paint, /if \(layout\.meta\.len > 0\)/);
+  assert.match(paint, /const meta = layout\.meta;/);
+  assert.doesNotMatch(paint, /chatTitleMetaText\(/);
+  assert.match(source, /app_state\.g_gdip_api\.fill_path = &Expire\.fill/);
+  assert.match(source, /try std\.testing\.expect\(notice_ink > 4\)/);
+});
+
 test('IGSH-1152 native crash evidence retains the minidump before scratch cleanup', () => {
   const copy = drive.indexOf('Get-ChildItem -LiteralPath "$settings/crashes" -File');
   const cleanup = drive.indexOf('Remove-Item -LiteralPath $profile -Recurse -Force', copy);

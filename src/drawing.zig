@@ -624,7 +624,7 @@ pub const ChatTitleLayout = struct {
     text: RECT,
     meta_pill: RECT,
     meta_text: RECT,
-    has_meta: bool,
+    meta: []const u16,
     meta_warn: bool,
 };
 
@@ -640,8 +640,8 @@ fn measureTitleText(font: HANDLE, text: []const u16) i32 {
     return size.cx;
 }
 
-fn chatTitleMetaText() []const u16 {
-    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > GetTickCount64();
+fn chatTitleMetaText(now: u64) []const u16 {
+    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
     if (cap_msg) {
         if (app_state.g_account_reauth) {
             return std.mem.span(L("Sign in again: Ctrl+K > Sign in to multiprompt"));
@@ -669,7 +669,9 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     var layout: ChatTitleLayout = std.mem.zeroes(ChatTitleLayout);
     layout.more = .{ .left = column.right - margin - pill_h, .top = pill_top, .right = column.right - margin, .bottom = pill_top + pill_h };
     var right_limit = layout.more.left - margin;
-    const meta = chatTitleMetaText();
+    const now = GetTickCount64();
+    const meta = chatTitleMetaText(now);
+    layout.meta = meta;
     if (meta.len > 0) {
         const meta_w = measureTitleText(uiFontSubtitle(), meta) + pad * 2;
         const width = @min(meta_w, @divTrunc((column.right - column.left) * 2, 5));
@@ -677,8 +679,7 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
         const top = pill_top + @divTrunc(pill_h - meta_h, 2);
         layout.meta_pill = .{ .left = layout.more.left - margin - width, .top = top, .right = layout.more.left - margin, .bottom = top + meta_h };
         layout.meta_text = .{ .left = layout.meta_pill.left + pad, .top = layout.meta_pill.top, .right = layout.meta_pill.right - pad, .bottom = layout.meta_pill.bottom };
-        layout.has_meta = true;
-        layout.meta_warn = app_state.g_account_reauth or app_state.g_cap_msg_until > GetTickCount64();
+        layout.meta_warn = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
         right_limit = layout.meta_pill.left - margin;
     }
     const center = @divTrunc(column.left + column.right, 2);
@@ -739,7 +740,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         _ = DrawTextW(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
     paintMoreButton(hdc, layout.more, border, fill, edge);
-    if (layout.has_meta) {
+    if (layout.meta.len > 0) {
         const meta_r = layout.meta_pill;
         fillRoundRectAA(hdc, meta_r, @divTrunc(meta_r.bottom - meta_r.top, 2), border);
         fillRoundRectAA(hdc, .{ .left = meta_r.left + edge, .top = meta_r.top + edge, .right = meta_r.right - edge, .bottom = meta_r.bottom - edge }, @divTrunc(meta_r.bottom - meta_r.top, 2) - edge, fill);
@@ -747,7 +748,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         const warn_col: DWORD = if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70);
         const dim_col: DWORD = if (app_state.g_light_theme) RGB(140, 140, 140) else RGB(110, 110, 120);
         _ = SetTextColor(hdc, if (layout.meta_warn) warn_col else dim_col);
-        const meta = chatTitleMetaText();
+        const meta = layout.meta;
         var text = layout.meta_text;
         _ = DrawTextW(hdc, meta.ptr, @intCast(meta.len), &text, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }

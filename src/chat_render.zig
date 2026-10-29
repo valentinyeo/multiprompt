@@ -7353,7 +7353,7 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
     @import("chat_composer.zig").refreshChatBrushes();
     const fill = app_state.g_chat_input_color;
     const title_layout = @import("drawing.zig").chatTitleLayout() orelse return error.TestUnexpectedResult;
-    const beside_right = (if (title_layout.has_meta) title_layout.meta_pill.right else pill.right) + uiScaled(8);
+    const beside_right = (if (title_layout.meta.len > 0) title_layout.meta_pill.right else pill.right) + uiScaled(8);
     const Position = enum { middle, top, bottom, sweep };
     const sweep_steps = 24;
     const gap = @import("chat_float.zig").moat();

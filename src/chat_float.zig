@@ -47,7 +47,7 @@ pub fn collectHoles(out: *HoleList) void {
     } else if (drawing.chatTitleLayout()) |title| {
         out.addFloating(title.pill, @divTrunc(title.pill.bottom - title.pill.top, 2));
         out.addFloating(title.more, @divTrunc(title.more.bottom - title.more.top, 2));
-        if (title.has_meta) out.addFloating(title.meta_pill, @divTrunc(title.meta_pill.bottom - title.meta_pill.top, 2));
+        if (title.meta.len > 0) out.addFloating(title.meta_pill, @divTrunc(title.meta_pill.bottom - title.meta_pill.top, 2));
     }
     if (chat_composer.chatNewMessagesRect()) |pill| out.addFloating(pill, drawing.uiScaled(13));
     if (window_layout.chatPermissionVisible()) {
