@@ -1,13 +1,14 @@
 name: Released large-history switching
 run-name: Large-history switches ${{ inputs.tag || 'v0.28.1010' }}
 on:
-  push:
-    branches: [ceo/IGSH-1197]
+  schedule:
+    - cron: '24 3 * * *'
   workflow_dispatch:
     inputs:
       tag:
         description: Published release tag
         required: true
+        default: v0.28.1010
         type: string
 permissions:
   contents: read
@@ -49,21 +50,6 @@ jobs:
           tar -xf $zip -C $env:RUNNER_TEMP
           if ($LASTEXITCODE -ne 0) { throw 'Zig extraction failed' }
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-      - name: Build exact branch candidate for pre-merge workflow proof
-        if: github.event_name == 'push'
-        shell: pwsh
-        run: |
-          zig build -Drelease=true
-          if ($LASTEXITCODE -ne 0) { throw 'Branch candidate build failed' }
-          Copy-Item zig-out/bin/multiprompt.exe released/multiprompt.exe
-          Copy-Item zig-out/bin/zigshell-bridge.exe released/zigshell-bridge-x64.exe
-      - name: Identify measured executable
-        shell: pwsh
-        env:
-          BRANCH_PROOF: ${{ github.event_name == 'push' }}
-        run: |
-          $revision = if ($env:BRANCH_PROOF -eq 'true') { $env:GITHUB_SHA } else { $env:RELEASE_TAG }
-          "SWITCH_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Build transport fixtures only
         shell: pwsh
         run: |
@@ -73,7 +59,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
       - name: Switch fifty times through 400 MiB history
         shell: powershell
-        run: ./tools/switch-performance.ps1 -Exe released/multiprompt.exe -Evidence evidence/released -Revision "$env:SWITCH_REVISION" -SwitchOnly
+        run: ./tools/switch-performance.ps1 -Exe released/multiprompt.exe -Evidence evidence/released -Revision "$env:RELEASE_TAG" -SwitchOnly
       - name: Require every visible switch below 200 ms
         run: node --input-type=module -e "import fs from 'node:fs'; import {assessSwitches} from './tools/switch-performance.mjs'; const data=JSON.parse(fs.readFileSync('evidence/released/samples.json','utf8').replace(/^\uFEFF/,'')); const verdict=assessSwitches(data); fs.writeFileSync('evidence/released/verdict.json',JSON.stringify(verdict,null,2)); console.log(verdict); if(!verdict.pass) process.exit(1);"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
