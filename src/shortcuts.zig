@@ -624,7 +624,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         app_state.g_last_main_keyboard_event_time.store(kb.time, .release);
         if (kb.vkCode == 0x41 or kb.vkCode == 0x42) {
             const fg = GetForegroundWindow();
-            altqLog("browser_key event={} vk={X} wp={X} flags={X} fg={X} owner={X} ours={} held={}", .{ kb.time, kb.vkCode, wp, kb.flags, @intFromPtr(fg), @intFromPtr(@import("win32.zig").GetAncestor(fg, @import("win32.zig").GA_ROOTOWNER)), foregroundHwndIsOurs(fg), app_state.g_browser_toggle_chord_held });
+            altqLog("browser_key event={} vk={X} wp={X} flags={X} fg={X} owner={X} ours={} held={}", .{ kb.time, kb.vkCode, wp, kb.flags, @intFromPtr(fg), @intFromPtr(@import("win32.zig").GetAncestor(fg, 3)), foregroundHwndIsOurs(fg), app_state.g_browser_toggle_chord_held });
         }
         const prior_focus_action = app_state.g_focus_user_action_tick;
         defer app_state.g_focus_user_action_tick = prior_focus_action;
