@@ -65,7 +65,8 @@ if (args[0] === 'run') {
   process.exit(0);
 }
 if (args[0] === 'api' && args[1].endsWith('/releases/latest')) {
-  console.log(process.env.PUBLISHED_TAG || 'v1.2.8');
+  if (process.env.LATEST_READ_FAIL === '1') process.exit(1);
+  console.log(process.env.GH_STATE && fs.existsSync(process.env.GH_STATE) ? JSON.parse(fs.readFileSync(process.env.GH_STATE)).latest : process.env.PUBLISHED_TAG || 'v1.2.8');
   process.exit(0);
 }
 if (args[0] === 'api') {
@@ -75,12 +76,18 @@ if (args[0] === 'api') {
 }
 if (args[1] === 'view') process.exit(process.env.RELEASE_EXISTS === '1' ? 0 : 1);
 if (args[1] !== 'create') process.exit(2);
+if (process.env.GH_STATE) {
+  const state = fs.existsSync(process.env.GH_STATE) ? JSON.parse(fs.readFileSync(process.env.GH_STATE)) : { latest: process.env.PUBLISHED_TAG, releases: [] };
+  state.releases.push(args[2]);
+  if (args.includes('--latest') || args.includes('--latest=true')) state.latest = args[2];
+  fs.writeFileSync(process.env.GH_STATE, JSON.stringify(state));
+}
 execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/tags/' + args[2], process.env.BUILT_SHA]);
 `, { mode: 0o755 });
   return { dir, git, sha, remote, log,
     run: (name, env = {}, source = workflow) => spawnSync('bash', ['-euo', 'pipefail', '-c', script(name, source)], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/master', GITHUB_REPOSITORY: 'example/multiprompt',
-        TAG: tag, BUILT_SHA: sha, REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } }),
+        TAG: tag, BUILT_SHA: sha, PUBLISHED_TAG: 'v1.2.2', GH_STATE: path.join(dir, 'release-state.json'), REQUESTED_TAG: '', RUNNER_TEMP: dir, GITHUB_OUTPUT: path.join(dir, 'output'), GH_LOG: log, TEST_REMOTE: remote, ...env } }),
     admit: (env = {}) => spawnSync('bash', ['tools/auto-release-admit.sh'], { cwd: dir, encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, GITHUB_REPOSITORY: 'example/multiprompt',
         GH_LOG: log, TEST_REMOTE: remote, TESTED_SHA: git('rev-parse', 'HEAD'), ...env } }),
@@ -111,7 +118,7 @@ test('CLI reads files and fails closed', t => {
   assert.equal(run(`${file}-missing`).status, 1);
 });
 
-test('workflow preserves tag and manual triggers with reusable release, both architectures, immutable builds and version concurrency', () => {
+test('workflow preserves tag and manual triggers with reusable release, both architectures, immutable builds and serialized publication', () => {
   assert.match(workflow, /push:\n    tags: \['v\*'\]/);
   assert.doesNotMatch(workflow, /branches: \[master\]/);
   assert.match(workflow, /workflow_call:[\s\S]*tag:[\s\S]*type: string/);
@@ -125,7 +132,7 @@ test('workflow preserves tag and manual triggers with reusable release, both arc
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
   assert.match(workflow, /if: github.event_name != 'pull_request'/);
   assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 2);
-  assert.match(workflow, /concurrency:\n      group: release-\$\{\{ needs.prepare.outputs.tag \}\}\n      cancel-in-progress: false/);
+  assert.match(workflow, /concurrency:\n      group: release-publication\n      cancel-in-progress: false/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   assert.match(build, /"tools\/version-stamp.test.mjs", "tools\/release-version.test.mjs"/);
@@ -294,7 +301,7 @@ test('master publication is latest, targets built SHA and skips a competing remo
   assert.equal(create[2], tag);
   assert.equal(create[create.indexOf('--target') + 1], f.sha);
   assert.equal(create[create.indexOf('--title') + 1], `multiprompt ${tag}`);
-  assert(create.includes('--latest'));
+  assert(create.includes('--latest=true'));
   assert(create.includes('--generate-notes'));
   const second = f.run('Publish release');
   assert.equal(second.status, 0, second.stderr);
@@ -486,4 +493,59 @@ test('IGSH-1033 a proof builds unchanged application source without inventing re
     assert.equal(result.status, proof === 'true' ? 0 : 1, result.stdout + result.stderr);
     assert.equal(result.stdout, proof === 'true' ? '' : 'STAMP_REQUIRED');
   }
+});
+
+for (const [published, candidate, latest] of [
+  ['v0.28.999', 'v0.28.995', false],
+  ['v0.28.999', 'v0.28.1000', true],
+  ['v0.29.0', 'v0.28.1000', false],
+  ['v1.0.0', 'v0.99.999', false],
+  ['v0.28.999', 'v0.28.999', false],
+  ['v1.2.9007199254740993', 'v1.2.9007199254740994', true],
+]) test(`publication preserves forward-only latest: ${published} then ${candidate}`, { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  const result = f.run('Publish release', { PUBLISHED_TAG: published, TAG: candidate, GITHUB_EVENT_NAME: 'workflow_dispatch' });
+  assert.equal(result.status, 0, result.stderr);
+  const create = f.calls().find(args => args[1] === 'create');
+  assert.ok(create, 'Older releases must still be published for history');
+  assert.equal(create[2], candidate);
+  assert.ok(create.includes(`--latest=${latest}`), JSON.stringify(create));
+  assert.equal(f.calls().filter(args => args[0] === 'api' && args[1].endsWith('/releases/latest')).length, 1);
+});
+
+for (const published of ['', 'unknown', 'v1.2', 'v1.2.3-beta']) test(`publication rejects unreadable latest version: ${published}`, { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  const result = f.run('Publish release', { PUBLISHED_TAG: published || 'unknown', GITHUB_EVENT_NAME: 'workflow_dispatch' });
+  assert.notEqual(result.status, 0);
+  assert.equal(f.calls().filter(args => args[1] === 'create').length, 0);
+});
+
+test('finishing an older release retains both downloads and the newer desktop feed', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  for (const candidate of ['v0.28.999', 'v0.28.995']) {
+    const result = f.run('Publish release', { TAG: candidate, PUBLISHED_TAG: 'v0.28.994', GITHUB_EVENT_NAME: 'workflow_dispatch' });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, 'release-state.json'), 'utf8')), {
+    latest: 'v0.28.999', releases: ['v0.28.999', 'v0.28.995'],
+  });
+});
+
+test('latest-feed read failures cannot replace the desktop update', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  const result = f.run('Publish release', { LATEST_READ_FAIL: '1', GITHUB_EVENT_NAME: 'workflow_dispatch' });
+  assert.notEqual(result.status, 0);
+  assert.equal(f.calls().filter(args => args[1] === 'create').length, 0);
+});
+
+
+test('publication-only dispatch proves the real publisher without building or changing releases', () => {
+  assert.match(workflow, /publication_proof:\n        description: Test publication ordering without building or publishing\n        type: boolean\n        default: false/);
+  const proof = workflow.split('\n  publication-proof:\n')[1]?.split('\n  prepare:\n')[0];
+  assert.ok(proof);
+  assert.match(proof, /if: inputs\.publication_proof/);
+  assert.match(proof, /permissions:\n      contents: read/);
+  assert.match(proof, /run: node --test tools\/release-version\.test\.mjs/);
+  assert.doesNotMatch(proof, /zig build|gh release|secrets\./);
+  assert.match(workflow, /prepare:\n    if: github.event_name != 'pull_request' && !inputs\.publication_proof/);
 });
