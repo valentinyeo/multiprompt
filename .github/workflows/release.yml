@@ -89,8 +89,8 @@ jobs:
     uses: ./.github/workflows/verify.yml
     with:
       feature: all
-      browser_stall: ${{ inputs.browser_stall || false }}
       revision: ${{ needs.prepare.outputs.sha }}
+      browser_stall: ${{ inputs.browser_stall || false }}
 
   build:
     needs: [prepare, journeys]

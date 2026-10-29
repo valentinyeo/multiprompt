@@ -131,13 +131,13 @@ on:
         type: string
   workflow_call:
     inputs:
+      revision:
+        required: false
+        type: string
       browser_stall:
         required: false
         default: false
         type: boolean
-      revision:
-        required: false
-        type: string
       chat_reactions_proof:
         required: false
         default: false
