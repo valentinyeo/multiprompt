@@ -3118,7 +3118,7 @@ class HeldQueueTest(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT state FROM messages WHERE key='message-1'").fetchone()[0], 'submitted')
                 self.assertEqual(db.execute("SELECT key FROM held_receipts WHERE key='message-1'").fetchone(), ('message-1',))
                 db.execute("UPDATE messages SET scan=? WHERE key='message-1'", (self.path.stat().st_size,))
-            for _ in range 20:
+            for _ in range(20):
                 reader.drain_held_queue('term-1', 'sid', self.path)
         self.assertEqual([call.args[0]['text'] for call in self.send.call_args_list], ['first missing'])
         self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['head ', 'third accepted'])
