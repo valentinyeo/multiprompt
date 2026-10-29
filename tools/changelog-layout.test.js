@@ -148,5 +148,5 @@ test('existing command palette speed journey measures real input through changed
   assert.match(journey, /Focus-Palette 'changelog' 6241/);
   assert.match(journey, /\$sample -lt 5/);
   assert.match(journey, /Save-Json \$changelogSpeed 'changelog-speed.json'/);
-  assert.match(journey, /Maximum -ge 100/);
+  assert.match(journey, /foreach \(\$value in \$changelogSpeed\[\$kind\]\) \{ Assert-ReleaseTiming 'changelog-response' \$value \$kind \}/);
 });

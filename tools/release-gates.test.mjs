@@ -125,3 +125,28 @@ if (args[0] === 'api') console.log(JSON.stringify([{ title: 'Speed regression: a
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('missing baseline timing warns without hiding invalid candidate evidence', () => {
+  assert.match(read('.github/workflows/test.yml'), /name: Measure baseline session speed\s+continue-on-error: true/);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'baseline-policy-'));
+  try {
+    const baseline = path.join(dir, 'baseline.json');
+    const candidate = path.join(dir, 'candidate.json');
+    const data = { revision: 'candidate', sessionCount: 10, transcriptBytes: 250 * 1024 * 1024, idleShell: 1, switches: Array.from({ length: 50 }, (_, index) => ({ shell: index % 10, us: 300000, blocks: 2 })), idleUs: Array(50).fill(10000) };
+    fs.writeFileSync(candidate, JSON.stringify(data));
+    const args = [new URL('tools/switch-performance.mjs', root).pathname, 'report', baseline, candidate, '--release-policy'];
+    if (process.platform === 'win32') args[0] = decodeURIComponent(args[0].replace(/^\//, ''));
+    const warned = spawnSync(process.execPath, args, { encoding: 'utf8' });
+    assert.equal(warned.status, 0, warned.stdout + warned.stderr);
+    assert.match(warned.stdout, /Baseline unavailable/);
+    const verdict = JSON.parse(fs.readFileSync(path.join(dir, 'verdict.json'), 'utf8'));
+    assert.equal(verdict[0].unavailable, true);
+    assert.equal(verdict[1].pass, false);
+    assert.equal(verdict[1].p95Ms, 300);
+    data.switches.pop();
+    fs.writeFileSync(candidate, JSON.stringify(data));
+    const invalid = spawnSync(process.execPath, args, { encoding: 'utf8' });
+    assert.notEqual(invalid.status, 0);
+    assert.match(invalid.stderr, /Expected exactly 50 switches/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
