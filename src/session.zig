@@ -48,7 +48,6 @@ const pruneEmptyGroups = @import("sidebar.zig").pruneEmptyGroups;
 const normalizeGroupOrder = @import("sidebar.zig").normalizeGroupOrder;
 const tmuxHostLongLabel = @import("capacity.zig").tmuxHostLongLabel;
 const CHAT_FONT_DEFAULT_PT = @import("app_state.zig").CHAT_FONT_DEFAULT_PT;
-const ProcessPollCache = @import("app_state.zig").ProcessPollCache;
 const win32OpenRead = @import("file_io.zig").win32OpenRead;
 const win32OpenWrite = @import("file_io.zig").win32OpenWrite;
 const win32WriteAll = @import("file_io.zig").win32WriteAll;
@@ -160,8 +159,6 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
 
     var json_buf: [SESSION_JSON_CAPACITY]u8 = undefined;
     var pos: usize = 0;
-    var proc_cache: ProcessPollCache = undefined;
-    var proc_cache_ready = false;
 
     const header = "{\"tabs\":[";
     @memcpy(json_buf[pos .. pos + header.len], header);
@@ -268,11 +265,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
                 pos += 1;
             }
 
-            if (!proc_cache_ready) {
-                proc_cache.refresh();
-                proc_cache_ready = true;
-            }
-            if (proc_cache.findClaudeChildPid(app_state.shells[i].pid) != null or app_state.shells[i].claude_sid_len > 0) {
+            if (app_state.shells[i].claude_session or app_state.shells[i].claude_sid_len > 0) {
                 const cf = ",\"claude_session\":true";
                 @memcpy(json_buf[pos .. pos + cf.len], cf);
                 pos += cf.len;

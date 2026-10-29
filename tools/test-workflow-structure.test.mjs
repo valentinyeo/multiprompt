@@ -116,3 +116,9 @@ test('push verification accepts another ticket branch and rejects losing master 
   assert.notEqual(unrelated, verify);
   assert.throws(() => verifyPushBranches(unrelated), assert.AssertionError);
 });
+
+
+test('palette red control checks only the proposed head, not unrelated merge-tree tests', () => {
+  const palette = fs.readFileSync(new URL('../.github/workflows/palette-dialog-design.yml', import.meta.url), 'utf8');
+  assert.match(palette, /head: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+});
