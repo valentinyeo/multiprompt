@@ -42,7 +42,13 @@ function Shot([string]$Name) {
 function Compare-Views([string]$Name) {
     Focus
     $selected = (Session).active_tab
-    $before = Capture "$Name-shell-sidebar"
+    $script:previousHash = ''
+    $before = Wait-For 'stable shell sidebar' {
+        $hash = Capture "$Name-shell-sidebar"
+        if ($hash -eq $script:previousHash) { return $hash }
+        $script:previousHash = $hash
+        $false
+    }
     Shot "$Name-shell"
     [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
     [void](Wait-For 'Chat View visible' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
@@ -69,10 +75,10 @@ try {
     [void](Wait-For 'three restored sessions' { (Session).tabs.Count -eq 3 })
     Focus
     [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(900, 500)
-    [void](Wait-For 'console previews published' {
+    [void](Wait-For 'three sidebar sessions published' {
         if (-not (Test-Path "$settings/inbox-default.json")) { return $false }
         $inbox = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
-        @($inbox.shells | Where-Object { $_.pv }).Count -eq 3
+        @($inbox.shells).Count -eq 3
     })
     Compare-Views 'expanded'
     $previous = (Session).active_tab
