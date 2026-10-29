@@ -162,6 +162,16 @@ test "local cache bypasses busy remote worker and foreground reservation" {
     chatFileRequest(key);
     try std.testing.expect(!cached_entry.pending); // recent input still defers remote IO
 }
+test "local cache bypasses background stream creation while remote work is busy" {
+    cached_entry = .{ .disk_loaded = true };
+    acquisitions = 0;
+    g_chat_active = false;
+    defer g_chat_active = true;
+    const key = chat_transcript.Identity.init(1, 0, false, "cached", "");
+    chatFileRequestForDelivery(key, true);
+    try std.testing.expectEqual(@as(usize, 1), acquisitions);
+    try std.testing.expect(!cached_entry.pending and cached_entry.stream == null);
+}
 `;
     const file = path.join(dir, 'request.zig'); fs.writeFileSync(file, source.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'local cache bypasses'], { encoding: 'utf8', timeout: 60_000 });
