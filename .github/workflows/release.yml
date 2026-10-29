@@ -8,6 +8,10 @@ on:
       tag:
         description: Release tag to create, for example v0.28.712
         required: true
+      browser_stall:
+        description: Force the quarantined browser driver to hang before publication
+        type: boolean
+        default: false
       proof:
         description: Build both architectures without publishing
         type: boolean
@@ -85,6 +89,7 @@ jobs:
     uses: ./.github/workflows/verify.yml
     with:
       feature: all
+      browser_stall: ${{ inputs.browser_stall || false }}
       revision: ${{ needs.prepare.outputs.sha }}
 
   build:

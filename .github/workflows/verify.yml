@@ -11,6 +11,11 @@ on:
         required: true
         default: appearance
         type: string
+      browser_stall:
+        description: Force the browser warning driver to hang for timeout proof
+        required: false
+        default: false
+        type: boolean
       dictation_stall:
         description: Deliberately stall the dictation capture precondition to prove failure evidence
         required: false
@@ -131,6 +136,10 @@ on:
         type: string
   workflow_call:
     inputs:
+      browser_stall:
+        required: false
+        default: false
+        type: boolean
       revision:
         required: false
         type: string
@@ -829,10 +838,17 @@ jobs:
           Write-Host 'RELEASED_RUNNER_NOTE_NEGATIVE_CONTROL_REJECTED'
           $global:LASTEXITCODE = 0
       - name: Launch Doctor Drive Evidence Cleanup
-        timeout-minutes: ${{ inputs.long_chat_proof && 40 || env.FEATURE == 'chat-dictation' && 5 || 30 }}
+        id: desktop-driver
+        timeout-minutes: ${{ env.FEATURE == 'browser-pane-stuck' && 8 || inputs.long_chat_proof && 40 || env.FEATURE == 'chat-dictation' && 5 || 30 }}
         if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'chat-switch-speed' && env.FEATURE != 'browser-own-profile' && env.FEATURE != 'title-bar'
         shell: powershell
+        env:
+          VERIFY_BROWSER_STALL: ${{ inputs.browser_stall && '1' || '' }}
         run: |
+          if ($env:FEATURE -eq 'browser-pane-stuck' -and $env:VERIFY_BROWSER_STALL -eq '1') {
+            Write-Host 'Forced browser driver hang: timeout must leave the release running'
+            Start-Sleep -Seconds 900
+          }
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
           if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') {
             foreach ($mode in @('sample', 'above', 'below')) {
@@ -870,6 +886,9 @@ jobs:
           }
           python tools/verify-chat-delivery/chat-switch-evidence.py evidence/shape-switch.json --require-cleanup @baseline
           if ($LASTEXITCODE -ne 0) { throw 'Real-shape evidence or cleanup did not satisfy the recorded contract' }
+      - name: Report quarantined browser warning
+        if: always() && env.FEATURE == 'browser-pane-stuck' && steps.desktop-driver.outcome == 'failure' && contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature)
+        run: Write-Output '::warning::Browser recovery driver failed or exceeded eight minutes; quarantined warning does not block publication.'
       - name: Retain pre-launch failure result
         if: always()
         shell: powershell
