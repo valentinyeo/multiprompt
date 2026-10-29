@@ -698,7 +698,7 @@ test "worker receives retained sid and cwd, including a disk-learned sid" {
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
     const fixturePrelude = prelude.replace(fn('chatFileRequest', prelude), '');
-    const dispatchPrelude = extra ? fixturePrelude.replace(fn('chatHistoryStreamsKeep', prelude), '') : fixturePrelude;
+    const dispatchPrelude = extra ? fixturePrelude.replace('fn chatHistoryStreamsKeep(_: u32) void {}\n', '') : fixturePrelude;
     const request = ['chatFileRequest', 'chatFileRequestForDelivery'].filter(n => text.includes(`fn ${n}(`)).map(n => fn(n, text)).join('\n').replace('std.Thread.spawn', 'TestThread.spawn');
     fs.writeFileSync(path.join(dir, 'main-test.zig'), (dispatchPrelude + entry +
       ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support + (extra ? fn('chatHistoryStreamsKeep', text) : '') + extra).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
