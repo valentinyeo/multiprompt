@@ -1,8 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 
-const read = file => fs.readFileSync(file, 'utf8');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(file, 'utf8'));
 const chat = read('src/chat_render.zig');
 const fonts = read('src/fonts.zig');
 const layout = read('src/window_layout.zig');
@@ -45,8 +47,8 @@ test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons
   assert.match(handler, /items.copy_target == .selection\) selection_text else message_text/);
   assert.match(handler, /debugLog\(menu_log\[0\.\.menu_log_len\]\)/);
   assert.match(handler, /\[chat\] message menu items=/);
-  assert.match(fonts, /pub fn trackPopupMenu\([^]*?return trackThemedPopupMenu\(menu, flags, x, y, reserved, owner, rect, false\);/);
-  assert.match(fonts, /pub fn trackMessagePopupMenu\([^]*?return trackThemedPopupMenu\(menu, flags, x, y, reserved, owner, rect, true\);/);
+  assert.match(fonts, /pub fn trackPopupMenu\([^]*?return trackThemedPopupMenu\(menu, flags, x, y, reserved, owner, rect, false, &\.\{\}\);/);
+  assert.match(fonts, /pub fn trackMessagePopupMenu\([^]*?return trackThemedPopupMenu\(menu, flags, x, y, reserved, owner, rect, true, &\.\{\}\);/);
   assert.match(fonts, /chat_style.menuLook\(if \(bound\) \|theme\| theme.background\(\) else unboundBackground\(\)\)/);
   assert.match(read('src/main.zig'), /bindMenuTheme\(\.\{\s*\.background = &@import\("themes.zig"\).themeConsoleBg,\s*\.foreground = &@import\("themes.zig"\).themeConsoleFg,\s*\.fill_round_rect = &@import\("smooth.zig"\).fillRoundRect/);
   assert.match(fonts, /DWMWCP_ROUND/);

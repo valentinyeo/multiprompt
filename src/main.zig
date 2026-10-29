@@ -1,3 +1,4 @@
+const SEARCH_SETTINGS_OFFSET = @import("app_state.zig").SEARCH_SETTINGS_OFFSET;
 const list_input = @import("list_input.zig");
 const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
@@ -678,6 +679,7 @@ const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
+const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -1137,10 +1139,7 @@ const keepSearchSelectionVisible = @import("command_palette.zig").keepSearchSele
 const updateSearchResults = @import("command_palette.zig").updateSearchResults;
 const paletteRowIsHeader = @import("command_palette.zig").paletteRowIsHeader;
 const stepOverPaletteHeaders = @import("command_palette.zig").stepOverPaletteHeaders;
-const BROWSER_SHORTCUT_OPEN_GUARD_MS = @import("app_state.zig").BROWSER_SHORTCUT_OPEN_GUARD_MS;
-const claimBrowserToggleEvent = @import("shortcuts.zig").claimBrowserToggleEvent;
 const physicalBrowserShortcutShouldRecover = @import("shortcuts.zig").physicalBrowserShortcutShouldRecover;
-const physicalBrowserShortcutMayClose = @import("shortcuts.zig").physicalBrowserShortcutMayClose;
 const startStaleAltMouseHookThread = @import("shortcuts.zig").startStaleAltMouseHookThread;
 const recordNativeBrowserDropGesture = @import("shortcuts.zig").recordNativeBrowserDropGesture;
 const openUrlAtScreenPoint = @import("clipboard.zig").openUrlAtScreenPoint;
@@ -1243,17 +1242,20 @@ comptime {
         _ = @import("vps.zig");
         _ = @import("chat_composer.zig");
         _ = @import("chat_capture.zig");
+        _ = @import("console_snapshot.zig");
         _ = @import("chat_session.zig");
         _ = @import("chat_render.zig");
         _ = @import("chat_find_ui.zig");
         _ = @import("chat_send.zig");
         _ = @import("window_layout.zig");
         _ = @import("window_frame.zig");
+        _ = @import("settings_panel.zig");
         _ = @import("rename.zig");
         _ = @import("changelog.zig");
         _ = @import("drawing.zig");
         _ = @import("smooth.zig");
         _ = @import("telemetry_panel.zig");
+        _ = @import("usage_card.zig");
         _ = @import("clipboard.zig");
         _ = @import("notifications.zig");
         _ = @import("browser_bridge.zig");
@@ -1350,6 +1352,7 @@ fn recordFrontVisit() void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (freeze_recorder.heartbeat(msg, wp)) return 0;
     freeze_recorder.note(msg, app_state.active_shell, if (app_state.g_inbox_active) .inbox else if (app_state.g_all_sessions_active) .sessions else if (app_state.g_search_active) .search else if (app_state.g_shortcuts_active) .shortcuts else if (app_state.g_changelog_active) .changelog else if (app_state.g_browser_focus_mode) .browser else if (app_state.g_chat_active) .chat else .terminal);
     if (msg == update_release.WM_RESPONSIVE) {
         update_release.ready();
@@ -1360,6 +1363,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
     if (@import("window_frame.zig").handle(hwnd, msg, wp, lp)) |result| return result;
+    if (msg == WM_LBUTTONDOWN and @import("settings_panel.zig").isOpen()) {
+        @import("settings_panel.zig").close();
+        return 0;
+    }
+    if (@import("settings_panel.zig").windowKey(msg, wp, false)) return 0;
     if (!app_state.g_account_locked and @import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
     if (msg == @import("console.zig").WM_STARTUP_SHELL_READY) {
         @import("console.zig").queueStartupShell(@ptrFromInt(@as(usize, @bitCast(lp))));
@@ -1417,6 +1425,31 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         if (@import("fonts.zig").menuChar(wp)) |result| return result;
     }
     if (@import("fonts.zig").menuMessage(msg, lp)) |result| return result;
+    if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) return 0;
+    if (msg == WM_SYSCOMMAND and (wp & 0xFFF0) == 0xF060) {
+        debugLog("close-command source=SC_CLOSE sender=unavailable");
+        app_state.requestAppClose(hwnd, .window_control);
+        return 0;
+    }
+    if (msg == WM_CLOSE) {
+        const reason = std.enums.fromInt(app_state.CloseReason, wp);
+        const foreground = GetForegroundWindow();
+        const intentional = reason != null or foreground == hwnd or @import("win32.zig").IsChild(hwnd, foreground) != 0;
+        var foreground_pid: DWORD = 0;
+        _ = GetWindowThreadProcessId(foreground, &foreground_pid);
+        var close_log: [384]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&close_log, "close-request action={s} reason={s} sender={s} declared_sender_pid={d} receiver_pid={d} transport={s} foreground_hwnd={X} foreground_pid={d}", .{
+            @as([]const u8, if (intentional) "accept" else "ignore"),
+            if (reason) |r| @tagName(r) else if (intentional) "foreground_close" else "unsolicited",
+            @as([]const u8, if (reason != null) "declared" else "unavailable"),
+            lp,
+            @import("win32.zig").GetCurrentProcessId(),
+            @as([]const u8, if (@import("win32.zig").InSendMessageEx(null) != 0) "sent" else "posted-or-local"),
+            if (foreground) |fg| @intFromPtr(fg) else 0,
+            foreground_pid,
+        }) catch "close-request log-overflow");
+        if (!intentional) return 0;
+    }
     if (app_state.g_account_locked) {
         switch (msg) {
             WM_PAINT => {
@@ -1526,6 +1559,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOVE => {
+            @import("settings_panel.zig").reposition();
             noteMainWindowMonitor(hwnd);
             if (app_state.g_monitor_transition.active) {
                 armMonitorTransitionTimer(hwnd);
@@ -1547,7 +1581,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SIZE => {
+            @import("usage_card.zig").close();
             more_menu.close();
+            @import("workspace_switcher.zig").close();
+            @import("settings_panel.zig").reposition();
             const SIZE_MINIMIZED: WPARAM = 1;
             if (wp == SIZE_MINIMIZED) {
                 resetPaintBackbuffer();
@@ -1644,6 +1681,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             @import("workspaces.zig").captureWorkspaceFocus();
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+            if (!app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
+                !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
+                !app_state.g_snippet_create_active and @import("workspace_switcher.zig").headerClick(mx, my)) return 0;
 
             if (!app_state.g_search_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and
                 !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_url_picker_active and
@@ -1929,6 +1969,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 {
+                    if (@import("usage_card.zig").versionStripHit(mx, my)) {
+                        updateCardRelaunch(hwnd);
+                        return 0;
+                    }
                     const upd_hit = updateCardHit(mx, my);
                     if (upd_hit != 0) {
                         app_state.g_shell_focused = false;
@@ -1948,7 +1992,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_shell_focused = false;
                 _ = InvalidateRect(hwnd, null, 0);
                 const logical_my = my + app_state.g_sidebar_scroll;
-                const target = hitTestSidebar(logical_my);
+                const target = hitTestSidebar(mx, logical_my);
                 switch (target) {
                     .inbox => |ri| {
                         jumpToInboxRow(ri);
@@ -1960,7 +2004,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     },
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) {
-                            if (!app_state.g_sidebar_collapsed and mx > SIDEBAR_W() - 30) {
+                            if (!app_state.g_sidebar_collapsed and !app_state.shells[tab_idx].pinned_top and mx > SIDEBAR_W() - 30) {
                                 closeShell(tab_idx);
                             } else if (isCtrlDown()) {
                                 commitRename();
@@ -2091,6 +2135,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
             if (pt.x >= 0 and pt.x < SIDEBAR_W() and pt.y >= 0) {
                 const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
+                if (@import("update_card.zig").updateCardScroll(pt.x, pt.y, delta)) return 0;
                 if (sidebarStickyCardHitTest(pt.y)) {
                     cycleSidebarStatusCard(if (delta < 0) 1 else -1);
                     return 0;
@@ -2129,6 +2174,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_status_card_hover = false;
                 _ = InvalidateRect(hwnd, null, 0);
             }
+            if (app_state.g_sidebar_hover != null) {
+                app_state.g_sidebar_hover = null;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             if (app_state.g_workspace_hover != null) {
                 app_state.g_workspace_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2144,6 +2193,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOUSEMOVE => {
+            const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll)) {
+                .tab => |index| index,
+                else => null,
+            } else null;
+            if (sidebar_hover != app_state.g_sidebar_hover) {
+                app_state.g_sidebar_hover = sidebar_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (sidebar_hover != null) {
+                var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                _ = TrackMouseEvent(&tracking);
+            }
             {
                 const card_hover = sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp));
                 if (card_hover != app_state.g_status_card_hover) {
@@ -2283,10 +2344,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (ady < 6) return 0;
                     const now = GetTickCount64();
                     if (app_state.drag_last_swap_tick != 0 and now - app_state.drag_last_swap_tick < 120) return 0;
+                    if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
                     if (sidebarStickyCardHitTest(my)) return 0;
 
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
-                    const ht = hitTestSidebar(logical_my_drag);
+                    const ht = hitTestSidebar(mx, logical_my_drag);
                     var target_gidx: ?u32 = null;
                     switch (ht) {
                         .tab => |ti| {
@@ -2377,7 +2439,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const sidebar_w_for_reorder = SIDEBAR_W();
                 if (my >= 0 and !sidebarStickyCardHitTest(my) and mx >= -REORDER_X_MARGIN and mx < sidebar_w_for_reorder + REORDER_X_MARGIN) {
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
-                    const ht = hitTestSidebar(logical_my_drag);
+                    const ht = hitTestSidebar(mx, logical_my_drag);
                     if (sidebarTierForDrop(ht)) |want_tier| {
                         if (app_state.drag_src < app_state.shell_count and shellSidebarTier(app_state.drag_src) != want_tier) {
                             switch (want_tier) {
@@ -2509,9 +2571,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
+                if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
                 if (sidebarStickyCardHitTest(my)) return 0;
                 const logical_my = my + app_state.g_sidebar_scroll;
-                const ht = hitTestSidebar(logical_my);
+                const ht = hitTestSidebar(mx, logical_my);
                 switch (ht) {
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) openTabContextPalette(hwnd, tab_idx);
@@ -2553,6 +2616,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_LBUTTONDBLCLK => {
             const mx = GET_X(lp);
             const my = GET_Y(lp);
+            if (!app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active and
+                !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and
+                !app_state.g_snippet_create_active and @import("workspace_switcher.zig").headerClick(mx, my)) return 0;
             const tth = threadTitleHeight();
             const tth_top = threadTitleTop();
             if (tth > 0 and mx >= SIDEBAR_W() and my >= tth_top and my < tth_top + tth and app_state.active_shell < app_state.shell_count and
@@ -2570,7 +2636,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 const logical_my = my + app_state.g_sidebar_scroll;
-                const ht = hitTestSidebar(logical_my);
+                const ht = hitTestSidebar(mx, logical_my);
                 switch (ht) {
                     .tab => |tab_idx| {
                         if (mx <= SIDEBAR_W() - 30 and tab_idx < app_state.shell_count and tab_idx == app_state.active_shell) {
@@ -2713,14 +2779,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (physical_shortcut) {
                 const event_time: u32 = @truncate(@as(usize, @bitCast(lp)));
                 browserTraceN("shortcutToggle event=", event_time);
-                if (!claimBrowserToggleEvent(event_time, &app_state.g_browser_toggle_last_handled_event_time)) {
-                    browserTrace("shortcutToggle suppressed duplicate event time");
-                    return 0;
-                }
             }
             if (wp == 2 and app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) {
-                app_state.g_browser_shortcut_open_guard_shell_id = app_state.shells[app_state.active_shell].shell_id;
-                app_state.g_browser_shortcut_open_guard_until = GetTickCount64() + BROWSER_SHORTCUT_OPEN_GUARD_MS;
                 openBrowserPaneForShell(app_state.active_shell, "");
                 return 0;
             }
@@ -2738,15 +2798,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.shells[target_idx].browser_enabled,
                     browser_hwnd_live,
                     app_state.shells[target_idx].browser_launch_tick,
+                    app_state.shells[target_idx].browser_connection_id != 0 or app_state.shells[target_idx].browser_hwnd != null or
+                        app_state.shells[target_idx].browser_relaunch_after_tick != 0,
                 );
-                if (physical_shortcut and app_state.shells[target_idx].browser_enabled and !recover_dead_pane and !physicalBrowserShortcutMayClose(
-                    app_state.shells[target_idx].shell_id,
-                    app_state.shells[target_idx].browser_launch_tick,
-                    app_state.shells[target_idx].browser_hwnd == null,
-                    GetTickCount64(),
-                    app_state.g_browser_shortcut_open_guard_shell_id,
-                    app_state.g_browser_shortcut_open_guard_until,
-                )) return 0;
                 if (app_state.g_webview2_active) {
                     closeWebView2();
                     if (app_state.active_shell < app_state.shell_count) _ = showShellConsole(app_state.active_shell, SW_SHOW, "wndProc.WM_APP_BROWSER_TOGGLE");
@@ -2757,18 +2811,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 } else {
                     app_state.shells[target_idx].browser_enabled = !app_state.shells[target_idx].browser_enabled;
                 }
+                if (physical_shortcut) browserTraceN("shortcutToggle enabled=", @intFromBool(app_state.shells[target_idx].browser_enabled));
                 if (app_state.shells[target_idx].browser_enabled) {
-                    if (physical_shortcut) {
-                        app_state.g_browser_shortcut_open_guard_shell_id = app_state.shells[target_idx].shell_id;
-                        app_state.g_browser_shortcut_open_guard_until = GetTickCount64() + BROWSER_SHORTCUT_OPEN_GUARD_MS;
-                        browserTrace("shortcutToggle armed 10s open guard");
-                    }
                     ensureBrowserDefaultUrl(target_idx);
                     updateBrowserVisibility();
                 } else {
-                    if (app_state.g_browser_shortcut_open_guard_shell_id == app_state.shells[target_idx].shell_id) {
-                        app_state.g_browser_shortcut_open_guard_until = 0;
-                    }
                     discardBrowserUrlBarEdit();
                     if (target_idx == app_state.active_shell) {
                         app_state.g_browser_focus_mode = false;
@@ -2923,7 +2970,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_APP_QUIT_ALL => {
             app_state.g_quit_all_in_progress = true;
             rememberOpenWorkspaceForQuit();
-            _ = PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            app_state.requestAppClose(hwnd, .quit_all);
             return 0;
         },
         WM_APP_RESTART => {
@@ -2968,7 +3015,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     if (pi.hThread != null) _ = CloseHandle(pi.hThread);
                 }
             }
-            _ = PostMessageW(app_state.g_main_hwnd, WM_CLOSE, 0, 0);
+            app_state.requestAppClose(app_state.g_main_hwnd, .restart);
             return 0;
         },
         WM_APP_NEXT_TAB => {
@@ -3313,12 +3360,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_FONT_BIGGER => {
             if (chatViewOwnsInput()) {
-                app_state.g_chat_font_pt = @min(28, app_state.g_chat_font_pt + 1);
-                resetFontCache();
-                layoutChatControls();
-                chatRefreshAfterFontChange();
-                _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-                saveSession();
+                setChatFontPoint(app_state.g_chat_font_pt + 1);
                 var cfb: [64]u8 = undefined;
                 const cfs = std.fmt.bufPrint(&cfb, "Chat text size: {d}", .{app_state.g_chat_font_pt}) catch "Chat text size";
                 showHeaderNoticeAscii(cfs, 1500, false);
@@ -3337,12 +3379,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_FONT_SMALLER => {
             if (chatViewOwnsInput()) {
-                app_state.g_chat_font_pt = @max(10, app_state.g_chat_font_pt - 1);
-                resetFontCache();
-                layoutChatControls();
-                chatRefreshAfterFontChange();
-                _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-                saveSession();
+                setChatFontPoint(app_state.g_chat_font_pt - 1);
                 var cfb: [64]u8 = undefined;
                 const cfs = std.fmt.bufPrint(&cfb, "Chat text size: {d}", .{app_state.g_chat_font_pt}) catch "Chat text size";
                 showHeaderNoticeAscii(cfs, 1500, false);
@@ -3361,12 +3398,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_FONT_RESET => {
             if (chatViewOwnsInput()) {
-                app_state.g_chat_font_pt = CHAT_FONT_DEFAULT_PT;
-                resetFontCache();
-                layoutChatControls();
-                chatRefreshAfterFontChange();
-                _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
-                saveSession();
+                setChatFontPoint(CHAT_FONT_DEFAULT_PT);
                 showHeaderNoticeAscii("Chat text size: default", 1500, false);
                 return 0;
             }
@@ -3484,6 +3516,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_all_sessions_tab = AS_TAB_ARCHIVED;
                     openAllSessions(hwnd);
                 },
+                @intFromEnum(more_menu.Item.resync) => @import("chat_session.zig").chatResync(),
                 @intFromEnum(more_menu.Item.waiting) => hideActiveTabUntilAttention(),
                 @intFromEnum(more_menu.Item.remind) => if (tmux) {
                     _ = PostMessageW(hwnd, WM_APP_REMIND_PRESETS_OPEN, 0, 0);
@@ -3649,6 +3682,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_KEYDOWN => {
+            if (@import("workspace_switcher.zig").key(wp)) return 0;
             if (app_state.g_search_active) list_input.palette.keyboard();
             if (app_state.g_url_picker_active) {
                 if (wp == 0x26) {
@@ -4061,6 +4095,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_LAYOUT_READY => {
             handleLayoutReply(lp);
+            return 0;
+        },
+        @import("win32.zig").WM_APP_SETTINGS_OPEN => {
+            debugLog("[settings] open dispatched");
+            cancelShellRefocus(hwnd);
+            if (app_state.g_search_active) _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+            if (app_state.g_shortcuts_active) _ = SendMessageW(hwnd, WM_APP_SHORTCUTS_CLOSE, 0, 0);
+            if (app_state.g_changelog_active) _ = SendMessageW(hwnd, WM_APP_CHANGELOG_CLOSE, 0, 0);
+            _ = @import("win32.zig").UpdateWindow(hwnd);
+            if (app_state.g_chat_transcript_hwnd != null) _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);
+            @import("settings_panel.zig").open(hwnd);
             return 0;
         },
         WM_APP_SHORTCUTS_OPEN => {
@@ -4662,6 +4707,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (target == SEARCH_CHAT_RESYNC_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_from_inbox = false;
+                    app_state.g_shell_focused = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    @import("chat_session.zig").chatResync();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if (target == SEARCH_CHAT_MORE_MENU_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_search_from_inbox = false;
@@ -4987,6 +5042,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_scroll = 0;
                     updateSearchResults();
                     _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_SETTINGS_OFFSET) {
+                    _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+                    _ = PostMessageW(hwnd, @import("win32.zig").WM_APP_SETTINGS_OPEN, 0, 0);
                     return 0;
                 }
                 if (target == SEARCH_QUIT_OFFSET) {
@@ -5663,7 +5723,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_active = false;
                     app_state.g_browser_focus_mode = false;
                     app_state.g_shell_focused = true;
-                    app_state.g_browser_shortcut_open_guard_until = 0;
                     clearSearchBackdrop();
                     discardBrowserUrlBarEdit();
                     closeWebView2();
@@ -5906,7 +5965,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     } else {
                         app_state.g_shell_focused = false;
-                        _ = PostMessageW(app_state.g_main_hwnd, WM_CLOSE, 0, 0);
+                        app_state.requestAppClose(app_state.g_main_hwnd, .workspace_close);
                     }
                     return 0;
                 }
@@ -6438,33 +6497,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     app_state.g_pending_new_tab_group = 0;
                     showActiveShellAfterOverlay();
-                    if (workspace_idx < app_state.g_workspace_count) {
-                        const e = &app_state.g_workspaces[workspace_idx];
-                        var id_copy: [64]u8 = std.mem.zeroes([64]u8);
-                        const id_len = @min(e.id_len, id_copy.len - 1);
-                        if (id_len > 0) @memcpy(id_copy[0..id_len], e.id[0..id_len]);
-                        var name_copy: [64]u8 = std.mem.zeroes([64]u8);
-                        const name_len = @min(e.name_len, name_copy.len - 1);
-                        if (name_len > 0) @memcpy(name_copy[0..name_len], e.name[0..name_len]);
-                        var host_copy: [64]u8 = std.mem.zeroes([64]u8);
-                        const host_len = @min(e.host_len, host_copy.len - 1);
-                        if (host_len > 0) @memcpy(host_copy[0..host_len], e.host[0..host_len]);
-                        const id = id_copy[0..id_len];
-                        const name = name_copy[0..name_len];
-                        const host = host_copy[0..host_len];
-                        if (std.mem.eql(u8, id, getInstanceName())) {} else if (app_state.g_single_window and findMyWorkspaceSlot(id) != null) {
-                            switchToWorkspace(findMyWorkspaceSlot(id).?);
-                        } else if (findAndFocusWorkspaceWindow(id, name)) {} else if (host.len > 0) {} else if (app_state.g_single_window) {
-                            if (absorbWorkspaceIntoSlots(id, name)) {
-                                if (findMyWorkspaceSlot(id)) |slot| switchToWorkspace(slot);
-                            } else {
-                                newWorkspace();
-                            }
-                        } else {
-                            setWorkspaceRestoreAndSave(id, name, true);
-                            spawnWorkspaceWindow(id);
-                        }
-                    }
+                    @import("workspaces.zig").openWorkspaceByIndex(workspace_idx);
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
@@ -6629,43 +6662,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
-                if (target == SEARCH_THEME_SYSTEM_OFFSET or target == SEARCH_THEME_DARK_OFFSET or target == SEARCH_THEME_MID_OFFSET or target == SEARCH_THEME_LIGHT_OFFSET or target == SEARCH_THEME_AMOLED_OFFSET or target == SEARCH_THEME_EDGE_GRAY_OFFSET) {
-                    app_state.g_system_theme = target == SEARCH_THEME_SYSTEM_OFFSET;
-                    app_state.g_dev_theme_active = false;
-                    app_state.g_multiprompt_theme = false;
-                    if (app_state.g_system_theme) {
-                        resolveSystemThemeFlags();
-                    } else {
-                        app_state.g_light_theme = target == SEARCH_THEME_LIGHT_OFFSET;
-                        app_state.g_mid_theme = target == SEARCH_THEME_MID_OFFSET;
-                        app_state.g_edge_gray_theme = target == SEARCH_THEME_EDGE_GRAY_OFFSET;
-                        app_state.g_amoled_theme = target == SEARCH_THEME_AMOLED_OFFSET;
-                    }
-                    resetFontCache();
-                    applyTitleBarTheme();
-                    applyConsoleThemeToAllShells();
-                    repositionActive();
-                    refreshBrowserEdgeMasks();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    saveGlobalTheme();
-                    return 0;
-                }
-                if (target == SEARCH_THEME_MULTIPROMPT_OFFSET) {
-                    app_state.g_system_theme = false;
-                    app_state.g_multiprompt_theme = true;
-                    app_state.g_dev_theme_active = false;
-                    app_state.g_light_theme = false;
-                    app_state.g_mid_theme = false;
-                    app_state.g_edge_gray_theme = false;
-                    app_state.g_amoled_theme = false;
-                    resetFontCache();
-                    applyTitleBarTheme();
-                    applyConsoleThemeToAllShells();
-                    repositionActive();
-                    refreshBrowserEdgeMasks();
-                    startSpinnerTimerIfNeeded();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    saveGlobalTheme();
+                const theme_choice: ?@import("themes.zig").Choice = switch (target) {
+                    SEARCH_THEME_SYSTEM_OFFSET => .system,
+                    SEARCH_THEME_DARK_OFFSET => .dark,
+                    SEARCH_THEME_MID_OFFSET => .mid,
+                    SEARCH_THEME_LIGHT_OFFSET => .light,
+                    SEARCH_THEME_AMOLED_OFFSET => .amoled,
+                    SEARCH_THEME_EDGE_GRAY_OFFSET => .edge_gray,
+                    SEARCH_THEME_MULTIPROMPT_OFFSET => .multiprompt,
+                    else => null,
+                };
+                if (theme_choice) |choice| {
+                    @import("themes.zig").choose(choice);
                     return 0;
                 }
                 if (target == SEARCH_THEME_DEV_BLUE_OFFSET and IS_DEV) {
@@ -7021,6 +7029,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_ACTIVATEAPP => {
             if (wp == 0) {
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
+                @import("usage_card.zig").close();
                 @import("chat_session.zig").chatReadDeactivate();
             } else {
                 focusGuardNoteActivation();
@@ -7142,6 +7151,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (wp == TIMER_CHAT_REFRESH) {
+                if (!app_state.g_chat_active or IsIconic(hwnd) != 0 or IsWindowVisible(hwnd) == 0) @import("chat_session.zig").chatHistoryStreamsKeep(0);
                 if (app_state.g_chat_browser_swap.shell_id != 0) return 0;
                 if (app_state.g_chat_active or app_state.g_voice_mode_active) {
                     if (!app_state.g_voice_mode_active and (IsIconic(hwnd) != 0 or IsWindowVisible(hwnd) == 0)) return 0;
@@ -8020,6 +8030,8 @@ pub fn main(init: std.process.Init) void {
         usage_telemetry.main(init) catch {};
         return;
     }
+    if (@import("console_snapshot.zig").runIfRequested(args)) return;
+    defer @import("console_snapshot.zig").close();
     if (update_release.runHelperIfRequested(args)) return;
 
     debugLog("launch process-start version=" ++ APP_VERSION);
@@ -8212,6 +8224,8 @@ pub fn main(init: std.process.Init) void {
     app_state.g_main_hwnd = hwnd;
     @import("browser_pane.zig").installBrowserDockHooks();
     defer @import("browser_pane.zig").uninstallBrowserDockHooks();
+    @import("report_upload.zig").start();
+    defer @import("report_upload.zig").stop();
     freeze_recorder.start(hwnd, APP_VERSION);
     defer freeze_recorder.stop();
     defer if (app_state.g_account_instance_mutex != null) {
@@ -8231,10 +8245,20 @@ pub fn main(init: std.process.Init) void {
     update_release.beginCheck();
     var msg: MSG = std.mem.zeroes(MSG);
     while (GetMessageW(&msg, null, 0, 0) > 0) {
+        if (@import("settings_panel.zig").dialogMessage(&msg)) continue;
         _ = TranslateMessage(&msg);
         _ = DispatchMessageW(&msg);
         launch_cache.acceptedInput(msg.message);
     }
+}
+
+pub fn setChatFontPoint(point: i32) void {
+    app_state.g_chat_font_pt = std.math.clamp(point, 10, 28);
+    resetFontCache();
+    layoutChatControls();
+    chatRefreshAfterFontChange();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+    saveSession();
 }
 
 var startup_phase: @import("launch_plan.zig").Deferred = .account;

@@ -217,6 +217,21 @@ pub const History = struct {
         }
     }
 
+    pub fn requestIdAlloc(self: History, a: std.mem.Allocator, block: md.Block) !?[]u16 {
+        if (block.message_id == 0) return null;
+        var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
+        while (lines.next()) |line| {
+            if (line.len == 0) continue;
+            const parsed = try std.json.parseFromSlice(Message, a, line, .{ .ignore_unknown_fields = true });
+            defer parsed.deinit();
+            const id = parsed.value.read_id orelse parsed.value.id;
+            if (id.len == 0) continue;
+            const identity = std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, if (self.read_sid[0] != 0) &self.read_sid else &self.sid), id);
+            if (identity == block.message_id) return try std.unicode.utf8ToUtf16LeAlloc(a, id);
+        }
+        return null;
+    }
+
     pub fn deliveryEvidence(self: History, a: std.mem.Allocator, pending: echo.Pending) !echo.DeliveryEvidence {
         var result: echo.DeliveryEvidence = .{};
         var complete = (self.start == 0 and !self.restore_full) or !ISSUE_349_STRICT_DEQUEUE;
@@ -343,8 +358,9 @@ pub const History = struct {
         var arena = std.heap.ArenaAllocator.init(a);
         defer arena.deinit();
         const scratch = arena.allocator();
-        var incoming = std.StringHashMap(struct { rows: std.ArrayList(u8) = .empty, used: bool = false, known: bool = false, index: usize }).init(scratch);
-        var order: std.ArrayList([]const u8) = .empty;
+        var incoming = std.HashMap(RowIdentity, struct { rows: std.ArrayList(u8) = .empty, used: bool = false, known: bool = false, index: usize }, RowIdentity.Context, 80).init(scratch);
+        var order: std.ArrayList(RowIdentity) = .empty;
+        var previous_matches: std.ArrayList(?usize) = .empty;
         var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
@@ -361,7 +377,10 @@ pub const History = struct {
         lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            if (incoming.getPtr(try rowIdentity(scratch, line))) |entry| {
+            const key = try rowIdentity(scratch, line);
+            const matched = incoming.getPtr(key);
+            try previous_matches.append(scratch, if (matched) |entry| entry.index else null);
+            if (matched) |entry| {
                 entry.known = true;
                 shared = true;
             }
@@ -373,11 +392,13 @@ pub const History = struct {
         var rows: std.ArrayList(u8) = .empty;
         errdefer rows.deinit(a);
         var cursor_index: usize = 0;
+        var previous_index: usize = 0;
         lines = std.mem.splitScalar(u8, previous.rows.items, '\n');
         while (lines.next()) |line| {
             if (line.len == 0) continue;
-            const key = try rowIdentity(scratch, line);
-            if (incoming.getPtr(key)) |replacement| {
+            const matched = previous_matches.items[previous_index];
+            previous_index += 1;
+            if (if (matched) |index| incoming.getPtr(order.items[index]) else null) |replacement| {
                 while (cursor_index <= replacement.index) : (cursor_index += 1) {
                     const added = incoming.getPtr(order.items[cursor_index]).?;
                     if (!added.known and !added.used) {
@@ -400,25 +421,79 @@ pub const History = struct {
         self.rows = rows;
     }
 
-    fn rowIdentity(a: std.mem.Allocator, line: []const u8) ![]const u8 {
-        const parsed = try std.json.parseFromSlice(Message, a, line, .{ .ignore_unknown_fields = true });
-        defer parsed.deinit();
-        const m = parsed.value;
+    const RowIdentity = struct {
+        role: []const u8,
+        id: []const u8,
+        segment: u64,
+        timestamp: []const u8,
+        text: []const u8,
+        settlement: @FieldType(Message, "settlement"),
+
+        const Context = struct {
+            pub fn hash(_: @This(), key: RowIdentity) u64 {
+                var h = std.hash.Wyhash.init(key.segment);
+                inline for (.{ "role", "id", "timestamp", "text" }) |field| {
+                    const bytes = @field(key, field);
+                    std.hash.autoHash(&h, bytes.len);
+                    h.update(bytes);
+                }
+                std.hash.autoHash(&h, key.settlement != null);
+                if (key.settlement) |fact| {
+                    std.hash.autoHash(&h, fact.operation.len);
+                    h.update(fact.operation);
+                    h.update(fact.content);
+                }
+                return h.final();
+            }
+
+            pub fn eql(_: @This(), lhs: RowIdentity, rhs: RowIdentity) bool {
+                if (lhs.segment != rhs.segment or (lhs.settlement == null) != (rhs.settlement == null)) return false;
+                inline for (.{ "role", "id", "timestamp", "text" }) |field| {
+                    if (!std.mem.eql(u8, @field(lhs, field), @field(rhs, field))) return false;
+                }
+                if (lhs.settlement) |fact| {
+                    if (!std.mem.eql(u8, fact.operation, rhs.settlement.?.operation) or !std.mem.eql(u8, fact.content, rhs.settlement.?.content)) return false;
+                }
+                return true;
+            }
+        };
+    };
+
+    fn rowIdentity(a: std.mem.Allocator, line: []const u8) !RowIdentity {
+        const m = try std.json.parseFromSliceLeaky(Message, a, line, .{ .ignore_unknown_fields = true });
         const id = m.read_id orelse m.id;
-        return std.json.Stringify.valueAlloc(a, .{ m.role, id, m.segment, m.timestamp, if (id.len == 0) m.text else "", if (id.len == 0) m.settlement else null }, .{});
+        return .{ .role = m.role, .id = id, .segment = m.segment, .timestamp = m.timestamp, .text = if (id.len == 0) m.text else "", .settlement = if (id.len == 0) m.settlement else null };
+    }
+
+    pub fn cacheRows(self: History, a: std.mem.Allocator) ![]const u8 {
+        const rows = self.rows.items;
+        const budget = TAIL_BYTES - 512;
+        if (rows.len <= budget) return rows;
+        var end = rows.len;
+        var position = end;
+        while (position > 0) {
+            const row_end = position;
+            position -= 1;
+            const row_start = if (std.mem.lastIndexOfScalar(u8, rows[0..position], '\n')) |n| n + 1 else 0;
+            const parsed = try std.json.parseFromSlice(Message, a, rows[row_start..position], .{ .ignore_unknown_fields = true });
+            defer parsed.deinit();
+            if ((std.mem.eql(u8, parsed.value.role, "user") or std.mem.eql(u8, parsed.value.role, "assistant")) and parsed.value.text.len > 0) {
+                if (row_start < rows.len - budget and row_end - row_start <= budget) end = row_end;
+                break;
+            }
+            position = row_start;
+        }
+        var start = end -| budget;
+        if (start > 0) start += if (std.mem.indexOfScalar(u8, rows[start..end], '\n')) |n| n + 1 else end - start;
+        return rows[start..end];
     }
 
     pub fn encode(self: History, a: std.mem.Allocator, key: transcript.Identity) ![]u8 {
-        var start: usize = 0;
-        const budget = TAIL_BYTES - 512;
-        if (self.rows.items.len > budget) {
-            start = self.rows.items.len - budget;
-            start += if (std.mem.indexOfScalar(u8, self.rows.items[start..], '\n')) |n| n + 1 else self.rows.items.len - start;
-        }
-        const header = try std.json.Stringify.valueAlloc(a, Header{ .inode = self.inode, .offset = self.offset, .start = self.start, .sid = std.mem.sliceTo(&self.sid, 0), .host = key.host, .codex = key.codex, .tmux = std.mem.sliceTo(&key.tmux, 0), .mtime = self.mtime, .probe = std.mem.sliceTo(&self.probe, 0), .read_sid = std.mem.sliceTo(&self.read_sid, 0), .partial = start > 0 or self.restore_full }, .{});
+        const rows = try self.cacheRows(a);
+        const header = try std.json.Stringify.valueAlloc(a, Header{ .inode = self.inode, .offset = self.offset, .start = self.start, .sid = std.mem.sliceTo(&self.sid, 0), .host = key.host, .codex = key.codex, .tmux = std.mem.sliceTo(&key.tmux, 0), .mtime = self.mtime, .probe = std.mem.sliceTo(&self.probe, 0), .read_sid = std.mem.sliceTo(&self.read_sid, 0), .partial = rows.len < self.rows.items.len or self.restore_full }, .{});
         defer a.free(header);
         if (header.len + 1 > 512) return error.InvalidHistory;
-        return std.fmt.allocPrint(a, "{s}\n{s}", .{ header, self.rows.items[start..] });
+        return std.fmt.allocPrint(a, "{s}\n{s}", .{ header, rows });
     }
 
     pub fn decode(a: std.mem.Allocator, bytes: []const u8, key: transcript.Identity) !History {
@@ -478,9 +553,9 @@ pub const History = struct {
         const append = std.mem.eql(u8, mode_text, "delta");
         const prepend = std.mem.eql(u8, mode_text, "older");
         if ((append or prepend) and (inode != self.inode or !std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) or
-            (if (prepend) end != self.start or oldest != base else base != self.offset or oldest != self.start))) return error.InvalidHistory;
+            (if (prepend) end != self.start or oldest != base else base != self.offset))) return error.InvalidHistory;
         if (oldest > base) return error.InvalidHistory;
-        var next: History = .{ .status = if (append or prepend) self.status else .{}, .inode = inode, .offset = end, .start = if (mode == null and !append) 0 else oldest, .mtime = mtime, .more = std.mem.eql(u8, more, "1"), .revision = self.revision +% 1 };
+        var next: History = .{ .status = if (append or prepend) self.status else .{}, .inode = inode, .offset = end, .start = if (append) self.start else if (mode == null) 0 else oldest, .mtime = mtime, .more = std.mem.eql(u8, more, "1"), .revision = self.revision +% 1 };
         @memcpy(next.probe[0..probe.len], probe);
         errdefer next.deinit(a);
         @memcpy(next.sid[0..sid.len], sid);
@@ -522,7 +597,7 @@ pub const History = struct {
         if (!prepend and mode != null and self.rows.items.len > 0) {
             if (inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and end < self.offset) return error.InvalidHistory;
             try next.retainRows(a, self.*);
-            if (inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and oldest <= self.offset) next.start = @min(next.start, self.start);
+            if (!self.restore_full and inode == self.inode and std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) and oldest <= self.offset) next.start = @min(next.start, self.start);
         }
         if (prepend) {
             var tail = self.cursor();
@@ -535,6 +610,18 @@ pub const History = struct {
             next.updateCursor(self.*);
         }
         if (!self.defer_render) try next.render(a);
+        var common_text: usize = 0;
+        const text_len = @min(self.text.items.len, next.text.items.len);
+        for (self.text.items[0..text_len], next.text.items[0..text_len]) |old, new| {
+            if (old != new) break;
+            common_text += 1;
+        }
+        const block_count = @min(self.last_block, next.blocks.items.len);
+        for (self.blocks.items[0..block_count], next.blocks.items[0..block_count]) |old, new| {
+            if (!std.meta.eql(old, new) or new.start + new.len > common_text or
+                new.detail_start + new.detail_len > common_text or new.diff_start + new.diff_len > common_text) break;
+            next.changed_from += 1;
+        }
         next.restore_full = mode == null and next.more and self.rows.items.len > 0;
         self.deinit(a);
         self.* = next;
@@ -1756,4 +1843,17 @@ test "IGSH-934 a partial tail retains earlier streamed fragments of the same mes
         "{\"role\":\"assistant\",\"id\":\"stream\",\"timestamp\":\"2026-10-26T10:00:01Z\",\"text\":\"second part\",\"offset\":100,\"end\":200}\n@@MP_END@@\n", 2, key);
     try std.testing.expect(std.mem.indexOf(u16, h.text.items, std.unicode.utf8ToUtf16LeStringLiteral("first part")) != null);
     try std.testing.expect(std.mem.indexOf(u16, h.text.items, std.unicode.utf8ToUtf16LeStringLiteral("second part")) != null);
+}
+
+test "IGSH-1019 copying a request ID returns the original ID not its display hash" {
+    const a = std.testing.allocator;
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t500\t9\t0\tclaude\tterm-1\n{\"role\":\"assistant\",\"id\":\"local-row\",\"read_id\":\"original-request-123\",\"text\":\"A reply\"}\n@@MP_END@@\n", 1, transcript.Identity.initTmux(1, 0, false, "term-1", ""));
+    const id = (try h.requestIdAlloc(a, h.blocks.items[0])) orelse return error.TestUnexpectedResult;
+    defer a.free(id);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("original-request-123"), id);
+    var missing = h.blocks.items[0];
+    missing.message_id = 0;
+    try std.testing.expectEqual(@as(?[]u16, null), try h.requestIdAlloc(a, missing));
 }

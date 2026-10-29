@@ -23,8 +23,8 @@ if ($messages.Count -ne 2000 -or $messages[0] -ne 'IGSH954 message 0000' -or $me
 Press @(0x1B) 'Esc: clear copied conversation'
 Switch-Palette 'new cmd'
 [void](Wait-For 'local and second-host tabs published' {
-    $published = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
-    $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 0 }).Count -eq 1
+    $published = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
+    $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 'cmd' }).Count -eq 1
 })
 $expectedShells = 2
 Switch-Palette 'chat view on everywhere'
@@ -32,10 +32,10 @@ Bind-Transcript
 Shell-Run @('turn', '99')
 Press @(0x11, 0x09) 'Ctrl+Tab: prepare unread remote visit'
 Bind-Transcript
+$appendLogStart = (Read-Shared "$settings/debug.log").Length
 [void](Wait-For 'new remote messages applied' {
-    $offset = (Read-Shared "$settings/debug.log").Length
     Press @(0x11, 0x30) 'Ctrl+0: verify appended messages'
-    $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
+    $m = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($appendLogStart), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
     $m.Count -gt 0 -and [int]$m[$m.Count - 1].Groups[1].Value -ge ($script:switchInitialBlocks + 2)
 } 30)
 [void](Scroll-Transcript 120)
@@ -47,6 +47,7 @@ $observation.messages = $messages.Count
 $observation.switches = [Collections.Generic.List[object]]::new()
 function Measure-CPU([scriptblock]$Action, [int]$MinimumMs) {
     $app.Refresh()
+    $uiCpuStart = [RemoteSwitchFrames]::UiCpuMs($main, $app.Id)
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $cpuStart = $app.TotalProcessorTime.TotalMilliseconds
     & $Action
@@ -54,7 +55,8 @@ function Measure-CPU([scriptblock]$Action, [int]$MinimumMs) {
     $app.Refresh()
     $cpuMs = $app.TotalProcessorTime.TotalMilliseconds - $cpuStart
     $elapsed = $timer.Elapsed.TotalMilliseconds
-    @{elapsedMs=$elapsed; cpuMs=$cpuMs; cpuPercent=100 * $cpuMs / $elapsed}
+    $uiCpu = [RemoteSwitchFrames]::UiCpuMs($main, $app.Id) - $uiCpuStart
+    @{elapsedMs=$elapsed; cpuMs=$cpuMs; cpuPercent=100 * $cpuMs / $elapsed; uiCpuMs=$uiCpu}
 }
 function Measure-Frames([scriptblock]$Action, [int]$MinimumMs) {
     $view = [IntPtr]$views[0].Current.NativeWindowHandle
@@ -101,14 +103,17 @@ for ($i = 0; $i -lt 20; $i++) {
 }
 Press @(0x11, 0x57) 'Ctrl+W: close the owned local fixture tab'
 $expectedShells = 1
-[void](Wait-For 'local fixture tab closed' { @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells).Count -eq 1 })
+[void](Wait-For 'local fixture tab closed' {
+    $remaining = @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs)
+    $remaining.Count -eq 1 -and $remaining[0].kind -eq 'tmux' -and $remaining[0].tmux_host -eq 2
+})
 Press @(0x11, 0x4E) 'Ctrl+N: create the local fixture workspace'
 $expectedShells = 2
 [void](Wait-For 'two distinct saved workspaces' {
     $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
     $slots = @($saved.tabs | ForEach-Object { if ($_.PSObject.Properties['workspace']) { [int]$_.workspace } else { 0 } } | Select-Object -Unique)
-    $published = @((Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json).shells)
-    $saved.workspace_count -eq 2 -and @($saved.tabs).Count -eq 2 -and $slots.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 0 }).Count -eq 1
+    $published = @($saved.tabs)
+    $saved.workspace_count -eq 2 -and @($saved.tabs).Count -eq 2 -and $slots.Count -eq 2 -and $published.Count -eq 2 -and @($published | Where-Object { $_.kind -eq 'cmd' }).Count -eq 1
 })
 Switch-Palette 'chat view on everywhere'
 Bind-Transcript
@@ -127,5 +132,28 @@ Doctor
 $observation.idleAfter = Measure-CPU {} 2000
 Press @(0x12, 0x25) 'Alt+Left: capture the proved remote conversation'
 Bind-Transcript
+Switch-Palette 'new cmd'
+$expectedShells = 3
+[void](Wait-For 'three sessions published for idle proof' { @((Get-Content "$settings/session.json" -Raw | ConvertFrom-Json).tabs).Count -eq 3 })
+Switch-Palette 'Verify agent'
+[void](Wait-For 'long remote chat selected with two background sessions' {
+    $saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+    $selected = $saved.tabs[$saved.active_tab]
+    $selected.kind -eq 'tmux' -and $selected.tmux_host -eq 2
+})
+Bind-Transcript
+$observation.idleThree = Measure-CPU {} 2000
+$saved = Get-Content "$settings/session.json" -Raw | ConvertFrom-Json
+$observation.idleThree.sessions = @($saved.tabs).Count
+$observation.idleThree.shell = $saved.tabs[$saved.active_tab].shell_id
+if ($env:CHAT_SWITCH_PROFILE -eq '1') {
+    . "$PSScriptRoot/chat-switch-profile.ps1"
+    Invoke-ChatSwitchProfile -TargetProcessId $app.Id -Directory "$Evidence/switch-profile" -Route @{mode='workspace'; remote_shell=$saved.tabs[$saved.active_tab].shell_id; separate_from_acceptance=$true} -Switch {
+        for ($repeat = 0; $repeat -lt 5; $repeat++) {
+            Switch-Sample @(0x12, 0x27) $true $false
+            Switch-Sample @(0x12, 0x25) $true $false
+        }
+    }
+}
 Shot 'remote-switch-complete'
 Save $observation "$caseDir/observation.json"

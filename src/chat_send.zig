@@ -420,6 +420,7 @@ pub fn sendChatPrompt() void {
         return;
     }
     var send_text: []const u16 = chatPromptNormalizeLineEndings(text_buf[0..text_len]);
+    if (chatSendQuestionText(send_text)) return;
     var composed_utf8: ?[]u8 = null;
     defer if (composed_utf8) |bytes| std.heap.page_allocator.free(bytes);
     if (app_state.g_chat_reply_len > 0) {
@@ -697,12 +698,18 @@ fn chatEchoAnchorNow(idx: u32) chat_echo.Anchor {
     anchor.counted = app_state.g_chat_block_count > 0;
     for (app_state.g_chat_blocks[0..app_state.g_chat_block_count]) |b| {
         if (b.role == .user) anchor.user_count +|= 1;
-        if (b.stamp_ms > anchor.after_ms) anchor.after_ms = b.stamp_ms;
+        if (b.stamp_ms >= anchor.after_ms) {
+            anchor.after_ms = b.stamp_ms;
+            anchor.after_id = b.message_id;
+        }
     }
     for (app_state.g_chat_histories.items) |history| {
         if (history.retired or history.key.shell_id != app_state.shells[idx].shell_id) continue;
         const facts = history.history.deliveryEvidence(std.heap.page_allocator, .{ .text = &.{}, .prefix = &.{}, .anchor = .{} }) catch continue;
-        anchor.after_ms = @max(anchor.after_ms, facts.latest_ms);
+        if (facts.latest_ms > anchor.after_ms) {
+            anchor.after_ms = facts.latest_ms;
+            anchor.after_id = 0;
+        }
     }
     return anchor;
 }
@@ -713,7 +720,7 @@ fn chatEchoStateOnLoad(saved: u8) ChatEchoState {
 
 fn chatOutboxSerialize(list: *const std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, out_len: *usize) ?[]u8 {
     var total: usize = 128;
-    for (list.items) |e| total += e.text.len * 6 + CHAT_OUTBOX_KEY_CAP + 160;
+    for (list.items) |e| total += e.text.len * 6 + CHAT_OUTBOX_KEY_CAP + 192;
     const out = allocator.alloc(u8, total) catch return null;
     var pos: usize = 0;
     const head = "{\"version\":2,\"queues\":[";
@@ -753,7 +760,7 @@ fn chatOutboxSerialize(list: *const std.ArrayList(ChatOutboxEntry), allocator: s
             pos += m2.len;
             out[pos] = '0' + @as(u8, @intFromEnum(m.state));
             pos += 1;
-            const anchor_text = std.fmt.bufPrint(out[pos..], ",\"a\":{d},\"w\":{d},\"c\":{d},\"n\":{d},\"x\":{d},\"r\":{d},\"d\":{d}", .{ @max(m.anchor.after_ms, 0), @max(m.anchor.sent_ms, 0), m.anchor.user_count, @intFromBool(m.anchor.counted), @intFromBool(m.write_started), @intFromBool(m.retryable), @max(m.expires_ms, 0) }) catch "";
+            const anchor_text = std.fmt.bufPrint(out[pos..], ",\"a\":{d},\"h\":{d},\"w\":{d},\"c\":{d},\"n\":{d},\"x\":{d},\"r\":{d},\"d\":{d}", .{ @max(m.anchor.after_ms, 0), m.anchor.after_id, @max(m.anchor.sent_ms, 0), m.anchor.user_count, @intFromBool(m.anchor.counted), @intFromBool(m.write_started), @intFromBool(m.retryable), @max(m.expires_ms, 0) }) catch "";
             pos += anchor_text.len;
             out[pos] = '}';
             pos += 1;
@@ -790,6 +797,7 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         const max_ms: u64 = std.math.maxInt(i64);
                         list.items[list.items.len - 1].anchor = .{
                             .after_ms = @intCast(@min(json_reader.uintDefault(mobj, "a", 0), max_ms)),
+                            .after_id = json_reader.uintDefault(mobj, "h", 0),
                             .sent_ms = @intCast(@min(json_reader.uintDefault(mobj, "w", 0), max_ms)),
                             .user_count = @intCast(@min(json_reader.uintDefault(mobj, "c", 0), std.math.maxInt(u32))),
                             .counted = json_reader.uintDefault(mobj, "n", 0) != 0,
@@ -1034,16 +1042,16 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
     for (blocks, 0..) |b, bi| {
         if (b.role != .user or user_count >= users.len) continue;
         const disp = chatBlockDisplayRange(buf, b);
-        users[user_count] = .{ .text = buf[disp.start .. disp.start + disp.len], .stamp_ms = b.stamp_ms };
+        users[user_count] = .{ .text = buf[disp.start .. disp.start + disp.len], .stamp_ms = b.stamp_ms, .message_id = b.message_id };
         user_at[user_count] = bi;
         user_count += 1;
     }
-    var claimed: [CHAT_CONFIRMED_MAX_PER_KEY]i64 = undefined;
+    var claimed: [CHAT_CONFIRMED_MAX_PER_KEY]chat_echo.Claim = undefined;
     var claimed_count: usize = 0;
     for (app_state.g_chat_confirmed.items) |c| {
         if (claimed_count >= claimed.len) break;
         if (c.stamp_ms == 0 or !std.mem.eql(u8, c.key[0..@as(usize, c.key_len)], key)) continue;
-        claimed[claimed_count] = c.stamp_ms;
+        claimed[claimed_count] = .{ .stamp_ms = c.stamp_ms, .message_id = c.message_id, .text_hash = c.text_hash };
         claimed_count += 1;
     }
     var picked: [CHAT_OUTBOX_MAX_PER_KEY]?usize = undefined;
@@ -1095,8 +1103,8 @@ fn chatConfirmedDropKey(key: []const u8) void {
     }
 }
 
-fn chatConfirmedAdd(key: []const u8, prefix: []const u16, block_start: usize, block_len: usize, stamp_ms: i64) void {
-    if (key.len == 0 or prefix.len == 0) return;
+fn chatConfirmedAdd(key: []const u8, text: []const u16, block: ChatBlock) void {
+    if (key.len == 0 or text.len == 0) return;
     while (chatConfirmedCountIn(key) >= CHAT_CONFIRMED_MAX_PER_KEY) {
         const victim = chatConfirmedFirstIndexIn(key) orelse break;
         _ = app_state.g_chat_confirmed.orderedRemove(victim);
@@ -1105,23 +1113,24 @@ fn chatConfirmedAdd(key: []const u8, prefix: []const u16, block_start: usize, bl
     const klen = @min(key.len, c.key.len);
     @memcpy(c.key[0..klen], key[0..klen]);
     c.key_len = @intCast(klen);
-    const plen = @min(prefix.len, c.prefix.len);
-    @memcpy(c.prefix[0..plen], prefix[0..plen]);
-    c.prefix_len = @intCast(plen);
-    c.block_start = block_start;
-    c.block_len = block_len;
-    c.stamp_ms = stamp_ms;
+    c.prefix_len = @intCast(chatEchoNormalizePrefix(text, &c.prefix).len);
+    c.block_start = block.start;
+    c.block_len = block.len;
+    c.stamp_ms = block.stamp_ms;
+    c.message_id = block.message_id;
+    c.text_hash = chat_echo.textHash(text);
     app_state.g_chat_confirmed.append(std.heap.page_allocator, c) catch {};
 }
 
-fn chatConfirmedHas(key: []const u8, block_norm: []const u16, stamp_ms: i64) bool {
+fn chatConfirmedHas(key: []const u8, block_norm: []const u16, stamp_ms: i64, message_id: u64) bool {
     if (key.len == 0 or block_norm.len == 0) return false;
     for (app_state.g_chat_confirmed.items) |c| {
         if (!std.mem.eql(u8, c.key[0..@as(usize, c.key_len)], key)) continue;
-        if (c.stamp_ms != 0 and stamp_ms != 0) {
-            if (c.stamp_ms == stamp_ms) return true;
+        if (c.message_id != 0 and message_id != 0) {
+            if (c.message_id == message_id) return true;
             continue;
         }
+        if (c.stamp_ms != 0 and stamp_ms != 0 and c.stamp_ms != stamp_ms) continue;
         const p = c.prefix[0..@as(usize, c.prefix_len)];
         if (p.len > 0 and chatEchoPrefixMatches(block_norm, p)) return true;
     }
@@ -1137,7 +1146,7 @@ pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {
     if (disp.len == 0) return false;
     var norm: [CHAT_ECHO_PREFIX_CAP]u16 = undefined;
     const p = chatEchoNormalizePrefix(buf[disp.start .. disp.start + disp.len], &norm);
-    return chatConfirmedHas(key, p, block.stamp_ms);
+    return chatConfirmedHas(key, p, block.stamp_ms, block.message_id);
 }
 
 fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState) ?usize {
@@ -1167,22 +1176,20 @@ fn chatEchoMarkNotSent(ei: usize) void {
     chatOutboxChanged();
 }
 
-fn chatEchoConfirmWithBlock(ei: usize, block_start: usize, block_len: usize, stamp_ms: i64) void {
+fn chatEchoConfirmWithBlock(ei: usize, block: ChatBlock) void {
     if (ei >= app_state.g_chat_outbox.items.len) return;
     const e = app_state.g_chat_outbox.items[ei];
     var key_copy: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const klen: usize = e.key_len;
     @memcpy(key_copy[0..klen], e.key[0..klen]);
-    var prefix: [CHAT_ECHO_PREFIX_CAP]u16 = undefined;
-    const p = chatEchoNormalizePrefix(e.text, &prefix);
-    if (p.len > 0) chatConfirmedAdd(key_copy[0..klen], p, block_start, block_len, stamp_ms);
+    chatConfirmedAdd(key_copy[0..klen], e.text, block);
     chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, ei);
     _ = saveChatOutbox();
     chatOutboxChanged();
 }
 
 fn chatEchoConfirm(ei: usize) void {
-    chatEchoConfirmWithBlock(ei, 0, 0, 0);
+    chatEchoConfirmWithBlock(ei, .{ .start = 0, .len = 0, .role = .user });
 }
 
 fn chatEchoTryMatchEntry(ei: usize) bool {
@@ -1196,7 +1203,7 @@ fn chatEchoTryMatchEntry(ei: usize) bool {
             if (chatEchoAssignedBlock(&assignment, id)) |bi| {
                 chatEchoStoreAnchors(&assignment);
                 const block = history.history.blocks.items[bi];
-                chatEchoConfirmWithBlock(ei, block.start, block.len, block.stamp_ms);
+                chatEchoConfirmWithBlock(ei, block);
                 return true;
             }
         }
@@ -1210,7 +1217,7 @@ fn chatEchoTryMatchEntry(ei: usize) bool {
     const bi = chatEchoAssignedBlock(&assignment, id) orelse return false;
     chatEchoStoreAnchors(&assignment);
     const ci = chatOutboxIndexById(id) orelse return false;
-    chatEchoConfirmWithBlock(ci, app_state.g_chat_blocks[bi].start, app_state.g_chat_blocks[bi].len, app_state.g_chat_blocks[bi].stamp_ms);
+    chatEchoConfirmWithBlock(ci, app_state.g_chat_blocks[bi]);
     return true;
 }
 
@@ -1272,11 +1279,9 @@ pub fn chatEchoMatchActive() void {
             continue;
         }
         if (chatEchoAssignedBlock(&assignment, e.id)) |mi| {
-            var prefix: [CHAT_ECHO_PREFIX_CAP]u16 = undefined;
-            const p = chatEchoNormalizePrefix(e.text, &prefix);
             var key_copy: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
             @memcpy(key_copy[0..e.key_len], e.key[0..e.key_len]);
-            chatConfirmedAdd(key_copy[0..e.key_len], p, app_state.g_chat_blocks[mi].start, app_state.g_chat_blocks[mi].len, app_state.g_chat_blocks[mi].stamp_ms);
+            chatConfirmedAdd(key_copy[0..e.key_len], e.text, app_state.g_chat_blocks[mi]);
             if (app_state.g_chat_verify_echo_id == e.id) chatVerifyClear();
             chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
             changed = true;
@@ -1969,7 +1974,7 @@ fn sshProbeStart() void {
     const job = std.heap.page_allocator.create(SshProbeJob) catch return;
     job.* = .{ .started_tick = GetTickCount64() };
     for (app_state.shells[0..app_state.shell_count]) |shell| {
-        if (shell.console_inflight or shell.kind != .tmux or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended or shell.tmux_session_len == 0 or (!shell.ssh_reconnect.awaiting_probe and GetTickCount64() -| shell.spawn_tick < 3000)) continue;
+        if (shell.console_inflight or shell.kind != .tmux or shell.ssh_reconnect.phase == .closed or shell.ssh_reconnect.phase == .ended or shell.tmux_session_len == 0 or (!shell.ssh_reconnect.awaiting_probe and shell.ssh_reconnect.phase != .reconnecting and GetTickCount64() -| shell.spawn_tick < 3000)) continue;
         job.items[job.count] = .{ .id = shell.shell_id, .host = shell.tmux_host, .session = shell.tmux_session, .len = shell.tmux_session_len, .spawn_tick = shell.spawn_tick };
         job.count += 1;
     }
@@ -2047,6 +2052,12 @@ fn sshProbeFinish() void {
         if (job.owners.fetchSub(1, .acq_rel) == 1) std.heap.page_allocator.destroy(job);
         ssh_probe_job = null;
         ssh_probe_next_tick = if (ssh_probe_pending_request) 0 else GetTickCount64() + 15_000;
+        for (app_state.shells[0..app_state.shell_count]) |shell| {
+            if (shell.ssh_reconnect.phase == .reconnecting) {
+                ssh_probe_next_tick = @min(ssh_probe_next_tick, GetTickCount64() + 1000);
+                break;
+            }
+        }
     }
     var checked: [256]bool = @splat(false);
     for (job.items[0..job.count]) |item| {
@@ -2472,8 +2483,7 @@ fn chatTmuxSettle() void {
             },
             .delivered => {
                 const block = history.history.blocks.items[matched.?];
-                var prefix: [CHAT_ECHO_PREFIX_CAP]u16 = undefined;
-                chatConfirmedAdd(entry.key[0..entry.key_len], chatEchoNormalizePrefix(entry.text, &prefix), block.start, block.len, block.stamp_ms);
+                chatConfirmedAdd(entry.key[0..entry.key_len], entry.text, block);
                 chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
                 changed = true;
                 continue;
@@ -2632,13 +2642,66 @@ pub fn chatPermissionAnswer(shell_index: u32, action: @import("chat_permission.z
     return true;
 }
 
-pub fn chatQuestionAnswer(shell_index: u32, digit: u8, question_hash: u64) bool {
+fn chatSendQuestionText(text: []const u16) bool {
+    const shell = &app_state.shells[app_state.active_shell];
+    if (!shell.chat_question_other) return false;
+    if (shell.chat_question_other_sent) return true;
+    if (chatShellOp(app_state.active_shell, "question_text", text, null)) {
+        shell.chat_question_other_hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(text));
+        shell.chat_question_other_sent = true;
+        @import("chat_composer.zig").chatShellDraftNoteSend();
+    }
+    return true;
+}
+
+pub fn chatQuestionOtherFinish(shell_index: u32) void {
+    const shell = &app_state.shells[shell_index];
+    if (shell.chat_question_other_sent and shell_index == app_state.active_shell and app_state.g_chat_composer_hwnd != null) {
+        var text: [16384]u16 = undefined;
+        const len: usize = @intCast(@max(0, GetWindowTextW(app_state.g_chat_composer_hwnd, &text, text.len)));
+        if (std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(chatPromptNormalizeLineEndings(text[0..len]))) == shell.chat_question_other_hash) {
+            _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+            app_state.g_chat_draft_dirty = true;
+            chatDraftFlush();
+        }
+    }
+    shell.chat_question_other_sent = false;
+    shell.chat_question_other = false;
+}
+
+pub fn chatQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_hash: u64) bool {
     if (!app_state.g_chat_active or shell_index != app_state.active_shell or shell_index >= app_state.shell_count) return false;
     var scratch: [2]u16 = undefined;
     if (@import("chat_capture.zig").captureChatTranscript(shell_index, &scratch, true) == null) return false;
     const shell = &app_state.shells[shell_index];
-    if (app_state.g_chat_question_sid != shell.shell_id or app_state.g_chat_question.count == 0 or app_state.g_chat_question.hash() != question_hash) return false;
-    return chatAgentKey(shell_index, digit);
+    const session = @import("chat_session.zig");
+    const entry = session.chatHistoryEntry(session.chatFileIdentity()) orelse return false;
+    const prompt = &entry.history.status.question;
+    if (shell.chat_question_index >= prompt.count or prompt.groups[shell.chat_question_index].hash() != question_hash) return false;
+    const group = &prompt.groups[shell.chat_question_index];
+    var keys: [@import("chat_options.zig").MAX_OPTIONS + 1]u8 = undefined;
+    const sequence = group.answerKeys(digit, selected, &keys) orelse return false;
+    const key = session.chatFileIdentity();
+    if (key.tmux[0] == 0) return false;
+    const thread = std.Thread.spawn(.{}, chatQuestionTmuxThread, .{ key, keys, sequence.len }) catch return false;
+    thread.detach();
+    return true;
+}
+
+fn chatQuestionTmuxThread(key: @import("chat_transcript.zig").Identity, keys: [@import("chat_options.zig").MAX_OPTIONS + 1]u8, count: usize) void {
+    const a = std.heap.page_allocator;
+    var values: [@import("chat_options.zig").MAX_OPTIONS + 1]u32 = undefined;
+    for (keys[0..count], 0..) |key_value, index| values[index] = key_value;
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = "question", .keys = values[0..count], .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0) }, .{}) catch return;
+    defer a.free(query);
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(a);
+    if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, "\tquestion\tok\t") == null) {
+        app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
+        debugLog("[chat] question failed via=tmux");
+        return;
+    }
+    debugLog("[chat] question sent via=tmux");
 }
 
 fn chatAgentKey(shell_index: u32, digit: u8) bool {
@@ -2737,6 +2800,7 @@ fn chatShellOpThread(key: @import("chat_transcript.zig").Identity, op: []const u
     const want = std.fmt.bufPrint(&needle, "\t{s}\tok\t", .{op}) catch return;
     var log: [96]u8 = undefined;
     if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, want) == null) {
+        if (std.mem.eql(u8, op, "question_text")) app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
         debugLog(std.fmt.bufPrint(&log, "[chat] {s} failed via=tmux", .{op}) catch "");
         return;
     }

@@ -7,6 +7,7 @@ export function verifyRemoteSync(root) {
   const read = name => fs.readFileSync(path.join(root, name), 'utf8');
   const value = JSON.parse(read('remote-sync/observation.json'));
   assert.equal(value.error, null, value.error || 'driver error');
+  assert.equal(read('remote-sync/theme-mode.txt').trim(), 'amoled', 'AMOLED theme saved by the app');
   assert.notEqual(value.remoteHome, value.clientHome, 'different remote user home');
   const seed = JSON.parse(read('remote-sync/seed-session.json'));
   assert.equal(seed.tabs[0].tmux_host, 2, 'second server tab');

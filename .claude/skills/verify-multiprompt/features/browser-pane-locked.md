@@ -1,5 +1,7 @@
 # Browser pane locked
 
+Verify on: push
+
 ## Sub-features
 
 - Fresh browser windows launch on Multiprompt's own monitor and keep normal scale after a relaunch, including mixed-DPI monitor setups.

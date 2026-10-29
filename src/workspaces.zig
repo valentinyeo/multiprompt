@@ -143,7 +143,6 @@ const sessionFileIsValid = @import("session.zig").sessionFileIsValid;
 const GetClassNameW = @import("win32.zig").GetClassNameW;
 const findWindowByClassAndPid = @import("console.zig").findWindowByClassAndPid;
 const reclaimShell = @import("console.zig").reclaimShell;
-const WM_CLOSE = @import("app_state.zig").WM_CLOSE;
 const ZigShellWindowList = @import("app_state.zig").ZigShellWindowList;
 const titleHasDevMarker = @import("console.zig").titleHasDevMarker;
 const listZigShellWindowsEnum = @import("console.zig").listZigShellWindowsEnum;
@@ -840,7 +839,7 @@ pub fn deleteWorkspaceByIndex(wi: u32) bool {
     if (findLiveWorkspaceTarget(id)) |t| {
         if (t.slot >= 0) return false;
         const target: HANDLE = @ptrFromInt(t.hwnd);
-        _ = PostMessageW(target, WM_CLOSE, 0, 0);
+        app_state.requestAppClose(target, .workspace_delete);
         var waited: u32 = 0;
         while (IsWindow(target) != 0 and waited < 10000) : (waited += 100) Sleep(100);
         if (IsWindow(target) != 0) return false;
@@ -3973,7 +3972,7 @@ pub fn closeMyWorkspaceSlot(slot: u8) void {
         return;
     }
     if (app_state.g_lws_count <= 1) {
-        _ = PostMessageW(app_state.g_main_hwnd, WM_CLOSE, 0, 0);
+        app_state.requestAppClose(app_state.g_main_hwnd, .workspace_close);
         return;
     }
     ensureWorkspaceSlotId(slot);
@@ -4442,7 +4441,7 @@ fn collapseOtherWindowsIntoThis() void {
             }
         }
         debugLog2("collapse: closing sibling workspace ", id);
-        _ = PostMessageW(target, WM_CLOSE, 0, 0);
+        app_state.requestAppClose(target, .workspace_collapse);
         var waited: u32 = 0;
         while (IsWindow(target) != 0 and waited < 10000) : (waited += 100) Sleep(100);
         if (IsWindow(target) != 0) {
@@ -4453,4 +4452,34 @@ fn collapseOtherWindowsIntoThis() void {
         if (!absorbWorkspaceIntoSlots(id, name)) debugLog2("collapse: absorb failed for ", id);
     }
     _ = reconcileWorkspaceRegistry(true);
+}
+
+pub fn openWorkspaceByIndex(workspace_idx: usize) void {
+    if (workspace_idx < app_state.g_workspace_count) {
+        const e = &app_state.g_workspaces[workspace_idx];
+        var id_copy: [64]u8 = std.mem.zeroes([64]u8);
+        const id_len = @min(e.id_len, id_copy.len - 1);
+        if (id_len > 0) @memcpy(id_copy[0..id_len], e.id[0..id_len]);
+        var name_copy: [64]u8 = std.mem.zeroes([64]u8);
+        const name_len = @min(e.name_len, name_copy.len - 1);
+        if (name_len > 0) @memcpy(name_copy[0..name_len], e.name[0..name_len]);
+        var host_copy: [64]u8 = std.mem.zeroes([64]u8);
+        const host_len = @min(e.host_len, host_copy.len - 1);
+        if (host_len > 0) @memcpy(host_copy[0..host_len], e.host[0..host_len]);
+        const id = id_copy[0..id_len];
+        const name = name_copy[0..name_len];
+        const host = host_copy[0..host_len];
+        if (std.mem.eql(u8, id, getInstanceName())) {} else if (app_state.g_single_window and findMyWorkspaceSlot(id) != null) {
+            switchToWorkspace(findMyWorkspaceSlot(id).?);
+        } else if (findAndFocusWorkspaceWindow(id, name)) {} else if (host.len > 0) {} else if (app_state.g_single_window) {
+            if (absorbWorkspaceIntoSlots(id, name)) {
+                if (findMyWorkspaceSlot(id)) |slot| switchToWorkspace(slot);
+            } else {
+                newWorkspace();
+            }
+        } else {
+            setWorkspaceRestoreAndSave(id, name, true);
+            spawnWorkspaceWindow(id);
+        }
+    }
 }

@@ -1,9 +1,16 @@
 const test = require('node:test');
+
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 const { runInNewContext } = require('node:vm');
-const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
 const base = '.claude/skills/verify-multiprompt/';
 const control = read(base + 'control.ps1');
 const workflow = read('.github/workflows/verify.yml');
@@ -332,7 +339,9 @@ test('QPC tracing is debug-gated, thread-local and emits exactly one aggregate l
 function journeyMatrix(source, event, feature = '', ref = 'refs/heads/master', flags = {}) {
   const expression = source.match(/^        feature: \$\{\{ (.+) \}\}$/m);
   assert.ok(expression, 'journey matrix expression exists');
+  const discovered = featureMatrix(source);
   return runInNewContext(expression[1], {
+    needs: { journeys: { outputs: { pr: JSON.stringify(discovered.pr), full: JSON.stringify(discovered.full) } } },
     github: { event_name: event, ref },
     inputs: { feature, ...flags },
     fromJSON: JSON.parse,
@@ -348,28 +357,33 @@ function assertsDispatchOnly(source) {
   assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'browser-switch-speed'), ['browser-switch-speed']);
   assert.match(source, /workflow_dispatch:[\s\S]+feature:/);
   assert.match(source, /fromJSON\(format\('\["\{0\}"\]', inputs\.feature\)\)/);
-  assert.match(source, /FEATURE -notin @\([^\n]*'browser-switch-speed'/);
+  assert.match(source, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(source).available.includes('browser-switch-speed'));
 }
 
-test('PR journeys are appearance-only while master and manual runs retain the full matrix', () => {
-  const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
+test('IGSH-1033 master smoke stays small while release candidates retain feature-owned coverage', async () => {
+  const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
+  const full = ['appearance', 'chat-dictation', 'relaunch-saved-sessions', 'settings-panel', 'session-restore', 'workspace-focus', 'tmux-binding', 'favorites-groups', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-view', 'chat-messages-only', 'chat-view-everywhere', 'chat-focus', 'browser-own-profile', 'status-card', 'palette-order', 'remind-me', 'chat-send-latency', 'chat-first-paint'];
   function contract(source) {
-    assert.match(source, /^  push:\n    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery\]\n  workflow_dispatch:/m);
-    assert.deepEqual(journeyMatrix(source, 'pull_request'), ['appearance']);
-    assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), ['appearance']);
-    assert.deepEqual(journeyMatrix(source, 'push'), full);
+    verifyPushBranches(source);
+    assert.deepEqual(journeyMatrix(source, 'pull_request'), featureMatrix(source).pr);
+    assert.deepEqual(journeyMatrix(source, 'pull_request', 'all'), featureMatrix(source).pr);
+    assert.deepEqual(journeyMatrix(source, 'push'), ['appearance', 'relaunch-saved-sessions']);
+    for (const feature of full) assert.ok(journeyMatrix(source, 'push', 'all').includes(feature));
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1072-proof-1'), ['chat-dictation']);
     assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1061-recovery'), ['browser-pane-stuck']);
-    assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837'), full);
+    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1083'), ['appearance']);
+    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1079'), ['appearance']);
+    assert.deepEqual(journeyMatrix(source, 'push', '', 'refs/heads/ceo/IGSH-1055-hax2'), ['browser-pane-stuck', 'chat-messages-only']);
+    for (const feature of full) assert.ok(journeyMatrix(source, 'workflow_dispatch', 'all', 'refs/tags/v0.28.837').includes(feature));
     assert.deepEqual(journeyMatrix(source, 'workflow_dispatch', 'chat-dictation'), ['chat-dictation']);
   }
   contract(workflow);
   for (const [before, after] of [
-    ["fromJSON('[\"appearance\"]')", `fromJSON('${JSON.stringify(full).replaceAll(',', ', ')}')`],
-    [`fromJSON('${JSON.stringify(full).replaceAll(',', ', ')}')`, "fromJSON('[\"appearance\"]')"],
-    ["(github.event_name == 'push' ||", "(github.event_name == 'pull_request' ||"],
+    ['fromJSON(needs.journeys.outputs.pr)', 'fromJSON(needs.journeys.outputs.full)'],
+    ['fromJSON(needs.journeys.outputs.full)', 'fromJSON(needs.journeys.outputs.pr)'],
+    [`github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]')`, `github.event_name == 'pull_request' && fromJSON('["appearance", "relaunch-saved-sessions"]')`],
     ["inputs.feature == 'all'", "inputs.feature == 'appearance'"],
-    ['"appearance", "chat-dictation",', '"appearance",'],
   ]) {
     const broken = workflow.replace(before, after);
     assert.notEqual(broken, workflow, before);
@@ -379,18 +393,19 @@ test('PR journeys are appearance-only while master and manual runs retain the fu
 
 test('explicit runner-note proof selects its native journey without expanding ordinary PR checks', () => {
   assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'chat-delivery', 'refs/pull/577/merge', { chat_notes_proof: true }), ['chat-delivery']);
-  assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'all'), ['appearance']);
+  assert.deepEqual(journeyMatrix(workflow, 'pull_request', 'all'), featureMatrix(workflow).pr);
 });
 
 test('switch timing is dispatch-only while allowlists and artifact contracts retain it', () => {
   assertsDispatchOnly(workflow);
-  for (const before of ['["appearance"]', '["appearance",']) {
-    const broken = workflow.replace(before, before.replace('[', '["browser-switch-speed", '));
+  for (const before of ['fromJSON(needs.journeys.outputs.pr)', 'fromJSON(needs.journeys.outputs.full)']) {
+    const broken = workflow.replace(before, `fromJSON('["browser-switch-speed"]')`);
     assert.notEqual(broken, workflow, before);
     assert.throws(() => assertsDispatchOnly(broken), assert.AssertionError);
   }
-  assert.throws(() => assertsDispatchOnly(workflow.replace(/inputs\.feature\)\) \}\}/, 'inputs.other)) }}')));
-  assert.match(workflow, /FEATURE -notin @\([^\n]*'browser-switch-speed'/);
+  assert.throws(() => assertsDispatchOnly(workflow.replaceAll(`fromJSON(format('["{0}"]', inputs.feature))`, `fromJSON(format('["{0}"]', inputs.other))`)));
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('browser-switch-speed'));
   assert.match(control, /ValidateSet\([^\n]*'browser-switch-speed'/);
   assert.match(workflow, /name: verify-\$\{\{ env.FEATURE \}\}/);
   assert.match(workflow, /node --test --test-concurrency=1 tools\/verify-multiprompt.test.js[^\n]+tools\/browser-switch-speed.test.js/);
@@ -499,7 +514,8 @@ function assertsSwitchExtension(driver) {
   const setup = driver.slice(driver.indexOf("    if ($Feature -in @('browser-switch-speed', 'chat-switch-speed', 'browser-own-profile')) {"), driver.indexOf("    $env:IGSH_246 = '0'"));
   for (const step of [
     "Join-Path $env:USERPROFILE 'Documents/GitHub/zigshell/extension'",
-    "Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse",
+    "$extensionSource = if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) { $env:VERIFY_EXTENSION_ROOT } else { Join-Path $PSScriptRoot '../../../extension' }",
+    "Copy-Item $extensionSource $extension -Recurse",
     'Add-Member -NotePropertyName key -NotePropertyValue $publicKey -Force',
     'allowed_origins = @("chrome-extension://$extensionId/")',
     "path = (Join-Path (Split-Path $Exe) 'zigshell-bridge.exe')",
@@ -521,7 +537,8 @@ function assertsSwitchExtension(driver) {
 test('switch journey installs only the fixture extension and matching native host, refuses shared registration and cleans it up', () => {
   assertsSwitchExtension(control);
   for (const before of [
-    "Copy-Item (Join-Path $PSScriptRoot '../../../extension') $extension -Recurse",
+    "$extensionSource = if ($shapeProof -and $env:VERIFY_EXTENSION_ROOT) { $env:VERIFY_EXTENSION_ROOT } else { Join-Path $PSScriptRoot '../../../extension' }",
+    "Copy-Item $extensionSource $extension -Recurse",
     'Add-Member -NotePropertyName key -NotePropertyValue $publicKey -Force',
     "if (Test-Path $registry) { throw 'Switch timing requires an unregistered disposable native host' }",
     'Remove-Item -LiteralPath $switchNativeRegistry -Recurse -Force',

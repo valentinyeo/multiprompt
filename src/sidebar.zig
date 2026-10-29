@@ -1,3 +1,4 @@
+const SEARCH_SETTINGS_OFFSET = @import("app_state.zig").SEARCH_SETTINGS_OFFSET;
 const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
@@ -231,6 +232,7 @@ const SEARCH_CHAT_TODO_OFFSET = @import("app_state.zig").SEARCH_CHAT_TODO_OFFSET
 const SEARCH_CHAT_TOOL_STEPS_OFFSET = @import("app_state.zig").SEARCH_CHAT_TOOL_STEPS_OFFSET;
 const SEARCH_CHAT_NEWEST_OFFSET = @import("app_state.zig").SEARCH_CHAT_NEWEST_OFFSET;
 const SEARCH_CHAT_MORE_MENU_OFFSET = @import("app_state.zig").SEARCH_CHAT_MORE_MENU_OFFSET;
+const SEARCH_CHAT_RESYNC_OFFSET = @import("app_state.zig").SEARCH_CHAT_RESYNC_OFFSET;
 const SEARCH_CHAT_FIND_OFFSET = @import("app_state.zig").SEARCH_CHAT_FIND_OFFSET;
 const SEARCH_CHAT_COPY_CODE_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_CODE_OFFSET;
 const SEARCH_CHAT_COPY_SELECTION_OFFSET = @import("app_state.zig").SEARCH_CHAT_COPY_SELECTION_OFFSET;
@@ -1396,9 +1398,9 @@ pub fn materializeDisplayOrder() void {
     }
 }
 
-pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
+fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
     var count: u32 = 0;
-    var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight();
+    var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
         for (0..app_state.group_count) |gi| {
             const gid = app_state.groups[gi].id;
@@ -1535,7 +1537,51 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
     return count;
 }
 
+pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
+    var rows: [MAX_ROWS]Row = undefined;
+    const count = layoutRowsInner(&rows);
+    if (count == 0 or app_state.g_sidebar_collapsed or app_state.g_starred_workspace) {
+        @memcpy(out[0..count], rows[0..count]);
+        return count;
+    }
+    var y = rows[0].y;
+    const width = uiScaled(88);
+    const gap = uiScaled(4);
+    const columns: u32 = @intCast(@max(1, @divTrunc(SIDEBAR_W() - uiScaled(16), width + gap)));
+    var n: u32 = 0;
+    var pinned: u32 = 0;
+    var total_pinned: u32 = 0;
+    for (rows[0..count]) |row| {
+        if (row.kind == .tab and effPinnedTop(row.shell_idx)) total_pinned += 1;
+    }
+    for (rows[0..count]) |row| {
+        if (row.kind != .tab or !effPinnedTop(row.shell_idx)) continue;
+        var tile = row;
+        tile.tile = true;
+        const in_row = @min(columns, total_pinned - (pinned / columns) * columns);
+        const row_width = @as(i32, @intCast(in_row)) * width + @as(i32, @intCast(in_row - 1)) * gap;
+        tile.x = @max(uiScaled(8), @divTrunc(SIDEBAR_W() - row_width, 2)) + @as(i32, @intCast(pinned % columns)) * (width + gap);
+        tile.width = @min(width, SIDEBAR_W() - tile.x - uiScaled(8));
+        tile.y = y + @as(i32, @intCast(pinned / columns)) * uiScaled(96);
+        out[n] = tile;
+        n += 1;
+        pinned += 1;
+    }
+    if (pinned > 0) y += @as(i32, @intCast((pinned + columns - 1) / columns)) * uiScaled(96) + uiScaled(8);
+    for (rows[0..count]) |row| {
+        if (row.kind == .section and row.section_tier == .pinned and pinned > 0) continue;
+        if (row.kind == .tab and effPinnedTop(row.shell_idx)) continue;
+        var next = row;
+        next.y = y;
+        out[n] = next;
+        n += 1;
+        y += rowTotalHeight(next);
+    }
+    return n;
+}
+
 pub fn rowTotalHeight(row: Row) i32 {
+    if (row.tile) return uiScaled(96);
     return switch (row.kind) {
         .section => SECTION_HEADER_H,
         .header => GROUP_HEADER_H,
@@ -1597,12 +1643,13 @@ test "workspace pills and Inbox button have disjoint hit areas" {
     try std.testing.expect(inboxButtonHitTest(inboxButtonRect(true).left, WS_PILL_TOP));
 }
 
-pub fn hitTestSidebar(logical_my: i32) HitTarget {
+pub fn hitTestSidebar(mx: i32, logical_my: i32) HitTarget {
     var rows: [MAX_ROWS]Row = undefined;
     const n = layoutRows(&rows);
     for (0..n) |ri| {
         const row = rows[ri];
         const h = rowTotalHeight(row);
+        if (row.tile and (mx < row.x or mx >= row.x + row.width)) continue;
         if (logical_my >= row.y and logical_my < row.y + h) {
             return switch (row.kind) {
                 .section => HitTarget{ .section = row.section_tier },
@@ -1620,11 +1667,11 @@ pub fn hitTestSidebar(logical_my: i32) HitTarget {
     return HitTarget{ .none = {} };
 }
 
-pub fn tabRowY(shell_idx: u32) ?i32 {
+pub fn tabRowForShell(shell_idx: u32) ?Row {
     var rows: [MAX_ROWS]Row = undefined;
     const n = layoutRows(&rows);
     for (0..n) |ri| {
-        if (rows[ri].kind == .tab and rows[ri].shell_idx == shell_idx) return rows[ri].y;
+        if (rows[ri].kind == .tab and rows[ri].shell_idx == shell_idx) return rows[ri];
     }
     return null;
 }
@@ -1634,7 +1681,7 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]con
     const reader = @import("themes.zig").themeReaderDark();
     _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else if (reader) tokens.ReaderHint else RGB(98, 102, 109)));
     var rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.right - uiScaled(8), .bottom = y + height };
-    if (!reader) {
+    if (!reader and !app_state.g_chat_active) {
         _ = DrawTextW(hdc, text, len, &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         return;
     }
@@ -1644,6 +1691,68 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]con
         upper[n] = if (text[n] >= 'a' and text[n] <= 'z') text[n] - 32 else text[n];
     }
     _ = DrawTextW(hdc, &upper, @intCast(n), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
+fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
+    const shell = &app_state.shells[index];
+    const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else if (index == app_state.active_shell) RGB(200, 200, 200) else RGB(138, 138, 138);
+    var right = column.right - uiScaled(12);
+    if (app_state.g_sidebar_hover == index) {
+        right -= uiScaled(18);
+        _ = SelectObject(hdc, uiFontClose());
+        _ = SetTextColor(hdc, hint);
+        var close = RECT{ .left = right, .top = y, .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
+        _ = DrawTextW(hdc, L("\u{00d7}"), -1, &close, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        var time: [24]u16 = undefined;
+        const time_len = @import("inbox.zig").inboxRelTime(shell.last_active, &time);
+        if (time_len > 0) {
+            _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+            var measure: RECT = std.mem.zeroes(RECT);
+            _ = DrawTextW(hdc, &time, @intCast(time_len), &measure, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
+            var stamp = RECT{ .left = right - measure.right - uiScaled(6), .top = y + uiScaled(5), .right = right - uiScaled(6), .bottom = y + uiScaled(29) };
+            _ = DrawTextW(hdc, &time, @intCast(time_len), &stamp, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+            right = stamp.left - uiScaled(6);
+        }
+    }
+    const size = uiScaled(40);
+    const left = column.left + uiScaled(10);
+    const top = y + @divTrunc(tabRowH() - size, 2);
+    const avatar = @import("bot_avatar.zig");
+    avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(shell));
+    if (shell.needs_attention or shell.disconnected) {
+        drawAttentionDot(hdc, left + size - uiScaled(3), top + size - uiScaled(3), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
+    }
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
+    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
+    var name = RECT{ .left = column.left + uiScaled(60), .top = y + uiScaled(5), .right = right, .bottom = y + uiScaled(29) };
+    if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+    _ = SetTextColor(hdc, hint);
+    var preview: [128]u16 = undefined;
+    const len = std.unicode.utf8ToUtf16Le(&preview, shell.preview[0..shell.preview_len]) catch 0;
+    var line = RECT{ .left = name.left, .top = y + uiScaled(29), .right = right, .bottom = y + uiScaled(51) };
+    if (chatDraftHasForShell(index)) {
+        _ = DrawTextW(hdc, L("DRAFT"), -1, &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    } else if (len > 0) {
+        _ = DrawTextW(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+}
+
+fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
+    const shell = &app_state.shells[row.shell_idx];
+    const size = uiScaled(56);
+    const left = row.x + @divTrunc(row.width - size, 2);
+    const top = y + uiScaled(8);
+    if (row.shell_idx == app_state.active_shell or shell.selected) {
+        @import("smooth.zig").fillRoundRect(hdc, .{ .left = row.x, .top = y, .right = row.x + row.width, .bottom = y + uiScaled(92) }, uiScaled(16), if (shell.selected) RGB(53, 53, 53) else if (app_state.g_light_theme) RGB(230, 230, 230) else RGB(24, 24, 24));
+    }
+    const avatar = @import("bot_avatar.zig");
+    avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(shell));
+    if (shell.needs_attention or shell.disconnected) drawAttentionDot(hdc, left + size - uiScaled(4), top + size - uiScaled(4), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
+    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
+    var name = RECT{ .left = row.x + uiScaled(4), .top = top + size + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
+    if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 pub fn paintSidebar(hdc: HANDLE) void {
@@ -1793,16 +1902,20 @@ pub fn paintSidebar(hdc: HANDLE) void {
             }
 
             const i: usize = row.shell_idx;
+            if (row.tile) {
+                paintPinnedBot(hdc, row, y);
+                continue;
+            }
 
             if (i == app_state.active_shell and LOOK_UNIFIED) {
                 const reader = @import("themes.zig").themeReaderDark();
                 const hl = if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_amoled_theme) RGB(42, 42, 42) else tintColor(sidebar_bg, RGB(160, 160, 160), 1, 6);
-                const hl_brush = CreateSolidBrush(if (reader) tokens.ReaderControl else hl);
-                const hl_pen = CreatePen(0, 1, if (reader) tokens.ReaderOutline else customColorOr("overlay_border", hl));
-                const hl_radius: i32 = if (reader) tabRowH() - 6 else 8;
+                const hl_brush = CreateSolidBrush(if (!app_state.g_sidebar_collapsed and !app_state.g_light_theme) RGB(53, 53, 53) else if (reader or (app_state.g_chat_active and !app_state.g_light_theme)) tokens.ReaderControl else hl);
+                const hl_pen = CreatePen(0, 1, if (reader or (app_state.g_chat_active and !app_state.g_light_theme)) tokens.ReaderOutline else customColorOr("overlay_border", hl));
+                const hl_radius: i32 = uiScaled(24);
                 const ob = SelectObject(hdc, hl_brush);
                 const op = SelectObject(hdc, hl_pen);
-                _ = @import("smooth.zig").drawRoundRect(hdc, column.left, y + 3, column.right, y + tabRowH() - 3, hl_radius, hl_radius);
+                _ = @import("smooth.zig").drawRoundRect(hdc, column.left, y + uiScaled(1), column.right, y + tabRowH() - uiScaled(1), hl_radius, hl_radius);
                 _ = SelectObject(hdc, ob);
                 _ = SelectObject(hdc, op);
                 _ = DeleteObject(hl_brush);
@@ -1843,17 +1956,24 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
             if (app_state.drag_active and i != app_state.drag_src) {}
 
-            if (app_state.g_sidebar_collapsed) {
+            if (!app_state.g_sidebar_collapsed and (app_state.g_chat_active or app_state.shells[i].tmux_session_len > 0 or app_state.shells[i].ai_agent != 0)) {
+                paintChatSidebarRow(hdc, column, y, @intCast(i));
+            } else if (app_state.g_sidebar_collapsed) {
                 const sw = SIDEBAR_W();
 
                 var kind_rc = RECT{ .left = 0, .top = y, .right = sw - 1, .bottom = y + tabRowH() };
                 if (chatDraftHasForShell(@intCast(i))) kind_rc.bottom -= uiScaled(14);
-                if (app_state.shells[i].disconnected) {
+                if (app_state.shells[i].ai_agent != 0 or app_state.shells[i].tmux_session_len > 0) {
+                    const size = @min(uiScaled(28), kind_rc.bottom - kind_rc.top);
+                    const left = @divTrunc(kind_rc.left + kind_rc.right - size, 2);
+                    const top = @divTrunc(kind_rc.top + kind_rc.bottom - size, 2);
+                    const avatar = @import("bot_avatar.zig");
+                    avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(&app_state.shells[i]));
+                    if (app_state.shells[i].disconnected or app_state.shells[i].needs_attention) drawAttentionDot(hdc, left + size - 2, top + size - 2, uiScaled(3), if (app_state.shells[i].disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
+                } else if (app_state.shells[i].disconnected) {
                     drawAttentionDot(hdc, @divTrunc(kind_rc.left + kind_rc.right, 2), @divTrunc(kind_rc.top + kind_rc.bottom, 2), 4, RGB(255, 145, 55));
                 } else if (app_state.shells[i].needs_attention) {
                     drawAttentionDot(hdc, @divTrunc(kind_rc.left + kind_rc.right, 2), @divTrunc(kind_rc.top + kind_rc.bottom, 2), 4, customColorOr("attention", RGB(60, 120, 220)));
-                } else if (app_state.shells[i].ai_agent != 0) {
-                    drawAgentIcon(hdc, &kind_rc, app_state.shells[i].ai_agent, app_state.shells[i].activity == .active);
                 } else {
                     _ = SelectObject(hdc, font_title);
                     _ = SetTextColor(hdc, if (isRemoteShellKind(app_state.shells[i].kind)) RGB(230, 140, 40) else RGB(150, 150, 150));
@@ -2153,8 +2273,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
         paintSidebarStickyStatusCard(hdc, font_status_card);
         paintSidebarUpdateCard(hdc, font_title, font_status_card);
+        @import("usage_card.zig").paintVersionStrip(hdc);
 
         paintWorkspaceStrip(hdc, sidebar_bg);
+        @import("workspace_switcher.zig").paintHeader(hdc);
         paintSidebarStatusCardPopup(hdc, font_title, font_status_card);
     }
 
@@ -2313,6 +2435,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_chat_find = result_idx == SEARCH_CHAT_FIND_OFFSET;
                     const is_chat_tools = result_idx == SEARCH_CHAT_TOOL_STEPS_OFFSET;
                     const is_chat_newest = result_idx == SEARCH_CHAT_NEWEST_OFFSET;
+                    const is_chat_resync = result_idx == SEARCH_CHAT_RESYNC_OFFSET;
                     const is_chat_more_menu = result_idx == SEARCH_CHAT_MORE_MENU_OFFSET;
                     const is_chat_copy = result_idx == SEARCH_CHAT_COPY_CODE_OFFSET;
                     const is_chat_attach = result_idx == SEARCH_CHAT_ATTACH_OFFSET or result_idx == SEARCH_CHAT_DICTATION_OFFSET;
@@ -2548,7 +2671,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var snm_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, if (is_snippet_manage) L("delete") else L("Alt+;"), -1, &snm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-
                     } else if (is_snippet_back) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
@@ -2691,7 +2813,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
                         var rc_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Reconnect Tab"), -1, &rc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L("Reattach Tab"), -1, &rc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var rc_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3237,11 +3359,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
                         var find_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Chat View: Find in conversation"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu) {
+                    } else if (is_clean_chat or is_chat_todo or is_chat_tools or is_chat_newest or is_chat_more_menu or is_chat_resync) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
                         var tools_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_more_menu) L("Chat View: More Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        _ = DrawTextW(hdc, if (is_clean_chat) (if (app_state.clean_chat) L("Chat View: CLEAN chat: ON (toggle)") else L("Chat View: CLEAN chat: OFF (toggle)")) else if (is_chat_todo) L("Chat View: Toggle todo list") else if (is_chat_newest) L("Chat View: Scroll to newest message") else if (is_chat_resync) L("Chat View: Resync chat") else if (is_chat_more_menu) L("Chat View: More Menu") else L("Chat View: Open or fold all tool steps"), -1, &tools_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                     } else if (is_chat_copy) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else customColorOr("text", themeConsoleFg()));
@@ -3921,7 +4043,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_kaw = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].keep_awake else false;
                             const tc_browser_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].browser_enabled else false;
                             const tc_has_tmux = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].tmux_session_len > 0 else false;
-                            const tc_label: [*:0]const u16 = if (result_idx == SEARCH_TABCTX_START_SESSION) L("Start new session") else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L("Unfavorite") else L("Favorite")) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L("Chat View: Allow") else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L("Chat View: Always allow") else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L("Chat View: Deny") else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L("Chat View: Stop the agent") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Chat View: Insert browser tab URL") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L("Chat View: Reset this chat") else if (result_idx == SEARCH_TABCTX_BACK) L("Back") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Reconnect Tab") else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L("Inbox: Show This Session Again") else L("Inbox: Never Show This Session")) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L("Unmute Tab") else L("Mute Tab")) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L("Keep Alive: On") else L("Keep Alive: Off")) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L("Unpin from Top") else L("Pin to Top")) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L("Keep Tab Awake: On") else L("Keep Tab Awake: Off")) else if (result_idx == SEARCH_TABCTX_WSMOVE) L("Move to Workspace\u{2026}") else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L("Add to new group") else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L("Remove from group") else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L("New tab in group") else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L("Move to NEW workspace") else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L("Clear tab selection") else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L("Archive Session") else L("Close Session")) else if (result_idx == SEARCH_TABCTX_END_TMUX) L("End tmux session") else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_browser_on) L("Close Browser Pane") else L("Open Browser Pane")) else L("Tab action");
+                            const tc_label: [*:0]const u16 = if (result_idx == SEARCH_TABCTX_START_SESSION) L("Start new session") else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L("Unfavorite") else L("Favorite")) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L("Chat View: Allow") else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L("Chat View: Always allow") else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L("Chat View: Deny") else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L("Chat View: Stop the agent") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Chat View: Insert browser tab URL") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L("Chat View: Reset this chat") else if (result_idx == SEARCH_TABCTX_BACK) L("Back") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Reattach Tab") else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L("Inbox: Show This Session Again") else L("Inbox: Never Show This Session")) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L("Unmute Tab") else L("Mute Tab")) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L("Keep Alive: On") else L("Keep Alive: Off")) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L("Unpin from Top") else L("Pin to Top")) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L("Keep Tab Awake: On") else L("Keep Tab Awake: Off")) else if (result_idx == SEARCH_TABCTX_WSMOVE) L("Move to Workspace\u{2026}") else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L("Add to new group") else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L("Remove from group") else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L("New tab in group") else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L("Move to NEW workspace") else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L("Clear tab selection") else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L("Archive Session") else L("Close Session")) else if (result_idx == SEARCH_TABCTX_END_TMUX) L("End tmux session") else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_browser_on) L("Close Browser Pane") else L("Open Browser Pane")) else L("Tab action");
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Ctrl+Shift+X") else if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_ARCHIVE) L("Alt+X") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
                             if (tc_shortcut) |tc_hint| {
@@ -4000,6 +4122,14 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var back_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("main"), -1, &back_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (result_idx == SEARCH_SETTINGS_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var settings_rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Settings"), -1, &settings_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
+                        var hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Ctrl+,"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_theme_menu) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
@@ -4337,8 +4467,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
         drawModalShadow(hdc, ox, oy, overlay_w, overlay_h, radius);
 
-        const border_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
-        const border_pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
+        const border_br = CreateSolidBrush(if (app_state.g_amoled_theme) @import("design_tokens.zig").ReaderOutline else if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
+        const border_pen = CreatePen(0, 1, if (app_state.g_amoled_theme) @import("design_tokens.zig").ReaderOutline else if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
         const old_brush_b = SelectObject(hdc, border_br);
         const old_pen_b = SelectObject(hdc, border_pen);
         _ = @import("smooth.zig").drawRoundRect(hdc, ox - 1, oy - 1, ox + overlay_w + 1, oy + overlay_h + 1, radius, radius);
@@ -4347,7 +4477,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         _ = DeleteObject(border_br);
         _ = DeleteObject(border_pen);
 
-        const bg_col: DWORD = if (app_state.g_light_theme) RGB(249, 249, 249) else if (app_state.g_edge_gray_theme) RGB(51, 51, 51) else if (app_state.g_mid_theme) RGB(68, 68, 68) else RGB(40, 40, 40);
+        const bg_col: DWORD = if (app_state.g_amoled_theme) @import("design_tokens.zig").ReaderCard else if (app_state.g_light_theme) RGB(249, 249, 249) else if (app_state.g_edge_gray_theme) RGB(51, 51, 51) else if (app_state.g_mid_theme) RGB(68, 68, 68) else RGB(40, 40, 40);
         const bg_br = CreateSolidBrush(bg_col);
         const bg_pen = CreatePen(0, 1, bg_col);
         const old_brush_i = SelectObject(hdc, bg_br);
@@ -4379,12 +4509,17 @@ pub fn paintSidebar(hdc: HANDLE) void {
             const row_h = if (len > WRAP_THRESHOLD) row_h_double else row_h_single;
 
             if (abs_idx == app_state.g_url_picker_sel) {
-                var sel_rc = RECT{ .left = ox + 1, .top = ry, .right = ox + overlay_w - 1, .bottom = ry + row_h };
-                const sel_br = CreateSolidBrush(RGB(0, 122, 204));
-                _ = FillRect(hdc, &sel_rc, sel_br);
+                const sel_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(232, 232, 232) else @import("design_tokens.zig").ReaderControl);
+                const sel_pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(210, 210, 210) else @import("design_tokens.zig").ReaderOutline);
+                const old_sel_br = SelectObject(hdc, sel_br);
+                const old_sel_pen = SelectObject(hdc, sel_pen);
+                _ = @import("smooth.zig").drawRoundRect(hdc, ox + 6, ry + 2, ox + overlay_w - 6, ry + row_h - 2, 12, 12);
+                _ = SelectObject(hdc, old_sel_br);
+                _ = SelectObject(hdc, old_sel_pen);
                 _ = DeleteObject(sel_br);
+                _ = DeleteObject(sel_pen);
             }
-            _ = SetTextColor(hdc, if (abs_idx == app_state.g_url_picker_sel) RGB(255, 255, 255) else if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(220, 220, 220));
+            _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(220, 220, 220));
 
             var draw_buf: [2100]u16 = undefined;
             var draw_len: usize = 0;

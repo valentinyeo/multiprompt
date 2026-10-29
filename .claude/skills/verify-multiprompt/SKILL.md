@@ -11,6 +11,28 @@ Read [features/README.md](features/README.md), then the selected feature file be
 
 Diagnostic verification maps live separately in `diagnostics/`: [Chat sync audit](diagnostics/chat-sync-audit.md) uses the dedicated GitHub Linux job, not the Windows desktop driver.
 
+## Feature control ownership
+
+- `control.ps1` keeps options, setup, dispatch and cleanup.
+- `control-feature-<name>.ps1` owns each extracted feature body.
+- Existing dedicated scripts keep their names.
+- `control-library.ps1` holds shared PowerShell helpers.
+- `control-native.cs` holds unchanged native types.
+- Same-directory dot sourcing preserves scope and paths.
+- Source readers use `readControlSource` from `tools/app-source.js`.
+- Ordinary checks never pin feature content hashes.
+
+The extraction tool is safe to rerun:
+
+```sh
+pwsh -File tools/split-feature-controls.ps1 -Path .claude/skills/verify-multiprompt/control.ps1 -Output control-ast.json
+node tools/split-feature-controls.mjs control-ast.json
+node tools/split-feature-controls.mjs --check
+```
+
+Use `--check --original` only for this migration's proof.
+Its fixture records the original source, not future constraints.
+
 ## Launch
 
 From an authenticated checkout, submit the default branch's workflow and select a feature-map file stem:
@@ -22,7 +44,7 @@ timeout 1800 gh run watch <id> --interval 300
 gh run download <id>
 ```
 
-Use `appearance` for the first journey. Other names are `browser-corners`, `sessions`, `session-restore`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `session-tabs`, `favorites-groups`, `browser-switch-speed`, `chat-switch-speed`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `title-bar`, `window-controls`, `chat-tables`, `chat-code-font`, `safe-updates`, `chat-view`, `chat-view-everywhere`, `chat-focus`, `chat-dictation`, `status-card`, `palette-order`, `remind-me`, `tab-names`, `browser-emulation`, `browser-own-profile`, `chat-first-paint` ([chat first paint](features/chat-first-paint.md)), `chat-send-latency` ([chat send latency](features/chat-send-latency.md)), and `relaunch-saved-sessions` (the release gate, [relaunch saved sessions](features/relaunch-saved-sessions.md)). [Chat delivery](features/chat-delivery.md) additionally selects `chat-delivery` for the production tmux-channel journey described below. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
+Use `appearance` for the first journey. Other names are `browser-corners`, `sessions`, `session-restore`, `workspaces`, `workspace-focus`, `inbox`, `command-palette`, `session-open`, `session-tabs`, `favorites-groups`, `browser-switch-speed`, `chat-switch-speed`, `browser-pane-stuck`, `browser-pane-locked`, `group-rail`, `pane-layout`, `title-bar`, `window-controls`, `chat-tables`, `chat-code-font`, `safe-updates`, `chat-view`, `chat-view-everywhere`, `chat-focus`, `chat-dictation`, `status-card`, `palette-order`, `remind-me`, `tab-names`, `browser-emulation`, `browser-own-profile`, `chat-first-paint` ([chat first paint](features/chat-first-paint.md)), `chat-send-latency` ([chat send latency](features/chat-send-latency.md)), `app-icon` ([app icon](features/app-icon.md)), and `relaunch-saved-sessions` (the release gate, [relaunch saved sessions](features/relaunch-saved-sessions.md)). [Chat delivery](features/chat-delivery.md) additionally selects `chat-delivery` for the production tmux-channel journey described below. The `session-open` journey exercises the real agent TCP request and background persistence, not successful SSH/tmux attachment. Verify the listed run's head SHA and title before watching or downloading. To verify a development branch:
 
 ```sh
 gh workflow run verify.yml --ref ceo/IGSH-525 -f feature=appearance

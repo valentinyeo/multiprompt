@@ -8,6 +8,14 @@ on:
       tag:
         description: Release tag to create, for example v0.28.712
         required: true
+      proof:
+        description: Build both architectures without publishing
+        type: boolean
+        default: false
+      publication_proof:
+        description: Test publication ordering without building or publishing
+        type: boolean
+        default: false
 
   workflow_call:
     inputs:
@@ -22,8 +30,23 @@ permissions:
   contents: write
 
 jobs:
+  publication-proof:
+    if: inputs.publication_proof
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Prove forward-only publication
+        run: node --test tools/release-version.test.mjs
+
   prepare:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && !inputs.publication_proof
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
@@ -35,6 +58,9 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
+      - name: Verify release history on the branch
+        if: inputs.proof
+        run: node --test tools/version-stamp.test.mjs tools/release-version.test.mjs
       - name: Resolve release version and commit
         id: version
         env:
@@ -54,8 +80,15 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-  build:
+  journeys:
     needs: prepare
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: all
+      revision: ${{ needs.prepare.outputs.sha }}
+
+  build:
+    needs: [prepare, journeys]
     name: build-${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
@@ -80,8 +113,12 @@ jobs:
       - name: Build
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          PROOF: ${{ inputs.proof }}
         run: |
-          node tools/version-stamp.mjs build "$TAG"
+          if [ "$PROOF" != true ]; then
+            node tools/version-stamp.mjs build "$TAG"
+          fi
           zig build -Dtarget=${{ matrix.target }} -Drelease=${{ github.event_name != 'pull_request' }} -Dversion="${TAG#v}"
           node --input-type=module - "$TAG" <<'NODE'
           import fs from 'node:fs';
@@ -103,10 +140,10 @@ jobs:
     needs: [prepare, build]
     permissions:
       contents: write
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && !inputs.proof
     runs-on: ubuntu-latest
     concurrency:
-      group: release-${{ needs.prepare.outputs.tag }}
+      group: release-publication
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -115,14 +152,19 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
+          name: multiprompt-x64
           path: dist
-          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: multiprompt-arm64
+          path: dist
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
       - name: Publish plain versioned update notes
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           node tools/version-stamp.mjs build "$TAG"
           node tools/release-notes.mjs src/changelog.zig "$TAG" dist/release-notes.json
@@ -153,5 +195,24 @@ jobs:
             echo "Release $TAG already exists; skipping publication"
             exit 0
           fi
+          published_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
+          latest=$(node --input-type=module - "$TAG" "$published_tag" <<'NODE'
+          const versions = process.argv.slice(2).map(tag => {
+            const match = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(tag);
+            if (!match) throw new Error(`Invalid release tag: ${tag}`);
+            return match.slice(1).map(BigInt);
+          });
+          const index = versions[0].findIndex((part, index) => part !== versions[1][index]);
+          console.log(index !== -1 && versions[0][index] > versions[1][index]);
+          NODE
+          )
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$BUILT_SHA" \
-            --latest --title "multiprompt $TAG" --generate-notes
+            --latest="$latest" --title "multiprompt $TAG" --generate-notes
+
+  runner-sessions:
+    needs: [prepare, release]
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      hax_sessions_proof: true
+      tag: ${{ needs.prepare.outputs.tag }}

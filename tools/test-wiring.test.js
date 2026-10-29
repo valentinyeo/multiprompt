@@ -15,7 +15,11 @@ function testFiles(dirs) {
 function runners() {
   const workflows = path.join(root, '.github/workflows');
   const files = ['build.zig', ...fs.readdirSync(workflows).map((f) => `.github/workflows/${f}`)];
-  return files.map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
+  const text = files.map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
+  const discovery = path.join(root, 'tools/discover-tests.cjs');
+  const discovered = text.includes('"node", "tools/discover-tests.cjs"') && fs.existsSync(discovery)
+    ? require(discovery).discoverTests(root) : [];
+  return text + '\n' + discovered.join('\n') + '\n';
 }
 
 function unwired(files, text) {
@@ -24,7 +28,7 @@ function unwired(files, text) {
 
 test('every tools/, extension/ and service/test/ test file runs in build.zig or a workflow', () => {
   const missing = unwired(testFiles(['tools', 'extension', 'service/test']).filter(file => !localOnly.has(file)), runners());
-  assert.deepEqual(missing, [], `add these to a node --test step in build.zig (test-vps runs on every PR): ${missing.join(', ')}`);
+  assert.deepEqual(missing, [], `wire non-Node tests explicitly; conventional Node tests use automatic discovery: ${missing.join(', ')}`);
 });
 
 test('tools contains no copied test backups', () => {
@@ -241,4 +245,43 @@ test('ISSUE-543 executable help sweep depends on its installed bridge in every s
   assert.match(build, /zsb_help_tests\.step\.dependOn\(&bridge_install\.step\);/);
   assert.match(build, /zsb_help_tests\.setEnvironmentVariable\("BRIDGE_EXE", b\.getInstallPath\(\.bin, "zigshell-bridge\.exe"\)\);/);
   assert.match(build, /test_step\.dependOn\(&zsb_help_tests\.step\);/);
+});
+
+test('chat CPU budget binaries finish without the listen transport and preserve failing exit codes', () => {
+  const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
+  const start = build.indexOf('    const run_chat_echo_budget_tests =');
+  const end = build.indexOf('    const chat_perf_step =', start);
+  assert.ok(start >= 0 && end > start);
+  const launch = build.slice(start, end);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-test-completion-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'build.zig'), `const std = @import("std");
+pub fn build(b: *std.Build) void {
+    const chat_echo_budget_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("fixture.zig"), .target = b.graph.host, .optimize = .ReleaseSmall,
+    }) });
+${launch}
+    b.step("check", "Run completion control").dependOn(&run_chat_echo_budget_tests.step);
+}
+`);
+    const run = failing => {
+      fs.writeFileSync(path.join(dir, 'fixture.zig'), `const std = @import("std");
+test "native runner completion control" {
+    for (0..180) |i| std.debug.print("CPU961 completion row={d} preserve native diagnostics\\n", .{i});
+    try std.testing.expect(${!failing});
+}
+`);
+      return spawnSync(process.env.ZIG || 'zig', ['build', 'check', '--verbose', '--summary', 'all', '-j1'], { cwd: dir, encoding: 'utf8', timeout: 120000 });
+    };
+    const green = run(false);
+    assert.equal(green.status, 0, `${green.error || green.signal || ''}\n${green.stdout}${green.stderr}`);
+    assert.match(green.stderr, /CPU961 completion row=179/);
+    assert.doesNotMatch(green.stderr, /(?:^|\n)[^\n]*[\\/]test(?:\.exe)?[ \t]+[^\n]*--listen=-/, 'native completion must not depend on the failed listen protocol');
+    const red = run(true);
+    assert.equal(red.status, 1, `${red.error || red.signal || ''}\n${red.stdout}${red.stderr}`);
+    assert.match(red.stderr, /TestUnexpectedResult/);
+    console.log('NATIVE_COMPLETION_CONTROLS_OK pass=0 failure=nonzero rows=180');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

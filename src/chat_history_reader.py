@@ -105,6 +105,16 @@ def conversation_path(agent, sid, cwd, home=None):
                     denied = error
                 except OSError:
                     pass
+    state_home = Path(os.environ.get("XDG_STATE_HOME", str(home / ".local/state"))) if home == HOME else home / ".local/state"
+    hax_root = state_home / "hax/sessions"
+    try:
+        for path in hax_root.glob("*/*_" + sid + ".jsonl"):
+            if path.resolve().is_relative_to(hax_root.resolve()):
+                header = hax_session_header(path)
+                if header and header["id"] == sid:
+                    return path
+    except PermissionError as error:
+        denied = error
     if denied is not None:
         raise denied
     return None
@@ -164,10 +174,23 @@ def agent_pid_for_panes(pane_pids, table, agent):
                 continue
             seen.add(pid)
             argv = table.get(pid, (0, []))[1]
-            if argv and (process_basename(argv[0]) == agent or
+            if argv and (process_basename(argv[0]) in (agent, "hax") or
                          process_basename(argv[0]) in ("node", "bun") and len(argv) > 1 and
                          process_basename(argv[1]) in (agent, agent + ".js")):
                 return pid
+            if argv and process_basename(argv[0]) == "tmux" and pwd is not None:
+                try:
+                    user = pwd.getpwuid(Path(f"/proc/{pid}").stat().st_uid)
+                    if user.pw_uid != 0:
+                        clients = subprocess.run(["sudo", "-n", "-H", "-u", user.pw_name, "--", "tmux", "list-clients", "-F", "#{client_pid}\t#{pane_pid}"],
+                                                 capture_output=True, text=True, timeout=3, check=False)
+                        if clients.returncode == 0:
+                            for line in clients.stdout.splitlines():
+                                fields = line.split()
+                                if len(fields) == 2 and fields[0] == str(pid) and fields[1].isdigit():
+                                    queue.append(int(fields[1]))
+                except (OSError, KeyError, subprocess.SubprocessError):
+                    pass
             queue.extend(children.get(pid, []))
     return None
 
@@ -188,16 +211,29 @@ def newest_jsonl(paths):
             best, best_mtime = path, mtime
     return best
 
-def process_table(root=Path("/proc")):
+def process_table(root=Path("/proc"), pids=None):
 
     table = {}
     try:
-        entries = list(root.iterdir())
+        entries = list(root.iterdir()) if pids is None else [root / str(pid) for pid in pids]
     except OSError:
         return table
+    seen = set()
     for entry in entries:
-        if not entry.name.isdigit():
+        if not entry.name.isdigit() or entry.name in seen:
             continue
+        seen.add(entry.name)
+        if pids is not None:
+            try:
+                tasks = list((entry / "task").iterdir())
+            except OSError:
+                tasks = []
+            for task in tasks:
+                try:
+                    children = (task / "children").read_text().split()
+                    entries.extend(root / child for child in children if child.isdigit())
+                except OSError:
+                    pass
         try:
             stat = (entry / "stat").read_text(encoding="utf-8", errors="replace")
             raw = (entry / "cmdline").read_bytes()
@@ -290,6 +326,35 @@ def open_claude_transcript(pid):
         pass
     return newest_jsonl(paths)
 
+def hax_session_header(path):
+    try:
+        with path.open("rb") as source:
+            header = json.loads(source.readline())
+        if (isinstance(header, dict) and header.get("type") == "session" and header.get("version") == 1 and
+                isinstance(header.get("id"), str) and SESSION_ID.fullmatch(header["id"]) and
+                path.name.endswith("_" + header["id"] + ".jsonl")):
+            return header
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def open_hax_transcript(pid):
+    try:
+        for fd in Path(f"/proc/{pid}/fd").iterdir():
+            try:
+                path = Path(os.readlink(fd))
+                if path.suffix == ".jsonl":
+                    header = hax_session_header(path)
+                    if header:
+                        return header["id"], path
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return None
+
+
 def read_process_cwd(pid):
     try:
         return os.readlink(f"/proc/{pid}/cwd")
@@ -340,6 +405,7 @@ def codex_transcript_for_cwd(cwd):
 
 def resolve_tmux_agent(agent, name, pid=None):
 
+    table = None
     if pid is None:
         try:
             result = subprocess.run(["tmux", "list-panes", "-t", "=" + name, "-F", "#{pane_pid}"],
@@ -351,9 +417,19 @@ def resolve_tmux_agent(agent, name, pid=None):
         pane_pids = [int(line) for line in result.stdout.split() if line.isdigit()]
         if not pane_pids:
             return None
-        pid = agent_pid_for_panes(pane_pids, process_table(), agent)
+        table = process_table(pids=pane_pids)
+        pid = agent_pid_for_panes(pane_pids, table, agent)
         if pid is None:
             return None
+    try:
+        argv = table[pid][1] if table is not None else Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "replace").split("\0")
+    except (OSError, KeyError):
+        argv = []
+    hax = open_hax_transcript(pid)
+    if hax is not None:
+        return hax
+    if argv and process_basename(argv[0]) == "hax":
+        return None
     cwd = read_process_cwd(pid)
     if agent == "claude":
         opened = open_claude_transcript(pid)
@@ -365,10 +441,6 @@ def resolve_tmux_agent(agent, name, pid=None):
             path = conversation_path("claude", sid, cwd) if cwd else None
             if path is not None:
                 return sid, path
-        try:
-            argv = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "replace").split("\0")
-        except OSError:
-            argv = []
         for index, argument in enumerate(argv[:-1]):
             if argument == "--resume" and SESSION_ID.fullmatch(argv[index + 1]):
                 resumed = argv[index + 1]
@@ -388,7 +460,11 @@ def resolve_tmux_agent(agent, name, pid=None):
 def conversation_event(event, agent):
     if not isinstance(event, dict):
         return None
-    if agent == "claude":
+    if event.get("kind") in ("user", "assistant"):
+        if event.get("origin") == "compact_seed":
+            return None
+        message = {"role": event["kind"], "content": event.get("text", "")}
+    elif agent == "claude":
         attachment = event.get("attachment") if event.get("type") == "attachment" else None
         if isinstance(attachment, dict) and attachment.get("type") == "queued_command" and not event.get("isSidechain"):
             message = {"role": "user", "content": attachment.get("prompt", "")}
@@ -627,6 +703,8 @@ def tool_events(event, agent, search=False):
 
 def conversation_rows(event, agent, offset=0, search=False):
     message = conversation_event(event, agent)
+    if message and event.get("kind") in ("user", "assistant"):
+        message["id"] = "hax:" + str(offset) + ":" + hashlib.sha256(wire_row(event).encode("utf-8")).hexdigest()[:16]
     tools = tool_events(event, agent, search=search)
     if not tools or agent != "claude" or event.get("type") != "assistant":
         return ([message] if message else []) + tools
@@ -765,6 +843,9 @@ def status_header(source, size, agent, captured=()):
             if source.read(probe_bytes) != previous[5]:
                 previous = None
     model = usage = todos = None
+    question = None
+    question_known = False
+    completed_questions = set()
     window = 200000
     end = size
     lower = previous[0] if previous is not None else 0
@@ -774,7 +855,7 @@ def status_header(source, size, agent, captured=()):
     pending = b""
     first = True
     extra_budget = max(0, QUESTION_SCAN_BYTES - probe_bytes - sum(len(data) for _, data in captured))
-    while end > lower and remaining and (model is None or usage is None or todos is None):
+    while end > lower and remaining and (model is None or usage is None or todos is None or not question_known):
         count = min(TAIL_BYTES, end - lower, remaining)
         cached = next(((start, data) for start, data in captured if start < end <= start + len(data)), None)
         if cached is not None:
@@ -804,7 +885,8 @@ def status_header(source, size, agent, captured=()):
         for raw in reversed(parts):
             markers = (((b'"model"',) if model is None else ()) +
                        ((b'"usage"', b'token_count') if usage is None else ()) +
-                       ((b'TodoWrite', b'update_plan') if todos is None else ()))
+                       ((b'TodoWrite', b'update_plan') if todos is None else ()) +
+                       ((b'AskUserQuestion', b'request_user_input', b'tool_result', b'function_call_output') if not question_known else ()))
             if not any(marker in raw for marker in markers):
                 continue
             try:
@@ -813,6 +895,37 @@ def status_header(source, size, agent, captured=()):
                 continue
             if not isinstance(event, dict) or event.get("isSidechain"):
                 continue
+            if not question_known:
+                if agent == "claude":
+                    message = event.get("message")
+                    parts = message.get("content", []) if isinstance(message, dict) and event.get("type") in ("assistant", "user") and not any(event.get(key) for key in ("isMeta", "isCompactSummary", "isVisibleInTranscriptOnly")) else []
+                    parts = parts if isinstance(parts, list) else []
+                else:
+                    parts = [event.get("payload")] if event.get("type") == "response_item" else []
+                for part in reversed(parts):
+                    if not isinstance(part, dict):
+                        continue
+                    kind = part.get("type")
+                    if kind in ("tool_result", "function_call_output"):
+                        identity = part.get("tool_use_id") if agent == "claude" else part.get("call_id")
+                        if isinstance(identity, str):
+                            completed_questions.add(identity)
+                    elif ((agent == "claude" and kind == "tool_use" and part.get("name") == "AskUserQuestion") or
+                          (agent != "claude" and kind == "function_call" and part.get("name") == "request_user_input")):
+                        identity = part.get("id") if agent == "claude" else part.get("call_id")
+                        value = part.get("input") if agent == "claude" else part.get("arguments")
+                        if isinstance(value, str):
+                            try:
+                                value = json.loads(value)
+                            except ValueError:
+                                value = None
+                        questions = value.get("questions") if isinstance(value, dict) else None
+                        if isinstance(identity, str) and isinstance(questions, list) and questions:
+                            question = dict(id=identity, questions=questions) if identity not in completed_questions else None
+                            if question is not None and agent != "claude":
+                                question["provider"] = "codex"
+                            question_known = True
+                            break
             if agent == "claude":
                 if event.get("type") != "assistant":
                     continue
@@ -858,17 +971,23 @@ def status_header(source, size, agent, captured=()):
                         continue
                     if isinstance(value, dict) and isinstance(value.get("plan"), list):
                         todos = value["plan"]
-            if model is not None and usage is not None and todos is not None:
+            if model is not None and usage is not None and todos is not None and question_known:
                 break
     if previous is not None:
         model = previous[1] if model is None else model
         if usage is None:
             usage, window = previous[2:4]
         todos = previous[4] if todos is None else todos
-    STATUS_CACHE[key] = (scanned_end, model, usage, window, todos[:50] if todos is not None else None, probe)
+        if not question_known:
+            question = previous[6]
+            if question is not None and question["id"] in completed_questions:
+                question = None
+    STATUS_CACHE[key] = (scanned_end, model, usage, window, todos[:50] if todos is not None else None, probe, question)
     if len(STATUS_CACHE) > 256:
         del STATUS_CACHE[next(iter(STATUS_CACHE))]
     result = {"role": "status"}
+    if question is not None or previous is not None and previous[6] is not None:
+        result["question"] = question
     if model:
         display = model.removeprefix("claude-")
         match = re.match(r"(opus|sonnet|fable|haiku)-(\d+)-(\d+)", display)
@@ -1108,10 +1227,10 @@ def queue_item(text):
     return dict(text=html.unescape(body)[:QUEUE_TEXT], sender='Task' if kind == 'task-notification' else html.unescape(sender or 'another session'), injected=True)
 
 
-def live_fields(source, size, tmux):
+def live_fields(source, size, tmux, shown=None):
     queue, sent = queue_replay(source, size)
     fields = dict(queue=[queue_item(text) for text in queue[:QUEUE_SHOWN]], sent=[queue_item(text) for text in sent[-QUEUE_SHOWN:]])
-    draft = box_draft("=" + tmux + ":")
+    draft = box_draft_text(shown) if shown is not None else box_draft("=" + tmux + ":")
     if draft is not None:
         fields["draft"] = draft[:DRAFT_TEXT]
     return fields
@@ -1154,6 +1273,13 @@ def resolve_response_path(q, source=None, as_owner=False):
         except PermissionError:
             resolved, denied = None, True
         sid, path = resolved if resolved else ("", None)
+        if path is None and follow and q["sid"]:
+            try:
+                pinned = conversation_path(agent, q["sid"], cwd)
+                if pinned is not None and hax_session_header(pinned):
+                    sid, path = q["sid"], pinned
+            except PermissionError:
+                denied = True
         if path is None and source is not None and not as_owner:
             discovered = tmux_owner_process(agent, tmux, source)
             if discovered:
@@ -1346,12 +1472,12 @@ def search_response(q, path, agent, sid):
     return "\n".join((header, *(wire_row(row) for row in hits), END, ""))
 
 
-def response(q, source=None, as_owner=False):
+def response(q, source=None, as_owner=False, resolved=None):
     if ISSUE_268_CHAT_FIND and "search" in q:
         query = q["search"]
         if not isinstance(query, str) or not 1 <= len(query) <= 200:
             raise ValueError("invalid search")
-    agent, sid, path, delegated = resolve_response_path(q, source, as_owner)
+    agent, sid, path, delegated = resolved or resolve_response_path(q, source, as_owner)
     if delegated is not None:
         return delegated
     if ISSUE_268_CHAT_FIND and "search" in q:
@@ -1457,10 +1583,12 @@ def response(q, source=None, as_owner=False):
             oldest = base
             rows = rows[row_start:]
         if jumped and not rows:
-            return response(dict(q, no_jump=True), source, as_owner)
+            return response(dict(q, no_jump=True), source, as_owner, resolved)
+        if mode == "delta":
+            captured.append((base, data))
         status = status_header(source, info.st_size, agent, captured)
         if q.get("live") is True and agent == "claude" and tmux and mode != "older":
-            status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux))
+            status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux, q.get("watch_screen")))
         more = scan_more or page_more
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
@@ -1485,14 +1613,22 @@ def stop_response(q):
     op = q.get("op", "stop")
     digit = q.get("digit")
     key = chr(digit) if op == "permission" and type(digit) is int and 49 <= digit <= 57 else "Escape"
+    keys = None
     reason = None
-    if op == "permission" and key == "Escape":
+    if op == "question":
+        values = q.get("keys")
+        if not isinstance(values, list) or not values or any(type(value) is not int or value not in (9, 13) and not 49 <= value <= 57 for value in values):
+            reason = "invalid_question_keys"
+        else:
+            keys = [key for value in values for key in (["Up", "Tab"] if value == 9 else ["Enter"] if value == 13 else [chr(value)])]
+    elif op == "permission" and key == "Escape":
         reason = "invalid_permission_digit"
-    elif not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
+    if not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", name) is None:
         reason = "invalid_tmux_name"
-    else:
+    if reason is None:
         try:
-            keys = ["C-x", "C-s"] if op == "send_queued" else ["Up"] if op == "edit_queued" else [key]
+            if keys is None:
+                keys = ["C-x", "C-s"] if op == "send_queued" else ["Up"] if op == "edit_queued" else [key]
             subprocess.run(["tmux", "send-keys", "-t", "=" + name + ":", *keys], check=True, capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             reason = "tmux_stop_failed"
@@ -1564,7 +1700,8 @@ def send_response(q):
         except (OSError, subprocess.SubprocessError, UnicodeError):
             reason = "tmux_send_failed"
     status = "error" if reason else "ok"
-    return f"@mp\t{rid}\tsend\t{status}\t{reason or '-'}\t0\n{END}\n"
+    op = "question_text" if q.get("op") == "question_text" else "send"
+    return f"@mp\t{rid}\t{op}\t{status}\t{reason or '-'}\t0\n{END}\n"
 
 
 def type_into_box(target, text, rid):
@@ -1678,6 +1815,172 @@ def settle_response(q, source=None, as_owner=False):
         return error("read_failed")
 
 
+def watch_changes(q, resolved, source, as_owner):
+    import ctypes
+    import selectors
+    import struct
+
+    agent, sid, path, delegated = resolved
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.inotify_init1.argtypes = [ctypes.c_int]
+    libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+    fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+    if fd < 0:
+        raise OSError(ctypes.get_errno(), "inotify_init1")
+    control = None
+    control_buffer = b""
+    attached = False
+
+    def capture():
+        nonlocal control_buffer, attached
+        control.stdin.write(("capture-pane -p -e -J -t =" + q["tmux"] + ":\n").encode())
+        control.stdin.flush()
+        block = None
+        rows = []
+        while True:
+            while b"\n" not in control_buffer:
+                output = os.read(control.stdout.fileno(), 65536)
+                if not output:
+                    raise OSError("tmux control closed")
+                control_buffer += output
+            line, control_buffer = control_buffer.split(b"\n", 1)
+            if not attached:
+                if line.startswith(b"%end "):
+                    attached = True
+            elif block is None:
+                if line.startswith(b"%begin "):
+                    block = line[7:]
+            elif line == b"%end " + block:
+                return b"\n".join(rows).decode("utf-8", "replace")
+            elif line == b"%error " + block:
+                raise OSError("tmux capture failed")
+            else:
+                rows.append(line)
+
+    def refresh_screen():
+        if control is not None:
+            started = time.perf_counter_ns()
+            q["watch_screen"] = capture()
+            q["watch_capture_us"] = (time.perf_counter_ns() - started) // 1000
+
+    try:
+        if libc.inotify_add_watch(fd, os.fsencode(path.parent), 0x00000FCE) < 0:
+            raise OSError(ctypes.get_errno(), "inotify_add_watch")
+        metadata = HOME / ".claude/sessions"
+        metadata_watch = (libc.inotify_add_watch(fd, os.fsencode(metadata), 0x00000FCE)
+                          if agent == "claude" and q.get("tmux") and metadata.is_dir() else -1)
+        with selectors.DefaultSelector() as selector:
+            selector.register(fd, selectors.EVENT_READ, "file")
+            selector.register(sys.stdin.fileno(), selectors.EVENT_READ, "input")
+            if as_owner:
+                q["watch_screen"] = ""
+            if q.get("tmux") and not as_owner:
+                control = subprocess.Popen(["tmux", "-C", "attach-session", "-f", "read-only,ignore-size", "-t", "=" + q["tmux"]],
+                                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                selector.register(control.stdout, selectors.EVENT_READ, "tmux")
+            refresh_screen()
+            yield resolved
+            while True:
+                changed = False
+                screen_changed = False
+                if b"\n" in control_buffer:
+                    lines = control_buffer.split(b"\n")
+                    control_buffer = lines.pop()
+                    changed = any(line.startswith((b"%output ", b"%extended-output ")) for line in lines)
+                    if changed:
+                        refresh_screen()
+                        yield resolved
+                        continue
+                for key, _mask in selector.select():
+                    if key.data == "input":
+                        if not os.read(key.fd, 4096):
+                            return
+                    elif key.data == "tmux":
+                        output = os.read(key.fd, 65536)
+                        if not output:
+                            return
+                        control_buffer += output
+                        lines = control_buffer.split(b"\n")
+                        control_buffer = lines.pop()
+                        screen_changed = screen_changed or any(line.startswith((b"%output ", b"%extended-output ")) for line in lines)
+                        changed = changed or screen_changed
+                    else:
+                        events = os.read(fd, 65536)
+                        at = 0
+                        while at + 16 <= len(events):
+                            _wd, mask, _cookie, length = struct.unpack_from("iIII", events, at)
+                            name = os.fsdecode(events[at + 16:at + 16 + length].split(b"\0", 1)[0])
+                            at += 16 + length
+                            if mask & 0x4000 or name == path.name:
+                                changed = True
+                            elif q.get("tmux") and mask & 0x18A and (name.endswith(".jsonl") or _wd == metadata_watch and name.endswith(".json")):
+                                latest = resolve_response_path(dict(q, follow=True), source, as_owner)
+                                if latest[2] is None and as_owner:
+                                    return
+                                if latest[2] is not None and latest[2] != path:
+                                    resolved = latest
+                                    agent, sid, path, delegated = latest
+                                    q["sid"] = sid
+                                    if libc.inotify_add_watch(fd, os.fsencode(path.parent), 0x00000FCE) < 0:
+                                        raise OSError(ctypes.get_errno(), "inotify_add_watch")
+                                    changed = True
+                if changed:
+                    if screen_changed:
+                        refresh_screen()
+                    yield resolved
+    finally:
+        os.close(fd)
+        if control is not None:
+            control.terminate()
+            control.communicate()
+
+
+def watch(source, as_owner=False):
+    q = json.loads(sys.stdin.buffer.readline())
+    owner = conversation_owner(q.get("cwd", "")) if not q.get("codex") else None
+    if not as_owner and q.get("tmux"):
+        discovered = tmux_owner_process("codex" if q.get("codex") else "claude", q["tmux"], source)
+        if discovered:
+            owner = discovered[1]
+            q = dict(q, discovery_pid=discovered[0])
+    if owner and owner[1] != HOME and not as_owner:
+        bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"
+        child = subprocess.Popen(["sudo", "-n", "-H", "-u", owner[0], "--", "python3", "-u", "-c", bootstrap, "--watch", "--owner"], stdin=subprocess.PIPE)
+        try:
+            child.stdin.write(base64.b64encode(source.encode()) + b"\n" + json.dumps(q).encode() + b"\n")
+            child.stdin.flush()
+            while os.read(sys.stdin.fileno(), 4096):
+                pass
+        finally:
+            child.stdin.close()
+            child.wait()
+        return
+    resolved = resolve_response_path(q, source, as_owner)
+    agent, sid, path, delegated = resolved
+    if delegated is not None or path is None:
+        print(json.dumps(dict(id=q["id"], wire=delegated or missing_response(q, "session transcript not found"))), flush=True)
+        return
+    q = dict(q, sid=sid, follow=False)
+    previous = None
+    for resolved in watch_changes(q, resolved, source, as_owner):
+        while True:
+            started = time.perf_counter_ns() - q.pop("watch_capture_us", 0) * 1000
+            wire = response(q, source, as_owner, resolved)
+            fields = wire.split("\n", 1)[0].split("\t")
+            if fields[3] != "ok":
+                print(json.dumps(dict(id=q["id"], wire=wire)), flush=True)
+                return
+            signature = (fields[4], fields[6], fields[7], fields[12], tuple(line for line in wire.splitlines()[1:-1] if json.loads(line).get("role") == "status"))
+            if signature != previous:
+                frame = dict(id=q["id"], wire=wire, read_us=(time.perf_counter_ns() - started) // 1000)
+                print(json.dumps(frame, separators=(",", ":")), flush=True)
+                previous = signature
+            q.update(cached_sid=fields[4], offset=int(fields[6]), inode=int(fields[7]),
+                     mtime=int(fields[11]), probe=fields[12], start=int(fields[14]), before=0)
+            if fields[8] != "1":
+                break
+
+
 def serve(source):
     for line in sys.stdin.buffer:
         query = None
@@ -1690,11 +1993,11 @@ def serve(source):
             if type(rid) is not int or rid < 0:
                 rid = 0
                 raise ValueError("invalid request id")
-            if query.get("op") == "send":
+            if query.get("op") in ("send", "question_text"):
                 wire = send_response(query)
             elif query.get("op") == "draft":
                 wire = draft_response(query)
-            elif query.get("op") in ("stop", "permission", "send_queued", "edit_queued"):
+            elif query.get("op") in ("stop", "permission", "question", "send_queued", "edit_queued"):
                 wire = stop_response(query)
             elif query.get("op") == "settle":
                 wire = settle_response(query, source)
@@ -1705,7 +2008,9 @@ def serve(source):
         print(json.dumps(dict(id=rid, wire=wire), separators=(",", ":")), flush=True)
 
 
-if __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
+if __name__ == "__main__" and "--watch" in sys.argv[1:]:
+    watch(globals().get("READER_SOURCE"), "--owner" in sys.argv[1:])
+elif __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
     serve(globals().get("READER_SOURCE"))
 elif __name__ == "__main__":
     try:

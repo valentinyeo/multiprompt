@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
+import { discoverFeatures } from './verify-features.cjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import appSource from './app-source.js';
+const { readControlSource } = appSource;
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 const directory = '.claude/skills/verify-multiprompt';
-const driver = read(`${directory}/control.ps1`);
+const driver = readControlSource().replace(/\r\n/g, '\n');
 const workflow = read('.github/workflows/verify.yml');
 const map = read(`${directory}/features/browser-pane-stuck.md`);
 
@@ -21,7 +25,7 @@ for (const [file, names] of [
     'browserPlaceholderPure applies the deadline only to uncovered slots',
   ]],
   ['src/shortcuts.zig', [
-    'Alt browser open guard rejects a delayed complete second chord',
+    'Alt browser toggle accepts twenty immediate released presses',
     'Alt browser shortcut recovers an enabled pane with no live window',
   ]],
 ]) {
@@ -29,14 +33,17 @@ for (const [file, names] of [
   for (const name of names) assert.ok(read(file).includes(`test "${name}"`), `behavior unit exists: ${name}`);
 }
 
-function prMatrixContract(source) {
-  const features = JSON.parse(source.match(/feature:.*github\.event_name == 'pull_request'.*fromJSON\('(\[[^']+\])'\)/)?.[1] || '[]');
-  for (const feature of ['appearance', 'browser-pane-stuck']) assert.ok(features.includes(feature), `PR matrix includes ${feature}`);
+function matrixContract(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.pr\)/);
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  const features = discoverFeatures();
+  assert.ok(features.pr.includes('appearance'), 'PR smoke includes appearance');
+  assert.ok(features.full.includes('browser-pane-stuck'), 'master matrix includes browser recovery');
   assert.ok(source.includes('FEATURE: ${{ matrix.feature }}'));
   for (const trigger of ['src/**', 'tools/check-browser-pane-stuck.mjs']) assert.ok(source.includes(`      - ${trigger}`));
 }
-prMatrixContract(workflow);
-assert.throws(() => prMatrixContract(workflow.replace('"browser-pane-stuck"', '"missing-browser-pane-stuck"')));
+matrixContract(workflow);
+assert.throws(() => matrixContract(workflow.replace('fromJSON(needs.journeys.outputs.full)', 'fromJSON(needs.journeys.outputs.missing)')));
 
 const featureFiles = fs.readdirSync(path.join(root, directory, 'features')).filter(name => name.endsWith('.md') && name !== 'README.md');
 const index = read(`${directory}/features/README.md`);
@@ -53,7 +60,7 @@ for (const file of featureFiles) {
   const name = file.slice(0, -3);
   assert.ok(index.includes(`](${file})`), `index lists ${name}`);
   if (!desktopFeatures.includes(file)) continue;
-  assert.ok(workflow.includes(`'${name}'`), `workflow allows ${name}`);
+  assert.ok(discoverFeatures().available.includes(name), `workflow allows ${name}`);
   assert.ok(driver.includes(`        '${name}' {`), `driver implements ${name}`);
 }
 for (const section of ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']) {
@@ -97,7 +104,7 @@ function foregroundInputContract(source) {
   assert.equal((press.match(/::Chord\(/g) || []).length, 1);
   assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 0);
   assert.doesNotMatch(press, /Wait-Until|Start-Sleep|catch|\b(?:for|while)\s*\(/);
-  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Assert-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
+  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Wait-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
   assert.match(type, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/);
   assert.equal((type.match(/::Text\(/g) || []).length, 1);
   assert.doesNotMatch(type, /SetForegroundWindow|SetFocus|BringToForeground/);
@@ -114,7 +121,7 @@ for (const [before, after] of [
   ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', '    [void][VerifyNative]::SetForegroundWindow($script:window)\n    [void][VerifyNative]::SetForegroundWindow($script:window)\n'],
   ['    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)\n    [VerifyNative]::Chord($Keys)'],
   ['    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)\n    [VerifyNative]::Text($Text)'],
-  ["    Doctor\n    Assert-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
+  ["    Doctor\n    Wait-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
   ['$attempt -lt 50', '$true'],
   ['$attempt -lt 49', '$true'],
   ['    Assert-Foreground\n}\n\nfunction Press(', '    try { Assert-Foreground } catch {}\n}\n\nfunction Press('],
@@ -140,17 +147,11 @@ for (const [before, after] of [
   assert.throws(() => foregroundInputContract(broken), assert.AssertionError, before);
 }
 function shiftedShortcutTimingContract(source) {
-  const debounce = Number(read('src/app_state.zig').match(/BROWSER_TOGGLE_DEBOUNCE_MS: u32 = ([\d_]+);/)?.[1].replaceAll('_', ''));
-  assert.ok(Number.isFinite(debounce) && debounce > 0, 'production browser shortcut debounce exists');
-  const sequence = source.match(/Press @\(0x12, 0x10, 0x41\)[^\n]*\n\s+\$shiftToggleCooldown = \[Diagnostics.Stopwatch\]::StartNew\(\)\n\s+\$closed = Assert-BrowserPane 'closed' 'shift-a-toggle'\n\s+Wait-Until \{ \$shiftToggleCooldown.ElapsedMilliseconds -ge (\d+) \} 'browser shortcut debounce elapsed' (\d+)\n\s+Press @\(0x12, 0x10, 0x42\)[^\n]*\n\s+\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id/);
-  assert.ok(sequence, 'shifted shortcuts retain close/new-identity assertions with a bounded monotonic cooldown after the first chord');
-  const cooldown = Number(sequence[1]);
-  const timeout = Number(sequence[2]) * 1000;
-  assert.ok(cooldown > debounce && timeout > cooldown && timeout <= 10000, 'journey waits past production debounce within a bounded timeout');
+  assert.match(source, /Press @\(0x12, 0x10, 0x41\)[^\n]*\n\s+\$closed = Assert-BrowserPane 'closed' 'shift-a-toggle'\n\s+Press @\(0x12, 0x10, 0x42\)/);
+  assert.doesNotMatch(source, /shiftToggleCooldown|browser shortcut debounce elapsed/);
 }
 shiftedShortcutTimingContract(driver);
-assert.throws(() => shiftedShortcutTimingContract(driver.replace("            Wait-Until { $shiftToggleCooldown.ElapsedMilliseconds -ge 1600 } 'browser shortcut debounce elapsed' 5\n", '')));
-assert.throws(() => shiftedShortcutTimingContract(driver.replace('ElapsedMilliseconds -ge 1600', 'ElapsedMilliseconds -ge 1000')));
+assert.throws(() => shiftedShortcutTimingContract(driver.replace("            Press @(0x12, 0x10, 0x42)", "            Wait-Until { $false } 'browser shortcut debounce elapsed' 5\n            Press @(0x12, 0x10, 0x42)")));
 function browserForegroundContract(source) {
   const helper = source.match(/function Focus-BrowserPaneOwner\([^\n]*\) \{\n([\s\S]*?)\n\}/)?.[1];
   assert.ok(helper, 'browser launches explicitly activate the main window after docking');
@@ -173,7 +174,7 @@ function browserForegroundContract(source) {
   assert.match(source, /\$fifth = Assert-BrowserPane 'open' 'shift-b-toggle' \$fourth.browser_connection_id\s*Focus-BrowserPaneOwner 'shift-b-toggle' \$fifth.browser_connection_id\s*Palette 'close all browser panes'/);
   foregroundInputContract(source);
   for (const name of ['Press', 'Type-Text']) {
-    const precondition = name === 'Press' ? 'Wait-Foreground' : 'Assert-Foreground';
+    const precondition = 'Wait-Foreground';
     assert.match(source, new RegExp(`function ${name}\\([^\\n]*\\) \\{\\s*Doctor\\s*${precondition}\\s*Record`));
   }
 }

@@ -12,8 +12,8 @@ const palette = read('src/command_palette.zig');
 const verify = read('.github/workflows/verify.yml');
 
 test('IGSH-1020 menu lists the Android items in the Android order with no submenus', () => {
-  assert.match(menu, /enum\(usize\) \{ approve, stop, terminal, rename, history, waiting, remind, archive, model, end_session, remove \}/);
-  assert.match(menu, /&\.\{ \.rename, \.history \}[\s\S]*&\.\{ \.waiting, \.remind, \.archive \}[\s\S]*&\.\{\.model\}[\s\S]*&\.\{ \.end_session, \.remove \}/);
+  assert.match(menu, /enum\(usize\) \{ approve, stop, terminal, rename, history, resync, waiting, remind, archive, model, end_session, remove \}/);
+  assert.match(menu, /&\.\{ \.rename, \.history, \.resync \}[\s\S]*&\.\{ \.waiting, \.remind, \.archive \}[\s\S]*&\.\{\.model\}[\s\S]*&\.\{ \.end_session, \.remove \}/);
   assert.match(menu, /RGB\(0x18, 0x18, 0x18\)[\s\S]*RGB\(0x2E, 0x2E, 0x2E\)[\s\S]*RGB\(0xF2, 0x8B, 0x82\)/);
   assert.match(menu, /uiScaled\(20\)/);
 });

@@ -219,7 +219,7 @@ function lifecycle() {
   const close = body('closeShellRemember');
   const closeStart = close.indexOf('    if (idx >= shell_count) return;');
   const closeEnd = close.indexOf('    accountRecordClose(idx);');
-  const historyStart = close.indexOf('    if (remember_closed) {');
+  const historyStart = close.indexOf('    if (remember_closed) {\n        if (g_closed_count >= MAX_CLOSED_HISTORY) {');
   const historyEnd = close.indexOf('\n    if (shells[idx].kind == .tmux)', historyStart);
   const compactStart = close.indexOf('    var i = idx;');
   const compactEnd = close.indexOf('    pruneEmptyGroups();', compactStart);
@@ -339,6 +339,38 @@ test "ISSUE-498 close retains unsaved text only until persistence succeeds" {
     reopenLastClosedShell();
     try expectText(L("retry A"));
     try std.testing.expectEqual(@as(u64, 101), shells[1].chat_id);
+}
+`);
+});
+
+test('IGSH-1043 host refresh hides closed runner identities until explicit reopen', () => {
+  execute(`
+const std = @import("std");
+const TmuxSessionEntry = struct { host: u8, name: [6]u8, name_len: usize = 6, activity: u8 = 0 };
+var g_tmux_cache = [_]TmuxSessionEntry{
+    .{ .host = 0, .name = "closed".* },
+    .{ .host = 1, .name = "closed".* },
+    .{ .host = 0, .name = "runner".* },
+};
+const g_tmux_cache_count: u32 = g_tmux_cache.len;
+var g_inactive_filtered: [3]u32 = undefined;
+var g_inactive_filtered_count: u32 = 0;
+var g_tmux_closed = struct {
+    closed: bool = true,
+    fn contains(self: @This(), host: u8, name: []const u8) bool {
+        return self.closed and host == 0 and std.mem.eql(u8, name, "closed");
+    }
+}{};
+fn tmuxCacheEntryAlreadyOpen(_: *const TmuxSessionEntry) bool { return false; }
+${body('buildFilteredTmux')}
+test "closing one runner does not hide same-name runner on another host" {
+    buildFilteredTmux();
+    try std.testing.expectEqualSlices(u32, &.{ 1, 2 }, g_inactive_filtered[0..g_inactive_filtered_count]);
+    buildFilteredTmux();
+    try std.testing.expectEqualSlices(u32, &.{ 1, 2 }, g_inactive_filtered[0..g_inactive_filtered_count]);
+    g_tmux_closed.closed = false;
+    buildFilteredTmux();
+    try std.testing.expectEqualSlices(u32, &.{ 0, 1, 2 }, g_inactive_filtered[0..g_inactive_filtered_count]);
 }
 `);
 });

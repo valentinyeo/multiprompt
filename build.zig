@@ -15,6 +15,17 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const stable_optimize: std.builtin.OptimizeMode = if (optimize == .Debug) .ReleaseSmall else optimize;
     const app_version = b.option([]const u8, "version", "Override the embedded app version");
+    const build_revision = b.option([]const u8, "revision", "Embed the verified source revision");
+    const revision_marker = b.fmt("MPREVISION={s};", .{build_revision orelse ""});
+    const revision_source = b.addWriteFiles().add("revision.zig", b.fmt("pub export const mp_revision_marker: [{d}]u8 = \"{f}\".*;\n", .{ revision_marker.len, std.zig.fmtString(revision_marker) }));
+    const revision_object = b.addObject(.{
+        .name = "build-revision",
+        .root_module = b.createModule(.{
+            .root_source_file = revision_source,
+            .target = target,
+            .optimize = stable_optimize,
+        }),
+    });
     const release = b.option(bool, "release", "Build a publishable release with a configured signing public key") orelse false;
     if (release) {
         const encoded = std.mem.trim(u8, @embedFile("src/release_signing_public_key.txt"), " \r\n\t");
@@ -23,7 +34,6 @@ pub fn build(b: *std.Build) void {
         std.base64.standard.Decoder.decode(&key, encoded) catch @panic("Invalid release signing public key: expected base64 raw 32-byte key");
         if (std.mem.allEqual(u8, &key, 0)) @panic("Release signing public key is still the all-zero placeholder; configure it before publishing");
     }
-
 
     const mod = b.addModule("multiprompt", .{
         .root_source_file = b.path("src/root.zig"),
@@ -44,6 +54,8 @@ pub fn build(b: *std.Build) void {
     });
 
     linkColorEmoji(b, exe.root_module);
+    if (b.option(bool, "symbols", "Retain native profiling symbols") orelse false) exe.root_module.strip = false;
+    exe.root_module.addObject(revision_object);
     exe.subsystem = .Windows;
     exe.stack_size = MAIN_STACK_SIZE;
     exe.root_module.addWin32ResourceFile(.{ .file = b.path("assets/zigshell.rc") });
@@ -91,6 +103,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     linkColorEmoji(b, dev_exe.root_module);
+    dev_exe.root_module.addObject(revision_object);
     dev_exe.subsystem = .Windows;
     dev_exe.stack_size = MAIN_STACK_SIZE;
     dev_exe.root_module.addWin32ResourceFile(.{ .file = b.path("assets/zigshell.rc") });
@@ -174,6 +187,13 @@ pub fn build(b: *std.Build) void {
     const install_listener_helper = b.addInstallArtifact(listener_helper, .{ .dest_sub_path = "local-listener-helper.exe" });
     b.step("local-listener-helper", "Build the local listener account test helper").dependOn(&install_listener_helper.step);
 
+    const listener_rejection = b.addTest(.{
+        .root_module = exe.root_module,
+        .filters = &.{"local listener rejects peer of another user"},
+    });
+    const install_listener_rejection = b.addInstallArtifact(listener_rejection, .{ .dest_sub_path = "local-listener-rejection.exe" });
+    b.step("local-listener-rejection", "Build the local listener rejection regression").dependOn(&install_listener_rejection.step);
+
     const clean_chat_tests = b.addTest(.{
         .root_module = exe.root_module,
         .filters = &.{"IGSH-816 CLEAN"},
@@ -229,6 +249,8 @@ pub fn build(b: *std.Build) void {
     const livetest_tests = b.addTest(.{ .root_module = livetest_exe.root_module });
     test_step.dependOn(&b.addRunArtifact(livetest_tests).step);
     const vps_test_step = b.step("test-vps", "Run tests for the Linux server tools");
+    const user_tmux_tests = b.addSystemCommand(&.{ "node", "--test", "tools/user-tmux.test.js" });
+    vps_test_step.dependOn(&user_tmux_tests.step);
     const chat_audit = b.addExecutable(.{ .name = "chat-audit", .root_module = b.createModule(.{
         .root_source_file = b.path("src/chat_audit.zig"),
         .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -244,13 +266,14 @@ pub fn build(b: *std.Build) void {
     const chat_send_integration = b.addSystemCommand(&.{ "python3", "tools/chat-tmux-send-test.py", "--integration" });
     vps_test_step.dependOn(&chat_send_integration.step);
     const outbox_test_step = b.step("test-chat-outbox", "Run native outbox delivery and restart tests");
-    const chat_send_routing = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tmux-send.test.js", "tools/chat-full-settle.test.js", "tools/chat-delivery.test.js", "tools/chat-outbox-key.test.js", "tools/chat-history-connection.test.js" });
+    const chat_send_routing = b.addSystemCommand(&.{ "node", "--test", "tools/chat-tmux-send.test.js", "tools/chat-resync.test.js", "tools/chat-full-settle.test.js", "tools/chat-delivery.test.js", "tools/chat-outbox-key.test.js", "tools/chat-history-connection.test.js" });
     chat_send_routing.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     vps_test_step.dependOn(&chat_send_routing.step);
     outbox_test_step.dependOn(&chat_send_routing.step);
     const chat_view_gaps_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-gaps.test.js" });
     vps_test_step.dependOn(&chat_view_gaps_tests.step);
     const pane_spacing_tests = b.addSystemCommand(&.{ "node", "--test", "tools/pane-spacing.test.js", "tools/group-palette.test.js" });
+    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/bot-avatar.test.js" }).step);
     pane_spacing_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&pane_spacing_tests.step);
     vps_test_step.dependOn(&pane_spacing_tests.step);
@@ -264,6 +287,8 @@ pub fn build(b: *std.Build) void {
     const ci_admission_tests = b.addSystemCommand(&.{ "node", "--test", "tools/ci-admission.test.js" });
     test_step.dependOn(&ci_admission_tests.step);
     vps_test_step.dependOn(&ci_admission_tests.step);
+    const automerge_run_tests = b.addSystemCommand(&.{ "node", "--test", "tools/automerge-admit-run.test.js" });
+    vps_test_step.dependOn(&automerge_run_tests.step);
     const automerge_admit_tests = b.addSystemCommand(&.{ "bash", "tools/automerge-admit.test.sh" });
     test_step.dependOn(&automerge_admit_tests.step);
     vps_test_step.dependOn(&automerge_admit_tests.step);
@@ -292,7 +317,10 @@ pub fn build(b: *std.Build) void {
         }),
         .filters = &.{"IGSH-991"},
     });
-    const run_chat_echo_budget_tests = b.addRunArtifact(chat_echo_budget_tests);
+    const run_chat_echo_budget_tests = std.Build.Step.Run.create(b, "run chat echo CPU budgets");
+    run_chat_echo_budget_tests.addArtifactArg(chat_echo_budget_tests);
+    run_chat_echo_budget_tests.expectExitCode(0);
+    run_chat_echo_budget_tests.has_side_effects = true;
     const chat_perf_step = b.step("test-chat-perf", "Run native Chat View CPU and 50 MB history regressions");
     chat_perf_step.dependOn(&run_chat_perf_tests.step);
     chat_perf_step.dependOn(&run_chat_echo_budget_tests.step);
@@ -303,6 +331,7 @@ pub fn build(b: *std.Build) void {
     const chat_perf_clock_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-perf-clock.test.js" });
     test_step.dependOn(&chat_perf_clock_tests.step);
     vps_test_step.dependOn(&chat_perf_clock_tests.step);
+    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/switch-performance.test.mjs" }).step);
     const chat_cpu_regression = b.addSystemCommand(&.{ "node", "--test", "tools/chat-cpu.test.js" });
     test_step.dependOn(&chat_cpu_regression.step);
     const chat_backfill_fairness_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-backfill-fairness.test.js" });
@@ -341,7 +370,7 @@ pub fn build(b: *std.Build) void {
     }) });
     test_step.dependOn(&b.addRunArtifact(usage_mode_tests).step);
     const account_test_step = b.step("test-account", "Run portable account layout and SSH host tests");
-    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig" }) |source| {
+    for ([_][]const u8{ "src/account_client.zig", "src/account_hosts.zig", "src/account_keys.zig", "src/account_keys_shell_test.zig", "src/session_layout.zig", "src/account_layout.zig", "src/workspace_view.zig", "src/tmux_closed.zig" }) |source| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{
             .root_source_file = b.path(source),
             .target = b.resolveTargetQuery(.{ .cpu_model = .baseline }),
@@ -467,6 +496,12 @@ pub fn build(b: *std.Build) void {
         .optimize = .Debug,
     }) });
     test_step.dependOn(&b.addRunArtifact(reminders_load_tests).step);
+    const report_upload_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/report_upload.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(report_upload_tests).step);
     const freeze_recorder_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("src/freeze_recorder.zig"),
         .target = target,
@@ -507,7 +542,7 @@ pub fn build(b: *std.Build) void {
     const run_frequent_tests = b.addRunArtifact(frequent_tests);
     test_step.dependOn(&run_frequent_tests.step);
     vps_test_step.dependOn(&run_frequent_tests.step);
-    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js", "tools/account-keys.test.js", "tools/split-settings.test.js" });
+    const frequent_integration_tests = b.addSystemCommand(&.{ "node", "--test", "tools/frequent.test.js", "tools/changelog-layout.test.js", "tools/account-used.test.js", "tools/account-hosts.test.js", "tools/account-keys.test.js", "tools/split-settings.test.js" });
     frequent_integration_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&frequent_integration_tests.step);
     vps_test_step.dependOn(&frequent_integration_tests.step);
@@ -531,7 +566,7 @@ pub fn build(b: *std.Build) void {
     chat_drafts_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_drafts_tests.step);
     vps_test_step.dependOn(&chat_drafts_tests.step);
-    const chat_switch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-switch.test.js", "tools/chat-shell-override.test.js" });
+    const chat_switch_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-switch.test.js", "tools/chat-shell-override.test.js", "tools/chat-shape-switch.test.js" });
     chat_switch_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_switch_tests.step);
     vps_test_step.dependOn(&chat_switch_tests.step);
@@ -618,7 +653,7 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&browser_own_profile_tests.step);
     const browser_profile_isolation_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-profile-isolation.test.js", "tools/chrome-launch.test.js", "tools/browser-profile-adoption.test.js", "tools/browser-native-profile.test.js" });
     test_step.dependOn(&browser_profile_isolation_tests.step);
-    const browser_engine_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-engine-selection.test.js" });
+    const browser_engine_selection_tests = b.addSystemCommand(&.{ "node", "--test", "tools/browser-engine-selection.test.js", "tools/browser-toggle-immediate.test.js" });
     test_step.dependOn(&browser_engine_selection_tests.step);
     const zsb_session_isolation_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-session-isolation.test.js" });
     test_step.dependOn(&zsb_session_isolation_tests.step);
@@ -717,6 +752,11 @@ pub fn build(b: *std.Build) void {
     const zig_copy_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zig-copy.test.js" });
     test_step.dependOn(&zig_copy_tests.step);
     vps_test_step.dependOn(&zig_copy_tests.step);
+    const live_delivery_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-delivery-live-proof.test.mjs" });
+    test_step.dependOn(&live_delivery_tests.step);
+    vps_test_step.dependOn(&live_delivery_tests.step);
+    const usage_card_tests = b.addSystemCommand(&.{ "node", "--test", "tools/usage-card.test.js" });
+    test_step.dependOn(&usage_card_tests.step);
     const test_wiring_tests = b.addSystemCommand(&.{ "node", "--test", "tools/test-wiring.test.js", "tools/heavy-guard.test.js" });
     test_step.dependOn(&test_wiring_tests.step);
     vps_test_step.dependOn(&test_wiring_tests.step);
@@ -734,21 +774,7 @@ pub fn build(b: *std.Build) void {
     idle_front_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&idle_front_tests.step);
     vps_test_step.dependOn(&idle_front_tests.step);
-    const server_tool_tests = b.addSystemCommand(&.{
-        "node",                                   "--test",                              "--test-concurrency=4",
-        "tools/app-source.test.js",               "tools/browser-fixed-layout.test.js",  "tools/browser-overlay.test.js",
-        "tools/browser-pane-hibernation.test.js", "tools/chat-cache-bound.test.js",      "tools/chat-correctness.test.js",
-        "tools/chat-history-reader.test.js",      "tools/chat-reset.test.js",            "tools/chat-tables.test.js",
-        "tools/chat-transcript-history.test.js",  "tools/chat_injected.test.js",         "tools/crash-report.test.js",
-        "tools/debug-log.test.js",                "tools/favorites.test.js",             "tools/focus-guard.test.js",
-        "tools/idle-cpu.test.js",                 "tools/inbox-eta.test.js",             "tools/inbox-exclude.test.js",
-        "tools/power-saver.test.js",              "tools/sidebar-custom-groups.test.js", "tools/token-ladder-panel.test.js",
-        "tools/unarchive-semantics.test.js",      "tools/update-card.test.js",           "tools/zsb-active-tab.test.js",
-        "tools/zsb-explicit-tab.test.js",         "tools/zsb-pane-binding.test.js",      "extension/focus-guard.test.js",
-        "tools/chat-queued-notes.test.js",         "tools/chat-unconfirmed-duplicate.test.js",
-        "tools/auto-release-admit.test.js",       "tools/automerge-admit.test.mjs",
-        "tools/chat-unread-visit.test.js",
-    });
+    const server_tool_tests = b.addSystemCommand(&.{ "node", "tools/discover-tests.cjs" });
     server_tool_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     server_tool_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     vps_test_step.dependOn(&server_tool_tests.step);
@@ -756,6 +782,8 @@ pub fn build(b: *std.Build) void {
     const wine_tests = b.addSystemCommand(&.{ "node", "--test", "--test-concurrency=1", "tools/live-test-window.test.mjs", "tools/second-launch.test.mjs", "tools/chat-reply.test.mjs", "tools/chat-select.test.mjs" });
     wine_tests.step.dependOn(b.getInstallStep());
     wine_step.dependOn(&wine_tests.step);
+
+    test_step.dependOn(&b.addSystemCommand(&.{ "node", "--test", "tools/background-close.test.js" }).step);
 
     const test_groups = [_]*std.Build.Step{
         b.step("test-group-1", "Run desktop, telemetry and chat CPU tests"),

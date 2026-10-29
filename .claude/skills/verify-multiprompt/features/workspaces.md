@@ -1,6 +1,6 @@
 # Workspaces
 
-Create a workspace in the same desktop window and switch away and back while retaining the workspace and its session. The separate `workspace-focus` journey verifies keyboard input restoration for Chat View and the shell.
+Read the current workspace name above the sessions. Click the name to open the workspace card, select another named workspace, or create a workspace. The workspaces journey verifies native clicks and screenshots in every theme, including AMOLED. The separate `workspace-focus` journey verifies keyboard input restoration for Chat View and the shell.
 
 ## Sub-features
 
@@ -25,10 +25,11 @@ Preconditions:
 - The fresh instance has room for another workspace; no browser pane owns Alt+Right.
 
 - **Dispatch.** Run `gh workflow run verify.yml -f feature=workspaces`; Windows runs `control.ps1 -Feature workspaces`.
-- **Create.** Capture the baseline and press Ctrl+N. The saved workspace count must increase by exactly one. `created.png` shows the new workspace and its CMD tab; remember its active workspace index.
-- **Switch away.** Press Alt+2. The saved active workspace must be the first stored workspace, index zero.
-- **Return.** Press Alt+Right. The saved active workspace must equal the newly created workspace, not Starred or a different window.
-- **Proof.** Inspect `before.png`, `created.png`, `after.png`, the timestamped keys in `actions.json`, and `data/roaming/ZigShell/session.json`. `result.json` records before/after workspace counts, returned active index and window title.
+- **Create.** Press Ctrl+N and require exactly one new saved workspace and CMD session.
+- **Switch.** Click the workspace name even with the numbered switcher hidden. Click the first workspace row, then reopen and click the new workspace. Require the saved identities and active workspace after both clicks.
+- **Themes.** Capture the header and open card in dark, Multiprompt, light, AMOLED, mid, edge grey and system themes. Check native card fill and dismiss with Escape without switching.
+- **New workspace.** Click the card's New workspace row. Require exactly one additional workspace and a closed card.
+- **Proof.** Inspect `workspace-first.png`, `workspace-created.png`, `workspace-<theme>-header.png`, `workspace-<theme>-card.png`, `after.png`, saved session files, actions and `result.json`. These are real native windows on GitHub, never the user's desktop.
 
 ### Keyboard focus regression journey
 

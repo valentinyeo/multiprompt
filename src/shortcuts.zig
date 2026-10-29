@@ -292,7 +292,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K Thread Title", .b = "[DEV] Subject header above the console (toggle)", .header = false },
     .{ .a = "Ctrl++ / Ctrl+- / Ctrl+0", .b = "Terminal font only (Chat View text size when Chat View is active)", .header = false },
     .{ .a = "Ctrl+K UI Size", .b = "App/sidebar only, layered over native monitor DPI", .header = false },
-    .{ .a = "Ctrl+Shift+R", .b = "Reconnect active SSH/tmux tab", .header = false },
+    .{ .a = "Ctrl+Shift+R", .b = "Reattach active SSH/tmux tab", .header = false },
     .{ .a = "Ctrl+K \u{2192} Start new session", .b = "Restart an ended server session with the same name (also in tab actions)", .header = false },
     .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },
@@ -336,7 +336,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Drag tab: Pinned / Recents", .b = "Change its order inside the group or ungrouped list", .header = false },
     .{ .a = "Click tier heading", .b = "Collapse / expand ungrouped Pinned or Recents", .header = false },
     .{ .a = "Right-click group / Ctrl+K", .b = "Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs", .header = false },
-    .{ .a = "Right-click tab", .b = "Tab actions palette (pin / reconnect / mute / close / move / group)", .header = false },
+    .{ .a = "Right-click tab", .b = "Tab actions palette (pin / reattach / mute / close / move / group)", .header = false },
     .{ .a = "Ctrl+F in Chat View", .b = "Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes", .header = false },
     .{ .a = "End / Ctrl+K \"Chat View: Scroll to newest message\"", .b = "Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch", .header = false },
     .{ .a = "Double-click empty space", .b = "Switch between Chat View and the shell (without selecting text)", .header = false },
@@ -350,6 +350,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Drag in Chat View", .b = "Select text; double-click a word, triple-click a message; drag past the edge to auto-scroll", .header = false },
     .{ .a = "Ctrl+C in Chat View", .b = "Copy the selection (right-click offers Reply and Copy)", .header = false },
     .{ .a = "Ctrl+A in Chat View", .b = "Select all transcript text (transcript focus; composer keeps its own Ctrl+A)", .header = false },
+    .{ .a = "Ctrl+K \"Chat View: Resync chat\"", .b = "Chat View: reload messages from the session, repair waiting labels and keep the unsent draft without resending", .header = false },
     .{ .a = "Ctrl+K \"Chat View: More Menu\"", .b = "Chat View: open the round three-dot menu next to the title as one grouped panel: Approve, Stop, Terminal, Rename, History, Waiting, Remind me, Archive, the current Model, End session and Remove from list; Up/Down/Enter or the mouse choose, Esc or a click outside closes", .header = false },
     .{ .a = "Up / Down / Enter in Chat View", .b = "Up in an empty message box focuses the newest message; Up/Down move between messages, Enter opens the right-click options, Esc or typing returns to the box", .header = false },
     .{ .a = "Enter / Ctrl+Enter in Chat View", .b = "Send your message; while dictating, stops the dictation and sends it with the spoken words; Shift+Enter adds a new line; Enter inserts an open command suggestion", .header = false },
@@ -399,6 +400,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K \u{2192} Browser: Insert Agent Instructions", .b = "Paste the multiprompt-browser guide into the active shell", .header = false },
     .{ .a = "URL bar (click strip above pane)", .b = "Type a URL and press Enter to navigate the docked pane", .header = false },
     .{ .a = "Ctrl+Click URL in shell", .b = "Open link in the docked browser pane (was: default browser)", .header = false },
+    .{ .a = "Ctrl+, / Ctrl+K -> Settings", .b = "Open Settings; Escape closes the panel", .header = false },
     .{ .a = "Ctrl+K -> Changelog", .b = "what changed in each version", .header = false },
     .{ .a = "(agent-reported) Session ETA countdown", .b = "Sidebar row shows time left + a progress line; toggle either from Ctrl+K \u{2192} ETA Countdown Numbers / ETA Progress Line", .header = false },
     .{ .a = "Ctrl+K \u{2192} Estimate Accuracy", .b = "See how each agent's time estimates compare to how long tasks actually took", .header = false },
@@ -488,30 +490,27 @@ test "browser toggle debounce uses original event time across delayed delivery" 
     try std.testing.expect(claimBrowserToggleEvent(21_501, &handled_event_time));
 }
 
-pub fn physicalBrowserShortcutMayClose(shell_id: u32, launch_tick: u64, hwnd_missing: bool, now: u64, guard_shell_id: u32, guard_until: u64) bool {
-    if (launch_tick != 0 and !hwnd_missing) return false;
-    return shell_id != guard_shell_id or now >= guard_until;
+test "Alt browser toggle accepts twenty immediate released presses" {
+    var held = false;
+    for (0..20) |_| {
+        try std.testing.expect(claimBrowserFocusPress(true, &held));
+        try std.testing.expect(!claimBrowserFocusPress(true, &held));
+        try std.testing.expect(!claimBrowserFocusPress(false, &held));
+        try std.testing.expect(claimBrowserFocusPress(true, &held));
+        try std.testing.expect(!claimBrowserFocusPress(false, &held));
+    }
 }
 
-test "Alt browser open guard rejects a delayed complete second chord" {
-    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, true, 56_000, 42, 65_000));
-    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 0, true, 58_344, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, true, 65_000, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(43, 0, true, 58_344, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(42, 55_000, true, 65_000, 42, 65_000));
-    try std.testing.expect(!physicalBrowserShortcutMayClose(42, 55_000, false, 65_000, 42, 65_000));
-    try std.testing.expect(physicalBrowserShortcutMayClose(42, 0, false, 65_000, 42, 65_000));
-}
-
-pub fn physicalBrowserShortcutShouldRecover(enabled: bool, hwnd_live: bool, launch_tick: u64) bool {
-    return enabled and !hwnd_live and launch_tick == 0;
+pub fn physicalBrowserShortcutShouldRecover(enabled: bool, hwnd_live: bool, launch_tick: u64, connection_started: bool) bool {
+    return enabled and !hwnd_live and launch_tick == 0 and connection_started;
 }
 
 test "Alt browser shortcut recovers an enabled pane with no live window" {
-    try std.testing.expect(physicalBrowserShortcutShouldRecover(true, false, 0));
-    try std.testing.expect(!physicalBrowserShortcutShouldRecover(false, false, 0));
-    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, true, 0));
-    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, false, 55_000));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, false, 0, false));
+    try std.testing.expect(physicalBrowserShortcutShouldRecover(true, false, 0, true));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(false, false, 0, true));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, true, 0, true));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, false, 55_000, true));
 }
 
 fn isWindowsLevelShortcut(vk: u32, ctrl: bool, shift: bool, alt: bool) bool {
@@ -624,14 +623,10 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         }
         const kb: *const KBDLLHOOKSTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
         app_state.g_last_main_keyboard_event_time.store(kb.time, .release);
-        if (kb.vkCode == 0x1B and app_state.g_dictation_escape_held) {
-            if (wp == WM_KEYUP or wp == WM_SYSKEYUP) app_state.g_dictation_escape_held = false;
-            return 1;
-        }
-        if (kb.vkCode == 0x1B and wp == WM_KEYDOWN and !app_state.g_win_held and (kb.flags & 0x20) == 0 and !isCtrlDown() and
-            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and foregroundIsOurs() and queueDictationCancelFromEscape())
-        {
-            return 1;
+        const browser_toggle_owned = (kb.vkCode == 0x41 or kb.vkCode == 0x42) and foregroundIsOurs();
+        if (kb.vkCode == 0x41 or kb.vkCode == 0x42) {
+            const fg = GetForegroundWindow();
+            altqLog("browser_key event={} vk={X} wp={X} flags={X} fg={X} owner={X} ours={} held={}", .{ kb.time, kb.vkCode, wp, kb.flags, @intFromPtr(fg), @intFromPtr(@import("win32.zig").GetAncestor(fg, 3)), browser_toggle_owned, app_state.g_browser_toggle_chord_held });
         }
         const prior_focus_action = app_state.g_focus_user_action_tick;
         defer app_state.g_focus_user_action_tick = prior_focus_action;
@@ -651,6 +646,21 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_focus_user_action_tick = GetTickCount64();
         }
 
+        if (@import("settings_panel.zig").ownsForeground()) {
+            if (kb.vkCode == 0x5B or kb.vkCode == 0x5C) app_state.g_win_held = wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN;
+            return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
+        }
+        if (kb.vkCode == 0x1B and app_state.g_dictation_escape_held) {
+            if (wp == WM_KEYUP or wp == WM_SYSKEYUP) app_state.g_dictation_escape_held = false;
+            return 1;
+        }
+        if (kb.vkCode == 0x1B and wp == WM_KEYDOWN and !app_state.g_win_held and (kb.flags & 0x20) == 0 and !isCtrlDown() and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and foregroundIsOurs() and queueDictationCancelFromEscape())
+        {
+            return 1;
+        }
+        if (@import("settings_panel.zig").windowKey(@intCast(wp), kb.vkCode, true)) return 1;
+
         if (kb.vkCode == 0x0D and wp == WM_KEYDOWN and isCtrlDown() and
             (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and
             !isAltDown(kb.flags) and !app_state.g_win_held and chatViewOwnsInput() and
@@ -663,11 +673,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         }
 
         if (wp == WM_KEYDOWN or wp == WM_SYSKEYDOWN) {
-            if (chatSteerChord(&chat_steer_chord_pending, kb.vkCode, isCtrlDown(),
-                (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0,
-                isAltDown(kb.flags) or app_state.g_win_held,
-                chatViewOwnsInput() and foregroundIsOurs() and !activeBrowserHasForegroundFocus()))
-            {
+            if (chatSteerChord(&chat_steer_chord_pending, kb.vkCode, isCtrlDown(), (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0, isAltDown(kb.flags) or app_state.g_win_held, chatViewOwnsInput() and foregroundIsOurs() and !activeBrowserHasForegroundFocus())) {
                 _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_SEND, 1, 0);
                 return 1;
             }
@@ -689,7 +695,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             (kb.flags & 0x10) == 0 and duplex.voiceKeyStopsSpeech(kb.vkCode, (kb.flags & 0x20) != 0) and activeShellHasForegroundFocus())
             app_state.g_voice_console_key_tick.store(kb.time, .release);
         if ((kb.vkCode == 0x41 or kb.vkCode == 0x42) and (wp == WM_KEYUP or wp == WM_SYSKEYUP)) {
-            _ = claimBrowserTogglePress(false, kb.time, &app_state.g_browser_toggle_chord_held, &app_state.g_browser_toggle_last_event_time);
+            _ = claimBrowserFocusPress(false, &app_state.g_browser_toggle_chord_held);
         }
         if (kb.vkCode == 0x43 and (wp == WM_KEYUP or wp == WM_SYSKEYUP)) {
             _ = claimBrowserTogglePress(false, kb.time, &app_state.g_chat_toggle_chord_held, &app_state.g_chat_toggle_last_event_time);
@@ -990,8 +996,8 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             return 1;
         }
-        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and (kb.vkCode == 0x41 or kb.vkCode == 0x42) and foregroundIsOurs()) {
-            if (!claimBrowserTogglePress(true, kb.time, &app_state.g_browser_toggle_chord_held, &app_state.g_browser_toggle_last_event_time)) return 1;
+        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and (kb.vkCode == 0x41 or kb.vkCode == 0x42) and browser_toggle_owned) {
+            if (!claimBrowserFocusPress(true, &app_state.g_browser_toggle_chord_held)) return 1;
             app_state.g_sysmenu_pending = false;
             keybd_event(0xFF, 0, 0, 0);
             keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);

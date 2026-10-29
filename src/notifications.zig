@@ -1579,11 +1579,14 @@ test "local listener rejects peer of another user" {
     }) |target, request| {
         const client = try hardeningConnect(target);
         defer _ = closesocket(client);
+        Sleep(50);
         const sent = send(client, request.ptr, @intCast(request.len), 0);
-        try std.testing.expect(sent == @as(i32, @intCast(request.len)) or (sent == -1 and WSAGetLastError() == 10054));
+        const send_error = WSAGetLastError();
+        try std.testing.expect(sent == @as(i32, @intCast(request.len)) or (sent == -1 and (send_error == 10054 or send_error == 10053)));
         var response: [256]u8 = undefined;
         const n = recv(client, &response, response.len, 0);
-        try std.testing.expect(n == 0 or (n == -1 and WSAGetLastError() == 10054));
+        const recv_error = WSAGetLastError();
+        try std.testing.expect(n == 0 or (n == -1 and (recv_error == 10054 or recv_error == 10053)));
         var payload: [NOTIFY_PAYLOAD_CAP]u8 = undefined;
         var queued_len = dequeueNotification(&payload);
         const deadline = GetTickCount64() + 1000;

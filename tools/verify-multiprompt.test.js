@@ -1,10 +1,18 @@
 const test = require('node:test');
+
 const assert = require('node:assert/strict');
+const { readControlSource } = require('./app-source');
+assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
 
+function featureMatrix(source) {
+  assert.match(source, /fromJSON\(needs\.journeys\.outputs\.full\)/);
+  return require('./verify-features.cjs').discoverFeatures();
+}
+
 const root = path.resolve(__dirname, '..');
-const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const read = file => (file.endsWith('control.ps1') ? readControlSource() : fs.readFileSync(path.join(root, file), 'utf8'));
 const skill = '.claude/skills/verify-multiprompt/';
 const control = read(skill + 'control.ps1');
 const workflow = read('.github/workflows/verify.yml');
@@ -94,10 +102,18 @@ test('concurrency evaluator respects precedence, short-circuiting, format and st
   assert.throws(() => evaluate("'a' 'b'"), assert.AssertionError);
 });
 
-test('release tags reuse master verification instead of starting another full Windows matrix', () => {
+test('IGSH-1113 required appearance verification cannot be filtered out for any PR', () => {
+  const trigger = workflow.match(/^  pull_request:\r?\n((?:[ \t]+[^\n]*\r?\n)+)/m)?.[1];
+  assert.ok(trigger?.includes("      - '**'"));
+  assert.doesNotMatch(trigger, /^    (?:branches(?:-ignore)?|paths-ignore|types):|^      - ['"]?!/m);
+  assert.ok(featureMatrix(workflow).pr.includes('appearance'));
+});
+
+test('release tags reuse master verification instead of starting another full Windows matrix', async () => {
   const push = workflow.match(/^  push:\r?\n((?:    [^\n]*\r?\n)+)/m);
   assert.ok(push, 'master pushes still trigger full verification');
-  assert.match(push[1], /^    branches: \[master, 'ceo\/IGSH-1072\*', ceo\/IGSH-1061-recovery\]\r?$/m);
+  const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
+  verifyPushBranches(workflow);
   assert.ok(workflow.includes(`github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck'))`), 'recovery branch runs only its failing browser journey');
   assert.doesNotMatch(push[1], /^    tags(?:-ignore)?:/m, 'release tags must not duplicate the tested master matrix');
 });
@@ -136,7 +152,8 @@ test('concurrency isolates dispatch features and tags while preserving pull_requ
 });
 
 function allowsSessionOpen(text) {
-  assert.match(text, /\$env:FEATURE -notin @\([^\n)]*'session-open'[^\n)]*\)/);
+  assert.match(text, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(text).available.includes('session-open'));
 }
 
 function assertsSavedState(text) {
@@ -165,7 +182,7 @@ test('G1: workflow and harness allow session-open and Windows parses the driver'
   assert.match(workflow, /Language\.Parser\]::ParseFile/);
   assert.match(workflow, /run: node --test --test-concurrency=1 tools\/verify-multiprompt\.test\.js/);
   assert.match(workflow, /paths:[\s\S]*?- tools\/verify-multiprompt\.test\.js/);
-  assert.throws(() => allowsSessionOpen(workflow.replace(", 'session-open'", '')));
+  assert.throws(() => allowsSessionOpen(workflow.replace("node tools/verify-features.cjs $env:FEATURE", "")));
 });
 
 function assertsGroupSetup(text) {
@@ -281,7 +298,7 @@ function assertsOwnedInput(source) {
   assert.equal((press.match(/::Chord\(/g) || []).length, 1);
   assert.equal((press.match(/::SetForegroundWindow\(/g) || []).length, 0);
   assert.doesNotMatch(press, /Wait-Until|Start-Sleep|catch|\b(?:for|while)\s*\(/);
-  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Assert-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
+  assert.match(type, /^function Type-Text\(\[string\]\$Text\) \{\s+Doctor\s+Wait-Foreground\s+Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)\s+\}\s*$/);
   assert.match(type, /Record \('Type ' \+ \$Text\)\s+Assert-Foreground\s+\[VerifyNative\]::Text\(\$Text\)/);
   assert.equal((type.match(/::Text\(/g) || []).length, 1);
   assert.doesNotMatch(type, /SetForegroundWindow|SetFocus|BringToForeground/);
@@ -298,7 +315,7 @@ test('IGSH-807: foreground ownership is bounded, refuses foreign input and is re
     ['    [void][VerifyNative]::SetForegroundWindow($script:window)\n', '    [void][VerifyNative]::SetForegroundWindow($script:window)\n    [void][VerifyNative]::SetForegroundWindow($script:window)\n'],
     ['    [VerifyNative]::Chord($Keys)', '    [VerifyNative]::Chord($Keys)\n    [VerifyNative]::Chord($Keys)'],
     ['    [VerifyNative]::Text($Text)', '    [VerifyNative]::Text($Text)\n    [VerifyNative]::Text($Text)'],
-    ["    Doctor\n    Assert-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
+    ["    Doctor\n    Wait-Foreground\n    Record ('Type ' + $Text)", "    Doctor\n    Record ('Type ' + $Text)"],
     ['$attempt -lt 50', '$true'],
     ['$attempt -lt 49', '$true'],
     ['    Assert-Foreground\n}\n\nfunction Press(', '    try { Assert-Foreground } catch {}\n}\n\nfunction Press('],
@@ -433,6 +450,10 @@ Reset
 $script:loseOnRecord = $true
 Refuses { Type-Text 'lost before text' }
 Reset
+[VerifyNative]::Foreign(); [VerifyNative]::RecoverOnActivation = 2
+Type-Text 'recovered text'
+Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 2) 'Text did not recover owned foreground'
+Reset
 Type-Text 'owned text'
 Require ([VerifyNative]::Texts -eq 1 -and [VerifyNative]::Activations -eq 0) 'Text repaired focus or failed to inject'
 Write-Host 'IGSH-807 owned foreground and bounded retry behaviour passed'
@@ -491,7 +512,7 @@ function assertsPaneFocusGeometry(source, workflowText) {
     assert.ok(capture.indexOf('$dpi =') < capture.indexOf('Snapshot '));
     assert.doesNotMatch(capture, /\$console =|\$browser =/);
   }
-  assert.match(final, /Save-Json[^\n]+ 'pane-layout-rects.json'\s+Snapshot 'pane-layout'\s+\$proof = \[PaneLayoutProof\]::Check\([^\n]+, \$frame, \$client, \$consoleRect, \$browserRect, \$dpi, \$scale, \$hidePills\)/);
+  assert.match(final, /Save-Json[^\n]+ 'pane-layout-rects.json'\s+Snapshot 'pane-layout'\s+\$proof = \[PaneLayoutProof\]::Check\([^\n]+, \$frame, \$client, \$consoleRect, \$browserRect, \$dpi, \$scale, \$hidePills, \$sidebarLogical\)/);
   assert.match(final, /Fresh console UIA and HWND identity\/bounds disagree/);
   for (const required of [
     "'9618091700e09f5958a48390449dc5067874d5dd'",
@@ -587,7 +608,7 @@ test('G2: evidence is retained without seeding app state or bypassing cleanup', 
   assert.match(transport, /WriteAllText[\s\S]*?\.reply.json/);
   assert.doesNotMatch(journey, /Set-Content|WriteAllText|WriteAllBytes|SetEnvironmentVariable|PostMessage/);
   assertsOwnedInput(control);
-  assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Assert-Foreground/);
+  assert.match(control, /function Type-Text[\s\S]*?Doctor\s+Wait-Foreground/);
   assert.match(control, /\$stopped = \$job.Stop\(\)/);
   assert.match(control, /Copy-Item \(Join-Path \$scratch '\*'\) \$data -Recurse -Force; break[\s\S]*?Remove-ScratchPath \$scratch/);
 });
@@ -605,7 +626,7 @@ test('audit verification is isolated from unchanged desktop journeys and retains
   assert.match(auditJob, /file zig-out\/bin\/chat-audit \| tee evidence\/renderer-file\.txt/);
   assert.match(auditJob, /uses: actions\/upload-artifact@[a-f0-9]{40}\r?\n        with:\r?\n          name: chat-audit-linux\r?\n          path: zig-out\/bin\/chat-audit\r?\n          retention-days: 30\r?\n          if-no-files-found: error/);
   for (const ending of ['\n', '\r\n']) {
-    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
+    assert.match(workflow.replace(/\r?\n/g, ending), /  verify:\r?\n    needs: journeys\r?\n    if: inputs\.feature != 'chat-sync-audit'\r?\n    runs-on: windows-latest/);
   }
   assert.match(read(skill + 'features/README.md'), /\[Chat sync audit\]\(\.\.\/diagnostics\/chat-sync-audit.md\)/);
   assert.match(read(skill + 'diagnostics/chat-sync-audit.md'), /not a Windows desktop journey/);
@@ -650,7 +671,8 @@ test('IGSH-376 Chat View keeps desktop toggle evidence separate from native rece
   const chat = control.slice(control.indexOf("        'chat-view' {"), control.indexOf("        'inbox' {"));
   assert.ok(chat.length > 0);
   assert.match(control, /ValidateSet\([^\n)]*'chat-view'/);
-  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'chat-view'/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-view'));
   const chord = control.slice(control.indexOf('    public static void Chord('), control.indexOf('    public static void Text('));
   assert.match(chord, /Input\[\] inputs = new Input\[keys\.Length \* 2\]/);
   assert.match(chord, /inputs\[i\]\.data\.keyboard = new Keyboard \{ key = \(ushort\)keys\[i\] \}/);
@@ -707,7 +729,8 @@ test('IGSH-376 browser journey retains upstream focus and scratch preparation co
 test('browser emulation map drives the real native CLI and extension only on GitHub Windows', () => {
   const driver = read(skill + 'browser-emulation.mjs');
   const map = read(skill + 'features/browser-emulation.md');
-  assert.match(workflow, /FEATURE -notin @\([^\n)]*'browser-emulation'/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('browser-emulation'));
   assert.match(workflow, /control\.ps1 -Feature \$env:FEATURE/);
   assert.match(control, /browserJob\.Start\(\$node/);
   assert.match(control, /activeAfterStop = \$stopped\.ActiveProcesses/);
@@ -907,7 +930,8 @@ test('IGSH-556: Favorites groups journey uses real keys and requires independent
   const favorites = control.slice(control.indexOf("        'favorites-groups' {"), control.indexOf("        'session-open' {"));
   function contract(driver, workflowText) {
     assert.match(driver, /ValidateSet\([^\n)]*'favorites-groups'/);
-    assert.match(workflowText, /\$env:FEATURE -notin @\([^\n)]*'favorites-groups'/);
+    assert.match(workflowText, /node tools\/verify-features.cjs \$env:FEATURE/);
+    assert.ok(featureMatrix(workflowText).available.includes('favorites-groups'));
     assert.match(favorites, /Press @\(0x12, 0x53\)/);
     assert.match(favorites, /favorite -eq \$true/);
     assert.equal((favorites.match(/Palette 'move to group'/g) || []).length, 2);
@@ -923,7 +947,7 @@ test('IGSH-556: Favorites groups journey uses real keys and requires independent
   }
   contract(control, workflow);
   assert.throws(() => contract(control.replace("'favorites-groups', ", ''), workflow));
-  assert.throws(() => contract(control, workflow.replace("'favorites-groups', ", '')));
+  assert.throws(() => contract(control, workflow.replace("node tools/verify-features.cjs $env:FEATURE", "")));
   assert.ok(control.indexOf('    Doctor\n') < control.indexOf("        'favorites-groups' {"));
   const map = read(skill + 'features/favorites-groups.md');
   for (const heading of ['Sub-features', 'How to get to it (user POV)', 'Driving it with control.ps1', 'Gotchas']) {
@@ -967,6 +991,9 @@ test('ISSUE-559 real Windows cleanup rejects the old vanished-lockfile race and 
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /ISSUE-559 old cleanup rejected:/);
   assert.match(result.stdout, /ISSUE-559 production cleanup passed/);
+  assert.match(result.stdout, /GLOBAL_FONT_KILLED_REGISTRAR_LOCK_PROVEN/);
+  assert.match(result.stdout, /GLOBAL_FONT_OWNED_CLEANUP_OK/);
+  console.log(result.stdout);
 });
 
 test('ISSUE-559 setup waits for rendered browser readiness and retries only owned-frame activation', () => {
@@ -991,7 +1018,8 @@ test('ISSUE-559 setup waits for rendered browser readiness and retries only owne
 test('ISSUE-569 restore registry, real close/kill and persistent private relaunches cannot be skipped', () => {
   function contract(driver, workflowText) {
     assert.match(driver, /ValidateSet\([^\n)]*'session-restore'/);
-    assert.match(workflowText, /\$env:FEATURE -notin @\([^\n)]*'session-restore'/);
+    assert.match(workflowText, /node tools\/verify-features.cjs \$env:FEATURE/);
+    assert.ok(featureMatrix(workflowText).available.includes('session-restore'));
     const launch = driver.slice(driver.indexOf("    if ($Feature -eq 'session-restore') {"), driver.indexOf("    if ($Feature -in @('browser-pane-stuck'"));
     assert.match(launch, /\$job.Start\(\$Exe, \$scratch, [^\n]+, '--single-window'\)/);
     const restart = driver.slice(driver.indexOf('function Restart-SessionRestore('), driver.indexOf('function Assert-SessionRestoreSelection('));
@@ -1043,7 +1071,7 @@ test('ISSUE-569 restore registry, real close/kill and persistent private relaunc
     assert.notEqual(broken, control);
     assert.throws(() => contract(broken, workflow));
   }
-  assert.throws(() => contract(control, workflow.replace("'session-restore', ", '')));
+  assert.throws(() => contract(control, workflow.replace("node tools/verify-features.cjs $env:FEATURE", "")));
   assert.throws(() => contract(control.replace("'--single-window')", "'--single-window --no-window-restore')"), workflow));
   const map = read(skill + 'features/session-restore.md');
   assert.deepEqual([...map.matchAll(/^## (.+)$/gm)].map(match => match[1]), [
@@ -1182,7 +1210,9 @@ test('ISSUE-569 selection assertions resolve published active identity and requi
 test('ISSUE-569 selection persistence is independent of deferred browser startup and stale snapshots', () => {
   function contract(session, console, cache, main) {
     const switching = console.slice(console.indexOf('pub fn switchToShell(idx:'), console.indexOf('var startup_completed:'));
-    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        app_state.shells[idx].notified = false;'));
+    const save = switching.slice(switching.indexOf('    ensureActiveVisible();'), switching.indexOf('        if (app_state.g_all_sessions_active) {'));
+    const attention = switching.indexOf('app_state.shells[idx].needs_attention = false;');
+    assert.ok(attention >= 0 && attention < switching.indexOf('saveSession();'), 'persist final attention state before returning to the browser queue');
     assert.match(save, /if \(!app_state.g_restoring and \(idx != prev or unarchived_on_open or/);
     assert.doesNotMatch(save, /defer_browser/);
     assert.doesNotMatch(save, /selected_shell_id\s*=/);
@@ -1405,7 +1435,8 @@ test('ISSUE-569 Starred restore never queues a hide for its already selected con
 
 test('chat-delivery is an explicit saved-tmux boundary journey, not a live-delivery claim by the toggle journey', () => {
   assert.match(control, /ValidateSet\([^\n]*'chat-delivery'/);
-  assert.match(workflow, /FEATURE -notin @\([^\n]*'chat-delivery'/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-delivery'));
   const dispatch = control.slice(control.indexOf("        'chat-delivery' {"), control.indexOf("        'safe-updates' {"));
   assert.match(dispatch, /verify-chat-delivery\/drive.ps1/);
   assert.match(dispatch, /ExpectedVersion \$ExpectedVersion -ExpectedHash \$ExpectedHash -Evidence \$Evidence/);
@@ -1419,7 +1450,7 @@ test('chat-delivery is an explicit saved-tmux boundary journey, not a live-deliv
 test('IGSH-599 local Chat View journey observes suggestion delivery and protects a typed draft', () => {
   const chat = control.slice(control.indexOf("        'chat-view' {"), control.indexOf("        'inbox' {"));
   const agent = read('tools/chat-local-agent.c');
-  assert.match(workflow, /fromJSON\('\[[^'\n]*"chat-view"/);
+  assert.ok(featureMatrix(workflow).full.includes('chat-view'));
   assert.match(workflow, /- tools\/chat-local-agent\.c/);
   assert.match(workflow, /if: env\.RELEASE_TAG == ''[^\n]*\|\| env\.FEATURE == 'chat-view'/);
   assert.match(workflow, /zig cc -target x86_64-windows-gnu -O2 tools\/chat-local-agent\.c -o verify-bin\/claude\.exe/);
@@ -1490,8 +1521,9 @@ test('IGSH-599 attribute classifier reads the trimmed prompt row and keeps four 
 
 test('IGSH-612 palette-order journey seeds only the usage fixture and fails releases on the selected row', () => {
   assert.match(control, /ValidateSet\([^\n)]*'palette-order'/);
-  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'palette-order'/);
-  assert.match(workflow, /fromJSON\('\[[^\n]*"palette-order"[^\]]*\]'\)/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('palette-order'));
+  assert.ok(featureMatrix(workflow).full.includes('palette-order'));
   assert.match(control, /if \(\$Feature -eq 'palette-order'\) \{\s+\$config = Join-Path \$env:APPDATA 'ZigShell'\s+New-Item -ItemType Directory -Force \$config \| Out-Null\s+Copy-Item \$paletteUsageFixture \(Join-Path \$config 'palette-usage.tsv'\)\s+\}/);
   assert.ok(control.indexOf("Copy-Item $paletteUsageFixture") < control.indexOf('$job = New-Object VerifyJob'));
   const journey = control.slice(control.indexOf("        'palette-order' {"), control.indexOf("        'chat-view-everywhere' {"));
@@ -1517,8 +1549,9 @@ test('IGSH-612 palette-order journey seeds only the usage fixture and fails rele
 
 test('IGSH-908 status-card journey keeps compact pages and proves the existing-style usage popup', () => {
   assert.match(control, /ValidateSet\([^\n)]*'status-card'/);
-  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'status-card'/);
-  assert.match(workflow, /fromJSON\('\[[^\n]*"status-card", "palette-order"[^\]]*\]'\)/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('status-card'));
+  assert.ok(featureMatrix(workflow).full.includes('status-card'));
   const journey = control.slice(control.indexOf("        'status-card' {"), control.indexOf("        'command-palette' {"));
   assert.ok(journey.length > 0);
   assert.match(journey, /foreach \(\$page in 0\.\.2\)/);
@@ -1529,8 +1562,9 @@ test('IGSH-908 status-card journey keeps compact pages and proves the existing-s
   assert.match(journey, /if \(\$height -gt 30 -or \$height -lt 20\) \{ throw/);
   assert.match(journey, /IGSH-908: usage pill has no frame at the sidebar bottom/);
   for (const check of ['usage panel closes on second click', 'usage panel closes on Escape', 'usage panel closes on outside click']) assert.ok(journey.includes(check));
-  assert.match(journey, /MenuLook/);
-  assert.match(journey, /\$look\.cornerShown/);
+  assert.match(journey, /Assert-UsageCardPixels 'pill-open'/);
+  assert.match(journey, /MultiPromptUsageCard/);
+  assert.match(journey, /Assert-AppVersionInk 'pill-closed'/);
   assert.match(journey, /usagePill = \$true/);
   assert.match(journey, /Snapshot 'pill-closed'/);
   assert.match(journey, /Snapshot 'pill-open'/);
@@ -1927,7 +1961,8 @@ test('ISSUE-569 respawn selection survives PID-zero normalization and automatic 
 test('IGSH-678 chat code font journey measures real console code and names every check', () => {
   const code = control.slice(control.indexOf("        'chat-code-font' {"), control.indexOf("        'sessions' {"));
   assert.match(control, /ValidateSet\([^\n)]*'chat-code-font'/);
-  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'chat-code-font'/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-code-font'));
   assert.match(workflow, /if: env\.FEATURE == 'chat-code-font' && env\.RELEASE_TAG == ''/);
   assert.match(workflow, /node tools\/chat-code-font-proof\.mjs evidence/);
   for (const name of ['IGSH-678 code cell size', 'IGSH-678 code font face and size', 'IGSH-678 code edges', 'IGSH-678 diff rows smooth on green and red']) assert.ok(code.includes(`name = '${name}'`), name);
@@ -1948,8 +1983,9 @@ test('IGSH-678 chat code font journey measures real console code and names every
 
 test('IGSH-702 remind-me journey presses Ctrl+H and proves the picker by the app palette rows log', () => {
   assert.match(control, /ValidateSet\([^\n)]*'remind-me'/);
-  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'remind-me'/);
-  assert.match(workflow, /fromJSON\('\[[^\n]*"remind-me"(?:, "[a-z-]+")*\]'\)/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('remind-me'));
+  assert.ok(featureMatrix(workflow).full.includes('remind-me'));
   const journey = control.slice(control.indexOf("        'remind-me' {"), control.indexOf("        'group-rail' {"));
   assert.match(journey, /Press @\(0x11, 0x48\)/);
   assert.match(journey, /SEARCH_REMIND_PRESET_OFFSET/);
@@ -1969,7 +2005,8 @@ test('IGSH-702 remind-me journey presses Ctrl+H and proves the picker by the app
 
 test('IGSH-901 tab-names journey seeds unflagged names once, reorders them and samples names through three restarts', () => {
   assert.match(control, /ValidateSet\([^\n)]*'tab-names'/);
-  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'tab-names'/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('tab-names'));
   assert.match(control, /\$Feature -in @\('browser-own-profile', 'tab-names'\)/);
   assert.match(control, /if \(\$Feature -eq 'tab-names'\) \{\s+\$seedFolder = Join-Path \$scratch 'GitHub'/);
   const journey = control.slice(control.indexOf("        'tab-names' {"), control.indexOf("        'favorites-groups' {"));
@@ -2048,8 +2085,9 @@ test('IGSH-814 theme verification waits for the initialized palette and selected
 
 test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches three times and gates the release', () => {
   assert.match(control, /ValidateSet\([^\n)]*'relaunch-saved-sessions'/);
-  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'relaunch-saved-sessions'/);
-  assert.match(workflow, /fromJSON\('\["appearance", "chat-dictation", "relaunch-saved-sessions", [^\n]*\]'\)/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('relaunch-saved-sessions'));
+  assert.ok(featureMatrix(workflow).full.includes('relaunch-saved-sessions'));
   const journey = control.slice(control.indexOf("        'relaunch-saved-sessions' {"), control.indexOf("        'session-open' {"));
   assert.match(journey, /foreach \(\$launch in 2, 3\)/);
   assert.match(journey, /Restart-SessionRestore "relaunch-\$launch" \$false \$false \$openPorts/);
@@ -2074,8 +2112,9 @@ test('IGSH-900 relaunch-saved-sessions journey seeds saved sessions, relaunches 
 
 test('IGSH-925 chat-first-paint journey relaunches a saved chat with a docked browser and rejects any moved chat rectangle', () => {
   assert.match(control, /ValidateSet\([^\n)]*'chat-first-paint'/);
-  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'chat-first-paint'/);
-  assert.match(workflow, /fromJSON\('\["appearance", "chat-dictation", "relaunch-saved-sessions", [^\n]*"chat-first-paint"\]'\)/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-first-paint'));
+  assert.ok(featureMatrix(workflow).full.includes('chat-first-paint'));
   const journey = control.slice(control.indexOf("        'chat-first-paint' {"), control.indexOf("        'browser-switch-speed' {"));
   assert.ok(journey.length > 200, 'chat-first-paint journey missing');
   assert.match(journey, /Open-BrowserPane/);
@@ -2145,8 +2184,9 @@ test('IGSH-857: debug.log is read with shared access so a live app write cannot 
 
 test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that takes over 100 ms to draw', () => {
   assert.match(control, /ValidateSet\([^\n)]*'chat-send-latency'/);
-  assert.match(workflow, /\$env:FEATURE -notin @\([^\n)]*'chat-send-latency'/);
-  assert.match(workflow, /fromJSON\('\["appearance", [^\n]*"chat-send-latency", "chat-first-paint"\]'\)/);
+  assert.match(workflow, /node tools\/verify-features.cjs \$env:FEATURE/);
+  assert.ok(featureMatrix(workflow).available.includes('chat-send-latency'));
+  assert.ok(featureMatrix(workflow).full.includes('chat-first-paint'));
   const journey = control.slice(control.indexOf("        'chat-send-latency' {"), control.indexOf("        'chat-focus' {"));
   assert.ok(journey.length > 200, 'chat-send-latency journey missing');
   assert.match(journey, /for \(\$n = 1; \$n -le 20; \$n\+\+\)/);
@@ -2165,4 +2205,213 @@ test('IGSH-977 chat-send-latency journey sends 20 messages and fails any that ta
   assert.match(read('src/chat_send.zig'), /send_latency\.markPressed\(\)/);
   assert.match(read('src/chat_render.zig'), /send_latency\.markPainted\(/);
   assert.throws(() => assert.match(control.replace("'chat-send-latency'", ''), /ValidateSet\([^\n)]*'chat-send-latency'/));
+});
+
+test('IGSH-1108 workflow consumes feature-owned matrices without changing required journey names', () => {
+  const features = featureMatrix(workflow);
+  assert.match(workflow, /  journeys:\n    if: inputs.feature != 'chat-sync-audit'/);
+  assert.match(workflow, /  verify:\n    needs: journeys/);
+  assert.match(workflow, /pr: \$\{\{ steps.features.outputs.pr \}\}/);
+  assert.match(workflow, /full: \$\{\{ steps.features.outputs.full \}\}/);
+  assert.match(workflow, /- id: features\n        run: node tools\/verify-features.cjs/);
+  assert.match(workflow, /github.event_name == 'pull_request' && fromJSON\(needs.journeys.outputs.pr\)/);
+  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
+  assert.ok(features.pr.includes('appearance'));
+  assert.ok(features.full.length >= 21);
+  const registered = [...control.match(/ValidateSet\(([^\n)]+)\)/)[1].matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
+  assert.deepEqual(features.available, registered);
+  assert.equal(read('.github/required-checks.txt').includes('verify (appearance)'), true);
+  assert.equal(features.available.includes('ssh-tab-reconnect'), false);
+  assert.equal(features.available.includes('chat-sync-audit'), false);
+});
+
+test('IGSH-1108 adding only a feature recipe joins generated journeys; manual and reconnect maps stay separate', t => {
+  featureMatrix(workflow);
+  const os = require('node:os');
+  const { discoverFeatures } = require('./verify-features.cjs');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-features-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.cpSync(path.join(root, skill, 'features'), directory, { recursive: true });
+  const before = discoverFeatures(directory);
+  const recipe = name => path.join(directory, `${name}.md`);
+  fs.writeFileSync(recipe('new-journey'), '# New journey\n\nVerify on: push, pull_request\n\n## Driving it with control.ps1\n');
+  fs.writeFileSync(recipe('manual-journey'), '# Manual journey\n\n## Driving it with control.ps1\n');
+  fs.writeFileSync(recipe('new-reconnect'), '# Reconnect\n\n## Driving it with the Windows reconnect harness\n');
+  const after = discoverFeatures(directory);
+  assert.deepEqual(after.full, [...before.full, 'new-journey'].sort());
+  assert.deepEqual(after.pr, [...before.pr, 'new-journey'].sort());
+  assert.deepEqual(after.available, [...before.available, 'new-journey', 'manual-journey'].sort());
+  fs.rmSync(recipe('new-journey'));
+  assert.deepEqual(discoverFeatures(directory).full, before.full);
+  assert.deepEqual(discoverFeatures(directory).pr, before.pr);
+  fs.writeFileSync(recipe('bad-events'), '# Bad\n\nVerify on: typo\n\n## Driving it with control.ps1\n');
+  assert.throws(() => discoverFeatures(directory), /Invalid Verify on events/);
+  fs.rmSync(recipe('bad-events'));
+  fs.writeFileSync(recipe('new-reconnect'), '# Reconnect\n\nVerify on: push\n');
+  assert.throws(() => discoverFeatures(directory), /needs a control.ps1 recipe/);
+});
+
+test('IGSH-1108 CLI writes JSON job outputs and rejects unavailable or unsafe feature names', t => {
+  const features = featureMatrix(workflow);
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-feature-output-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const output = path.join(directory, 'output');
+  const cli = (...args) => spawnSync(process.execPath, [path.join(root, 'tools/verify-features.cjs'), ...args], {
+    encoding: 'utf8', env: { ...process.env, GITHUB_OUTPUT: output },
+  });
+  assert.equal(cli().status, 0);
+  const outputs = Object.fromEntries(fs.readFileSync(output, 'utf8').trim().split('\n').map(line => {
+    const split = line.indexOf('=');
+    return [line.slice(0, split), JSON.parse(line.slice(split + 1))];
+  }));
+  assert.deepEqual(outputs, { full: features.full, pr: features.pr });
+  assert.deepEqual(JSON.parse(cli('browser-switch-speed').stdout), ['browser-switch-speed']);
+  for (const feature of ['unknown', '../appearance', 'ssh-tab-reconnect', 'README', 'chat-sync-audit']) {
+    const result = cli(feature);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Unsupported desktop journey/);
+  }
+});
+
+test('IGSH-1033 shared tracked quarantine protects rollback and release execution', () => {
+  assert.ok(fs.existsSync(path.join(root, 'tools/journey-policy.json')), 'Shared quarantine policy must ship');
+  assert.deepEqual(JSON.parse(read('tools/journey-policy.json')), { quarantined: {} });
+  const policy = JSON.parse(read('tools/fixtures/IGSH-1033/journey-policy.json'));
+  assert.deepEqual(Object.keys(policy.quarantined).sort(), ['browser-pane-stuck', 'chat-messages-only']);
+  assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs.journeys.outputs.quarantined\), matrix.feature\) \}\}/);
+  assert.match(workflow, /quarantined: \$\{\{ steps.policy.outputs.quarantined \}\}/);
+  assert.match(workflow, /inputs.feature == 'all' && fromJSON\(needs.journeys.outputs.full\)/);
+  assert.match(workflow, /github.event_name == 'push' && fromJSON\('\["appearance", "relaunch-saved-sessions"\]'\)/);
+  for (const entry of Object.values(policy.quarantined)) {
+    assert.equal(entry.ticket, 'https://app.hypertask.ai/detail/project-2060/1055');
+    assert.deepEqual(entry.runs, ['https://github.com/valentinyeo/multiprompt/actions/runs/40450143181', 'https://github.com/valentinyeo/multiprompt/actions/runs/40454057302']);
+  }
+});
+
+test('IGSH-1033 historical controls stay outside master and release candidates', () => {
+  for (const name of ['Build IGSH-807 pre-fix focus-ring control', 'Require visible pre-fix focus rings with unchanged input cycling', 'Build the pre-fix commit 42cecfd3 negative control', 'Require pre-fix 42cecfd3 to show activity rows with the identical journey']) {
+    const step = workflow.slice(workflow.indexOf('      - name: ' + name)).split(/\n      - /)[0];
+    assert.match(step, /if: github.event_name == 'workflow_dispatch' && inputs.revision == '' &&/);
+  }
+});
+
+test('group proof samples and clicks below the workspace picker at every supported scale', () => {
+  const source = read(skill + 'control-native.cs');
+  const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
+  const expression = group.match(/int top = ([^;]+);/)[1];
+  const top = new Function('origin', 'frame', 'dpi', 'scale', 'hidePills', 'S', `return ${expression};`);
+  const pane = source.slice(source.indexOf('public static class PaneLayoutProof {'));
+  const rowExpression = pane.match(/int rowTop = ([^;]+);/)[1];
+  const rowTop = new Function('client', 'gap', 'dpi', 'scale', 'hidePills', 'S', `return ${rowExpression};`);
+  for (const [dpi, scale, hidePills, expected] of [
+    [96, 100, false, 125], [96, 100, true, 91],
+    [120, 100, false, 140], [144, 100, false, 155],
+    [96, 125, false, 140], [144, 125, true, 143],
+  ]) {
+    assert.equal(top({ Y: 231 }, { Top: 200 }, dpi, scale, hidePills,
+      (value, d, s) => Math.trunc(value * d * s / 9600)), expected,
+    `group headline must clear the workspace picker: dpi=${dpi} scale=${scale} hidePills=${hidePills}`);
+    assert.equal(rowTop({ Top: 31 }, Math.trunc(8 * dpi * scale / 9600), dpi, scale, hidePills,
+      (value, d, s) => Math.trunc(value * d * s / 9600)), expected + 28,
+    `pane icon scan must follow the group headline: dpi=${dpi} scale=${scale} hidePills=${hidePills}`);
+  }
+});
+
+test('native group pixel proof reports the current header and member rectangles', { skip: process.platform !== 'win32' }, () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-proof-'));
+  const source = read(skill + 'control-native.cs');
+  const group = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class PaneLayoutProof {'));
+  const pane = source.slice(source.indexOf('public static class PaneLayoutProof {'), source.indexOf('public static class CodeFontProof {'));
+  const script = `$ErrorActionPreference = 'Stop'
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+public static class VerifyNative {
+    public struct Rect { public int Left, Top, Right, Bottom; }
+    public struct Point { public int X, Y; }
+    public static List<Dictionary<string, object>> DesktopWindows() { throw new NotSupportedException(); }
+    public static bool GetWindowRect(IntPtr hwnd, out Rect rect) { throw new NotSupportedException(); }
+}
+${group}
+${pane}
+'@
+$image = New-Object System.Drawing.Bitmap 800, 900
+try { $image.Save((Join-Path $PSScriptRoot 'sidebar.png')) } finally { $image.Dispose() }
+$frame = New-Object VerifyNative+Rect
+$frame.Left = 200; $frame.Top = 200
+$origin = New-Object VerifyNative+Point
+$origin.X = 208; $origin.Y = 231
+foreach ($collapsed in @($false, $true)) {
+    $proof = [GroupRailProof]::Check((Join-Path $PSScriptRoot 'sidebar.png'), $frame, $origin, 96, 100, $false, $collapsed, 300)
+    if ($proof.headerTops[0] -ne 125) { throw 'First group overlaps the workspace picker' }
+    $second = if ($collapsed) { 153 } else { 269 }
+    if ($proof.headerTops[1] -ne $second -or $proof.sidebarRect[3] -ne ($second + 144)) { throw 'Member rectangles do not track group collapse' }
+    if (-not $proof.noFill -or -not $proof.noRail -or $proof.flushLeft) { throw 'Pixel checks no longer inspect the blank image faithfully' }
+}
+$frame.Left = 0; $frame.Top = 0
+$origin.X = 0; $origin.Y = 0
+$fixtures = '${path.join(root, 'tools/fixtures/IGSH-1150').replace(/'/g, "''")}'
+$baseline = Join-Path $fixtures 'group-rail-selected-1.png'
+$proof = [GroupRailProof]::Check($baseline, $frame, $origin, 96, 100, $true, $false, 300)
+if (-not $proof.noFill -or -not $proof.noRail -or -not $proof.flushLeft) { throw ('Shipped screenshot failed: ' + ($proof | ConvertTo-Json -Compress)) }
+$labels = [GroupRailProof]::Labels($baseline, $frame, $origin, 96, 100, $proof.sidebarRect[3], $proof.nameX[0], $proof.rowHeight, 300)
+if (-not $labels.sameStyle -or -not $labels.noArrow -or -not $labels.plusOnly) { throw ('Shipped labels failed: ' + ($labels | ConvertTo-Json -Compress)) }
+$toggle = [GroupRailProof]::Toggle($baseline, (Join-Path $fixtures 'group-rail-collapsed.png'), (Join-Path $fixtures 'group-rail-restored.png'), $proof.sessionTextX[0], ($proof.headerTops[0] + $proof.headerHeight), $proof.rowHeight, $proof.headerTops[0], ($proof.sidebarRect[3] + 24 + 2 * $proof.rowHeight), 96, 100)
+if (-not $toggle.membersDisappearAndReturn) { throw 'Shipped member rows do not disappear and return' }
+$frame.Left = -8; $frame.Top = -8
+$client = New-Object VerifyNative+Rect
+$browser = New-Object VerifyNative+Rect
+$browser.Left = 558; $browser.Top = 40; $browser.Right = 1016; $browser.Bottom = 712
+$mask = New-Object 'Collections.Generic.Dictionary[string,object]'
+$mask['rect'] = [int[]]@(868, 38, 1018, 74); $mask['handle'] = [long]1
+$masks = [Collections.Generic.Dictionary[string,object][]]@($mask)
+$colors = [PaneLayoutProof]::MeasureMasks((Join-Path $fixtures 'pane-layout-mask-dark.png'), 'dark', $frame, $client, $browser, $masks, 96, 100)
+[PaneLayoutProof]::CheckMasks($colors, 'dark')
+if (($colors.appColor -join ',') -cne '16,16,16') { throw 'App comparison sampled a session label, not the quiet gutter' }
+Write-Host 'NATIVE_GROUP_GEOMETRY_OK'
+`;
+  try {
+    const file = path.join(dir, 'group-proof.ps1');
+    fs.writeFileSync(file, script);
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', file], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /NATIVE_GROUP_GEOMETRY_OK/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('IGSH-1161 owned global console fonts are released after process teardown and before scratch removal', () => {
+  const driver = read(skill + 'control.ps1');
+  const library = read(skill + 'control-library.ps1');
+  const native = read(skill + 'control-native.cs');
+  const stop = driver.indexOf('$stopped = $job.Stop()');
+  const release = driver.indexOf('Release-ScratchConsoleFonts $scratch', stop);
+  const copy = driver.indexOf('Prepare-ScratchEvidence $scratch', stop);
+  assert.ok(stop >= 0 && release > stop && copy > release, 'release global font references only after owned processes stop');
+  assert.match(native, /\[DllImport\("gdi32\.dll", CharSet=CharSet\.Unicode\)\] public static extern bool RemoveFontResourceEx\(string path, uint flags, IntPtr reserved\);/);
+  assert.match(library, /function Release-ScratchConsoleFonts\(\[string\]\$Path\)/);
+  const cleanup = library.slice(library.indexOf('function Release-ScratchConsoleFonts('), library.indexOf('function Test-VanishedScratchItem('));
+  assert.ok(cleanup.includes("Join-Path $Path 'local/ZigShell/fonts'"));
+  assert.ok(cleanup.includes('[VerifyNative]::RemoveFontResourceEx($entry.FullName, 0, [IntPtr]::Zero)'));
+  assert.ok(cleanup.includes("'console-font-cleanup.json'"));
+});
+
+test('release sidebar pixel oracles use the live width and approved expanded row height', () => {
+  const source = read(skill + 'control-native.cs');
+  const groups = source.slice(source.indexOf('public static class GroupRailProof {'), source.indexOf('public static class CodeFontProof {'));
+  assert.doesNotMatch(groups, /S\(220, dpi, scale\)|S\(38, dpi, scale\)/);
+  const height = Number(read('src/browser_pane.zig').match(/!app_state.g_sidebar_collapsed\) (\d+)/)[1]);
+  assert.equal(Number(groups.match(/headerHeight = 28, rowHeight = S\((\d+),/)[1]), height);
+  assert.match(groups, /rowBottom = rowTop \+ S\(58, dpi, scale\)/);
+  for (const feature of ['group-rail', 'pane-layout']) {
+    const driver = read(skill + `control-feature-${feature}.ps1`);
+    assert.match(driver, /session.json.launch.json/);
+    assert.match(driver, /\$sidebarLogical = \[int\].*sidebar_width/);
+    for (const call of driver.matchAll(/\[(?:GroupRailProof|PaneLayoutProof)\]::(?:Check|Labels|FocusMargins)\([^\n]+/g)) assert.match(call[0], /, \$sidebarLogical\)$/);
+  }
 });

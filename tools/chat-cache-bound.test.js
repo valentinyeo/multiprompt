@@ -85,7 +85,7 @@ test "oldest cache eviction preserves personal files directories and the bound" 
     try std.testing.expect(!deleted[1] and deleted[2] and deleted[3]);
     try std.testing.expect(!deleted[0] and !deleted[6] and !deleted[7]);
 }
-`).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+`).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
     const run = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig')], { encoding: 'utf8', timeout: 60000 });
     assert.equal(run.status, 0, run.stdout + run.stderr);
     assert.match(run.stderr, /All 2 tests passed/);
@@ -96,8 +96,8 @@ test('disk reads are bounded and disk writes/pruning are serialized on the worke
   assert.match(body('chatHistoryRead'), /bytes.items.len \+ n > chat_history.MAX_CACHE_BYTES/);
   assert.match(body('chatFileFetchThread'), /g_chat_cache_write_mutex.tryLock\(\)\) Sleep\(1\);[\s\S]*defer g_chat_cache_write_mutex.unlock\(\);[\s\S]*writeFileAtomicW\(path, bytes\)\)[\s\S]*chatHistoryPrune\(path\)/);
   assert.doesNotMatch(body('chatDeferTranscriptLoad'), /chatHistoryRead|History.decode|refreshChatTranscript/);
-  assert.match(body('chatFileRequestForDelivery'), /!load_disk and !chatFetchAcquire/);
-  assert.match(body('chatFileOnReady'), /if \(!entry.loading_disk\) chatFetchRelease/);
+  assert.match(body('chatFileRequestForDelivery'), /!load_disk and pushed == null and !chatFetchAcquire/);
+  assert.match(body('chatFileOnReady'), /if \(!entry.loading_disk and !entry.push_pending\) chatFetchRelease/);
 });
 
 test('a local cache load starts even with a remote worker busy and recent input in another window', () => {
@@ -116,7 +116,17 @@ const chat_history = @import("chat_history.zig");
 const chat_transcript = @import("chat_transcript.zig");
 const HANDLE = ?*anyopaque;
 const LASTINPUTINFO = struct { cbSize: usize, dwTime: u32 };
-const ChatHistoryEntry = struct { key: chat_transcript.Identity = .{}, backfill: chat_history.Backfill = .{}, show_older: bool = false, disk_loaded: bool = false, pending: bool = false, loading_disk: bool = false, before: u64 = 0, next: u64 = 0, history: chat_history.History = .{} };
+const ChatHistoryPush = struct { wire: std.ArrayList(u8), id: u32, read_us: u64 };
+const ChatHistoryStream = struct {
+    ready: std.atomic.Value(bool) = .init(false), ended: std.atomic.Value(bool) = .init(false),
+    wire: std.ArrayList(u8) = .empty, id: u32 = 0, read_us: u64 = 0, ack: HANDLE = null,
+};
+fn chatHistoryStreamsKeep(_: u32) void {}
+fn chatHistoryStreamStop(_: *ChatHistoryEntry) void {}
+fn chatHistoryStreamStart(_: chat_transcript.Identity, _: u32, _: chat_history.History) ?*ChatHistoryStream { @panic("foreground reservation must precede stream start"); }
+fn chatBenchEnabled() bool { return false; }
+fn SetEvent(_: HANDLE) i32 { return 1; }
+const ChatHistoryEntry = struct { stream: ?*ChatHistoryStream = null, push_pending: bool = false, key: chat_transcript.Identity = .{}, backfill: chat_history.Backfill = .{}, show_older: bool = false, disk_loaded: bool = false, pending: bool = false, loading_disk: bool = false, before: u64 = 0, next: u64 = 0, history: chat_history.History = .{} };
 var cached_entry: ChatHistoryEntry = .{};
 var g_chat_active = true;
 var g_main_hwnd: HANDLE = @ptrFromInt(1);
@@ -133,7 +143,7 @@ fn chatFetchAcquire() bool { acquisitions += 1; return false; }
 fn chatFetchRelease() void { @panic("local worker must not release the remote mutex"); }
 fn chatFileFailed(_: *ChatHistoryEntry) void { @panic("spawn failed"); }
 fn debugLog(_: []const u8) void {}
-fn chatFileFetchThread(_: *ChatHistoryEntry, _: chat_transcript.Identity, _: u32, disk: bool) void { std.debug.assert(disk); completions.store(1, .release); }
+fn chatFileFetchThread(_: *ChatHistoryEntry, _: chat_transcript.Identity, _: u32, disk: bool, _: ?ChatHistoryPush) void { std.debug.assert(disk); completions.store(1, .release); }
 ${body('chatFileRequest')}
 ${body('chatFileRequestForDelivery')}
 test "local cache bypasses busy remote worker and foreground reservation" {
@@ -150,12 +160,12 @@ test "local cache bypasses busy remote worker and foreground reservation" {
     try std.testing.expect(!cached_entry.pending); // recent input still defers remote IO
 }
 `;
-    const file = path.join(dir, 'request.zig'); fs.writeFileSync(file, source.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    const file = path.join(dir, 'request.zig'); fs.writeFileSync(file, source.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'local cache bypasses'], { encoding: 'utf8', timeout: 60_000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
     const baseline = ({ status: 0, stdout: fs.readFileSync('tools/fixtures/chat-before-7a02ac9.zig', 'utf8') });
     assert.equal(baseline.status, 0);
-    fs.writeFileSync(file, (source.replace(body('chatFileRequest'), body('chatFileRequest', baseline.stdout))).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(file, (source.replace(body('chatFileRequest'), body('chatFileRequest', baseline.stdout).replace('entry.loading_disk })', 'entry.loading_disk, null })'))).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
     const old = spawnSync(process.env.ZIG || 'zig', ['test', file, '--test-filter', 'local cache bypasses'], { encoding: 'utf8', timeout: 60_000 });
     assert.notEqual(old.status, 0);
     assert.match(old.stderr, /FAIL \(TestUnexpectedResult\)/, '708 must fail the same executed loading oracle');

@@ -1,7 +1,8 @@
 const { execFileSync } = require('node:child_process');
+const { quarantined } = require('./journey-policy.json');
 
 const journeyKey = name => name.slice(8, -1).split(',')[0].trim();
-const failedJourneys = jobs => [...new Set(jobs.filter(job => job.conclusion === 'failure' && /^verify \([^)]+\)$/.test(job.name)).map(job => journeyKey(job.name)))];
+const failedJourneys = jobs => [...new Set(jobs.filter(job => job.conclusion === 'failure' && /^verify \([^)]+\)$/.test(job.name)).map(job => journeyKey(job.name)).filter(key => !Object.hasOwn(quarantined, key)))];
 
 function baselineFor(history, key) {
   for (const entry of history) {
@@ -19,6 +20,7 @@ function decide({ run, repository, commits, jobs, history = [] }) {
   if (run.status !== 'completed' || !['failure', 'cancelled'].includes(run.conclusion) || run.event !== 'push' || run.head_branch !== 'master') return refuse('Not a completed failing or cancelled push on master');
   if (!/^[a-f0-9]{40}$/.test(run.head_sha)) return refuse('Invalid run head');
   const failed = failedJourneys(jobs);
+  if (!failed.length && jobs.some(job => job.conclusion === 'failure' && /^verify \([^)]+\)$/.test(job.name) && Object.hasOwn(quarantined, journeyKey(job.name)))) return { action: 'ignore', reason: 'Only quarantined journeys failed' };
   if (!failed.length && run.conclusion === 'cancelled') return { action: 'ignore', reason: 'Cancelled run has no failed journey' };
   const marker = `Auto-Revert-Run: ${run.id}`;
   const duplicate = commits.find(commit => commit.commit.message.split('\n').includes(marker));
@@ -31,7 +33,7 @@ function decide({ run, repository, commits, jobs, history = [] }) {
     return { action: 'skip', reason: `Commit ${target.sha} already has a revert on master` };
   }
   const ticket = subject.match(/\b(IGSH-\d+):(?:\s|$)/)?.[1];
-  if (!ticket) return refuse('Run head subject has no IGSH ticket id');
+  if (!ticket) return { action: 'ignore', reason: 'Run head subject has no IGSH ticket id' };
   if (!failed.length) return refuse('No failed verify journey found in the run');
   const baselines = new Map();
   for (const key of failed) {
@@ -99,11 +101,14 @@ function main() {
   }
   const decision = decide({ run, repository, commits, jobs, history });
   console.log(JSON.stringify({ dryRun, runId, ...decision }, null, 2));
+  if (decision.action === 'ignore') {
+    if (process.env.GITHUB_STEP_SUMMARY) require('node:fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, `No commit reverted: ${decision.reason}\n\nRun: ${run.html_url}\n`);
+    return;
+  }
   if (dryRun) {
     if (decision.action === 'refuse') throw new Error(decision.reason);
     return;
   }
-  if (decision.action === 'ignore') return;
   const marker = `Auto-Revert-Run: ${runId}`;
   const failing = jobs.filter(job => job.conclusion === 'failure').map(job => job.name).join(', ') || 'Unknown failed job';
   const ticket = decision.ticket || commits.find(commit => commit.sha === run.head_sha)?.commit.message.split('\n')[0].match(/\bIGSH-\d+\b/)?.[0] || 'Unknown ticket';

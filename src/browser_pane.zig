@@ -655,7 +655,7 @@ pub fn SIDEBAR_W() i32 {
     return uiScaled(if (app_state.g_sidebar_collapsed) SIDEBAR_W_COLLAPSED else app_state.g_sidebar_w_full);
 }
 pub fn tabRowH() i32 {
-    return uiScaled(if (LOOK_UNIFIED) 38 else 52);
+    return uiScaled(if (LOOK_UNIFIED and !app_state.g_sidebar_collapsed) 58 else if (LOOK_UNIFIED) 38 else 52);
 }
 
 pub fn inboxButtonRect(in_overlay: bool) RECT {
@@ -1615,6 +1615,24 @@ fn browserWindowProfileMatches(hwnd: HANDLE, idx: u32) bool {
     return expected.len > 0 and std.ascii.eqlIgnoreCase(expected, actual);
 }
 
+pub fn pendingBrowserWindowOwnsForeground(hwnd: HANDLE) bool {
+    if (!edgeWindowClassMatches(hwnd)) return false;
+    var title: [128]u16 = undefined;
+    const len = InternalGetWindowText(hwnd, &title, title.len);
+    if (len > 0) {
+        const now = GetTickCount64();
+        for (app_state.g_cancelled_browser_launches) |launch| {
+            if (launch.nonce_len == 0 or now >= launch.deadline) continue;
+            var nonce: [40]u16 = undefined;
+            for (launch.nonce[0..launch.nonce_len], 0..) |c, i| nonce[i] = c;
+            if (std.mem.indexOf(u16, title[0..@intCast(len)], nonce[0..launch.nonce_len]) != null) return true;
+        }
+    }
+    const idx = app_state.g_browser_adopt_target_idx;
+    if (idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or app_state.shells[idx].browser_launch_tick == 0) return false;
+    return browserWindowProfileMatches(hwnd, idx);
+}
+
 fn enumBrowserAdopt(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     if (!edgeWindowClassMatches(hwnd)) return 1;
     if (browserSnapshotContains(hwnd)) return 1;
@@ -2095,9 +2113,9 @@ pub fn browserHibernationTick() void {
             if (!app_state.shells[i].browser_enabled) continue;
             var buf: [256]u8 = undefined;
             debugLog(std.fmt.bufPrint(&buf, "browser-freeze-state: now={d} active={d} swap={d} shell={d} window={d} frozen={} parked={d} activity={s} last_event={d} busy={}", .{
-                GetTickCount64(), app_state.active_shell, app_state.g_chat_browser_swap.shell_id,
-                app_state.shells[i].shell_id, app_state.shells[i].browser_window_id, app_state.shells[i].browser_frozen,
-                app_state.shells[i].browser_parked_since, @tagName(app_state.shells[i].activity), app_state.shells[i].last_active_event,
+                GetTickCount64(),                                                                                                  app_state.active_shell,                 app_state.g_chat_browser_swap.shell_id,
+                app_state.shells[i].shell_id,                                                                                      app_state.shells[i].browser_window_id,  app_state.shells[i].browser_frozen,
+                app_state.shells[i].browser_parked_since,                                                                          @tagName(app_state.shells[i].activity), app_state.shells[i].last_active_event,
                 browserPaneSessionBusy(i, if (browserPowerSaving()) BROWSER_FREEZE_PARK_MS_SAVING else BROWSER_FREEZE_PARK_MS_AC),
             }) catch "browser-freeze-state: unavailable");
         }
@@ -3173,7 +3191,8 @@ pub fn snippetFormAnchoredBesideBrowser() bool {
 }
 
 pub fn browserChromeHiddenForOverlay() bool {
-    return app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_inbox_active or app_state.g_all_sessions_active or app_state.g_url_picker_active or
+    return @import("settings_panel.zig").isOpen() or
+        app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_inbox_active or app_state.g_all_sessions_active or app_state.g_url_picker_active or
         (app_state.g_snippet_create_active and !snippetFormAnchoredBesideBrowser()) or
         (app_state.g_search_active and !paletteAnchoredBesideBrowser());
 }
@@ -3504,7 +3523,12 @@ test "IGSH-523 docked pane without an extension never resolves on health ticks" 
     app_state.shells[0].browser_bind_nonce[0] = 'X';
     app_state.shells[0].browser_bind_nonce_len = 1;
     for (0..5) |_| {
+        var message: @import("win32.zig").MSG = undefined;
+        _ = @import("win32.zig").PeekMessageW(&message, null, 0, 0, 0);
+        try std.testing.expectEqual(@as(BOOL, 0), IsHungAppWindow(hwnd));
         browserHealthTick();
+        try std.testing.expectEqual(hwnd, app_state.shells[0].browser_hwnd);
+        try std.testing.expectEqual(@as(u8, 0), app_state.shells[0].browser_health_misses);
         for (app_state.g_browser_resolve_inflight) |entry| try std.testing.expectEqual(@as(u32, 0), entry.shell_id);
         try std.testing.expectEqual(@as(i64, 0), app_state.shells[0].browser_window_id);
         try std.testing.expectEqualStrings("connected", browserConnectionState(&app_state.shells[0]));

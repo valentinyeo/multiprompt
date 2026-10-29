@@ -1,5 +1,7 @@
 # Workspace focus
 
+Verify on: push
+
 Return to a workspace and resume typing in its Chat View typing box or shell without clicking.
 
 ## Sub-features

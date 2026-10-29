@@ -48,7 +48,6 @@ const pruneEmptyGroups = @import("sidebar.zig").pruneEmptyGroups;
 const normalizeGroupOrder = @import("sidebar.zig").normalizeGroupOrder;
 const tmuxHostLongLabel = @import("capacity.zig").tmuxHostLongLabel;
 const CHAT_FONT_DEFAULT_PT = @import("app_state.zig").CHAT_FONT_DEFAULT_PT;
-const ProcessPollCache = @import("app_state.zig").ProcessPollCache;
 const win32OpenRead = @import("file_io.zig").win32OpenRead;
 const win32OpenWrite = @import("file_io.zig").win32OpenWrite;
 const win32WriteAll = @import("file_io.zig").win32WriteAll;
@@ -160,8 +159,6 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
 
     var json_buf: [SESSION_JSON_CAPACITY]u8 = undefined;
     var pos: usize = 0;
-    var proc_cache: ProcessPollCache = undefined;
-    var proc_cache_ready = false;
 
     const header = "{\"tabs\":[";
     @memcpy(json_buf[pos .. pos + header.len], header);
@@ -268,11 +265,7 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
                 pos += 1;
             }
 
-            if (!proc_cache_ready) {
-                proc_cache.refresh();
-                proc_cache_ready = true;
-            }
-            if (proc_cache.findClaudeChildPid(app_state.shells[i].pid) != null or app_state.shells[i].claude_sid_len > 0) {
+            if (app_state.shells[i].claude_session or app_state.shells[i].claude_sid_len > 0) {
                 const cf = ",\"claude_session\":true";
                 @memcpy(json_buf[pos .. pos + cf.len], cf);
                 pos += cf.len;
@@ -777,6 +770,16 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         pos += 1;
     }
 
+    if (app_state.g_tmux_closed.restored) {
+        const closed = std.json.Stringify.valueAlloc(std.heap.page_allocator, app_state.g_tmux_closed.entries.items, .{}) catch return false;
+        defer std.heap.page_allocator.free(closed);
+        const closed_key = ",\"closed_tmux\":";
+        if (pos + closed_key.len + closed.len + 1 > json_buf.len) return false;
+        @memcpy(json_buf[pos .. pos + closed_key.len], closed_key);
+        pos += closed_key.len;
+        @memcpy(json_buf[pos .. pos + closed.len], closed);
+        pos += closed.len;
+    }
     json_buf[pos] = '}';
     pos += 1;
 
@@ -813,6 +816,9 @@ fn mergeStartupSelection(a: std.mem.Allocator, previous: []const u8, current: []
             }
         }
         if (!found and !@import("launch_cache.zig").cachedShell(@intCast(id))) try saved_tabs.array.append(tab);
+    }
+    if (live.value.object.get("closed_tmux")) |closed| {
+        try saved.value.object.put(saved.arena.allocator(), "closed_tmux", closed);
     }
     const merged_tabs = saved_tabs.array.items;
     if (json_reader.uint(live.value, "workspace_count") > json_reader.uint(saved.value, "workspace_count")) {
@@ -1574,7 +1580,10 @@ pub fn restoreSession() u32 {
         startup_bytes = null;
         break :ready bytes;
     } else readSessionBytes(path);
-    const bytes = json_buf orelse return 0;
+    const bytes = json_buf orelse {
+        app_state.g_tmux_closed.restored = true;
+        return 0;
+    };
     defer std.heap.page_allocator.free(bytes);
 
     const prepared = @import("launch_cache.zig").pending and startupRestoreReady();
@@ -1585,6 +1594,21 @@ pub fn restoreSession() u32 {
     } else json_reader.parse(std.heap.page_allocator, bytes) catch return 0;
     defer parsed.deinit();
     const json = parsed.value;
+    app_state.g_tmux_closed.restore(std.heap.page_allocator, json_reader.field(json, "closed_tmux")) catch debugLog("Could not restore closed tmux sessions");
+    if (app_state.g_closed_count == 0) {
+        const entries = app_state.g_tmux_closed.entries.items;
+        const start = entries.len - @min(entries.len, app_state.MAX_CLOSED_HISTORY);
+        for (entries[start..]) |entry| {
+            var name: [64]u16 = @splat(0);
+            for (entry.name[0..entry.len], 0..) |c, i| name[i] = c;
+            app_state.g_closed_history[app_state.g_closed_count] = .{
+                .kind = .tmux, .name = name, .name_len = @intCast(entry.len),
+                .tmux_session = entry.name, .tmux_session_len = @intCast(entry.len), .tmux_host = entry.host,
+                .cached_cwd = @splat(0), .cached_cwd_len = 0, .was_manual = true, .was_sem = false, .closed_at = 0,
+            };
+            app_state.g_closed_count += 1;
+        }
+    }
 
     var tabs: [MAX_SHELLS]SavedTab = undefined;
     const tab_count = json_reader.sessionTabs(json, tabs[0..], MAX_LWS);
@@ -2064,6 +2088,31 @@ test "ISSUE-569 saved view and selected session use the same source during start
     try std.testing.expect(savedStarredView(parsed.value, tabs[0..count]));
     cache.pending = false;
     try std.testing.expect(!savedStarredView(parsed.value, tabs[0..count]));
+}
+
+test "IGSH-1043 unknown startup close metadata differs from a known empty set" {
+    const a = std.testing.allocator;
+    const previous = "{\"tabs\":[],\"closed_tmux\":[{\"host\":0,\"session\":\"runner-empty\"}]}";
+    for ([_][]const u8{ "{\"tabs\":[]}", "{\"tabs\":[],\"closed_tmux\":[]}" }, 0..) |current, i| {
+        const bytes = try mergeStartupSelection(a, previous, current);
+        defer a.free(bytes);
+        var parsed = try json_reader.parse(a, bytes);
+        defer parsed.deinit();
+        try std.testing.expectEqual(@as(usize, if (i == 0) 1 else 0), json_reader.array(json_reader.field(parsed.value, "closed_tmux")).len);
+    }
+}
+
+test "IGSH-1043 startup selection preserves current close intent" {
+    const a = std.testing.allocator;
+    const bytes = try mergeStartupSelection(a, "{\"tabs\":[],\"closed_tmux\":[]}", "{\"tabs\":[],\"closed_tmux\":[{\"host\":0,\"session\":\"runner-empty\"}]}");
+    defer a.free(bytes);
+    var parsed = try json_reader.parse(a, bytes);
+    defer parsed.deinit();
+    const closed = json_reader.array(json_reader.field(parsed.value, "closed_tmux"));
+    try std.testing.expectEqual(@as(usize, 1), closed.len);
+    var name: [64]u8 = undefined;
+    const len = json_reader.copyString(closed[0], "session", &name);
+    try std.testing.expectEqualStrings("runner-empty", name[0..len]);
 }
 
 test "ISSUE-569 startup selection save preserves full tabs and newly created sessions" {

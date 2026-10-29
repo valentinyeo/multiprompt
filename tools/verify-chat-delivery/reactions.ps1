@@ -9,7 +9,14 @@ Press @(0x1B) 'Esc: close Themes'
 Bind-Transcript
 Type-Composer $plan.text
 $bounds = $views[0].Current.BoundingRectangle
-Save @{left=[int]$bounds.Left; top=[int]$bounds.Top; right=[int]$bounds.Right; bottom=[int]$bounds.Bottom} "$caseDir/area.json"
+$frame = Wait-For 'painted transcript geometry' {
+    $frames = [regex]::Matches((Read-Shared "$settings/debug.log"), '\[chat\] frame transcript (-?\d+),(-?\d+),(-?\d+),(-?\d+) edit ')
+    if ($frames.Count) { $frames[$frames.Count - 1] }
+}
+$origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
+$area = @{left=$origin.X + [int]$frame.Groups[1].Value; top=$origin.Y + [int]$frame.Groups[2].Value; right=$origin.X + [int]$frame.Groups[3].Value; bottom=$origin.Y + [int]$frame.Groups[4].Value}
+if ($area.left -lt $bounds.Left -or $area.top -lt $bounds.Top -or $area.right -gt $bounds.Right -or $area.bottom -gt $bounds.Bottom -or $area.bottom -le $area.top) { throw 'Painted transcript escaped its owned view' }
+Save $area "$caseDir/area.json"
 $point = Wait-For 'two painted same-prefix replies' {
     Shot 'reactions-before'
     $ErrorActionPreference = 'Continue'
@@ -28,13 +35,40 @@ $menu = Wait-For 'owned reaction menu logged' {
 $up = [char]::ConvertFromUtf32(0x1f44d)
 $down = [char]::ConvertFromUtf32(0x1f44e)
 $heart = [string][char]0x2764 + [char]0xfe0f
-if ($menu -cne "React $up,React $down,React $heart,Reply,Copy") { throw "IGSH975_REACTIONS_MISSING: $menu" }
+if ($menu -cne "React $up,React $down,React $heart,Reply,Copy,Copy request ID") { throw "IGSH975_REACTIONS_MISSING: $menu" }
 $popup = Wait-For 'owned native reaction popup visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } } 5
 Shot 'reactions-menu'
-$firstItem = [ChatDeliveryDesktop]::FirstMenuItem($popup, $app.Id, 5)
-Save @{count=5; left=$firstItem.Left; top=$firstItem.Top; right=$firstItem.Right; bottom=$firstItem.Bottom} "$caseDir/menu-item.json"
+for ($key = 0; $key -lt 6; $key++) { Press @(0x28) 'Down: select the next message action' }
+Press @(0x0D) 'Enter: copy the original request ID'
+[void](Wait-For 'original request ID reached the clipboard' { [Windows.Forms.Clipboard]::GetText() -ceq 'msg_first' })
+$observation.copiedRequestId = [Windows.Forms.Clipboard]::GetText()
+[ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $point.x, $point.y)
+$hover = Wait-For 'all three message hover controls are painted' {
+    Shot 'reactions-hover'
+    $ErrorActionPreference = 'Continue'
+    $located = & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --hover 2> "$caseDir/oracle-hover-stderr.log"
+    if ($LASTEXITCODE -eq 0) { ($located -join "`n") | ConvertFrom-Json }
+}
+foreach ($entry in @('emoji', 'more')) {
+    $menuStart = (Read-Shared "$settings/debug.log").Length
+    $x = if ($entry -eq 'emoji') { $hover.emojiX } else { $hover.moreX }
+    [ChatDeliveryDesktop]::PressOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, ($x - [int]$bounds.Left), ($hover.y - [int]$bounds.Top))
+    [void](Wait-For 'hover opens the same combined message menu' {
+        $tail = (Read-Shared "$settings/debug.log").Substring($menuStart)
+        $tail.Contains('[chat] message menu items=' + $menu)
+    })
+    $popup = Wait-For 'owned combined hover menu visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    Shot ('reactions-menu-' + $entry)
+    if ($entry -eq 'emoji') {
+        Press @(0x1B) 'Esc: dismiss the emoji entry menu'
+        [ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $hover.insideX, $hover.insideY)
+    }
+}
+$observation.hoverMenusMatch = $true
+$firstItem = [ChatDeliveryDesktop]::FirstMenuItem($popup, $app.Id)
+Save @{count=6; left=$firstItem.Left; top=$firstItem.Top; right=$firstItem.Right; bottom=$firstItem.Bottom} "$caseDir/menu-item.json"
 $actions.Add(@{case=$plan.name; input='real mouse click first native reaction menu item'})
-[ChatDeliveryDesktop]::PressOwnedMenu($main, $app.Id, $popup, 5)
+[ChatDeliveryDesktop]::PressOwnedMenu($main, $app.Id, $popup)
 [void](Wait-For 'one reaction reached the real send queue' { @((Fake-State).queue).Count -eq 1 })
 $observation.composerText = [ChatDeliveryDesktop]::Text($composer)
 if ($observation.composerText -cne $plan.text) { throw 'Reaction cleared the composer draft' }

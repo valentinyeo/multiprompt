@@ -235,6 +235,12 @@ pub const Shell = struct {
     activity: ShellActivity,
     working_since_ms: u64 = 0,
     permission_answered: bool = false,
+    chat_question_identity: u64 = 0,
+    chat_question_index: usize = 0,
+    chat_question_selected: u32 = 0,
+    chat_question_other: bool = false,
+    chat_question_other_sent: bool = false,
+    chat_question_other_hash: u64 = 0,
     needs_attention: bool,
     hook_capable: bool = false,
     turn_pending: bool = false,
@@ -396,7 +402,7 @@ pub const empty_shell = Shell{
 };
 
 pub const MAX_SHELLS = 256;
-pub var g_sidebar_w_full: i32 = if (LOOK_UNIFIED) 220 else 320;
+pub var g_sidebar_w_full: i32 = if (LOOK_UNIFIED) 300 else 320;
 pub const SIDEBAR_W_COLLAPSED: i32 = 44;
 pub const SIDEBAR_W_MIN: i32 = 150;
 pub const SIDEBAR_W_MAX: i32 = 500;
@@ -655,6 +661,7 @@ pub const WS_PILL_GAP: i32 = 5;
 pub const WS_STRIP_LEFT: i32 = 8;
 pub const WS_NEW_PILL: u8 = 0xFF;
 pub var g_workspace_hover: ?u8 = null;
+pub var g_sidebar_hover: ?u32 = null;
 pub var g_inbox_button_hover: bool = false;
 pub var g_chat_stop_hover: bool = false;
 pub var g_chat_stop_shown: bool = false;
@@ -691,6 +698,9 @@ pub const Row = struct {
     shell_idx: u32,
     section_tier: SidebarTier = .recent,
     y: i32,
+    x: i32 = 0,
+    width: i32 = 0,
+    tile: bool = false,
 };
 pub const MAX_ROWS: usize = MAX_SHELLS + INBOX_MAX_ROWS + MAX_GROUPS + 6;
 pub const SECTION_HEADER_H: i32 = 24;
@@ -726,6 +736,8 @@ pub const ClosedShell = struct {
 pub const MAX_CLOSED_HISTORY = 10;
 pub var g_closed_history: [MAX_CLOSED_HISTORY]ClosedShell = undefined;
 pub var g_closed_count: u32 = 0;
+
+pub var g_tmux_closed: @import("tmux_closed.zig").Closed = .{};
 
 pub const MAX_TMUX_SESSIONS = 512;
 pub const TmuxSessionEntry = struct {
@@ -1111,13 +1123,13 @@ pub var g_chat_hidden_tool_rows: u32 = 0;
 pub var g_chat_screen_working: bool = false;
 pub var g_chat_permission: @import("chat_permission.zig").PermissionMenu = .{};
 pub var g_chat_permission_sid: u32 = 0;
-pub var g_chat_question: @import("chat_options.zig").Group = .{};
-pub var g_chat_question_sid: u32 = 0;
 pub var g_chat_working_text: [128]u16 = std.mem.zeroes([128]u16);
 pub var g_chat_screen_status_len: usize = 0;
 pub var g_chat_working_applied: [128]u16 = std.mem.zeroes([128]u16);
 pub var g_chat_working_applied_len: usize = 0;
 pub var g_chat_raw: [262144]u16 = std.mem.zeroes([262144]u16);
+pub var g_chat_raw_len: usize = 0;
+pub var g_chat_raw_sid: u32 = 0;
 pub var g_chat_capture_storage: [262144]u16 = @splat(0);
 pub var g_chat_capture: []u16 = &g_chat_capture_storage;
 pub var g_chat_line_starts: [1400]usize = std.mem.zeroes([1400]usize);
@@ -1367,6 +1379,7 @@ pub const SEARCH_CHAT_TODO_OFFSET: usize = 6398;
 pub const SEARCH_CHAT_TOOL_STEPS_OFFSET: usize = 6395;
 pub const SEARCH_CHAT_NEWEST_OFFSET: usize = 6465;
 pub const SEARCH_CHAT_MORE_MENU_OFFSET: usize = 6466;
+pub const SEARCH_CHAT_RESYNC_OFFSET: usize = 6493;
 pub const SEARCH_CHAT_COPY_CODE_OFFSET: usize = 6362;
 pub const SEARCH_CHAT_COPY_SELECTION_OFFSET: usize = 6363;
 pub const SEARCH_CHAT_FOCUS_MESSAGES_OFFSET: usize = 6469;
@@ -1551,6 +1564,18 @@ pub const AiPace = enum(u8) {
     behind,
 };
 
+pub const AiPaceComparison = struct {
+    ratio: f64,
+    verdict: AiPace,
+};
+
+pub const AiUsagePace = struct {
+    per_hour: ?f64 = null,
+    per_day: ?f64 = null,
+    empty_hours: ?f64 = null,
+    comparison: ?AiPaceComparison = null,
+};
+
 pub const AiPaceGoal = struct {
     label: [128]u8 = std.mem.zeroes([128]u8),
     label_len: usize = 0,
@@ -1574,6 +1599,9 @@ pub const AiPaceGoal = struct {
     five_hour_reset_filetime: u64 = 0,
     has_bonus_reset: bool = false,
     bonus_reset_filetime: u64 = 0,
+    week_elapsed_tenths: ?u16 = null,
+    weekly_pace: AiUsagePace = .{},
+    five_hour_pace: AiUsagePace = .{},
     pace: AiPace = .on_pace,
     status: AiPaceStatus = .unavailable,
     cluster: [64]u8 = std.mem.zeroes([64]u8),
@@ -1725,6 +1753,20 @@ pub var g_tunnel_relay_mode: [3]std.atomic.Value(u32) = .{ .init(0), .init(0), .
 pub var g_graceful_exit: bool = false;
 pub var g_quit_all_in_progress: bool = false;
 pub var g_app_closing: bool = false;
+
+pub const CloseReason = enum(usize) {
+    window_control = 0x4D504301,
+    quit_all,
+    restart,
+    workspace_close,
+    workspace_delete,
+    workspace_collapse,
+    bench_exit,
+};
+
+pub fn requestAppClose(target: HANDLE, reason: CloseReason) void {
+    _ = PostMessageW(target, WM_CLOSE, @intFromEnum(reason), @intCast(@import("win32.zig").GetCurrentProcessId()));
+}
 
 pub const SPAWN_TITLE_CAP: usize = 1024;
 
@@ -2601,7 +2643,10 @@ pub const ChatHistoryEntry = struct {
     show_older: bool = false,
     tables: chat_markdown.TableCache = .{},
     pending: bool = false,
+    push_pending: bool = false,
+    stream: ?*ChatHistoryStream = null,
     retired: bool = false,
+    resync: bool = false,
     cache_cancelled: std.atomic.Value(bool) = .init(false),
     loaded_ms: i64 = 0,
     disk_loaded: bool = false,
@@ -2637,7 +2682,20 @@ pub var g_chat_cache_pruned: u64 = 0;
 
 pub var g_chat_cache_write_mutex: SpinMutex = .{};
 
+pub const ChatHistoryStream = struct {
+    channel: ChatHistoryChannel = .{ .watch = true },
+    mutex: SpinMutex = .{},
+    refs: std.atomic.Value(u32) = .init(2),
+    cancelled: std.atomic.Value(bool) = .init(false),
+    ended: std.atomic.Value(bool) = .init(false),
+    ready: std.atomic.Value(bool) = .init(false),
+    ack: HANDLE = null,
+    id: u32,
+    wire: std.ArrayList(u8) = .empty,
+    read_us: u64 = 0,
+};
 pub const ChatHistoryChannel = struct {
+    watch: bool = false,
     process: HANDLE = null,
     input: HANDLE = null,
     output: HANDLE = null,
@@ -2874,6 +2932,8 @@ pub const ChatConfirmedEcho = struct {
     block_start: usize = 0,
     block_len: usize = 0,
     stamp_ms: i64 = 0,
+    message_id: u64 = 0,
+    text_hash: u64 = 0,
 };
 
 pub var g_chat_outbox: std.ArrayList(ChatOutboxEntry) = .empty;
@@ -3276,6 +3336,7 @@ pub var g_font_shell_tab_title: HANDLE = null;
 pub var g_font_subtitle: HANDLE = null;
 pub var g_font_status_card: HANDLE = null;
 pub var g_font_close: HANDLE = null;
+pub var g_font_bot: [3]HANDLE = @splat(null);
 pub var g_font_inbox_title: HANDLE = null;
 pub var g_font_inbox_sub: HANDLE = null;
 pub var g_font_thread_title: HANDLE = null;
@@ -3284,7 +3345,6 @@ pub const WM_SYSKEYDOWN: u32 = 0x0104;
 pub var g_win_held: bool = false;
 pub var g_native_paste_passthrough_until: u64 = 0;
 pub var g_browser_toggle_chord_held: bool = false;
-pub var g_browser_toggle_last_event_time: u32 = 0;
 pub var g_chat_toggle_chord_held: bool = false;
 pub var g_chat_toggle_last_event_time: u32 = 0;
 pub var g_voice_toggle_chord_held: bool = false;
@@ -3299,11 +3359,7 @@ pub var g_palette_chord_held: bool = false;
 pub var g_screenshot_chord_held: bool = false;
 pub var g_tab_url_chord_held: bool = false;
 pub var g_dictation_toggle_chord_held: bool = false;
-pub var g_browser_toggle_last_handled_event_time: u32 = 0;
 pub const BROWSER_TOGGLE_DEBOUNCE_MS: u32 = 1500;
-pub var g_browser_shortcut_open_guard_shell_id: u32 = 0;
-pub var g_browser_shortcut_open_guard_until: u64 = 0;
-pub const BROWSER_SHORTCUT_OPEN_GUARD_MS: u64 = 10_000;
 
 pub const STALE_ALT_REPAIR_EXTRA_INFO: usize = 0x4D505341;
 
@@ -3658,3 +3714,5 @@ pub var g_chat_find_layout_open = false;
 pub const ShellDoubleClick = struct { time: u32, point: POINT, shell_id: u32 };
 pub var g_shell_double_click_first: ?ShellDoubleClick = null;
 pub var g_shell_double_click_pending: ?ShellDoubleClick = null;
+
+pub const SEARCH_SETTINGS_OFFSET: usize = 4002;

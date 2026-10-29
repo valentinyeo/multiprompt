@@ -8,6 +8,8 @@ on:
       - src/main.zig
       - .claude/skills/verify-multiprompt/browser-corners.ps1
       - .claude/skills/verify-multiprompt/control.ps1
+      - .claude/skills/verify-multiprompt/control-library.ps1
+      - .claude/skills/verify-multiprompt/control-native.cs
       - .github/workflows/browser-corners.yml
       - .github/workflows/check-red-run.yml
   push:
@@ -17,6 +19,8 @@ on:
       - src/main.zig
       - .claude/skills/verify-multiprompt/browser-corners.ps1
       - .claude/skills/verify-multiprompt/control.ps1
+      - .claude/skills/verify-multiprompt/control-library.ps1
+      - .claude/skills/verify-multiprompt/control-native.cs
       - .github/workflows/browser-corners.yml
       - .github/workflows/check-red-run.yml
   workflow_dispatch:

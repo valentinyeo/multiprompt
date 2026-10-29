@@ -1,5 +1,7 @@
 # Appearance
 
+Verify on: push, pull_request
+
 Confirm the main window starts maximized, then choose a global color theme through the command palette and confirm both the visible desktop and saved preference change.
 
 ## Sub-features

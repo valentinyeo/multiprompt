@@ -338,17 +338,17 @@ pub fn chatViewLayout() ChatViewLayout {
     const right = left + content.width;
     const content_top = slot.top + threadTitleHeight();
     const bottom = slot.bottom;
+    const send_size = uiScaled(32);
+    const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
     const composer_card = RECT{
-        .left = left,
+        .left = left + send_size + uiScaled(8),
         .top = bottom - composer_h,
         .right = right,
         .bottom = bottom,
     };
-    const send_size = uiScaled(32);
-    const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
     const slots = chatSendSlots(composer_card, send_size, send_margin, @import("window_layout.zig").chatStopVisible(), chatComposerHasText() or chat_dictation_state != .idle);
     const send_btn = slots.send;
-    const mic_w = chatDictationMicFit(chatDictationMicWidth(chat_dictation_state), slots.left - uiScaled(6) - (composer_card.left + send_margin + send_size + uiScaled(12)));
+    const mic_w = chatDictationMicFit(chatDictationMicWidth(chat_dictation_state), slots.left - uiScaled(6) - (composer_card.left + uiScaled(14)));
     const mic_btn = RECT{
         .left = slots.left - uiScaled(6) - mic_w,
         .top = send_btn.top,
@@ -356,9 +356,9 @@ pub fn chatViewLayout() ChatViewLayout {
         .bottom = send_btn.bottom,
     };
     const attach_btn = RECT{
-        .left = composer_card.left + send_margin,
+        .left = left,
         .top = send_btn.top,
-        .right = composer_card.left + send_margin + send_size,
+        .right = left + send_size,
         .bottom = send_btn.bottom,
     };
     const transcript_bottom = composer_card.top - gap - chatWorkingIndicatorH() - chatNewMessagesHeight();
@@ -378,7 +378,7 @@ pub fn chatViewLayout() ChatViewLayout {
         },
         .composer_card = composer_card,
         .composer = .{
-            .left = attach_btn.right + uiScaled(10),
+            .left = composer_card.left + uiScaled(14),
             .top = composer_card.top + chatReplyBarH() + uiScaled(12),
             .right = mic_btn.left - uiScaled(12),
             .bottom = composer_card.bottom - uiScaled(10),
@@ -534,7 +534,7 @@ fn chatComposerButtonsRefresh() void {
     if (!app_state.g_chat_active or app_state.g_main_hwnd == null) return;
     layoutChatControls();
     const layout = chatViewLayout();
-    var rc = RECT{ .left = layout.composer_card.left, .top = layout.transcript.bottom, .right = layout.composer_card.right, .bottom = layout.composer_card.bottom };
+    var rc = RECT{ .left = layout.attach_btn.left, .top = layout.transcript.bottom, .right = layout.composer_card.right, .bottom = layout.composer_card.bottom };
     _ = InvalidateRect(app_state.g_main_hwnd, &rc, 0);
 }
 
@@ -788,7 +788,7 @@ pub fn layoutChatControls() void {
     const status_h = @import("chat_render.zig").chatStatusHeight(layout.transcript.bottom - layout.transcript.top);
     if (app_state.g_chat_status_hwnd != null) {
         _ = MoveWindow(app_state.g_chat_status_hwnd, layout.transcript.left, layout.transcript.top, layout.transcript.right - layout.transcript.left, status_h, 0);
-        _ = ShowWindow(app_state.g_chat_status_hwnd, if (status_h > 0 and !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_all_sessions_active) SW_SHOW else SW_HIDE);
+        _ = ShowWindow(app_state.g_chat_status_hwnd, if (status_h > 0 and chatViewOwnsInput()) SW_SHOW else SW_HIDE);
         _ = InvalidateRect(app_state.g_chat_status_hwnd, null, 0);
     }
     const win = layout.transcript_window;
@@ -1418,8 +1418,17 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
+    if (@import("settings_panel.zig").windowKey(msg, wp, false)) return 0;
     if (@import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
-    if (app_state.g_chat_nav_active and (msg == 0x0201 or msg == 0x0102 or msg == 0x0302 or msg == 0x0300 or GetWindowTextLengthW(hwnd) != 0)) @import("chat_render.zig").chatNavClear();
+    if (app_state.g_chat_nav_active and (msg == 0x0201 or msg == 0x0102 or msg == 0x0302 or msg == 0x0300 or CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x000E, 0, 0) != 0)) @import("chat_render.zig").chatNavClear();
+    if (msg == WM_KEYDOWN and @import("workspace_switcher.zig").key(wp)) {
+        if (wp == 0x0D) dropPendingEnterChar(hwnd);
+        return 0;
+    }
+    if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) {
+        if (wp == 0x0D) dropPendingEnterChar(hwnd);
+        return 0;
+    }
     if (msg == WM_KEYDOWN and @import("more_menu.zig").key(wp)) {
         if (wp == 0x0D) dropPendingEnterChar(hwnd);
         return 0;
@@ -1746,8 +1755,7 @@ pub fn openChatView() void {
     layoutChatControls();
     _ = ShowWindow(app_state.g_chat_transcript_hwnd, SW_SHOW);
     _ = ShowWindow(app_state.g_chat_composer_hwnd, SW_SHOW);
-    _ = SetForegroundWindow(app_state.g_main_hwnd);
-    _ = SetFocus(app_state.g_chat_composer_hwnd);
+    focusActiveShell();
     for (&app_state.g_voice_deferred_text) |*pending| {
         if (pending.shell_id == app_state.shells[app_state.active_shell].shell_id and pending.len != 0) {
             insertTextIntoChatComposer(pending.text[0..pending.len]);
@@ -1759,6 +1767,7 @@ pub fn openChatView() void {
 }
 
 pub fn closeChatView() void {
+    @import("chat_session.zig").chatHistoryStreamsKeep(0);
     @import("chat_find_ui.zig").close(false);
     chatAcClose();
     if (!app_state.g_chat_active) return;
@@ -2872,7 +2881,6 @@ test "IGSH-887 the wave follows the voice level and shifts left each tick" {
     try std.testing.expectEqual(chatDictationLevelBar(2000), chat_dictation_wave[DICTATION_WAVE_BARS - 2]);
     try std.testing.expectEqual(@as(u8, 0), chat_dictation_wave[DICTATION_WAVE_BARS - 1]);
 }
-
 
 test "IGSH-1072 queued Ctrl+D stops after physical Ctrl release" {
     try testChatDictation(.queued_ctrl_stop);
