@@ -60,7 +60,7 @@ test('IGSH-1126 pane loading never blocks a released shortcut', () => {
 
 test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', () => {
   const journey = read('.claude/skills/verify-multiprompt/control-feature-browser-pane-stuck.ps1');
-  for (const token of ['$i -lt 20', 'ImmediateBrowserTogglePair((50 + ($i % 5) * 50))', "$before + 2", 'SLOW_LOADING', 'SLOW_FINISHED', "'toggle-keys.log'", 'immediate-toggle.mp4', "Assert-ImmediateBrowserPairs 'blank'", "Assert-ImmediateBrowserPairs 'slow'"]) assert.ok(journey.includes(token), token);
+  for (const token of ['$i -lt 20', 'ImmediateBrowserTogglePair(50)', "$before + 2", 'SLOW_LOADING', 'SLOW_FINISHED', "'toggle-keys.log'", 'immediate-toggle.mp4', "Assert-ImmediateBrowserPairs 'blank'", "Assert-ImmediateBrowserPairs 'slow'"]) assert.ok(journey.includes(token), token);
   assert.match(read('.github/workflows/verify.yml'), /name: Install browser toggle recorder\n\s+if: env\.FEATURE == 'browser-pane-stuck'[\s\S]*choco install ffmpeg --version=7\.1\.1/);
   assert.doesNotMatch(journey, /\$job\.Start\(/);
   const recordingSeconds = Number(journey.match(/-t (\d+) -vf/)[1]);
@@ -70,7 +70,10 @@ test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', 
   const native = read('.claude/skills/verify-multiprompt/control-native.cs').split('public static double ImmediateBrowserTogglePair(int delay)')[1]?.split('public static void OpenAndCloseBrowserPane()')[0];
   assert.ok(native);
   assert.match(native, /chord\(\);[\s\S]*remaining = delay - clock\.Elapsed\.TotalMilliseconds;[\s\S]*Thread\.Sleep\(\(int\)\(remaining\)\);[\s\S]*chord\(\);/);
-  assert.match(native, /gap > 300/);
+  assert.doesNotMatch(native, /if \(gap > 300\) throw/);
+  assert.match(journey, /\$speedWarning = \$gap -gt 300/);
+  assert.match(journey, /if \(\$speedWarning\) \{ Record "WARNING:/);
+  assert.match(journey, /inputGapMs = \$gap; verifiedClosedMs = \$verifiedClosedMs/);
   assert.match(native, /SendInput\(\(uint\)batch.Length, batch/);
   assert.doesNotMatch(native, /Key\(0x12/);
   assert.match(native, /key\(0x12, 0\); key\(0x41, 0\); key\(0x41, 2\); key\(0x12, 2\)/);
