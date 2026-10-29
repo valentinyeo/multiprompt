@@ -1099,9 +1099,6 @@ pub fn chatFileOnReady() void {
                 entry.history.newMessages(history)
             else
                 0;
-            const before = if (entry.stalled) 0 else if (entry.backfill.pages.items.len > 0) entry.backfill.start else if (disk or history.start < entry.history.start or
-                (entry.before == 0 and (history.start != entry.history.start or history.inode != entry.history.inode or
-                    !std.mem.eql(u8, &history.sid, &entry.history.sid)))) history.start else 0;
             if (entry.unchanged) {
                 entry.history.changed_from = entry.history.blocks.items.len;
                 entry.history.updateCursor(history);
@@ -1132,13 +1129,16 @@ pub fn chatFileOnReady() void {
                 app_state.g_chat_new_messages.arrive(added, app_state.g_chat_scrolled_up);
                 chatNewMessagesChanged(had_messages);
             }
-            entry.before = before;
-            if (!disk and !history.more and history.start == 0) entry.loaded_ms = @intCast(GetTickCount64());
+            const has_messages = for (entry.history.blocks.items) |block| {
+                if (block.role != .tool) break true;
+            } else false;
+            entry.before = if (entry.stalled) 0 else if (entry.backfill.pages.items.len > 0) entry.backfill.start else if (!has_messages) entry.history.start else 0;
+            if (!disk and !history.more) entry.loaded_ms = @intCast(GetTickCount64());
             entry.key.sid = history.sid;
             entry.result = null;
             entry.failures = 0;
             entry.missing_message = @splat(0);
-            if (entry.resync and !disk and !history.more and history.start == 0) {
+            if (entry.resync and !disk and !history.more) {
                 entry.resync = false;
                 if (belongs_to_active) showHeaderNoticeAscii("Chat resynced", 3000, false);
                 debugLog("[chat] resync completed");
@@ -1166,7 +1166,6 @@ pub fn chatFileOnReady() void {
             entry.next = 0;
             if (chat_history.sameSession(key, entry.key)) active_changed = true;
         } else {
-            entry.before = entry.history.start;
             entry.missing_message = entry.result_missing;
             chatFileFailed(entry);
             chatHistoryStreamStop(entry);

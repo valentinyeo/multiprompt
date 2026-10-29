@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Evidence, [Parameter(Mandatory)][string]$Revision, [ValidateSet(25, 750)][int]$IdleObserverPollMs = 750)
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Evidence, [Parameter(Mandatory)][string]$Revision, [ValidateSet(25, 750)][int]$IdleObserverPollMs = 750, [switch]$SwitchOnly)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Performance workload runs only on GitHub Windows' }
@@ -86,14 +86,15 @@ try {
         if ($i -ge 10) {
             $range = (Read-Log).Substring($offset)
             $timing = [regex]::Matches($range, 'switch-timing: to=(\d+) total_us=(\d+)')
-            $paint = [regex]::Match($range, ('\[switch\] chat content shown shell=' + $targetShellId + ' blocks=(\d+)'))
+            $paint = [regex]::Match($range, ('\[switch\] chat content shown shell=' + $targetShellId + ' blocks=(\d+) ms=(\d+)'))
             if ($timing.Count -ne 1 -or [int]$timing[0].Groups[1].Value -ne $target) { throw 'Missing or ambiguous switch timing' }
-            $result.switches += @{ shell=$target; us=[long]$timing[0].Groups[2].Value; blocks=[int]$paint.Groups[1].Value }
+            $result.switches += @{ shell=$target; us=[long]$timing[0].Groups[2].Value; blocks=[int]$paint.Groups[1].Value; paintMs=[long]$paint.Groups[2].Value }
         }
         Start-Sleep -Milliseconds 300
     }
     $result.finalTab = (Session).active_tab
     if ($result.finalTab -ne $initial) { throw 'Switch cycle failed to return to initial session' }
+    if ($SwitchOnly) { return }
     [void](Wait-For 'idle conversation foreground' {
         $composer = [ChatDeliveryDesktop]::Composer($main)
         $composer -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $composer)

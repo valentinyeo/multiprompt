@@ -11,7 +11,7 @@ async function oracle() {
   assert.ok(fs.existsSync(new URL('./switch-performance.mjs', import.meta.url)), 'The performance oracle must ship');
   return import('./switch-performance.mjs');
 }
-const workload = () => ({ sessionCount: 10, transcriptBytes: 250 * 1024 * 1024, idleShell: 1, switches: Array.from({ length: 50 }, (_, i) => ({ shell: i % 10, us: 1000, blocks: 2 })), idleUs: Array(50).fill(100) });
+const workload = () => ({ sessionCount: 10, transcriptBytes: 400 * 1024 * 1024, idleShell: 1, switches: Array.from({ length: 50 }, (_, i) => ({ shell: i % 10, us: 1000, blocks: 2, paintMs: 1 })), idleUs: Array(50).fill(100) });
 
 test('complete workload passes; injected 300 ms switching fails', async () => {
   const { assess } = await oracle();
@@ -298,4 +298,35 @@ test('status polling uses isolated snapshots without attaching the UI console', 
   assert.match(source, /test "snapshot polling never waits for partial data and rejects a switched session"/);
   const main = fs.readFileSync(new URL('../src/main.zig', import.meta.url), 'utf8');
   assert.ok(main.indexOf('runIfRequested(args)') < main.indexOf('debugLog("launch process-start'));
+});
+
+
+test('IGSH-1197 every painted switch stays below 200 ms on the 400 MiB workload', async () => {
+  const { assess } = await oracle();
+  const data = workload();
+  data.switches[0].paintMs = 199;
+  assert.equal(assess(data).pass, true);
+  assert.equal(assess(data).paintMaxMs, 199);
+  data.switches[0].paintMs = 200;
+  assert.equal(assess(data).pass, false);
+  delete data.switches[0].paintMs;
+  assert.throws(() => assess(data));
+  const small = workload();
+  small.transcriptBytes = 399 * 1024 * 1024;
+  assert.throws(() => assess(small));
+});
+
+
+test('IGSH-1197 published executable proof measures switches without inventing idle samples', async () => {
+  const { assessSwitches } = await oracle();
+  assert.equal(typeof assessSwitches, 'function');
+  const data = workload();
+  delete data.idleUs;
+  delete data.idleShell;
+  assert.equal(assessSwitches(data).pass, true);
+  data.switches[0].paintMs = 200;
+  assert.equal(assessSwitches(data).pass, false);
+  const driver = fs.readFileSync(new URL('./switch-performance.ps1', import.meta.url), 'utf8');
+  assert.match(driver, /if \(\$SwitchOnly\) \{ return \}/);
+  assert.match(driver, /paintMs=\[long\]\$paint.Groups\[2\].Value/);
 });

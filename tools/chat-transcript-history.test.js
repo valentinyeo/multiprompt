@@ -424,7 +424,7 @@ test "cache-first switch-back, stale completion and failure preserve complete me
     try std.testing.expectEqual(@as(i32, 40), g_chat_scroll_y);
     try std.testing.expectEqual(@as(u64, 150), one.history.offset);
     try std.testing.expectEqual(@as(u64, 25), one.history.start);
-    try std.testing.expectEqual(@as(u64, 25), one.before);
+    try std.testing.expectEqual(@as(u64, 0), one.before);
     try std.testing.expectEqual(GetTickCount64(), one.next);
     const status_text_ptr = one.history.text.items.ptr;
     const status_blocks = g_chat_block_count;
@@ -943,7 +943,7 @@ test "cache-first switch-back overlapping watch tail keeps live replies" {
 
 
 test('IGSH-1053 Resync confirms complete live reload, never saved disk or a failed load', () => {
-  assert.match(fn('chatFileOnReady'), /entry\.resync and !disk and !history\.more and history\.start == 0/);
+  assert.match(fn('chatFileOnReady'), /entry\.resync and !disk and !history\.more/);
   const cases = String.raw`
 test "cache-first switch-back Resync success notice requires live source" {
     const a = std.heap.page_allocator;
@@ -1084,7 +1084,7 @@ test "cache-first switch-back tools-only tail must not hide the first reply" {
     chatFileOnReady();
     try std.testing.expectEqual(@as(usize, 2), g_chat_block_count);
     try std.testing.expect(std.mem.indexOf(u16, g_chat_capture[0..g_chat_last_len], std.unicode.utf8ToUtf16LeStringLiteral("Latest reply")) != null);
-    try std.testing.expectEqual(@as(u64, 100), one.before);
+    try std.testing.expectEqual(@as(u64, 0), one.before);
     try std.testing.expectEqual(@as(usize, 0), one.backfill.pages.items.len);
 }
 `;
@@ -1127,6 +1127,58 @@ test "cache-first switch-back poll snapshot retains visible preview" {
         try std.testing.expect(std.mem.indexOf(u16, restored.text.items, std.unicode.utf8ToUtf16LeStringLiteral("Latest visible reply")) != null);
         try std.testing.expectEqual(@as(usize, 301), one.history.blocks.items.len);
     }
+}
+`;
+  const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 1 tests passed/);
+});
+
+
+test('IGSH-1197 partial tails stay live without fetching older pages until scroll requests them', () => {
+  const cases = String.raw`
+test "cache-first switch-back demand-paged tail" {
+    const a = std.heap.page_allocator;
+    var one: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", ""), .disk_loaded = true };
+    defer one.history.deinit(a);
+    defer one.backfill.deinit(a);
+    try g_chat_histories.append(a, &one);
+    shells[0].shell_id = 1;
+    @memcpy(shells[0].tmux_session[0..6], "term-1");
+    shells[0].tmux_session_len = 6;
+    remote_pages = &.{ "@mp\t1\thistory\tok\tsid\t419000000\t419430400\t9\t0\tclaude\tterm-1\t0\t\ttail\t419000000\n{\"role\":\"assistant\",\"id\":\"latest\",\"text\":\"Newest reply\"}\n@@MP_END@@\n" };
+    remote_calls = 0;
+    one.pending = true;
+    one.resync = true;
+    chatFileFetchThread(&one, one.key, 1, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 0), one.before);
+    try std.testing.expectEqual(@as(u64, 419000000), one.history.start);
+    try std.testing.expectEqual(ticks, one.loaded_ms);
+    try std.testing.expect(!one.resync);
+    try std.testing.expectEqual(@as(usize, 1), one.history.blocks.items.len);
+    try std.testing.expectEqual(@as(usize, 0), one.backfill.pages.items.len);
+    one.result = null;
+    one.pending = true;
+    one.ready.store(true, .release);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 0), one.before);
+    one.failures = 0;
+    one.next = 0;
+    fake_viewport_h = 80;
+    g_chat_scroll_y = 0;
+    chatScrollBy(100);
+    try std.testing.expectEqual(one.history.start, one.before);
+    try std.testing.expect(one.show_older);
+    remote_pages = &.{ "@mp\t2\thistory\tok\tsid\t418500000\t419000000\t9\t0\tclaude\tterm-1\t0\t\tolder\t418500000\n{\"role\":\"assistant\",\"id\":\"older\",\"text\":\"Older reply\"}\n@@MP_END@@\n" };
+    remote_calls = 0;
+    one.pending = true;
+    chatFileFetchThread(&one, one.key, 2, false, null);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 0), one.before);
+    try std.testing.expectEqual(@as(u64, 418500000), one.history.start);
+    try std.testing.expectEqual(@as(u64, 419430400), one.history.offset);
+    try std.testing.expectEqual(@as(usize, 2), one.history.blocks.items.len);
 }
 `;
   const run = runHarness(fn('chatDeferTranscriptLoad'), null, cases);
