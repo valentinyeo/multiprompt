@@ -2526,3 +2526,10 @@ test('IGSH-1176 browser warning times out before its job cancellation boundary',
   assert.match(read('.github/workflows/release.yml'), /browser_stall: \$\{\{ inputs\.browser_stall \|\| false \}\}/);
   assert.match(workflow, /- name: Upload durable verification evidence\s+if: always\(\)/);
 });
+
+
+test('IGSH-1176 forced browser timeout proof fits the GitHub dispatch input limit', () => {
+  const dispatch = workflow.slice(workflow.indexOf('  workflow_dispatch:'), workflow.indexOf('  workflow_call:'));
+  assert.ok([...dispatch.matchAll(/^      [a-z_]+:$/gm)].length <= 25);
+  assert.match(workflow, /VERIFY_BROWSER_STALL: \$\{\{ \(inputs\.browser_stall \|\| inputs\.dictation_stall\) && '1' \|\| '' \}\}/);
+});

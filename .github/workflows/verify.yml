@@ -11,13 +11,8 @@ on:
         required: true
         default: appearance
         type: string
-      browser_stall:
-        description: Force the browser warning driver to hang for timeout proof
-        required: false
-        default: false
-        type: boolean
       dictation_stall:
-        description: Deliberately stall the dictation capture precondition to prove failure evidence
+        description: Deliberately stall dictation capture or the browser-pane-stuck driver to prove timeout evidence
         required: false
         default: false
         type: boolean
@@ -843,7 +838,7 @@ jobs:
         if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'chat-switch-speed' && env.FEATURE != 'browser-own-profile' && env.FEATURE != 'title-bar'
         shell: powershell
         env:
-          VERIFY_BROWSER_STALL: ${{ inputs.browser_stall && '1' || '' }}
+          VERIFY_BROWSER_STALL: ${{ (inputs.browser_stall || inputs.dictation_stall) && '1' || '' }}
         run: |
           if ($env:FEATURE -eq 'browser-pane-stuck' -and $env:VERIFY_BROWSER_STALL -eq '1') {
             Write-Host 'Forced browser driver hang: timeout must leave the release running'
