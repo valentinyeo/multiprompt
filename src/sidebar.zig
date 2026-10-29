@@ -1757,7 +1757,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
     if (app_state.g_main_hwnd == null) return;
 
     const font_title = uiFontTitle();
-    const font_shell_tab_title = uiFontShellTabTitle();
     const font_subtitle = uiFontSubtitle();
     const font_status_card = uiFontStatusCard();
     const old_font = SelectObject(hdc, font_title);
