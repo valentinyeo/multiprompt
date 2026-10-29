@@ -3,7 +3,7 @@ const w = @import("win32.zig");
 const L = std.unicode.utf8ToUtf16LeStringLiteral;
 const HRESULT = i32;
 const Slot = *const anyopaque;
-const DWRITE_MEASURING_MODE_NATURAL = 0;
+const DWRITE_MEASURING_MODE_GDI_CLASSIC = 1;
 const DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC = 5;
 
 const Factory = extern struct {
@@ -110,6 +110,9 @@ extern "gdi32" fn GetBkMode(w.HANDLE) callconv(w.WINAPI) i32;
 extern "gdi32" fn GetBkColor(w.HANDLE) callconv(w.WINAPI) u32;
 extern "gdi32" fn GetMapMode(w.HANDLE) callconv(w.WINAPI) i32;
 extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
+extern "gdi32" fn SetStretchBltMode(w.HANDLE, i32) callconv(w.WINAPI) i32;
+extern "gdi32" fn SetBrushOrgEx(w.HANDLE, i32, i32, ?*w.POINT) callconv(w.WINAPI) w.BOOL;
+extern "gdi32" fn StretchBlt(w.HANDLE, i32, i32, i32, i32, w.HANDLE, i32, i32, i32, i32, u32) callconv(w.WINAPI) w.BOOL;
 
 const CachedFace = struct {
     font: w.HANDLE = null,
@@ -275,10 +278,13 @@ pub fn drawPositioned(hdc: w.HANDLE, text: []const u16, advances: []const f32, x
     const width = clip.right - clip.left;
     const height = clip.bottom - clip.top;
     if (width <= 0 or height <= 0) return true;
-    if (!ensureTarget(hdc, @intCast(width), @intCast(height))) return false;
+    if (!ensureTarget(hdc, @intCast(width * 2), @intCast(height * 2))) return false;
     const t = target.?;
     const memory = t.v.getMemoryDC(t);
-    if (memory == null or w.BitBlt(memory, 0, 0, width, height, hdc, clip.left, clip.top, w.GDI_SRCCOPY) == 0) return false;
+    if (memory == null) return false;
+    const memory_mode = SetStretchBltMode(memory, 3);
+    defer _ = SetStretchBltMode(memory, memory_mode);
+    if (StretchBlt(memory, 0, 0, width * 2, height * 2, hdc, clip.left, clip.top, width, height, w.GDI_SRCCOPY) == 0) return false;
     for (items[0..@intCast(item_count)], 0..) |*item, item_index| {
         const begin: usize = @intCast(item.position);
         const end: usize = @intCast(items[item_index + 1].position);
@@ -325,16 +331,21 @@ pub fn drawPositioned(hdc: w.HANDLE, text: []const u16, advances: []const f32, x
                     anchor -= @floatFromInt(advance);
                 };
                 for (cluster_start..glyph) |g| {
-                    offsets[g] = .{ .advance = anchor + @as(f32, @floatFromInt(native_offsets[g].x)), .ascender = @floatFromInt(native_offsets[g].y) };
+                    offsets[g] = .{ .advance = 2 * (anchor + @as(f32, @floatFromInt(native_offsets[g].x))), .ascender = 2 * @as(f32, @floatFromInt(native_offsets[g].y)) };
                     anchor += @floatFromInt(widths[g]);
                 }
             }
-            const run = GlyphRun{ .face = face, .em_size = @floatFromInt(metric.height - metric.internal_leading), .count = @intCast(count), .indices = indices.ptr, .advances = zero_advances.ptr, .offsets = @ptrCast(offsets.ptr) };
-            if (t.v.drawGlyphRun(t, @floatFromInt(x - clip.left), @floatFromInt(y - clip.top + metric.ascent), DWRITE_MEASURING_MODE_NATURAL, &run, params.?, color, null) < 0) return false;
+            const run = GlyphRun{ .face = face, .em_size = @floatFromInt(2 * (metric.height - metric.internal_leading)), .count = @intCast(count), .indices = indices.ptr, .advances = zero_advances.ptr, .offsets = @ptrCast(offsets.ptr) };
+            if (t.v.drawGlyphRun(t, @floatFromInt(2 * (x - clip.left)), @floatFromInt(2 * (y - clip.top + metric.ascent)), DWRITE_MEASURING_MODE_GDI_CLASSIC, &run, params.?, color, null) < 0) return false;
             break;
         }
     }
-    if (w.BitBlt(hdc, clip.left, clip.top, width, height, memory, 0, 0, w.GDI_SRCCOPY) == 0) return false;
+    const output_mode = SetStretchBltMode(hdc, 4);
+    defer _ = SetStretchBltMode(hdc, output_mode);
+    var brush_origin: w.POINT = undefined;
+    if (SetBrushOrgEx(hdc, 0, 0, &brush_origin) == 0) return false;
+    defer _ = SetBrushOrgEx(hdc, brush_origin.x, brush_origin.y, null);
+    if (StretchBlt(hdc, clip.left, clip.top, width, height, memory, 0, 0, width * 2, height * 2, w.GDI_SRCCOPY) == 0) return false;
     painted_runs += 1;
     return true;
 }
@@ -370,7 +381,7 @@ fn paint(hdc: w.HANDLE, text: []const u16, rect: w.RECT, flags: u32) ?i32 {
     const em = metric.height - metric.internal_leading;
     if (em <= 0) return null;
     const run = GlyphRun{ .face = face, .em_size = @floatFromInt(em), .count = @intCast(segment.count), .indices = &segment.indices, .advances = &segment.advances };
-    if (t.v.drawGlyphRun(t, @floatFromInt(x), @floatFromInt(y + metric.ascent), DWRITE_MEASURING_MODE_NATURAL, &run, params.?, color, null) < 0) return null;
+    if (t.v.drawGlyphRun(t, @floatFromInt(x), @floatFromInt(y + metric.ascent), DWRITE_MEASURING_MODE_GDI_CLASSIC, &run, params.?, color, null) < 0) return null;
     if (metric.underlined != 0) {
         var post: [12]u8 = undefined;
         var head: [20]u8 = undefined;
