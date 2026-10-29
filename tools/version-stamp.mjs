@@ -170,7 +170,16 @@ function releaseHistory(tag, changelog, publishedTags) {
   }
   const stamped = changelog.match(/\.ver\s*=\s*"(\d+\.\d+\.\d+)"/)?.[1];
   const base = stamped ? older.findLastIndex(name => compareTags(name, `v${stamped}`) <= 0) : -1;
-  return older.slice(Math.max(base, 0)).map(name => ({ tag: name, files: readTree(name) }));
+  const history = older.slice(Math.max(base, 0));
+  for (const name of history) {
+    const ref = `refs/tags/${name}`;
+    try {
+      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { stdio: 'ignore' });
+    } catch {
+      git(['fetch', '--no-tags', 'origin', `${ref}:${ref}`]);
+    }
+  }
+  return history.map(name => ({ tag: name, files: readTree(`refs/tags/${name}`) }));
 }
 
 function check(baseRev, headRev) {

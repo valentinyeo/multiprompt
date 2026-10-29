@@ -630,6 +630,40 @@ test('IGSH-1115 failed tags cannot consume unpublished product notes', async t =
   assert.equal(fs.readFileSync(path.join(r.dir, 'changelog.d/DEMO-1115-recovered.md'), 'utf8'), 'Your chats keep their saved order.\n');
 });
 
+test('build fetches a newly published tag without changing HEAD or consuming failed tags', { skip: process.platform === 'win32' }, async t => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const r = repo(t);
+  r.git('tag', 'v0.28.735');
+  r.write({ 'changelog.d/DEMO-1-published.md': 'Previously published change.\n' });
+  const published = r.commit();
+  r.write({ 'changelog.d/DEMO-2-new.md': 'New release change.\n' });
+  const head = r.commit();
+  const clone = path.join(r.dir, '.git', 'fixture-clone');
+  r.git('clone', '--no-hardlinks', r.dir, clone);
+  r.git('tag', 'v0.28.736', published);
+  r.git('tag', 'v0.28.737', head);
+  const bin = path.join(r.dir, '.git', 'fixture-bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'gh'), '#!/usr/bin/env node\nprocess.stdout.write("v0.28.735\\nv0.28.736\\n");\n', { mode: 0o755 });
+  const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH };
+  const built = spawnSync(process.execPath, [tool, 'build', 'v0.28.738'], { cwd: clone, encoding: 'utf8', env });
+  assert.equal(built.status, 0, built.stderr);
+  const git = (...args) => execFileSync('git', args, { cwd: clone, encoding: 'utf8' }).trim();
+  assert.equal(git('rev-parse', 'HEAD'), head);
+  assert.equal(git('rev-parse', 'refs/tags/v0.28.736^{commit}'), published);
+  assert.deepEqual(releaseNotes(fs.readFileSync(path.join(clone, 'src/changelog.zig'), 'utf8'), 'v0.28.738'), {
+    version: '0.28.738', releases: [
+      { version: '0.28.738', changes: ['New release change.'] },
+      { version: '0.28.736', changes: ['Previously published change.'] },
+      { version: '0.28.735', changes: ['Existing.'] },
+    ],
+  });
+  git('remote', 'remove', 'origin');
+  fs.writeFileSync(path.join(clone, 'src/changelog.zig'), changelog);
+  const offline = spawnSync(process.execPath, [tool, 'build', 'v0.28.738', JSON.stringify(['v0.28.735', 'v0.28.736'])], { cwd: clone, encoding: 'utf8' });
+  assert.equal(offline.status, 0, offline.stderr);
+});
+
 test('IGSH-1115 production history ignores failed tags without moving their product notes into failed versions', { skip: process.platform === 'win32' }, async t => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const r = repo(t);
