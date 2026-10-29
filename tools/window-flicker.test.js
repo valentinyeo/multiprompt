@@ -89,6 +89,8 @@ fn repositionActive() void { console_relayouts += 1; }
 fn syncMainWindowDpi(_: HANDLE, _: u32) bool { return false; }
 fn fontSyncMarkAllStale(_: HANDLE, _: []const u8) void {}
 fn fontSyncActiveNow() void {}
+var keyboard_hook_installed = false;
+fn installHook() void { keyboard_hook_installed = true; }
 fn sessionFrontChanged() void {}
 fn focusGuardReturnFromPane(_: HANDLE) bool { return false; }
 fn syncPaneFocusModeFromForeground(_: HANDLE, _: bool) void {}
@@ -187,4 +189,21 @@ test "ISSUE-521 geometry still settles" {
     try std.testing.expectEqual(@as(usize, 4), full_repaints);
 }
 `, 'ISSUE-521 geometry still settles');
+});
+
+
+test('IGSH-1161 owned browser foreground restores shortcut delivery without main activation', () => {
+  zig(prelude + `
+test "IGSH-1161 browser foreground restores shortcut delivery" {
+    var delivered: usize = 0;
+    for (0..20) |_| {
+        keyboard_hook_installed = false;
+        foregroundMovesTo(@ptrFromInt(0x1000));
+        try std.testing.expect(!keyboard_hook_installed);
+        foregroundMovesTo(pane_hwnd);
+        if (keyboard_hook_installed) delivered += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 20), delivered);
+}
+`, 'IGSH-1161 browser foreground restores shortcut delivery');
 });
