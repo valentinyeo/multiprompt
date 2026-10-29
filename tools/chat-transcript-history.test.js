@@ -633,7 +633,7 @@ test('background retries, local cache, complete dynamic layout and diagnostics a
   assert.doesNotMatch(src, /CHAT_LOAD_MAX_TRIES/);
 });
 
-function runMetadataHarness(text) {
+function runMetadataHarness(text, extra = '') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-metadata-'));
   const support = `
 var g_chat_file_request_id: u32 = 0;
@@ -698,9 +698,10 @@ test "worker receives retained sid and cwd, including a disk-learned sid" {
     fs.writeFileSync(path.join(dir, 'launch_cache.zig'), 'pub var pending = false;\npub var queue = struct { next: usize = 0 }{};\npub fn changed() void {}\n');
     fs.cpSync('src/testdata', path.join(dir, 'testdata'), { recursive: true });
     const fixturePrelude = prelude.replace(fn('chatFileRequest', prelude), '');
+    const dispatchPrelude = extra ? fixturePrelude.replace('fn chatHistoryStreamsKeep(_: u32) void {}\n', '') : fixturePrelude;
     const request = ['chatFileRequest', 'chatFileRequestForDelivery'].filter(n => text.includes(`fn ${n}(`)).map(n => fn(n, text)).join('\n').replace('std.Thread.spawn', 'TestThread.spawn');
-    fs.writeFileSync(path.join(dir, 'main-test.zig'), (fixturePrelude + entry +
-      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
+    fs.writeFileSync(path.join(dir, 'main-test.zig'), (dispatchPrelude + entry +
+      ['chatFileIdentityForShell', 'chatFileFailed', 'chatFileFetchThread'].map(n => fn(n, text)).join('\n') + request + support + (extra ? fn('chatHistoryStreamsKeep', text) : '') + extra).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("win32.zig").UpdateWindow', 'UpdateWindow').replaceAll('@import("win32.zig").SetEvent', 'SetEvent'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'main-test.zig'), '--test-filter', 'main-test.test'], { encoding: 'utf8', timeout: 60000 });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -709,6 +710,46 @@ test('production chat identity and worker dispatch retain learned sid/cwd when s
   const run = runMetadataHarness(src);
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /All \d+ tests passed/);
+});
+
+test('background delivery keeps the visible subscription and reconciles inactive chats without restarting streams', () => {
+  const cases = String.raw`
+test "background delivery cannot replace the visible reader" {
+    const a = std.heap.page_allocator;
+    var visible: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(1, 0, false, "term-1", "/work/demo"), .disk_loaded = true, .stream = &test_stream };
+    var background: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(2, 0, false, "term-2", "/work/demo"), .disk_loaded = true };
+    try g_chat_histories.append(a, &visible);
+    try g_chat_histories.append(a, &background);
+    defer { g_chat_histories.deinit(a); g_chat_histories = .empty; }
+    shell_count = 2;
+    active_shell = 0;
+    shells[0].shell_id = 1;
+    g_chat_active = true;
+    chatFileRequestForDelivery(background.key, true);
+    try std.testing.expect(visible.stream != null);
+    try std.testing.expect(background.stream == null);
+    try std.testing.expect(background.pending);
+    try std.testing.expectEqual(@as(u32, 2), captured_key.shell_id);
+}
+test "background delivery still progresses with Chat View closed" {
+    const a = std.heap.page_allocator;
+    var background: ChatHistoryEntry = .{ .key = chat_transcript.Identity.initTmux(2, 0, false, "term-2", "/work/demo"), .disk_loaded = true };
+    try g_chat_histories.append(a, &background);
+    defer { g_chat_histories.deinit(a); g_chat_histories = .empty; }
+    g_chat_active = false;
+    defer g_chat_active = true;
+    for (0..3) |_| {
+        background.pending = false;
+        chatFileRequestForDelivery(background.key, true);
+        try std.testing.expect(background.stream == null);
+        try std.testing.expect(background.pending);
+        try std.testing.expectEqual(@as(u32, 2), captured_key.shell_id);
+    }
+}
+`;
+  const run = runMetadataHarness(src, cases);
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stderr, /All 4 tests passed/);
 });
 
 test('metadata retention oracle rejects the actual 708 identity and worker dispatch (positive control)', () => {

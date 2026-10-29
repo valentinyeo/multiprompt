@@ -71,6 +71,9 @@ foreach ($round in 1..$roundCount) {
     $observation.rounds.Add(@{round=$round; messages=$messages; answer=$answer; shownMs=$shownMs})
 }
 $observation.sustainedMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $firstReplyMs
+$readers = @(Get-Content "$state/invocations.jsonl" | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.kind -eq 'reader' -and $_.argv -contains '--watch' })
+if ($readers.Count -ne 1) { throw "Background delivery replaced the visible reader: $($readers.Count) subscriptions" }
+$observation.readerSubscriptions = $readers.Count
 if ($longDelivery) {
     Shot 'live-chat-after'
     Press @(0x12, 0x43) 'Alt+C: capture completed shell'

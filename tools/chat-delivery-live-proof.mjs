@@ -17,6 +17,7 @@ export function verifyLiveDelivery(root) {
   const frames = read('live-delivery/stand-in/frames.jsonl').trim().split(/\r?\n/).map(JSON.parse);
   assert.equal(truth.length, count);
   const latencies = [];
+  const received = [];
   for (const row of observed.rounds) {
     const source = truth.find(item => item.turn === row.round);
     const messages = Array.from({ length: 3 }, (_, i) => `Live request ${row.round} part ${i + 1}`);
@@ -28,7 +29,9 @@ export function verifyLiveDelivery(root) {
     assert.ok(Number.isSafeInteger(latency) && latency >= 0 && latency <= 2000, `reply ${row.round} exceeded two seconds: ${latency}`);
     latencies.push(latency);
     const copied = read(`live-delivery/round-${row.round}-copied.txt`);
-    for (const text of [...messages, source.answer]) assert.ok(copied.includes(text), 'native rendered copy misses accepted text');
+    received.push(...messages, source.answer);
+    const copiedLines = new Set(copied.split(/\r?\n/).map(line => line.trim()));
+    for (const text of received) assert.ok(copiedLines.has(text), 'native rendered copy misses accepted text');
     const outbox = json(`live-delivery/round-${row.round}-outbox.json`);
     assert.ok(!outbox.queues.some(queue => queue.messages.some(item => messages.includes(item.t))), 'accepted message remains pending or unsent');
     for (const kind of ['queued', 'round']) {
