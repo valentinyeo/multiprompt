@@ -42,19 +42,19 @@ const Painter = struct {
 
     fn point(self: Painter, x: f32, y: f32) w.POINT {
         const mirrored = if (self.face == 8 or self.face == 9) 256 - x else x;
-        const angle: f32 = if (self.face == 12) -14 * std.math.pi / 180 else if (self.face == 17) 14 * std.math.pi / 180 else 0;
+        const angle: f32 = if (self.face == 12) -14.0 * std.math.pi / 180.0 else if (self.face == 17) 14.0 * std.math.pi / 180.0 else 0;
         const px = (mirrored - 128) * @cos(angle) - (y - 128) * @sin(angle) + 128;
         const py = (mirrored - 128) * @sin(angle) + (y - 128) * @cos(angle) + 128;
         const scale: f32 = @as(f32, @floatFromInt(self.rect.right - self.rect.left)) / 256;
         return .{ .x = self.rect.left + @as(i32, @intFromFloat(@round(px * scale))), .y = self.rect.top + @as(i32, @intFromFloat(@round(py * scale))) };
     }
 
-    fn rounded(self: Painter, box: Box, color: u32, gradient: bool) void {
+    fn rounded(self: Painter, bounds: Box, color: u32, gradient: bool) void {
         var points: [48]w.POINT = undefined;
-        const radius = @min(box.radius, @min(box.width, box.height) / 2);
+        const radius = @min(bounds.radius, @min(bounds.width, bounds.height) / 2);
         for (0..4) |corner| {
-            const cx = box.x + (if (corner == 0 or corner == 3) radius else box.width - radius);
-            const cy = box.y + (if (corner < 2) radius else box.height - radius);
+            const cx = bounds.x + (if (corner == 0 or corner == 3) radius else bounds.width - radius);
+            const cy = bounds.y + (if (corner < 2) radius else bounds.height - radius);
             for (0..12) |step| {
                 const angle = (@as(f32, @floatFromInt(corner)) * 90 + 180 + @as(f32, @floatFromInt(step)) * 90 / 11) * std.math.pi / 180;
                 points[corner * 12 + step] = self.point(cx + radius * @cos(angle), cy + radius * @sin(angle));

@@ -68,7 +68,7 @@ jobs:
         shell: powershell
         run: |
           & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_HASH -Evidence "$pwd/evidence"
-      - uses: actions/upload-artifact@043fb57c43b18a77b59cf2113626b88d53ac34005
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: robot-avatars
