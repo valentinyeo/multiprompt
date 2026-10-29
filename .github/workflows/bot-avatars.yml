@@ -1,0 +1,76 @@
+name: Robot avatars
+run-name: robot avatars ${{ inputs.tag || github.ref_name }}
+on:
+  push:
+    branches: [ceo/IGSH-1150]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release to verify, empty builds this branch
+        required: false
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: robot-avatars-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: true
+jobs:
+  robots:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install Zig
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
+          if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Resolve application
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          New-Item -ItemType Directory -Force verify-bin, evidence | Out-Null
+          if ($env:RELEASE_TAG) {
+            if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
+            gh release download $env:RELEASE_TAG --dir verify-bin --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern SHA256SUMS.txt
+            if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+            foreach ($name in @('multiprompt', 'zigshell-bridge')) {
+              $line = @(Get-Content verify-bin/SHA256SUMS.txt | Where-Object { $_ -match ('^[a-fA-F0-9]{64} [ *]' + $name + '-x64\.exe$') })
+              if ($line.Count -ne 1 -or (Get-FileHash "verify-bin/$name-x64.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne ($line[0] -split '\s+')[0]) { throw 'Release checksum mismatch' }
+              Move-Item "verify-bin/$name-x64.exe" "verify-bin/$name.exe"
+            }
+            $version = $env:RELEASE_TAG.Substring(1)
+          } else {
+            $tag = (git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim()
+            $version = $tag.Substring(1)
+            zig build -Dversion="$version" -Drevision="$(git rev-parse HEAD)"
+            if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
+            Copy-Item zig-out/bin/multiprompt.exe, zig-out/bin/zigshell-bridge.exe verify-bin/
+          }
+          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/ssh.exe
+          if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
+          zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/tmux.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Terminal fixture build failed' }
+          $hash = (Get-FileHash verify-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{tag=$env:RELEASE_TAG; version=$version; sha256=$hash; revision=(git rev-parse HEAD).Trim()} | ConvertTo-Json | Set-Content evidence/build.json
+          "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "VERIFY_HASH=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Native robot pixels and sidebar clicks
+        shell: powershell
+        run: |
+          & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_HASH -Evidence "$pwd/evidence"
+      - uses: actions/upload-artifact@043fb57c43b18a77b59cf2113626b88d53ac34005
+        if: always()
+        with:
+          name: robot-avatars
+          path: evidence
+          retention-days: 7

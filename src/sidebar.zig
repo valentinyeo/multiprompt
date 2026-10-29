@@ -1398,7 +1398,7 @@ pub fn materializeDisplayOrder() void {
     }
 }
 
-pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
+fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
@@ -1537,7 +1537,45 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
     return count;
 }
 
+pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
+    var rows: [MAX_ROWS]Row = undefined;
+    const count = layoutRowsInner(&rows);
+    if (count == 0 or app_state.g_sidebar_collapsed or app_state.g_starred_workspace) {
+        @memcpy(out[0..count], rows[0..count]);
+        return count;
+    }
+    var y = rows[0].y;
+    const width = uiScaled(88);
+    const gap = uiScaled(4);
+    const columns: u32 = @intCast(@max(1, @divTrunc(SIDEBAR_W() - uiScaled(16), width + gap)));
+    var n: u32 = 0;
+    var pinned: u32 = 0;
+    for (rows[0..count]) |row| {
+        if (row.kind != .tab or !effPinnedTop(row.shell_idx)) continue;
+        var tile = row;
+        tile.tile = true;
+        tile.x = uiScaled(8) + @as(i32, @intCast(pinned % columns)) * (width + gap);
+        tile.width = @min(width, SIDEBAR_W() - tile.x - uiScaled(8));
+        tile.y = y + @as(i32, @intCast(pinned / columns)) * uiScaled(96);
+        out[n] = tile;
+        n += 1;
+        pinned += 1;
+    }
+    if (pinned > 0) y += @as(i32, @intCast((pinned + columns - 1) / columns)) * uiScaled(96) + uiScaled(8);
+    for (rows[0..count]) |row| {
+        if (row.kind == .section and row.section_tier == .pinned) continue;
+        if (row.kind == .tab and effPinnedTop(row.shell_idx)) continue;
+        var next = row;
+        next.y = y;
+        out[n] = next;
+        n += 1;
+        y += rowTotalHeight(next);
+    }
+    return n;
+}
+
 pub fn rowTotalHeight(row: Row) i32 {
+    if (row.tile) return uiScaled(96);
     return switch (row.kind) {
         .section => SECTION_HEADER_H,
         .header => GROUP_HEADER_H,
@@ -1599,12 +1637,13 @@ test "workspace pills and Inbox button have disjoint hit areas" {
     try std.testing.expect(inboxButtonHitTest(inboxButtonRect(true).left, WS_PILL_TOP));
 }
 
-pub fn hitTestSidebar(logical_my: i32) HitTarget {
+pub fn hitTestSidebar(mx: i32, logical_my: i32) HitTarget {
     var rows: [MAX_ROWS]Row = undefined;
     const n = layoutRows(&rows);
     for (0..n) |ri| {
         const row = rows[ri];
         const h = rowTotalHeight(row);
+        if (row.tile and (mx < row.x or mx >= row.x + row.width)) continue;
         if (logical_my >= row.y and logical_my < row.y + h) {
             return switch (row.kind) {
                 .section => HitTarget{ .section = row.section_tier },
@@ -1650,34 +1689,54 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]con
 
 fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     const shell = &app_state.shells[index];
-    const hovered = app_state.g_sidebar_hover == index;
-    const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else tokens.ReaderHint;
+    const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else if (index == app_state.active_shell) RGB(200, 200, 200) else RGB(138, 138, 138);
     var right = column.right - uiScaled(12);
-    if (hovered) {
+    if (app_state.g_sidebar_hover == index) {
         right -= uiScaled(18);
         _ = SelectObject(hdc, uiFontClose());
         _ = SetTextColor(hdc, hint);
         var close = RECT{ .left = right, .top = y, .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
         _ = DrawTextW(hdc, L("\u{00d7}"), -1, &close, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-        var time: [24]u16 = undefined;
-        const time_len = @import("inbox.zig").inboxRelTime(shell.last_active, &time);
-        if (time_len > 0) {
-            _ = SelectObject(hdc, uiFontSubtitle());
-            var measure: RECT = std.mem.zeroes(RECT);
-            _ = DrawTextW(hdc, &time, @intCast(time_len), &measure, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
-            var stamp = RECT{ .left = right - measure.right - uiScaled(6), .top = y, .right = right - uiScaled(6), .bottom = y + tabRowH() };
-            _ = DrawTextW(hdc, &time, @intCast(time_len), &stamp, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-            right = stamp.left - uiScaled(6);
-        }
     }
-    if (shell.needs_attention) {
-        drawAttentionDot(hdc, right - uiScaled(4), y + @divTrunc(tabRowH(), 2), uiScaled(3), RGB(137, 180, 248));
-        right -= uiScaled(14);
+    const size = uiScaled(40);
+    const left = column.left + uiScaled(10);
+    const top = y + @divTrunc(tabRowH() - size, 2);
+    const avatar = @import("bot_avatar.zig");
+    avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(shell));
+    if (shell.needs_attention or shell.disconnected) {
+        drawAttentionDot(hdc, left + size - uiScaled(3), top + size - uiScaled(3), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
     }
     _ = SelectObject(hdc, uiFontTitle());
-    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else tokens.ReaderForeground);
-    var name = RECT{ .left = column.left + uiScaled(12), .top = y, .right = right, .bottom = y + tabRowH() };
+    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
+    var name = RECT{ .left = column.left + uiScaled(60), .top = y + uiScaled(5), .right = right, .bottom = y + uiScaled(29) };
     if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    _ = SelectObject(hdc, uiFontSubtitle());
+    _ = SetTextColor(hdc, hint);
+    var preview: [128]u16 = undefined;
+    const len = std.unicode.utf8ToUtf16Le(&preview, shell.preview[0..shell.preview_len]) catch 0;
+    var line = RECT{ .left = name.left, .top = y + uiScaled(29), .right = right, .bottom = y + uiScaled(51) };
+    if (chatDraftHasForShell(index)) {
+        _ = DrawTextW(hdc, L("DRAFT"), -1, &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    } else if (len > 0) {
+        _ = DrawTextW(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
+}
+
+fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
+    const shell = &app_state.shells[row.shell_idx];
+    const size = uiScaled(56);
+    const left = row.x + @divTrunc(row.width - size, 2);
+    const top = y + uiScaled(8);
+    if (row.shell_idx == app_state.active_shell or shell.selected) {
+        @import("smooth.zig").fillRoundRect(hdc, .{ .left = row.x, .top = y, .right = row.x + row.width, .bottom = y + uiScaled(92) }, uiScaled(16), if (shell.selected) RGB(53, 53, 53) else if (app_state.g_light_theme) RGB(230, 230, 230) else RGB(24, 24, 24));
+    }
+    const avatar = @import("bot_avatar.zig");
+    avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(shell));
+    if (shell.needs_attention or shell.disconnected) drawAttentionDot(hdc, left + size - uiScaled(4), top + size - uiScaled(4), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
+    _ = SelectObject(hdc, uiFontSubtitle());
+    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
+    var name = RECT{ .left = row.x + uiScaled(4), .top = top + size + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
+    if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 pub fn paintSidebar(hdc: HANDLE) void {
@@ -1827,13 +1886,17 @@ pub fn paintSidebar(hdc: HANDLE) void {
             }
 
             const i: usize = row.shell_idx;
+            if (row.tile) {
+                paintPinnedBot(hdc, row, y);
+                continue;
+            }
 
             if (i == app_state.active_shell and LOOK_UNIFIED) {
                 const reader = @import("themes.zig").themeReaderDark();
                 const hl = if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_amoled_theme) RGB(42, 42, 42) else tintColor(sidebar_bg, RGB(160, 160, 160), 1, 6);
-                const hl_brush = CreateSolidBrush(if (reader or (app_state.g_chat_active and !app_state.g_light_theme)) tokens.ReaderControl else hl);
+                const hl_brush = CreateSolidBrush(if (!app_state.g_sidebar_collapsed and !app_state.g_light_theme) RGB(53, 53, 53) else if (reader or (app_state.g_chat_active and !app_state.g_light_theme)) tokens.ReaderControl else hl);
                 const hl_pen = CreatePen(0, 1, if (reader or (app_state.g_chat_active and !app_state.g_light_theme)) tokens.ReaderOutline else customColorOr("overlay_border", hl));
-                const hl_radius: i32 = if (reader or app_state.g_chat_active) tabRowH() - 6 else 8;
+                const hl_radius: i32 = uiScaled(24);
                 const ob = SelectObject(hdc, hl_brush);
                 const op = SelectObject(hdc, hl_pen);
                 _ = @import("smooth.zig").drawRoundRect(hdc, column.left, y + 3, column.right, y + tabRowH() - 3, hl_radius, hl_radius);
@@ -1877,7 +1940,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
             if (app_state.drag_active and i != app_state.drag_src) {}
 
-            if (app_state.g_chat_active and !app_state.g_sidebar_collapsed) {
+            if (!app_state.g_sidebar_collapsed and (app_state.g_chat_active or app_state.shells[i].tmux_session_len > 0 or app_state.shells[i].ai_agent != 0)) {
                 paintChatSidebarRow(hdc, column, y, @intCast(i));
             } else if (app_state.g_sidebar_collapsed) {
                 const sw = SIDEBAR_W();
