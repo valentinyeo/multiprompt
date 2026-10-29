@@ -2441,14 +2441,15 @@ fn chatPaintScrollUi(canvas: *@import("smooth.zig").Canvas, hdc: HANDLE, w: i32,
     const box = chatScrollJumpBox(w, h);
     chatLogScrollUi(h, box);
     if (!app_state.g_chat_scrolled_up) return;
-    const ring = RECT{ .left = box.left - 1, .top = box.top - 1, .right = box.right + 1, .bottom = box.bottom + 1 };
+    const edge = @import("window_layout.zig").chatSurfaceBorderW();
+    const ring = RECT{ .left = box.left - edge, .top = box.top - edge, .right = box.right + edge, .bottom = box.bottom + edge };
     const face = RECT{ .left = box.left, .top = box.top, .right = box.right, .bottom = box.bottom };
     const gap = @import("chat_float.zig").moat();
     const clear = themeConsoleBg();
     @import("smooth.zig").fillEllipse(hdc, .{ .left = ring.left - gap, .top = ring.top - gap, .right = ring.right + gap, .bottom = ring.bottom + gap }, clear);
     if (chatScrollJumpBadgeBox(w, h)) |badge| fillRoundRectAA(hdc, .{ .left = badge.left - gap, .top = badge.top - gap, .right = badge.right + gap, .bottom = badge.bottom + gap }, uiScaled(9) + gap, clear);
-    @import("smooth.zig").fillEllipse(hdc, ring, if (app_state.g_light_theme) RGB(176, 184, 196) else RGB(96, 108, 126));
-    @import("smooth.zig").fillEllipse(hdc, face, if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(50, 58, 72));
+    @import("smooth.zig").fillEllipse(hdc, ring, @import("window_layout.zig").chatSurfaceBorderColor());
+    @import("smooth.zig").fillEllipse(hdc, face, app_state.g_chat_input_color);
     const cx = @divTrunc(box.left + box.right, 2);
     const cy = @divTrunc(box.top + box.bottom, 2);
     const arm = uiScaled(7);
@@ -3436,15 +3437,9 @@ pub fn shotFocusTick() void {
 }
 
 pub fn paintChatAttachButton(hdc: HANDLE, rc: RECT) void {
-    if (@import("themes.zig").themeReaderDark()) {
-        const edge = @import("window_layout.zig").chatSurfaceBorderW();
-        @import("smooth.zig").fillEllipse(hdc, rc, @import("window_layout.zig").chatSurfaceBorderColor());
-        @import("smooth.zig").fillEllipse(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, app_state.g_chat_input_color);
-    } else {
-        const base = app_state.g_chat_input_color;
-        const fill = chat_style.shift(base, if (chat_style.isDark(base)) 22 else -14);
-        @import("smooth.zig").fillEllipse(hdc, rc, fill);
-    }
+    const edge = @import("window_layout.zig").chatSurfaceBorderW();
+    @import("smooth.zig").fillEllipse(hdc, rc, @import("window_layout.zig").chatSurfaceBorderColor());
+    @import("smooth.zig").fillEllipse(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, app_state.g_chat_input_color);
     const cx = rc.left + @divTrunc(rc.right - rc.left, 2);
     const cy = rc.top + @divTrunc(rc.bottom - rc.top, 2);
     const arm = @max(uiScaled(5), @divTrunc(rc.right - rc.left, 5));
@@ -7074,7 +7069,7 @@ fn floatProofRing(pixels: []const u32, stride: usize, bg: u32, rect: RECT, round
     return count;
 }
 
-test "IGSH-1001 the scroll-down button sits on a clear gap, not on chat text" {
+test "IGSH-1189 the scroll-down button has a thin theme outline without a clearing surround" {
     const w = @import("win32.zig");
     const GdiFlush = struct {
         extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
@@ -7090,18 +7085,24 @@ test "IGSH-1001 the scroll-down button sits on a clear gap, not on chat text" {
     const old_bitmap = SelectObject(dc, bitmap);
     defer _ = SelectObject(dc, old_bitmap);
     const pixels = @as([*]const u32, @ptrCast(@alignCast(bits.?)))[0 .. width * height];
+    const old_input_color = app_state.g_chat_input_color;
+    const old_counter = app_state.g_chat_new_messages;
     const old_content = app_state.g_chat_content_h;
     const old_scroll = app_state.g_chat_scroll_y;
     const old_up = app_state.g_chat_scrolled_up;
     const old_last = chat_scroll_last_ms;
     const old_drag = chat_scroll_drag;
     defer {
+        app_state.g_chat_input_color = old_input_color;
+        app_state.g_chat_new_messages = old_counter;
         app_state.g_chat_content_h = old_content;
         app_state.g_chat_scroll_y = old_scroll;
         app_state.g_chat_scrolled_up = old_up;
         chat_scroll_last_ms = old_last;
         chat_scroll_drag = old_drag;
     }
+    app_state.g_chat_input_color = RGB(35, 45, 55);
+    app_state.g_chat_new_messages = .{};
     app_state.g_chat_content_h = 3000;
     app_state.g_chat_scroll_y = 1200;
     app_state.g_chat_scrolled_up = true;
@@ -7109,7 +7110,6 @@ test "IGSH-1001 the scroll-down button sits on a clear gap, not on chat text" {
     chat_scroll_drag = null;
     var canvas = @import("smooth.zig").Canvas.init(dc);
     defer canvas.deinit();
-    const bg = themeConsoleBg();
     const ink = RGB(200, 60, 60);
     var everything = RECT{ .left = 0, .top = 0, .right = width, .bottom = height };
     const brush = CreateSolidBrush(ink);
@@ -7118,14 +7118,21 @@ test "IGSH-1001 the scroll-down button sits on a clear gap, not on chat text" {
     chatPaintScrollUi(&canvas, dc, width, height);
     _ = GdiFlush();
     const box = chatScrollJumpBox(width, height);
-    const gap = @import("chat_float.zig").moat();
-    const round = @divTrunc(box.right - box.left, 2) - 5;
-    const box_rc = RECT{ .left = box.left, .top = box.top, .right = box.right, .bottom = box.bottom };
-    const not_clear = floatProofRing(pixels, width, bg, box_rc, round, gap - 1);
-    std.debug.print("IGSH-1001 scroll-down button: gap pixels still showing chat text={d}\n", .{not_clear});
-    try std.testing.expectEqual(@as(usize, 0), not_clear);
-    const beside = pixels[@as(usize, @intCast(box.top + @divTrunc(box.bottom - box.top, 2))) * width + @as(usize, @intCast(box.left - gap - 4))];
-    try std.testing.expectEqual(ink, scrollProofColor(beside));
+    const cy = box.top + @divTrunc(box.bottom - box.top, 2);
+    const margin = @import("window_layout.zig").chatSurfaceBorderW() + 1;
+    var y = box.top - margin;
+    while (y <= box.bottom + margin) : (y += 1) {
+        var x = box.left - margin;
+        while (x <= box.right + margin) : (x += 1) {
+            if (x != box.left - margin and x != box.right + margin and y != box.top - margin and y != box.bottom + margin) continue;
+            const pixel = pixels[@as(usize, @intCast(y)) * width + @as(usize, @intCast(x))];
+            try std.testing.expectEqual(ink, scrollProofColor(pixel));
+        }
+    }
+    const face = pixels[@as(usize, @intCast(cy)) * width + @as(usize, @intCast(box.left + 4))];
+    try std.testing.expectEqual(app_state.g_chat_input_color, scrollProofColor(face));
+    const bytes = @as([*]const u8, @ptrCast(bits.?))[0 .. width * height * 4];
+    try scrollProofSave(L("chat-shared-jump.bmp"), bytes, info.header);
 }
 
 fn moreMenuProofNear(pixel: u32, r: u32, g: u32, b: u32, slack: u32) bool {
