@@ -32,6 +32,17 @@ Wait-Until { try { (Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:19283/'
 $known = Join-Path $scratch 'owner-known-hosts'
 [IO.File]::WriteAllText($known, $ownerProof.knownHost + "`n")
 $ssh = Join-Path $env:WINDIR 'System32/OpenSSH/ssh.exe'
+$authArguments = '-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=' + $known + '" -i "' + $key + '" ' + $ownerProof.target + ' ready'
+Wait-Until {
+    $auth = Start-Process -FilePath $ssh -ArgumentList $authArguments -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $Evidence 'owner-browser-authorization.json') -RedirectStandardError (Join-Path $Evidence 'owner-browser-authorization.log')
+    try {
+        if (-not $auth.WaitForExit(15000)) { return $false }
+        return $auth.ExitCode -eq 0 -and (Read-SharedText (Join-Path $Evidence 'owner-browser-authorization.json')).Contains('OWNER_PROOF_KEY_READY')
+    } finally {
+        if (-not $auth.HasExited) { Stop-Process -Id $auth.Id -Force }
+        $auth.Dispose()
+    }
+} 'disposable proof public key authorized' 900 300000
 $arguments = '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o StreamLocalBindUnlink=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o "UserKnownHostsFile=' + $known + '" -i "' + $key + '" -R "' + $ownerProof.tunnel + ':127.0.0.1:' + $ownerPort + '" ' + $ownerProof.target + ' proof'
 $remote = Start-Process -FilePath $ssh -ArgumentList $arguments -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $Evidence 'owner-browser-live.json') -RedirectStandardError (Join-Path $Evidence 'owner-browser-ssh.log')
     if (-not $remote.WaitForExit(180000)) { throw 'Owner browser proof did not finish' }

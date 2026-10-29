@@ -55,6 +55,10 @@
             if ($ownProof.pid -eq $sharedProof.pid) { throw 'Opted-in pane reused the shared browser process' }
             Wait-OwnProfilePipe $ownToken 'opted-in'
             Wait-Until { $pane = Read-BrowserPane; $null -ne $pane -and $pane.browser_window_id -gt 0 } 'opted-in pane bound through its own native host' 60
+            if ($env:OWNER_BROWSER_PROOF) {
+                $result.proofMode = 'owner-browser'
+                . (Join-Path $PSScriptRoot 'owner-browser-proof.ps1')
+            } else {
             if ($null -eq (Get-Process -Id $sharedProof.pid -ErrorAction SilentlyContinue)) { throw 'Shared browser closed when the opted-in pane opened' }
             $sharedAfter = Get-SharedProfileListing $sharedRoot
             $coreAfter = Get-SharedProfileCore $sharedRoot
@@ -191,6 +195,4 @@
             $result.checks += @{ name = 'browser-own-profile branded Chrome stable cold and restored'; executable = $stableChrome; token = $stableToken; windowId = $stablePane.browser_window_id }
             Snapshot 'after'
 
-            if ($env:OWNER_BROWSER_PROOF) {
-                . (Join-Path $PSScriptRoot 'owner-browser-proof.ps1')
             }

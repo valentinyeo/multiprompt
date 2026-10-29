@@ -4,6 +4,11 @@ import os
 import pwd
 from pathlib import Path
 import subprocess
+import sys
+
+if os.environ.get("SSH_ORIGINAL_COMMAND") == "ready":
+    print("OWNER_PROOF_KEY_READY")
+    sys.exit(0)
 
 ROOT = Path(__file__).resolve().parent
 config = json.loads((ROOT / "proof-config.json").read_text())

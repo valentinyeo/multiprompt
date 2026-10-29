@@ -45,7 +45,8 @@ Run the GitHub verify.yml journey with feature `browser-own-profile`; it is in t
 ### Cross-user browser proof
 
 The optional `owner_browser_proof` dispatch input adds a real Unix-user round
-trip after this journey. Its JSON contains `target`, `knownHost`, `session`
+trip after initial shared/own pane setup. This explicit mode tests owner access,
+not the separate profile-restart journey. Its JSON contains `target`, `knownHost`, `session`
 and `tunnel`; the session must start with `mp-proof-`. The workflow uploads
 only a fresh SSH public key before building. Authorize that key temporarily,
 restricted to `tools/agent-notifications/owner_browser_live.py` in an isolated
