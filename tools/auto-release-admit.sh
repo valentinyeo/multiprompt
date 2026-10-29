@@ -15,9 +15,13 @@ if ! last_tag=$(git describe --tags --match 'v*' --first-parent --abbrev=0 HEAD 
     exit 0
 fi
 published_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+last_sha=$(git rev-parse "$last_tag^{commit}")
 commits=$(git rev-list --first-parent "$last_tag..HEAD")
+if [ "$last_tag" != "$published_tag" ] && git merge-base --is-ancestor "$published_tag" "$last_sha"; then
+    commits="$commits $last_sha"
+fi
 for sha in $commits; do
-    if [ -n "$(git tag --points-at "$sha")" ]; then
+    if [ -n "$(git tag --points-at "$sha")" ] && [ "$sha" != "$last_sha" ]; then
         continue
     fi
     if git log -1 --pretty=%B "$sha" | grep -Fq -e '[skip release]' -e '[release skip]'; then
@@ -53,13 +57,17 @@ for sha in $commits; do
         echo "$sha has no unpublished product notes; waiting for a useful change" >&2
         continue
     fi
-    release_tag=$(node tools/release-version.mjs --next "$last_tag")
-    if git show-ref --verify --quiet "refs/tags/$release_tag"; then
-        echo "$release_tag already exists; refusing to move it" >&2
-        exit 1
-    fi
-    if [ "$dry_run" = false ]; then
-        gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$release_tag" -f "sha=$sha" >&2
+    if [ "$sha" = "$last_sha" ]; then
+        release_tag=$last_tag
+    else
+        release_tag=$(node tools/release-version.mjs --next "$last_tag")
+        if git show-ref --verify --quiet "refs/tags/$release_tag"; then
+            echo "$release_tag already exists; refusing to move it" >&2
+            exit 1
+        fi
+        if [ "$dry_run" = false ]; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$release_tag" -f "sha=$sha" >&2
+        fi
     fi
     printf 'tag=%s\nsha=%s\n' "$release_tag" "$sha"
     exit 0
