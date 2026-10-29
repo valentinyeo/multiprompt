@@ -71,6 +71,13 @@ test('every sample retains all earlier accepted messages and replies', async t =
   assert.throws(f.check, /misses accepted text/);
 });
 
+test('reply ten cannot conceal a missing reply one', async t => {
+  const f = await fixture(t);
+  const copied = f.rounds.flatMap(row => [...row.messages, `Live answer ${row.round}`]).filter(text => text !== 'Live answer 1');
+  f.write('live-delivery/round-10-copied.txt', copied.join('\n'));
+  assert.throws(f.check, /misses accepted text/);
+});
+
 test('slow replies, stale copies, unsent ghosts and view-refresh tricks fail', async t => {
   for (const broken of ['slow', 'copy', 'unsent', 'refresh', 'recording', 'missing-round']) {
     const f = await fixture(t);

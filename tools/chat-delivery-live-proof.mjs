@@ -30,7 +30,8 @@ export function verifyLiveDelivery(root) {
     latencies.push(latency);
     const copied = read(`live-delivery/round-${row.round}-copied.txt`);
     received.push(...messages, source.answer);
-    for (const text of received) assert.ok(copied.includes(text), 'native rendered copy misses accepted text');
+    const copiedLines = new Set(copied.split(/\r?\n/).map(line => line.trim()));
+    for (const text of received) assert.ok(copiedLines.has(text), 'native rendered copy misses accepted text');
     const outbox = json(`live-delivery/round-${row.round}-outbox.json`);
     assert.ok(!outbox.queues.some(queue => queue.messages.some(item => messages.includes(item.t))), 'accepted message remains pending or unsent');
     for (const kind of ['queued', 'round']) {
