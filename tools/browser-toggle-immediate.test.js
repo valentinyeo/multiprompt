@@ -71,6 +71,9 @@ test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', 
   assert.ok(native);
   assert.match(native, /chord\(\);[\s\S]*Thread\.Sleep\(delay\);[\s\S]*chord\(\);/);
   assert.match(native, /gap > 300/);
+  assert.match(native, /SendInput\(\(uint\)batch.Length, batch/);
+  assert.doesNotMatch(native, /Key\(0x12/);
+  assert.match(native, /key\(0x12, 0\); key\(0x41, 0\); key\(0x41, 2\); key\(0x12, 2\)/);
   assert.match(journey, /Press @\(0x11, 0x4C\) 'Ctrl\+L: navigate browser pane'/);
   assert.match(journey, /ClassName -eq 'OmniboxViewViews'/);
   assert.ok(journey.includes("(Read-Session).tabs[0].burl -eq $slowUrl"));
