@@ -8,6 +8,10 @@ on:
       tag:
         description: Release tag to create, for example v0.28.712
         required: true
+      browser_stall:
+        description: Force the quarantined browser driver to hang before publication
+        type: boolean
+        default: false
       proof:
         description: Build both architectures without publishing
         type: boolean
@@ -86,6 +90,7 @@ jobs:
     with:
       feature: all
       revision: ${{ needs.prepare.outputs.sha }}
+      browser_stall: ${{ inputs.browser_stall || false }}
 
   build:
     needs: [prepare, journeys]
