@@ -1429,3 +1429,15 @@ test('held cancellation stays callable within GitHub manual input limits', () =>
   assert.match(journey, /  ui:\n[^]*?uses: \.\/.github\/workflows\/verify.yml\n    with:\n      feature: chat-delivery\n      chat_cancel_proof: true/);
   assert.match(journey, /tag: \$\{\{ inputs.tag \|\| '' \}\}/);
 });
+
+
+test('IGSH-1197 complete-history journeys request old pages through owned scrolling, never eager loading', () => {
+  const history = drive.slice(drive.indexOf('function Assert-FullHistory'), drive.indexOf('function Retention-Copy'));
+  const retention = drive.slice(drive.indexOf('function Retention-Copy'), drive.indexOf('function Retention-Top'));
+  assert.match(history, /input='scroll up to request older history'/);
+  assert.match(history, /WheelOwnedTranscriptMessage\(\$main, \$app.Id, \$historyView, 30000\)/);
+  assert.match(retention, /if \(\$Stage -eq 'open'\) \{[\s\S]*input='scroll up to request retained history'/);
+  assert.match(retention, /WheelOwnedTranscriptMessage\(\$main, \$app.Id, \$historyView, 30000\)/);
+  assert.match(history, /incomplete copied messages/);
+  assert.match(retention, /retained copy missing or reordered/);
+});

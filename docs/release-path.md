@@ -41,6 +41,7 @@ Nightly and manual workflow inventory:
 - `hax-sessions.yml`
 - `held-queue.yml`
 - `idle-poll-proof.yml`
+- `large-history-switch.yml`
 - `ledger-guard.yml`
 - `link-picker.yml`
 - `manage-snippets.yml`

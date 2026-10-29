@@ -391,3 +391,11 @@ test "parked native pane returns after chat cancelled the settle timer" {
     assert.match(run.stderr, /All 1 tests passed/);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+test('IGSH-1197 switch traces attribute persistence, draft and history stalls before paint', () => {
+  const switching = body('switchToShell');
+  for (const step of ['read_marker', 'draft_bind', 'save_session', 'chat_history']) {
+    assert.ok(switching.includes(`switch_timing.record(.${step}, timing_started)`), step);
+  }
+});

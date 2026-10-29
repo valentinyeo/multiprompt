@@ -3,6 +3,10 @@ const win = @import("win32.zig");
 const diagnostics = @import("diagnostics.zig");
 
 pub const Step = enum {
+    read_marker,
+    draft_bind,
+    save_session,
+    chat_history,
     console_shown,
     hide_prev_browser,
     park,

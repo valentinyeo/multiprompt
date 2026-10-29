@@ -146,7 +146,8 @@ test('reset has all command surfaces and rejects obsolete cache writes/results',
   assert.match(worker, /if \(!entry.cache_cancelled.load\(.acquire\)\) \{\s+if \(writeFileAtomicW/);
   assert.match(body('chatHistoryForget'), /if \(entry.pending\) \{\s+entry.retired = true/);
   assert.match(body('chatFileOnReady'), /if \(entry.retired\) \{[\s\S]*?continue;/);
-  assert.match(body('chatFileOnReady'), /if \(!disk and !history.more and history.start == 0\) entry.loaded_ms/);
+  assert.match(body('chatFileOnReady'), /if \(!disk and !history.more\) entry.loaded_ms/);
+  assert.match(body('chatFileOnReady'), /else if \(!has_messages\) entry.history.start else 0/);
   const loadOutbox = body('loadChatOutbox');
   assert.match(loadOutbox, /const version = json_reader\.uintDefault\(parsed\.value, "version", 0\);\s+if \(version != 1 and version != 2\) return;\s+_ = chatOutboxPurgeOrphans\(\);\s+_ = saveChatOutbox\(\);/);
   assert.equal(loadOutbox.match(/saveChatOutbox\(/g)?.length, 1);

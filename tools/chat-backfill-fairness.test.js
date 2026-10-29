@@ -68,8 +68,8 @@ function stagingContract(source, model) {
   assert.match(staged, /UpdateWindow\(app_state.g_chat_transcript_hwnd\)/);
   assert.doesNotMatch(staged, /layoutChatControls|refreshChatTranscript|g_chat_switch_loading/);
   assert.doesNotMatch(ready, /\.render\(|\.apply\(|\.decode\(/);
-  assert.match(ready, /const before = if \(entry.stalled\) 0 else if \(entry.backfill.pages.items.len > 0\) entry.backfill.start else if \(disk or history.start < entry.history.start/);
-  assert.match(ready, /entry.before = entry.history.start;\s*entry.missing_message = entry.result_missing/);
+  assert.match(ready, /entry.before = if \(entry.stalled\) 0 else if \(entry.backfill.pages.items.len > 0\) entry.backfill.start else if \(!has_messages\) entry.history.start else 0/);
+  assert.doesNotMatch(ready, /entry.before = entry.history.start;\s*entry.missing_message = entry.result_missing/);
   assert.doesNotMatch(body(source, 'chatFileRequestForDelivery'), /entry.before = entry.backfill.start/);
   assert.match(body(source, 'chatHistoryForget'), /entry.backfill.deinit/);
   assert.match(ready, /if \(entry.retired\)[^]*entry.backfill.deinit/);
@@ -126,11 +126,11 @@ test('staging-order model: all fifty messages survive page staging and one publi
   assert.deepEqual(JSON.parse(JSON.stringify(complete)), complete);
 });
 
-test('full-history continuation stays automatic across disk restore without a cap or new loading gate', () => {
+test('cached tails stop unsolicited backfill; requested older history retains every row without a cap', () => {
   const ready = body(session, 'chatFileOnReady');
-  assert.match(ready, /const before = if \(entry.stalled\) 0 else if \(entry.backfill.pages.items.len > 0\) entry.backfill.start else if \(disk or history.start < entry.history.start/);
-  assert.match(ready, /entry.before = before/);
-  assert.match(ready, /if \(!disk and !history.more and history.start == 0\) entry.loaded_ms/);
+  assert.match(ready, /entry.before = if \(entry.stalled\) 0 else if \(entry.backfill.pages.items.len > 0\) entry.backfill.start else if \(!has_messages\) entry.history.start else 0/);
+  assert.match(ready, /const has_messages = for \(entry.history.blocks.items\)/);
+  assert.match(ready, /if \(!disk and !history.more\) entry.loaded_ms/);
   assert.match(ready, /if \(disk or entry.prepended or entry.before > 0\) @as\(u64, 0\)/);
   assert.match(body(session, 'chatFileFetchThread'), /chat_history.History.decode/);
   assert.match(history, /try std.testing.expectEqual\(@as\(usize, 50\), restored.blocks.items.len\)/);

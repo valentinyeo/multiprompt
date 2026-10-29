@@ -318,11 +318,16 @@ function Assert-FullHistory([string]$Stage) {
         Press @(0x1B) 'Esc: clear latest-message selection'
     }
     $offset = (Read-Shared "$settings/debug.log").Length
+    Bind-Transcript
     $complete = Step 'all session rows reach the renderer' {
         Press @(0x11, 0x30) 'Ctrl+0: measure every rendered session row'
         $log = (Read-Shared "$settings/debug.log").Substring($offset)
         $frames = [regex]::Matches($log, '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
-        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq $blocks
+        if ($frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq $blocks) { return $true }
+        $historyView = [IntPtr]$script:views[0].Current.NativeWindowHandle
+        $actions.Add(@{case=$plan.name; input='scroll up to request older history'; hwnd=$historyView.ToInt64()})
+        [ChatDeliveryDesktop]::WheelOwnedTranscriptMessage($main, $app.Id, $historyView, 30000)
+        $false
     }
     if (-not $complete) { throw "IGSH-815 incomplete session at $Stage" }
     $pollOffset = (Read-Shared "$settings/debug.log").Length
@@ -397,11 +402,18 @@ function Assert-FullHistory([string]$Stage) {
     Save @{stage=$Stage; blocks=$blocks; polled=$true; messages=($actual.Count + 2); copied=$actual} "$caseDir/$Stage.json"
 }
 function Retention-Copy([string]$Stage, [int]$Count) {
+    if ($Stage -eq 'open') { Bind-Transcript }
     $offset = (Read-Shared "$settings/debug.log").Length
     $complete = Step "IGSH-934 $Stage keeps $Count messages" {
         Press @(0x11, 0x30) 'Ctrl+0: measure retained conversation'
         $frames = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($offset), '\[chatfont\] pt=\d+ blocks=(\d+) content_h=\d+')
-        $frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq $Count
+        if ($frames.Count -gt 0 -and [int]$frames[$frames.Count - 1].Groups[1].Value -eq $Count) { return $true }
+        if ($Stage -eq 'open') {
+            $historyView = [IntPtr]$script:views[0].Current.NativeWindowHandle
+            $actions.Add(@{case=$plan.name; input='scroll up to request retained history'; hwnd=$historyView.ToInt64()})
+            [ChatDeliveryDesktop]::WheelOwnedTranscriptMessage($main, $app.Id, $historyView, 30000)
+        }
+        $false
     }
     if (-not $complete) { Shot "retention-$Stage-failed"; throw "IGSH-934 history lost at $Stage expected=$Count" }
     $script:retentionPosition = Divider-State

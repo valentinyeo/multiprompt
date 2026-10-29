@@ -20,7 +20,7 @@ subprocess.run([sys.executable, str(Path(__file__).parent / 'verify-chat-deliver
 transcript = profile / 'home' / '.claude' / 'projects' / 'C--verify-work0' / (sids[names[0]] + '.jsonl')
 row = (json.dumps(dict(type='user', sessionId=sids[names[0]], message=dict(role='user', content=[dict(type='tool_result', tool_use_id='large-build-output', content='Build output line\n' * 2048)]))) + '\n').encode()
 with transcript.open('ab') as output:
-    while output.tell() < 250 * 1024 * 1024:
+    while output.tell() < 400 * 1024 * 1024:
         output.write(row)
     output.write((json.dumps(dict(type='assistant', sessionId=sids[names[0]], message=dict(role='assistant', content=[dict(type='text', text='Performance fixture end: large transcript ready')]))) + '\n').encode())
 seed = dict(active_tab=0, single_window=True, chat_active=True,

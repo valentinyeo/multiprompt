@@ -132,6 +132,7 @@ test('history readiness retains a paint emitted between polling attempts', async
   const offset = before.match(/^\$offset = \(Read-Shared "\$settings\/debug.log"\)\.Length$/m);
   assert.ok(offset, 'observation starts before polling, not inside each attempt');
   assert.doesNotMatch(wait, /\$offset\s*=/);
+  assert.match(wait, /Scroll-Transcript 30000/);
   if (process.platform !== 'win32') return;
   const { spawnSync } = await import('node:child_process');
   const script = `
@@ -140,6 +141,8 @@ $settings = 'fixture'
 $script:log = ''
 function Read-Shared($Path) { return $script:log }
 function Press($Keys, $Label) { $script:pending = '[chatfont] pt=14 blocks=4002 content_h=680156' }
+$script:scrolls = 0
+function Scroll-Transcript($Delta) { if ($Delta -ne 30000) { throw 'Wrong older-page gesture' }; $script:scrolls++ }
 function Wait-For($Description, [scriptblock]$Check, $Seconds) {
   for ($attempt = 0; $attempt -lt 3; $attempt++) {
     if (& $Check) { return $true }
@@ -150,6 +153,7 @@ function Wait-For($Description, [scriptblock]$Check, $Seconds) {
 ${offset[0]}
 ${wait}
 if ($script:switchInitialBlocks -ne 4002) { throw 'Wrong loaded message count' }
+if ($script:scrolls -ne 1) { throw 'History must be requested before the delayed paint' }
 Write-Host 'ASYNC_HISTORY_PAINT_OBSERVED'
 `;
   const result = spawnSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', timeout: 20000 });
