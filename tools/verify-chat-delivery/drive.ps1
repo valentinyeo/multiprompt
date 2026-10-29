@@ -270,7 +270,11 @@ function Assert-FullHistory([string]$Stage) {
         [void](Wait-For 'latest retained message reaches the real rendered transcript' {
             Doctor $true
             [ChatSwitchObserver]::CopyTranscript($app.Id, $main)
-            [Windows.Forms.Clipboard]::GetText().Contains($latest)
+            try { [Windows.Forms.Clipboard]::GetText().Contains($latest) }
+            catch {
+                if ($_.Exception.InnerException -isnot [Runtime.InteropServices.ExternalException]) { throw }
+                $false
+            }
         } 2)
         Shot "full-history-$Stage-latest"
         $latestClock.Stop()
