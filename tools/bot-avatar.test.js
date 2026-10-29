@@ -142,7 +142,12 @@ test "tiles wrap and every mouse target remains the painted session" {
     pinned_collapsed = false;
     g_starred_workspace = true;
     try std.testing.expectEqual(@as(u32, 5), layoutRows(&rows));
-    try std.testing.expect(!rows[0].tile);
+    try std.testing.expect(rows[0].tile);
+    for (rows[0..4]) |row| {
+        const target = hitTestSidebar(row.x + @divTrunc(row.width, 2), row.y + 48);
+        try std.testing.expect(target == .tab);
+        try std.testing.expectEqual(row.shell_idx, target.tab);
+    }
     try std.testing.expectEqual(@as(i32, 20), rows[0].y);
     g_starred_workspace = false;
     pinned_count = 2;
