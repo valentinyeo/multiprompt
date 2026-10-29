@@ -2671,12 +2671,20 @@ pub fn switchToShell(idx: u32) void {
         _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
     if (defer_browser) hideBrowserFloatingChrome() else if (app_state.active_shell < app_state.shell_count) hideActiveBrowser();
     if (idx != prev) app_state.g_front_period.selected = null;
-    if (idx != prev) _ = @import("chat_session.zig").chatReadMark(false);
+    if (idx != prev) {
+        const timing_started = switch_timing.start();
+        defer switch_timing.record(.read_marker, timing_started);
+        _ = @import("chat_session.zig").chatReadMark(false);
+    }
     if (idx != prev) app_state.g_chat_read_visit_shell_id = 0;
     app_state.active_shell = idx;
     parkStrayBrowserPanes(if (idx < app_state.shell_count) app_state.shells[idx].browser_hwnd else null);
     if (defer_browser and defer_native_browser) @import("browser_pane.zig").revealPaintedChatBrowser();
-    chatDraftBindToActive();
+    {
+        const timing_started = switch_timing.start();
+        defer switch_timing.record(.draft_bind, timing_started);
+        chatDraftBindToActive();
+    }
     if (!app_state.g_restoring and idx < app_state.shell_count and app_state.shells[idx].workspace < app_state.MAX_LWS) {
         if (app_state.g_ws_last_shell[app_state.shells[idx].workspace] != app_state.shells[idx].shell_id)
             app_state.g_ws_focus[app_state.shells[idx].workspace] = .none;
@@ -2715,6 +2723,8 @@ pub fn switchToShell(idx: u32) void {
     if (!app_state.g_restoring and (idx != prev or unarchived_on_open or
         (@import("launch_cache.zig").pending and app_state.g_focus_user_action_tick != 0 and idx < app_state.shell_count)))
     {
+        const timing_started = switch_timing.start();
+        defer switch_timing.record(.save_session, timing_started);
         saveSession();
     }
     if (idx < app_state.shell_count) {
@@ -2726,8 +2736,12 @@ pub fn switchToShell(idx: u32) void {
             if (want_chat != app_state.g_chat_active) {
                 if (want_chat) openChatView() else closeChatView();
             } else if (app_state.g_chat_active) {
-                chatDeferTranscriptLoad();
-                layoutChatControls();
+                {
+                    const timing_started = switch_timing.start();
+                    defer switch_timing.record(.chat_history, timing_started);
+                    chatDeferTranscriptLoad();
+                    layoutChatControls();
+                }
                 if (foregroundIsOurs()) _ = SetForegroundWindow(app_state.g_main_hwnd);
                 if (chatComposerFocusAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
             } else if (app_state.shells[idx].hwnd != null) {
