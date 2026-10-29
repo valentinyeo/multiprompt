@@ -668,6 +668,7 @@ pub extern "gdi32" fn CreateCompatibleDC(HANDLE) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn CreateCompatibleBitmap(HANDLE, i32, i32) callconv(WINAPI) HANDLE;
 pub extern "gdi32" fn GdiFlush() callconv(WINAPI) BOOL;
 pub extern "gdi32" fn BitBlt(HANDLE, i32, i32, i32, i32, HANDLE, i32, i32, DWORD) callconv(WINAPI) BOOL;
+pub extern "gdi32" fn RectVisible(hdc: HANDLE, rect: *const RECT) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn IntersectClipRect(HANDLE, i32, i32, i32, i32) callconv(WINAPI) i32;
 extern "gdi32" fn SetViewportOrgEx(HANDLE, i32, i32, ?*POINT) callconv(WINAPI) BOOL;
 pub extern "gdi32" fn DeleteDC(HANDLE) callconv(WINAPI) BOOL;

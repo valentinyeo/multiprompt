@@ -5285,6 +5285,46 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
     }
 }
 
+var transcript_paint_dc: HANDLE = null;
+var transcript_paint_bitmap: HANDLE = null;
+var transcript_paint_old_bitmap: HANDLE = null;
+var transcript_paint_width: i32 = 0;
+var transcript_paint_height: i32 = 0;
+
+fn resetTranscriptBackbuffer() void {
+    if (transcript_paint_dc != null and transcript_paint_old_bitmap != null) _ = SelectObject(transcript_paint_dc, transcript_paint_old_bitmap);
+    if (transcript_paint_bitmap != null) _ = DeleteObject(transcript_paint_bitmap);
+    if (transcript_paint_dc != null) _ = DeleteDC(transcript_paint_dc);
+    transcript_paint_dc = null;
+    transcript_paint_bitmap = null;
+    transcript_paint_old_bitmap = null;
+    transcript_paint_width = 0;
+    transcript_paint_height = 0;
+}
+
+fn ensureTranscriptBackbuffer(hdc: HANDLE, w: i32, h: i32) HANDLE {
+    if (w <= 0 or h <= 0) return null;
+    if (transcript_paint_dc != null and transcript_paint_width >= w and transcript_paint_height >= h) return transcript_paint_dc;
+    resetTranscriptBackbuffer();
+    const mem_dc = CreateCompatibleDC(hdc);
+    if (mem_dc == null) return null;
+    const width = @divTrunc(w + 127, 128) * 128;
+    const height = @divTrunc(h + 127, 128) * 128;
+    const info = @import("win32.zig").BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+    var bits: ?*anyopaque = null;
+    const bmp = @import("win32.zig").CreateDIBSection(hdc, &info, 0, &bits, null, 0);
+    if (bmp == null) {
+        _ = DeleteDC(mem_dc);
+        return null;
+    }
+    transcript_paint_old_bitmap = SelectObject(mem_dc, bmp);
+    transcript_paint_dc = mem_dc;
+    transcript_paint_bitmap = bmp;
+    transcript_paint_width = width;
+    transcript_paint_height = height;
+    return mem_dc;
+}
+
 fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
@@ -5294,6 +5334,10 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
     switch (msg) {
         0x0233 => {
             chatDropFiles(@ptrFromInt(wp));
+            return 0;
+        },
+        @import("win32.zig").WM_DESTROY => {
+            resetTranscriptBackbuffer();
             return 0;
         },
         WM_ERASEBKGND => return 1,
@@ -5321,16 +5365,8 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             const w = client_rc.right;
             const h = client_rc.bottom;
             if (w <= 0 or h <= 0) return 0;
-            const mem_dc = CreateCompatibleDC(hdc);
+            const mem_dc = ensureTranscriptBackbuffer(hdc, w, h);
             if (mem_dc == null) return 0;
-            defer _ = DeleteDC(mem_dc);
-            const info = @import("win32.zig").BITMAPINFO{ .header = .{ .width = w, .height = -h } };
-            var bits: ?*anyopaque = null;
-            const bmp = @import("win32.zig").CreateDIBSection(hdc, &info, 0, &bits, null, 0);
-            if (bmp == null) return 0;
-            defer _ = DeleteObject(bmp);
-            const old_bmp = SelectObject(mem_dc, bmp);
-            defer _ = SelectObject(mem_dc, old_bmp);
             chatPaintTranscriptContent(mem_dc, w, h, ps.rcPaint);
             painted = BitBlt(hdc, 0, 0, w, h, mem_dc, 0, 0, GDI_SRCCOPY) != 0;
             if (painted) send_latency.markPainted();

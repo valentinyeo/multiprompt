@@ -238,6 +238,14 @@ pub const Canvas = struct {
             .{ .x = l, .y = b - g.diameter_y, .angle = 90, .points = .{ .{ l, b - ry }, .{ l + rx, b - ry }, .{ l + rx, b } } },
         };
         for (specs) |corner| {
+            var bounds = RECT{ .left = @intFromFloat(corner.points[0][0]), .top = @intFromFloat(corner.points[0][1]), .right = @intFromFloat(corner.points[0][0]), .bottom = @intFromFloat(corner.points[0][1]) };
+            for (corner.points[1..]) |point| {
+                bounds.left = @min(bounds.left, @as(i32, @intFromFloat(point[0])));
+                bounds.top = @min(bounds.top, @as(i32, @intFromFloat(point[1])));
+                bounds.right = @max(bounds.right, @as(i32, @intFromFloat(point[0])));
+                bounds.bottom = @max(bounds.bottom, @as(i32, @intFromFloat(point[1])));
+            }
+            if (w.RectVisible(self.hdc, &bounds) == 0) continue;
             var corners: HANDLE = null;
             if (api.create_path(0, &corners) != 0) return false;
             defer _ = api.delete_path(corners);

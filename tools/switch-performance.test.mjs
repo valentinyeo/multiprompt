@@ -272,8 +272,11 @@ test('diagnostic instrumentation qualifies capture logging and keeps ordinary bu
     const original = fs.readFileSync(captureFile, 'utf8');
     instrument(directory, true);
     const capture = fs.readFileSync(captureFile, 'utf8');
+    assert.match(capture, /QueryPerformanceCounter\(&profile_read\);\n    chatCaptureStatus/);
     assert.match(capture, /@import\("diagnostics.zig"\)\.debugLog\(std\.fmt\.bufPrint\(&message, "idle-capture:/);
     assert.notEqual(capture, original);
+    assert.match(fs.readFileSync(path.join(target, 'diagnostics.zig'), 'utf8'), /defer @import\("switch_cpu_profile.zig"\)\.end\(\.logging/);
+    assert.match(fs.readFileSync(path.join(target, 'switch_cpu_profile.zig'), 'utf8'), /QueryThreadCycleTime/);
     assert.match(fs.readFileSync(path.join(target, 'main.zig'), 'utf8'), /ready_us=\{d\} transcript_us=\{d\}/);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
