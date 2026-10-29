@@ -806,6 +806,7 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
             const avatar = @import("bot_avatar.zig");
             ag_rc.top = title_top + @divTrunc(title_bottom - title_top - uiScaled(24), 2);
             ag_rc.bottom = ag_rc.top + uiScaled(24);
+            ag_rc.right = ag_rc.left + uiScaled(24);
             avatar.draw(hdc, ag_rc, avatar.forShell(&app_state.shells[app_state.active_shell]));
         }
         text_left += 30;

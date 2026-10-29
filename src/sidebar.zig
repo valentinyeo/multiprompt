@@ -1947,12 +1947,17 @@ pub fn paintSidebar(hdc: HANDLE) void {
 
                 var kind_rc = RECT{ .left = 0, .top = y, .right = sw - 1, .bottom = y + tabRowH() };
                 if (chatDraftHasForShell(@intCast(i))) kind_rc.bottom -= uiScaled(14);
-                if (app_state.shells[i].disconnected) {
+                if (app_state.shells[i].ai_agent != 0 or app_state.shells[i].tmux_session_len > 0) {
+                    const size = @min(uiScaled(28), kind_rc.bottom - kind_rc.top);
+                    const left = @divTrunc(kind_rc.left + kind_rc.right - size, 2);
+                    const top = @divTrunc(kind_rc.top + kind_rc.bottom - size, 2);
+                    const avatar = @import("bot_avatar.zig");
+                    avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(&app_state.shells[i]));
+                    if (app_state.shells[i].disconnected or app_state.shells[i].needs_attention) drawAttentionDot(hdc, left + size - 2, top + size - 2, uiScaled(3), if (app_state.shells[i].disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
+                } else if (app_state.shells[i].disconnected) {
                     drawAttentionDot(hdc, @divTrunc(kind_rc.left + kind_rc.right, 2), @divTrunc(kind_rc.top + kind_rc.bottom, 2), 4, RGB(255, 145, 55));
                 } else if (app_state.shells[i].needs_attention) {
                     drawAttentionDot(hdc, @divTrunc(kind_rc.left + kind_rc.right, 2), @divTrunc(kind_rc.top + kind_rc.bottom, 2), 4, customColorOr("attention", RGB(60, 120, 220)));
-                } else if (app_state.shells[i].ai_agent != 0) {
-                    drawAgentIcon(hdc, &kind_rc, app_state.shells[i].ai_agent, app_state.shells[i].activity == .active);
                 } else {
                     _ = SelectObject(hdc, font_title);
                     _ = SetTextColor(hdc, if (isRemoteShellKind(app_state.shells[i].kind)) RGB(230, 140, 40) else RGB(150, 150, 150));

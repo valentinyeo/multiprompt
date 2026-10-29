@@ -115,7 +115,7 @@ public static class WindowControlsProof {
                 if (Math.Abs(p.R - neighbor.R) + Math.Abs(p.G - neighbor.G) + Math.Abs(p.B - neighbor.B) >= 12) separator++;
             }
             int dpi = geometry[8];
-            int start = leftGap + 240 * dpi / 96, end = leftGap + geometry[6] - 140 * dpi / 96;
+            int start = leftGap + sidebar + 16 * dpi / 96, end = leftGap + geometry[6] - 140 * dpi / 96;
             Color backdrop = image.GetPixel(start, topGap + 4 * dpi / 96);
             int minX = end, minY = image.Height, maxX = 0, maxY = 0;
             for (int y = topGap + 8 * dpi / 96; y < topGap + 55 * dpi / 96; y++) {

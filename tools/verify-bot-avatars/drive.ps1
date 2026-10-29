@@ -89,6 +89,9 @@ try {
     Save @{name='robot-avatars'; fake=$true; mode='idle'; suggestion=''; sessions=$names; panes=$panes; sids=$sids; home="$profile/home"; procRoot=([IO.Path]::GetPathRoot($profile) + 'proc')} "$state/state.json"
     & $env:MP_VERIFY_PYTHON $env:MP_VERIFY_BOUNDARY shell seed-many 1
     if ($LASTEXITCODE -ne 0) { throw 'Transcript seed failed' }
+    $console = Get-Content "$state/claude.json" -Raw | ConvertFrom-Json
+    $console | Add-Member -NotePropertyName turns -NotePropertyValue (,@('Show the next step', 'Robot previews are ready.')) -Force
+    Save $console "$state/claude.json"
     $tabs = @()
     for ($i = 0; $i -lt $names.Count; $i++) { $tabs += @{kind='tmux'; name=$names[$i]; manual=$true; tmux_host=0; tmux_session=$names[$i]; pinned_top=($i -lt 2); cv=$false; pid=0} }
     Save @{active_tab=0; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=$tabs} "$settings/session.json"
@@ -113,6 +116,11 @@ try {
         $checks.Add(@{name=($entry.name + '-click'); passed=$true; selected=$selected})
         Check-Pixels $entry.row $entry.name
     }
+    [void](Wait-For 'real console messages reach list previews' {
+        $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
+        @($published.shells | Where-Object { $_.pv -like '*Robot previews are ready*' }).Count -ge 4
+    })
+    $checks.Add(@{name='last-message-previews'; passed=$true})
     Shot 'sidebar-amoled'
     [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
     [void](Wait-For 'native chat composer' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero })
@@ -120,6 +128,7 @@ try {
     Check-Pixels $title 'chat-title-robot'
     $selectedRow = @($list | Where-Object { $_.face -eq $title.face -and $_.color -eq $title.color })
     if ($selectedRow.Count -eq 0) { throw 'Chat title robot differs from the selected session' }
+    [void](Wait-For 'selected conversation has loaded' { (Read-Log) -match '\[chat\] transcript load shell=\d+ ok' })
     Shot 'chat-amoled'
     Copy-Item "$settings/session.json" "$Evidence/session-selected.json"
     Save @(Layouts) "$Evidence/layouts.json"

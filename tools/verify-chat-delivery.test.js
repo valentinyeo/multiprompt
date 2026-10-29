@@ -5,7 +5,7 @@ const { readControlSource } = require('./app-source');
 assert.equal(typeof readControlSource, 'function', 'Control readers must follow physical feature files');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const { names, queueName, sendName, sendTexts, sendSteps, allNames, queueTexts, queueSteps, agentBoundary, evaluateDelivery, evaluateEvidence } = require('./verify-chat-delivery/check-evidence.js');
 const os = require('node:os');
 
@@ -344,7 +344,7 @@ test('background host probes are explicitly declined and unknown remote commands
 import ast, contextlib, io, json, os, pathlib, re, shlex, sys, tempfile, time
 source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 tree = ast.parse(source)
-selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ("state", "record", "declined_remote", "ssh") or isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "VPS_POLL_COMMAND" for target in node.targets)]
+selected = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ("state", "record", "declined_remote", "attached_session", "ssh") or isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "VPS_POLL_COMMAND" for target in node.targets)]
 namespace = dict(json=json, os=os, re=re, shlex=shlex, sys=sys, time=time)
 exec(compile(ast.Module(body=selected, type_ignores=[]), sys.argv[1], "exec"), namespace)
 fixtures = json.load(sys.stdin)
@@ -1314,4 +1314,25 @@ test('full-history copy proof distinguishes message 10 from 100 and rejects lost
   fs.writeFileSync(path.join(dir, 'full-history/open-copied.txt'), messages.join('\n\n'));
   json('full-history/restart-latest.json', { latest: 'IGSH815 assistant 319', visibleMs: 2001 });
   assert.equal(evaluate().status, 'failed');
+});
+
+test('native SSH fixture attaches legal raw names without truncating spaces or UTF-8', () => {
+  const source = read('tools/verify-chat-delivery/boundary.py');
+  assert.match(source, /def attached_session\(command\):/);
+  const result = spawnSync('python3', ['-I', '-c', String.raw`
+import ast, pathlib, re, shlex, sys
+source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+tree = ast.parse(source)
+function = next(item for item in tree.body if isinstance(item, ast.FunctionDef) and item.name == 'attached_session')
+namespace = dict(re=re, shlex=shlex)
+exec(compile(ast.Module(body=[function], type_ignores=[]), '<production SSH boundary>', 'exec'), namespace)
+for name in ['HT Product Lead', 'SF Design Lead', '机器人', "bot's console", 'verify-agent']:
+    command = 'tmux attach -t ' + shlex.quote('=' + name)
+    assert namespace['attached_session'](command) == name
+assert namespace['attached_session']('tmux list-sessions') is None
+assert namespace['attached_session']("tmux attach -t '") is None
+print('RAW_SESSION_NAMES_PROVEN')
+`, path.join(root, 'tools/verify-chat-delivery/boundary.py')], {encoding: 'utf8'});
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /RAW_SESSION_NAMES_PROVEN/);
 });
