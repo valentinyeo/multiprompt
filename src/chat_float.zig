@@ -7,7 +7,7 @@ const RGN_DIFF: i32 = 4;
 const MAX_HOLES = 7 + std.meta.tags(@import("chat_permission.zig").Action).len;
 
 pub fn moat() i32 {
-    return @import("drawing.zig").uiScaled(6);
+    return 0;
 }
 
 pub const Hole = struct {
@@ -105,4 +105,13 @@ pub fn syncChatRegion() void {
         return;
     }
     app_state.g_chat_hole_signature = sig;
+}
+
+test "IGSH-1189 floating control clipping adds no thick surround" {
+    var holes: HoleList = .{};
+    const control: RECT = .{ .left = 20, .top = 30, .right = 120, .bottom = 70 };
+    holes.addFloating(control, 20);
+    try std.testing.expectEqual(@as(usize, 1), holes.len);
+    try std.testing.expectEqualDeep(control, holes.items[0].rect);
+    try std.testing.expectEqual(@as(i32, 20), holes.items[0].radius);
 }

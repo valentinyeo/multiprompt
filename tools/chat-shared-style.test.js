@@ -89,3 +89,22 @@ test('sidebar labels and selection appearance ignore the content view', () => {
   assert.doesNotMatch(selection, /g_chat_active/);
   assert.doesNotMatch(paint, /const fav_size: i32|const base_text_left: i32/);
 });
+
+test('IGSH-1189 floating controls have no clearing surround and share theme outlines', () => {
+  const floating = fs.readFileSync('src/chat_float.zig', 'utf8');
+  assert.match(body(floating, 'pub fn moat('), /return 0;/);
+  assert.match(floating, /IGSH-1189 floating control clipping adds no thick surround/);
+  const render = fs.readFileSync('src/chat_render.zig', 'utf8');
+  for (const signature of ['fn chatPaintScrollUi(', 'pub fn paintChatAttachButton(']) {
+    const paint = body(render, signature);
+    assert.match(paint, /chatSurfaceBorderW\(\)/);
+    assert.match(paint, /chatSurfaceBorderColor\(\)/);
+    assert.match(paint, /app_state\.g_chat_input_color/);
+    assert.doesNotMatch(paint, /RGB\(96, 108, 126\)|RGB\(50, 58, 72\)|themeReaderDark/);
+  }
+  const layout = fs.readFileSync('src/window_layout.zig', 'utf8');
+  assert.match(body(layout, 'pub fn chatSurfaceBorderW('), /@max\(1, uiScaled\(1\)\)/);
+  const title = body(drawing, 'fn paintChatTitlePill(');
+  assert.match(title, /chatSurfaceBorderW\(\)/);
+  assert.match(title, /chatSurfaceBorderColor\(\)/);
+});

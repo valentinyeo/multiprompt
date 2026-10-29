@@ -2441,14 +2441,15 @@ fn chatPaintScrollUi(canvas: *@import("smooth.zig").Canvas, hdc: HANDLE, w: i32,
     const box = chatScrollJumpBox(w, h);
     chatLogScrollUi(h, box);
     if (!app_state.g_chat_scrolled_up) return;
-    const ring = RECT{ .left = box.left - 1, .top = box.top - 1, .right = box.right + 1, .bottom = box.bottom + 1 };
+    const edge = @import("window_layout.zig").chatSurfaceBorderW();
+    const ring = RECT{ .left = box.left - edge, .top = box.top - edge, .right = box.right + edge, .bottom = box.bottom + edge };
     const face = RECT{ .left = box.left, .top = box.top, .right = box.right, .bottom = box.bottom };
     const gap = @import("chat_float.zig").moat();
     const clear = themeConsoleBg();
     @import("smooth.zig").fillEllipse(hdc, .{ .left = ring.left - gap, .top = ring.top - gap, .right = ring.right + gap, .bottom = ring.bottom + gap }, clear);
     if (chatScrollJumpBadgeBox(w, h)) |badge| fillRoundRectAA(hdc, .{ .left = badge.left - gap, .top = badge.top - gap, .right = badge.right + gap, .bottom = badge.bottom + gap }, uiScaled(9) + gap, clear);
-    @import("smooth.zig").fillEllipse(hdc, ring, if (app_state.g_light_theme) RGB(176, 184, 196) else RGB(96, 108, 126));
-    @import("smooth.zig").fillEllipse(hdc, face, if (app_state.g_light_theme) RGB(255, 255, 255) else RGB(50, 58, 72));
+    @import("smooth.zig").fillEllipse(hdc, ring, @import("window_layout.zig").chatSurfaceBorderColor());
+    @import("smooth.zig").fillEllipse(hdc, face, app_state.g_chat_input_color);
     const cx = @divTrunc(box.left + box.right, 2);
     const cy = @divTrunc(box.top + box.bottom, 2);
     const arm = uiScaled(7);
@@ -3436,15 +3437,9 @@ pub fn shotFocusTick() void {
 }
 
 pub fn paintChatAttachButton(hdc: HANDLE, rc: RECT) void {
-    if (@import("themes.zig").themeReaderDark()) {
-        const edge = @import("window_layout.zig").chatSurfaceBorderW();
-        @import("smooth.zig").fillEllipse(hdc, rc, @import("window_layout.zig").chatSurfaceBorderColor());
-        @import("smooth.zig").fillEllipse(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, app_state.g_chat_input_color);
-    } else {
-        const base = app_state.g_chat_input_color;
-        const fill = chat_style.shift(base, if (chat_style.isDark(base)) 22 else -14);
-        @import("smooth.zig").fillEllipse(hdc, rc, fill);
-    }
+    const edge = @import("window_layout.zig").chatSurfaceBorderW();
+    @import("smooth.zig").fillEllipse(hdc, rc, @import("window_layout.zig").chatSurfaceBorderColor());
+    @import("smooth.zig").fillEllipse(hdc, .{ .left = rc.left + edge, .top = rc.top + edge, .right = rc.right - edge, .bottom = rc.bottom - edge }, app_state.g_chat_input_color);
     const cx = rc.left + @divTrunc(rc.right - rc.left, 2);
     const cy = rc.top + @divTrunc(rc.bottom - rc.top, 2);
     const arm = @max(uiScaled(5), @divTrunc(rc.right - rc.left, 5));
