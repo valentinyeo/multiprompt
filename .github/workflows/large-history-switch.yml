@@ -1,6 +1,8 @@
 name: Released large-history switching
-run-name: Large-history switches ${{ inputs.tag }}
+run-name: Large-history switches ${{ inputs.tag || 'v0.28.1010' }}
 on:
+  push:
+    branches: [ceo/IGSH-1197]
   workflow_dispatch:
     inputs:
       tag:
@@ -14,7 +16,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     env:
-      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_TAG: ${{ inputs.tag || 'v0.28.1010' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Keep LF line endings
