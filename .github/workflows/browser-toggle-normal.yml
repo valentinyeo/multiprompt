@@ -7,7 +7,7 @@ on:
       tag:
         description: Published Windows release
         required: true
-        default: v0.28.1005
+        default: v0.28.1011
         type: string
 permissions:
   contents: read
@@ -16,7 +16,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 180
     env:
-      RELEASE_TAG: ${{ inputs.tag || 'v0.28.1005' }}
+      RELEASE_TAG: ${{ inputs.tag || 'v0.28.1011' }}
     steps:
       - name: Keep LF line endings
         run: git config --global core.autocrlf false
