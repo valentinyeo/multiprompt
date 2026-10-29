@@ -438,3 +438,17 @@ test('IGSH-1115 release proof builds both architectures without publishing and a
   const notes = release.split('      - name: Publish plain versioned update notes\n')[1].split('      - name: Package extension')[0];
   assert.match(notes, /GH_TOKEN: \$\{\{ github\.token \}\}/);
 });
+
+
+test('IGSH-1033 a proof builds unchanged application source without inventing release notes', () => {
+  const build = workflow.split('\n  build:\n')[1].split('\n  release:\n')[0];
+  assert.match(build, /PROOF: \$\{\{ inputs\.proof \}\}/);
+  const stamp = script('Build').split('zig build ')[0];
+  for (const proof of ['true', 'false', '']) {
+    const result = spawnSync('bash', ['-e', '-c', `node() { printf 'STAMP_REQUIRED'; return 1; }\n${stamp}`], {
+      encoding: 'utf8', env: { ...process.env, TAG: 'v1.2.3', PROOF: proof },
+    });
+    assert.equal(result.status, proof === 'true' ? 0 : 1, result.stdout + result.stderr);
+    assert.equal(result.stdout, proof === 'true' ? '' : 'STAMP_REQUIRED');
+  }
+});
