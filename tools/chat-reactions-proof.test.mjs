@@ -131,3 +131,22 @@ test('reaction proof measures the painted transcript, excluding the floating com
   assert.throws(() => assertBadge(inspect(f.image, area)));
   assertBadge(inspect(f.image, { ...area, bottom: 235 }));
 });
+
+test('menu pictures require all three painted color icons', () => {
+  assert.equal(typeof proof.assertMenuIcons, 'function');
+  const image = { width: 160, height: 60, pixels: Buffer.alloc(160 * 60 * 4) };
+  const item = { left: 8, top: 8, right: 50, bottom: 46 };
+  const paint = (cell, color) => {
+    for (let y = 18; y < 28; y++) for (let x = 18 + cell * 42; x < 28 + cell * 42; x++) image.pixels.writeUIntLE(color, (y * image.width + x) * 4, 3);
+  };
+  assert.throws(() => proof.assertMenuIcons(image, item), /menu icon/);
+  for (let cell = 0; cell < 3; cell++) paint(cell, 0xe4af43);
+  assert.deepEqual(proof.assertMenuIcons(image, item), [100, 100, 100]);
+  for (let cell = 0; cell < 3; cell++) {
+    paint(cell, 0xaaaaaa);
+    assert.throws(() => proof.assertMenuIcons(image, item), new RegExp(`menu icon ${cell}`));
+    paint(cell, 0xe4af43);
+  }
+  assert.throws(() => proof.assertMenuIcons(image, { ...item, left: -1 }), /geometry/);
+  assert.throws(() => proof.assertMenuIcons(image, { ...item, right: 100 }), /geometry/);
+});

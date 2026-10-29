@@ -1,3 +1,14 @@
+function Shot-PaintedMenu([string]$Name, [IntPtr]$Popup) {
+    $item = [ChatDeliveryDesktop]::FirstMenuItem($Popup, $app.Id)
+    Save @{left=$item.Left; top=$item.Top; right=$item.Right; bottom=$item.Bottom} "$caseDir/$Name-item.json"
+    [void](Wait-For "$Name has three painted color icons" {
+        Shot $Name
+        $ErrorActionPreference = 'Continue'
+        & node "$PSScriptRoot/../chat-reactions-proof.mjs" $Evidence --menu $Name 2> "$caseDir/$Name-stderr.log"
+        $LASTEXITCODE -eq 0
+    })
+}
+
 [void](Wait-For 'reaction transcript loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
 Press @(0x11, 0x4B) 'Ctrl+K: open theme picker'
 foreach ($letter in 'themes'.ToCharArray()) { [ChatDeliveryDesktop]::Character($letter) }
@@ -37,7 +48,7 @@ $down = [char]::ConvertFromUtf32(0x1f44e)
 $heart = [string][char]0x2764 + [char]0xfe0f
 if ($menu -cne "React $up,React $down,React $heart,Reply,Copy,Copy request ID") { throw "IGSH975_REACTIONS_MISSING: $menu" }
 $popup = Wait-For 'owned native reaction popup visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } } 5
-Shot 'reactions-menu'
+Shot-PaintedMenu 'reactions-menu' $popup
 for ($key = 0; $key -lt 6; $key++) { Press @(0x28) 'Down: select the next message action' }
 Press @(0x0D) 'Enter: copy the original request ID'
 [void](Wait-For 'original request ID reached the clipboard' { [Windows.Forms.Clipboard]::GetText() -ceq 'msg_first' })
@@ -58,7 +69,7 @@ foreach ($entry in @('emoji', 'more')) {
         $tail.Contains('[chat] message menu items=' + $menu)
     })
     $popup = Wait-For 'owned combined hover menu visible' { $h = [ChatDeliveryDesktop]::Menu($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-    Shot ('reactions-menu-' + $entry)
+    Shot-PaintedMenu ('reactions-menu-' + $entry) $popup
     if ($entry -eq 'emoji') {
         Press @(0x1B) 'Esc: dismiss the emoji entry menu'
         [ChatDeliveryDesktop]::HoverOwnedTranscript($main, $app.Id, [IntPtr]$views[0].Current.NativeWindowHandle, $hover.insideX, $hover.insideY)

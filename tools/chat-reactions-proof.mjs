@@ -76,10 +76,29 @@ export function assertHoverActions(image, first) {
   return { insideX: first.left + 30, insideY: y, emojiX: first.right + 20, moreX: first.right + 76, y };
 }
 
+export function assertMenuIcons(image, item) {
+  const { left, top, right, bottom } = item;
+  const width = right - left;
+  assert.ok([left, top, right, bottom].every(Number.isInteger) && left >= 0 && top >= 0 && width > 0 && bottom > top && right + width * 2 <= image.width && bottom <= image.height, 'menu geometry stays inside the picture');
+  return [0, 1, 2].map(cell => {
+    let colored = 0;
+    for (let y = top; y < bottom; y++) for (let x = left + cell * width; x < right + cell * width; x++) {
+      const offset = (y * image.width + x) * 4;
+      const channels = [image.pixels[offset], image.pixels[offset + 1], image.pixels[offset + 2]];
+      if (Math.max(...channels) - Math.min(...channels) > 50 && Math.max(...channels) > 100) colored++;
+    }
+    assert.ok(colored > 20, `menu icon ${cell} must be painted in color`);
+    return colored;
+  });
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = process.argv[2];
   const json = name => JSON.parse(fs.readFileSync(path.join(root, name), 'utf8').replace(/^\uFEFF/, ''));
-  if (process.argv[3] === '--hover') {
+  if (process.argv[3] === '--menu') {
+    const name = process.argv[4];
+    console.log(JSON.stringify(assertMenuIcons(readBmp(path.join(root, `${name}.bmp`)), json(`reactions/${name}-item.json`))));
+  } else if (process.argv[3] === '--hover') {
     const image = readBmp(path.join(root, 'reactions-hover.bmp'));
     const frame = inspect(image, json('reactions/area.json'));
     assert.ok(frame.agent.length >= 2);
@@ -112,6 +131,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       assert.equal(events.filter(e => e.type === 'attachment' && e.attachment?.prompt === expected).length, 1);
       assert.ok(events.some(e => e.message?.content === '👍 to: Unavailable reply [mp:0000000000000000]'));
       assert.ok(events.some(e => e.message?.content?.some?.(part => part.text === 'Done with the queued messages.')), 'the session answered the delivered reaction');
+      for (const name of ['reactions-menu', 'reactions-menu-emoji', 'reactions-menu-more']) assertMenuIcons(readBmp(path.join(root, `${name}.bmp`)), json(`reactions/${name}-item.json`));
       const area = json('reactions/area.json');
       const frames = {};
       for (const name of ['before', 'pending', 'delivered', 'restart', 'fallback']) frames[name] = inspect(readBmp(path.join(root, `reactions-${name}.bmp`)), area);
