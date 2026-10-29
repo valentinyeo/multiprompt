@@ -2514,3 +2514,22 @@ Write-Host 'OWNED_SLOW_BROWSER_TRANSITION_OK'
   assert.equal(green.status, 0, green.stdout + green.stderr);
   assert.match(green.stdout, /OWNED_SLOW_BROWSER_TRANSITION_OK/);
 });
+
+
+test('IGSH-1176 browser warning times out before its job cancellation boundary', () => {
+  const driver = workflow.slice(workflow.indexOf('      - name: Launch Doctor Drive Evidence Cleanup'), workflow.indexOf('      - name: Check real-shape observations'));
+  assert.match(driver, /timeout-minutes: \$\{\{ env\.FEATURE == 'browser-pane-stuck' && 8 \|\|/);
+  assert.match(workflow, /continue-on-error: \$\{\{ contains\(fromJSON\(needs\.journeys\.outputs\.quarantined\), matrix\.feature\) \}\}/);
+  assert.match(driver, /if \(\$env:FEATURE -eq 'browser-pane-stuck' -and \$env:VERIFY_BROWSER_STALL -eq '1'\)/);
+  assert.match(driver, /Start-Sleep -Seconds 900/);
+  assert.match(workflow, /if: always\(\) && env\.FEATURE == 'browser-pane-stuck' && steps\.desktop-driver\.outcome == 'failure' && contains/);
+  assert.match(read('.github/workflows/release.yml'), /browser_stall: \$\{\{ inputs\.browser_stall \|\| false \}\}/);
+  assert.match(workflow, /- name: Upload durable verification evidence\s+if: always\(\)/);
+});
+
+
+test('IGSH-1176 forced browser timeout proof fits the GitHub dispatch input limit', () => {
+  const dispatch = workflow.slice(workflow.indexOf('  workflow_dispatch:'), workflow.indexOf('  workflow_call:'));
+  assert.ok([...dispatch.matchAll(/^      [a-z_]+:$/gm)].length <= 25);
+  assert.match(workflow, /VERIFY_BROWSER_STALL: \$\{\{ \(inputs\.browser_stall \|\| inputs\.dictation_stall\) && '1' \|\| '' \}\}/);
+});
