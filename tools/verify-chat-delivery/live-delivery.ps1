@@ -3,10 +3,12 @@ Bind-Transcript
 $observation.rounds = [Collections.Generic.List[object]]::new()
 $frames = [Collections.Generic.List[string]]::new()
 $longDelivery = $env:CHAT_LONG_PROOF -eq '1'
-$releasedLongDelivery = $longDelivery -and $env:RELEASE_TAG
-$roundCount = if ($releasedLongDelivery) { 31 } else { 10 }
+$crashStress = $env:CHAT_CRASH_PROOF -eq '1'
+$releasedLongDelivery = $longDelivery -and $env:RELEASE_TAG -and -not $crashStress
+$roundCount = if ($crashStress) { 30 } elseif ($releasedLongDelivery) { 31 } else { 10 }
 $firstReplyMs = 0L
 $observation.longDelivery = $longDelivery
+$observation.crashStress = $crashStress
 if ($longDelivery) {
     $retained = Wait-For 'older history fully retained before live refresh' {
         foreach ($cache in @(Get-ChildItem "$settings/chatcache/*.jsonl" -ErrorAction SilentlyContinue)) {

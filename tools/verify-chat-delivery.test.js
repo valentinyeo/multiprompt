@@ -19,6 +19,27 @@ const skill = '.claude/skills/verify-multiprompt/';
 const drive = read('tools/verify-chat-delivery/drive.ps1');
 const workflow = read('.github/workflows/verify.yml');
 
+test('IGSH-1152 header paint uses the same notice text measured before expiry', () => {
+  const source = read('src/drawing.zig');
+  const layout = source.slice(source.indexOf('pub fn chatTitleLayout('), source.indexOf('pub fn chatTitleHoleRect('));
+  const paint = source.slice(source.indexOf('fn paintChatTitlePill('), source.indexOf('pub fn paintThreadTitle('));
+  assert.match(source, /meta: \[\]const u16/);
+  assert.doesNotMatch(source, /has_meta: bool/);
+  assert.match(layout, /const meta = chatTitleMetaText\(now\);\s*layout\.meta = meta;/);
+  assert.match(paint, /if \(layout\.meta\.len > 0\)/);
+  assert.match(paint, /const meta = layout\.meta;/);
+  assert.doesNotMatch(paint, /chatTitleMetaText\(/);
+  assert.match(source, /app_state\.g_gdip_api\.fill_path = &Expire\.fill/);
+  assert.match(source, /try std\.testing\.expect\(notice_ink > 4\)/);
+});
+
+test('IGSH-1152 native crash evidence retains the minidump before scratch cleanup', () => {
+  const copy = drive.indexOf('Get-ChildItem -LiteralPath "$settings/crashes" -File');
+  const cleanup = drive.indexOf('Remove-Item -LiteralPath $profile -Recurse -Force', copy);
+  assert.ok(copy >= 0 && cleanup > copy);
+  assert.match(drive.slice(copy, cleanup), /Where-Object \{ \$_\.Extension -in @\('\.txt', '\.dmp'\) \}[\s\S]*Copy-Item -Destination "\$caseDir\/crashes\/" -ErrorAction Stop/);
+});
+
 const ps51Rules = [
   [/\[\s*(?:ushort|uint|ulong|short|sbyte|semver|bigint)\s*\]/i, '[ushort][char]::ToUpperInvariant($letter)'],
   [/\?\?|\?\.|\?\[/, '$value ?? $fallback'],
@@ -1228,6 +1249,28 @@ test('long-chat reproduction includes hundreds of visible exchanges rather than 
   assert.equal(appended.message, undefined);
 });
 
+
+test('IGSH-1152 crash replay preserves the original large-row workload, not newer history shapes', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-crash-workload-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const transcript = path.join(dir, 'transcript.jsonl');
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+    name: 'live-delivery', mode: 'busy', suggestion: queueTexts.suggestion, fake: true, sid: 'sid-crash', longChatProof: true,
+    transcript, meta: path.join(dir, 'sessions/4242.json'), procDir: path.join(dir, 'proc/4242'), cwd: 'C:/verify/work', panePid: 4242,
+  }));
+  const shell = op => execFileSync('python3', ['-I', '-X', 'utf8', path.join(root, 'tools/verify-chat-delivery/boundary.py'), 'shell', op], {
+    env: { ...process.env, MP_VERIFY_STATE: dir }, encoding: 'utf8', timeout: 60000,
+  });
+  shell('init');
+  shell('history');
+  const rows = fs.readFileSync(transcript, 'utf8').trim().split('\n').map(JSON.parse).slice(2);
+  const original = require('node:zlib').gunzipSync(fs.readFileSync(path.join(root, 'tools/fixtures/IGSH-1152/original-history.jsonl.gz'))).toString('utf8').trim().split('\n').map(JSON.parse);
+  const digest = value => require('node:crypto').createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  assert.equal(digest(rows.map(({ type, message }) => ({ type, message }))), digest(original));
+  const results = rows.flatMap(row => Array.isArray(row.message.content) ? row.message.content.filter(part => part.type === 'tool_result') : []);
+  assert.equal(results.length, 24);
+  assert.ok(results.every(part => part.content === 'synthetic tool output '.repeat(40000)));
+});
 
 test('full-history copy proof distinguishes message 10 from 100 and rejects lost, repeated or reordered messages', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'history-copy-proof-'));

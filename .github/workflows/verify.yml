@@ -39,6 +39,11 @@ on:
         required: false
         default: false
         type: boolean
+      chat_crash_proof:
+        description: Stress thirty consecutive live reply and select-copy rounds
+        required: false
+        default: false
+        type: boolean
       chat_accepted_proof:
         description: Check queued message pixels within one second of acceptance
         required: false
@@ -355,7 +360,8 @@ jobs:
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_ACCEPTED_PROOF: ${{ inputs.chat_accepted_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
-      CHAT_LIVE_DELIVERY_PROOF: ${{ inputs.chat_live_delivery_proof && '1' || '' }}
+      CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
+      CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_REACTIONS_PROOF: ${{ inputs.chat_reactions_proof && '1' || '' }}
       CHAT_RESYNC_PROOF: ${{ (inputs.chat_resync_proof || (github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11')) && '1' || '' }}

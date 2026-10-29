@@ -1200,7 +1200,9 @@ foreach ($plan in $plans) {
             if (Test-Path "$settings/session.json") { Copy-Item "$settings/session.json" "$caseDir/session-after.json" }
             if (Test-Path "$settings/crashes") {
                 New-Item -ItemType Directory -Force "$caseDir/crashes" | Out-Null
-                Copy-Item "$settings/crashes/*.txt" "$caseDir/crashes/" -ErrorAction SilentlyContinue
+                Get-ChildItem -LiteralPath "$settings/crashes" -File |
+                    Where-Object { $_.Extension -in @('.txt', '.dmp') } |
+                    Copy-Item -Destination "$caseDir/crashes/" -ErrorAction Stop
             }
             if ($isActivity -and (Test-Path "$settings/chatcache")) { Copy-Item "$settings/chatcache" "$caseDir/chatcache" -Recurse -Force }
             if ($hasTranscript -and $transcript -and (Test-Path -LiteralPath $transcript)) { Copy-Item -LiteralPath $transcript "$caseDir/transcript.jsonl" }

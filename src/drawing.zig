@@ -624,7 +624,7 @@ pub const ChatTitleLayout = struct {
     text: RECT,
     meta_pill: RECT,
     meta_text: RECT,
-    has_meta: bool,
+    meta: []const u16,
     meta_warn: bool,
 };
 
@@ -640,8 +640,8 @@ fn measureTitleText(font: HANDLE, text: []const u16) i32 {
     return size.cx;
 }
 
-fn chatTitleMetaText() []const u16 {
-    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > GetTickCount64();
+fn chatTitleMetaText(now: u64) []const u16 {
+    const cap_msg = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
     if (cap_msg) {
         if (app_state.g_account_reauth) {
             return std.mem.span(L("Sign in again: Ctrl+K > Sign in to multiprompt"));
@@ -669,7 +669,9 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
     var layout: ChatTitleLayout = std.mem.zeroes(ChatTitleLayout);
     layout.more = .{ .left = column.right - margin - pill_h, .top = pill_top, .right = column.right - margin, .bottom = pill_top + pill_h };
     var right_limit = layout.more.left - margin;
-    const meta = chatTitleMetaText();
+    const now = GetTickCount64();
+    const meta = chatTitleMetaText(now);
+    layout.meta = meta;
     if (meta.len > 0) {
         const meta_w = measureTitleText(uiFontSubtitle(), meta) + pad * 2;
         const width = @min(meta_w, @divTrunc((column.right - column.left) * 2, 5));
@@ -677,8 +679,7 @@ pub fn chatTitleLayout() ?ChatTitleLayout {
         const top = pill_top + @divTrunc(pill_h - meta_h, 2);
         layout.meta_pill = .{ .left = layout.more.left - margin - width, .top = top, .right = layout.more.left - margin, .bottom = top + meta_h };
         layout.meta_text = .{ .left = layout.meta_pill.left + pad, .top = layout.meta_pill.top, .right = layout.meta_pill.right - pad, .bottom = layout.meta_pill.bottom };
-        layout.has_meta = true;
-        layout.meta_warn = app_state.g_account_reauth or app_state.g_cap_msg_until > GetTickCount64();
+        layout.meta_warn = app_state.g_account_reauth or app_state.g_cap_msg_until > now;
         right_limit = layout.meta_pill.left - margin;
     }
     const center = @divTrunc(column.left + column.right, 2);
@@ -739,7 +740,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         _ = DrawTextW(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
     paintMoreButton(hdc, layout.more, border, fill, edge);
-    if (layout.has_meta) {
+    if (layout.meta.len > 0) {
         const meta_r = layout.meta_pill;
         fillRoundRectAA(hdc, meta_r, @divTrunc(meta_r.bottom - meta_r.top, 2), border);
         fillRoundRectAA(hdc, .{ .left = meta_r.left + edge, .top = meta_r.top + edge, .right = meta_r.right - edge, .bottom = meta_r.bottom - edge }, @divTrunc(meta_r.bottom - meta_r.top, 2) - edge, fill);
@@ -747,7 +748,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         const warn_col: DWORD = if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70);
         const dim_col: DWORD = if (app_state.g_light_theme) RGB(140, 140, 140) else RGB(110, 110, 120);
         _ = SetTextColor(hdc, if (layout.meta_warn) warn_col else dim_col);
-        const meta = chatTitleMetaText();
+        const meta = layout.meta;
         var text = layout.meta_text;
         _ = DrawTextW(hdc, meta.ptr, @intCast(meta.len), &text, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
@@ -853,7 +854,7 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
     }
 }
 
-test "IGSH-910 active ETA leaves Chat View header pixels and title space unchanged" {
+test "IGSH-910 ETA and IGSH-1152 notice expiry preserve Chat View header pixels" {
     const w = @import("win32.zig");
     const gdi = struct {
         extern "gdi32" fn GdiFlush() callconv(w.WINAPI) w.BOOL;
@@ -869,6 +870,8 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
         .light = app_state.g_light_theme,
         .reauth = app_state.g_account_reauth,
         .cap_until = app_state.g_cap_msg_until,
+        .cap_text = app_state.g_cap_msg_text,
+        .cap_len = app_state.g_cap_msg_len,
         .voice = app_state.g_voice_mode_active,
         .scale = app_state.g_ui_scale,
         .dpi = app_state.g_main_monitor_dpi,
@@ -884,6 +887,8 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
         app_state.g_light_theme = saved.light;
         app_state.g_account_reauth = saved.reauth;
         app_state.g_cap_msg_until = saved.cap_until;
+        app_state.g_cap_msg_text = saved.cap_text;
+        app_state.g_cap_msg_len = saved.cap_len;
         app_state.g_voice_mode_active = saved.voice;
         app_state.g_ui_scale = saved.scale;
         app_state.g_main_monitor_dpi = saved.dpi;
@@ -960,6 +965,43 @@ test "IGSH-910 active ETA leaves Chat View header pixels and title space unchang
             try std.testing.expectEqualDeep(idle_rect, title_rect);
         }
     }
+    const Expire = struct {
+        var next: @TypeOf(app_state.g_gdip_api.fill_path) = undefined;
+        var calls: usize = 0;
+
+        fn fill(graphics: HANDLE, brush: HANDLE, path: HANDLE) callconv(w.WINAPI) app_state.GpStatus {
+            calls += 1;
+            app_state.g_cap_msg_until = 0;
+            return next(graphics, brush, path);
+        }
+    };
+    try std.testing.expect(smooth.gdipLoad());
+    Expire.next = app_state.g_gdip_api.fill_path;
+    Expire.calls = 0;
+    app_state.g_gdip_api.fill_path = &Expire.fill;
+    defer app_state.g_gdip_api.fill_path = Expire.next;
+    const notice = std.mem.span(L("Copied"));
+    @memcpy(app_state.g_cap_msg_text[0..notice.len], notice);
+    app_state.g_cap_msg_len = notice.len;
+    app_state.g_cap_msg_until = std.math.maxInt(u64);
+    const notice_layout = chatTitleLayout() orelse return error.TestUnexpectedResult;
+    @memset(pixels, 0);
+    paintChatTitlePill(dc);
+    _ = gdi.GdiFlush();
+    try std.testing.expect(Expire.calls > 0);
+    try std.testing.expectEqual(@as(u64, 0), app_state.g_cap_msg_until);
+    var notice_ink: usize = 0;
+    var y = notice_layout.meta_text.top;
+    while (y < notice_layout.meta_text.bottom) : (y += 1) {
+        var x = notice_layout.meta_text.left;
+        while (x < notice_layout.meta_text.right) : (x += 1) {
+            const color = w.GetPixel(dc, x, y);
+            if (color & 0xff > 150 and (color >> 8) & 0xff > 80 and (color >> 16) & 0xff < 150) notice_ink += 1;
+        }
+    }
+    try std.testing.expect(notice_ink > 4);
+    try std.testing.expectEqual(@as(i32, 0), (chatTitleLayout() orelse return error.TestUnexpectedResult).meta_pill.right);
+    std.debug.print("IGSH-1152 notice expired during native paint; retained ink={d}\n", .{notice_ink});
 }
 
 pub fn paintInboxButtonTooltip(hdc: HANDLE, in_overlay: bool) void {
