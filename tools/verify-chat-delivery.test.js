@@ -1354,3 +1354,49 @@ test('held cancellation stays callable within GitHub manual input limits', () =>
   assert.match(journey, /  ui:\n[^]*?uses: \.\/.github\/workflows\/verify.yml\n    with:\n      feature: chat-delivery\n      chat_cancel_proof: true/);
   assert.match(journey, /tag: \$\{\{ inputs.tag \|\| '' \}\}/);
 });
+
+test('IGSH-1181 startup subscriptions do not count as interrupted live replies, but new readers do', () => {
+  const source = read('tools/verify-chat-delivery/live-delivery.ps1');
+  const start = source.match(/^\$readerStart = .+$/m)?.[0];
+  assert.ok(start, 'snapshot reader count before observing live replies');
+  const loop = source.indexOf('foreach ($round in 1..$roundCount)');
+  assert.ok(source.indexOf(start) > source.indexOf('Save $retained'));
+  assert.ok(source.indexOf(start) < loop);
+  const end = source.slice(source.indexOf('$readers = ', loop), source.indexOf('if ($longDelivery) {', loop));
+  assert.match(end, /if \(\$readerStart -lt 1 -or \$readers.Count -ne \$readerStart\)/);
+  assert.match(start, /\$_.kind -eq 'reader' -and \$_.argv -contains '--watch'/);
+  assert.match(end, /\$_.kind -eq 'reader' -and \$_.argv -contains '--watch'/);
+  if (process.platform !== 'win32') return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'live-reader-window-'));
+  try {
+    const script = `
+$ErrorActionPreference = 'Stop'
+$state = $env:READER_FIXTURE
+foreach ($startup in @(1, 3)) {
+    foreach ($added in @(0, 1)) {
+        $observation = @{}
+        $rows = @(1..$startup | ForEach-Object { @{kind='reader'; argv=@('--watch')} | ConvertTo-Json -Compress })
+        $rows | Set-Content "$state/invocations.jsonl"
+        ${start}
+        if ($added) { @{kind='reader'; argv=@('--watch')} | ConvertTo-Json -Compress | Add-Content "$state/invocations.jsonl" }
+        @{kind='reader'; argv=@('--serve')} | ConvertTo-Json -Compress | Add-Content "$state/invocations.jsonl"
+        @{kind='list'; argv=@('--watch')} | ConvertTo-Json -Compress | Add-Content "$state/invocations.jsonl"
+        $rejected = $false
+        try { ${end} } catch {
+            if ($_.Exception.Message -notlike 'Background delivery replaced the visible reader:*') { throw }
+            $rejected = $true
+        }
+        if ($rejected -ne [bool]$added) { throw "Wrong interruption result: startup=$startup added=$added" }
+    }
+}
+'READER_WINDOW_OK'
+`;
+    const file = path.join(dir, 'reader-window.ps1');
+    fs.writeFileSync(file, script);
+    assert.match(execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file], {
+      env: { ...process.env, READER_FIXTURE: dir }, encoding: 'utf8', timeout: 30000,
+    }), /READER_WINDOW_OK/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
