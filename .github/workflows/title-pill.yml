@@ -9,7 +9,7 @@ on:
       - tools/title-pill-proof*
       - .github/workflows/title-pill.yml
   push:
-    branches: [master, ceo/IGSH-1028]
+    branches: [master]
   repository_dispatch:
     types: [title-pill-release]
   workflow_dispatch:
