@@ -116,3 +116,11 @@ test('push verification accepts another ticket branch and rejects losing master 
   assert.notEqual(unrelated, verify);
   assert.throws(() => verifyPushBranches(unrelated), assert.AssertionError);
 });
+
+test('IGSH-1161 desktop release journeys use the explicit Windows Server 2022 image', () => {
+  const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
+  const job = verify.match(/^  verify:\n([\s\S]*?)(?=^  [\w-]+:|$(?![\s\S]))/m)?.[1];
+  assert.ok(job, 'desktop journey job exists');
+  assert.match(job, /^    runs-on: windows-2022$/m);
+  assert.doesNotMatch(job, /^    runs-on: windows-latest$/m);
+});
