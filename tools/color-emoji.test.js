@@ -83,3 +83,7 @@ test('Cross-build budget covers native color-font linkage', () => {
 test('Long-chat proof retries cache files replaced during enumeration', () => {
   assert.match(read('tools/verify-chat-delivery/reactions.ps1'), /New message 199[\s\S]*catch \[IO\.FileNotFoundException\] \{ \$false \}/);
 });
+
+test('Long-chat scroll paints emojis throughout the measured paragraphs', () => {
+  assert.match(read('tools/verify-chat-delivery/boundary.py'), /body = body\.replace\("\\n\\n", " ✓ ⚠ 👍\\n\\n"\)/);
+});
