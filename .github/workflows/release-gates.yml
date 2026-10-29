@@ -2,7 +2,7 @@ name: Release gate policy
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: [Release]
+    workflows: [Release, auto-release]
     types: [completed]
   push:
     branches: [ceo/IGSH-1171]
@@ -29,7 +29,7 @@ jobs:
       - name: Prove speed warnings and blocking stability
         run: node --test tools/release-gates.test.mjs
   history:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'master')
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name == github.repository && (github.event.workflow_run.head_branch == 'master' || startsWith(github.event.workflow_run.head_branch, 'v')))
     runs-on: ubuntu-latest
     permissions:
       contents: read

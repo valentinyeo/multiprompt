@@ -60,6 +60,9 @@ test('publication and proof cancellation use separate concurrency lanes', () => 
   assert.match(workflow, /cancel-in-progress: \$\{\{ inputs.proof \|\| inputs.publication_proof \}\}/);
   assert.match(workflow, /needs: \[prepare, journeys\]/);
   assert.match(workflow, /group: release-publication\s+cancel-in-progress: false/);
+  const history = read('.github/workflows/release-gates.yml');
+  assert.match(history, /workflows: \[Release, auto-release\]/);
+  assert.match(history, /startsWith\(github.event.workflow_run.head_branch, 'v'\)/);
 });
 
 test('history separates unchanged-code flakes from deterministic failures', async () => {
