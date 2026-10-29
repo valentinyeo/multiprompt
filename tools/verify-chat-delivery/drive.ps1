@@ -272,9 +272,9 @@ function Assert-FullHistory([string]$Stage) {
             [ChatSwitchObserver]::CopyTranscript($app.Id, $main)
             [Windows.Forms.Clipboard]::GetText().Contains($latest)
         } 2)
+        Shot "full-history-$Stage-latest"
         $latestClock.Stop()
         Save @{latest=$latest; visibleMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/$Stage-latest.json"
-        Shot "full-history-$Stage-latest"
         if ($latestClock.ElapsedMilliseconds -gt 2000) { throw "Latest long-chat message exceeded two seconds at $Stage" }
         Press @(0x1B) 'Esc: clear latest-message selection'
     }
