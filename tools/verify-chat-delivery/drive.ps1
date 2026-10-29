@@ -268,7 +268,6 @@ function Assert-FullHistory([string]$Stage) {
         $latest = 'IGSH815 assistant {0:00}' -f ($rounds - 1)
         [Windows.Forms.Clipboard]::Clear()
         [void](Wait-For 'latest retained message reaches the real rendered transcript' {
-            Doctor $true
             [ChatSwitchObserver]::CopyTranscript($app.Id, $main)
             try { [Windows.Forms.Clipboard]::GetText().Contains($latest) }
             catch {
@@ -280,6 +279,7 @@ function Assert-FullHistory([string]$Stage) {
         $latestClock.Stop()
         Save @{latest=$latest; visibleMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/$Stage-latest.json"
         if ($latestClock.ElapsedMilliseconds -gt 2000) { throw "Latest long-chat message exceeded two seconds at $Stage" }
+        Doctor $true
         Press @(0x1B) 'Esc: clear latest-message selection'
     }
     $offset = (Read-Shared "$settings/debug.log").Length
@@ -699,11 +699,12 @@ foreach ($plan in $plans) {
             $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
             $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
             [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
-            [void](Wait-For 'restarted owned app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
+            $windowMs = [int]$latestClock.ElapsedMilliseconds
             $composer = Wait-For 'restored native Chat View composer with owned typing focus' {
                 $h = [ChatDeliveryDesktop]::Composer($main)
                 if ($h -ne [IntPtr]::Zero -and [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $h)) { $h }
             }
+            Save @{windowMs=$windowMs; focusedMs=[int]$latestClock.ElapsedMilliseconds} "$caseDir/restart-ready.json"
             Assert-FullHistory 'restart'
             if ($env:CHAT_LONG_PROOF -eq '1') { . "$PSScriptRoot/long-chat.ps1" }
         } elseif ($isReply) {
