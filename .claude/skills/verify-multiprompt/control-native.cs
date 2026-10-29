@@ -896,14 +896,14 @@ public static class GroupRailProof {
                 if (TextPixel(image.GetPixel(x, y))) return x;
         return -1;
     }
-    public static Dictionary<string, object> Check(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, bool hidePills, bool collapsed) {
+    public static Dictionary<string, object> Check(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, bool hidePills, bool collapsed, int sidebarWidth) {
         var proof = new Dictionary<string, object>();
         using (var image = new System.Drawing.Bitmap(path)) {
             int clientLeft = origin.X - frame.Left;
             int left = clientLeft + S(8, dpi, scale);
-            int right = clientLeft + S(220, dpi, scale) - S(8, dpi, scale) / 2;
+            int right = clientLeft + S(sidebarWidth, dpi, scale) - S(8, dpi, scale) / 2;
             int top = origin.Y - frame.Top + S(8, dpi, scale) + (hidePills ? 0 : 34) + S(52, dpi, scale);
-            int headerHeight = 28, rowHeight = S(38, dpi, scale);
+            int headerHeight = 28, rowHeight = S(58, dpi, scale);
             int secondHeader = top + headerHeight + (collapsed ? 0 : 2 * rowHeight);
             int groupBottom = secondHeader + headerHeight + 2 * rowHeight;
             var background = image.GetPixel(clientLeft + S(2, dpi, scale), top);
@@ -916,7 +916,7 @@ public static class GroupRailProof {
             for (int group = 0; group < 2; group++) {
                 int headerTop = group == 0 ? top : secondHeader;
                 foreach (int y in new int[] { headerTop, headerTop + headerHeight - 1 })
-                    for (int x = clientLeft; x < clientLeft + S(220, dpi, scale) - 1; x++)
+                    for (int x = clientLeft; x < clientLeft + S(sidebarWidth, dpi, scale) - 1; x++)
                         if (Distance(image.GetPixel(x, y), background) > 3) fillMismatch++;
                 int nameLeft = -1;
                 var headerBackground = image.GetPixel(right - S(8, dpi, scale), headerTop + headerHeight / 2);
@@ -965,17 +965,17 @@ public static class GroupRailProof {
             proof["headerTops"] = new int[] { top, secondHeader };
             proof["headerHeight"] = headerHeight;
             proof["rowHeight"] = rowHeight;
-            proof["sidebarRect"] = new int[] { clientLeft, top, clientLeft + S(220, dpi, scale) - 1, groupBottom };
+            proof["sidebarRect"] = new int[] { clientLeft, top, clientLeft + S(sidebarWidth, dpi, scale) - 1, groupBottom };
             proof["railSearchX"] = new int[] { clientLeft, left + S(10, dpi, scale) };
             proof["background"] = new int[] { background.R, background.G, background.B };
         }
         return proof;
     }
-    public static Dictionary<string, object> Labels(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, int sectionTop, int headlineX, int rowHeight) {
+    public static Dictionary<string, object> Labels(string path, VerifyNative.Rect frame, VerifyNative.Point origin, uint dpi, int scale, int sectionTop, int headlineX, int rowHeight, int sidebarWidth) {
         var proof = new Dictionary<string, object>();
         using (var image = new System.Drawing.Bitmap(path)) {
             int clientLeft = origin.X - frame.Left;
-            int right = clientLeft + S(220, dpi, scale) - S(8, dpi, scale);
+            int right = clientLeft + S(sidebarWidth, dpi, scale) - S(8, dpi, scale);
             int sectionHeight = 24, buttonHeight = 32;
             var muted = System.Drawing.Color.FromArgb(138, 138, 138);
             var sectionBackground = image.GetPixel(right, sectionTop + sectionHeight / 2);
@@ -1016,7 +1016,7 @@ public static class GroupRailProof {
             var buttonBackground = image.GetPixel(right, buttonTop + buttonHeight / 2);
             int minX = int.MaxValue, maxX = -1, minY = int.MaxValue, maxY = -1, buttonInk = 0;
             for (int y = buttonTop; y < buttonTop + buttonHeight; y++) {
-                for (int x = clientLeft + S(2, dpi, scale); x < clientLeft + S(220, dpi, scale) - S(2, dpi, scale); x++) {
+                for (int x = clientLeft + S(2, dpi, scale); x < clientLeft + S(sidebarWidth, dpi, scale) - S(2, dpi, scale); x++) {
                     if (Distance(image.GetPixel(x, y), buttonBackground) <= 30) continue;
                     buttonInk++;
                     minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
@@ -1036,7 +1036,7 @@ public static class GroupRailProof {
             proof["labelInkPixels"] = inkPixels;
             proof["labelMutedPixels"] = mutedPixels;
             proof["labelRect"] = new int[] { clientLeft, sectionTop, right, sectionTop + sectionHeight };
-            proof["buttonRect"] = new int[] { clientLeft, buttonTop, clientLeft + S(220, dpi, scale), buttonTop + buttonHeight };
+            proof["buttonRect"] = new int[] { clientLeft, buttonTop, clientLeft + S(sidebarWidth, dpi, scale), buttonTop + buttonHeight };
             proof["buttonInkBox"] = buttonInk == 0 ? new int[0] : new int[] { minX, minY, maxX, maxY };
             proof["buttonInkPixels"] = buttonInk;
         }
@@ -1085,10 +1085,10 @@ public static class PaneLayoutProof {
         return Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B)));
     }
     public static Dictionary<string, object> FocusMargins(string inputPath, string browserPath, VerifyNative.Rect frame,
-        VerifyNative.Rect client, VerifyNative.Rect console, VerifyNative.Rect browser, uint dpi, int scale) {
+        VerifyNative.Rect client, VerifyNative.Rect console, VerifyNative.Rect browser, uint dpi, int scale, int sidebarWidth) {
         int gap = S(8, dpi, scale), inset = S(10, dpi, scale), margin = S(2, dpi, scale);
         int browserLeft = browser.Left - inset;
-        int primaryLeft = client.Left + S(220, dpi, scale) + gap / 2;
+        int primaryLeft = client.Left + S(sidebarWidth, dpi, scale) + gap / 2;
         int mismatches = 0, samples = 0;
         var first = new List<int[]>();
         Func<int, int, bool> inContent = (x, y) =>
@@ -1190,14 +1190,14 @@ public static class PaneLayoutProof {
         }
     }
     public static Dictionary<string, object> Check(string path, VerifyNative.Rect frame, VerifyNative.Rect client,
-        VerifyNative.Rect console, VerifyNative.Rect browser, uint dpi, int scale, bool hidePills) {
+        VerifyNative.Rect console, VerifyNative.Rect browser, uint dpi, int scale, bool hidePills, int sidebarWidth) {
         var proof = new Dictionary<string, object>();
         using (var image = new System.Drawing.Bitmap(path)) {
             int ox = frame.Left, oy = frame.Top;
             Func<int, int, System.Drawing.Color> pixel = (x, y) => image.GetPixel(x - ox, y - oy);
             int gap = S(8, dpi, scale), pad = S(6, dpi, scale), border = S(1, dpi, scale);
             int sidebarLeft = client.Left + gap;
-            int sidebarRight = client.Left + S(220, dpi, scale) - gap / 2;
+            int sidebarRight = client.Left + S(sidebarWidth, dpi, scale) - gap / 2;
             int left = sidebarRight + gap, right = browser.Left - S(10, dpi, scale) - gap;
             int top = client.Top + gap, bottom = client.Bottom - gap;
             Require(console.Left >= left && console.Right <= right && console.Top >= top && console.Bottom <= bottom,
@@ -1220,7 +1220,7 @@ public static class PaneLayoutProof {
             proof["gripPixels"] = gripPixels;
             Require(forbidden == 0 && gapLeft >= right, "clean-gap", "forbidden ring/divider pixels=" + forbidden);
             int rowTop = client.Top + gap + (hidePills ? 0 : 34) + S(52, dpi, scale) + 28;
-            int rowBottom = rowTop + S(38, dpi, scale);
+            int rowBottom = rowTop + S(58, dpi, scale);
             var railColor = System.Drawing.Color.FromArgb(145, 149, 157);
             int railPixels = 0;
             for (int x = sidebarLeft; x < sidebarLeft + S(10, dpi, scale); x++)

@@ -1,3 +1,6 @@
+            $snapshotPath = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
+            Wait-Until { (Test-Path $snapshotPath) -and (Get-Content $snapshotPath -Raw | ConvertFrom-Json).sidebar_width -ge 100 } 'app publishes its actual sidebar width'
+            $sidebarLogical = [int](Get-Content $snapshotPath -Raw | ConvertFrom-Json).sidebar_width
 
             Select-Theme 'dark' 'pane-layout-dark'
             Wait-Until { $state = Read-Session; $null -ne $state -and @($state.tabs).Count -eq 1 -and $state.tabs[0].kind -eq 'cmd' } 'one real CMD session'
@@ -153,7 +156,7 @@
                             Wait-Until { (Test-Path $returnMarker) -and (Get-Content $returnMarker -Raw).Trim() -ceq 'returned' } 'returned shell received input'
                         }
                         Snapshot ($step + '-returned')
-                        $pixels = [PaneLayoutProof]::FocusMargins((Join-Path $Evidence ($step + '-input.png')), (Join-Path $Evidence ($step + '-browser.png')), $frame, $client, $consoleRect, $browserRect, $dpi, $scale)
+                        $pixels = [PaneLayoutProof]::FocusMargins((Join-Path $Evidence ($step + '-input.png')), (Join-Path $Evidence ($step + '-browser.png')), $frame, $client, $consoleRect, $browserRect, $dpi, $scale, $sidebarLogical)
                         Save-Json $pixels ($step + '-pixels.json')
                         $focusProofs += @{ theme = $theme; view = $view; cycle = $cycle; pageKeys = $pageKeys; pixels = $pixels }
                         if ($view -eq 'chat') {
@@ -214,7 +217,7 @@
                 [Math]::Abs($uiaRect.Right - $consoleRect.Right) -gt 1 -or [Math]::Abs($uiaRect.Bottom - $consoleRect.Bottom) -gt 1) { throw 'Fresh console UIA and HWND identity/bounds disagree' }
             Save-Json @{ frame = $frame; client = $client; console = $consoleRect; browser = $browserRect; consoleHwnd = $console.ToInt64(); browserHwnd = $browser.ToInt64(); dpi = $dpi; scale = $scale; session = $state } 'pane-layout-rects.json'
             Snapshot 'pane-layout'
-            $proof = [PaneLayoutProof]::Check((Join-Path $Evidence 'pane-layout.png'), $frame, $client, $consoleRect, $browserRect, $dpi, $scale, $hidePills)
+            $proof = [PaneLayoutProof]::Check((Join-Path $Evidence 'pane-layout.png'), $frame, $client, $consoleRect, $browserRect, $dpi, $scale, $hidePills, $sidebarLogical)
             Save-Json $proof 'pane-layout-pixels.json'
             $maskColors = [ordered]@{ themes = [ordered]@{}; dpi = $dpi; scale = $scale }
             foreach ($theme in @('dark', 'light', 'amoled')) {
