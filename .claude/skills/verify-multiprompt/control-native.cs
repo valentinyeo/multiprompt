@@ -127,7 +127,17 @@ public static class VerifyNative {
         Thread.Sleep(250);
     }
     public static double ImmediateBrowserTogglePair(int delay) {
-        Action chord = () => { Key(0x12, 0, 0); Key(0x41, 0, 0); Key(0x41, 0, 2); Key(0x12, 0, 2); };
+        var inputs = new List<Input>();
+        Action<ushort, uint> key = (code, flags) => {
+            Input input = new Input(); input.type = 1;
+            input.data.keyboard = new Keyboard { key = code, flags = flags };
+            inputs.Add(input);
+        };
+        key(0x12, 0); key(0x41, 0); key(0x41, 2); key(0x12, 2);
+        Input[] batch = inputs.ToArray();
+        Action chord = () => {
+            if (SendInput((uint)batch.Length, batch, Marshal.SizeOf(typeof(Input))) != (uint)batch.Length) throw new InvalidOperationException("SendInput chord failed");
+        };
         var clock = System.Diagnostics.Stopwatch.StartNew();
         chord();
         Thread.Sleep(delay);

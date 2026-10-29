@@ -71,6 +71,9 @@ test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', 
   assert.ok(native);
   assert.match(native, /chord\(\);[\s\S]*Thread\.Sleep\(delay\);[\s\S]*chord\(\);/);
   assert.match(native, /gap > 300/);
+  assert.match(native, /SendInput\(\(uint\)batch.Length, batch/);
+  assert.doesNotMatch(native, /Key\(0x12/);
+  assert.match(native, /key\(0x12, 0\); key\(0x41, 0\); key\(0x41, 2\); key\(0x12, 2\)/);
   assert.match(journey, /Press @\(0x11, 0x4C\) 'Ctrl\+L: navigate browser pane'/);
   assert.match(journey, /ClassName -eq 'OmniboxViewViews'/);
   assert.ok(journey.includes("(Read-Session).tabs[0].burl -eq $slowUrl"));
@@ -141,6 +144,29 @@ test "opening pane owner is authoritative before shell browser_hwnd is populated
 }
 `);
     const result = spawnSync(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, 'owner.zig')], { cwd: dir, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('IGSH-1126 an enabled browser waiting to launch closes instead of recovering', () => {
+  const source = read('src/shortcuts.zig');
+  const policy = fn(source, 'physicalBrowserShortcutShouldRecover');
+  const acceptsStarted = policy.slice(0, policy.indexOf(')')).includes('connection_started');
+  const call = (live, tick, started) => `physicalBrowserShortcutShouldRecover(true, ${live}, ${tick}${acceptsStarted ? `, ${started}` : ''})`;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-pending-toggle-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'pending.zig'), `const std = @import("std");
+${policy}
+test "pending open closes, crashed connection still recovers" {
+    try std.testing.expect(!${call('false', 0, 'false')});
+    try std.testing.expect(${call('false', 0, 'true')});
+    try std.testing.expect(!${call('true', 0, 'true')});
+    try std.testing.expect(!${call('false', 100, 'true')});
+}
+`);
+    const result = spawnSync(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, 'pending.zig')], { cwd: dir, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

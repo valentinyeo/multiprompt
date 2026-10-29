@@ -501,15 +501,16 @@ test "Alt browser toggle accepts twenty immediate released presses" {
     }
 }
 
-pub fn physicalBrowserShortcutShouldRecover(enabled: bool, hwnd_live: bool, launch_tick: u64) bool {
-    return enabled and !hwnd_live and launch_tick == 0;
+pub fn physicalBrowserShortcutShouldRecover(enabled: bool, hwnd_live: bool, launch_tick: u64, connection_started: bool) bool {
+    return enabled and !hwnd_live and launch_tick == 0 and connection_started;
 }
 
 test "Alt browser shortcut recovers an enabled pane with no live window" {
-    try std.testing.expect(physicalBrowserShortcutShouldRecover(true, false, 0));
-    try std.testing.expect(!physicalBrowserShortcutShouldRecover(false, false, 0));
-    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, true, 0));
-    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, false, 55_000));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, false, 0, false));
+    try std.testing.expect(physicalBrowserShortcutShouldRecover(true, false, 0, true));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(false, false, 0, true));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, true, 0, true));
+    try std.testing.expect(!physicalBrowserShortcutShouldRecover(true, false, 55_000, true));
 }
 
 fn isWindowsLevelShortcut(vk: u32, ctrl: bool, shift: bool, alt: bool) bool {
