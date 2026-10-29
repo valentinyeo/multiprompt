@@ -1,1 +1,1 @@
-Switching chats avoids drawing rounded corners outside the visible area.
+Switching chats avoids repeated drawing and slow diagnostic writes.

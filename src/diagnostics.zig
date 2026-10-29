@@ -334,24 +334,30 @@ fn writeAuditTimestamp(h: HANDLE) void {
 }
 
 pub fn writeAuditEscapedBytes(h: HANDLE, bytes: []const u8) void {
-    for (bytes) |c| {
-        switch (c) {
-            '\\' => win32WriteAll(h, "\\\\"),
-            '"' => win32WriteAll(h, "\\\""),
-            '\r' => win32WriteAll(h, "\\r"),
-            '\n' => win32WriteAll(h, "\\n"),
-            else => {
-                var b = [_]u8{c};
-                win32WriteAll(h, &b);
-            },
-        }
+    var start: usize = 0;
+    for (bytes, 0..) |c, i| {
+        const escaped: []const u8 = switch (c) {
+            '\\' => "\\\\",
+            '"' => "\\\"",
+            '\r' => "\\r",
+            '\n' => "\\n",
+            else => continue,
+        };
+        if (i > start) win32WriteAll(h, bytes[start..i]);
+        win32WriteAll(h, escaped);
+        start = i + 1;
     }
+    if (start < bytes.len) win32WriteAll(h, bytes[start..]);
 }
 
 pub fn writeAuditEscapedWideAscii(h: HANDLE, chars: []const u16) void {
-    for (chars) |wc| {
-        const c: u8 = if (wc >= 32 and wc <= 126) @intCast(wc) else '?';
-        writeAuditEscapedBytes(h, (&[_]u8{c})[0..]);
+    var ascii: [4096]u8 = undefined;
+    var pos: usize = 0;
+    while (pos < chars.len) {
+        const n = @min(ascii.len, chars.len - pos);
+        for (chars[pos..][0..n], 0..) |wc, i| ascii[i] = if (wc >= 32 and wc <= 126) @intCast(wc) else '?';
+        writeAuditEscapedBytes(h, ascii[0..n]);
+        pos += n;
     }
 }
 
