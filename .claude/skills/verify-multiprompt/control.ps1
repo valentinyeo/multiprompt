@@ -12,7 +12,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'Ru
 $shapeProof = $env:CHAT_SHAPE_PROOF -eq '1'
 $shapeProfile = $env:CHAT_SWITCH_PROFILE -eq '1'
 if ($shapeProof -and $Feature -ne 'chat-switch-speed') { throw 'Shape proof requires the chat-switch-speed journey' }
-if ($shapeProfile -and -not $shapeProof) { throw 'Switch profiling requires the shape-proof journey' }
+if ($shapeProfile -and -not $shapeProof -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profiling requires a native switching journey' }
 switch ($Feature) {
         'app-icon' {
             & "$PSScriptRoot/../../../tools/verify-app-icon/drive.ps1" -Exe $Exe -ExpectedVersion $ExpectedVersion -ExpectedHash $ExpectedHash -Evidence $Evidence
