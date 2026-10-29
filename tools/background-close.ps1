@@ -55,6 +55,7 @@ try {
     $env:LOCALAPPDATA = "$profile/local"
     $env:MULTIPROMPT_NO_LOGIN = '1'
     $env:ZIGSHELL_DEBUG = '1'
+    $env:IGSH_246 = '0'
     @{active_tab=0; single_window=$false; chat_active=$false; tabs=@(@{kind='cmd'; name='Close message proof'; manual=$true; cv=$false; pid=0})} | ConvertTo-Json -Depth 5 | Set-Content "$settings/session.json"
     $app = Start-Process -FilePath $Exe -PassThru
     Wait-For 'owned app visible' { $app.Refresh(); $app.MainWindowHandle -ne [IntPtr]::Zero }
