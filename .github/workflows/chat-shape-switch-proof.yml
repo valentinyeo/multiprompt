@@ -1,8 +1,9 @@
 name: Real-size session switch proof
 on:
   workflow_dispatch:
-  push:
-    branches: [ceo/IGSH-1040]
+  schedule:
+    - cron: '32 2 * * *'
+
 permissions:
   contents: read
 jobs:

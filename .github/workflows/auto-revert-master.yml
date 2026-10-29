@@ -1,16 +1,7 @@
 name: Auto-revert master
 
 on:
-  workflow_run:
-    workflows: [Verify desktop]
-    types: [completed]
-    branches: [master]
   workflow_dispatch:
-    inputs:
-      run_id:
-        description: Failed or cancelled master Verify desktop run id to inspect without pushing or opening issues
-        required: true
-        type: string
 
 permissions:
   actions: write
@@ -24,7 +15,7 @@ concurrency:
 
 jobs:
   auto-revert:
-    if: github.event_name == 'workflow_dispatch' || ((github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled') && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'master')
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:

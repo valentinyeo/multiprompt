@@ -2,9 +2,8 @@ name: Tests
 
 on:
   workflow_dispatch:
-  pull_request:
-  push:
-    branches: [master, ceo/IGSH-1019]
+  schedule:
+    - cron: '12 4 * * *'
 
 permissions:
   contents: read
@@ -35,7 +34,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -62,7 +61,7 @@ jobs:
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
       - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
@@ -74,7 +73,7 @@ jobs:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Restore Zig (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
@@ -180,7 +179,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Test plain changelog fragments and update card notes
@@ -231,7 +230,7 @@ jobs:
           node --test tools/update-release.test.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
@@ -286,7 +285,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -350,7 +349,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -383,7 +382,7 @@ jobs:
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
       - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
@@ -395,7 +394,7 @@ jobs:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Restore Zig (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
@@ -459,7 +458,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -481,7 +480,7 @@ jobs:
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
       - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
@@ -529,7 +528,7 @@ jobs:
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -537,7 +536,7 @@ jobs:
         with:
           node-version: 22
       - name: Restore Zig toolchain (PR)
-        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref != 'refs/heads/master'))
+        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref != 'refs/heads/master'))
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
@@ -549,7 +548,7 @@ jobs:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Restore Zig (PR)
-        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref != 'refs/heads/master'))
+        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref != 'refs/heads/master'))
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |

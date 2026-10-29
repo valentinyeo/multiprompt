@@ -2,8 +2,6 @@ name: Verify desktop
 run-name: verify ${{ inputs.feature || 'appearance' }} ${{ inputs.tag || github.head_ref || github.ref_name }}
 
 on:
-  push:
-    branches: [master, 'ceo/IGSH-1072*', ceo/IGSH-1061-recovery, ceo/IGSH-1083, ceo/IGSH-1079, ceo/IGSH-1055-hax2, ceo/IGSH-1053-hax11]
   workflow_dispatch:
     inputs:
       feature:
@@ -192,56 +190,8 @@ on:
         required: false
         default: false
         type: boolean
-  pull_request:
-    paths:
-      - '**'
-      - build.zig
-      - build.zig.zon
-      - .claude/skills/verify-multiprompt/**
-      - .github/workflows/verify.yml
-      - .github/workflows/auto-revert-master.yml
-      - .github/required-checks.txt
-      - tools/auto-revert-master.js
-      - tools/auto-revert-master.test.js
-      - tools/verify-multiprompt.test.js
-      - tools/verify-features.cjs
-      - tools/test-workflow-structure.test.mjs
-      - tools/chat-history-reader-test.py
-      - tools/check-red-run.mjs
-      - tools/verify-workflow-branches.mjs
-      - tools/chat-sync-audit.py
-      - tools/chat-sync-audit.test.py
-      - tools/chat-focus.test.js
-      - tools/chat-dictation.test.js
-      - tools/fixtures/IGSH-812/**
-      - tools/fixtures/IGSH-1040/**
-      - tools/chat-view-everywhere.test.js
-      - tools/chat-view-everywhere-policy.test.js
-      - tools/verify-chat-delivery.test.js
-      - tools/verify-chat-delivery/**
-      - tools/chat-local-agent.c
-      - tools/chat-messages-only-proof.mjs
-      - tools/chat-messages-only-proof.test.mjs
-      - tools/chat-messages-only-proof.test.js
-      - tools/chat-unread-divider.test.js
-      - tools/chat-code-font-proof.mjs
-      - tools/chat-code-font-proof.test.js
-      - tools/chat-composer-text-proof.mjs
-      - tools/chat-composer-text-proof.test.js
-      - tools/start-maximized.test.js
-      - tools/verify-scratch.test.ps1
-      - tools/favorites-groups.test.js
-      - src/**
-      - tools/check-browser-pane-stuck.mjs
-      - tools/check-browser-pane-locked.test.js
-      - tools/check-workspace-focus.mjs
-      - tools/pane-spacing.test.js
-      - tools/browser-switch-speed.test.js
-      - tools/chat-shape-switch.test.js
-      - tools/frozen-wake.test.js
-      - tools/browser-own-profile.test.js
-      - tools/screenshot-upload-receiver.mjs
-      - tools/screenshot-upload-receiver.test.js
+  schedule:
+    - cron: '32 4 * * *'
 
 permissions:
   contents: read

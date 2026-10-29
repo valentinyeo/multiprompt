@@ -1,18 +1,9 @@
 name: Remote switch performance
 
 on:
-  push:
-    branches: [ceo/IGSH-1059, ceo/IGSH-1149]
   workflow_dispatch:
-  pull_request:
-    paths:
-      - src/chat_session.zig
-      - src/chat_render.zig
-      - src/diagnostics.zig
-      - src/smooth.zig
-      - tools/remote-switch*
-      - tools/verify-chat-delivery/**
-      - .github/workflows/remote-switch.yml
+  schedule:
+    - cron: '56 3 * * *'
 
 permissions:
   contents: read

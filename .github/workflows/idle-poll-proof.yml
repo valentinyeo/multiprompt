@@ -1,8 +1,9 @@
 name: Repeated idle polling proof
 on:
   workflow_dispatch:
-  push:
-    branches: [ceo/IGSH-1111]
+  schedule:
+    - cron: '12 3 * * *'
+
 permissions:
   contents: read
 jobs:

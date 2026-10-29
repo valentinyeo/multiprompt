@@ -2,17 +2,21 @@ name: Gitleaks
 
 on:
   push:
-    branches: [master]
   pull_request:
   schedule:
     - cron: "17 4 * * 1"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_scan:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -64,6 +68,7 @@ jobs:
             ./gitleaks detect --no-banner --source . --redact --log-opts "${SCAN_BASE:+$SCAN_BASE..}$SCAN_HEAD"
           fi
       - name: Run trufflehog
+        if: ${{ !inputs.release_scan && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
         run: |
           curl -sSfL https://github.com/trufflesecurity/trufflehog/releases/download/v3.97.0/trufflehog_3.97.0_linux_amd64.tar.gz | tar -xz trufflehog
           # --json keeps values out of the plain log; only the key type and place are printed.

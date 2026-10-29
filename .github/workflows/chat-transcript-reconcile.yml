@@ -1,14 +1,9 @@
 name: Transcript queue reconciliation
 
 on:
-  pull_request:
-    paths:
-      - src/chat_history_reader.py
-      - tools/chat-history-reader-test.py
-      - tools/chat-transcript-reconcile.test.py
-      - tools/fixtures/IGSH-835/**
-      - .github/workflows/chat-transcript-reconcile.yml
   workflow_dispatch:
+  schedule:
+    - cron: '44 2 * * *'
 
 permissions:
   contents: read

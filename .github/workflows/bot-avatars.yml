@@ -1,14 +1,15 @@
 name: Robot avatars
 run-name: robot avatars ${{ inputs.tag || github.ref_name }}
 on:
-  push:
-    branches: [ceo/IGSH-1150, ceo/IGSH-1172]
   workflow_dispatch:
     inputs:
       tag:
         description: Published release to verify, empty builds this branch
         required: false
         type: string
+  schedule:
+    - cron: '8 2 * * *'
+
 permissions:
   contents: read
 concurrency:

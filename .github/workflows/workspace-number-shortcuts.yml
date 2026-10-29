@@ -8,6 +8,8 @@ on:
         description: Published release to verify; empty builds this branch
         required: false
         type: string
+  schedule:
+    - cron: '44 4 * * *'
 
 permissions:
   contents: read

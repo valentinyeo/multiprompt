@@ -1,16 +1,6 @@
 name: check-red-run
 
 on:
-  push:
-    branches: [ceo/IGSH-1012, ceo/IGSH-1057, ceo/IGSH-1059]
-  workflow_call:
-    inputs:
-      base:
-        type: string
-        required: true
-      head:
-        type: string
-        required: true
   workflow_dispatch:
     inputs:
       base:
@@ -21,6 +11,16 @@ on:
         description: Head revision
         default: master
         required: true
+  workflow_call:
+    inputs:
+      base:
+        type: string
+        required: true
+      head:
+        type: string
+        required: true
+  schedule:
+    - cron: '48 2 * * *'
 
 permissions:
   contents: read
@@ -53,6 +53,6 @@ jobs:
         run: node --test tools/check-red-run.test.mjs
       - name: Require changed tests to fail on merge-base source
         env:
-          BASE: ${{ inputs.base || 'origin/master' }}
+          BASE: ${{ inputs.base || format('{0}^', github.sha) }}
           HEAD: ${{ inputs.head || github.sha }}
         run: node tools/check-red-run.mjs "$BASE" "$HEAD"

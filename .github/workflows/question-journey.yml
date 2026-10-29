@@ -1,10 +1,9 @@
 name: Structured question journey
 
 on:
-  push:
-    branches: [ceo/IGSH-1063]
-  repository_dispatch:
-    types: [structured-question-proof]
+  workflow_dispatch:
+  schedule:
+    - cron: '44 3 * * *'
 
 permissions:
   contents: read

@@ -2,28 +2,9 @@ name: Browser corners
 run-name: Browser corners ${{ github.head_ref || github.ref_name }} ${{ github.sha }}
 
 on:
-  pull_request:
-    paths:
-      - src/browser_pane.zig
-      - src/main.zig
-      - .claude/skills/verify-multiprompt/browser-corners.ps1
-      - .claude/skills/verify-multiprompt/control.ps1
-      - .claude/skills/verify-multiprompt/control-library.ps1
-      - .claude/skills/verify-multiprompt/control-native.cs
-      - .github/workflows/browser-corners.yml
-      - .github/workflows/check-red-run.yml
-  push:
-    branches: [master, ceo/IGSH-1057]
-    paths:
-      - src/browser_pane.zig
-      - src/main.zig
-      - .claude/skills/verify-multiprompt/browser-corners.ps1
-      - .claude/skills/verify-multiprompt/control.ps1
-      - .claude/skills/verify-multiprompt/control-library.ps1
-      - .claude/skills/verify-multiprompt/control-native.cs
-      - .github/workflows/browser-corners.yml
-      - .github/workflows/check-red-run.yml
   workflow_dispatch:
+  schedule:
+    - cron: '12 2 * * *'
 
 permissions:
   contents: read

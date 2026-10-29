@@ -1,59 +1,17 @@
 name: auto-release
 
 on:
-  workflow_run:
-    workflows: [Tests, Verify desktop, Release gate]
-    types: [completed]
+  push:
     branches: [master]
   workflow_dispatch:
-  schedule:
-    - cron: '*/30 * * * *'
 
 permissions:
   contents: write
   actions: read
 
-concurrency:
-  group: auto-release
-  cancel-in-progress: false
-
 jobs:
-  tag:
-    if: >-
-      github.event_name == 'schedule' ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') ||
-      (github.event.workflow_run.name == 'Tests' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_repository.full_name == github.repository &&
-       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')) ||
-      ((github.event.workflow_run.name == 'Verify desktop' || github.event.workflow_run.name == 'Release gate') &&
-       (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') &&
-       github.event.workflow_run.head_repository.full_name == github.repository &&
-       github.event.workflow_run.event == 'push')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      tag: ${{ steps.tag.outputs.tag }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: master
-          fetch-depth: 0
-          fetch-tags: true
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-      - name: Tag the newest green master commit
-        id: tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash tools/auto-release-admit.sh >> "$GITHUB_OUTPUT"
-
   release:
-    needs: tag
-    if: needs.tag.outputs.tag != ''
+    if: github.ref == 'refs/heads/master'
     uses: ./.github/workflows/release.yml
-    with:
-      tag: ${{ needs.tag.outputs.tag }}
     secrets:
       MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}

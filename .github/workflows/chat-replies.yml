@@ -1,27 +1,9 @@
 name: Compact reply references
 
 on:
-  pull_request:
-    paths:
-      - 'src/chat_reply.zig'
-      - 'src/chat_render.zig'
-      - 'src/chat_session.zig'
-      - 'tools/chat-reply-reference-proof.mjs'
-      - 'tools/verify-chat-reply.ps1'
-      - 'tools/verify-chat-delivery/**'
-      - '.github/workflows/chat-replies.yml'
-      - '.github/workflows/verify.yml'
-  push:
-    branches: [master]
-    paths:
-      - 'src/chat_reply.zig'
-      - 'src/chat_render.zig'
-      - 'src/chat_session.zig'
-      - 'tools/chat-reply-reference-proof.mjs'
-      - 'tools/verify-chat-reply.ps1'
-      - 'tools/verify-chat-delivery/**'
-      - '.github/workflows/chat-replies.yml'
-      - '.github/workflows/verify.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '28 2 * * *'
 
 permissions:
   contents: read

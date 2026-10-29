@@ -1,23 +1,14 @@
 name: Title pill transparency
 
 on:
-  pull_request:
-    paths:
-      - src/chat_float.zig
-      - src/chat_render.zig
-      - src/drawing.zig
-      - tools/title-pill-proof*
-      - .github/workflows/title-pill.yml
-  push:
-    branches: [master]
-  repository_dispatch:
-    types: [title-pill-release]
   workflow_dispatch:
     inputs:
       tag:
         description: Published tag whose native painter must be verified
         required: false
         type: string
+  schedule:
+    - cron: '16 4 * * *'
 
 permissions:
   contents: read

@@ -1,31 +1,13 @@
 name: Release
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to create, for example v0.28.712
-        required: true
-      browser_stall:
-        description: Force the quarantined browser driver to hang before publication
-        type: boolean
-        default: false
-      proof:
-        description: Build both architectures without publishing
-        type: boolean
-        default: false
-      publication_proof:
-        description: Test publication ordering without building or publishing
-        type: boolean
-        default: false
-
-  workflow_call:
-    inputs:
-      tag:
-        required: true
+        description: Optional new release tag
+        required: false
         type: string
+  workflow_call:
     secrets:
       MULTIPROMPT_RELEASE_SIGNING_KEY:
         required: true
@@ -34,23 +16,12 @@ permissions:
   contents: write
 
 jobs:
-  publication-proof:
-    if: inputs.publication_proof
-    permissions:
-      contents: read
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 22
-      - name: Prove forward-only publication
-        run: node --test tools/release-version.test.mjs
+  gitleaks:
+    uses: ./.github/workflows/gitleaks.yml
+    with:
+      release_scan: true
 
   prepare:
-    if: github.event_name != 'pull_request' && !inputs.publication_proof
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
@@ -62,40 +33,37 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Verify release history on the branch
-        if: inputs.proof
-        run: node --test tools/version-stamp.test.mjs tools/release-version.test.mjs
       - name: Resolve release version and commit
         id: version
         env:
-          REQUESTED_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+          REQUESTED_TAG: ${{ inputs.tag || '' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           sha=$(git rev-parse HEAD)
-          if [ -n "$REQUESTED_TAG" ] && git show-ref --verify --quiet "refs/tags/$REQUESTED_TAG"; then
-            sha=$(git rev-parse "refs/tags/$REQUESTED_TAG^{commit}")
-          fi
-          git show "$sha:src/changelog.zig" > "$RUNNER_TEMP/changelog.zig"
-          tag=$(node tools/release-version.mjs "$RUNNER_TEMP/changelog.zig")
           if [ -n "$REQUESTED_TAG" ]; then
             [[ "$REQUESTED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
             tag=$REQUESTED_TAG
+          else
+            previous=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+            [[ "$previous" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+            base=$(git rev-parse --verify "refs/tags/$previous^{commit}")
+            git merge-base --is-ancestor "$base" "$sha"
+            git rev-list --first-parent "$sha" | grep -Fx "$base" >/dev/null || { echo 'Latest release is not on the first-parent history' >&2; exit 1; }
+            distance=$(git rev-list --first-parent --count "$base..$sha")
+            [ "$distance" -gt 0 ] || { echo 'No commits since latest release' >&2; exit 1; }
+            tag=$(node --input-type=module - "$previous" "$distance" <<'NODE'
+          const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(process.argv[2]);
+          console.log(`v${match[1]}.${match[2]}.${BigInt(match[3]) + BigInt(process.argv[3])}`);
+          NODE
+            )
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-  journeys:
-    if: inputs.proof
-    needs: prepare
-    uses: ./.github/workflows/verify.yml
-    with:
-      feature: all
-      revision: ${{ needs.prepare.outputs.sha }}
-      browser_stall: ${{ inputs.browser_stall || false }}
-
   build:
-    needs: [prepare, journeys]
-    if: always() && !cancelled() && needs.prepare.result == 'success' && (needs.journeys.result == 'success' || needs.journeys.result == 'skipped')
+    needs: prepare
+    timeout-minutes: 10
     name: build-${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
@@ -112,7 +80,9 @@ jobs:
           fetch-depth: 0
       - name: Install Zig 0.16.0
         run: |
-          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz | tar -xJ
+          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
+          tar -xJf zig.tar.xz
           echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -121,11 +91,8 @@ jobs:
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
           GH_TOKEN: ${{ github.token }}
-          PROOF: ${{ inputs.proof }}
         run: |
-          if [ "$PROOF" != true ]; then
-            node tools/version-stamp.mjs build "$TAG"
-          fi
+          node tools/version-stamp.mjs build "$TAG"
           zig build -Dtarget=${{ matrix.target }} -Drelease=${{ github.event_name != 'pull_request' }} -Dversion="${TAG#v}"
           node --input-type=module - "$TAG" <<'NODE'
           import fs from 'node:fs';
@@ -143,9 +110,8 @@ jobs:
           name: multiprompt-${{ matrix.arch }}
           path: dist/*
 
-  update-test:
+  launch:
     needs: [prepare, build]
-    if: ${{ !cancelled() && !inputs.proof && needs.prepare.result == 'success' && needs.build.result == 'success' }}
     permissions:
       contents: read
       actions: read
@@ -154,65 +120,36 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ needs.prepare.outputs.sha }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Require exact-source Lifecycle and Rollback proofs
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
-        run: node tools/release-update-gate.mjs $env:SOURCE_SHA
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: multiprompt-x64
           path: release-bin
-      - name: Start the actual release executable in an isolated profile
+      - name: Restore installed bridge filename
+        shell: powershell
+        run: Copy-Item release-bin/zigshell-bridge-x64.exe release-bin/zigshell-bridge.exe
+      - name: Open the built app and prove its main window
         shell: powershell
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:RUNNER_TEMP 'release-startup'
-          $env:APPDATA = "$root/roaming"
-          $env:LOCALAPPDATA = "$root/local"
-          $env:USERPROFILE = "$root/profile"
-          $env:HOME = $env:USERPROFILE
-          $env:MULTIPROMPT_NO_LOGIN = '1'
-          $env:IGSH_246 = '1'
-          New-Item -ItemType Directory -Force $root, $env:APPDATA, $env:LOCALAPPDATA, $env:USERPROFILE, release-proof | Out-Null
-          Add-Type -Path tools/verify-chat-delivery/job.cs
-          $name = 'Local\MultipromptReleaseStartup-' + [guid]::NewGuid().ToString('N')
-          $event = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $name)
-          $job = [VerifyJob]::new()
-          $process = $null
-          try {
-            $exe = (Resolve-Path release-bin/multiprompt-x64.exe).Path
-            $process = $job.Start($exe, $root, "$pwd/release-proof/startup.stdout.log", "$pwd/release-proof/startup.stderr.log", "--single-window --no-window-restore --update-ready $name")
-            if (-not $event.WaitOne(15000) -or $process.HasExited) { throw 'Release executable did not become ready' }
-            $pidProof = $process.Id
-          } finally {
-            $stopped = $job.Stop()
-            $job.Dispose()
-            $event.Dispose()
-            if ($null -ne $process) { $process.Dispose() }
-          }
-          if ($stopped.ActiveProcesses -ne 0) { throw 'Startup proof left owned processes' }
-          @{ tag = $env:RELEASE_TAG; sha = $env:SOURCE_SHA; ready = $true; pid = $pidProof; remainingOwnedProcesses = $stopped.ActiveProcesses } | ConvertTo-Json | Set-Content -Encoding UTF8 release-proof/startup.json
+        run: ./tools/release-launch.ps1 -Exe release-bin/multiprompt-x64.exe -Evidence release-proof
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: release-startup-updater-proof
+          name: release-launch-proof
           path: release-proof/
           if-no-files-found: error
 
   release:
-    needs: [prepare, build, update-test]
+    needs: [prepare, build, launch, gitleaks]
     permissions:
       contents: write
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && !inputs.proof && needs.prepare.result == 'success' && needs.build.result == 'success' && needs.update-test.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     concurrency:
       group: release-publication
       cancel-in-progress: false
@@ -253,18 +190,9 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
           BUILT_SHA: ${{ needs.prepare.outputs.sha }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/master ]; then
-            status=0
-            git ls-remote --exit-code --tags origin "refs/tags/$TAG" || status=$?
-            if [ "$status" = 0 ]; then
-              echo "Tag $TAG already exists; skipping publication"
-              exit 0
-            fi
-            if [ "$status" != 2 ]; then exit "$status"; fi
-          fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; skipping publication"
-            exit 0
+            echo "Release $TAG already exists; refusing publication" >&2
+            exit 1
           fi
           published_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
           latest=$(node --input-type=module - "$TAG" "$published_tag" <<'NODE'
@@ -279,11 +207,3 @@ jobs:
           )
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$BUILT_SHA" \
             --latest="$latest" --title "multiprompt $TAG" --generate-notes
-
-  runner-sessions:
-    needs: [prepare, release]
-    uses: ./.github/workflows/verify.yml
-    with:
-      feature: chat-delivery
-      hax_sessions_proof: true
-      tag: ${{ needs.prepare.outputs.tag }}

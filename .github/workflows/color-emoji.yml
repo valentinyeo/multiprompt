@@ -1,16 +1,14 @@
 name: Color emoji
 
 on:
-  workflow_run:
-    workflows: [auto-release]
-    types: [completed]
-    branches: [master]
   workflow_dispatch:
     inputs:
       tag:
         description: Published release tag for the live journey, empty builds this branch
         required: false
         type: string
+  schedule:
+    - cron: '52 2 * * *'
 
 permissions:
   contents: read

@@ -121,13 +121,18 @@ export function buildChangelog(files, tag, history = []) {
     const tree = { ...result };
     for (const file of Object.keys(fragmentFiles(tree))) delete tree[file];
     Object.assign(tree, fragments);
-    result[changelogPath] = stampTree(tree, stepTag.slice(1)).files[changelogPath];
+    if (Object.values(fragments).some(text => text.split(/\r?\n/).some(productChange))) {
+      result[changelogPath] = stampTree(tree, stepTag.slice(1)).files[changelogPath];
+    } else {
+      if (!changelogStart.test(result[changelogPath] || '')) throw new Error('Missing CHANGELOG in src/changelog.zig');
+      result[changelogPath] = result[changelogPath].replace(changelogStart, start => `${start}\n    .{ .ver = "${stepTag.slice(1)}", .items = &.{\n    } },`);
+    }
   };
   let previous = history.length ? fragmentFiles(history[0].files) : {};
   for (const step of history.slice(1)) {
     const added = Object.fromEntries(Object.entries(addedSince(fragmentFiles(step.files), previous))
       .filter(([file, text]) => fragmentLines(file, text).some(productChange)));
-    if (Object.keys(added).length) stamp(step.tag, added);
+    stamp(step.tag, added);
     previous = fragmentFiles(step.files);
   }
   const added = addedSince(fragmentFiles(files), previous);
