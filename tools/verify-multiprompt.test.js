@@ -991,6 +991,9 @@ test('ISSUE-559 real Windows cleanup rejects the old vanished-lockfile race and 
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /ISSUE-559 old cleanup rejected:/);
   assert.match(result.stdout, /ISSUE-559 production cleanup passed/);
+  assert.match(result.stdout, /GLOBAL_FONT_KILLED_REGISTRAR_LOCK_PROVEN/);
+  assert.match(result.stdout, /GLOBAL_FONT_OWNED_CLEANUP_OK/);
+  console.log(result.stdout);
 });
 
 test('ISSUE-559 setup waits for rendered browser readiness and retries only owned-frame activation', () => {
@@ -2356,4 +2359,20 @@ Write-Host 'NATIVE_GROUP_GEOMETRY_OK'
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('IGSH-1161 owned global console fonts are released after process teardown and before scratch removal', () => {
+  const driver = read(skill + 'control.ps1');
+  const library = read(skill + 'control-library.ps1');
+  const native = read(skill + 'control-native.cs');
+  const stop = driver.indexOf('$stopped = $job.Stop()');
+  const release = driver.indexOf('Release-ScratchConsoleFonts $scratch', stop);
+  const copy = driver.indexOf('Prepare-ScratchEvidence $scratch', stop);
+  assert.ok(stop >= 0 && release > stop && copy > release, 'release global font references only after owned processes stop');
+  assert.match(native, /\[DllImport\("gdi32\.dll", CharSet=CharSet\.Unicode\)\] public static extern bool RemoveFontResourceEx\(string path, uint flags, IntPtr reserved\);/);
+  assert.match(library, /function Release-ScratchConsoleFonts\(\[string\]\$Path\)/);
+  const cleanup = library.slice(library.indexOf('function Release-ScratchConsoleFonts('), library.indexOf('function Test-VanishedScratchItem('));
+  assert.ok(cleanup.includes("Join-Path $Path 'local/ZigShell/fonts'"));
+  assert.ok(cleanup.includes('[VerifyNative]::RemoveFontResourceEx($entry.FullName, 0, [IntPtr]::Zero)'));
+  assert.ok(cleanup.includes("'console-font-cleanup.json'"));
 });

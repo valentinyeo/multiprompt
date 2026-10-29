@@ -510,6 +510,7 @@ try {
                     $warmupStopped = $warmupJob.Stop()
                     Save-Json @{ activeAfterStop = $warmupStopped.ActiveProcesses } 'browser-setup-process-tree.json'
                 }
+                Release-ScratchConsoleFonts $scratch
             } finally {
                 if ($null -ne $switchNativeRegistry) {
                     Remove-Item -LiteralPath $switchNativeRegistry -Recurse -Force
