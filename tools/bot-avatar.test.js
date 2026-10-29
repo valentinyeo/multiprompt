@@ -121,6 +121,11 @@ test "tiles wrap and every mouse target remains the painted session" {
     try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
     try std.testing.expect(rows[0].kind == .section);
     try std.testing.expect(hitTestSidebar(20, rows[0].y + 10) == .section);
+    pinned_collapsed = false;
+    g_starred_workspace = true;
+    try std.testing.expectEqual(@as(u32, 5), layoutRows(&rows));
+    try std.testing.expect(!rows[0].tile);
+    try std.testing.expectEqual(@as(i32, 20), rows[0].y);
 }
 `);
     const result = spawnSync(process.env.ZIG_EXE || 'zig', ['test', path.join(dir, 'layout.zig')], {encoding: 'utf8', timeout: 120000});

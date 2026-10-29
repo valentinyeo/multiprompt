@@ -148,7 +148,7 @@ test('IGSH-457 production Starred rows include other windows without duplicating
   try {
     copyZig(['workspace_view.zig'], tmp);
     const sidebar = fs.readFileSync(path.join(__dirname, '../src/sidebar.zig'), 'utf8');
-    const start = sidebar.indexOf('pub fn layoutRows(');
+    const start = sidebar.indexOf('fn layoutRowsInner(');
     const end = sidebar.indexOf('    const show_section_headers', start);
     assert.ok(start >= 0 && end > start);
     const groupIdStart = sidebar.indexOf('pub fn tabGroupId(');
@@ -196,28 +196,28 @@ fn tabRowH() i32 { return 32; }
 ${production}
 test "IGSH-457 Starred mirrors local and other-account window favorites after star and unstar" {
     var rows: [MAX_ROWS]Row = undefined;
-    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 2), layoutRowsInner(&rows));
     try std.testing.expectEqual(.tab, rows[0].kind);
     try std.testing.expectEqual(@as(i32, 92), rows[0].y);
     try std.testing.expectEqual(.inbox, rows[1].kind);
     try std.testing.expectEqual(@as(u32, 1), rows[1].shell_idx);
     local_favorite = false;
     app_state.g_inbox_rows[1].favorite = false;
-    try std.testing.expectEqual(@as(u32, 0), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 0), layoutRowsInner(&rows));
     app_state.g_inbox_rows[2].favorite = true;
-    try std.testing.expectEqual(@as(u32, 1), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 1), layoutRowsInner(&rows));
     try std.testing.expectEqual(@as(u32, 2), rows[0].shell_idx);
     local_favorite = true;
     app_state.group_count = 1;
     app_state.shells[0].starred_group_id = 17;
-    try std.testing.expectEqual(@as(u32, 3), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 3), layoutRowsInner(&rows));
     try std.testing.expectEqual(.header, rows[0].kind);
     try std.testing.expectEqual(.tab, rows[1].kind);
     try std.testing.expectEqual(@as(u32, 0), rows[1].shell_idx);
     try std.testing.expectEqual(.inbox, rows[2].kind);
     try std.testing.expectEqual(@as(u32, 2), rows[2].shell_idx);
     app_state.groups[0].collapsed = true;
-    try std.testing.expectEqual(@as(u32, 2), layoutRows(&rows));
+    try std.testing.expectEqual(@as(u32, 2), layoutRowsInner(&rows));
     try std.testing.expectEqual(.header, rows[0].kind);
     try std.testing.expectEqual(.inbox, rows[1].kind);
 }
