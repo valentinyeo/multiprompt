@@ -91,7 +91,9 @@ test('IGSH-718 enabled button backgrounds are neutral, hover is lighter, disable
   assert.match(paint, /if \(enabled\) RGB\(grey, grey, grey\) else customColorOr\("overlay_input_bg", if \(app_state.g_light_theme\) RGB\(236, 238, 243\) else RGB\(38, 42, 52\)\)/);
   assert.match(paint, /RGB\(255, 255, 255\) else RGB\(235, 235, 235\)/);
   assert.doesNotMatch(paint, /selected_bg|const accent/);
-  assert.match(paint, /drawRoundRect\(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius\)/);
+  assert.match(paint, /tokens.roundButton\(&canvas, @bitCast\(rc\), fill\)/);
+  assert.match(read('src/design_tokens.zig'), /canvas.roundRect\(rect, @divTrunc\(rect.bottom - rect.top, 2\), fill\)/);
+  assert.match(read('src/design_canvas.zig'), /fillRoundRectAA\(self.hdc, @bitCast\(rect\), radius, color\)/);
 });
 
 test('IGSH-718 journey requires real owned mouse input, exact new log, popup dismissal and screenshot pixel checks', () => {

@@ -88,9 +88,11 @@ test "IGSH-731 production composer edges beat native EDIT at every UI scale and 
             @import("drawing.zig").resetFontCache();
             const font = @import("chat_composer.zig").ensureChatFont();
             try std.testing.expect(font != null);
-            _ = w.SendMessageW(edit, 0x0030, @intFromPtr(font), 0);
+            const native_font = fonts.chat(-@import("drawing.zig").uiScaled(app_state.g_chat_font_pt), false, false, false, .{ .quality = 3 }) orelse return error.TestUnexpectedResult;
+            defer _ = w.DeleteObject(native_font);
             var measurements: [2]Measurement = undefined;
             for ([_]bool{ false, true }, 0..) |direct_write, mode| {
+                _ = w.SendMessageW(edit, 0x0030, @intFromPtr(if (direct_write) font else native_font), 0);
                 try std.testing.expect(w.SetEnvironmentVariableW(L("IGSH_731"), if (direct_write) L("1") else L("0")) != 0);
                 @memset(pixels, 255);
                 const before = @import("dwrite_text.zig").painted_runs;
