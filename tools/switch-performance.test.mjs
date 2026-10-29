@@ -333,7 +333,9 @@ test('IGSH-1197 published executable proof measures switches without inventing i
 
 
 test('IGSH-1197 branch workflow measures the fixed candidate, dispatch measures the signed release', () => {
-  const flow = fs.readFileSync(new URL('../.github/workflows/large-history-switch.yml', import.meta.url), 'utf8');
+  const file = new URL('../.github/workflows/large-history-switch.yml', import.meta.url);
+  assert.ok(fs.existsSync(file), 'Large-history proof workflow must ship');
+  const flow = fs.readFileSync(file, 'utf8');
   assert.match(flow, /name: Build exact branch candidate for pre-merge workflow proof\n        if: github.event_name == 'push'/);
   assert.match(flow, /Copy-Item zig-out\/bin\/multiprompt.exe released\/multiprompt.exe/);
   assert.match(flow, /-Revision "\$env:SWITCH_REVISION" -SwitchOnly/);
