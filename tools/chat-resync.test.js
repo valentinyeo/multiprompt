@@ -13,7 +13,8 @@ test('Resync retires cached generation without touching draft or delivery, and e
   assert.ok(match, 'Existing chat menu needs a non-destructive Resync action');
   const body = match[0].replace('pub fn', 'fn').replaceAll('app_state.', '');
   assert.doesNotMatch(body, /chatResetForShell|sendChat|chatOutbox|SetWindowText|DeleteFile/);
-  assert.match(source, /entry\.resync and !disk and !history\.more and history\.start == 0/);
+  assert.match(source, /entry\.resync and !disk and !history\.more/);
+  assert.match(source, /else if \(!has_messages\) entry.history.start else 0/);
   assert.match(source, /showHeaderNoticeAscii\("Chat resynced"/);
   assert.match(read('src/more_menu.zig'), /\.resync => "Resync chat"/);
   assert.match(read('src/main.zig'), /Item\.resync\) => @import\("chat_session.zig"\)\.chatResync\(\)/);
