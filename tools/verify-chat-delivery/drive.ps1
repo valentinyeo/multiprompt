@@ -1232,7 +1232,11 @@ if ($env:CHAT_ACCEPTED_PROOF -eq '1') {
     exit $LASTEXITCODE
 }
 if ($env:CHAT_SWITCH_PROOF -eq '1') {
-    & node "$PSScriptRoot/../remote-switch-proof.mjs" $Evidence
+    if ($env:CHAT_SWITCH_PAIRED -eq '1') {
+        & node "$PSScriptRoot/../remote-switch-proof.mjs" $Evidence --measure
+    } else {
+        & node "$PSScriptRoot/../remote-switch-proof.mjs" $Evidence
+    }
     exit $LASTEXITCODE
 }
 if ($env:CHAT_REMOTE_PROOF -eq '1') {
