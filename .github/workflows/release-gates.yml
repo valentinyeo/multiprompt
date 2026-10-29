@@ -15,7 +15,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: release-gates-${{ github.ref }}
+  group: release-gates-${{ github.event_name }}-${{ github.event.workflow_run.id || github.ref }}
   cancel-in-progress: true
 jobs:
   policy:
