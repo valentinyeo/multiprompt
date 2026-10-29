@@ -12,6 +12,10 @@ on:
         description: Build both architectures without publishing
         type: boolean
         default: false
+      publication_proof:
+        description: Test publication ordering without building or publishing
+        type: boolean
+        default: false
 
   workflow_call:
     inputs:
@@ -26,8 +30,23 @@ permissions:
   contents: write
 
 jobs:
+  publication-proof:
+    if: inputs.publication_proof
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Prove forward-only publication
+        run: node --test tools/release-version.test.mjs
+
   prepare:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && !inputs.publication_proof
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}

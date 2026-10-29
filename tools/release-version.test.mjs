@@ -537,3 +537,15 @@ test('latest-feed read failures cannot replace the desktop update', { skip: proc
   assert.notEqual(result.status, 0);
   assert.equal(f.calls().filter(args => args[1] === 'create').length, 0);
 });
+
+
+test('publication-only dispatch proves the real publisher without building or changing releases', () => {
+  assert.match(workflow, /publication_proof:\n        description: Test publication ordering without building or publishing\n        type: boolean\n        default: false/);
+  const proof = workflow.split('\n  publication-proof:\n')[1]?.split('\n  prepare:\n')[0];
+  assert.ok(proof);
+  assert.match(proof, /if: inputs\.publication_proof/);
+  assert.match(proof, /permissions:\n      contents: read/);
+  assert.match(proof, /run: node --test tools\/release-version\.test\.mjs/);
+  assert.doesNotMatch(proof, /zig build|gh release|secrets\./);
+  assert.match(workflow, /prepare:\n    if: github.event_name != 'pull_request' && !inputs\.publication_proof/);
+});
