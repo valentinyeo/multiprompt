@@ -122,18 +122,34 @@ pub fn draw(dc: w.HANDLE, rect: w.RECT, appearance: Appearance) void {
         var log: [160]u8 = undefined;
         @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log, "[bots] face={d} color={d} rect={d},{d},{d},{d}", .{ appearance.face, appearance.color, rect.left, rect.top, rect.right, rect.bottom }) catch "[bots] layout unavailable");
     }
-    const saved = w.SaveDC(dc);
-    if (saved == 0) return;
-    defer _ = w.RestoreDC(dc, saved);
-    const crop = w.CreateRoundRectRgn(rect.left, rect.top, rect.right + 1, rect.bottom + 1, rect.right - rect.left, rect.bottom - rect.top);
-    if (crop == null) return;
-    defer _ = w.DeleteObject(crop);
-    const old_clip = w.CreateRectRgn(0, 0, 0, 0);
-    if (old_clip == null) return;
-    defer _ = w.DeleteObject(old_clip);
-    if (w.GetClipRgn(dc, old_clip) == 1) _ = w.CombineRgn(crop, crop, old_clip, 1);
-    _ = w.SelectClipRgn(dc, crop);
-    smooth.fillEllipse(dc, rect, rgb(0x1E1E1E));
+    const width = rect.right - rect.left;
+    const height = rect.bottom - rect.top;
+    if (width <= 0 or height <= 0) return;
+    const samples = 4;
+    const surface = w.CreateCompatibleDC(dc);
+    if (surface == null) return;
+    defer _ = w.DeleteDC(surface);
+    const info = w.BITMAPINFO{ .header = .{ .width = width * samples, .height = -height * samples } };
+    var bits: ?*anyopaque = null;
+    const bitmap = w.CreateDIBSection(surface, &info, 0, &bits, null, 0);
+    if (bitmap == null or bits == null) return;
+    defer _ = w.DeleteObject(bitmap);
+    const old = w.SelectObject(surface, bitmap);
+    defer _ = w.SelectObject(surface, old);
+    const pixels: [*]u32 = @ptrCast(@alignCast(bits.?));
+    const len: usize = @intCast(width * height * samples * samples);
+    @memset(pixels[0..len], 0x001E1E1E);
+    const canvas_rect = w.RECT{ .left = 0, .top = 0, .right = width * samples, .bottom = height * samples };
+    drawFace(surface, canvas_rect, appearance);
+    _ = w.GdiFlush();
+    smooth.resolveEllipse(pixels[0..len], @intCast(width), @intCast(height), samples);
+    const Blend = struct {
+        extern "gdi32" fn GdiAlphaBlend(w.HANDLE, i32, i32, i32, i32, w.HANDLE, i32, i32, i32, i32, w.BLENDFUNCTION) callconv(w.WINAPI) w.BOOL;
+    };
+    _ = Blend.GdiAlphaBlend(dc, rect.left, rect.top, width, height, surface, 0, 0, width, height, .{});
+}
+
+fn drawFace(dc: w.HANDLE, rect: w.RECT, appearance: Appearance) void {
     const face = appearance.face;
     const head = colors[appearance.color];
     const p = Painter{ .dc = dc, .rect = rect, .face = face };
@@ -189,16 +205,40 @@ pub fn draw(dc: w.HANDLE, rect: w.RECT, appearance: Appearance) void {
     const y = vb.y + vb.height / 2;
     const left = vb.x + vb.width * 0.264;
     const right = vb.x + vb.width * 0.6;
-    const radius: f32 = switch (face) { 11, 14, 15, 18 => 20, 13 => 34, else => 26 };
+    const radius: f32 = switch (face) {
+        11, 14, 15, 18 => 20,
+        13 => 34,
+        else => 26,
+    };
     switch (face) {
-        1, 12 => { p.eye(left, y, radius, true); p.eye(right, y, radius, true); },
-        2, 9 => { p.box(eyes, left - 24, y - 24, 48, 48, 12); p.box(eyes, right - 24, y - 24, 48, 48, 12); },
-        3, 19 => { p.box(eyes, left - 28, y - 7, 56, 14, 7); p.box(eyes, right - 28, y - 7, 56, 14, 7); },
+        1, 12 => {
+            p.eye(left, y, radius, true);
+            p.eye(right, y, radius, true);
+        },
+        2, 9 => {
+            p.box(eyes, left - 24, y - 24, 48, 48, 12);
+            p.box(eyes, right - 24, y - 24, 48, 48, 12);
+        },
+        3, 19 => {
+            p.box(eyes, left - 28, y - 7, 56, 14, 7);
+            p.box(eyes, right - 28, y - 7, 56, 14, 7);
+        },
         4 => p.box(eyes, 112, 122, 132, 52, 26),
-        5 => { p.eye(left, y, radius, false); p.eye(right, y, radius, true); },
-        6 => { for ([_]f32{ left, right }) |x| { p.eye(x, y, 34, false); p.box(visor, x - 2, y - 10, 20, 20, 10); } },
+        5 => {
+            p.eye(left, y, radius, false);
+            p.eye(right, y, radius, true);
+        },
+        6 => {
+            for ([_]f32{ left, right }) |x| {
+                p.eye(x, y, 34, false);
+                p.box(visor, x - 2, y - 10, 20, 20, 10);
+            }
+        },
         16 => p.eye(84, y, 28, false),
-        else => { p.eye(left, y, radius, false); p.eye(right, y, radius, false); },
+        else => {
+            p.eye(left, y, radius, false);
+            p.eye(right, y, radius, false);
+        },
     }
     if (face == 14) p.box(eyes, 112, 186, 30, 8, 4);
     if (face == 18) {
@@ -220,4 +260,84 @@ test "Android and desktop share raw UTF-8 bot identity" {
     shell.shell_id = 999;
     shell.tmux_host = 1;
     try std.testing.expectEqual(first, forShell(&shell));
+}
+
+test "IGSH-1192 every robot retains fractional circular edges at 100 and 150 percent" {
+    for ([_]i32{ 100, 150 }) |scale| {
+        const size = @divTrunc(40 * scale, 100);
+        const cell = size + 12;
+        const width = cell * 10;
+        const height = cell * 3;
+        const dc = w.CreateCompatibleDC(null);
+        try std.testing.expect(dc != null);
+        defer _ = w.DeleteDC(dc);
+        const info = w.BITMAPINFO{ .header = .{ .width = width, .height = -height } };
+        var bits: ?*anyopaque = null;
+        const bitmap = w.CreateDIBSection(dc, &info, 0, &bits, null, 0);
+        try std.testing.expect(bitmap != null and bits != null);
+        defer _ = w.DeleteObject(bitmap);
+        const old = w.SelectObject(dc, bitmap);
+        defer _ = w.SelectObject(dc, old);
+        const pixels: [*]u32 = @ptrCast(@alignCast(bits.?));
+        const len: usize = @intCast(width * height);
+        const background: u32 = 0x00804020;
+        @memset(pixels[0..len], background);
+        for (0..20) |face| {
+            const left = @as(i32, @intCast(face % 10)) * cell + 6;
+            const top = @as(i32, @intCast(face / 10)) * cell + 6;
+            const rect = w.RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+            draw(dc, rect, .{ .face = @intCast(face), .color = 0 });
+            _ = w.GdiFlush();
+            var partial: usize = 0;
+            var visible: usize = 0;
+            for (0..@intCast(size)) |y| {
+                for (0..@intCast(size)) |x| {
+                    var covered: usize = 0;
+                    for (0..4) |sy| {
+                        for (0..4) |sx| {
+                            const dx = 2 * @as(i32, @intCast(x * 4 + sx)) + 1 - size * 4;
+                            const dy = 2 * @as(i32, @intCast(y * 4 + sy)) + 1 - size * 4;
+                            if (dx * dx + dy * dy <= size * size * 16) covered += 1;
+                        }
+                    }
+                    const pixel = pixels[(@as(usize, @intCast(top)) + y) * @as(usize, @intCast(width)) + @as(usize, @intCast(left)) + x] & 0xffffff;
+                    if (covered == 0) try std.testing.expectEqual(background, pixel);
+                    if (covered > 0 and covered < 16) {
+                        partial += 1;
+                        const b = pixel & 255;
+                        const g = (pixel >> 8) & 255;
+                        const r = (pixel >> 16) & 255;
+                        if (pixel != background and (r != g or g != b)) visible += 1;
+                    }
+                }
+            }
+            if (visible != partial) std.debug.print("IGSH-1192 face={d} scale={d} fractional={d}/{d}\n", .{ face, scale, visible, partial });
+            try std.testing.expect(partial >= @as(usize, @intCast(size)));
+            try std.testing.expectEqual(partial, visible);
+        }
+        const pill = w.RECT{ .left = 6, .top = cell * 2 + 6, .right = cell * 4 - 6, .bottom = height - 6 };
+        smooth.fillRoundRect(dc, pill, @divTrunc(size, 2), 0x808080);
+        smooth.fillRoundRect(dc, .{ .left = pill.left + 1, .top = pill.top + 1, .right = pill.right - 1, .bottom = pill.bottom - 1 }, @divTrunc(size, 2) - 1, 0x202020);
+        var canvas = smooth.Canvas.init(dc);
+        defer canvas.deinit();
+        try std.testing.expect(canvas.graphics != null);
+        const icon_x = cell * 5;
+        canvas.strokePolyline(&.{ .{ .x = icon_x, .y = cell * 2 + 12 }, .{ .x = icon_x + @divTrunc(size, 2), .y = height - 12 }, .{ .x = icon_x + size, .y = cell * 2 + 12 } }, 0xffffff, 2);
+        _ = w.GdiFlush();
+        const bytes = std.mem.sliceAsBytes(pixels[0..len]);
+        const bmp = try std.testing.allocator.alloc(u8, 54 + bytes.len);
+        defer std.testing.allocator.free(bmp);
+        @memset(bmp[0..54], 0);
+        @memcpy(bmp[0..2], "BM");
+        std.mem.writeInt(u32, bmp[2..6], @intCast(bmp.len), .little);
+        std.mem.writeInt(u32, bmp[10..14], 54, .little);
+        @memcpy(bmp[14..54], std.mem.asBytes(&info.header));
+        @memcpy(bmp[54..], bytes);
+        const name = if (scale == 100) std.unicode.utf8ToUtf16LeStringLiteral("smooth-shapes-100.bmp") else std.unicode.utf8ToUtf16LeStringLiteral("smooth-shapes-150.bmp");
+        const file = w.CreateFileW(name, 0x40000000, 0, null, 2, 0x80, null);
+        try std.testing.expect(file != null and file != @as(w.HANDLE, @ptrFromInt(std.math.maxInt(usize))));
+        defer _ = w.CloseHandle(file);
+        var written: u32 = 0;
+        try std.testing.expect(w.WriteFile(file, bmp.ptr, @intCast(bmp.len), &written, null) != 0 and written == bmp.len);
+    }
 }

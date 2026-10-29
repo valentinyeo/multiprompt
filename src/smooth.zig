@@ -163,7 +163,7 @@ pub const Canvas = struct {
         const api = &app_state.g_gdip_api;
         if (api.create_from_hdc(hdc, &self.graphics) != 0) return .{ .hdc = hdc };
         if (self.graphics == null) return self;
-        if (api.set_smoothing(self.graphics, 4) != 0 or api.set_pixel_offset(self.graphics, 4) != 0) self.deinit();
+        if (api.set_smoothing(self.graphics, 5) != 0 or api.set_pixel_offset(self.graphics, 4) != 0) self.deinit();
         if (self.graphics != null and paint_graphics == null) {
             paint_hdc = hdc;
             paint_graphics = self.graphics;
@@ -388,6 +388,36 @@ pub fn drawPie(hdc: HANDLE, l: i32, t: i32, r: i32, b: i32, sx: i32, sy: i32, ex
     var canvas = Canvas.init(hdc);
     defer canvas.deinit();
     return canvas.selected(.{ .pie = .{ .rc = .{ .left = l, .top = t, .right = r, .bottom = b }, .start = .{ .x = sx, .y = sy }, .end = .{ .x = ex, .y = ey } } });
+}
+
+pub fn resolveEllipse(pixels: []u32, width: usize, height: usize, samples: usize) void {
+    const stride = width * samples;
+    const rows = height * samples;
+    std.debug.assert(pixels.len == stride * rows and samples > 0);
+    const total: u32 = @intCast(samples * samples);
+    const ww: i64 = @intCast(stride * stride);
+    const hh: i64 = @intCast(rows * rows);
+    for (0..height) |y| {
+        for (0..width) |x| {
+            var sum: [3]u32 = @splat(0);
+            var covered: u32 = 0;
+            for (0..samples) |sy| {
+                const yy = y * samples + sy;
+                const dy = @as(i64, @intCast(2 * yy + 1)) - @as(i64, @intCast(rows));
+                for (0..samples) |sx| {
+                    const xx = x * samples + sx;
+                    const dx = @as(i64, @intCast(2 * xx + 1)) - @as(i64, @intCast(stride));
+                    if (dx * dx * hh + dy * dy * ww > ww * hh) continue;
+                    covered += 1;
+                    const pixel = pixels[yy * stride + xx];
+                    inline for (0..3) |channel| sum[channel] += (pixel >> (channel * 8)) & 255;
+                }
+            }
+            var pixel = ((covered * 255 + total / 2) / total) << 24;
+            inline for (0..3) |channel| pixel |= ((sum[channel] + total / 2) / total) << (channel * 8);
+            pixels[y * stride + x] = pixel;
+        }
+    }
 }
 
 pub fn fillRoundRect(hdc: HANDLE, rc: RECT, radius: i32, color: u32) void {

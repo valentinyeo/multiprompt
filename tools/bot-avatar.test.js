@@ -209,3 +209,46 @@ test "console buffer is used and released, never the inherited log file" {
     assert.equal(result.status, 0, result.stdout + result.stderr);
   } finally { fs.rmSync(dir, {recursive: true, force: true}); }
 });
+
+test('IGSH-1192 fractional circle resolve preserves artwork, premultiplies edges and leaves exterior transparent', () => {
+  const resolve = block(read('src/smooth.zig'), 'pub fn resolveEllipse(');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-circle-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'circle.zig'), `const std = @import("std");
+${resolve}
+test "fractional circle is symmetric, premultiplied and resolved in place" {
+    for ([_]usize{ 28, 40, 56, 60, 84 }) |size| {
+        const stride = size * 4;
+        const pixels = try std.testing.allocator.alloc(u32, stride * stride);
+        defer std.testing.allocator.free(pixels);
+        @memset(pixels, 0x00ffffff);
+        resolveEllipse(pixels, size, size, 4);
+        var partial: usize = 0;
+        var area: usize = 0;
+        for (0..size) |y| for (0..size) |x| {
+            const p = pixels[y * stride + x];
+            const a = p >> 24;
+            try std.testing.expectEqual(a, p & 255);
+            try std.testing.expectEqual(a, (p >> 8) & 255);
+            try std.testing.expectEqual(a, (p >> 16) & 255);
+            try std.testing.expectEqual(p, pixels[y * stride + size - 1 - x]);
+            try std.testing.expectEqual(p, pixels[(size - 1 - y) * stride + x]);
+            partial += @intFromBool(a > 0 and a < 255);
+            area += a;
+        };
+        try std.testing.expect(partial >= size);
+        try std.testing.expectEqual(@as(u32, 0), pixels[0]);
+        try std.testing.expectEqual(@as(u32, 0xffffffff), pixels[(size / 2) * stride + size / 2]);
+        const expected = @as(f64, @floatFromInt(size * size)) * std.math.pi / 4;
+        try std.testing.expect(@abs(@as(f64, @floatFromInt(area)) / 255 - expected) < @as(f64, @floatFromInt(size)) / 4);
+        for (0..size * 4) |y| for (0..size * 4) |x| { pixels[y * stride + x] = if (x < stride / 2) 0x00ffffff else 0; };
+        resolveEllipse(pixels, size, size, 4);
+        try std.testing.expectEqual(@as(u32, 0xffffffff), pixels[(size / 2) * stride + size / 4]);
+        try std.testing.expectEqual(@as(u32, 0xff000000), pixels[(size / 2) * stride + size * 3 / 4]);
+    }
+}
+`);
+    const result = spawnSync(process.env.ZIG_EXE || 'zig', ['test', path.join(dir, 'circle.zig')], {encoding: 'utf8', timeout: 60000});
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  } finally { fs.rmSync(dir, {recursive: true, force: true}); }
+});

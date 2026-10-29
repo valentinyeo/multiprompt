@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][string]$ExpectedVersion,
     [Parameter(Mandatory)][string]$ExpectedHash,
     [Parameter(Mandatory)][string]$Evidence,
-    [string]$WorkspaceName = ''
+    [string]$WorkspaceName = '',
+    [ValidateSet(96, 144)][int]$Dpi = 96
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -14,6 +15,7 @@ $Evidence = (Resolve-Path $Evidence).Path
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/desktop.cs"
 Add-Type -Path "$PSScriptRoot/../verify-chat-delivery/job.cs"
+Add-Type -Path "$PSScriptRoot/../../.claude/skills/verify-multiprompt/title-bar-native.cs"
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $env:IGSH_246 = '0'
 $env:MULTIPROMPT_NO_LOGIN = '1'
@@ -89,6 +91,8 @@ function Check-Pixels($Row, [string]$Name) {
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 try {
+    [CaptionProof]::SetDpi($Dpi)
+    function Px([int]$Value) { [int][Math]::Floor($Value * $Dpi / 96) }
     if ((Get-FileHash $Exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedHash) { throw 'Binary checksum mismatch' }
     if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains("MPVERSION=$ExpectedVersion;")) { throw 'Binary version mismatch' }
     $displayNames = @('inne Chief of Staff', 'Mini Boss CEO', 'HT Product Lead', 'SF Design Lead', 'HT Design Lead', 'Triage')
@@ -118,18 +122,19 @@ try {
     $main = Wait-For 'owned main window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
     [void](Wait-For 'foreground owned app' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
     [void](Wait-For 'all restored sessions' { if (Test-Path "$settings/inbox-default.json") { $doc = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json; if (@($doc.shells).Count -eq 6) { $true } } })
-    $rows = Wait-For 'large pinned and list robots' { $v = @(Layouts); if (@($v | Where-Object { $_.size -eq 56 }).Count -ge 2 -and @($v | Where-Object { $_.size -eq 40 }).Count -ge 4) { ,$v } }
+    $rows = Wait-For 'large pinned and list robots' { $v = @(Layouts); if (@($v | Where-Object { $_.size -eq (Px 56) }).Count -ge 2 -and @($v | Where-Object { $_.size -eq (Px 40) }).Count -ge 4) { ,$v } }
     [void](Wait-For 'real console messages reach list previews' {
         $published = Get-Content "$settings/inbox-default.json" -Raw | ConvertFrom-Json
         @($published.shells | Where-Object { $_.pv -like '*Robot previews are ready*' }).Count -eq 6
     })
     $checks.Add(@{name='last-message-previews'; passed=$true})
+    Save @{ requestedDpi=$Dpi; listSize=(Px 40); pinSize=(Px 56); uiScale=100 } "$Evidence/display.json"
     $expectedColor = (Appearance $names[0]).color
     if (@($rows | Where-Object { $_.color -ne $expectedColor }).Count) { throw 'Workspace robot color mismatch' }
     $checks.Add(@{name='workspace-colors'; passed=$true; workspace=$WorkspaceName; color=$expectedColor})
     $rows = @(Layouts)
-    $pins = @($rows | Where-Object { $_.size -eq 56 } | Sort-Object x)
-    $list = @($rows | Where-Object { $_.size -eq 40 } | Sort-Object y)
+    $pins = @($rows | Where-Object { $_.size -eq (Px 56) } | Sort-Object x)
+    $list = @($rows | Where-Object { $_.size -eq (Px 40) } | Sort-Object y)
     foreach ($entry in @(@{row=$pins[0]; name='pin-one'}, @{row=$pins[1]; name='pin-two'}, @{row=$list[0]; name='list-one'})) {
         $live = Wait-For 'current clicked robot position' {
             $v = @(Layouts | Where-Object { $_.size -eq $entry.row.size -and $_.face -eq $entry.row.face -and $_.color -eq $entry.row.color })
@@ -155,7 +160,7 @@ try {
     Shot 'sidebar-amoled'
     [ChatDeliveryDesktop]::Chord(@(0x12, 0x43))
     [void](Wait-For 'native chat composer' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero })
-    $title = Wait-For 'matching title robot' { $v = @(Layouts | Where-Object { $_.size -eq 28 -and $_.x -gt 300 }); if ($v.Count) { $v[-1] } }
+    $title = Wait-For 'matching title robot' { $v = @(Layouts | Where-Object { $_.size -eq (Px 28) -and $_.x -gt 300 }); if ($v.Count) { $v[-1] } }
     Check-Pixels $title 'chat-title-robot'
     $selectedRow = @($list | Where-Object { $_.face -eq $title.face -and $_.color -eq $title.color })
     if ($selectedRow.Count -eq 0) { throw 'Chat title robot differs from the selected session' }
@@ -179,5 +184,6 @@ try {
     }
     Save $result "$Evidence/result.json"
     if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
+    [CaptionProof]::RestoreDpi()
 }
 if (-not $result.passed -or $result.cleanup -ne 0) { throw 'Robot avatar acceptance failed; see result.json' }

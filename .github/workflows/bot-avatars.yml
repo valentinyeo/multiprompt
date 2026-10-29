@@ -18,7 +18,11 @@ concurrency:
 jobs:
   robots:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        dpi: [96, 144]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -33,6 +37,26 @@ jobs:
           if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
           Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
           "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Reject the original binary avatar clipping
+        if: inputs.tag == '' && matrix.dpi == 96
+        shell: pwsh
+        run: |
+          $file = 'src/bot_avatar.zig'
+          $source = [IO.File]::ReadAllText($file)
+          $test = $source.Substring($source.IndexOf('test "IGSH-1192 every robot'))
+          try {
+            [IO.File]::WriteAllText($file, [IO.File]::ReadAllText('tools/fixtures/IGSH-1192/bot-avatar-before.zig') + "`n" + $test)
+            zig build test-smooth-shapes 2>&1 | Tee-Object native-shapes-red.log
+            if ($LASTEXITCODE -eq 0 -or -not (Select-String -Quiet -Path native-shapes-red.log -Pattern 'IGSH-1192 face=0 scale=100 fractional=')) { throw 'Original avatar clipping did not fail the native fractional-edge assertion' }
+            Write-Host 'ORIGINAL_BINARY_CLIP_REJECTED'
+          } finally { [IO.File]::WriteAllText($file, $source) }
+      - name: Native fractional circle proof
+        shell: pwsh
+        run: |
+          zig build test-smooth-shapes
+          if ($LASTEXITCODE -ne 0) { throw 'Native fractional circle proof failed' }
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          Copy-Item smooth-shapes-*.bmp evidence/
       - name: Resolve application
         shell: pwsh
         env:
@@ -66,7 +90,7 @@ jobs:
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_HASH=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Reject the published pre-robot application
-        if: inputs.tag == ''
+        if: inputs.tag == '' && matrix.dpi == 96
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -89,11 +113,11 @@ jobs:
         shell: powershell
         run: |
           foreach ($workspace in @('inne', 'Hypertask', 'Software Factory')) {
-            & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_HASH -Evidence "$pwd/evidence/$workspace" -WorkspaceName $workspace
+            & tools/verify-bot-avatars/drive.ps1 -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_HASH -Evidence "$pwd/evidence/$workspace" -WorkspaceName $workspace -Dpi ${{ matrix.dpi }}
           }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: robot-avatars
+          name: robot-avatars-${{ matrix.dpi }}
           path: evidence
           retention-days: 7
