@@ -135,6 +135,38 @@ test('workflow preserves tag and manual triggers with reusable release, both arc
   assert.equal((tests.match(/node --test tools\/release-version.test.mjs/g) || []).length, 2);
 });
 
+test('release downloads exclude verification evidence from published update assets', t => {
+  const f = fixture(t);
+  const artifacts = new Map([
+    ['multiprompt-x64', ['multiprompt-x64.exe', 'zigshell-bridge-x64.exe']],
+    ['multiprompt-arm64', ['multiprompt-arm64.exe', 'zigshell-bridge-arm64.exe']],
+    ['verify-tmux-binding', ['binding-name-reused-stderr.log', 'result.json']],
+    ['verify-browser', ['journey.json', 'screenshot.png']],
+  ]);
+  const release = workflow.split('\n  release:\n')[1].split('\n  runner-sessions:\n')[0];
+  const downloads = [...release.matchAll(/      - uses: actions\/download-artifact@[^\n]+\n        with:\n((?:          [^\n]+\n)+)/g)];
+  assert.ok(downloads.length > 0, 'Release must download build artifacts');
+  for (const [, inputs] of downloads) {
+    const name = inputs.match(/^          name: (.+)$/m)?.[1];
+    const destination = inputs.match(/^          path: (.+)$/m)?.[1];
+    assert.equal(destination, 'dist');
+    for (const [artifact, files] of artifacts) {
+      if (name && artifact !== name) continue;
+      const directory = path.join(f.dir, destination, !name && !inputs.includes('merge-multiple: true') ? artifact : '');
+      fs.mkdirSync(directory, { recursive: true });
+      for (const file of files) fs.writeFileSync(path.join(directory, file), '');
+    }
+  }
+  const generated = ['multiprompt-extension.zip', 'release-notes.json', 'SHA256SUMS.txt', 'SHA256SUMS.txt.sig'];
+  for (const file of generated) fs.writeFileSync(path.join(f.dir, 'dist', file), '');
+  const result = f.run('Publish release');
+  assert.equal(result.status, 0, result.stderr);
+  const published = f.calls().find(args => args[0] === 'release' && args[1] === 'create');
+  assert.ok(published, 'Release must publish');
+  const assets = published.filter(arg => arg.startsWith('dist/')).map(arg => path.basename(arg));
+  assert.deepEqual(assets.sort(), [...artifacts.get('multiprompt-x64'), ...artifacts.get('multiprompt-arm64'), ...generated].sort());
+});
+
 test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', () => {
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   assert.equal(jobs['pr-build'], undefined);
