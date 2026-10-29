@@ -1315,3 +1315,29 @@ test('full-history copy proof distinguishes message 10 from 100 and rejects lost
   json('full-history/restart-latest.json', { latest: 'IGSH815 assistant 319', visibleMs: 2001 });
   assert.equal(evaluate().status, 'failed');
 });
+
+
+test('evidence reader permits production cache replacement', () => {
+  const helper = drive.slice(drive.indexOf('function Read-Shared('), drive.indexOf('function Step('));
+  assert.match(helper, /\[IO.FileShare\]::ReadWrite -bor \[IO.FileShare\]::Delete/);
+});
+
+test('Windows reads cache while a replacement-capable writer owns it', { skip: process.platform !== 'win32' }, () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'shared-cache-read-'));
+  try {
+    const file = path.join(directory, 'cache.jsonl');
+    fs.writeFileSync(file, 'complete cache record');
+    const helper = drive.slice(drive.indexOf('function Read-Shared('), drive.indexOf('function Step('));
+    const script = `$ErrorActionPreference = 'Stop'
+${helper}
+$writer = [IO.FileStream]::new($env:CACHE_READ_FIXTURE, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete), 4096, [IO.FileOptions]::DeleteOnClose)
+try {
+  $observed = Read-Shared $env:CACHE_READ_FIXTURE
+  if ($observed -cne 'complete cache record') { throw 'Cache evidence differs from actual bytes' }
+  Write-Output 'CACHE_REPLACEMENT_READ_OK'
+} finally { $writer.Dispose() }
+`;
+    const output = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', env: { ...process.env, CACHE_READ_FIXTURE: file } });
+    assert.match(output, /CACHE_REPLACEMENT_READ_OK/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
