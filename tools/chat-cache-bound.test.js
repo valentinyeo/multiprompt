@@ -129,6 +129,9 @@ fn SetEvent(_: HANDLE) i32 { return 1; }
 const ChatHistoryEntry = struct { stream: ?*ChatHistoryStream = null, push_pending: bool = false, key: chat_transcript.Identity = .{}, backfill: chat_history.Backfill = .{}, show_older: bool = false, disk_loaded: bool = false, pending: bool = false, loading_disk: bool = false, before: u64 = 0, next: u64 = 0, history: chat_history.History = .{} };
 var cached_entry: ChatHistoryEntry = .{};
 var g_chat_active = true;
+var active_shell: u32 = 0;
+var shell_count: u32 = 1;
+var shells = [_]struct { shell_id: u32 = 1 }{.{}};
 var g_main_hwnd: HANDLE = @ptrFromInt(1);
 var g_chat_file_request_id: u32 = 0;
 var acquisitions: usize = 0;
