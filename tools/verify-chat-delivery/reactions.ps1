@@ -132,7 +132,7 @@ Press @(0x1B) 'Esc: clear emoji selection'
 
 $scrollStart = (Read-Shared "$settings/debug.log").Length
 Shell-Run @('messages', '200')
-$cache = Wait-For 'long emoji transcript cached' { Get-ChildItem "$settings/chatcache/*.jsonl" | Where-Object { (Read-Shared $_.FullName).Contains('New message 199') } | Select-Object -First 1 }
+$cache = Wait-For 'long emoji transcript cached' { Get-ChildItem "$settings/chatcache/*.jsonl" | Where-Object { try { (Read-Shared $_.FullName).Contains('New message 199') } catch [IO.FileNotFoundException] { $false } } | Select-Object -First 1 }
 [void](Wait-For 'long emoji transcript painted' {
     $painted = [regex]::Matches((Read-Shared "$settings/debug.log").Substring($scrollStart), 'PERF\[chat\]: receive to paint ms=\d+ size=(\d+)')
     $painted.Count -gt 0 -and [int]$painted[$painted.Count - 1].Groups[1].Value -ge 200

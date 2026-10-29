@@ -79,3 +79,7 @@ test('Color glyphs composite over the actual message and rounded badge pixels', 
 test('Cross-build budget covers native color-font linkage', () => {
   assert.match(read('.github/workflows/test.yml'), /build-windows:\s*name:[^\n]+\s*runs-on: ubuntu-latest\s*timeout-minutes: 10/);
 });
+
+test('Long-chat proof retries cache files replaced during enumeration', () => {
+  assert.match(read('tools/verify-chat-delivery/reactions.ps1'), /New message 199[\s\S]*catch \[IO\.FileNotFoundException\] \{ \$false \}/);
+});
