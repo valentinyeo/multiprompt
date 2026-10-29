@@ -74,7 +74,10 @@ test('IGSH-1126 GitHub journey measures actual keys and unfinished navigation', 
 });
 
 test('IGSH-1126 a launch-owned browser belongs to the app before adoption', () => {
-  const production = fn(read('src/focus.zig'), 'foregroundHwndIsOurs').replace('@import("settings_panel.zig").ownsWindow(fg)', 'settingsOwnsWindow(fg)');
+  const production = fn(read('src/focus.zig'), 'foregroundHwndIsOurs')
+    .replace('@import("settings_panel.zig").ownsWindow(fg)', 'settingsOwnsWindow(fg)')
+    .replace('@import("browser_pane.zig").pendingBrowserWindowOwnsForeground(fg)', 'pendingBrowserWindowOwnsForeground(fg)');
+  const pending = fn(read('src/browser_pane.zig'), 'pendingBrowserWindowOwnsForeground');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-opening-owner-'));
   try {
     fs.writeFileSync(path.join(dir, 'owner.zig'), `const std = @import("std");
@@ -85,19 +88,35 @@ const GWLP_HWNDPARENT = -8;
 const app_state = @This();
 var g_main_hwnd: HANDLE = @ptrFromInt(10);
 var g_urlbar_hwnd: HANDLE = null;
-const shell_count = 0;
-const shells = [_]struct { hwnd: HANDLE, browser_hwnd: HANDLE }{};
+var shell_count: u32 = 1;
+var g_browser_adopt_target_idx: u32 = 0;
+var shells = [_]struct { hwnd: HANDLE = null, browser_hwnd: HANDLE = null, browser_enabled: bool = true, browser_launch_tick: u64 = 1 }{.{}};
 fn GetAncestor(hwnd: HANDLE, _: u32) HANDLE { return if (hwnd == @as(HANDLE, @ptrFromInt(20))) @as(HANDLE, @ptrFromInt(10)) else hwnd; }
 fn settingsOwnsWindow(_: HANDLE) bool { return false; }
 fn IsWindow(_: HANDLE) i32 { return 1; }
 fn GetWindowLongPtrW(_: HANDLE, _: i32) isize { return 0; }
 fn GetParent(_: HANDLE) HANDLE { return null; }
 fn browserPaneOwnsForegroundHwnd(_: HANDLE, _: HANDLE) bool { return false; }
+fn edgeWindowClassMatches(hwnd: HANDLE) bool { return hwnd != @as(HANDLE, @ptrFromInt(70)); }
+fn browserSnapshotContains(hwnd: HANDLE) bool { return hwnd == @as(HANDLE, @ptrFromInt(60)); }
+fn browserWindowProfileMatches(hwnd: HANDLE, _: u32) bool { return hwnd != @as(HANDLE, @ptrFromInt(50)); }
+${pending}
 ${production}
 test "opening pane owner is authoritative before shell browser_hwnd is populated" {
     try std.testing.expect(foregroundHwndIsOurs(@ptrFromInt(20)));
     try std.testing.expect(foregroundHwndIsOurs(@ptrFromInt(10)));
-    try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(30)));
+    try std.testing.expect(foregroundHwndIsOurs(@ptrFromInt(40)));
+    try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(50)));
+    try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(60)));
+    try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(70)));
+    shells[0].browser_enabled = false;
+    try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(40)));
+    shells[0].browser_enabled = true;
+    shells[0].browser_launch_tick = 0;
+    try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(40)));
+    shells[0].browser_launch_tick = 1;
+    g_browser_adopt_target_idx = 0xFFFFFFFF;
+    try std.testing.expect(!foregroundHwndIsOurs(@ptrFromInt(40)));
     try std.testing.expect(!foregroundHwndIsOurs(null));
 }
 `);

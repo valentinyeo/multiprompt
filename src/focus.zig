@@ -761,7 +761,7 @@ pub fn foregroundHwndIsOurs(fg: HANDLE) bool {
             if (browserPaneOwnsForegroundHwnd(fg, bh)) return true;
         }
     }
-    return false;
+    return @import("browser_pane.zig").pendingBrowserWindowOwnsForeground(fg);
 }
 
 pub fn foregroundIsOurs() bool {

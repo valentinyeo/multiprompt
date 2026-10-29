@@ -1615,6 +1615,13 @@ fn browserWindowProfileMatches(hwnd: HANDLE, idx: u32) bool {
     return expected.len > 0 and std.ascii.eqlIgnoreCase(expected, actual);
 }
 
+pub fn pendingBrowserWindowOwnsForeground(hwnd: HANDLE) bool {
+    const idx = app_state.g_browser_adopt_target_idx;
+    if (idx >= app_state.shell_count or !app_state.shells[idx].browser_enabled or app_state.shells[idx].browser_launch_tick == 0) return false;
+    if (!edgeWindowClassMatches(hwnd) or browserSnapshotContains(hwnd)) return false;
+    return browserWindowProfileMatches(hwnd, idx);
+}
+
 fn enumBrowserAdopt(hwnd: HANDLE, lp: LPARAM) callconv(WINAPI) BOOL {
     if (!edgeWindowClassMatches(hwnd)) return 1;
     if (browserSnapshotContains(hwnd)) return 1;
