@@ -694,6 +694,7 @@ foreach ($plan in $plans) {
             $latestClock = [Diagnostics.Stopwatch]::StartNew()
             $app = $job.Start($Exe, $profile, "$caseDir/restart-stdout.log", "$caseDir/restart-stderr.log", '--no-window-restore')
             $main = Wait-For 'restarted owned app window' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+            [void](Wait-For 'restarted app published its restored tabs' { Test-Path "$settings/inbox-default.json" })
             [void](Wait-For 'restarted owned app foreground' { [ChatDeliveryDesktop]::FocusOwnedWindow($main, $app.Id, $main) })
             $composer = Wait-For 'restored native Chat View composer with owned typing focus' {
                 $h = [ChatDeliveryDesktop]::Composer($main)
