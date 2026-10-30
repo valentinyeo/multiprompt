@@ -150,6 +150,63 @@ if (fs.existsSync(checker)) {
     assert.match(result.stderr, /assertion failure/);
   });
 
+  for (const input of ['tools/fixtures/expected.txt', 'tests/fixtures/expected.txt', 'tools/account-hosts-fixture.zig']) {
+    test(`fixture and test changes pass without artificial red: ${input}`, t => {
+      const f = fixture(t);
+      f.write(input, 'old fixture');
+      const base = f.commit();
+      f.write(input, 'new fixture');
+      f.write('tools/value.test.cjs', `const {test}=require('node:test'); const assert=require('node:assert/strict'); const fs=require('node:fs'); test('fixture',()=>assert.equal(fs.readFileSync(${JSON.stringify(input)},'utf8'),'new fixture'));\n`);
+      f.commit();
+      const result = f.run(base);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.match(result.stdout, /TEST_ONLY_PROVEN 1 changed suites/);
+      assert.doesNotMatch(result.stdout, /RED PROVEN/);
+    });
+  }
+
+  test('source plus fixture changes still reject a test that stays green on merge-base', t => {
+    const f = fixture(t);
+    f.write('src/value.txt', 'fixed');
+    f.write('tools/fixtures/expected.txt', 'fixed');
+    f.write('tools/value.test.cjs', "const {test}=require('node:test'); const assert=require('node:assert/strict'); const fs=require('node:fs'); test('fixture',()=>assert.equal(fs.readFileSync('tools/fixtures/expected.txt','utf8'),'fixed'));\n");
+    f.commit();
+    const result = f.run();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /stayed green on merge-base source/);
+  });
+
+  test('fixture changes without a changed regression still fail closed', t => {
+    const f = fixture(t);
+    f.write('tools/fixtures/expected.txt', 'new fixture');
+    f.commit();
+    const result = f.run();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /No changed regression tests/);
+  });
+
+  test('deleted fixture inputs are not treated as copied fixture changes', t => {
+    const f = fixture(t);
+    f.write('tools/fixtures/expected.txt', 'old fixture');
+    const base = f.commit();
+    fs.unlinkSync(path.join(f.repo, 'tools/fixtures/expected.txt'));
+    f.write('tools/value.test.cjs', "require('node:test')('passes',()=>{});\n");
+    f.commit();
+    const result = f.run(base);
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(result.stdout, /TEST_ONLY_PROVEN/);
+  });
+
+  test('non-fixture tooling changes still require red proof', t => {
+    const f = fixture(t);
+    f.write('tools/utility.cjs', 'module.exports = 1;\n');
+    f.write('tools/value.test.cjs', "require('node:test')('always passes',()=>{});\n");
+    f.commit();
+    const result = f.run();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /stayed green on merge-base source/);
+  });
+
   test('changed fixtures travel with the test, but implementation stays at merge-base', t => {
     const f = fixture(t);
     f.write('src/value.txt', 'fixed');
