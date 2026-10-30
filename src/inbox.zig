@@ -1830,6 +1830,7 @@ pub fn handleInboxKey(hwnd: HANDLE, wp: WPARAM) void {
             app_state.g_unread_only = !app_state.g_unread_only;
             if (!inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = firstInboxSplit();
             app_state.g_inbox_sel = 0;
+            saveSession();
         },
         24 => {
             if (inboxNthVisible(app_state.g_inbox_sel)) |ri| inboxArchiveRow(ri);

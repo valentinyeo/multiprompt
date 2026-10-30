@@ -8,6 +8,11 @@ on:
         description: Published release to verify; empty builds this branch
         required: false
         type: string
+      memory_proof:
+        description: Run the bounded sidebar memory journey
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: '4 4 * * *'
 
@@ -52,9 +57,16 @@ jobs:
           @{tag=$env:RELEASE_TAG; revision=(git rev-parse HEAD).Trim(); sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower(); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"} | ConvertTo-Json | Set-Content evidence/provenance.json
       - name: Native sidebar parity and actions
         shell: powershell
-        run: ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
+        env:
+          MEMORY_PROOF: ${{ inputs.memory_proof }}
+        run: |
+          if ($env:MEMORY_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -MemoryProof
+          } else {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
+          }
       - name: Reject the old published sidebar
-        if: inputs.tag == ''
+        if: inputs.tag == '' && !inputs.memory_proof
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}

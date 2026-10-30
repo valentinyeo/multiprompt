@@ -568,6 +568,11 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         @memcpy(json_buf[pos .. pos + rsc.len], rsc);
         pos += rsc.len;
     }
+    if (app_state.g_unread_only) {
+        const unread = ",\"unread_only\":true";
+        @memcpy(json_buf[pos .. pos + unread.len], unread);
+        pos += unread.len;
+    }
     if (IS_DEV and !app_state.g_thread_title) {
         const ttf = ",\"thread_title\":false";
         @memcpy(json_buf[pos .. pos + ttf.len], ttf);
@@ -1660,6 +1665,7 @@ pub fn restoreSession() u32 {
     if (json_reader.boolTrue(json, "sidebar_collapsed")) app_state.g_sidebar_collapsed = true;
     app_state.g_pinned_section_collapsed = json_reader.boolTrue(json, "pinned_section_collapsed");
     app_state.g_recents_section_collapsed = json_reader.boolTrue(json, "recents_section_collapsed");
+    app_state.g_unread_only = json_reader.boolTrue(json, "unread_only");
     if (IS_DEV and json_reader.boolFalse(json, "thread_title")) app_state.g_thread_title = false;
     const console_font = json_reader.uint(json, "console_font_h");
     if (console_font >= 8 and console_font <= 40) app_state.g_console_font_override = @intCast(console_font);

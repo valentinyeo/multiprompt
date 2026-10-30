@@ -2524,6 +2524,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_sidebar_resizing) {
                 app_state.g_sidebar_resizing = false;
                 _ = ReleaseCapture();
+                saveSession();
                 return 0;
             }
             if (app_state.g_browser_dragging) {
@@ -3350,6 +3351,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_APP_TOGGLE_UNREAD => {
             app_state.g_unread_only = !app_state.g_unread_only;
             if (app_state.g_inbox_active and !inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
+            saveSession();
             _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
@@ -5130,6 +5132,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (target == SEARCH_UNREADONLY_OFFSET) {
                     app_state.g_unread_only = !app_state.g_unread_only;
                     if (app_state.g_inbox_active and !inboxSplitVisible(app_state.g_inbox_tab)) app_state.g_inbox_tab = @import("inbox.zig").firstInboxSplit();
+                    saveSession();
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
