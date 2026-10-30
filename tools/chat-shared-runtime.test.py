@@ -80,6 +80,13 @@ class RuntimeTest(unittest.TestCase):
         active.write_text(json.dumps(metadata))
         self.assertIn('history\\terror', self.invoke().stdout)
 
+    def test_null_selection_cannot_downgrade(self):
+        self.assertEqual(self.info(self.newer())['generation'], 2)
+        active = Path(self.home.name) / '.multiprompt-runtime' / 'active.json'
+        active.write_text('null')
+        self.assertIn('history\\terror', self.invoke().stdout)
+        self.assertEqual(active.read_text(), 'null')
+
     def test_concurrent_generations_cannot_downgrade(self):
         processes = []
         for source in (SOURCE, self.newer(), SOURCE, self.newer()):

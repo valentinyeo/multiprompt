@@ -2496,11 +2496,12 @@ if __name__ == '__main__':
                     finally:
                         if _os.path.exists(path):
                             _os.unlink(path)
+                missing = object()
                 try:
                     active = _json.loads(read('active.json', 4096))
                 except FileNotFoundError:
-                    active = None
-                if active is not None:
+                    active = missing
+                if active is not missing:
                     if (not isinstance(active, dict) or set(active) != {'protocol', 'generation', 'sha256'} or
                             type(active['protocol']) is not int or active['protocol'] != 1 or
                             type(active['generation']) is not int or active['generation'] < 1 or
