@@ -992,6 +992,16 @@ pub fn chatResetForShell(idx: u32) void {
     if (idx >= app_state.shell_count) return;
     const key = chatFileIdentityForShell(idx);
     if (app_state.shells[idx].kind == .tmux and (app_state.shells[idx].ai_agent == 1 or app_state.shells[idx].ai_agent == 2)) {
+        _ = chatPendingResetDropIfStale();
+        if (app_state.g_chat_pending_reset) |pending| {
+            if (key.sid[0] != 0 and chatResetSameChat(pending.key, key)) {
+                app_state.g_chat_reset_next = 0;
+                chatPendingResetStart(idx);
+                armChatOutboxTimerIfNeeded();
+                showHeaderNoticeAscii("Reset in progress", 3000, false);
+                return;
+            }
+        }
         if (key.sid[0] == 0 or app_state.g_chat_pending_reset != null) {
             showHeaderNoticeAscii("Cannot reset yet. Check the connection", 5000, true);
             return;
@@ -1037,6 +1047,50 @@ fn chatPendingResetStart(idx: u32) void {
     const thread = std.Thread.spawn(.{}, chatTmuxSendThread, .{job}) catch { a.free(job.text); a.destroy(job); return; };
     app_state.g_chat_tmux_send_job = job;
     thread.detach();
+}
+
+const ChatIdentity = @import("chat_transcript.zig").Identity;
+
+fn chatResetSameChat(pending: ChatIdentity, shell: ChatIdentity) bool {
+    return shell.host == pending.host and shell.codex == pending.codex and std.mem.eql(u8, &shell.sid, &pending.sid);
+}
+
+fn chatResetShellMayOwn(pending: ChatIdentity, shell: ChatIdentity) bool {
+    if (chatResetSameChat(pending, shell)) return true;
+    return shell.host == pending.host and shell.sid[0] == 0 and shell.tmux[0] != 0 and std.mem.eql(u8, &shell.tmux, &pending.tmux);
+}
+
+fn chatPendingResetDropIfStale() bool {
+    const pending = app_state.g_chat_pending_reset orelse return false;
+    if (app_state.shell_count == 0) return false;
+    for (0..app_state.shell_count) |i| {
+        if (chatResetShellMayOwn(pending.key, chatFileIdentityForShell(@intCast(i)))) return false;
+    }
+    app_state.g_chat_pending_reset = null;
+    for (app_state.g_chat_outbox.items) |*entry| entry.reset_pending = false;
+    _ = saveChatOutbox();
+    chatOutboxChanged();
+    return true;
+}
+
+test "Chat View reset: a pending reset whose chat is gone no longer blocks resets" {
+    var pending = ChatIdentity.init(1, 0, false, "e21b7c80-5042-416e-9209-ef4c42239027", "");
+    @memcpy(pending.tmux[0..8], "projects");
+    var same = pending;
+    same.shell_id = 7;
+    try std.testing.expect(chatResetShellMayOwn(pending, same));
+    var loading = ChatIdentity.init(2, 0, false, "", "");
+    @memcpy(loading.tmux[0..8], "projects");
+    try std.testing.expect(chatResetShellMayOwn(pending, loading));
+    var rotated = ChatIdentity.init(3, 0, false, "0a3c2e10-1111-4222-8333-944455556666", "");
+    @memcpy(rotated.tmux[0..8], "projects");
+    try std.testing.expect(!chatResetShellMayOwn(pending, rotated));
+    var other = ChatIdentity.init(4, 0, false, "", "");
+    @memcpy(other.tmux[0..5], "other");
+    try std.testing.expect(!chatResetShellMayOwn(pending, other));
+    var codex = same;
+    codex.codex = true;
+    try std.testing.expect(!chatResetShellMayOwn(pending, codex));
 }
 
 fn chatResetLocalForShell(idx: u32) void {
@@ -1908,9 +1962,12 @@ pub fn chatOutboxTick() void {
     chatMessageSyncFinish();
     if (app_state.g_chat_pending_reset != null and app_state.g_chat_tmux_send_job == null and GetTickCount64() >= app_state.g_chat_reset_next) {
         app_state.g_chat_reset_next = GetTickCount64() + 5000;
-        for (0..app_state.shell_count) |i| {
-            chatPendingResetStart(@intCast(i));
-            if (app_state.g_chat_tmux_send_job != null) break;
+        _ = chatPendingResetDropIfStale();
+        if (app_state.g_chat_pending_reset != null) {
+            for (0..app_state.shell_count) |i| {
+                chatPendingResetStart(@intCast(i));
+                if (app_state.g_chat_tmux_send_job != null) break;
+            }
         }
     }
     if (app_state.g_chat_message_sync_job == null and app_state.shell_count > 0) {
