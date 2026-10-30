@@ -1,5 +1,33 @@
 const std = @import("std");
 
+pub const OwnedDraft = struct {
+    owner: [33]u8 = @splat(0),
+    sid: [40]u8 = @splat(0),
+    inode: u64 = 0,
+    revision: u64 = 0,
+
+    pub fn valid(self: OwnedDraft) bool {
+        const owner = std.mem.sliceTo(&self.owner, 0);
+        const sid = std.mem.sliceTo(&self.sid, 0);
+        if (owner.len != 32 or sid.len == 0 or sid.len >= self.sid.len or self.inode == 0 or self.inode > std.math.maxInt(i64) or self.revision == 0 or self.revision > std.math.maxInt(i64)) return false;
+        for (owner) |c| if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f'))) return false;
+        for (sid) |c| if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_') return false;
+        return true;
+    }
+
+    pub fn advance(self: *OwnedDraft) bool {
+        if (self.revision >= std.math.maxInt(i64)) return false;
+        self.revision += 1;
+        return self.valid();
+    }
+
+    pub fn wire(self: *const OwnedDraft) Wire {
+        return .{ .owner = std.mem.sliceTo(&self.owner, 0), .revision = self.revision, .sid = std.mem.sliceTo(&self.sid, 0), .inode = self.inode };
+    }
+
+    pub const Wire = struct { owner: []const u8, revision: u64, sid: []const u8, inode: u64 };
+};
+
 pub const Store = struct {
     pub const Draft = struct { text: []u16, dirty: bool, evict: bool = false };
 
@@ -87,4 +115,22 @@ test "ISSUE-498 evicting a closed draft frees its key and text without touching 
     try std.testing.expectEqual(@as(u32, 1), store.entries.count());
     try std.testing.expect(!store.entries.contains("session-a"));
     try std.testing.expect(store.hasDraft("session-b"));
+}
+
+test "owned draft identity and revision survive metadata roundtrip" {
+    var owned: OwnedDraft = .{};
+    @memcpy(owned.owner[0..32], "0123456789abcdef0123456789abcdef");
+    @memcpy(owned.sid[0..3], "sid");
+    owned.inode = 19;
+    try std.testing.expect(owned.advance());
+    const bytes = try std.json.Stringify.valueAlloc(std.testing.allocator, owned.wire(), .{});
+    defer std.testing.allocator.free(bytes);
+    const parsed = try std.json.parseFromSlice(OwnedDraft.Wire, std.testing.allocator, bytes, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("0123456789abcdef0123456789abcdef", parsed.value.owner);
+    try std.testing.expectEqual(@as(u64, 1), parsed.value.revision);
+    try std.testing.expect(owned.advance());
+    try std.testing.expectEqual(@as(u64, 2), owned.revision);
+    owned.revision = std.math.maxInt(i64);
+    try std.testing.expect(!owned.advance());
 }

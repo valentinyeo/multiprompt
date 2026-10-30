@@ -1875,9 +1875,9 @@ fn chatDraftWriteFile(path: []const u8, bytes: []const u8) bool {
     var dir_end: usize = path.len;
     while (dir_end > 0 and path[dir_end - 1] != '\\') dir_end -= 1;
     if (dir_end > 1) win32MakePath(path[0 .. dir_end - 1]);
-    var tmp_buf: [580]u8 = undefined;
+    var tmp_buf: [720]u8 = undefined;
     const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return false;
-    var wbuf: [600]u16 = undefined;
+    var wbuf: [740]u16 = undefined;
     const tmp_w = win32WidePath(&wbuf, tmp) orelse return false;
     const h = CreateFileW(tmp_w.ptr, GENERIC_WRITE, 0, null, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
     if (h == INVALID_HANDLE_VALUE_PTR) return false;
@@ -1901,6 +1901,79 @@ pub fn chatDraftKeyForShell(idx: u32, buf: []u8) []const u8 {
         saveSession();
     }
     return std.fmt.bufPrint(buf, "session:#{x:0>16}", .{sh.chat_id}) catch buf[0..0];
+}
+
+
+pub fn chatOwnedDraftEligible(idx: u32) bool {
+    return idx < app_state.shell_count and app_state.shells[idx].kind == .tmux and app_state.shells[idx].ai_agent == 1;
+}
+
+pub fn chatReserveOwnedDraft(idx: u32) ?draft_model.OwnedDraft {
+    if (!chatOwnedDraftEligible(idx)) return null;
+    const shell = &app_state.shells[idx];
+    var history: ?*app_state.ChatHistoryEntry = null;
+    for (app_state.g_chat_histories.items) |entry| {
+        if (!entry.retired and !entry.resync and entry.key.shell_id == shell.shell_id and entry.key.host == shell.tmux_host and
+            entry.loaded_ms != 0 and entry.history.received_ms != 0 and entry.history.inode != 0 and entry.history.status.owned_draft_version == 1 and
+            std.mem.eql(u8, std.mem.sliceTo(&entry.key.tmux, 0), shell.tmux_session[0..shell.tmux_session_len])) {
+            history = entry;
+            break;
+        }
+    }
+    const entry = history orelse return null;
+    const sid = std.mem.sliceTo(&entry.history.sid, 0);
+    if (sid.len == 0 or sid.len >= 40) return null;
+    for (sid) |c| if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_') return null;
+    var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+    const id = chatDraftKeyForShell(idx, &key_buf);
+    var path_buf: [560]u8 = undefined;
+    const path = getChatDraftPath(id, &path_buf) orelse return null;
+    var metadata_buf: [680]u8 = undefined;
+    const metadata = std.fmt.bufPrint(&metadata_buf, "{s}.{s}.{d}.owned.json", .{ path, sid, entry.history.inode }) catch return null;
+    var owned: draft_model.OwnedDraft = .{};
+    if (readFileAllocWin32(metadata, 2048)) |bytes| {
+        defer std.heap.page_allocator.free(bytes);
+        const parsed = std.json.parseFromSlice(draft_model.OwnedDraft.Wire, std.heap.page_allocator, bytes, .{}) catch return null;
+        defer parsed.deinit();
+        const saved = parsed.value;
+        if (saved.owner.len != 32 or saved.sid.len == 0 or saved.sid.len >= owned.sid.len) return null;
+        @memcpy(owned.owner[0..32], saved.owner);
+        @memcpy(owned.sid[0..saved.sid.len], saved.sid);
+        owned.inode = saved.inode;
+        owned.revision = saved.revision;
+        if (!owned.valid()) return null;
+        if (!std.mem.eql(u8, saved.sid, sid) or saved.inode != entry.history.inode) return null;
+    } else {
+        var wbuf: [720]u16 = undefined;
+        const w = win32WidePath(&wbuf, metadata) orelse return null;
+        if (GetFileAttributesW(w.ptr) != 0xFFFF_FFFF) return null;
+        const missing = @import("win32.zig").GetLastError();
+        if (missing != 2 and missing != 3) return null;
+    }
+    if (owned.owner[0] == 0) {
+        var random: [16]u8 = undefined;
+        var io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+        defer io.deinit();
+        io.io().random(&random);
+        const alphabet = "0123456789abcdef";
+        for (random, 0..) |byte, i| {
+            owned.owner[2 * i] = alphabet[byte >> 4];
+            owned.owner[2 * i + 1] = alphabet[byte & 15];
+        }
+        @memcpy(owned.sid[0..sid.len], sid);
+        owned.inode = entry.history.inode;
+    }
+    if (!owned.advance()) return null;
+    const encoded = std.json.Stringify.valueAlloc(std.heap.page_allocator, owned.wire(), .{}) catch return null;
+    defer std.heap.page_allocator.free(encoded);
+    if (!chatDraftWriteFile(metadata, encoded)) return null;
+    return owned;
+}
+
+pub fn chatShellDraftClearAfterSend() void {
+    chat_draft_loading = true;
+    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+    chat_draft_loading = false;
 }
 
 fn chatDraftLoad(id: []const u8) void {
@@ -1991,7 +2064,7 @@ pub fn chatDraftFlush() void {
     }
     if (app_state.g_main_hwnd != null) {
         _ = KillTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT);
-        if (app_state.g_chat_draft_dirty or (shell_draft.edit_pending and shell_draft.foreign)) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
+        if (app_state.g_chat_draft_dirty or (app_state.g_chat_active and (shell_draft.edit_pending or shell_draft.push_in_flight.load(.acquire) or shell_draft.push_failed.load(.acquire)))) _ = SetTimer(app_state.g_main_hwnd, TIMER_CHAT_DRAFT, CHAT_DRAFT_SAVE_MS, null);
     }
 }
 
@@ -2036,21 +2109,31 @@ pub fn chatShellDraftNoteSend() void {
     shell_draft.onSend(GetTickCount64());
 }
 
+pub fn chatShellDraftSendCommitted() void {
+    shell_draft.sendCommitted();
+}
+
 pub fn chatShellDraftPushDue() void {
-    if (!shell_draft.edit_pending) return;
+    if (!shell_draft.edit_pending and !shell_draft.push_failed.load(.acquire)) return;
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or app_state.g_chat_composer_hwnd == null or
         GetFocus() != app_state.g_chat_composer_hwnd or !shell_draft.known or shell_draft.shell_id != app_state.shells[app_state.active_shell].shell_id)
     {
-        shell_draft.edit_pending = false;
         return;
     }
+    if (app_state.shells[app_state.active_shell].kind == .tmux and app_state.shells[app_state.active_shell].ai_agent == 0) return;
     var composer: [16400]u16 = undefined;
     const text = composerText(&composer);
     const now = GetTickCount64();
     if (!shell_draft.pushDue(text, now)) return;
-    if (@import("chat_send.zig").chatShellOp(app_state.active_shell, "draft", text, &shell_draft.push_in_flight)) {
+    const owned = if (chatOwnedDraftEligible(app_state.active_shell)) chatReserveOwnedDraft(app_state.active_shell) orelse {
+        shell_draft.push_failed.store(true, .release);
+        shell_draft.pushFinished();
+        return;
+    } else null;
+    if (@import("chat_send.zig").chatShellDraftOp(app_state.active_shell, text, &shell_draft.push_in_flight, &shell_draft.push_failed, owned)) {
         shell_draft.pushed(text, now);
     } else {
+        shell_draft.push_failed.store(true, .release);
         shell_draft.pushFinished();
     }
 }

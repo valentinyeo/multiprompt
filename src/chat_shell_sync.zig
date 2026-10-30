@@ -175,6 +175,8 @@ pub const Draft = struct {
     foreign: bool = false,
     edit_pending: bool = false,
     push_in_flight: std.atomic.Value(bool) = .init(false),
+    push_failed: std.atomic.Value(bool) = .init(false),
+    force_push: bool = false,
 
     pub fn armPull(self: *Draft, now: u64) void {
         self.pull_until_ms = now + PULL_ARM_MS;
@@ -241,20 +243,28 @@ pub const Draft = struct {
     }
 
     pub fn onSend(self: *Draft, now: u64) void {
-        self.edit_pending = false;
         self.quiet_until_ms = now + SEND_QUIET_MS;
     }
 
+    pub fn sendCommitted(self: *Draft) void {
+        self.edit_pending = false;
+        self.force_push = true;
+    }
+
     pub fn pushDue(self: *Draft, composer: []const u16, now: u64) bool {
+        if (self.push_failed.swap(false, .acq_rel) and (!isBlankDraft(composer) or !self.force_push)) {
+            self.edit_pending = true;
+            self.force_push = true;
+        }
         if (self.push_in_flight.load(.acquire) or !self.edit_pending) return false;
-        if (self.foreign) return false;
-        if (now < self.quiet_until_ms) {
+        if (self.foreign or now < self.quiet_until_ms) return false;
+        if (composer.len > DRAFT_PUSH_CAP) return false;
+        if (!self.force_push and draftHash(composer) == self.synced_hash) {
             self.edit_pending = false;
             return false;
         }
         self.edit_pending = false;
-        if (composer.len > DRAFT_PUSH_CAP) return false;
-        if (draftHash(composer) == self.synced_hash) return false;
+        self.force_push = false;
         self.push_in_flight.store(true, .release);
         return true;
     }
@@ -567,4 +577,17 @@ test "IGSH-720 serialized push log ends with the newest composer text" {
     try std.testing.expect(!draft.pushDue(composer, 5000));
     try std.testing.expectEqual(@as(usize, 2), sent.items.len);
     try std.testing.expectEqualSlices(u16, w("newest"), sent.items[sent.items.len - 1]);
+}
+
+test "pending edits survive quiet and identical edits after send" {
+    var draft: Draft = .{};
+    _ = draft.onShell(1, w("hello"), w("hello"), true, 1000);
+    draft.onSend(1100);
+    draft.onComposerEdit(1200);
+    try std.testing.expect(!draft.pushDue(w("hello"), 1300));
+    try std.testing.expect(draft.edit_pending);
+    draft.sendCommitted();
+    draft.onComposerEdit(1400);
+    try std.testing.expect(!draft.pushDue(w("hello"), 1500));
+    try std.testing.expect(draft.pushDue(w("hello"), 4000));
 }

@@ -16,6 +16,9 @@ import re
 import subprocess
 import sys
 import time
+import threading
+from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 
 HOME = Path.home()
@@ -1277,23 +1280,51 @@ def _consumed_identity(source, sid, inode, offset, digest, text):
         return None
 
 
+
+def observed_draft_lease(tmux, sid, inode):
+    import sqlite3
+    from contextlib import closing
+    if not held_queue_path(tmux).exists():
+        return None
+    try:
+        with writer_guard(tmux, blocking=False), closing(held_queue_db(tmux, timeout=0)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            bound_transcript(tmux, sid, inode)
+            lease = db.execute("SELECT owner,revision,sid,inode,token,text,phase FROM draft_lease WHERE slot=1").fetchone()
+            if not lease or lease[2:4] != (sid, inode) or lease[6] != "active":
+                return None
+            actual = box_draft("=" + tmux + ":")
+            if actual is None:
+                return None
+            if actual != lease[5]:
+                db.execute("DELETE FROM draft_lease WHERE token=?", (lease[4],))
+                return None
+            return dict(owner=lease[0], revision=lease[1], sid=sid, inode=inode, token=lease[4])
+    except (OSError, subprocess.SubprocessError, UnicodeError, OwnedDraftError, sqlite3.OperationalError):
+        return None
+
+
 def live_fields(source, size, tmux, shown=None, sid=None):
     queue, sent = queue_replay(source, size, with_receipts=True)
-    fields = dict(queue=[queue_item(text) for text in queue[:QUEUE_SHOWN]])
+    fields = dict(queue=[queue_item(text) for text in queue[:QUEUE_SHOWN]], owned_draft_version=1)
     if sid is not None:
         held = held_queue_fields(tmux, sid, with_receipts=True)
-        fields["queue"] = (held["queue"] + fields["queue"])[:QUEUE_SHOWN]
+        if held is not None:
+            fields["queue"] = (held["queue"] + fields["queue"])[:QUEUE_SHOWN]
         inode = os.fstat(source.fileno()).st_ino
+        lease = observed_draft_lease(tmux, sid, inode)
+        if lease is not None:
+            fields["draft_lease"] = lease
         identities = {identity for text, receipt in sent if receipt is not None
                       if (identity := _consumed_identity(source, sid, inode, *receipt, text)) is not None}
-        for text, receipt in held["sent"]:
+        for text, receipt in held["sent"] if held is not None else []:
             identity = _consumed_identity(source, sid, *receipt, text) if receipt is not None else None
             if identity is None or identity not in identities:
                 sent.append((text, None))
         if held_queue_path(tmux).exists():
-            from contextlib import closing
-            with closing(held_queue_db(tmux)) as db:
-                fields["received"] = [row[0] for row in db.execute("SELECT key FROM messages WHERE sid=? AND state='delivered' AND key LIKE 'desktop-%' ORDER BY created DESC LIMIT 20", (sid,))]
+            received = held_queue_read_rows(tmux, "SELECT key FROM messages WHERE sid=? AND state='delivered' AND key LIKE 'desktop-%' ORDER BY created DESC LIMIT 20", (sid,))
+            if received is not None:
+                fields["received"] = [row[0] for row in received]
     fields["sent"] = [queue_item(text) for text, _ in sent[-QUEUE_SHOWN:]]
     draft = box_draft_text(shown) if shown is not None else box_draft("=" + tmux + ":")
     if draft is not None:
@@ -1551,7 +1582,7 @@ def response(q, source=None, as_owner=False, resolved=None):
     rid, tmux = q["id"], q["tmux"]
     if agent == "claude" and tmux:
         start_held_worker(tmux, sid, path, source)
-        q["_held_queue_progress"] = bool(drain_held_queue(tmux, sid, path))
+        q["_held_queue_progress"] = bool(drain_held_queue(tmux, sid, path, blocking=False))
     rows, budget = [], 0
     queue_stamps = {}
     with path.open("rb") as source:
@@ -1663,22 +1694,19 @@ def response(q, source=None, as_owner=False, resolved=None):
         if q.get("live") is True and agent == "claude" and tmux and mode != "older":
             status = dict(status or dict(role="status"), **live_fields(source, info.st_size, tmux, q.get("watch_screen"), sid))
         if q.get("held") is True and agent == "claude" and tmux and held_queue_path(tmux).exists():
-            from contextlib import closing
-            with closing(held_queue_db(tmux)) as db:
-                pending = db.execute("SELECT key,text,queued_at,state,origin,source_inode FROM messages WHERE sid=? AND state IN ('queued','submitted') ORDER BY created", (sid,)).fetchall()
-            status = dict(status or dict(role="status"), held=[dict(id=item[0], text=item[1], queued_at=item[2], state=item[3], offset=item[4], inode=item[5], sid=sid) for item in pending])
+            pending = held_queue_read_rows(tmux, "SELECT key,text,queued_at,state,origin,source_inode FROM messages WHERE sid=? AND state IN ('queued','submitted') ORDER BY created", (sid,))
+            if pending is not None:
+                status = dict(status or dict(role="status"), held=[dict(id=item[0], text=item[1], queued_at=item[2], state=item[3], offset=item[4], inode=item[5], sid=sid) for item in pending])
         if q.get("delivery_ids") and agent == "claude" and tmux:
             ids = q["delivery_ids"]
             if not isinstance(ids, list) or any(not isinstance(token, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,80}", token) is None for token in ids):
                 raise ValueError("invalid message identities")
-            from contextlib import closing
-            with closing(held_queue_db(tmux)) as db:
-                deliveries = []
-                for token in ids:
-                    held = db.execute("SELECT state FROM messages WHERE key=? AND sid=?", (token, sid)).fetchone()
-                    if held:
-                        deliveries.append(dict(id=token, state=held[0]))
-            status = dict(status or dict(role="status"), deliveries=deliveries)
+            placeholders = ",".join("?" for _ in ids)
+            held = held_queue_read_rows(tmux, "SELECT key,state FROM messages WHERE sid=? AND key IN (" + placeholders + ")", (sid, *ids))
+            if held is not None:
+                states = dict(held)
+                deliveries = [dict(id=token, state=states[token]) for token in ids if token in states]
+                status = dict(status or dict(role="status"), deliveries=deliveries)
         more = scan_more or page_more
         source.seek(max(0, end - 64))
         probe = hashlib.sha256(source.read(min(end, 64))).hexdigest()
@@ -1697,6 +1725,106 @@ def prompt_box_text(target):
     return "\n".join(" ".join(line.split()) for line in draft.split("\n")).strip()
 
 
+
+_writer_mutexes = {}
+_writer_mutexes_lock = threading.Lock()
+_writer_local = threading.local()
+
+
+@contextmanager
+def writer_guard(name, blocking=True):
+    path = held_queue_path(name).with_suffix(".writer")
+    with _writer_mutexes_lock:
+        mutex = _writer_mutexes.setdefault(str(path), threading.RLock())
+    if not mutex.acquire(blocking=blocking):
+        raise BlockingIOError("writer busy")
+    try:
+        held = getattr(_writer_local, "held", {})
+        if str(path) in held:
+            yield
+            return
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with path.open("a") as lock:
+            if os.name == "nt":
+                import ctypes
+                from ctypes import wintypes
+                import msvcrt
+                class Overlapped(ctypes.Structure):
+                    _fields_ = [("Internal", ctypes.c_size_t), ("InternalHigh", ctypes.c_size_t),
+                                ("Offset", wintypes.DWORD), ("OffsetHigh", wintypes.DWORD), ("hEvent", wintypes.HANDLE)]
+                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel.LockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(Overlapped)]
+                kernel.LockFileEx.restype = wintypes.BOOL
+                kernel.UnlockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(Overlapped)]
+                kernel.UnlockFileEx.restype = wintypes.BOOL
+                handle = msvcrt.get_osfhandle(lock.fileno())
+                overlap = Overlapped()
+                if not kernel.LockFileEx(handle, 2 | (0 if blocking else 1), 0, 1, 0, ctypes.byref(overlap)):
+                    error = ctypes.get_last_error()
+                    if error in (33, 158):
+                        raise BlockingIOError(error, "writer busy")
+                    raise ctypes.WinError(error)
+            else:
+                import fcntl
+                fcntl.flock(lock, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+            held[str(path)] = True
+            _writer_local.held = held
+            try:
+                yield
+            finally:
+                del held[str(path)]
+                if os.name == "nt":
+                    if not kernel.UnlockFileEx(handle, 0, 1, 0, ctypes.byref(overlap)):
+                        raise ctypes.WinError(ctypes.get_last_error())
+                else:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+    finally:
+        mutex.release()
+
+
+def serialized_writer(fn):
+    @wraps(fn)
+    def wrapped(q, *args, **kwargs):
+        name = q.get("tmux")
+        try:
+            if not isinstance(name, str) or not TMUX_NAME.fullmatch(name):
+                return fn(q, *args, **kwargs)
+            with writer_guard(name):
+                return fn(q, *args, **kwargs)
+        except OwnedDraftError as error:
+            op = q.get("op", "send" if fn.__name__ == "_enqueue_commit" else "draft")
+            return f"@mp\t{q.get('id', 0)}\t{op}\terror\t{error}\t0\n{END}\n"
+    return wrapped
+
+
+def legacy_writer(fn):
+    @wraps(fn)
+    def wrapped(q, *args, **kwargs):
+        from contextlib import closing
+        name = q.get("tmux")
+        if "owned_draft" in q and fn.__name__ == "send_response":
+            return fn(q, *args, **kwargs)
+        if not isinstance(name, str) or not TMUX_NAME.fullmatch(name):
+            return fn(q, *args, **kwargs)
+        path = str(held_queue_path(name).with_suffix(".writer"))
+        if path in getattr(_writer_local, "held", {}):
+            return fn(q, *args, **kwargs)
+        with writer_guard(name):
+            with closing(held_queue_db(name)) as db:
+                token = os.urandom(24).hex()
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    db.execute("DELETE FROM draft_lease")
+                    db.execute("INSERT INTO draft_lease VALUES (1,'',0,'',0,'',?,'unknown')", (token,))
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    result = fn(q, *args, **kwargs)
+                    db.execute("DELETE FROM draft_lease WHERE token=?", (token,))
+                    return result
+    return wrapped
+
+
+@legacy_writer
 def stop_response(q):
     rid = q.get("id", 0)
     name = q.get("tmux")
@@ -1755,11 +1883,30 @@ def held_queue_path(tmux):
     return HOME / ".local/state/multiprompt/held-messages" / hashlib.sha256(tmux.encode()).hexdigest() / "queue.sqlite3"
 
 
-def held_queue_db(tmux):
+
+def held_queue_read(tmux):
+    import sqlite3
+    return sqlite3.connect(held_queue_path(tmux).resolve().as_uri() + "?mode=ro", uri=True, timeout=0)
+
+
+
+def held_queue_read_rows(tmux, sql, args):
+    import sqlite3
+    from contextlib import closing
+    if not held_queue_path(tmux).exists():
+        return []
+    try:
+        with closing(held_queue_read(tmux)) as db:
+            return db.execute(sql, args).fetchall()
+    except sqlite3.OperationalError:
+        return None
+
+
+def held_queue_db(tmux, timeout=5):
     import sqlite3
     path = held_queue_path(tmux)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    db = sqlite3.connect(path)
+    db = sqlite3.connect(path, timeout=timeout)
     os.chmod(path, 0o600)
     db.execute("CREATE TABLE IF NOT EXISTS messages (key TEXT PRIMARY KEY, sid TEXT NOT NULL, text TEXT NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('queued','submitted','delivered','cancelled')), scan INTEGER NOT NULL DEFAULT 0, origin INTEGER NOT NULL, source_inode INTEGER NOT NULL, receipt TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL)")
     db.execute("CREATE INDEX IF NOT EXISTS pending ON messages(sid,state,created)")
@@ -1776,7 +1923,92 @@ def held_queue_db(tmux):
             db.execute("PRAGMA user_version=2")
         db.execute("CREATE TABLE IF NOT EXISTS held_receipts (sid TEXT NOT NULL, inode INTEGER NOT NULL, offset INTEGER NOT NULL, key TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(sid,inode,offset))")
         db.execute("CREATE INDEX IF NOT EXISTS held_receipts_key ON held_receipts(key,sid,inode,offset)")
+        db.execute("CREATE TABLE IF NOT EXISTS draft_watermarks (sid TEXT NOT NULL, inode INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(sid,inode,owner))")
+        db.execute("CREATE TABLE IF NOT EXISTS draft_seen (sid TEXT NOT NULL, inode INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(sid,inode,owner))")
+        if "digest" not in {row[1] for row in db.execute("PRAGMA table_info(draft_seen)")}:
+            db.execute("ALTER TABLE draft_seen ADD COLUMN digest TEXT NOT NULL DEFAULT ''")
+        db.execute("CREATE TABLE IF NOT EXISTS draft_lease (slot INTEGER PRIMARY KEY CHECK(slot=1), sid TEXT NOT NULL, inode INTEGER NOT NULL, owner TEXT NOT NULL, revision INTEGER NOT NULL, text TEXT NOT NULL, token TEXT NOT NULL, phase TEXT NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS message_retirements (key TEXT PRIMARY KEY, descriptor TEXT NOT NULL)")
     return db
+
+
+
+class OwnedDraftError(ValueError):
+    pass
+
+
+def owned_descriptor(q, sid, inode):
+    descriptor = q.get("owned_draft")
+    if not isinstance(descriptor, dict) or set(descriptor) != {"owner", "revision", "sid", "inode"}:
+        raise OwnedDraftError("invalid_owned_draft")
+    owner, revision = descriptor["owner"], descriptor["revision"]
+    if (not isinstance(owner, str) or re.fullmatch(r"[0-9a-f]{32}", owner) is None or
+            type(revision) is not int or not 0 < revision < 2**63 or
+            not isinstance(descriptor["sid"], str) or type(descriptor["inode"]) is not int or descriptor["inode"] <= 0):
+        raise OwnedDraftError("invalid_owned_draft")
+    if descriptor["sid"] != sid or descriptor["inode"] != inode:
+        raise OwnedDraftError("owned_binding_mismatch")
+    return json.dumps(descriptor, sort_keys=True, separators=(",", ":"))
+
+
+def bound_transcript(tmux, expected_sid=None, expected_inode=None):
+    try:
+        current = resolve_tmux_agent("claude", tmux, require_bound=True)
+        if current is None:
+            raise OwnedDraftError("owned_unsupported")
+        sid, path = current
+        with path.open("rb") as source:
+            info = os.fstat(source.fileno())
+            stat = path.stat()
+            if info.st_ino != stat.st_ino or info.st_dev != stat.st_dev:
+                raise OwnedDraftError("owned_binding_mismatch")
+        if (expected_sid is not None and sid != expected_sid) or (expected_inode is not None and info.st_ino != expected_inode):
+            raise OwnedDraftError("owned_binding_mismatch")
+        return sid, path, info
+    except OSError:
+        raise OwnedDraftError("owned_binding_mismatch")
+
+
+def ensure_draft_owner(db, sid, inode, owner):
+    exists = db.execute("SELECT 1 FROM draft_seen WHERE sid=? AND inode=? AND owner=? UNION SELECT 1 FROM draft_watermarks WHERE sid=? AND inode=? AND owner=?", (sid, inode, owner, sid, inode, owner)).fetchone()
+    if not exists:
+        count = db.execute("SELECT count(*) FROM (SELECT owner FROM draft_seen WHERE sid=? AND inode=? UNION SELECT owner FROM draft_watermarks WHERE sid=? AND inode=?)", (sid, inode, sid, inode)).fetchone()[0]
+        if count >= 1024:
+            raise OwnedDraftError("draft_owner_limit")
+
+
+def clear_owned_once(target):
+    subprocess.run(["tmux", "send-keys", "-t", target, "C-u"], check=True, capture_output=True, timeout=5)
+    return box_draft(target) == ""
+
+
+def withdraw_owned_draft(db, tmux, sid, inode):
+    lease = db.execute("SELECT sid,inode,owner,revision,text,token,phase FROM draft_lease WHERE slot=1").fetchone()
+    if not lease or lease[0] != sid or lease[1] != inode or lease[6] != "withdraw_pending":
+        return
+    watermark = db.execute("SELECT revision FROM draft_watermarks WHERE sid=? AND inode=? AND owner=?", lease[:3]).fetchone()
+    if not watermark or lease[3] > watermark[0]:
+        return
+    bound_transcript(tmux, sid, inode)
+    target = "=" + tmux + ":"
+    box = box_draft(target)
+    if box is None:
+        return
+    if box != lease[4]:
+        db.execute("DELETE FROM draft_lease WHERE slot=1 AND token=?", (lease[5],))
+        return
+    bound_transcript(tmux, sid, inode)
+    if box_draft(target) != lease[4]:
+        db.execute("DELETE FROM draft_lease WHERE slot=1 AND token=?", (lease[5],))
+        return
+    try:
+        cleared = clear_owned_once(target)
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        cleared = False
+    if cleared:
+        db.execute("DELETE FROM draft_lease WHERE slot=1 AND token=?", (lease[5],))
+    else:
+        db.execute("UPDATE draft_lease SET phase='unknown' WHERE slot=1 AND token=?", (lease[5],))
 
 
 def held_message_key(q):
@@ -1792,9 +2024,13 @@ def start_held_worker(tmux, sid, transcript, source):
         return
     import fcntl
     from contextlib import closing
-    with closing(held_queue_db(tmux)) as db:
-        if not db.execute("SELECT 1 FROM messages WHERE sid=? AND state IN ('queued','submitted') LIMIT 1", (sid,)).fetchone():
-            return
+    import sqlite3
+    try:
+        with closing(held_queue_read(tmux)) as db:
+            if not db.execute("SELECT 1 FROM messages WHERE sid=? AND state IN ('queued','submitted') UNION ALL SELECT 1 FROM draft_lease WHERE sid=? AND phase='withdraw_pending' LIMIT 1", (sid, sid)).fetchone():
+                return
+    except sqlite3.OperationalError:
+        return
     with held_queue_path(tmux).with_suffix("." + hashlib.sha256(sid.encode()).hexdigest() + ".worker").open("a") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1845,7 +2081,7 @@ def held_queue_worker(tmux, sid, transcript):
                         time.sleep(0.01)
                         continue
                     with closing(held_queue_db(tmux)) as db:
-                        pending = db.execute("SELECT 1 FROM messages WHERE sid=? AND state IN ('queued','submitted') LIMIT 1", (sid,)).fetchone()
+                        pending = db.execute("SELECT 1 FROM messages WHERE sid=? AND state IN ('queued','submitted') UNION ALL SELECT 1 FROM draft_lease WHERE sid=? AND phase='withdraw_pending' LIMIT 1", (sid, sid)).fetchone()
                     if not pending:
                         return
                     changed = False
@@ -1871,21 +2107,57 @@ def held_queue_worker(tmux, sid, transcript):
                 control.communicate()
 
 
-def enqueue_response(q, source=None):
+@serialized_writer
+def _enqueue_commit(q):
     from contextlib import closing
     key = held_message_key(q)
     name = q["tmux"]
-    resolved = resolve_tmux_agent("claude", name, require_bound=True)
-    if not resolved:
-        return f"@mp\t{q['id']}\tsend\terror\tagent_unavailable\t0\n{END}\n"
-    sid, transcript = resolved
-    info = transcript.stat()
+    if "owned_draft" in q:
+        sid, transcript, info = bound_transcript(name)
+    else:
+        resolved = resolve_tmux_agent("claude", name, require_bound=True)
+        if not resolved:
+            return f"@mp\t{q['id']}\tsend\terror\tagent_unavailable\t0\n{END}\n"
+        sid, transcript = resolved
+        info = transcript.stat()
+    descriptor = owned_descriptor(q, sid, info.st_ino) if "owned_draft" in q else None
     with closing(held_queue_db(name)) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute("SELECT sid,text,source_inode FROM messages WHERE key=?", (key,)).fetchone()
+        if existing is not None and existing != (sid, q["text"], info.st_ino):
+            return f"@mp\t{q['id']}\tsend\terror\tmessage_id_conflict\t0\n{END}\n"
         db.execute("INSERT OR IGNORE INTO messages(key,sid,text,queued_at,state,created,origin,source_inode) VALUES (?,?,?,?,'queued',?,?,?)",
                    (key, sid, q["text"], q["queued_at"], time.time_ns(), info.st_size, info.st_ino))
+        prior = db.execute("SELECT descriptor FROM message_retirements WHERE key=?", (key,)).fetchone()
+        if existing is not None and (prior[0] if prior else None) != descriptor:
+            return f"@mp\t{q['id']}\tsend\terror\tmessage_id_conflict\t0\n{END}\n"
+        if descriptor is not None:
+            owned = q["owned_draft"]
+            bound_transcript(name, sid, info.st_ino)
+            ensure_draft_owner(db, sid, info.st_ino, owned["owner"])
+            db.execute("INSERT OR IGNORE INTO message_retirements(key,descriptor) VALUES (?,?)", (key, descriptor))
+            db.execute("INSERT INTO draft_watermarks(sid,inode,owner,revision) VALUES (?,?,?,?) ON CONFLICT(sid,inode,owner) DO UPDATE SET revision=max(revision,excluded.revision)", (sid, info.st_ino, owned["owner"], owned["revision"]))
+            db.execute("UPDATE draft_lease SET phase='withdraw_pending' WHERE sid=? AND inode=? AND owner=? AND revision<=? AND phase='active'", (sid, info.st_ino, owned["owner"], owned["revision"]))
         db.execute("UPDATE messages SET scan=origin WHERE key=? AND state='queued' AND scan=0", (key,))
-    start_held_worker(name, sid, transcript, source)
-    drain_held_queue(name, sid, transcript)
+    return key, name, sid, transcript
+
+
+def enqueue_response(q, source=None):
+    from contextlib import closing
+    try:
+        result = _enqueue_commit(q)
+    except (ValueError, KeyError, TypeError):
+        if "owned_draft" not in q:
+            raise
+        return f"@mp\t{q.get('id', 0)}\tsend\terror\tinvalid_owned_draft\t0\n{END}\n"
+    if isinstance(result, str):
+        return result
+    key, name, sid, transcript = result
+    try:
+        start_held_worker(name, sid, transcript, source)
+        drain_held_queue(name, sid, transcript)
+    except (OSError, subprocess.SubprocessError, UnicodeError, OwnedDraftError):
+        pass
     with closing(held_queue_db(name)) as db:
         identity = db.execute("SELECT sid,source_inode,origin,state,receipt FROM messages WHERE key=?", (key,)).fetchone()
     receipt = wire_row(dict(role="delivery", message_id=key, sid=identity[0], inode=identity[1], offset=identity[2], state=identity[3], detail=identity[4]))
@@ -1936,17 +2208,35 @@ def held_queue_ready(tmux, path):
     return not rows
 
 
-def drain_held_queue(tmux, sid, transcript):
+def drain_held_queue(tmux, sid, transcript, blocking=True):
+    import sqlite3
+    if not held_queue_path(tmux).exists():
+        return False
+    try:
+        with writer_guard(tmux, blocking=blocking):
+            return _drain_held_queue(tmux, sid, transcript, db_timeout=5 if blocking else 0)
+    except BlockingIOError:
+        if blocking:
+            raise
+        return False
+    except sqlite3.OperationalError as error:
+        if blocking or not any(word in str(error).lower() for word in ("locked", "busy")):
+            raise
+        return False
+
+
+def _drain_held_queue(tmux, sid, transcript, db_timeout=5):
     from contextlib import closing
     if not held_queue_path(tmux).exists():
         return
-    with closing(held_queue_db(tmux)) as db:
+    with closing(held_queue_db(tmux, timeout=db_timeout)) as db:
         current = resolve_tmux_agent("claude", tmux, require_bound=True)
         if current is None or current[0] != sid or Path(current[1]) != Path(transcript):
             return
         with transcript.open("rb") as source, db:
             db.execute("BEGIN IMMEDIATE")
             info = os.fstat(source.fileno())
+            withdraw_owned_draft(db, tmux, sid, info.st_ino)
             db.execute("UPDATE messages SET recovery_scan=origin WHERE recovery_scan IS NULL")
             pending = db.execute("SELECT key,text,recovery_scan,origin,source_inode,state,created FROM messages WHERE sid=? AND state IN ('submitted','queued') ORDER BY CASE state WHEN 'submitted' THEN 0 ELSE 1 END,created", (sid,)).fetchall()
             if any(inode != info.st_ino or origin > info.st_size or scan > info.st_size for _, _, scan, origin, inode, _, _ in pending):
@@ -2035,6 +2325,7 @@ def drain_held_queue(tmux, sid, transcript):
             if info.st_ino != inode or db.execute("SELECT 1 FROM messages WHERE sid=? AND state='queued' AND (source_inode!=? OR recovery_scan IS NULL OR recovery_scan<?) LIMIT 1", (sid, info.st_ino, info.st_size)).fetchone():
                 return
             db.execute("UPDATE messages SET state='submitted',scan=?1,recovery_scan=?1 WHERE key=?2 AND state='queued'", (info.st_size, key))
+            db.execute("DELETE FROM draft_lease")
         try:
             with db:
                 db.execute("BEGIN IMMEDIATE")
@@ -2054,22 +2345,29 @@ def drain_held_queue(tmux, sid, transcript):
 
 
 def held_queue_fields(tmux, sid, with_receipts=False):
+    import sqlite3
     from contextlib import closing
     if not held_queue_path(tmux).exists():
         return dict(queue=[], sent=[])
-    with closing(held_queue_db(tmux)) as db:
-        queued = db.execute("SELECT text FROM messages WHERE sid=? AND state='queued' ORDER BY created LIMIT ?", (sid, QUEUE_SHOWN)).fetchall()
-        sql = "SELECT key,text,source_inode,origin FROM messages WHERE sid=? AND state='delivered' ORDER BY created DESC LIMIT ?"
-        sent = db.execute(sql, (sid, QUEUE_SHOWN)).fetchall()
-        result = []
-        for key, text, inode, origin in reversed(sent):
-            claims = db.execute("SELECT inode,offset,digest FROM held_receipts WHERE key=? AND sid=? AND inode=? AND offset>=? LIMIT 2", (key, sid, inode, origin)).fetchall() if with_receipts else []
-            result.append((text, claims[0] if len(claims) == 1 else None) if with_receipts else text)
-    return dict(queue=[row[0] for row in queued], sent=result)
+    try:
+        with closing(held_queue_read(tmux)) as db:
+            queued = db.execute("SELECT text FROM messages WHERE sid=? AND state='queued' ORDER BY created LIMIT ?", (sid, QUEUE_SHOWN)).fetchall()
+            sql = "SELECT key,text,source_inode,origin FROM messages WHERE sid=? AND state='delivered' ORDER BY created DESC LIMIT ?"
+            sent = db.execute(sql, (sid, QUEUE_SHOWN)).fetchall()
+            result = []
+            for key, text, inode, origin in reversed(sent):
+                claims = db.execute("SELECT inode,offset,digest FROM held_receipts WHERE key=? AND sid=? AND inode=? AND offset>=? LIMIT 2", (key, sid, inode, origin)).fetchall() if with_receipts else []
+                result.append((text, claims[0] if len(claims) == 1 else None) if with_receipts else text)
+        return dict(queue=[row[0] for row in queued], sent=result)
+    except sqlite3.OperationalError:
+        return None
 
 
+@legacy_writer
 def send_response(q):
     rid = q.get("id", 0)
+    if "owned_draft" in q:
+        return f"@mp\t{rid}\t{q.get('op', 'send')}\terror\towned_unsupported\t0\n{END}\n"
     name = q.get("tmux")
     text = q.get("text")
     reason = None
@@ -2127,7 +2425,7 @@ def type_into_box(target, text, rid):
         subprocess.run(["tmux", "send-keys", "-t", target, "-l", "--", text], check=True, capture_output=True, timeout=5)
 
 
-def draft_response(q):
+def legacy_draft_response(q):
     rid = q.get("id", 0)
     name = q.get("tmux")
     text = q.get("text")
@@ -2150,6 +2448,111 @@ def draft_response(q):
             reason = "tmux_draft_failed"
     status = "error" if reason else "ok"
     return f"@mp\t{rid}\tdraft\t{status}\t{reason or '-'}\t0\n{END}\n"
+
+
+
+@serialized_writer
+def draft_response(q):
+    from contextlib import closing
+    name, text, rid = q.get("tmux"), q.get("text"), q.get("id", 0)
+    if "owned_draft" not in q:
+        if not isinstance(name, str) or not TMUX_NAME.fullmatch(name):
+            return legacy_draft_response(q)
+        with closing(held_queue_db(name)) as db:
+            token = os.urandom(24).hex()
+            with db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute("DELETE FROM draft_lease")
+                db.execute("INSERT INTO draft_lease VALUES (1,'',0,'',0,'',?,'unknown')", (token,))
+            with db:
+                db.execute("BEGIN IMMEDIATE")
+                result = legacy_draft_response(q)
+                db.execute("DELETE FROM draft_lease WHERE token=?", (token,))
+                return result
+    if not isinstance(name, str) or not TMUX_NAME.fullmatch(name):
+        raise OwnedDraftError("invalid_owned_draft")
+    if (not isinstance(text, str) or len(text) > DRAFT_TEXT or "\x00" in text or
+            "\n" in text or "\r" in text or text != text.rstrip() or any(ord(c) < 32 for c in text)):
+        raise OwnedDraftError("owned_unsupported")
+    sid, transcript, info = bound_transcript(name)
+    inode = info.st_ino
+    owned_descriptor(q, sid, inode)
+    owner, revision = q["owned_draft"]["owner"], q["owned_draft"]["revision"]
+    try:
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    except UnicodeError:
+        raise OwnedDraftError("invalid_owned_draft")
+    target = "=" + name + ":"
+    with closing(held_queue_db(name)) as db:
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            bound_transcript(name, sid, inode)
+            ensure_draft_owner(db, sid, inode, owner)
+            if db.execute("SELECT 1 FROM messages WHERE sid=? AND state='submitted' LIMIT 1", (sid,)).fetchone():
+                raise OwnedDraftError("draft_busy")
+            retired = db.execute("SELECT revision FROM draft_watermarks WHERE sid=? AND inode=? AND owner=?", (sid, inode, owner)).fetchone()
+            seen = db.execute("SELECT revision,digest FROM draft_seen WHERE sid=? AND inode=? AND owner=?", (sid, inode, owner)).fetchone()
+            lease = db.execute("SELECT sid,inode,owner,revision,text,token,phase FROM draft_lease WHERE slot=1").fetchone()
+            if retired and revision <= retired[0] or seen and revision < seen[0]:
+                return f"@mp\t{rid}\tdraft\tok\t-\t0\n{wire_row(dict(role='draft', result='stale'))}\n{END}\n"
+            if seen and revision == seen[0]:
+                if digest != seen[1]:
+                    raise OwnedDraftError("revision_conflict")
+                if lease and lease[:4] == (sid, inode, owner, revision) and lease[6] == "active":
+                    observed = box_draft(target)
+                    if observed == lease[4]:
+                        return f"@mp\t{rid}\tdraft\tok\t-\t0\n{END}\n"
+                    if observed is not None:
+                        db.execute("DELETE FROM draft_lease WHERE token=?", (lease[5],))
+                        return f"@mp\t{rid}\tdraft\terror\tdraft_foreign\t0\n{END}\n"
+                if not text and not lease and box_draft(target) == "":
+                    return f"@mp\t{rid}\tdraft\tok\t-\t0\n{END}\n"
+                raise OwnedDraftError("draft_unknown")
+            box = box_draft(target)
+            if box is None:
+                raise OwnedDraftError("draft_unknown")
+            if lease and lease[6] != "active":
+                if box:
+                    raise OwnedDraftError("draft_unknown")
+                db.execute("DELETE FROM draft_lease")
+                lease = None
+            if box and (not lease or lease[:3] != (sid, inode, owner) or box != lease[4]):
+                if lease and box != lease[4]:
+                    db.execute("DELETE FROM draft_lease")
+                return f"@mp\t{rid}\tdraft\terror\tdraft_foreign\t0\n{END}\n"
+            token = os.urandom(24).hex()
+            db.execute("INSERT INTO draft_seen(sid,inode,owner,revision,digest) VALUES (?,?,?,?,?) ON CONFLICT(sid,inode,owner) DO UPDATE SET revision=excluded.revision,digest=excluded.digest", (sid, inode, owner, revision, digest))
+            db.execute("DELETE FROM draft_lease")
+            db.execute("INSERT INTO draft_lease VALUES (1,?,?,?,?,?,?,?)", (sid, inode, owner, revision, text, token, "writing"))
+        try:
+            with db:
+                db.execute("BEGIN IMMEDIATE")
+                bound_transcript(name, sid, inode)
+                if not db.execute("SELECT 1 FROM draft_lease WHERE token=? AND phase='writing'", (token,)).fetchone():
+                    raise OwnedDraftError("draft_unknown")
+                if box_draft(target) != box:
+                    raise OwnedDraftError("draft_unknown")
+                if box != text:
+                    if box:
+                        bound_transcript(name, sid, inode)
+                        if box_draft(target) != box or not clear_owned_once(target):
+                            raise OwnedDraftError("draft_unknown")
+                    if text:
+                        bound_transcript(name, sid, inode)
+                        if box_draft(target) != "":
+                            raise OwnedDraftError("draft_unknown")
+                        type_into_box(target, text, rid)
+                        if box_draft(target) != text:
+                            raise OwnedDraftError("draft_unknown")
+                if text:
+                    db.execute("UPDATE draft_lease SET phase='active' WHERE token=?", (token,))
+                else:
+                    db.execute("DELETE FROM draft_lease WHERE token=?", (token,))
+        except (OSError, subprocess.SubprocessError, UnicodeError, OwnedDraftError):
+            with db:
+                db.execute("UPDATE draft_lease SET phase='unknown' WHERE token=?", (token,))
+            raise OwnedDraftError("draft_unknown")
+    return f"@mp\t{rid}\tdraft\tok\t-\t0\n{END}\n"
 
 
 def settle_unchained(target):
@@ -2455,7 +2858,10 @@ def serve(source):
                 print(json.dumps(dict(id=rid, engine_info=globals().get("ENGINE_INFO")), separators=(",", ":")), flush=True)
                 continue
             if query.get("op") in ("send", "question_text"):
-                wire = enqueue_response(query, source) if "message_id" in query else send_response(query)
+                if "owned_draft" in query and (query.get("op") != "send" or "message_id" not in query):
+                    wire = f"@mp\t{rid}\t{query.get('op')}\terror\towned_unsupported\t0\n{END}\n"
+                else:
+                    wire = enqueue_response(query, source) if "message_id" in query else send_response(query)
             elif query.get("op") == "cancel_queued":
                 wire = cancel_queued_response(query)
             elif query.get("op") == "draft":
@@ -2492,7 +2898,7 @@ elif __name__ == "__main__":
         print("@mp\t0\thistory\terror\t-\t0\n" + END)
 
 '''
-RUNTIME_GENERATION = 5
+RUNTIME_GENERATION = 6
 
 if __name__ == '__main__':
     import fcntl
