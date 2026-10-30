@@ -23,6 +23,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 
 ## Hard rules
 
+- Every inner reader edit increments `RUNTIME_GENERATION` in `src/chat_history_reader.py`. See [runtime contract](openwiki/operations/chat-shared-runtime.md).
 - Fundamental shared changes need Android tickets. This includes chat, sessions, and sync. Create or update one paired ticket first. Link both tickets in both directions. Reuse board 2060's Multiprompt Android label. Record old and new client compatibility. Verify both clients before declaring Done. Existing release gates remain unchanged.
 - **Never restart multiprompt without asking the user.** Use the in-app updater.
 - **Never compile on the laptop.** Use the in-app updater.

@@ -34,3 +34,5 @@ jobs:
         run: python3 tools/chat-transcript-reconcile.test.py
       - name: Run the complete reader regression suite
         run: python3 tools/chat-history-reader-test.py -v
+      - name: Verify shared reader selection
+        run: python3 tools/chat-shared-runtime.test.py -v
