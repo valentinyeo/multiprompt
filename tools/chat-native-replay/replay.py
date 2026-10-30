@@ -4,6 +4,7 @@ import json
 import sys
 from model import append, classify, counts, empty_snapshot
 from cases import check
+from ledger_replay import run as run_ledger
 
 
 def main(path):
@@ -26,6 +27,7 @@ def main(path):
     assert all(row['class'] and row['desktop_binding'] is None for row in left.values())
     assert total == 498394 and len(full['sources']) == 4294
     case_oracles = check(full, left)
+    print(json.dumps({'ledger_baseline': run_ledger()}, sort_keys=True))
     print(json.dumps({'input_occurrences': total, 'sources_with_selected_events': len(full['sources']),
                       'classification': counts(left), 'desktop_bindings_proven': 0,
                       'full_incremental_and_reread_equal': True, 'case_oracles': case_oracles,

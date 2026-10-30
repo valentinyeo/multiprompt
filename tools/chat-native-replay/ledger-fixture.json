@@ -1,0 +1,714 @@
+{
+  "schema": "mp-held-claims-structural-v1",
+  "scope": "eight per-ledger bounded read-only snapshots, no raw records",
+  "positions": "source-local ordering ranks, not byte offsets",
+  "digest": "boolean historical integrity observation; raw digest unavailable",
+  "rows": [
+    {
+      "db": "db1",
+      "message": "message1",
+      "session": "sid1",
+      "desktop_id": true,
+      "state": "submitted",
+      "source": "source1",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 0,
+      "claims": []
+    },
+    {
+      "db": "db1",
+      "message": "message2",
+      "session": "sid1",
+      "desktop_id": true,
+      "state": "queued",
+      "source": "source1",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 1,
+      "claims": []
+    },
+    {
+      "db": "db1",
+      "message": "message3",
+      "session": "sid1",
+      "desktop_id": true,
+      "state": "queued",
+      "source": "source1",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 2,
+      "claims": []
+    },
+    {
+      "db": "db2",
+      "message": "message4",
+      "session": "sid2",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source2",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 0,
+      "claims": []
+    },
+    {
+      "db": "db2",
+      "message": "message5",
+      "session": "sid2",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source2",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 0,
+      "claims": [
+        {
+          "id": "claim1",
+          "message": "message5",
+          "session": "sid2",
+          "source": "source2",
+          "record_type": "user",
+          "attachment_type": null,
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 3,
+          "end_rank": 4,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid2",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {}
+        }
+      ]
+    },
+    {
+      "db": "db2",
+      "message": "message6",
+      "session": "sid2",
+      "desktop_id": true,
+      "state": "submitted",
+      "source": "source2",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 0,
+      "claims": []
+    },
+    {
+      "db": "db2",
+      "message": "message7",
+      "session": "sid2",
+      "desktop_id": true,
+      "state": "submitted",
+      "source": "source2",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 5,
+      "claims": []
+    },
+    {
+      "db": "db2",
+      "message": "message8",
+      "session": "sid2",
+      "desktop_id": false,
+      "state": "submitted",
+      "source": "source2",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 6,
+      "claims": []
+    },
+    {
+      "db": "db2",
+      "message": "message9",
+      "session": "sid2",
+      "desktop_id": false,
+      "state": "submitted",
+      "source": "source2",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 7,
+      "claims": []
+    },
+    {
+      "db": "db2",
+      "message": "message10",
+      "session": "sid2",
+      "desktop_id": false,
+      "state": "submitted",
+      "source": "source2",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 7,
+      "claims": []
+    },
+    {
+      "db": "db2",
+      "message": "message11",
+      "session": "sid2",
+      "desktop_id": false,
+      "state": "submitted",
+      "source": "source2",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 8,
+      "claims": []
+    },
+    {
+      "db": "db2",
+      "message": "message12",
+      "session": "sid2",
+      "desktop_id": true,
+      "state": "queued",
+      "source": "source2",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 9,
+      "claims": []
+    },
+    {
+      "db": "db2",
+      "message": "message13",
+      "session": "sid2",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source2",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 9,
+      "claims": [
+        {
+          "id": "claim2",
+          "message": "message13",
+          "session": "sid2",
+          "source": "source2",
+          "record_type": "user",
+          "attachment_type": null,
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 10,
+          "end_rank": 11,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid2",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {}
+        }
+      ]
+    },
+    {
+      "db": "db3",
+      "message": "message14",
+      "session": "sid3",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source3",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 0,
+      "claims": [
+        {
+          "id": "claim3",
+          "message": "message14",
+          "session": "sid3",
+          "source": "source3",
+          "record_type": "attachment",
+          "attachment_type": "queued_command",
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 1,
+          "end_rank": 2,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid3",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {
+            "source_uuid": "uuid7",
+            "delivery_id": "uuid8"
+          }
+        }
+      ]
+    },
+    {
+      "db": "db3",
+      "message": "message15",
+      "session": "sid3",
+      "desktop_id": true,
+      "state": "submitted",
+      "source": "source3",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 3,
+      "claims": []
+    },
+    {
+      "db": "db3",
+      "message": "message16",
+      "session": "sid3",
+      "desktop_id": true,
+      "state": "queued",
+      "source": "source3",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 4,
+      "claims": []
+    },
+    {
+      "db": "db3",
+      "message": "message17",
+      "session": "sid3",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source3",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 5,
+      "claims": [
+        {
+          "id": "claim4",
+          "message": "message17",
+          "session": "sid3",
+          "source": "source3",
+          "record_type": "user",
+          "attachment_type": null,
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 6,
+          "end_rank": 7,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid3",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {}
+        }
+      ]
+    },
+    {
+      "db": "db3",
+      "message": "message18",
+      "session": "sid3",
+      "desktop_id": true,
+      "state": "queued",
+      "source": "source3",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 8,
+      "claims": []
+    },
+    {
+      "db": "db3",
+      "message": "message19",
+      "session": "sid3",
+      "desktop_id": true,
+      "state": "queued",
+      "source": "source3",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 9,
+      "claims": []
+    },
+    {
+      "db": "db4",
+      "message": "message20",
+      "session": "sid4",
+      "desktop_id": true,
+      "state": "queued",
+      "source": "source4",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 0,
+      "claims": []
+    },
+    {
+      "db": "db5",
+      "message": "message21",
+      "session": "sid5",
+      "desktop_id": false,
+      "state": "delivered",
+      "source": "source5",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": null,
+      "origin_rank": 0,
+      "claims": []
+    },
+    {
+      "db": "db5",
+      "message": "message22",
+      "session": "sid5",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source5",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 2,
+      "claims": [
+        {
+          "id": "claim5",
+          "message": "message22",
+          "session": "sid5",
+          "source": "source5",
+          "record_type": "user",
+          "attachment_type": null,
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 3,
+          "end_rank": 4,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid5",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {}
+        }
+      ]
+    },
+    {
+      "db": "db5",
+      "message": "message23",
+      "session": "sid5",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source5",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 5,
+      "claims": [
+        {
+          "id": "claim6",
+          "message": "message23",
+          "session": "sid5",
+          "source": "source5",
+          "record_type": "user",
+          "attachment_type": null,
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 6,
+          "end_rank": 7,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid5",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {}
+        }
+      ]
+    },
+    {
+      "db": "db5",
+      "message": "message24",
+      "session": "sid5",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source5",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 8,
+      "claims": [
+        {
+          "id": "claim7",
+          "message": "message24",
+          "session": "sid5",
+          "source": "source5",
+          "record_type": "attachment",
+          "attachment_type": "queued_command",
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 9,
+          "end_rank": 10,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid5",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {
+            "source_uuid": "uuid17",
+            "delivery_id": "uuid18"
+          }
+        }
+      ]
+    },
+    {
+      "db": "db5",
+      "message": "message25",
+      "session": "sid5",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source5",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 8,
+      "claims": [
+        {
+          "id": "claim8",
+          "message": "message25",
+          "session": "sid5",
+          "source": "source5",
+          "record_type": "user",
+          "attachment_type": null,
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 11,
+          "end_rank": 12,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid5",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {}
+        }
+      ]
+    },
+    {
+      "db": "db5",
+      "message": "message26",
+      "session": "sid5",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source5",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 8,
+      "claims": [
+        {
+          "id": "claim9",
+          "message": "message26",
+          "session": "sid5",
+          "source": "source5",
+          "record_type": "user",
+          "attachment_type": null,
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 13,
+          "end_rank": 14,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid5",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {}
+        }
+      ]
+    },
+    {
+      "db": "db5",
+      "message": "message27",
+      "session": "sid5",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source5",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 8,
+      "claims": [
+        {
+          "id": "claim10",
+          "message": "message27",
+          "session": "sid5",
+          "source": "source5",
+          "record_type": "user",
+          "attachment_type": null,
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 15,
+          "end_rank": 16,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid5",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {}
+        }
+      ]
+    },
+    {
+      "db": "db6",
+      "message": "message28",
+      "session": "sid7",
+      "desktop_id": true,
+      "state": "delivered",
+      "source": "source6",
+      "source_compatibility": "compatible",
+      "in_latest20_snapshot": true,
+      "origin_rank": 0,
+      "claims": [
+        {
+          "id": "claim11",
+          "message": "message28",
+          "session": "sid7",
+          "source": "source6",
+          "record_type": "user",
+          "attachment_type": null,
+          "binding_basis": "existing_app_legacy_content_correlated_claim",
+          "body_eligibility": "not_inspected",
+          "independent_desktop_native_id_proof": false,
+          "offset_rank": 1,
+          "end_rank": 2,
+          "checks": {
+            "claim_matches_message_binding": true,
+            "offset_at_or_after_origin": true,
+            "unique_sid_inode_file": true,
+            "nonnegative_in_range_offset": true,
+            "line_boundary": true,
+            "complete_line": true,
+            "digest_matches": true,
+            "json_object": true,
+            "record_sessionId_matches": true,
+            "accepted_record_kind": true,
+            "eligibility_flags_clear": true,
+            "file_stable_during_read": true
+          },
+          "record_session": "sid7",
+          "flags": {
+            "isSidechain": false
+          },
+          "native_pair": {}
+        }
+      ]
+    }
+  ],
+  "ledger_count": 8
+}
