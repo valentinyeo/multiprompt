@@ -130,6 +130,139 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertIn("\tquestion_text\tok\t", wire)
         self.assertEqual(run.call_args_list[0].args[0], ["tmux", "send-keys", "-t", "=term-1:", "-l", "--", "Purple"])
         self.assertEqual(run.call_args_list[1].args[0], ["tmux", "send-keys", "-t", "=term-1:", "Enter"])
+    def test_igsh1229_live_native_processes_keep_separate_histories(self):
+        root = self.home / '.codex/sessions/2026/10/30'
+        root.mkdir(parents=True)
+        binary = self.home / 'codex'
+        binary.symlink_to(sys.executable)
+        children, paths = [], []
+        try:
+            for sid in ('first', 'second'):
+                path = root / ('rollout-2026-' + sid + '.jsonl')
+                path.write_text(json.dumps(dict(type='session_meta', payload=dict(id=sid, cwd=str(self.home)))) + '\n' +
+                                json.dumps(dict(type='response_item', payload=dict(type='message', role='assistant',
+                                                content=[dict(type='output_text', text=sid + ' reply')]))) + '\n')
+                child = subprocess.Popen([str(binary), '-c',
+                    'import sys; f=open(sys.argv[1], "rb"); print("ready", flush=True); sys.stdin.read()', str(path)],
+                    cwd=self.home, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+                children.append(child)
+                paths.append(path)
+                self.assertEqual(child.stdout.readline(), b'ready\n')
+            table = {10: (1, ['bash']), 11: (10, ['node', 'codex.js']),
+                     children[0].pid: (11, [str(binary)]), 20: (1, ['bash']),
+                     children[1].pid: (20, [str(binary)])}
+            def panes(command, **kwargs):
+                return subprocess.CompletedProcess(command, 0, '10\n' if '=first-tab' in command else '20\n', '')
+            with patch.object(reader, 'process_table', return_value=table), \
+                    patch.object(reader.subprocess, 'run', side_effect=panes):
+                for changed in (paths[1], paths[0], paths[1]):
+                    with changed.open('a') as output:
+                        output.write('\n')
+                    for index, name in enumerate(('first-tab', 'second-tab')):
+                        sid = ('first', 'second')[index]
+                        wire = reader.response(dict(self.query, codex=True, sid='', tmux=name,
+                                                    cwd=str(self.home), follow=True))
+                        self.assertIn('\thistory\tok\t' + sid + '\t', wire)
+                        self.assertIn(sid + ' reply', wire)
+                        self.assertNotIn(('second', 'first')[index] + ' reply', wire)
+        finally:
+            for child in children:
+                child.stdin.close()
+                child.wait(timeout=5)
+                child.stdout.close()
+
+    def test_igsh1229_native_codex_same_cwd_uses_owned_fds(self):
+        root = self.home / '.codex/sessions/2026/10/30'
+        root.mkdir(parents=True)
+        paths = []
+        for sid, text in [('first', 'First session reply'), ('second', 'Second session reply')]:
+            path = root / ('rollout-2026-' + sid + '.jsonl')
+            path.write_text(json.dumps(dict(type='session_meta', payload=dict(id=sid, cwd='/shared'))) + '\n' +
+                            json.dumps(dict(type='response_item', payload=dict(type='message', role='assistant',
+                                            content=[dict(type='output_text', text=text)]))) + '\n')
+            paths.append(path)
+        fds = {}
+        for pid, path in [(12, paths[0]), (22, paths[1])]:
+            folder = self.home / ('fd-' + str(pid))
+            folder.mkdir()
+            (folder / '3').symlink_to(path)
+            fds[Path('/proc') / str(pid) / 'fd'] = folder
+        original_iterdir = Path.iterdir
+        def iterdir(path):
+            return original_iterdir(fds.get(path, path))
+        table = {10: (1, ['bash']), 11: (10, ['node', '/bin/codex.js']),
+                 12: (11, ['/bin/codex']), 20: (1, ['bash']), 22: (20, ['/bin/codex'])}
+        def panes(command, **kwargs):
+            return subprocess.CompletedProcess(command, 0, '10\n' if '=first-tab' in command else '20\n', '')
+        with patch.object(Path, 'iterdir', iterdir), patch.object(reader, 'process_table', return_value=table), \
+                patch.object(reader.subprocess, 'run', side_effect=panes):
+            for newer in (paths[0], paths[1], paths[0]):
+                with newer.open('a') as output:
+                    output.write('\n')
+                for name, sid, expected, other in [('first-tab', 'first', 'First session reply', 'Second session reply'),
+                                                   ('second-tab', 'second', 'Second session reply', 'First session reply')]:
+                    query = dict(self.query, codex=True, sid='', tmux=name, cwd='/shared', follow=True)
+                    wire = reader.response(query)
+                    self.assertIn('\thistory\tok\t' + sid + '\t', wire)
+                    self.assertIn(expected, wire)
+                    self.assertNotIn(other, wire)
+            for follow in (None, False):
+                query = dict(self.query, codex=True, sid='first', cached_sid='first',
+                             tmux='second-tab', cwd='/shared')
+                if follow is not None:
+                    query['follow'] = follow
+                wire = reader.response(query)
+                self.assertIn('\thistory\tok\tsecond\t', wire)
+                self.assertIn('Second session reply', wire)
+                self.assertNotIn('First session reply', wire)
+                resolved = reader.resolve_response_path(query, reader.READER_SOURCE, True)
+                incoming, writer = os.pipe()
+                try:
+                    with patch.object(reader.sys, 'stdin', types.SimpleNamespace(fileno=lambda: incoming)):
+                        events = reader.watch_changes(query, resolved, reader.READER_SOURCE, True)
+                        try:
+                            initial = reader.response(query, reader.READER_SOURCE, True, next(events))
+                            self.assertIn('\thistory\tok\tsecond\t', initial)
+                            self.assertIn('Second session reply', initial)
+                            self.assertNotIn('First session reply', initial)
+                        finally:
+                            events.close()
+                finally:
+                    os.close(incoming)
+                    os.close(writer)
+            archive = reader.response(dict(self.query, codex=True, sid='first', tmux='', cwd='/shared'))
+            self.assertIn('\thistory\tok\tfirst\t', archive)
+            self.assertIn('First session reply', archive)
+            (fds[Path('/proc/12/fd')] / '4').symlink_to(paths[1])
+            self.assertIsNone(reader.resolve_tmux_agent('codex', 'first-tab'))
+            self.assertIn('history\tmissing', reader.response(dict(self.query, codex=True, sid='',
+                                                                  tmux='first-tab', cwd='/shared', follow=True)))
+            self.assertEqual(reader.resolve_tmux_agent('codex', 'second-tab'), ('second', paths[1]))
+        self.assertIsNone(reader.agent_pid_for_panes([10], {**table, 13: (10, ['/bin/codex'])}, 'codex'))
+
+    def test_igsh1229_codex_watcher_never_switches_on_neighbour_write(self):
+        root = self.home / '.codex/sessions'
+        root.mkdir(parents=True)
+        own = root / 'rollout-day-own.jsonl'
+        other = root / 'rollout-day-other.jsonl'
+        own.write_text('{}\n')
+        other.write_text('{}\n')
+        incoming, writer = os.pipe()
+        self.addCleanup(os.close, incoming)
+        self.addCleanup(os.close, writer)
+        query = dict(self.query, codex=True, sid='own', follow=True)
+        resolved = ('codex', 'own', own, None)
+        stdin = types.SimpleNamespace(fileno=lambda: incoming)
+        with patch.object(reader.sys, 'stdin', stdin), \
+                patch.object(reader, 'resolve_response_path', return_value=resolved):
+            events = reader.watch_changes(query, resolved, reader.READER_SOURCE, True)
+            self.assertEqual(next(events), resolved)
+            other.write_text('neighbour update\n')
+            with own.open('a') as output:
+                output.write('own update\n')
+            self.assertEqual(next(events), resolved)
+            events.close()
+
     def test_igsh1043_hax_only_processes_are_discovered_without_provider_children(self):
         table = {10: (1, ['bash']), 11: (10, ['/opt/bin/hax', '-p', 'neutral']),
                  20: (1, ['bash']), 21: (20, ['/opt/bin/hax', '--resume=neutral'])}

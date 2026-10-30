@@ -165,6 +165,7 @@ def agent_pid_for_panes(pane_pids, table, agent):
     children = {}
     for pid, (ppid, _argv) in table.items():
         children.setdefault(ppid, []).append(pid)
+    matches = []
     for pane in pane_pids:
         queue = [pane]
         seen = set()
@@ -177,7 +178,10 @@ def agent_pid_for_panes(pane_pids, table, agent):
             if argv and (process_basename(argv[0]) in (agent, "hax") or
                          process_basename(argv[0]) in ("node", "bun") and len(argv) > 1 and
                          process_basename(argv[1]) in (agent, agent + ".js")):
-                return pid
+                if agent != "codex" or process_basename(argv[0]) == "hax":
+                    return pid
+                matches.append(pid)
+                continue
             if argv and process_basename(argv[0]) == "tmux" and pwd is not None:
                 try:
                     user = pwd.getpwuid(Path(f"/proc/{pid}").stat().st_uid)
@@ -192,7 +196,7 @@ def agent_pid_for_panes(pane_pids, table, agent):
                 except (OSError, KeyError, subprocess.SubprocessError):
                     pass
             queue.extend(children.get(pid, []))
-    return None
+    return matches[0] if len(matches) == 1 else None
 
 def claude_project_folder(cwd):
     return re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
@@ -375,33 +379,46 @@ def claude_transcript_for_cwd(cwd):
         return None
     return newest_jsonl(folder.glob("*.jsonl"))
 
-def codex_transcript_for_cwd(cwd):
-
-    root = HOME / ".codex/sessions"
-    if not root.is_dir():
-        return None
-    best = None
-    best_mtime = -1.0
-    try:
-        candidates = list(root.rglob("rollout-*.jsonl"))
-    except OSError:
-        return None
-    for path in candidates:
-        try:
-            with path.open("r", encoding="utf-8") as source:
-                meta = json.loads(source.readline())
-            payload = meta.get("payload") if isinstance(meta, dict) else None
-            if not isinstance(payload, dict) or payload.get("cwd") != cwd:
-                continue
-            sid = payload.get("id") or payload.get("session_id")
-            if not isinstance(sid, str) or not SESSION_ID.fullmatch(sid):
-                continue
-            mtime = path.stat().st_mtime
-        except (OSError, ValueError):
+def open_codex_transcript(pid, table):
+    children = {}
+    for child, (parent, _argv) in table.items():
+        children.setdefault(parent, []).append(child)
+    candidates = set()
+    queue = [pid]
+    seen = set()
+    root = (HOME / ".codex/sessions").resolve()
+    while queue:
+        current = queue.pop(0)
+        if current in seen:
             continue
-        if mtime > best_mtime:
-            best, best_mtime = (sid, path), mtime
-    return best
+        seen.add(current)
+        queue.extend(children.get(current, []))
+        argv = table.get(current, (0, []))[1]
+        if not argv or not (process_basename(argv[0]) == "codex" or
+                            process_basename(argv[0]) in ("node", "bun") and len(argv) > 1 and
+                            process_basename(argv[1]) in ("codex", "codex.js")):
+            continue
+        try:
+            for fd in Path(f"/proc/{current}/fd").iterdir():
+                try:
+                    path = Path(os.readlink(fd))
+                    if not path.resolve().is_relative_to(root):
+                        continue
+                    with path.open("rb") as source:
+                        if not os.path.samestat(fd.stat(), os.fstat(source.fileno())):
+                            continue
+                        meta = json.loads(source.readline())
+                    payload = meta.get("payload") if isinstance(meta, dict) and meta.get("type") == "session_meta" else None
+                    sid = payload.get("id") if isinstance(payload, dict) else None
+                    if (isinstance(sid, str) and SESSION_ID.fullmatch(sid) and
+                            payload.get("session_id", sid) == sid and path.name.startswith("rollout-") and path.name.endswith("-" + sid + ".jsonl")):
+                        candidates.add((sid, path.resolve()))
+                except (OSError, ValueError):
+                    pass
+        except OSError:
+            pass
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
 
 def resolve_tmux_agent(agent, name, pid=None, require_bound=False):
 
@@ -454,9 +471,9 @@ def resolve_tmux_agent(agent, name, pid=None, require_bound=False):
         if fallback is None:
             return None
         return fallback.stem, fallback
-    if cwd is None:
-        return None
-    return codex_transcript_for_cwd(cwd)
+    if table is None:
+        table = process_table(pids=[pid])
+    return open_codex_transcript(pid, table)
 
 
 def conversation_event(event, agent):
@@ -1254,7 +1271,7 @@ def resolve_response_path(q, source=None, as_owner=False):
             tmux and not TMUX_NAME.fullmatch(tmux) or not sid and not tmux or
             cwd and not Path(cwd).is_absolute()):
         raise ValueError("invalid identity")
-    follow = bool(q.get("follow") and tmux)
+    follow = bool(tmux and (q.get("follow") or agent == "codex"))
     denied = False
     delegated = None
     try:
@@ -2213,6 +2230,22 @@ def watch_changes(q, resolved, source, as_owner):
             q["watch_screen"] = capture()
             q["watch_capture_us"] = (time.perf_counter_ns() - started) // 1000
 
+    def refresh_codex_binding():
+        nonlocal resolved, agent, sid, path, delegated
+        if agent != "codex" or not q.get("tmux"):
+            return True
+        latest = resolve_response_path(dict(q, follow=True), source, as_owner)
+        if latest[2] is None:
+            resolved = latest
+            return False
+        if latest[2] != path:
+            resolved = latest
+            agent, sid, path, delegated = latest
+            q["sid"] = sid
+            if libc.inotify_add_watch(fd, os.fsencode(path.parent), 0x00000FCE) < 0:
+                raise OSError(ctypes.get_errno(), "inotify_add_watch")
+        return True
+
     try:
         if libc.inotify_add_watch(fd, os.fsencode(path.parent), 0x00000FCE) < 0:
             raise OSError(ctypes.get_errno(), "inotify_add_watch")
@@ -2239,7 +2272,10 @@ def watch_changes(q, resolved, source, as_owner):
                     changed = any(line.startswith((b"%output ", b"%extended-output ")) for line in lines)
                     if changed:
                         refresh_screen()
+                        bound = refresh_codex_binding()
                         yield resolved
+                        if not bound:
+                            return
                         continue
                 for key, _mask in selector.select():
                     if key.data == "input":
@@ -2277,7 +2313,10 @@ def watch_changes(q, resolved, source, as_owner):
                 if changed:
                     if screen_changed:
                         refresh_screen()
+                    bound = refresh_codex_binding()
                     yield resolved
+                    if not bound:
+                        return
     finally:
         os.close(fd)
         if control is not None:
