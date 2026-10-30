@@ -139,12 +139,25 @@ class SettleTest(unittest.TestCase):
         rows = [json.loads(line) for line in wire[1:-1]]
         self.assertEqual(rows[0]['delivered_ms'], 0)
         self.assertTrue(all(row['line'] == 1 for row in rows[1:]))
-        self.query.update(codex=True, texts=['please check the build'])
+        self.query.update(codex=True, tmux='', texts=['please check the build'])
         path = self.home / '.codex/sessions/2026/rollout-2026-sid.jsonl'
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps(dict(type='response_item', timestamp='2026-10-17T15:22:09.790Z',
                                        payload=dict(type='message', role='user', content=[dict(type='input_text', text='please check the build')]))) + '\n')
-        self.assertEqual(json.loads(self.serve()[1]), dict(i=0, delivered_ms=1792250529790, line=1))
+        wire = self.serve()
+        self.assertEqual(wire[0], '@mp\t7\tsettle\tok\t-\t1')
+        self.assertEqual(json.loads(wire[1]), dict(i=0, delivered_ms=1792250529790, line=1))
+        bound = dict(self.query, tmux='term-1')
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            self.assertEqual(reader.settle_response(bound).splitlines(),
+                             ['@mp\t7\tsettle\terror\tsession transcript not found\t0', reader.END])
+        other = path.with_name('rollout-2026-other.jsonl')
+        other.write_text(json.dumps(dict(type='response_item', timestamp='2026-10-17T15:22:09.790Z',
+                                         payload=dict(type='message', role='user', content=[dict(type='input_text', text='different session')]))) + '\n')
+        with patch.object(reader, 'resolve_tmux_agent', return_value=('other', other)):
+            wire = reader.settle_response(bound).splitlines()
+            self.assertEqual(wire[0], '@mp\t7\tsettle\tok\t-\t1')
+            self.assertEqual(json.loads(wire[1]), dict(i=0, delivered_ms=0, line=0))
 
     def test_shared_tmux_resolution_and_owner_delegation(self):
         self.write([self.user('please check the build')])

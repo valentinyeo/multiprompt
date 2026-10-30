@@ -13,8 +13,12 @@ for line in sys.stdin:
         query = job["request"]
         if job["protocol"] == "history":
             query = json.loads(query)
-            query["follow"] = False
-            wire = reader.response(query)
+            if query.get("tmux") and query.get("tmux") != query.get("sid"):
+                wire = reader.missing_response(query, "session transcript not found")
+            else:
+                query["follow"] = False
+                query["tmux"] = ""
+                wire = reader.response(query)
         else:
             wire = reader.request(query)
         print(json.dumps({"job": job["job"], "wire": wire}), flush=True)
