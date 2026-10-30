@@ -4210,5 +4210,20 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
                 self.assertFalse(any('delete-buffer' in command and 'send-keys' in command for command in commands))
 
 
+    def test_own_mirrored_draft_is_cleared_and_sent(self):
+        request = dict(tmux='fixture', sid='sid', text='https://example.com/a.png This happens on every message.')
+        boxes = iter(['https://example.com/a.png This happens', ''])
+        def run(command, **kwargs):
+            return types.SimpleNamespace(returncode=0, stdout='')
+        with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', '/synthetic/sid.jsonl')), \
+                patch.object(reader, 'box_draft', return_value='https://example.com/a.png This\nhappens'), \
+                patch.object(reader, 'prompt_box_text', side_effect=lambda target: next(boxes)), \
+                patch.object(reader.subprocess, 'run', side_effect=run) as calls:
+            result = reader.send_response_preserve_draft(request)
+        self.assertEqual(result['status'], 'sent')
+        commands = [call.args[0] for call in calls.call_args_list]
+        self.assertEqual(len([command for command in commands if 'paste-buffer' in command]), 1)
+        self.assertTrue(any('C-u' in command for command in commands))
+
 if __name__ == '__main__':
     unittest.main()

@@ -2942,8 +2942,12 @@ def send_response_preserve_draft(q):
         draft = box_draft(target)
         if draft is None:
             return dict(status='not_sent', reason='prompt_unavailable')
-        if draft:
+        if draft and not ''.join(text.split()).startswith(''.join(draft.split())):
             return dict(status='not_sent', reason='draft_present')
+        if draft:
+            box, _ = clear_prompt_box(target, prompt_box_text(target))
+            if not box_is_empty(box):
+                return dict(status='not_sent', reason='draft_present')
         try:
             subprocess.run(['tmux', 'paste-buffer', '-p', '-d', '-b', buffer, '-t', target, ';', 'send-keys', '-t', target, 'Enter'], check=True, capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
@@ -3332,7 +3336,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 19
+RUNTIME_GENERATION = 20
 
 if __name__ == '__main__':
     import fcntl
