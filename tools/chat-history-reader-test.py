@@ -278,6 +278,31 @@ class HistoryReaderTest(unittest.TestCase):
             with patch.object(reader, 'codex_unix_connections', return_value={'11': ('22', '*'), '22': ('99', daemon)}):
                 self.assertIsNone(reader.codex_daemon_transcript(10))
 
+    def test_IGSH_1266_codex_transcript_namespace_is_exact(self):
+        wanted = self.home / 'native' / 'sessions'
+        other = self.home / 'foreign' / 'sessions'
+        wanted.mkdir(parents=True)
+        other.mkdir(parents=True)
+        for directory in (wanted, other):
+            (directory / 'rollout-fixture-sid.jsonl').write_text(json.dumps(dict(type='session_meta', payload=dict(id='sid'))) + '\n')
+        fds = self.home / 'native-fds'
+        fds.mkdir()
+        (fds / '3').symlink_to(other / 'rollout-fixture-sid.jsonl')
+        original_iterdir = Path.iterdir
+        def iterdir(path):
+            return original_iterdir(fds if path == Path('/proc/10/fd') else path)
+        with patch.object(Path, 'iterdir', iterdir):
+            self.assertEqual(reader.open_codex_transcript(10, {10: (1, ['codex'])}, wanted.parent), set())
+            self.assertEqual(reader.open_codex_transcript(10, {10: (1, ['codex'])}, other.parent), {('sid', (other / 'rollout-fixture-sid.jsonl').resolve())})
+
+    def test_IGSH_1266_attachment_rejects_foreign_daemon_session(self):
+        table = {10: (1, ['codex'])}
+        with patch.object(reader.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '10\n', '')), \
+                patch.object(reader, 'process_table', return_value=table), \
+                patch.object(reader, 'agent_pid_for_panes', return_value=10), \
+                patch.object(reader, 'codex_daemon_transcript', return_value=(('other', Path('/other')), 'unix:///fixture')):
+            self.assertIsNone(reader.codex_queue_attachment('fixture', 'wanted', Path('/wanted')))
+
     def test_IGSH_1266_codex_ambiguous_fds_never_use_daemon(self):
         table = {10: (1, ['codex'])}
         with patch.object(reader, 'process_table', return_value=table), \
@@ -3959,7 +3984,7 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
 
     def test_legacy_watcher_tracks_shared_acceptance(self):
         from contextlib import closing
-        token = 'legacy_fixture_0001'
+        token = 'test-1'
         request = dict(id=1, tmux='fixture', message_id=token, text='synthetic prompt', queued_at=1)
         self.assertIn('\tsend\tok\t', reader.enqueue_response(request))
         identity = reader.legacy_message_id(token)
@@ -3986,7 +4011,7 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
 
     def test_legacy_replay_updates_original_watcher_across_locators(self):
         from contextlib import closing
-        token = 'legacy_fixture_0002'
+        token = 'test-2'
         request = dict(id=1, tmux='fixture', message_id=token, text='synthetic prompt', queued_at=1)
         self.assertIn('\tsend\tok\t', reader.enqueue_response(request))
         identity = reader.legacy_message_id(token)

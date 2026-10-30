@@ -373,14 +373,14 @@ def claude_session_metadata(pid):
     return (sid if isinstance(sid, str) and SESSION_ID.fullmatch(sid) else None,
             cwd if isinstance(cwd, str) and cwd else None)
 
-def open_codex_transcript(pid, table):
+def open_codex_transcript(pid, table, codex_home=None):
     children = {}
     for child, (parent, _argv) in table.items():
         children.setdefault(parent, []).append(child)
     candidates = set()
     queue = [pid]
     seen = set()
-    root = (HOME / ".codex/sessions").resolve()
+    root = ((Path(codex_home) if codex_home is not None else HOME / '.codex') / 'sessions').resolve()
     scanned = False
     uncertain = False
     while queue:
@@ -540,6 +540,107 @@ def codex_daemon_endpoint(tmux, sid, transcript):
     except (OSError, subprocess.SubprocessError):
         pass
     return None
+
+
+def codex_queue_attachment(tmux, sid, transcript):
+    try:
+        panes = subprocess.run(['tmux', 'list-panes', '-t', '=' + tmux, '-F', '#{pane_pid}'], capture_output=True, text=True, timeout=3, check=True)
+        pids = [int(line) for line in panes.stdout.split() if line.isdigit()]
+        table = process_table(pids=pids)
+        pid = agent_pid_for_panes(pids, table, 'codex')
+        if not pid or pid not in table:
+            return None
+        daemon = codex_daemon_transcript(pid, include_endpoint=True)
+        if daemon:
+            if daemon[0][0] == sid and Path(daemon[0][1]).resolve() == Path(transcript).resolve():
+                return dict(attachment='daemon', daemon_endpoint=daemon[1])
+            return None
+        start = codex_process_start(pid)
+        proc = Path('/proc') / str(pid)
+        if not start or proc.stat().st_uid != os.getuid():
+            return None
+        binary = Path(os.readlink(proc / 'exe'))
+        if not binary.is_absolute() or not binary.name.startswith('codex') or not os.path.samestat((proc / 'exe').stat(), binary.stat()) or not os.access(binary, os.X_OK):
+            return None
+        argv = table[pid][1]
+        if any(arg in ('--remote', '--profile', '-p', '--listen') or arg.startswith(('--remote=', '--profile=', '--listen=')) for arg in argv[1:]):
+            return None
+        for index, arg in enumerate(argv[1:], 1):
+            if arg in ('-c', '--config'):
+                if index + 1 >= len(argv) or 'state_home' in argv[index + 1].lower():
+                    return None
+            elif (arg.startswith('--config=') or arg.startswith('-c')) and 'state_home' in arg.lower():
+                return None
+        def namespace():
+            allowed = {'HOME', 'CODEX_HOME', 'XDG_STATE_HOME', 'CODEX_STATE_HOME', 'CODEX_PROFILE', 'CODEX_CONFIG_PROFILE'}
+            entries = {}
+            for item in (proc / 'environ').read_bytes().split(b'\0'):
+                key, sep, value = item.partition(b'=')
+                if sep and key.decode('ascii', 'ignore') in allowed:
+                    name = key.decode('ascii')
+                    if name in entries:
+                        return None
+                    entries[name] = os.fsdecode(value)
+            return entries
+        env = namespace()
+        if not env or any(env.get(key) or os.environ.get(key) for key in ('XDG_STATE_HOME', 'CODEX_STATE_HOME', 'CODEX_PROFILE', 'CODEX_CONFIG_PROFILE')):
+            return None
+        home = Path(env.get('HOME', ''))
+        codex_home = Path(env.get('CODEX_HOME') or home / '.codex')
+        if not home.is_absolute() or not codex_home.is_absolute() or home.resolve() != HOME.resolve():
+            return None
+        if not home.is_dir() or not codex_home.is_dir() or home.stat().st_uid != os.getuid() or codex_home.stat().st_uid != os.getuid():
+            return None
+        config = codex_home / 'config.toml'
+        if config.exists():
+            import tomllib
+            with config.open('rb') as stream:
+                settings = tomllib.load(stream)
+            def has_state_override(value):
+                if isinstance(value, dict):
+                    return any(key == 'state_home' or has_state_override(child) for key, child in value.items())
+                return isinstance(value, list) and any(has_state_override(child) for child in value)
+            if has_state_override(settings):
+                return None
+        sockets = codex_socket_fds(pid)
+        connections = codex_unix_connections()
+        if sockets is None or connections is None:
+            return None
+        prefix = '/tmp/codex-daemon-' + str(os.getuid()) + '/'
+        observed = {sock: connections[sock] for sock in sockets if sock in connections}
+        for peer, path in observed.values():
+            if peer is None or (isinstance(path, str) and path.startswith(prefix)):
+                return None
+            peer_path = connections.get(peer, (None, None))[1]
+            if isinstance(peer_path, str) and peer_path.startswith(prefix):
+                return None
+        peers = {peer for peer, _ in observed.values()}
+        for backend, (_, args) in process_table().items():
+            if backend == pid or not args or process_basename(args[0]) != 'codex' or 'app-server' not in args:
+                continue
+            try:
+                if Path(f'/proc/{backend}').stat().st_uid != os.getuid():
+                    continue
+            except FileNotFoundError:
+                return None
+            backend_sockets = codex_socket_fds(backend)
+            if backend_sockets is None or peers & backend_sockets:
+                return None
+        own_table = {pid: table[pid]}
+        candidates = open_codex_transcript(pid, own_table, codex_home)
+        expected = (sid, Path(transcript).resolve())
+        if candidates != {expected}:
+            return None
+        latest = codex_unix_connections()
+        if (latest is None or codex_process_start(pid) != start or proc.stat().st_uid != os.getuid() or namespace() != env or
+                not os.path.samestat((proc / 'exe').stat(), binary.stat()) or
+                open_codex_transcript(pid, own_table, codex_home) != {expected} or codex_socket_fds(pid) != sockets or
+                {sock: latest[sock] for sock in sockets if sock in latest} != observed or
+                any(latest.get(item[0]) != connections.get(item[0]) for item in observed.values())):
+            return None
+        return dict(attachment='direct', codex_binary=str(binary), codex_home=str(codex_home.resolve()), native_user_home=str(home.resolve()))
+    except (OSError, ValueError, KeyError, TypeError, ImportError, subprocess.SubprocessError):
+        return None
 
 
 def resolve_tmux_agent(agent, name, pid=None, require_bound=False):
@@ -2259,7 +2360,9 @@ def message_store_transaction(q):
             bound = resolve_tmux_agent(provider, tmux, require_bound=True)
             if current != ('sent', epoch) or not bound or bound[0] != sid or Path(bound[1]) != Path(resolved[1]):
                 return dict(epoch=epoch, seq=seq, message=None)
-            context = dict(provider=provider, sid=sid, tmux=tmux, chat_id=tmux, transcript_path=str(bound[1]), daemon_endpoint=codex_daemon_endpoint(tmux, sid, bound[1]) if provider == 'codex' else None)
+            context = dict(provider=provider, sid=sid, tmux=tmux, chat_id=tmux, transcript_path=str(bound[1]))
+            if provider == 'codex':
+                context.update(codex_queue_attachment(tmux, sid, bound[1]) or {})
             capabilities = connector['capabilities'](context)
             if not isinstance(capabilities, dict) or capabilities.get('protocol') != 1 or capabilities.get('provider') != provider:
                 raise ValueError('incompatible connector')
@@ -2370,7 +2473,9 @@ def message_poll_locked(tmux, provider, sid):
         saved = db.execute('SELECT state FROM connector_states WHERE provider=? AND sid=?', (provider, sid)).fetchone()
         state = json.loads(saved[0]) if saved else {}
         pending = [message_row(row) for row in db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND epoch=? AND state IN ('sent','failed','accepted') ORDER BY position", (provider, sid, epoch))]
-        context = dict(provider=provider, sid=sid, tmux=tmux, chat_id=tmux, transcript_path=str(resolved[1]), daemon_endpoint=codex_daemon_endpoint(tmux, sid, resolved[1]) if provider == 'codex' else None)
+        context = dict(provider=provider, sid=sid, tmux=tmux, chat_id=tmux, transcript_path=str(resolved[1]))
+        if provider == 'codex':
+            context.update(codex_queue_attachment(tmux, sid, resolved[1]) or {})
         services = message_services(tmux, provider, sid)
         result = connector['poll'](context, state, pending, services)
         with db:
@@ -3211,7 +3316,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 13
+RUNTIME_GENERATION = 15
 
 if __name__ == '__main__':
     import fcntl

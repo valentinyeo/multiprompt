@@ -39,7 +39,32 @@ def capabilities(context):
             'terminal_input': False, 'accepted': 'native_queue_success',
             'started': False, 'native_queue_id': False,
             'messages': 'validated_transcript_occurrences',
+            'attachment_modes': ['daemon', 'direct'],
+            'direct_pickup_interval_seconds': 10,
             'requires': ['codex_attempt_claim', 'codex_attempt_finish']}
+
+
+def _direct_command(context, sid, text):
+    binary = context.get('codex_binary')
+    home = context.get('native_user_home')
+    codex_home = context.get('codex_home')
+    for path in (binary, home, codex_home):
+        if not isinstance(path, str) or not os.path.isabs(path) or '\x00' in path:
+            return None
+    try:
+        binary_stat = os.stat(binary)
+        home_stat = os.stat(home)
+        codex_home_stat = os.stat(codex_home)
+        if (not stat.S_ISREG(binary_stat.st_mode) or not os.access(binary, os.X_OK) or
+                not stat.S_ISDIR(home_stat.st_mode) or not stat.S_ISDIR(codex_home_stat.st_mode) or
+                home_stat.st_uid != os.getuid() or codex_home_stat.st_uid != os.getuid()):
+            return None
+    except OSError:
+        return None
+    env = os.environ.copy()
+    env['HOME'] = home
+    env['CODEX_HOME'] = codex_home
+    return [binary, 'queue', '--thread', sid, '--message', text], env
 
 
 def submit(context, intent, state, services):
@@ -52,14 +77,26 @@ def submit(context, intent, state, services):
             not isinstance(attempt, (str, int)) or isinstance(attempt, bool) or
             not isinstance(text, str) or not text or '\x00' in text):
         return {'handoff': 'not_sent', 'facts': [], 'state': state}
-    endpoint = context.get('daemon_endpoint')
-    if (not isinstance(endpoint, str) or not endpoint.startswith('unix:///') or
-            '\x00' in endpoint):
-        return {'handoff': 'not_sent', 'facts': [], 'state': state}
-    try:
-        if not stat.S_ISSOCK(os.stat(endpoint[7:]).st_mode):
+    attachment = context.get('attachment')
+    env = None
+    if attachment == 'direct':
+        direct = _direct_command(context, sid, text)
+        if direct is None:
             return {'handoff': 'not_sent', 'facts': [], 'state': state}
-    except OSError:
+        command, env = direct
+    elif attachment in (None, 'daemon'):
+        endpoint = context.get('daemon_endpoint')
+        if (not isinstance(endpoint, str) or not endpoint.startswith('unix:///') or
+                '\x00' in endpoint):
+            return {'handoff': 'not_sent', 'facts': [], 'state': state}
+        try:
+            if not stat.S_ISSOCK(os.stat(endpoint[7:]).st_mode):
+                return {'handoff': 'not_sent', 'facts': [], 'state': state}
+        except OSError:
+            return {'handoff': 'not_sent', 'facts': [], 'state': state}
+        command = ['codex', 'queue', '--thread', sid, '--message', text,
+                   '--remote', endpoint]
+    else:
         return {'handoff': 'not_sent', 'facts': [], 'state': state}
     claim = services.get('codex_attempt_claim')
     finish = services.get('codex_attempt_finish')
@@ -80,11 +117,9 @@ def submit(context, intent, state, services):
         return {'handoff': 'sent', 'facts': [receipt], 'state': state}
     if status != 'claimed':
         return {'handoff': 'uncertain', 'facts': [], 'state': state}
-    command = ['codex', 'queue', '--thread', sid, '--message', text]
-    command.extend(['--remote', endpoint])
     try:
         process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL)
+                                   stderr=subprocess.DEVNULL, env=env)
     except OSError:
         try:
             finish(key, 'not_sent')

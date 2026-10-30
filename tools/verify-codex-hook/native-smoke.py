@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 
 
 class LocalProvider(http.server.BaseHTTPRequestHandler):
@@ -108,9 +109,13 @@ def main():
         def tmux(*args):
             return subprocess.run(['tmux', '-L', socket, *args], env=env, check=True,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).stdout.strip()
-        previous_path = os.environ.get('PATH')
-        previous_tmux = os.environ.get('TMUX')
-        os.environ['PATH'] = scratch_path
+        scoped_keys = set(env) | {'TMUX', 'XDG_STATE_HOME', 'CODEX_STATE_HOME', 'CODEX_PROFILE', 'CODEX_CONFIG_PROFILE'}
+        previous_env = {key: os.environ.get(key) for key in scoped_keys}
+        for key in scoped_keys:
+            os.environ.pop(key, None)
+        os.environ.update(env)
+        backend_process = None
+        daemon_socket = None
         try:
             diagnostic = home / 'hook-observations.jsonl'
             def observations():
@@ -123,138 +128,191 @@ def main():
                         return value
                     time.sleep(0.1)
                 raise AssertionError(description)
-            def start(name, resume=None):
+            def start(name, resume=None, endpoint=None):
                 arguments = [str(cli), '--yolo', '--dangerously-bypass-hook-trust', '--enable', 'hooks']
+                if endpoint:
+                    arguments.extend(['--remote', endpoint])
                 if resume:
                     arguments.extend(['resume', resume])
                 else:
                     arguments.append('initial synthetic prompt')
                 tmux('new-session', '-d', '-s', name, '-c', str(work), 'exec ' + shlex.join(arguments))
-            start('smoke-a')
-            first = wait_for(lambda: observations()[:1], 'first native SessionStart missing after initial prompt')[0]
-            sid = first.get('session_id')
-            assert sid and first.get('transcript_path'), 'first hook lacks session identity'
-            print(json.dumps({'hook_event': first.get('hook_event_name'), 'hook_ancestors': first['ancestors']}), flush=True)
-            spec = importlib.util.spec_from_file_location('reader', repo / 'src/chat_history_reader.py')
-            reader = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(reader)
-            reader.HOME = home
-            reader.CONNECTOR_SOURCES = {name: base64.b64encode((repo / 'src/chat_connectors' / (name + '.py')).read_bytes()).decode()
-                                        for name in ('claude', 'codex')}
-            socket_path = tmux('display-message', '-p', '-t', 'smoke-a:0.0', '#{socket_path}')
-            os.environ['TMUX'] = socket_path + ',0,0'
-            def response(name):
-                query = dict(id=7, codex=True, sid='', tmux=name, cwd=str(work), cached_sid='', inode=0, offset=0, follow=True)
-                return reader.response(query)
-            pane = int(tmux('display-message', '-p', '-t', 'smoke-a:0.0', '#{pane_pid}'))
-            table = reader.process_table(pids=[pane])
-            native = reader.agent_pid_for_panes([pane], table, 'codex')
-            assert native and reader.open_codex_transcript(native, table) == set(), 'pane must have zero rollout FDs'
-            def first_response():
-                wire = response('smoke-a')
-                return wire if '\thistory\tok\t' + sid + '\t' in wire else None
-            wire = wait_for(first_response, 'pane-to-backend response not established')
-            assert '\thistory\tok\t' + sid + '\t' in wire
-            transcript = Path(first['transcript_path'])
-            def transcript_rows():
-                if not transcript.exists():
-                    return []
-                rows = []
-                with transcript.open('rb') as source:
-                    while True:
-                        offset = source.tell()
-                        line = source.readline()
-                        if not line or not line.endswith(b'\n'):
-                            break
-                        event = reader.load_line(line)
-                        rows.extend(reader.conversation_rows(event, 'codex', offset))
-                return rows
-            def replies():
+            for mode in ('direct', 'daemon'):
+                server.busy_release.clear()
+                server.busy_started.clear()
+                server.busy_timed_out.clear()
+                endpoint = None
+                if mode == 'daemon':
+                    daemon_dir = Path('/tmp/codex-daemon-' + str(os.getuid()))
+                    daemon_dir.mkdir(mode=0o700, exist_ok=True)
+                    daemon_socket = daemon_dir / (uuid.uuid4().hex + uuid.uuid4().hex)
+                    endpoint = 'unix://' + str(daemon_socket)
+                    backend_process = subprocess.Popen([str(cli), '--dangerously-bypass-hook-trust', '--enable', 'hooks', 'app-server', '--listen', endpoint], cwd=work, env=env,
+                                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    wait_for(lambda: daemon_socket.is_socket() and backend_process.poll() is None, 'fixture daemon failed to listen')
+                count = len(observations())
+                start('smoke-a', endpoint=endpoint)
+                first = wait_for(lambda: observations()[count:count + 1], 'first native SessionStart missing after initial prompt')[0]
+                sid = first.get('session_id')
+                assert sid and first.get('transcript_path'), 'first hook lacks session identity'
+                print(json.dumps({'hook_event': first.get('hook_event_name'), 'hook_ancestors': first['ancestors']}), flush=True)
+                spec = importlib.util.spec_from_file_location('reader', repo / 'src/chat_history_reader.py')
+                reader = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(reader)
+                reader.HOME = home
+                reader.CONNECTOR_SOURCES = {name: base64.b64encode((repo / 'src/chat_connectors' / (name + '.py')).read_bytes()).decode()
+                                            for name in ('claude', 'codex')}
+                socket_path = tmux('display-message', '-p', '-t', 'smoke-a:0.0', '#{socket_path}')
+                os.environ['TMUX'] = socket_path + ',0,0'
+                def response(name):
+                    query = dict(id=7, codex=True, sid='', tmux=name, cwd=str(work), cached_sid='', inode=0, offset=0, follow=True)
+                    return reader.response(query)
+                pane = int(tmux('display-message', '-p', '-t', 'smoke-a:0.0', '#{pane_pid}'))
+                table = reader.process_table(pids=[pane])
+                native = reader.agent_pid_for_panes([pane], table, 'codex')
+                assert native, 'native TUI missing'
+                native_start = reader.codex_process_start(native)
+                assert native_start, 'native TUI start time unavailable'
+                transcript = Path(first['transcript_path']).resolve()
+                if mode == 'daemon':
+                    wait_for(lambda: reader.open_codex_transcript(native, table) == set(), 'remote TUI owns rollout FDs')
+                else:
+                    wait_for(lambda: reader.open_codex_transcript(native, {native: table[native]}, config) == {(sid, transcript)},
+                             'direct TUI does not own exact transcript')
+                attachment = wait_for(lambda: reader.codex_queue_attachment('smoke-a', sid, transcript), 'verified attachment missing')
+                assert attachment['attachment'] == mode
+                if mode == 'direct':
+                    assert Path(attachment['codex_binary']).resolve() == cli
+                    assert Path(attachment['codex_home']).resolve() == config.resolve()
+                    assert Path(attachment['native_user_home']).resolve() == home.resolve()
+                else:
+                    assert attachment['daemon_endpoint'] == endpoint
+                    assert backend_process.poll() is None
+                    backend_start = reader.codex_process_start(backend_process.pid)
+                    assert backend_start, 'daemon start time unavailable'
+                def first_response():
+                    wire = response('smoke-a')
+                    return wire if '\thistory\tok\t' + sid + '\t' in wire else None
+                wire = wait_for(first_response, 'pane-to-backend response not established')
+                assert '\thistory\tok\t' + sid + '\t' in wire
+                def transcript_rows():
+                    if not transcript.exists():
+                        return []
+                    rows = []
+                    with transcript.open('rb') as source:
+                        while True:
+                            offset = source.tell()
+                            line = source.readline()
+                            if not line or not line.endswith(b'\n'):
+                                break
+                            event = reader.load_line(line)
+                            rows.extend(reader.conversation_rows(event, 'codex', offset))
+                    return rows
+                def replies():
+                    with server.response_lock:
+                        return set(server.responses)
+                def initial_reply():
+                    issued = replies()
+                    return any(row.get('role') == 'assistant' and row.get('text') in issued
+                               for row in transcript_rows())
+                wait_for(initial_reply, 'initial fake-provider reply missing from exact native transcript')
+                initial_replies = replies()
+                request = dict(message_protocol=1, provider='codex', sid=sid, tmux='smoke-a',
+                               message_id='native_smoke_' + mode + '_0001', text='hosted synthetic prompt')
+                def host(op):
+                    return reader.message_store_request(dict(request, op='message_' + op))
+                wrong = dict(request, sid=str(uuid.uuid4()), message_id='native_smoke_' + mode + '_wrong_sid',
+                             text='wrong session synthetic prompt')
+                reader.message_store_request(dict(wrong, op='message_submit'))
+                rejected = reader.message_store_request(dict(wrong, op='message_dispatch'))
+                assert rejected['message']['state'] != 'accepted', 'wrong session was accepted'
+                host('submit')
+                dispatched = host('dispatch')
+                assert dispatched['message']['state'] == 'accepted', (
+                    'Codex 0.166.0 native queue acceptance unavailable: ' + str(dispatched.get('handoff')))
+                host('submit')
+                host('dispatch')
+                def delivered():
+                    rows = transcript_rows()
+                    users = [index for index, row in enumerate(rows)
+                             if row.get('role') == 'user' and row.get('text') == request['text']]
+                    if len(users) > 1:
+                        raise AssertionError('native transcript contains duplicate semantic user submissions')
+                    later_replies = replies() - initial_replies
+                    return bool(users and any(row.get('role') == 'assistant' and row.get('text') in later_replies
+                                              for row in rows[users[0] + 1:]))
+                wait_for(delivered, 'host send or distinct later reply missing from exact native transcript')
+                reader.message_poll('smoke-a', 'codex', sid)
+                native_items = host('snapshot')['items']
+                assert any(item.get('native_message', {}).get('text') == request['text'] for item in native_items)
+                assert any(item.get('native_message', {}).get('text') in replies() - initial_replies for item in native_items)
+                assert host('status')['message']['state'] == 'accepted'
+                busy = dict(request, message_id='native_smoke_' + mode + '_busy_0001', text='controlled synthetic busy prompt')
+                queued = dict(request, message_id='native_smoke_' + mode + '_busy_0002', text='controlled synthetic queued prompt')
+                def busy_host(op, message):
+                    return reader.message_store_request(dict(message, op='message_' + op))
                 with server.response_lock:
-                    return set(server.responses)
-            def initial_reply():
-                issued = replies()
-                return any(row.get('role') == 'assistant' and row.get('text') in issued
-                           for row in transcript_rows())
-            wait_for(initial_reply, 'initial fake-provider reply missing from exact native transcript')
-            initial_replies = replies()
-            request = dict(message_protocol=1, provider='codex', sid=sid, tmux='smoke-a',
-                           message_id='native_smoke_fixture_0001', text='hosted synthetic prompt')
-            def host(op):
-                return reader.message_store_request(dict(request, op='message_' + op))
-            host('submit')
-            dispatched = host('dispatch')
-            assert dispatched['message']['state'] == 'accepted', (
-                'Codex 0.166.0 native queue acceptance unavailable: ' + str(dispatched.get('handoff')))
-            host('submit')
-            host('dispatch')
-            def delivered():
-                rows = transcript_rows()
-                users = [index for index, row in enumerate(rows)
-                         if row.get('role') == 'user' and row.get('text') == request['text']]
-                if len(users) > 1:
-                    raise AssertionError('native transcript contains duplicate semantic user submissions')
-                later_replies = replies() - initial_replies
-                return bool(users and any(row.get('role') == 'assistant' and row.get('text') in later_replies
-                                          for row in rows[users[0] + 1:]))
-            wait_for(delivered, 'host send or distinct later reply missing from exact native transcript')
-            reader.message_poll('smoke-a', 'codex', sid)
-            native_items = host('snapshot')['items']
-            assert any(item.get('native_message', {}).get('text') == request['text'] for item in native_items)
-            assert any(item.get('native_message', {}).get('text') in replies() - initial_replies for item in native_items)
-            assert host('status')['message']['state'] == 'accepted'
-            busy = dict(request, message_id='native_smoke_busy_0001', text='controlled synthetic busy prompt')
-            queued = dict(request, message_id='native_smoke_busy_0002', text='controlled synthetic queued prompt')
-            def busy_host(op, message):
-                return reader.message_store_request(dict(message, op='message_' + op))
-            with server.response_lock:
-                server.busy_armed = True
-            try:
-                busy_host('submit', busy)
-                first_ack = busy_host('dispatch', busy)
-                assert first_ack['message']['state'] == 'accepted', 'busy turn was not accepted'
-                assert server.busy_started.wait(35), 'busy provider response did not start'
-                busy_host('submit', queued)
-                started_at = time.monotonic()
-                second_ack = busy_host('dispatch', queued)
-                elapsed = time.monotonic() - started_at
-                assert not server.busy_release.is_set() and not server.busy_timed_out.is_set(), 'busy response released before acceptance'
-                assert elapsed < 15, 'busy acceptance exceeded sent deadline'
-                assert second_ack['message']['state'] == 'accepted', 'busy native queue did not accept second turn'
-                replay = busy_host('submit', queued)
-                assert replay['message']['attempt'] == second_ack['message']['attempt']
-                assert replay['message']['state'] == 'accepted'
-                busy_host('dispatch', queued)
-                assert not server.busy_timed_out.is_set(), 'busy provider hold expired before replay'
-            finally:
-                server.busy_release.set()
-            def busy_delivered():
-                rows = transcript_rows()
-                first_user = [i for i, row in enumerate(rows) if row.get('role') == 'user' and row.get('text') == busy['text']]
-                second_user = [i for i, row in enumerate(rows) if row.get('role') == 'user' and row.get('text') == queued['text']]
-                if len(first_user) > 1 or len(second_user) > 1:
-                    raise AssertionError('busy or queued turn submitted more than once')
-                if not first_user or not second_user or first_user[0] >= second_user[0]:
-                    return False
-                held_reply = server.busy_reply
-                between = rows[first_user[0] + 1:second_user[0]]
-                after = rows[second_user[0] + 1:]
-                later_replies = replies() - initial_replies - {held_reply}
-                return (any(row.get('role') == 'assistant' and row.get('text') == held_reply for row in between)
-                        and any(row.get('role') == 'assistant' and row.get('text') in later_replies for row in after))
-            wait_for(busy_delivered, 'busy turns or distinct replies missing from exact native transcript')
-            reader.message_poll('smoke-a', 'codex', sid)
-            busy_items = host('snapshot')['items']
-            assert all(any(item.get('native_message', {}).get('text') == message['text'] for item in busy_items)
-                       for message in (busy, queued))
-            assert busy_host('status', queued)['message']['state'] == 'accepted'
-            start('smoke-b', resume=sid)
-            second = wait_for(lambda: observations()[1:2], 'second native SessionStart missing')[0]
+                    server.busy_armed = True
+                try:
+                    busy_host('submit', busy)
+                    first_ack = busy_host('dispatch', busy)
+                    assert first_ack['message']['state'] == 'accepted', 'busy turn was not accepted'
+                    assert server.busy_started.wait(35), 'busy provider response did not start'
+                    busy_host('submit', queued)
+                    started_at = time.monotonic()
+                    second_ack = busy_host('dispatch', queued)
+                    elapsed = time.monotonic() - started_at
+                    assert not server.busy_release.is_set() and not server.busy_timed_out.is_set(), 'busy response released before acceptance'
+                    assert elapsed < 15, 'busy acceptance exceeded sent deadline'
+                    assert second_ack['message']['state'] == 'accepted', 'busy native queue did not accept second turn'
+                    replay = busy_host('submit', queued)
+                    assert replay['message']['attempt'] == second_ack['message']['attempt']
+                    assert replay['message']['state'] == 'accepted'
+                    busy_host('dispatch', queued)
+                    assert not server.busy_timed_out.is_set(), 'busy provider hold expired before replay'
+                finally:
+                    server.busy_release.set()
+                def busy_delivered():
+                    rows = transcript_rows()
+                    first_user = [i for i, row in enumerate(rows) if row.get('role') == 'user' and row.get('text') == busy['text']]
+                    second_user = [i for i, row in enumerate(rows) if row.get('role') == 'user' and row.get('text') == queued['text']]
+                    if len(first_user) > 1 or len(second_user) > 1:
+                        raise AssertionError('busy or queued turn submitted more than once')
+                    if not first_user or not second_user or first_user[0] >= second_user[0]:
+                        return False
+                    held_reply = server.busy_reply
+                    between = rows[first_user[0] + 1:second_user[0]]
+                    after = rows[second_user[0] + 1:]
+                    later_replies = replies() - initial_replies - {held_reply}
+                    return (any(row.get('role') == 'assistant' and row.get('text') == held_reply for row in between)
+                            and any(row.get('role') == 'assistant' and row.get('text') in later_replies for row in after))
+                wait_for(busy_delivered, 'busy turns or distinct replies missing from exact native transcript')
+                reader.message_poll('smoke-a', 'codex', sid)
+                busy_items = host('snapshot')['items']
+                assert all(any(item.get('native_message', {}).get('text') == message['text'] for item in busy_items)
+                           for message in (busy, queued))
+                assert busy_host('status', queued)['message']['state'] == 'accepted'
+                assert int(tmux('display-message', '-p', '-t', 'smoke-a:0.0', '#{pane_pid}')) == pane
+                assert reader.codex_process_start(native) == native_start, 'original TUI changed'
+                assert reader.codex_queue_attachment('smoke-a', sid, transcript) == attachment, 'attachment identity changed'
+                if mode == 'daemon':
+                    assert backend_process.poll() is None and reader.codex_process_start(backend_process.pid) == backend_start, 'daemon worker changed'
+                else:
+                    assert reader.open_codex_transcript(native, {native: reader.process_table()[native]}, config) == {(sid, transcript)}, 'direct worker changed transcript'
+                if mode == 'direct':
+                    tmux('kill-session', '-t', 'smoke-a')
+                    continue
+            count = len(observations())
+            start('smoke-b', resume=sid, endpoint=endpoint)
+            second = wait_for(lambda: observations()[count:count + 1], 'second native SessionStart missing')[0]
             assert second.get('session_id') == sid, 'second client did not resume the first thread'
-            backends = [(pid, value) for pid, value in reader.process_table().items()
-                        if 'app-server' in value[1] and '--listen' in value[1]]
-            assert len(backends) == 1, 'expected one default daemon backend'
-            backend, value = backends[0]
+            backend = backend_process.pid
+            value = reader.process_table()[backend]
+            assert backend_process.poll() is None and reader.codex_process_start(backend) == backend_start
+            pane_b = int(tmux('display-message', '-p', '-t', 'smoke-b:0.0', '#{pane_pid}'))
+            table_b = reader.process_table(pids=[pane_b])
+            native_b = reader.agent_pid_for_panes([pane_b], table_b, 'codex')
+            assert native_b and reader.open_codex_transcript(native_b, table_b) == set(), 'second remote TUI owns rollout FDs'
             sources = reader.open_codex_transcript(backend, {backend: value})
             assert sources is not None and len(sources) == 1, 'two-client one-writer precondition not observed'
             assert '\thistory\tmissing\t' in response('smoke-a')
@@ -263,6 +321,7 @@ def main():
             wait_for(lambda: '\thistory\tok\t' + sid + '\t' in response('smoke-a'), 'single-client binding did not recover')
             count = len(observations())
             tmux('send-keys', '-t', 'smoke-a:0.0', '/new', 'Enter')
+            tmux('send-keys', '-t', 'smoke-a:0.0', 'new synthetic session prompt', 'Enter')
             switched = wait_for(lambda: [row for row in observations()[count:] if row.get('session_id') and row['session_id'] != sid],
                                 'independent new-session selection event not observed')[0]
             assert int(tmux('display-message', '-p', '-t', 'smoke-a:0.0', '#{pane_pid}')) == pane, 'TUI process changed'
@@ -275,7 +334,11 @@ def main():
                               'old_writer_open': old_writer, 'old_thread_returned': '\thistory\tok\t' + sid + '\t' in old_wire}), flush=True)
             assert ('\thistory\tmissing\t' in old_wire or
                     '\thistory\tok\t' + switched['session_id'] + '\t' in old_wire), 'old or unrelated thread exposed after selection changed'
-            print('native default daemon: isolation and selection controls verified')
+            new_sid = switched['session_id']
+            wait_for(lambda: '\thistory\tok\t' + new_sid + '\t' in response('smoke-a'),
+                     'initialized new session not bound to its exact SID')
+            assert reader.codex_process_start(native) == native_start, 'TUI changed during selection'
+            print('native fixture daemon: isolation and observed selection controls verified')
         except Exception:
             try:
                 pane_text = tmux('capture-pane', '-p', '-t', 'smoke-a:0.0', '-S', '-50')
@@ -286,15 +349,21 @@ def main():
         finally:
             server.busy_release.set()
             subprocess.run(['tmux', '-L', socket, 'kill-server'], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if backend_process is not None:
+                backend_process.terminate()
+                try:
+                    backend_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    backend_process.kill()
+                    backend_process.wait()
+            if daemon_socket is not None:
+                daemon_socket.unlink(missing_ok=True)
             server.shutdown()
-            if previous_path is None:
-                os.environ.pop('PATH', None)
-            else:
-                os.environ['PATH'] = previous_path
-            if previous_tmux is None:
-                os.environ.pop('TMUX', None)
-            else:
-                os.environ['TMUX'] = previous_tmux
+            for key, value in previous_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 if __name__ == '__main__':
