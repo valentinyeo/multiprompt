@@ -51,9 +51,17 @@ test('publication exports pending fragments after the release fold and handles o
 test('existing release workflow signs the versioned history alongside the update bundle', () => {
   const workflow = read('.github/workflows/release.yml');
   assert.match(workflow, /node tools\/release-notes\.mjs src\/changelog\.zig "\$TAG" dist\/release-notes\.json/);
-  assert.match(workflow, /sha256sum \*\.exe \*\.zip release-notes\.json > SHA256SUMS\.txt/);
-  assert.ok(workflow.indexOf('node tools/release-notes.mjs') < workflow.indexOf('sha256sum'));
-  assert.ok(workflow.indexOf('sha256sum') < workflow.indexOf('node tools/sign-release.mjs'));
+  const release = workflow.slice(workflow.indexOf('\n  release:\n'));
+  const signedNotesInOrder = text => {
+    const notes = text.indexOf('node tools/release-notes.mjs');
+    const manifest = text.indexOf('sha256sum *.exe *.zip release-notes.json > SHA256SUMS.txt');
+    const signature = text.indexOf('node tools/sign-release.mjs');
+    const publication = text.indexOf('gh release create "$TAG" dist/*');
+    return notes >= 0 && notes < manifest && manifest < signature && signature < publication;
+  };
+  assert.ok(signedNotesInOrder(release));
+  const unsigned = release.replace('sha256sum *.exe *.zip release-notes.json > SHA256SUMS.txt', 'sha256sum *.exe *.zip > SHA256SUMS.txt');
+  assert.equal(signedNotesInOrder(unsigned), false);
   assert.match(workflow, /gh release create "\$TAG" dist\/\*/);
 });
 
@@ -106,7 +114,12 @@ test('existing card uses the same growing rectangle for layout and hits, with th
   assert.match(notes, /!versionNewer\(installed, release.version\) or versionNewer\(offered, release.version\)/);
   assert.match(notes, /while \(at < result.count and !versionNewer\(versions\[at\], release.version\)\)/);
   assert.match(notes, /"and \{d\} more", \.\{rest\}/);
-  assert.match(card, /if \(card_notes\.count == 0 or/);
+  const rect = card.slice(card.indexOf('pub fn updateCardRect()'), card.indexOf('fn updateCardButtonRect('));
+  assert.match(rect, /\.top = sticky.top - @import\("window_layout.zig"\).paneGap\(\) - updateCardHeight\(\) - uiScaled\(22\)/);
+  assert.match(rect, /\.bottom = sticky.top - uiScaled\(22\) - @import\("window_layout.zig"\).paneGap\(\)/);
+  const hit = card.slice(card.indexOf('pub fn updateCardHit('), card.indexOf('var release_ready'));
+  assert.match(hit, /const card = updateCardRect\(\);\s+if \(!ptInRect\(card, x, y\)\) return 0/);
+  assert.match(card.slice(card.indexOf('pub fn paintSidebarUpdateCard')), /const card = updateCardRect\(\)/);
 });
 
 test('master painter fails the exact card-note observability contract required by the new journey', () => {
@@ -132,7 +145,11 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
   assert.match(suite, /PrintWindow\(\$cardProcess.MainWindowHandle/);
   assert.match(suite, /\$bitmap.Save\(\(Join-Path \$Evidence 'update-card-notes.png'\)\)/);
   assert.match(suite, /Tampered notes accepted/);
-  assert.match(suite, /maintenance release waits without an update card/);
+  assert.match(suite, /checks-only update shows fallback and retains ticket link/);
+  assert.match(suite, /Checks-only fallback is missing or changed/);
+  assert.match(suite, /Checks-only ticket link is missing or changed/);
+  assert.match(suite, /card view=collapsed n=1 first=Checks and fixes, no visible change/);
+  assert.match(suite, /Checks-only card was blank/);
   assert.match(suite, /update-card-quiet\.png/);
   assert.match(suite, /Real product notes did not show again/);
   assert.match(suite, /\$installedNotes\.version = \$newVersion/);
@@ -287,7 +304,7 @@ test('IGSH-1243 builds one linked line for each commit ticket', async () => {
   const files = {
     'src/main.zig': 'pub const APP_VERSION = "0.28.883";\n',
     'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
-    'changelog.d/IGSH-2-chat.md': 'Chats open sooner.\nDrafts stay visible.\n',
+    [path.posix.join('changelog.d', 'IGSH-2-chat.md')]: 'Chats open sooner.\nDrafts stay visible.\n',
   };
   const commits = [{ sha: 'aaa', subject: 'IGSH-2: Improve chats' }, { sha: 'bbb', subject: 'IGSH-3: Repair checks' }, { sha: 'ccc', subject: 'IGSH-2: Follow up' }];
   const generated = buildChangelog(files, 'v0.28.1100', [], commits);
@@ -298,7 +315,7 @@ test('IGSH-1243 builds one linked line for each commit ticket', async () => {
   assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [{ sha: 'bad123', subject: 'Repair checks' }]), /bad123.*leading ticket ID/);
   assert.throws(() => buildChangelog(files, 'v0.28.1100', [], []), /fragment has no matching commit ticket/);
   const noFragments = { ...files };
-  delete noFragments['changelog.d/IGSH-2-chat.md'];
+  delete noFragments[path.posix.join('changelog.d', 'IGSH-2-chat.md')];
   assert.throws(() => buildChangelog(noFragments, 'v0.28.1100'), /no ticketed release lines/);
   const tooling = releaseNotes(buildChangelog(noFragments, 'v0.28.1100', [], [commits[1]]), 'v0.28.1100').releases[0];
   assert.deepEqual(tooling.changes, ['Checks and fixes, no visible change']);
@@ -322,7 +339,7 @@ test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => 
     const fragments = Object.fromEntries(names.map(name => [name, git('show', `${tag}:${name}`)]));
     history.push({ tag, files: { ...source, ...fragments }, sha: git('rev-parse', `${tag}^{commit}`) });
   }
-  const files = { ...history.at(-1).files, 'changelog.d/IGSH-1243-notes.md': 'Changelog ticket links now open their tickets.\n' };
+  const files = { ...history.at(-1).files, [path.posix.join('changelog.d', 'IGSH-1243-notes.md')]: 'Changelog ticket links now open their tickets.\n' };
   const generated = buildChangelog(files, 'v0.28.1100', history, [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }]);
   const notes = releaseNotes(generated, 'v0.28.1100');
   for (const tag of tags) {
@@ -333,7 +350,7 @@ test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => 
   }
   assert.equal(notes.releases.some(item => item.version === '0.28.1041'), false);
   const release1038 = notes.releases.find(item => item.version === '0.28.1038');
-  const actualFragment = git('show', 'v0.28.1038:changelog.d/IGSH-1238-busy-queue.md').split('\n').join(' ');
+  const actualFragment = git('show', `v0.28.1038:${path.posix.join('changelog.d', 'IGSH-1238-busy-queue.md')}`).split('\n').join(' ');
   const fragmentIndex = release1038.tickets.indexOf('https://app.hypertask.ai/detail/project-2060/1238');
   assert.equal(release1038.changes[fragmentIndex], actualFragment);
   assert.throws(() => buildChangelog(files, 'v0.28.1100', history.map(item => item.tag === 'v0.28.1048' ? { ...item, sha: 'wrong' } : item), [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }]), /reviewed release commit does not match/);

@@ -33,13 +33,19 @@ test('Manage Snippets is searchable, rendered, and Enter deletes instead of past
   assert.match(open, /g_search_snippet_manage_mode = false/);
 });
 
-test('released builds can repeat the keyboard proof through the content-write App boundary', () => {
+test('snippet keyboard proof runs manually and nightly through the command-palette journey', () => {
   const workflowPath = path.join(root, '.github/workflows/manage-snippets.yml');
   assert.ok(fs.existsSync(workflowPath), 'native snippet proof workflow must exist');
   const workflow = fs.readFileSync(workflowPath, 'utf8');
-  assert.match(workflow, /repository_dispatch:\s+types: \[manage-snippets-proof\]/);
+  assert.match(workflow, /^  workflow_dispatch:/m);
+  assert.match(workflow, /^  schedule:/m);
+  assert.doesNotMatch(workflow, /^  (?:push|pull_request|repository_dispatch|workflow_run):/m);
+  assert.match(workflow, /uses: \.\/\.github\/workflows\/verify\.yml/);
   assert.match(workflow, /feature: command-palette/);
-  assert.match(workflow, /tag: \$\{\{ github\.event\.client_payload\.tag \|\| '' \}\}/);
+  const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
+  assert.match(verify, /tag:\s+description: Optional release tag/);
+  const feature = fs.readFileSync(path.join(root, '.claude/skills/verify-multiprompt/features/command-palette.md'), 'utf8');
+  assert.match(feature, /manage-snippets/);
 });
 
 test('production deletion preserves other entries across reload and failed writes', () => {

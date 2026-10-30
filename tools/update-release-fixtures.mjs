@@ -31,7 +31,7 @@ for (const [version, broken] of [['1.10.0', false], ['1.11.0', false], ['1.12.0'
     { version: '10.0.0', changes: ['Not offered yet.'] },
     { version: '0.0.0', changes: ['Already installed.'] },
     { version, changes: ['Typing feels faster.', 'Chats keep your place.', 'Fix IGSH-123.', 'Fix src/main.zig.', 'Behind the scenes fixes.', 'Chat speed checks now ignore shared-machine pauses.'] },
-  ] : [{ version, changes: version === '9.11.0' ? [] : ['Typing feels faster.'] }];
+  ] : [{ version, changes: version === '9.11.0' ? ['Checks and fixes, no visible change'] : ['Typing feels faster.'], ...(version === '9.11.0' ? { tickets: ['https://app.hypertask.ai/detail/project-2060/1243'] } : {}) }];
   fs.writeFileSync(path.join(dir, 'release-notes.json'), JSON.stringify({ version, releases }));
   names.push('release-notes.json');
   const sums = Buffer.from(names.map(name => `${createHash('sha256').update(fs.readFileSync(path.join(dir, name))).digest('hex')}  ${name}\n`).join(''));

@@ -88,13 +88,20 @@ test('every split PowerShell control parses on the hosted Windows path', t => {
 
 });
 
-test('existing native workflows follow shared controls and their own feature file', () => {
-  for (const file of ['browser-corners.yml', 'window-controls.yml', 'palette-dialog-design.yml']) {
+test('existing native workflows run their features through shared controls', () => {
+  const controllerSource = read('control.ps1');
+  assert.match(controllerSource, /\. \(Join-Path \$PSScriptRoot 'control-library\.ps1'\)/);
+  assert.match(controllerSource, /Add-Type[^\n]+control-native\.cs/);
+  for (const [file, feature, control] of [['browser-corners.yml', 'browser-corners', 'browser-corners.ps1'], ['window-controls.yml', 'window-controls', 'window-controls.ps1'], ['palette-dialog-design.yml', 'command-palette', 'control-feature-command-palette.ps1']]) {
     const source = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
-    for (const control of ['control-library.ps1', 'control-native.cs']) assert.equal(source.split(`.claude/skills/verify-multiprompt/${control}`).length - 1, 2, `${file}: ${control}`);
+    assert.match(source, /^  workflow_dispatch:/m, file);
+    assert.match(source, /^  schedule:/m, file);
+    assert.match(source, new RegExp(`control\\.ps1 -Feature ${feature} -Exe \\$exe`), file);
+    assert.match(source, /if \(\$LASTEXITCODE -ne 0\) \{ throw/, file);
+    const route = controllerSource.match(new RegExp(`'${feature}'\\s*\\{([^}]+)\\}`));
+    assert.ok(route && route[1].includes(control), feature);
+    assert.ok(fs.existsSync(path.join(directory, control)), feature);
   }
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   assert.match(workflow, /tools\/split-feature-controls\.ps1 -Path[^\n]+control-ast\.json/);
-  const palette = fs.readFileSync(path.join(root, '.github/workflows/palette-dialog-design.yml'), 'utf8');
-  assert.equal(palette.split('control-feature-command-palette.ps1').length - 1, 2);
 });

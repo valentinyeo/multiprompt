@@ -179,19 +179,21 @@ try {
                 $observedAll | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-expanded.json')
                 Passed 'update card opens the full list on click'
                 Select-Release 'v9.11.0'
-                Assert (Save-Update $cardExe '0.0.0' 'x64') 'Quiet release was not staged'
+                $beforeChecks = (-join (Get-Content $log -Raw)).Length
+                Assert (Save-Update $cardExe '0.0.0' 'x64') 'Checks-only release was not staged'
+                $checksNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
+                Assert ($checksNotes.releases[0].changes.Count -eq 1 -and $checksNotes.releases[0].changes[0] -ceq 'Checks and fixes, no visible change') 'Checks-only fallback is missing or changed'
+                Assert ($checksNotes.releases[0].tickets.Count -eq 1 -and $checksNotes.releases[0].tickets[0] -ceq 'https://app.hypertask.ai/detail/project-2060/1243') 'Checks-only ticket link is missing or changed'
                 $deadline = [DateTime]::UtcNow.AddSeconds(30)
                 do {
                     $cardLog = -join (Get-Content $log -Raw)
-                    $quietMarker = [regex]::Match($cardLog, '(?m)\[update\] quiet release waiting 9\.11\.0\r?$')
-                    if ($quietMarker.Success) {
-                        $afterQuiet = $cardLog.Substring($quietMarker.Index + $quietMarker.Length)
-                        if ($afterQuiet -match '(?s)\[update\] restart button=-?\d+,-?\d+\r?\n.*?\[update\] card view=collapsed n=0 first=\r?\n') { break }
-                    }
-                    Assert (-not $cardProcess.HasExited) 'Quiet update interrupted the app'
-                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Quiet release update card was not painted with a Restart button' }
+                    $afterChecks = $cardLog.Substring($beforeChecks)
+                    if ($afterChecks -match '(?s)\[update\] restart button=-?\d+,-?\d+\r?\n.*?\[update\] card view=collapsed n=1 first=Checks and fixes, no visible change\r?\n') { break }
+                    Assert (-not $cardProcess.HasExited) 'Checks-only update interrupted the app'
+                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Checks-only fallback and Restart button were not painted' }
                     Start-Sleep -Milliseconds 100
                 } while ($true)
+                Assert ($afterChecks -notmatch '\[update\] card view=collapsed n=0 first=') 'Checks-only card was blank'
                 $cardProcess.Refresh()
                 Assert ($cardProcess.Responding) 'Quiet update blocked the app'
                 Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Quiet update window unavailable'
@@ -200,14 +202,15 @@ try {
                 $dc = $graphics.GetHdc()
                 try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Quiet update screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
                 try { $bitmap.Save((Join-Path $Evidence 'update-card-quiet.png')) } finally { $bitmap.Dispose() }
-                Passed 'empty-note update remains visible with Restart available'
+                Passed 'checks-only update shows fallback and retains ticket link'
                 Select-Release 'v9.10.0'
+                $beforeRestore = (-join (Get-Content $log -Raw)).Length
                 Assert (Save-Update $cardExe '0.0.0' 'x64') 'Real product notes were not restored'
                 $deadline = [DateTime]::UtcNow.AddSeconds(30)
                 do {
                     $cardLog = -join (Get-Content $log -Raw)
-                    $afterQuiet = $cardLog.Substring($cardLog.IndexOf('[update] quiet release waiting'))
-                    if ($afterQuiet -match '\[update\] card view=collapsed n=3') { break }
+                    $afterRestore = $cardLog.Substring($beforeRestore)
+                    if ($afterRestore -match '\[update\] card view=collapsed n=3') { break }
                     if ([DateTime]::UtcNow -gt $deadline) { throw 'Real product notes did not show again' }
                     Start-Sleep -Milliseconds 100
                 } while ($true)
