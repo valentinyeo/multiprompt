@@ -97,6 +97,7 @@ public static class SidebarDrag {
     [StructLayout(LayoutKind.Sequential)] struct Point { public int X, Y; }
     [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
     [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
@@ -112,7 +113,7 @@ public static class SidebarDrag {
         var end = new Point { X = to, Y = y };
         uint owner;
         GetWindowThreadProcessId(hwnd, out owner);
-        if (!ClientToScreen(hwnd, ref start) || !ClientToScreen(hwnd, ref end) || owner != pid || GetForegroundWindow() != hwnd || WindowFromPoint(start) != hwnd || WindowFromPoint(end) != hwnd) throw new InvalidOperationException("Sidebar drag ownership mismatch");
+        if (!ClientToScreen(hwnd, ref start) || !ClientToScreen(hwnd, ref end) || owner != pid || GetForegroundWindow() != hwnd || WindowFromPoint(start) != hwnd || GetAncestor(WindowFromPoint(end), 2) != hwnd) throw new InvalidOperationException("Sidebar drag ownership mismatch");
         Mouse(start.X, start.Y, 0);
         Mouse(start.X, start.Y, 2);
         try {
@@ -337,14 +338,50 @@ try {
     Write-Host $result.error
     if (Get-Variable main -ErrorAction SilentlyContinue) { Shot 'failure' }
 } finally {
-    if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() }
-    if ($null -ne $nextJob) { $nextStopped = $nextJob.Stop(); if ($result.cleanup -eq 'pending') { $result.cleanup = 0 }; $result.cleanup += $nextStopped.ActiveProcesses; $nextJob.Dispose() }
-    foreach ($name in @('session.json', 'debug.log', 'inbox-default.json')) { if (Test-Path "$settings/$name") { Copy-Item "$settings/$name" "$Output/$name" } }
     if ($MemoryProof) {
-        if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
-        $result.scratchRemoved = -not (Test-Path $profile)
-        Save $result "$Output/result.json"
+        $result.scratchRemoved = $false
+        $result.cleanupErrors = @()
+        try {
+            $result.cleanup = 0
+            $cleanupKnown = $true
+            foreach ($ownedJob in @($job, $nextJob)) {
+                if ($null -eq $ownedJob) { continue }
+                try {
+                    $stopped = $ownedJob.Stop()
+                    if ($cleanupKnown) { $result.cleanup += $stopped.ActiveProcesses }
+                } catch {
+                    $cleanupKnown = $false
+                    $result.cleanup = 'unknown'
+                    $result.cleanupErrors += $_.Exception.Message
+                } finally { $ownedJob.Dispose() }
+            }
+            foreach ($name in @('session.json', 'debug.log', 'inbox-default.json')) {
+                try { if (Test-Path "$settings/$name") { Copy-Item "$settings/$name" "$Output/$name" } } catch { $result.cleanupErrors += $_.Exception.Message }
+            }
+            if ($result.cleanup -eq 0) {
+                $deadline = [DateTime]::UtcNow.AddSeconds(20)
+                $lastError = ''
+                while (Test-Path -LiteralPath $profile) {
+                    try { Remove-Item -LiteralPath $profile -Recurse -Force } catch { $lastError = $_.Exception.Message }
+                    if (-not (Test-Path -LiteralPath $profile)) { break }
+                    if ([DateTime]::UtcNow -ge $deadline) {
+                        $result.cleanupErrors += "Scratch removal failed: $lastError"
+                        break
+                    }
+                    Start-Sleep -Milliseconds 200
+                }
+            }
+        } catch {
+            $result.cleanupErrors += $_.Exception.Message
+        } finally {
+            try { $result.scratchRemoved = -not (Test-Path -LiteralPath $profile) } catch { $result.cleanupErrors += $_.Exception.Message }
+            if ($result.cleanupErrors.Count -gt 0) { $result.passed = $false }
+            Save $result "$Output/result.json"
+        }
     } else {
+        if ($null -ne $job) { $stopped = $job.Stop(); $result.cleanup = $stopped.ActiveProcesses; $job.Dispose() }
+        if ($null -ne $nextJob) { $nextStopped = $nextJob.Stop(); if ($result.cleanup -eq 'pending') { $result.cleanup = 0 }; $result.cleanup += $nextStopped.ActiveProcesses; $nextJob.Dispose() }
+        foreach ($name in @('session.json', 'debug.log', 'inbox-default.json')) { if (Test-Path "$settings/$name") { Copy-Item "$settings/$name" "$Output/$name" } }
         Save $result "$Output/result.json"
         if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
     }
