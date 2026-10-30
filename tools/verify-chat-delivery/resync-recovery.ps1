@@ -1,3 +1,5 @@
+. "$PSScriptRoot/recovery-palette.ps1"
+. "$PSScriptRoot/recovery-palette-test.ps1"
 [void](Wait-For 'initial transcript loaded' { (Read-Shared "$settings/debug.log") -match '\[chat\] transcript load shell=\d+ ok' })
 Bind-Transcript
 Type-Composer $plan.text
@@ -13,7 +15,7 @@ Press @(0x11, 0x4B) 'Ctrl+K: open existing chat menu'
 [void](Wait-For 'menu palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
 $query = 'more menu'
 foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-[void](Wait-For 'more menu command selected' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=1 target=6466') })
+[void](Wait-For 'more menu command selected' { Test-RecoveryPaletteSelection ((Read-Shared "$settings/debug.log").Substring($offset)) $query.Length 6466 })
 Press @(0x0D) 'Enter: open More Menu'
 Shot "recovery-menu-$phase"
 $menuRect = Wait-For 'actual painted Resync menu row' {
@@ -44,7 +46,7 @@ function Recovery-Copy([bool]$LoadOlder = $true) {
     [void](Wait-For 'copy palette ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
     $query = 'chat view select all'
     foreach ($letter in $query.ToCharArray()) { [ChatDeliveryDesktop]::Type([uint16][char]::ToUpperInvariant($letter)) }
-    [void](Wait-For 'select-all command ready' { (Read-Shared "$settings/debug.log").Substring($offset) -match ('\[palette\] ready chars=' + $query.Length + ' count=[1-9][0-9]* target=6364') })
+    [void](Wait-For 'select-all command ready' { Test-RecoveryPaletteSelection ((Read-Shared "$settings/debug.log").Substring($offset)) $query.Length 6364 })
     Press @(0x0D) 'Enter: select rendered messages'
     Press @(0x11, 0x43) 'Ctrl+C: copy rendered messages'
     [Windows.Forms.Clipboard]::GetText()
