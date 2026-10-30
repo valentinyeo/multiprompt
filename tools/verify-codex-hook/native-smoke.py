@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
@@ -150,6 +151,9 @@ def main():
                     backend_process = subprocess.Popen([str(cli), '--dangerously-bypass-hook-trust', '--enable', 'hooks', 'app-server', '--listen', endpoint], cwd=work, env=env,
                                                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     wait_for(lambda: daemon_socket.is_socket() and backend_process.poll() is None, 'fixture daemon failed to listen')
+                    backend_proc = Path('/proc') / str(backend_process.pid)
+                    backend_start = (backend_proc / 'stat').read_text().rsplit(')', 1)[1].split()[19]
+                    assert backend_proc.stat().st_uid == os.getuid() and os.path.samefile(backend_proc / 'exe', cli), 'fixture daemon identity mismatch'
                 count = len(observations())
                 start('smoke-a', endpoint=endpoint)
                 first = wait_for(lambda: observations()[count:count + 1], 'first native SessionStart missing after initial prompt')[0]
@@ -186,10 +190,35 @@ def main():
                     assert Path(attachment['codex_home']).resolve() == config.resolve()
                     assert Path(attachment['native_user_home']).resolve() == home.resolve()
                 else:
-                    assert attachment['daemon_endpoint'] == endpoint
-                    assert backend_process.poll() is None
-                    backend_start = reader.codex_process_start(backend_process.pid)
-                    assert backend_start, 'daemon start time unavailable'
+                    actual = attachment.get('daemon_endpoint')
+                    backend_fds = reader.codex_socket_fds(backend_process.pid)
+                    tui_fds = reader.codex_socket_fds(native)
+                    connections = reader.codex_unix_connections()
+                    path = actual[7:] if isinstance(actual, str) and actual.startswith('unix:///') else ''
+                    canonical = re.fullmatch(r'/tmp/codex-daemon-' + str(os.getuid()) + r'/[0-9a-f]{64}', path)
+                    links = {fd for fd in (backend_fds or set()) if connections and
+                             connections.get(fd, (None, None))[1] == path and
+                             connections[fd][0] in (tui_fds or set()) and
+                             connections.get(connections[fd][0], (None, None))[0] == fd}
+                    table_now = reader.process_table(pids=[backend_process.pid])
+                    backend_sources = reader.open_codex_transcript(backend_process.pid, table_now)
+                    try:
+                        valid = (backend_process.poll() is None and backend_start and
+                                 reader.codex_process_start(backend_process.pid) == backend_start and
+                                 backend_proc.stat().st_uid == os.getuid() and
+                                 os.path.samefile(backend_proc / 'exe', cli) and
+                                 reader.codex_process_start(native) == native_start and
+                                 canonical and Path(path).is_socket() and len(links) == 1 and
+                                 backend_sources == {(sid, transcript)})
+                    except OSError:
+                        valid = False
+                    if not valid:
+                        metadata = {fd: connections.get(fd) for fd in sorted((backend_fds or set()) | (tui_fds or set()))[:32]} if connections else None
+                        raise AssertionError('daemon peer mismatch: ' + json.dumps(dict(
+                            expected=endpoint, actual=actual, backend_pid=backend_process.pid,
+                            tui_pid=native, backend_fds=sorted(backend_fds or [])[:32],
+                            tui_fds=sorted(tui_fds or [])[:32], connections=metadata,
+                            backend_sources=sorted((str(item[0]), str(item[1])) for item in (backend_sources or set())))))
                 def first_response():
                     wire = response('smoke-a')
                     return wire if '\thistory\tok\t' + sid + '\t' in wire else None

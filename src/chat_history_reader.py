@@ -1774,13 +1774,12 @@ def response(q, source=None, as_owner=False, resolved=None):
         return search_response(q, path, agent, sid)
     rid, tmux = q["id"], q["tmux"]
     legacy_status = None
-    if agent == 'claude' and tmux:
+    if agent == 'claude' and tmux and (q.get('held') is True or q.get('delivery_ids')):
         ids = q.get('delivery_ids') or []
         if not isinstance(ids, list) or any(not isinstance(token, str) or re.fullmatch(r'[A-Za-z0-9_-]{1,80}', token) is None for token in ids):
             raise ValueError('invalid message identities')
-        bound = resolve_tmux_agent('claude', tmux, require_bound=True)
-        if bound and bound[0] == sid and Path(bound[1]) == Path(path):
-            legacy_status = legacy_projection(tmux, sid, path, ids)
+        legacy_status = legacy_projection(tmux, sid, path, ids)
+        if legacy_status[0]:
             start_message_worker(dict(tmux=tmux, provider='claude', sid=sid), source)
     rows, budget = [], 0
     queue_stamps = {}
@@ -2488,6 +2487,15 @@ def message_poll_locked(tmux, provider, sid):
 def start_message_worker(q, source):
     if source is None:
         return
+    import fcntl
+    path = message_store_path()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock_path = path.with_suffix('.' + hashlib.sha256((q['provider'] + ':' + q['sid']).encode()).hexdigest() + '.message-worker')
+    with lock_path.open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
     bootstrap = "import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();exec(compile(s,'<message-worker>','exec'),dict(__name__='__main__',READER_SOURCE=s))"
     child = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, '--message-worker', q['tmux'], q['provider'], q['sid']], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     try:
@@ -3316,7 +3324,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 15
+RUNTIME_GENERATION = 16
 
 if __name__ == '__main__':
     import fcntl

@@ -593,24 +593,24 @@ pub const History = struct {
             if (line.len != 0) try merged.append(scratch, .{ .line = line, .key = try rowIdentity(scratch, line) });
         }
         var changed = false;
-        for (rows) |row| {
-            const key = try rowIdentity(scratch, row);
+        for (rows) |row_bytes| {
+            const key = try rowIdentity(scratch, row_bytes);
             if (key.end <= key.offset) return error.InvalidHistory;
             if (key.end <= self.start) continue;
             var index: usize = 0;
             while (index < merged.items.len) : (index += 1) {
                 const old = merged.items[index].key;
                 if (RowIdentity.Context.eql(.{}, old, key)) {
-                    if (!std.mem.eql(u8, merged.items[index].line, row)) { merged.items[index].line = row; changed = true; }
+                    if (!std.mem.eql(u8, merged.items[index].line, row_bytes)) { merged.items[index].line = row_bytes; changed = true; }
                     break;
                 }
                 if (old.end > old.offset and (old.offset > key.offset or (old.offset == key.offset and old.segment > key.segment))) {
-                    try merged.insert(scratch, index, .{ .line = row, .key = key });
+                    try merged.insert(scratch, index, .{ .line = row_bytes, .key = key });
                     changed = true;
                     break;
                 }
             }
-            if (index == merged.items.len) { try merged.append(scratch, .{ .line = row, .key = key }); changed = true; }
+            if (index == merged.items.len) { try merged.append(scratch, .{ .line = row_bytes, .key = key }); changed = true; }
         }
         if (!changed) return;
         var next = self.cursor();
