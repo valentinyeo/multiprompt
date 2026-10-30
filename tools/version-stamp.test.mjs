@@ -157,21 +157,24 @@ test('check rejects version entry removal without an APP_VERSION bump', t => {
   expectKind(r.check(r.initial, r.commit()), 'HAND_EDIT', 1);
 });
 
-test('PR runs only restore Zig caches while master pushes can save them', () => {
+test('PR, manual and nightly runs restore Zig caches while master pushes can save them', () => {
   for (const file of fs.readdirSync(path.join(root, '.github/workflows')).filter(file => /\.ya?ml$/.test(file))) {
     const workflow = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
     const caches = workflow.split(/(?=^      - )/m).filter(step => /uses: actions\/cache(?:\/(?:restore|save))?@/.test(step));
     const windows = workflow.split('\n  build-windows:\n')[1]?.split('\n  test-result:\n')[0];
     const updateSource = workflow.split('\n  test-update-source:\n')[1]?.split(/\n  [\w-]+:\n/)[0];
-    const native = workflow.split('\n  test:\n')[1]?.split('\n  test-update-source:\n')[0];
     for (const cache of caches) {
       const pathGuard = file === 'test.yml' ? "steps\\.paths\\.outputs\\.heavy == 'true' && " : '';
       const guard = windows?.includes(cache) || updateSource?.includes(cache) ? '' : "steps\\.rule\\.outputs\\.kind != 'STAMP' && ";
       assert.match(cache, /uses: actions\/cache(?:\/restore)?@[a-f0-9]{40}\n/);
       assert.match(cache, new RegExp(`if: ${pathGuard}${guard}\\(?github\\.event_name == '`));
       if (cache.includes('uses: actions/cache/restore@')) {
-        const event = windows?.includes(cache) ? "\\(github\\.event_name == 'pull_request' \\|\\| github\\.event_name == 'workflow_dispatch' \\|\\| \\(github\\.event_name == 'push' && github\\.ref != 'refs/heads/master'\\)\\)" : native?.includes(cache) ? "\\(github\\.event_name == 'pull_request' \\|\\| github\\.event_name == 'workflow_dispatch'\\)" : "github\\.event_name == 'pull_request'";
-        assert.match(cache, new RegExp(`if: ${pathGuard}${guard}${event}\n`));
+        const condition = cache.match(new RegExp(`if: ${pathGuard}${guard}\\(([^\\n]+)\\)\\n`));
+        assert.ok(condition, 'restore condition must enumerate allowed events');
+        const events = condition[1].split(' || ').sort();
+        const expected = ["github.event_name == 'pull_request'", "github.event_name == 'workflow_dispatch'", "github.event_name == 'schedule'"];
+        if (windows?.includes(cache)) expected.push("(github.event_name == 'push' && github.ref != 'refs/heads/master')");
+        assert.deepEqual(events, expected.sort());
       } else {
         assert.match(cache, new RegExp(`if: ${pathGuard}${guard}github\\.event_name == 'push' && github\\.ref == 'refs/heads/master'\n`));
       }
@@ -253,13 +256,18 @@ test('build, CI, installer and documentation use the stamp contract', () => {
   assert.ok(install.indexOf('receipt.mjs') < install.indexOf('Rename-Item'));
   const release = fs.readFileSync(path.join(root, '.github/workflows/release.yml'), 'utf8');
   assert.doesNotMatch(release, /branches: \[master\]/);
-  assert.match(release, /node tools\/release-version\.mjs/);
+  assert.match(release, /gh api "repos\/\$GITHUB_REPOSITORY\/releases\/latest" --jq \.tag_name/);
+  assert.match(release, /git rev-list --first-parent --count "\$base\.\.\$sha"/);
+  assert.match(release, /node tools\/version-stamp\.mjs build "\$TAG"/);
+  assert.match(release, /Executable embedded version does not match release tag/);
   const autoRelease = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
   assert.match(autoRelease, /branches: \[master\]/);
   assert.ok(fs.readFileSync(path.join(root, 'tools/gates/no-version-bump.mjs'), 'utf8').includes(fixHint));
   const readme = fs.readFileSync(path.join(root, 'changelog.d/README.md'), 'utf8');
-  assert.ok(readme.trim().split('\n').length <= 6);
-  assert.ok(readme.includes('node tools/version-stamp.mjs release'));
+  assert.match(readme, /Never edit APP_VERSION or \.ver lines by hand/);
+  assert.match(readme, /Automatic releases replace manual `node tools\/version-stamp\.mjs release`/);
+  assert.match(readme, /Releases without product notes show linked check notes/);
+  assert.match(readme, /Releases without ticketed lines cannot publish/);
 });
 
 for (const race of [false, true]) test(race ? 'release retries a competing branch and waits for its PR' : 'release stamps, opens and waits for the PR, then reports nothing pending', { skip: process.platform === 'win32' }, t => {
