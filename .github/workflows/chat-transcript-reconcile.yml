@@ -15,6 +15,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Check remote sync proof oracle
+        run: node --test tools/chat-remote-sync-proof.test.mjs tools/remote-switch-proof.test.mjs tools/chat-missing-note-proof.test.mjs
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'

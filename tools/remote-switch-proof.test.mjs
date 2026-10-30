@@ -98,7 +98,9 @@ test('remote switch proof rejects each broken acceptance condition', () => {
 test('five base/head attempts run alternately in one job without changing absolute limits', () => {
   const workflow = fs.readFileSync(new URL('../.github/workflows/remote-switch.yml', import.meta.url), 'utf8');
   assert.doesNotMatch(workflow, /matrix:|matrix\.side/);
-  assert.match(workflow, /branches: \[ceo\/IGSH-1059, ceo\/IGSH-1149\]/);
+  assert.match(workflow, /^  workflow_dispatch:\s*$/m);
+  assert.match(workflow, /^  schedule:\s*\n    - cron: '(?:[0-9]|[1-5][0-9]) (?:[0-9]|1[0-9]|2[0-3]) \* \* \*'\s*$/m);
+  assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m);
   assert.match(workflow, /for \(\$attempt = 1; \$attempt -le 5; \$attempt\+\+\) \{\s+foreach \(\$side in @\('base', 'head'\)\)/);
   assert.match(workflow, /git -C harness merge-base \$env:BASE HEAD/);
   assert.match(workflow, /CHAT_SWITCH_PAIRED: '1'/);
