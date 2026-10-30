@@ -3852,6 +3852,81 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
 
 
 class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        patch.object(reader.time, 'sleep').start()
+
+    def pane(self, box, stale=0):
+        state = dict(box=box, stale=stale, shown=box)
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            stdout = ''
+            if 'capture-pane' in command:
+                if state['stale']:
+                    state['stale'] -= 1
+                else:
+                    state['shown'] = state['box']
+                stdout = '\u276f ' + state['shown'] + '\n' + '\u2500' * 20 + '\n'
+            elif 'send-keys' in command and 'paste-buffer' not in command:
+                if command[-1] in ('C-u', 'C-k'):
+                    state['box'] = ''
+                elif '-l' in command:
+                    state['box'] += command[-1]
+            return types.SimpleNamespace(returncode=0, stdout=stdout)
+        return state, calls, run
+
+    def send(self, text, run):
+        with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', '/synthetic/sid.jsonl')), \
+                patch.object(reader.subprocess, 'run', side_effect=run):
+            return reader.send_response_preserve_draft(dict(tmux='fixture', sid='sid', text=text))
+
+    def draft(self, text, run):
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            return reader.draft_response(dict(op='draft', id=9, tmux='fixture', text=text))
+
+    def test_leftover_app_draft_never_blocks_later_messages(self):
+        state, calls, run = self.pane('')
+        self.assertIn('\tdraft\tok\t', self.draft('just now was a glitch i sent it it shoed re', run))
+        self.assertEqual(state['box'], 'just now was a glitch i sent it it shoed re')
+        result = self.send('https://example.com/a.png getting this here', run)
+        self.assertEqual(result['status'], 'sent')
+        self.assertEqual(sum('paste-buffer' in command for command in calls), 1)
+        self.assertEqual(state['box'], '')
+
+    def test_mixed_or_user_draft_is_never_cleared(self):
+        for typed, box in (('app words', 'app words and my own words'), (None, 'only my own words')):
+            with self.subTest(box=box):
+                state, calls, run = self.pane('')
+                if typed:
+                    self.draft(typed, run)
+                state['box'] = box
+                result = self.send('a different message', run)
+                self.assertEqual((result['status'], result['reason']), ('not_sent', 'draft_present'))
+                self.assertEqual(state['box'], box)
+                self.assertFalse(any('paste-buffer' in command for command in calls))
+
+    def test_slow_redraw_still_clears_own_draft(self):
+        state, calls, run = self.pane('')
+        self.draft('half typed', run)
+        state['stale'] = 4
+        result = self.send('another message', run)
+        self.assertEqual(result['status'], 'sent')
+        self.assertEqual(state['box'], '')
+
+    def test_late_draft_write_after_send_is_not_typed(self):
+        state, calls, run = self.pane('')
+        self.assertEqual(self.send('full message text', run)['status'], 'sent')
+        self.assertIn('\tdraft\tok\t', self.draft('full message', run))
+        self.assertEqual(state['box'], '')
+        with patch.object(reader.time, 'time', return_value=time.time() + reader.DRAFT_ECHO_SECONDS + 1):
+            self.draft('full message', run)
+        self.assertEqual(state['box'], 'full message')
+
     def test_preserve_draft_handoff_boundaries(self):
         request = dict(tmux='fixture', sid='sid', text='synthetic prompt')
         for draft, fail, expected in (('unfinished synthetic draft', False, 'not_sent'),

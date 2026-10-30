@@ -2940,6 +2940,51 @@ def type_into_box(target, text, rid):
         subprocess.run(["tmux", "send-keys", "-t", target, "-l", "--", text], check=True, capture_output=True, timeout=5)
 
 
+DRAFT_ECHO_SECONDS = 10
+
+
+def draft_record_path(tmux):
+    return HOME / ".local/state/multiprompt/shell-drafts" / (hashlib.sha256(tmux.encode()).hexdigest() + ".json")
+
+
+def draft_record(tmux):
+    try:
+        value = json.loads(draft_record_path(tmux).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def draft_note(tmux, **fields):
+    path = draft_record_path(tmux)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        value = draft_record(tmux)
+        value.update(fields)
+        temporary = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")
+        temporary.write_text(json.dumps(value), encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        pass
+
+
+def squashed(text):
+    return "".join(text.split())
+
+
+def own_draft(box, text, typed):
+    shown = squashed(box)
+    return not shown or squashed(text).startswith(shown) or bool(typed) and squashed(typed).startswith(shown)
+
+
+def late_draft_echo(tmux, text):
+    record = draft_record(tmux)
+    sent, at = record.get("sent"), record.get("sent_at")
+    if not text.strip() or not isinstance(sent, str) or not isinstance(at, (int, float)) or not 0 <= time.time() - at < DRAFT_ECHO_SECONDS:
+        return False
+    return squashed(sent).startswith(squashed(text))
+
+
 def send_response_preserve_draft(q):
     import uuid
     name, sid, text = q.get('tmux'), q.get('sid'), q.get('text')
@@ -2960,16 +3005,31 @@ def send_response_preserve_draft(q):
         draft = box_draft(target)
         if draft is None:
             return dict(status='not_sent', reason='prompt_unavailable')
-        if draft and not ''.join(text.split()).startswith(''.join(draft.split())):
+        typed = draft_record(name).get('typed')
+        typed = typed if isinstance(typed, str) else ''
+        if draft and not own_draft(draft, text, typed):
             return dict(status='not_sent', reason='draft_present')
-        if draft:
-            box, _ = clear_prompt_box(target, prompt_box_text(target))
-            if not box_is_empty(box):
+        for wait in ((0, 0.3, 0.7) if draft or typed else ()):
+            time.sleep(wait)
+            box = prompt_box_text(target)
+            if box and not own_draft(box, text, typed):
                 return dict(status='not_sent', reason='draft_present')
+            if not box:
+                subprocess.run(['tmux', 'send-keys', '-t', target, 'C-u'], check=True, capture_output=True, timeout=5)
+                box = prompt_box_text(target)
+                if box and not own_draft(box, text, typed):
+                    return dict(status='not_sent', reason='draft_present')
+            box, _ = clear_prompt_box(target, box)
+            if box_is_empty(box):
+                break
+        else:
+            if draft or typed:
+                return dict(status='not_sent', reason='draft_not_cleared')
         try:
             subprocess.run(['tmux', 'paste-buffer', '-p', '-d', '-b', buffer, '-t', target, ';', 'send-keys', '-t', target, 'Enter'], check=True, capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             return dict(status='uncertain', reason='handoff_interrupted')
+        draft_note(name, typed='', sent=text, sent_at=time.time())
         return dict(status='sent', reason=None)
     finally:
         try:
@@ -2991,12 +3051,17 @@ def draft_response(q):
         try:
             target = "=" + name + ":"
             box = box_draft(target)
-            if box is None or box.strip() != text.strip():
+            if late_draft_echo(name, text):
+                pass
+            elif box is None or box.strip() != text.strip():
                 box, _ = clear_prompt_box(target, prompt_box_text(target))
                 if not box_is_empty(box):
                     reason = "box_not_clear"
                 elif text:
                     type_into_box(target, text, rid)
+                    draft_note(name, typed=text)
+                else:
+                    draft_note(name, typed="")
         except (OSError, subprocess.SubprocessError, UnicodeError):
             reason = "tmux_draft_failed"
     status = "error" if reason else "ok"
@@ -3354,7 +3419,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 22
+RUNTIME_GENERATION = 23
 
 if __name__ == '__main__':
     import fcntl
