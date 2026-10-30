@@ -8,7 +8,7 @@ const SSH_TARGET_DE = "remote-1";
 const SSH_TARGET_UK = "remote-2";
 const SSH_TARGET_INNE = "remote-3";
 const AccountJob = struct { kind: enum { startup, login, pull, push, remove_host }, slot: ?u8 = null, base: ?[]u8 = null, edited: ?[]u8 = null };
-const LayoutReply = struct { bytes: ?[]u8 = null, unauthorized: bool = false };
+const LayoutReply = struct { bytes: ?[]u8 = null, unauthorized: bool = false, colors_supported: bool = false };
 const initial_host = account_hosts.Host{ .slot = 0, .name = "Host 1", .hostname = "old.example", .port = 22, .user = "owner" };
 const initial_config = "Host remote-1\r\n  HostName old.example\r\n  Port 22\r\n  User owner\r\n  IdentityFile ~/.ssh/local_key\r\n  ProxyCommand custom-proxy %h\r\n  ForwardAgent no\r\nHost other\r\n  HostName untouched.example\r\n";
 var g_account_hosts_cache: struct {
@@ -124,15 +124,7 @@ fn accountDeviceKeyError(_: *LayoutReply, _: []const u8) void {
     @panic("unexpected device key error");
 }
 const account_client = struct {
-    const Response = struct {
-        status: u32,
-        bytes: []u8,
-        hosts_supported: bool = true,
-        removal_supported: bool = true,
-        fn deinit(self: @This()) void {
-            allocator.free(self.bytes);
-        }
-    };
+    const Response = @import("account_client.zig").Response;
     fn request(method: []const u8, path: []const u8, _: []const u8, body: []const u8) !Response {
         std.debug.assert(std.mem.eql(u8, path, "/v1/layout"));
         var status: u32 = 200;
@@ -167,7 +159,7 @@ const account_client = struct {
             }
         }
         const layout = session_layout.Layout{ .revision = revision, .hosts = try account_hosts.withoutRemoved(allocator, &.{server_host}, server_removed), .removed_hosts = if (server_removed.len > 0) server_removed else null, .workspaces = &.{}, .tabs = &.{} };
-        return .{ .status = status, .bytes = try std.json.Stringify.valueAlloc(allocator, .{ .layout = layout }, .{ .emit_null_optional_fields = false }) };
+        return .{ .status = status, .bytes = try std.json.Stringify.valueAlloc(allocator, .{ .layout = layout }, .{ .emit_null_optional_fields = false }), .hosts_supported = true, .removal_supported = true, .colors_supported = true };
     }
 };
 fn sync(laptop: *Laptop, kind: @FieldType(AccountJob, "kind")) !void {

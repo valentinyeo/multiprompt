@@ -106,6 +106,11 @@ test('production switch timer releases missing paints, defers all overlays and i
   const saveGuard = switching.slice(switching.lastIndexOf('    if (', saveAt), switching.indexOf('\n    }', saveAt) + 6).replaceAll('@import("launch_cache.zig").', 'launch_cache.');
   const prelude = `
 const std = @import("std");
+const switch_timing = struct {
+    const Step = @import("switch_timing.zig").Step;
+    fn start() i64 { return 0; }
+    fn record(_: Step, _: i64) void {}
+};
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
@@ -257,7 +262,7 @@ test "browserless switches save selection immediately without another queued wri
 }
 `;
   try {
-    copyZig(['chat_switch.zig'], dir);
+    copyZig(['chat_switch.zig', 'switch_timing.zig'], dir);
     const check = timer => {
       fs.writeFileSync(path.join(dir, 'timer.zig'), (prelude + body('chatViewOwnsInput') + '\n' + timer + cases).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
       return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'timer.zig')], { encoding: 'utf8', timeout: 120_000 });

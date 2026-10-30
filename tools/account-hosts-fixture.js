@@ -12,7 +12,7 @@ function section(source, name) {
 
 function prepare(source) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'account-hosts-'));
-  require('./zig-copy').copyZig(['account_hosts.zig', 'session_layout.zig', 'account_layout.zig'], dir);
+  require('./zig-copy').copyZig(['account_hosts.zig', 'session_layout.zig', 'account_layout.zig', 'account_client.zig'], dir);
   const request = section(source, 'accountRequest');
   const tail = request.slice(request.indexOf('    var remote = try account_client.request("GET", "/v1/layout"'));
   let production = section(source, 'accountSyncHosts') + '\n' + section(source, 'accountApplyHostAddresses') + '\n' +

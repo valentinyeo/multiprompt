@@ -16,6 +16,7 @@ function body(name) {
 function execute(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-drafts-'));
   try {
+    copyZig(['switch_timing.zig'], dir);
     if (fs.existsSync('src/chat_drafts.zig')) copyZig(['chat_drafts.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1', '-fllvm'], {
@@ -29,6 +30,12 @@ function execute(code) {
 
 const prelude = `
 const std = @import("std");
+const switch_timing = struct {
+    const Step = @import("switch_timing.zig").Step;
+    fn start() i64 { return 0; }
+    fn record(_: Step, _: i64) void {}
+};
+var g_chat_active = true;
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
@@ -134,7 +141,6 @@ test('ISSUE-498 dictation started in A completes in A while B is active', () => 
   const route = source.includes('chatDraftAppend') ? appReady.slice(appReady.indexOf('    if (g_dictation_draft_owner_len > 0)'), marker) : appReady.slice(branchStart, marker);
   assert.ok(marker >= 0);
   execute(production() + `
-var g_chat_active = true;
 var g_dictation_draft_owner: [192]u8 = undefined;
 var g_dictation_draft_owner_len: usize = 0;
 var g_dictation_cancelled = std.atomic.Value(bool).init(false);
