@@ -44,6 +44,15 @@ jobs:
           if [ -n "$REQUESTED_TAG" ]; then
             [[ "$REQUESTED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
             tag=$REQUESTED_TAG
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              git fetch --no-tags origin "+refs/tags/$tag:refs/tags/$tag"
+            else
+              status=$?
+              [ "$status" -eq 2 ] || exit "$status"
+            fi
+            if git show-ref --verify --quiet "refs/tags/$tag"; then
+              sha=$(git rev-parse --verify "refs/tags/$tag^{commit}")
+            fi
           else
             previous=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
             [[ "$previous" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]

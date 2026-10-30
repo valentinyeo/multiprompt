@@ -292,14 +292,14 @@ test('an unrelated red journey does not block the release', t => {
     { 801: { jobs: [{ name: journey, conclusion: 'success' }, { name: 'verify (chat-focus)', conclusion: 'failure' }] } })), f.green);
 });
 
-test('the admit script names the journey the verify workflow runs on every master push', () => {
+test('the legacy admit journey remains available without gating automatic releases', () => {
   const admit = fs.readFileSync(path.join(root, 'tools/auto-release-admit.sh'), 'utf8');
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   const autoRelease = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
   assert.match(admit, /RELEASE_JOURNEY=relaunch-saved-sessions/);
   assert.ok(featureMatrix(workflow).full.includes('relaunch-saved-sessions'));
-  assert.match(autoRelease, /workflows: \[Tests, Verify desktop, Release gate\]/);
-  assert.match(autoRelease, /workflow_run\.name == 'Release gate'/);
+  assert.match(autoRelease, /push:\n    branches: \[master\]/);
+  assert.doesNotMatch(autoRelease, /workflow_run|auto-release-admit/);
 });
 
 const gateJourney = 'journey / verify (relaunch-saved-sessions)';
@@ -329,17 +329,17 @@ for (const [label, conclusion] of [['cancelled', 'cancelled'], ['unfinished', nu
   });
 }
 
-test('the release gate workflow runs the journey once per master commit without queueing behind other commits', () => {
+test('the release journey runs manually and nightly without blocking releases', () => {
   const gate = fs.readFileSync(path.join(root, '.github/workflows/release-gate.yml'), 'utf8');
   const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
   assert.match(gate, /^name: Release gate$/m);
-  assert.match(gate, /push:\n    branches: \[master\]/);
-  assert.match(gate, /group: release-gate-\$\{\{ github\.event_name == 'push' && github\.sha \|\| github\.run_id \}\}/);
+  assert.match(gate, /^  workflow_dispatch:/m);
+  assert.match(gate, /^  schedule:/m);
+  assert.doesNotMatch(gate, /^  (?:push|pull_request|workflow_run):/m);
   assert.match(gate, /cancel-in-progress: false/);
   assert.match(gate, /uses: \.\/\.github\/workflows\/verify\.yml/);
   assert.match(gate, /feature: relaunch-saved-sessions/);
   assert.match(verify, /workflow_call:/);
-  assert.match(verify, /inputs\.feature && github\.event_name == 'push' && format\('-gate-\{0\}', github\.sha\)/);
   assert.match(verify, /inputs\.feature && inputs\.feature != 'all' && fromJSON\(format\('\["\{0\}"\]', inputs\.feature\)\)/);
 });
 

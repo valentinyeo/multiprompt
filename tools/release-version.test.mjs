@@ -33,6 +33,8 @@ function fixture(t) {
   fs.writeFileSync(path.join(dir, 'src/main.zig'), 'pub const APP_VERSION = build_config.app_version orelse "1.2.3";\n');
   git('add', '.');
   git('commit', '-m', 'fixture');
+  git('tag', 'v1.2.2');
+  git('commit', '--allow-empty', '-m', 'release candidate');
   const sha = git('rev-parse', 'HEAD');
   const remote = path.join(dir, 'remote.git');
   git('clone', '--bare', dir, remote);
@@ -74,15 +76,21 @@ if (args[0] === 'api') {
   execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', field('ref'), field('sha'), ''], { stdio: 'ignore' });
   process.exit(0);
 }
-if (args[1] === 'view') process.exit(process.env.RELEASE_EXISTS === '1' ? 0 : 1);
+if (args[1] === 'view') {
+  const state = process.env.GH_STATE && fs.existsSync(process.env.GH_STATE) ? JSON.parse(fs.readFileSync(process.env.GH_STATE)) : { releases: [] };
+  process.exit(process.env.RELEASE_EXISTS === '1' || state.releases.includes(args[2]) ? 0 : 1);
+}
 if (args[1] !== 'create') process.exit(2);
+if (process.env.GH_CREATE_FAIL === '1') process.exit(1);
 if (process.env.GH_STATE) {
   const state = fs.existsSync(process.env.GH_STATE) ? JSON.parse(fs.readFileSync(process.env.GH_STATE)) : { latest: process.env.PUBLISHED_TAG, releases: [] };
   state.releases.push(args[2]);
   if (args.includes('--latest') || args.includes('--latest=true')) state.latest = args[2];
   fs.writeFileSync(process.env.GH_STATE, JSON.stringify(state));
 }
-execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/tags/' + args[2], process.env.BUILT_SHA]);
+const existing = require('node:child_process').spawnSync('git', ['--git-dir', process.env.TEST_REMOTE, 'show-ref', '--verify', '--quiet', 'refs/tags/' + args[2]]);
+if (existing.status === 1) execFileSync('git', ['--git-dir', process.env.TEST_REMOTE, 'update-ref', 'refs/tags/' + args[2], process.env.BUILT_SHA]);
+else if (existing.status !== 0) process.exit(existing.status || 1);
 `, { mode: 0o755 });
   return { dir, git, sha, remote, log,
     run: (name, env = {}, source = workflow) => spawnSync('bash', ['-euo', 'pipefail', '-c', script(name, source)], { cwd: dir, encoding: 'utf8',
@@ -118,20 +126,27 @@ test('CLI reads files and fails closed', t => {
   assert.equal(run(`${file}-missing`).status, 1);
 });
 
-test('workflow preserves tag and manual triggers with reusable release, both architectures, immutable builds and serialized publication', () => {
-  assert.match(workflow, /push:\n    tags: \['v\*'\]/);
-  assert.doesNotMatch(workflow, /branches: \[master\]/);
-  assert.match(workflow, /workflow_call:[\s\S]*tag:[\s\S]*type: string/);
-  assert.doesNotMatch(workflow, /pull_request:/);
-  assert.match(workflow, /workflow_dispatch:[\s\S]*tag:[\s\S]*required: true/);
+test('master release builds both architectures, launches, scans and publishes the exact source', () => {
+  const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
+  assert.match(auto, /push:\n    branches: \[master\]/);
+  assert.match(auto, /workflow_dispatch:/);
+  assert.match(auto, /if: github.ref == 'refs\/heads\/master'/);
+  assert.match(auto, /uses: \.\/\.github\/workflows\/release.yml/);
+  assert.doesNotMatch(auto, /workflow_run:|schedule:|auto-release-admit/);
+  assert.match(workflow, /workflow_dispatch:[\s\S]*tag:[\s\S]*required: false/);
+  assert.match(workflow, /workflow_call:/);
+  assert.doesNotMatch(workflow, /^  (?:push|pull_request):/m);
   assert.match(workflow, /permissions:\n  contents: write/);
   assert.doesNotMatch(workflow, /--draft/);
   assert.deepEqual([...workflow.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['MULTIPROMPT_RELEASE_SIGNING_KEY']);
   assert.match(workflow, /run: node tools\/sign-release\.mjs/);
   assert.match(workflow, /arch: x64\n            target: x86_64-windows-gnu/);
   assert.match(workflow, /arch: arm64\n            target: aarch64-windows-gnu/);
-  assert.match(workflow, /if: github.event_name != 'pull_request'/);
-  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 2);
+  assert.equal((workflow.match(/ref: \$\{\{ needs.prepare.outputs.sha \}\}/g) || []).length, 3);
+  assert.match(workflow, /launch:\n    needs: \[prepare, build\]/);
+  assert.match(workflow, /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64.exe/);
+  assert.match(workflow, /gitleaks:\n    uses: \.\/\.github\/workflows\/gitleaks.yml/);
+  assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks\]/);
   assert.match(workflow, /concurrency:\n      group: release-publication\n      cancel-in-progress: false/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
@@ -174,15 +189,12 @@ test('release downloads exclude verification evidence from published update asse
   assert.deepEqual(assets.sort(), [...artifacts.get('multiprompt-x64'), ...artifacts.get('multiprompt-arm64'), ...generated].sort());
 });
 
-test('PR arm64 coverage is path-gated in Tests, not the publishing workflow', () => {
+test('release builds both architectures independently of the report-only Tests workflow', () => {
   const jobs = Object.fromEntries([...workflow.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
   assert.equal(jobs['pr-build'], undefined);
-  assert.match(jobs.prepare, /if: github.event_name != 'pull_request'/);
-  assert.match(jobs.build, /needs: \[prepare, journeys\]/);
-  assert.match(jobs.journeys, /feature: all/);
-  assert.match(jobs.journeys, /revision: \$\{\{ needs.prepare.outputs.sha \}\}/);
-  assert.match(jobs.journeys, /if: inputs.proof/);
-  assert.match(jobs.release, /needs: \[prepare, build, update-test\]/);
+  assert.match(jobs.build, /needs: prepare/);
+  assert.match(jobs.release, /needs: \[prepare, build, launch, gitleaks\]/);
+  assert.doesNotMatch(jobs.release, /journeys|update-test|test-result/);
   const tests = fs.readFileSync(path.join(root, '.github/workflows/test.yml'), 'utf8');
   assert.match(tests, /name: build-windows \(\$\{\{ matrix.arch \}\}\)\n    runs-on: ubuntu-latest\n/);
   assert.match(tests, /run: zig build -Dtarget=aarch64-windows-gnu/);
@@ -246,24 +258,25 @@ test('five Windows and three VPS jobs retain the upstream test graph with indepe
   assert.match(build, /test_step.dependOn\(&zsb_help_tests.step\)/);
 });
 
-test('lightweight workflows cancel superseded PRs, a running master verify is never cancelled by the next merge, never tags or dispatches', () => {
-  for (const file of ['gitleaks', 'no-comments', 'docs-site']) {
-    const text = fs.readFileSync(path.join(root, `.github/workflows/${file}.yml`), 'utf8');
-    assert.match(text, /^  pull_request:/m, file);
-    assert.match(text, /^concurrency:\n  group: \$\{\{ github.workflow \}\}-\$\{\{ github.ref \}\}\n  cancel-in-progress: \$\{\{ github.event_name == 'pull_request' \}\}/m, file);
-  }
-  const verify = fs.readFileSync(path.join(root, '.github/workflows/verify.yml'), 'utf8');
-  assert.match(verify, /^  pull_request:/m);
-  assert.match(verify, /^concurrency:\n  group: \$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}\$\{\{ inputs\.chat_reply_proof && format\('-reply-\{0\}', inputs\.tag \|\| 'candidate'\) \|\| '' \}\}\$\{\{ github\.event_name == 'workflow_dispatch' && format\('-\{0\}-\{1\}', inputs\.feature, inputs\.tag\) \|\| '' \}\}\$\{\{ inputs\.feature && github\.event_name == 'push' && format\('-gate-\{0\}', github\.sha\) \|\| '' \}\}\$\{\{ github\.run_attempt != '1' && format\('-rerun-\{0\}', github\.sha\) \|\| '' \}\}\$\{\{ inputs\.feature && format\('-feature-\{0\}', inputs\.feature\) \|\| '' \}\}\n  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m);
+test('gitleaks scans every push while other checks run manually or nightly', () => {
   const scan = fs.readFileSync(path.join(root, '.github/workflows/gitleaks.yml'), 'utf8');
-  assert.match(scan, /^  push:\n    branches: \[master\]\n  pull_request:/m);
+  assert.match(scan, /^  push:\n  pull_request:/m);
   assert.match(scan, /^  schedule:/m);
   assert.match(scan, /^  workflow_dispatch:/m);
+  assert.match(scan, /^  workflow_call:/m);
+  for (const file of ['no-comments', 'docs-site', 'verify']) {
+    const text = fs.readFileSync(path.join(root, `.github/workflows/${file}.yml`), 'utf8');
+    const events = text.split('\non:\n')[1].split(/\n(?:permissions|concurrency|jobs):/)[0];
+    assert.match(events, /^  workflow_dispatch:/m, file);
+    assert.match(events, /^  schedule:/m, file);
+    assert.doesNotMatch(events, /^  (?:push|pull_request|workflow_run):/m, file);
+  }
 });
 
 test('one lightweight workflow preserves both check names and checker suites', () => {
   const checks = fs.readFileSync(path.join(root, '.github/workflows/no-comments.yml'), 'utf8');
-  assert.match(checks, /^  push:\n    branches: \[master\]/m);
+  assert.match(checks, /^  workflow_dispatch:/m);
+  assert.match(checks, /^  schedule:/m);
   for (const name of ['no-comments', 'extension-version']) assert.match(checks, new RegExp(`^    name: ${name}$`, 'm'));
   for (const command of [
     'node --test tools/strip-comments.test.js',
@@ -274,7 +287,7 @@ test('one lightweight workflow preserves both check names and checker suites', (
   assert(!fs.existsSync(path.join(root, '.github/workflows/extension-version.yml')));
 });
 
-for (const event of ['push', 'pull_request', 'workflow_dispatch']) {
+for (const event of ['push', 'workflow_dispatch']) {
   test(`workflow resolves ${event} version from the built commit`, { skip: process.platform === 'win32' }, t => {
     const f = fixture(t);
     const result = f.run('Resolve release version and commit', { GITHUB_EVENT_NAME: event, REQUESTED_TAG: event === 'workflow_dispatch' ? tag : '' });
@@ -293,7 +306,46 @@ test('dispatch of an existing tag builds its commit rather than the dispatch bra
   assert.equal(fs.readFileSync(path.join(f.dir, 'output'), 'utf8'), `tag=${tag}\nsha=${f.sha}\n`);
 });
 
-test('master publication is latest, targets built SHA and skips a competing remote tag', { skip: process.platform === 'win32' }, t => {
+test('remote requested tag overrides a conflicting local tag and keeps its commit through publication', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  const tagged = f.git('rev-parse', 'v1.2.2^{commit}');
+  f.git('--git-dir', f.remote, 'update-ref', `refs/tags/${tag}`, tagged);
+  f.git('tag', tag, f.sha);
+  const result = f.run('Resolve release version and commit', { REQUESTED_TAG: tag, GITHUB_EVENT_NAME: 'workflow_dispatch' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(path.join(f.dir, 'output'), 'utf8'), `tag=${tag}\nsha=${tagged}\n`);
+  assert.equal(f.git('rev-parse', `${tag}^{commit}`), tagged);
+  const published = f.run('Publish release', { BUILT_SHA: tagged });
+  assert.equal(published.status, 0, published.stderr);
+  const create = f.calls().find(args => args[1] === 'create');
+  assert.equal(create[create.indexOf('--target') + 1], tagged);
+  assert.equal(f.git('--git-dir', f.remote, 'rev-parse', `${tag}^{commit}`), tagged);
+});
+
+test('a missing requested tag uses HEAD, but a remote lookup failure fails closed', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  const result = f.run('Resolve release version and commit', { REQUESTED_TAG: tag });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(path.join(f.dir, 'output'), 'utf8'), `tag=${tag}\nsha=${f.sha}\n`);
+  f.git('remote', 'set-url', 'origin', path.join(f.dir, 'missing.git'));
+  assert.notEqual(f.run('Resolve release version and commit', { REQUESTED_TAG: tag }).status, 0);
+});
+
+test('automatic version uses first-parent distance and rejects invalid history or latest reads', { skip: process.platform === 'win32' }, t => {
+  const f = fixture(t);
+  f.git('commit', '--allow-empty', '-m', 'second candidate');
+  const sha = f.git('rev-parse', 'HEAD');
+  const result = f.run('Resolve release version and commit');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(path.join(f.dir, 'output'), 'utf8'), `tag=v1.2.4\nsha=${sha}\n`);
+  for (const env of [{ LATEST_READ_FAIL: '1' }, { PUBLISHED_TAG: 'bad' }, { PUBLISHED_TAG: 'v9.9.9' }]) {
+    assert.notEqual(f.run('Resolve release version and commit', env).status, 0);
+  }
+  f.git('tag', 'v1.2.4');
+  assert.notEqual(f.run('Resolve release version and commit', { PUBLISHED_TAG: 'v1.2.4' }).status, 0);
+});
+
+test('master publication is latest, targets built SHA and refuses duplicate releases', { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
   const first = f.run('Publish release');
   assert.equal(first.status, 0, first.stderr);
@@ -305,27 +357,28 @@ test('master publication is latest, targets built SHA and skips a competing remo
   assert(create.includes('--latest=true'));
   assert(create.includes('--generate-notes'));
   const second = f.run('Publish release');
-  assert.equal(second.status, 0, second.stderr);
-  assert.match(second.stdout, /already exists; skipping publication/);
+  assert.notEqual(second.status, 0);
+  assert.match(second.stderr, /already exists; refusing publication/);
   assert.equal(f.calls().filter(args => args[1] === 'create').length, 1);
 });
 
 for (const event of ['push', 'workflow_dispatch']) {
-  test(`${event} can publish an existing tag without duplicating an existing release`, { skip: process.platform === 'win32' }, t => {
+  test(`${event} publishes an existing matching tag but refuses a duplicate release`, { skip: process.platform === 'win32' }, t => {
     const f = fixture(t);
     f.git('--git-dir', f.remote, 'update-ref', `refs/tags/${tag}`, f.sha);
     const env = { GITHUB_EVENT_NAME: event, GITHUB_REF: `refs/tags/${tag}` };
     assert.equal(f.run('Publish release', env).status, 0);
-    assert.equal(f.run('Publish release', { ...env, RELEASE_EXISTS: '1' }).status, 0);
+    assert.notEqual(f.run('Publish release', { ...env, RELEASE_EXISTS: '1' }).status, 0);
     assert.equal(f.calls().filter(args => args[1] === 'create').length, 1);
   });
 }
 
-test('master remote failures do not publish', { skip: process.platform === 'win32' }, t => {
+test('latest lookup and publication failures do not create a release', { skip: process.platform === 'win32' }, t => {
   const f = fixture(t);
-  f.git('remote', 'set-url', 'origin', path.join(f.dir, 'missing.git'));
-  assert.notEqual(f.run('Publish release').status, 0);
-  assert.deepEqual(f.calls(), []);
+  assert.notEqual(f.run('Publish release', { LATEST_READ_FAIL: '1' }).status, 0);
+  assert.equal(f.calls().filter(args => args[1] === 'create').length, 0);
+  assert.notEqual(f.run('Publish release', { GH_CREATE_FAIL: '1' }).status, 0);
+  assert.equal(fs.existsSync(path.join(f.dir, 'release-state.json')), false);
 });
 
 test('packaging includes extension contents, excludes current themes and covers every asset', { skip: process.platform === 'win32' }, t => {
@@ -358,25 +411,12 @@ test('automatic admission fixtures reject unsafe heads', { skip: process.platfor
   assert.match(result.stdout, /ADMISSION VERIFIED/);
 });
 
-test('automatic release only tags a tested master and reuses signed release jobs', () => {
+test('automatic release invokes the signed release workflow for master without test admission', () => {
   const auto = fs.readFileSync(path.join(root, '.github/workflows/auto-release.yml'), 'utf8');
-  assert.match(auto, /workflows: \[Tests, Verify desktop, Release gate\]/);
-  assert.match(auto, /branches: \[master\]/);
-  assert.match(auto, /github.event.workflow_run.conclusion == 'success'/);
-  assert.match(auto, /github.event.workflow_run.head_repository.full_name == github.repository/);
-  assert.match(auto, /cron: '\*\/30 \* \* \* \*'/);
-  assert.match(auto, /github.event_name == 'schedule'/);
-  assert.match(auto, /ref: master/);
-  assert.match(auto, /fetch-depth: 0/);
-  assert.match(auto, /fetch-tags: true/);
-  assert.match(auto, /bash tools\/auto-release-admit\.sh >> "\$GITHUB_OUTPUT"/);
-  const admit = fs.readFileSync(path.join(root, 'tools/auto-release-admit.sh'), 'utf8');
-  assert.match(admit, /node tools\/release-version\.mjs --next "\$last_tag"/);
-  assert.match(admit, /gh api -X POST "repos\/\$GITHUB_REPOSITORY\/git\/refs" -f "ref=refs\/tags\/\$release_tag" -f "sha=\$sha" >&2/);
-  assert.doesNotMatch(admit, /\bgit (?:push|tag "\$release_tag")/);
-  assert.doesNotMatch(auto, /git (?:commit|add|config)|stampTree|fs\.(?:writeFileSync|unlinkSync)|HEAD:refs\/heads\/master/);
+  assert.match(auto, /push:\n    branches: \[master\]/);
+  assert.match(auto, /if: github.ref == 'refs\/heads\/master'/);
   assert.match(auto, /uses: \.\/\.github\/workflows\/release.yml/);
-  assert.doesNotMatch(auto, /zig build|gh pr create|gh release create/);
+  assert.doesNotMatch(auto, /workflow_run|schedule:|auto-release-admit|gh pr create|gh release create/);
   assert.deepEqual([...auto.matchAll(/secrets\.(\w+)/g)].map(match => match[1]), ['MULTIPROMPT_RELEASE_SIGNING_KEY']);
 });
 
@@ -470,30 +510,13 @@ for (const reason of ['skip', 'red', 'green']) test(`auto-release admission: ${r
 });
 
 
-test('IGSH-1115 release proof builds both architectures without publishing and authenticates history reads', () => {
-  const prepare = workflow.split('\n  prepare:\n')[1].split('\n  build:\n')[0];
-  const build = workflow.split('\n  build:\n')[1].split('\n  release:\n')[0];
+test('release builds authenticate history reads and publish versioned notes', () => {
+  const build = workflow.split('\n  build:\n')[1].split('\n  launch:\n')[0];
   const release = workflow.split('\n  release:\n')[1];
-  assert.match(workflow, /proof:\n        description: Build both architectures without publishing\n        type: boolean\n        default: false/);
-  assert.match(prepare, /if: inputs\.proof\n        run: node --test tools\/version-stamp\.test\.mjs tools\/release-version\.test\.mjs/);
   assert.match(build, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-  assert.match(release, /if: \$\{\{ !cancelled\(\) && github\.event_name != 'pull_request' && !inputs\.proof/);
   const notes = release.split('      - name: Publish plain versioned update notes\n')[1].split('      - name: Package extension')[0];
   assert.match(notes, /GH_TOKEN: \$\{\{ github\.token \}\}/);
-});
-
-
-test('IGSH-1033 a proof builds unchanged application source without inventing release notes', () => {
-  const build = workflow.split('\n  build:\n')[1].split('\n  release:\n')[0];
-  assert.match(build, /PROOF: \$\{\{ inputs\.proof \}\}/);
-  const stamp = script('Build').split('zig build ')[0];
-  for (const proof of ['true', 'false', '']) {
-    const result = spawnSync('bash', ['-e', '-c', `node() { printf 'STAMP_REQUIRED'; return 1; }\n${stamp}`], {
-      encoding: 'utf8', env: { ...process.env, TAG: 'v1.2.3', PROOF: proof },
-    });
-    assert.equal(result.status, proof === 'true' ? 0 : 1, result.stdout + result.stderr);
-    assert.equal(result.stdout, proof === 'true' ? '' : 'STAMP_REQUIRED');
-  }
+  assert.match(notes, /node tools\/release-notes\.mjs src\/changelog\.zig "\$TAG" dist\/release-notes\.json/);
 });
 
 for (const [published, candidate, latest] of [
@@ -540,13 +563,10 @@ test('latest-feed read failures cannot replace the desktop update', { skip: proc
 });
 
 
-test('publication-only dispatch proves the real publisher without building or changing releases', () => {
-  assert.match(workflow, /publication_proof:\n        description: Test publication ordering without building or publishing\n        type: boolean\n        default: false/);
-  const proof = workflow.split('\n  publication-proof:\n')[1]?.split('\n  prepare:\n')[0];
-  assert.ok(proof);
-  assert.match(proof, /if: inputs\.publication_proof/);
-  assert.match(proof, /permissions:\n      contents: read/);
-  assert.match(proof, /run: node --test tools\/release-version\.test\.mjs/);
-  assert.doesNotMatch(proof, /zig build|gh release|secrets\./);
-  assert.match(workflow, /prepare:\n    if: github.event_name != 'pull_request' && !inputs\.publication_proof/);
+test('manual release uses the same source-bound publisher', () => {
+  assert.match(workflow, /workflow_dispatch:/);
+  const release = workflow.split('\n  release:\n')[1];
+  assert.match(release, /ref: \$\{\{ needs.prepare.outputs.sha \}\}/);
+  assert.match(release, /BUILT_SHA: \$\{\{ needs.prepare.outputs.sha \}\}/);
+  assert.match(release, /--target "\$BUILT_SHA"/);
 });
