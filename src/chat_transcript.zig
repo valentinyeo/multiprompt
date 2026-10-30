@@ -47,11 +47,6 @@ pub const QueueItem = struct {
     injected: bool = false,
     sender: [64]u16 = @splat(0),
 };
-pub const DraftLease = struct {
-    owned: @import("chat_drafts.zig").OwnedDraft = .{},
-    token: [49]u8 = @splat(0),
-};
-
 pub const Status = struct {
     received: [20]u64 = @splat(0),
     received_len: usize = 0,
@@ -62,8 +57,6 @@ pub const Status = struct {
     draft: [DRAFT_TEXT]u16 = @splat(0),
     draft_len: usize = 0,
     draft_known: bool = false,
-    draft_lease: ?DraftLease = null,
-    owned_draft_version: u32 = 0,
     model: [128]u16 = @splat(0),
     model_len: usize = 0,
     percent_left: ?u8 = null,
@@ -159,12 +152,12 @@ fn fillQueue(result: *Status, items: ?[]const std.json.Value, sent: bool) void {
 pub fn parseStatus(line: []const u8) ?Parsed {
     if (std.mem.indexOf(u8, line, "\"status\"") == null) return null;
     const WireTodo = struct { text: []const u8 = "", status: []const u8 = "pending" };
-    const WireStatus = struct { received: ?[]const []const u8 = null, role: []const u8, question: ?@import("chat_options.zig").WirePrompt = null, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const std.json.Value = null, sent: ?[]const std.json.Value = null, draft: ?[]const u8 = null, draft_lease: ?std.json.Value = null, owned_draft_version: u32 = 0 };
+    const WireStatus = struct { received: ?[]const []const u8 = null, role: []const u8, question: ?@import("chat_options.zig").WirePrompt = null, model: []const u8 = "", percent_left: ?u8 = null, todos: ?[]const WireTodo = null, queue: ?[]const std.json.Value = null, sent: ?[]const std.json.Value = null, draft: ?[]const u8 = null };
     const parsed = std.json.parseFromSlice(WireStatus, std.heap.page_allocator, line, .{ .ignore_unknown_fields = true }) catch return null;
     defer parsed.deinit();
     const value = parsed.value;
     if (!std.mem.eql(u8, value.role, "status")) return null;
-    var result: Status = .{ .owned_draft_version = value.owned_draft_version };
+    var result: Status = .{};
     if (value.received) |identities| {
         for (identities) |identity| {
             if (result.received_len == result.received.len) break;
@@ -186,21 +179,6 @@ pub fn parseStatus(line: []const u8) ?Parsed {
         if (draft.len <= DRAFT_TEXT) {
             result.draft_len = keepText(&result.draft, draft, true);
             result.draft_known = true;
-        }
-    }
-    if (value.draft_lease) |lease| {
-        const jr = @import("json_reader.zig");
-        const owner = jr.string(jr.field(lease, "owner")) orelse "";
-        const sid = jr.string(jr.field(lease, "sid")) orelse "";
-        const token = jr.string(jr.field(lease, "token")) orelse "";
-        if (owner.len == 32 and sid.len > 0 and sid.len < 40 and token.len == 48) {
-            var parsed_lease: DraftLease = .{};
-            @memcpy(parsed_lease.owned.owner[0..32], owner);
-            @memcpy(parsed_lease.owned.sid[0..sid.len], sid);
-            @memcpy(parsed_lease.token[0..48], token);
-            parsed_lease.owned.revision = jr.uintDefault(lease, "revision", 0);
-            parsed_lease.owned.inode = jr.uintDefault(lease, "inode", 0);
-            if (parsed_lease.owned.valid()) result.draft_lease = parsed_lease;
         }
     }
     if (value.todos) |todos| {
@@ -837,15 +815,4 @@ test "IGSH-1010 host receipts keep exact identities and reject other clients" {
     const parsed = parseStatus("{\"role\":\"status\",\"received\":[\"desktop-123\",\"proof-123\",\"desktop-invalid\",\"desktop-456\"]}").?;
     try std.testing.expectEqual(@as(usize, 2), parsed.status.received_len);
     try std.testing.expectEqualSlices(u64, &.{ 0x123, 0x456 }, parsed.status.received[0..parsed.status.received_len]);
-}
-
-test "owned draft status is optional and malformed leases preserve draft" {
-    const lease = "{\"role\":\"status\",\"owned_draft_version\":1,\"draft\":\"hello\",\"draft_lease\":{\"owner\":\"0123456789abcdef0123456789abcdef\",\"revision\":4,\"sid\":\"sid\",\"inode\":9,\"token\":\"0123456789abcdef0123456789abcdef0123456789abcdef\"}}";
-    const parsed = (parseStatus(lease) orelse return error.InvalidStatus).status;
-    try std.testing.expect(parsed.draft_known);
-    try std.testing.expectEqual(@as(u32, 1), parsed.owned_draft_version);
-    try std.testing.expectEqual(@as(u64, 4), parsed.draft_lease.?.owned.revision);
-    const malformed = (parseStatus("{\"role\":\"status\",\"draft\":\"manual\",\"draft_lease\":{\"revision\":\"bad\"}}") orelse return error.InvalidStatus).status;
-    try std.testing.expect(malformed.draft_known);
-    try std.testing.expect(malformed.draft_lease == null);
 }

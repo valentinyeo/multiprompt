@@ -1440,9 +1440,3 @@ test('IGSH-1197 complete-history journeys request old pages through owned scroll
   assert.match(history, /incomplete copied messages/);
   assert.match(retention, /retained copy missing or reordered/);
 });
-
-test('Windows supplied reader uses a real cross-process writer lock', { skip: process.platform !== 'win32' }, () => {
-  const control = path.join(root, 'tools/verify-chat-delivery/test_writer_lock.py');
-  const output = execFileSync('python', [control], { encoding: 'utf8', timeout: 60000 });
-  assert.match(output, /WINDOWS_WRITER_LOCK_OK/);
-});

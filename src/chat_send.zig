@@ -386,7 +386,7 @@ pub fn chatSteerPrompt() void {
 
 pub fn sendChatMessage(text: []const u16) bool {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or text.len == 0) return false;
-    _ = chatEchoEnqueueForShell(app_state.active_shell, text, .queued, null) orelse return false;
+    _ = chatEchoEnqueueForShell(app_state.active_shell, text, .queued) orelse return false;
     app_state.g_chat_read_open_pending = false;
     app_state.g_chat_read_hold = false;
     app_state.g_chat_read_open_ready = true;
@@ -469,14 +469,7 @@ pub fn sendChatPrompt() void {
             slot.consumed = true;
         };
     }
-    const composer = @import("chat_composer.zig");
-    const owned = if (composer.chatOwnedDraftEligible(app_state.active_shell))
-        composer.chatReserveOwnedDraft(app_state.active_shell) orelse {
-            showHeaderNoticeAscii("Could not save draft ownership; try again", 3500, true);
-            return;
-        }
-    else null;
-    const ei = chatEchoEnqueueForShell(app_state.active_shell, send_text, .queued, owned) orelse {
+    const ei = chatEchoEnqueueForShell(app_state.active_shell, send_text, .queued) orelse {
         showHeaderNoticeAscii("Could not save the message; keep it here and try again", 3500, true);
         return;
     };
@@ -494,8 +487,7 @@ pub fn sendChatPrompt() void {
         showHeaderNoticeAscii("Opened in the terminal, press Alt+C to see it", 4000, false);
     }
     app_state.g_chat_ac_dialog_len = 0;
-    composer.chatShellDraftSendCommitted();
-    composer.chatShellDraftClearAfterSend();
+    _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
     app_state.g_chat_draft_dirty = true;
     chatDraftFlush();
     app_state.g_chat_skill_name_len = 0;
@@ -509,7 +501,7 @@ pub fn sendChatPrompt() void {
 pub fn chatSendChoice(text: []const u16) bool {
     if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count or text.len == 0) return false;
     send_latency.markPressed();
-    const ei = chatEchoEnqueueForShell(app_state.active_shell, text, .queued, null) orelse {
+    const ei = chatEchoEnqueueForShell(app_state.active_shell, text, .queued) orelse {
         showHeaderNoticeAscii("Could not save the message; try again", 3500, true);
         return false;
     };
@@ -735,7 +727,7 @@ fn chatEchoStateOnLoad(saved: u8) ChatEchoState {
 
 fn chatOutboxSerialize(list: *const std.ArrayList(ChatOutboxEntry), allocator: std.mem.Allocator, out_len: *usize) ?[]u8 {
     var total: usize = 128;
-    for (list.items) |e| total += e.text.len * 6 + CHAT_OUTBOX_KEY_CAP + 400;
+    for (list.items) |e| total += e.text.len * 6 + CHAT_OUTBOX_KEY_CAP + 192;
     const out = allocator.alloc(u8, total) catch return null;
     var pos: usize = 0;
     const head = "{\"version\":2,\"queues\":[";
@@ -777,15 +769,6 @@ fn chatOutboxSerialize(list: *const std.ArrayList(ChatOutboxEntry), allocator: s
             pos += 1;
             const anchor_text = std.fmt.bufPrint(out[pos..], ",\"a\":{d},\"h\":{d},\"w\":{d},\"c\":{d},\"n\":{d},\"x\":{d},\"r\":{d},\"d\":{d},\"held\":{d},\"qid\":{d}", .{ @max(m.anchor.after_ms, 0), m.anchor.after_id, @max(m.anchor.sent_ms, 0), m.anchor.user_count, @intFromBool(m.anchor.counted), @intFromBool(m.write_started), @intFromBool(m.retryable), @max(m.expires_ms, 0), @intFromBool(m.host_held), m.queue_id }) catch "";
             pos += anchor_text.len;
-            if (m.owned_draft) |owned| {
-                const ownership = std.fmt.bufPrint(out[pos..], ",\"owned\":{{\"owner\":\"{s}\",\"revision\":{d},\"sid\":\"{s}\",\"inode\":{d}}}", .{ std.mem.sliceTo(&owned.owner, 0), owned.revision, std.mem.sliceTo(&owned.sid, 0), owned.inode }) catch "";
-                pos += ownership.len;
-            }
-            if (m.owned_invalid) {
-                const invalid = ",\"owned_invalid\":1";
-                @memcpy(out[pos .. pos + invalid.len], invalid);
-                pos += invalid.len;
-            }
             out[pos] = '}';
             pos += 1;
         }
@@ -830,23 +813,6 @@ fn chatOutboxParseJson(list: *std.ArrayList(ChatOutboxEntry), allocator: std.mem
                         entry.channel_sent = entry.write_started and std.mem.startsWith(u8, key, "tmux:");
                         entry.host_held = json_reader.uintDefault(mobj, "held", 0) != 0;
                         entry.queue_id = json_reader.uintDefault(mobj, "qid", entry.queue_id);
-                        const ownership = if (mobj == .object) mobj.object.get("owned") else null;
-                        entry.owned_invalid = json_reader.uintDefault(mobj, "owned_invalid", 0) != 0;
-                        if (ownership) |value| {
-                            var owned: @import("chat_drafts.zig").OwnedDraft = .{};
-                            const owner = json_reader.string(json_reader.field(value, "owner")) orelse "";
-                            const sid = json_reader.string(json_reader.field(value, "sid")) orelse "";
-                            const revision = json_reader.field(value, "revision");
-                            const inode = json_reader.field(value, "inode");
-                            if (value == .object and owner.len == 32 and sid.len > 0 and sid.len < owned.sid.len and
-                                (revision == .integer or revision == .number_string) and (inode == .integer or inode == .number_string)) {
-                                @memcpy(owned.owner[0..owner.len], owner);
-                                @memcpy(owned.sid[0..sid.len], sid);
-                                owned.revision = json_reader.unsigned(revision, 0);
-                                owned.inode = json_reader.unsigned(inode, 0);
-                            }
-                            if (owned.valid()) entry.owned_draft = owned else entry.owned_invalid = true;
-                        }
                         const now_ms = chat_echo.fileTimeToUnixMs(nowFileTime());
                         const saved_ms = if (entry.anchor.sent_ms > 0) entry.anchor.sent_ms else entry.anchor.after_ms;
                         const saved_deadline = @min(json_reader.uintDefault(mobj, "d", 0), max_ms);
@@ -1192,7 +1158,7 @@ pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {
     return chatConfirmedHas(key, p, block.stamp_ms, block.message_id);
 }
 
-fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState, owned: ?@import("chat_drafts.zig").OwnedDraft) ?usize {
+fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState) ?usize {
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(idx, &key_buf);
     if (key.len == 0) return null;
@@ -1200,7 +1166,6 @@ fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState, ow
     if (!chatOutboxEnqueueInState(&app_state.g_chat_outbox, std.heap.page_allocator, key, text, state)) return null;
     const added = app_state.g_chat_outbox.items.len - 1;
     app_state.g_chat_outbox.items[added].anchor = anchor;
-    app_state.g_chat_outbox.items[added].owned_draft = owned;
     app_state.g_chat_outbox.items[added].sent_tick_ms = @intCast(GetTickCount64());
     app_state.g_chat_outbox.items[added].expires_ms = anchor.sent_ms +| 600_000;
     if (!saveChatOutbox()) {
@@ -1644,7 +1609,7 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
     if (shell_index >= app_state.shell_count) return .write_failed;
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = &app_state.g_chat_outbox.items[ei];
-        if (entry.write_started or entry.owned_invalid) return .write_failed;
+        if (entry.write_started) return .write_failed;
         entry.state = .sending;
         entry.anchor = chatEchoAnchorNow(shell_index);
         if (entry.expires_ms == 0) {
@@ -1667,15 +1632,6 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
         return .write_failed;
     }
     if (chatTmuxSendEligible(shell_index) and chatTmuxSendStart(shell_index, send_text, echo_id, false)) return .ok;
-    if (chatOutboxIndexById(echo_id)) |ei| {
-        const entry = &app_state.g_chat_outbox.items[ei];
-        if (entry.owned_draft != null or entry.owned_invalid) {
-            entry.write_started = false;
-            entry.state = .queued;
-            _ = saveChatOutbox();
-            return .write_failed;
-        }
-    }
     return chatSendViaConsole(shell_index, send_text, echo_id);
 }
 
@@ -2423,16 +2379,12 @@ fn chatTmuxSendEligible(idx: u32) bool {
 
 fn chatTmuxSendStart(idx: u32, text: []const u16, echo_id: u64, retry: bool) bool {
     if (app_state.g_chat_tmux_send_job != null) return false;
-    if (chatOutboxIndexById(echo_id)) |ei| {
-        const entry = &app_state.g_chat_outbox.items[ei];
-        if (entry.owned_invalid or (entry.owned_draft != null and app_state.shells[idx].ai_agent != 1)) return false;
-    }
     const a = std.heap.page_allocator;
     const job = a.create(app_state.ChatTmuxSendJob) catch return false;
     job.* = .{ .key = chatFileIdentityForShell(idx), .echo_id = echo_id, .text = a.dupe(u16, text) catch {
         a.destroy(job);
         return false;
-    }, .retry = retry, .queued_at = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].anchor.sent_ms else 0, .held = app_state.shells[idx].ai_agent == 1, .queue_id = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].queue_id else 0, .owned_draft = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].owned_draft else null };
+    }, .retry = retry, .queued_at = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].anchor.sent_ms else 0, .held = app_state.shells[idx].ai_agent == 1, .queue_id = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].queue_id else 0 };
     const thread = std.Thread.spawn(.{}, chatTmuxSendThread, .{job}) catch {
         a.free(job.text);
         a.destroy(job);
@@ -2453,9 +2405,7 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
     const id: u32 = @truncate(job.echo_id);
     var message_id: [32]u8 = undefined;
     const token = std.fmt.bufPrint(&message_id, "desktop-{x}", .{job.queue_id}) catch return;
-    const query = if (job.held and job.owned_draft != null)
-        std.json.Stringify.valueAlloc(a, .{ .op = "send", .id = id, .tmux = std.mem.sliceTo(&job.key.tmux, 0), .text = text, .queued_at = job.queued_at, .message_id = token, .owned_draft = job.owned_draft.?.wire() }, .{}) catch return
-    else if (job.held)
+    const query = if (job.held)
         std.json.Stringify.valueAlloc(a, .{ .op = "send", .id = id, .tmux = std.mem.sliceTo(&job.key.tmux, 0), .text = text, .queued_at = job.queued_at, .message_id = token }, .{}) catch return
     else
         std.json.Stringify.valueAlloc(a, .{ .op = "send", .id = id, .tmux = std.mem.sliceTo(&job.key.tmux, 0), .text = text }, .{}) catch return;
@@ -2959,14 +2909,6 @@ pub fn chatShellEditQueued() bool {
 }
 
 pub fn chatShellOp(shell_index: u32, op: []const u8, text: ?[]const u16, in_flight: ?*std.atomic.Value(bool)) bool {
-    return chatShellOpWithDraft(shell_index, op, text, in_flight, null, null);
-}
-
-pub fn chatShellDraftOp(shell_index: u32, text: []const u16, in_flight: *std.atomic.Value(bool), failed: *std.atomic.Value(bool), owned: ?@import("chat_drafts.zig").OwnedDraft) bool {
-    return chatShellOpWithDraft(shell_index, "draft", text, in_flight, failed, owned);
-}
-
-fn chatShellOpWithDraft(shell_index: u32, op: []const u8, text: ?[]const u16, in_flight: ?*std.atomic.Value(bool), failed: ?*std.atomic.Value(bool), owned: ?@import("chat_drafts.zig").OwnedDraft) bool {
     if (shell_index >= app_state.shell_count) return false;
     const shell = &app_state.shells[shell_index];
     if (@import("chat_working.zig").stopTransportFor(shell.kind, shell.tmux_session_len > 0) != .tmux) return false;
@@ -2980,7 +2922,7 @@ fn chatShellOpWithDraft(shell_index: u32, op: []const u8, text: ?[]const u16, in
         store[kept] = c;
         kept += 1;
     }
-    const thread = std.Thread.spawn(.{}, chatShellOpThread, .{ key, op, store, kept, in_flight, failed, owned }) catch {
+    const thread = std.Thread.spawn(.{}, chatShellOpThread, .{ key, op, store, kept, in_flight }) catch {
         a.free(store);
         return false;
     };
@@ -2988,16 +2930,11 @@ fn chatShellOpWithDraft(shell_index: u32, op: []const u8, text: ?[]const u16, in
     return true;
 }
 
-fn chatShellOpThread(key: @import("chat_transcript.zig").Identity, op: []const u8, store: []u8, kept: usize, in_flight: ?*std.atomic.Value(bool), failed: ?*std.atomic.Value(bool), owned: ?@import("chat_drafts.zig").OwnedDraft) void {
+fn chatShellOpThread(key: @import("chat_transcript.zig").Identity, op: []const u8, store: []u8, kept: usize, in_flight: ?*std.atomic.Value(bool)) void {
     defer if (in_flight) |flag| flag.store(false, .release);
     const a = std.heap.page_allocator;
     defer a.free(store);
-    const query = if (owned) |descriptor|
-        std.json.Stringify.valueAlloc(a, .{ .op = op, .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0), .text = store[0..kept], .owned_draft = descriptor.wire() }, .{}) catch {
-            if (failed) |flag| flag.store(true, .release);
-            return;
-        }
-    else std.json.Stringify.valueAlloc(a, .{ .op = op, .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0), .text = store[0..kept] }, .{}) catch return;
+    const query = std.json.Stringify.valueAlloc(a, .{ .op = op, .id = key.shell_id, .tmux = std.mem.sliceTo(&key.tmux, 0), .text = store[0..kept] }, .{}) catch return;
     defer a.free(query);
     var wire: std.ArrayList(u8) = .empty;
     defer wire.deinit(a);
@@ -3005,7 +2942,6 @@ fn chatShellOpThread(key: @import("chat_transcript.zig").Identity, op: []const u
     const want = std.fmt.bufPrint(&needle, "\t{s}\tok\t", .{op}) catch return;
     var log: [96]u8 = undefined;
     if (!@import("chat_session.zig").chatHistoryPersistent(key.host, key.shell_id, query, 4096, &wire, null) or std.mem.indexOf(u8, wire.items, want) == null) {
-        if (failed) |flag| flag.store(true, .release);
         if (std.mem.eql(u8, op, "question_text")) app_state.g_chat_permission_send_failed.store(key.shell_id, .release);
         debugLog(std.fmt.bufPrint(&log, "[chat] {s} failed via=tmux", .{op}) catch "");
         return;
@@ -3137,62 +3073,4 @@ test "IGSH-895 typed prefix plus native paste preserves the draft and sends one 
     var mixed = [_]u16{ 'a', '\r', '\n', '\r', '\n', 'b', '\n', 'c', '\r' };
     try std.testing.expectEqualSlices(u16, std.mem.span(L("a\n\nb\nc\n")), chatPromptNormalizeLineEndings(&mixed));
     std.debug.print("IGSH-895 exact draft paste and canonical outgoing line endings PASS\n", .{});
-}
-
-test "outbox preserves owned retirement across save and retry" {
-    const allocator = std.testing.allocator;
-    var list: std.ArrayList(ChatOutboxEntry) = .empty;
-    var loaded: std.ArrayList(ChatOutboxEntry) = .empty;
-    defer {
-        for (list.items) |entry| allocator.free(entry.text);
-        list.deinit(allocator);
-        for (loaded.items) |entry| allocator.free(entry.text);
-        loaded.deinit(allocator);
-    }
-    try std.testing.expect(chatOutboxEnqueueIn(&list, allocator, "tmux:0:test", std.unicode.utf8ToUtf16LeStringLiteral("hello")));
-    var owned: @import("chat_drafts.zig").OwnedDraft = .{};
-    @memcpy(owned.owner[0..32], "0123456789abcdef0123456789abcdef");
-    @memcpy(owned.sid[0..3], "sid");
-    owned.inode = 9;
-    owned.revision = 7;
-    list.items[0].owned_draft = owned;
-    list.items[0].host_held = true;
-    const queue_id = list.items[0].queue_id;
-    var len: usize = 0;
-    const encoded = chatOutboxSerialize(&list, allocator, &len) orelse return error.SerializeFailed;
-    defer allocator.free(encoded);
-    chatOutboxParseJson(&loaded, allocator, encoded[0..len]);
-    try std.testing.expectEqual(@as(usize, 1), loaded.items.len);
-    try std.testing.expectEqual(queue_id, loaded.items[0].queue_id);
-    try std.testing.expectEqualDeep(owned, loaded.items[0].owned_draft.?);
-}
-
-test "outbox rejects malformed ownership without discarding message" {
-    const allocator = std.testing.allocator;
-    const cases = [_][]const u8{
-        "{\"owner\":\"0123456789abcdef0123456789abcdefx\",\"revision\":1,\"sid\":\"sid\",\"inode\":9}",
-        "{\"owner\":\"0123456789abcdef0123456789abcdef\",\"revision\":1,\"sid\":\"abcdefghijklmnopqrstuvwxyzabcdefghijklmno\",\"inode\":9}",
-        "{\"owner\":\"0123456789abcdef0123456789abcdef\",\"revision\":\"1\",\"sid\":\"sid\",\"inode\":9}",
-        "{\"owner\":\"0123456789abcdef0123456789abcdef\",\"revision\":1,\"sid\":\"sid\",\"inode\":\"9\"}",
-        "{\"owner\":\"0123456789abcdef0123456789abcdef\",\"revision\":0,\"sid\":\"sid\",\"inode\":9}",
-        "{\"owner\":\"0123456789abcdef0123456789abcdef\",\"revision\":9223372036854775808,\"sid\":\"sid\",\"inode\":9}",
-        "{\"owner\":\"0123456789abcdef0123456789abcdef\",\"revision\":1,\"sid\":\"sid\",\"inode\":9223372036854775808}",
-        "{\"owner\":\"0123456789abcdef0123456789abcdef\",\"revision\":true,\"sid\":\"sid\",\"inode\":9}",
-        "null",
-    };
-    for (cases) |owned| {
-        var list: std.ArrayList(ChatOutboxEntry) = .empty;
-        defer {
-            for (list.items) |entry| allocator.free(entry.text);
-            list.deinit(allocator);
-        }
-        const data = try std.fmt.allocPrint(allocator, "{{\"version\":2,\"queues\":[{{\"key\":\"tmux:0:test\",\"messages\":[{{\"t\":\"keep me\",\"s\":0,\"qid\":123,\"owned\":{s}}}]}}]}}", .{owned});
-        defer allocator.free(data);
-        chatOutboxParseJson(&list, allocator, data);
-        try std.testing.expectEqual(@as(usize, 1), list.items.len);
-        try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("keep me"), list.items[0].text);
-        try std.testing.expect(list.items[0].owned_invalid);
-        try std.testing.expect(list.items[0].owned_draft == null);
-        try std.testing.expectEqual(@as(u64, 123), list.items[0].queue_id);
-    }
 }
