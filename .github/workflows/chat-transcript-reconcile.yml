@@ -64,3 +64,24 @@ jobs:
         run: python3 -m unittest discover -s tools/chat-native-replay -p 'test_*.py' -v
       - name: Replay anonymized real-derived structural corpus
         run: python3 tools/chat-native-replay/replay.py tools/chat-native-replay/structural.jsonl.gz
+
+  codex-socket-binding:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify synthetic socket boundaries
+        run: python3 tools/chat-history-reader-test.py -k IGSH_1266 -v
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Install native Codex and tmux
+        run: |
+          npm install --prefix "$RUNNER_TEMP/codex-smoke" @openai/codex@0.166.0
+          sudo apt-get update && sudo apt-get install -y tmux iproute2
+      - name: Verify default daemon with isolated provider
+        run: |
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_OS unshare --net bash -c 'ip link set lo up; python3 tools/verify-codex-hook/native-smoke.py "$1"' _ "$RUNNER_TEMP/codex-smoke/node_modules/.bin/codex"

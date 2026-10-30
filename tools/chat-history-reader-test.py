@@ -151,9 +151,8 @@ class HistoryReaderTest(unittest.TestCase):
                 children.append(child)
                 paths.append(path)
                 self.assertEqual(child.stdout.readline(), b'ready\n')
-            table = {10: (1, ['bash']), 11: (10, ['node', 'codex.js']),
-                     children[0].pid: (11, [str(binary)]), 20: (1, ['bash']),
-                     children[1].pid: (20, [str(binary)])}
+            table = {10: (1, ['bash']), children[0].pid: (10, [str(binary)]),
+                     20: (1, ['bash']), children[1].pid: (20, [str(binary)])}
             def panes(command, **kwargs):
                 return subprocess.CompletedProcess(command, 0, '10\n' if '=first-tab' in command else '20\n', '')
             with patch.object(reader, 'process_table', return_value=table), \
@@ -190,6 +189,9 @@ class HistoryReaderTest(unittest.TestCase):
             folder.mkdir()
             (folder / '3').symlink_to(path)
             fds[Path('/proc') / str(pid) / 'fd'] = folder
+        empty = self.home / 'fd-launcher'
+        empty.mkdir()
+        fds[Path('/proc/11/fd')] = empty
         original_iterdir = Path.iterdir
         def iterdir(path):
             return original_iterdir(fds.get(path, path))
@@ -242,6 +244,49 @@ class HistoryReaderTest(unittest.TestCase):
                                                                   tmux='first-tab', cwd='/shared', follow=True)))
             self.assertEqual(reader.resolve_tmux_agent('codex', 'second-tab'), ('second', paths[1]))
         self.assertIsNone(reader.agent_pid_for_panes([10], {**table, 13: (10, ['/bin/codex'])}, 'codex'))
+
+    def test_IGSH_1266_codex_socket_bridge_rejects_shared_or_changed_sources(self):
+        uid = os.getuid()
+        table = {10: (1, ['codex']), 20: (1, ['codex', 'app-server', '--listen'])}
+        daemon = '/tmp/codex-daemon-' + str(uid) + '/' + 'a' * 64
+        links = {'11': ('22', '*'), '22': ('11', daemon), '25': ('26', '/unrelated'), '26': ('25', '*')}
+        sockets = {10: {'11'}, 20: {'22', '25'}}
+        actual_stat = Path.stat
+        def stat(path, *args, **kwargs):
+            if str(path) in ('/proc/10', '/proc/20', '/proc/30'):
+                return types.SimpleNamespace(st_uid=uid)
+            return actual_stat(path, *args, **kwargs)
+        with patch.object(Path, 'stat', stat), patch.object(reader.os, 'readlink', return_value='/synthetic/codex'), \
+                patch.object(reader, 'process_table', return_value=table), \
+                patch.object(reader, 'codex_process_start', return_value='birth'), \
+                patch.object(reader, 'codex_socket_fds', side_effect=lambda pid: sockets.get(pid)), \
+                patch.object(reader, 'codex_unix_connections', return_value=links), \
+                patch.object(reader, 'open_codex_transcript', return_value={('session', Path('/synthetic'))}):
+            self.assertEqual(reader.codex_daemon_transcript(10), ('session', Path('/synthetic')))
+            links['22'] = ('11', '/tmp/codex-daemon-' + str(uid))
+            self.assertIsNone(reader.codex_daemon_transcript(10))
+            links['22'] = ('11', daemon)
+            table[30] = (1, ['codex'])
+            sockets[20].add('24')
+            sockets[30] = {'13'}
+            links.update({'24': ('13', daemon), '13': ('24', '*')})
+            self.assertIsNone(reader.codex_daemon_transcript(10))
+            sockets[20].remove('24')
+            del table[30]
+            with patch.object(reader, 'open_codex_transcript', side_effect=[{('session', Path('/synthetic'))}, set()]):
+                self.assertIsNone(reader.codex_daemon_transcript(10))
+            with patch.object(reader, 'codex_unix_connections', return_value={'11': ('22', '*'), '22': ('99', daemon)}):
+                self.assertIsNone(reader.codex_daemon_transcript(10))
+
+    def test_IGSH_1266_codex_ambiguous_fds_never_use_daemon(self):
+        table = {10: (1, ['codex'])}
+        with patch.object(reader, 'process_table', return_value=table), \
+                patch.object(reader, 'open_hax_transcript', return_value=None), \
+                patch.object(reader, 'read_process_cwd', return_value='/synthetic'), \
+                patch.object(reader, 'open_codex_transcript', return_value={('a', Path('/a')), ('b', Path('/b'))}), \
+                patch.object(reader, 'codex_daemon_transcript') as daemon:
+            self.assertIsNone(reader.resolve_tmux_agent('codex', 'synthetic', pid=10))
+            daemon.assert_not_called()
 
     def test_igsh1229_codex_watcher_never_switches_on_neighbour_write(self):
         root = self.home / '.codex/sessions'

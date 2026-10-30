@@ -381,6 +381,8 @@ def open_codex_transcript(pid, table):
     queue = [pid]
     seen = set()
     root = (HOME / ".codex/sessions").resolve()
+    scanned = False
+    uncertain = False
     while queue:
         current = queue.pop(0)
         if current in seen:
@@ -393,13 +395,23 @@ def open_codex_transcript(pid, table):
                             process_basename(argv[1]) in ("codex", "codex.js")):
             continue
         try:
-            for fd in Path(f"/proc/{current}/fd").iterdir():
+            descriptors = list(Path(f"/proc/{current}/fd").iterdir())
+            if current == pid:
+                scanned = True
+            for fd in descriptors:
                 try:
                     path = Path(os.readlink(fd))
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    uncertain = True
+                    continue
+                try:
                     if not path.resolve().is_relative_to(root):
                         continue
                     with path.open("rb") as source:
                         if not os.path.samestat(fd.stat(), os.fstat(source.fileno())):
+                            uncertain = True
                             continue
                         meta = json.loads(source.readline())
                     payload = meta.get("payload") if isinstance(meta, dict) and meta.get("type") == "session_meta" else None
@@ -407,11 +419,112 @@ def open_codex_transcript(pid, table):
                     if (isinstance(sid, str) and SESSION_ID.fullmatch(sid) and
                             payload.get("session_id", sid) == sid and path.name.startswith("rollout-") and path.name.endswith("-" + sid + ".jsonl")):
                         candidates.add((sid, path.resolve()))
+                    else:
+                        uncertain = True
                 except (OSError, ValueError):
-                    pass
+                    uncertain = True
         except OSError:
-            pass
-    return next(iter(candidates)) if len(candidates) == 1 else None
+            uncertain = True
+    return candidates if scanned and not uncertain else None
+
+
+def codex_process_start(pid):
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return None
+
+
+def codex_socket_fds(pid):
+    try:
+        sockets = set()
+        for fd in Path(f"/proc/{pid}/fd").iterdir():
+            try:
+                link = os.readlink(fd)
+            except FileNotFoundError:
+                continue
+            match = re.fullmatch(r"socket:\[(\d+)\]", link)
+            if match:
+                sockets.add(match.group(1))
+        return sockets
+    except OSError:
+        return None
+
+
+def codex_unix_connections():
+    try:
+        result = subprocess.run(["ss", "-x", "-a", "-n", "-e"], capture_output=True, text=True, timeout=3, check=True)
+        connections = {}
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if len(fields) >= 5 and fields[0] == "u_str" and fields[1] == "ESTAB":
+                if len(fields) < 8 or not fields[5].isdigit() or not fields[7].isdigit():
+                    continue
+                inode, peer = fields[5], fields[7]
+                if inode in connections and connections[inode] != (peer, fields[4]):
+                    previous = connections[inode][1]
+                    daemon_prefix = '/tmp/codex-daemon-' + str(os.getuid()) + '/'
+                    path = previous if isinstance(previous, str) and previous.startswith(daemon_prefix) else fields[4]
+                    connections[inode] = (None, path)
+                else:
+                    connections[inode] = (peer, fields[4])
+        return connections
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def codex_daemon_transcript(pid):
+    try:
+        if Path(f"/proc/{pid}").stat().st_uid != os.getuid() or Path(os.readlink(f"/proc/{pid}/exe")).name != "codex":
+            return None
+        start = codex_process_start(pid)
+        tui_sockets = codex_socket_fds(pid)
+        connections = codex_unix_connections()
+        if not start or tui_sockets is None or connections is None:
+            return None
+        table = process_table()
+        endpoint = re.compile(r"/tmp/codex-daemon-" + str(os.getuid()) + r"/[0-9a-f]{64}\Z")
+        backends = []
+        for backend, (_, argv) in table.items():
+            if backend == pid or not argv or process_basename(argv[0]) != "codex" or "app-server" not in argv or "--listen" not in argv:
+                continue
+            try:
+                if Path(f"/proc/{backend}").stat().st_uid != os.getuid() or Path(os.readlink(f"/proc/{backend}/exe")).name != "codex":
+                    continue
+                backend_start = codex_process_start(backend)
+                backend_sockets = codex_socket_fds(backend)
+                if not backend_start or backend_sockets is None:
+                    continue
+                links = {s for s in backend_sockets if s in connections and isinstance(connections[s][1], str) and endpoint.fullmatch(connections[s][1])}
+                if not any(connections[s][0] in tui_sockets for s in links):
+                    continue
+                if any(connections.get(connections[s][0], (None,))[0] != s for s in links):
+                    return None
+                peers = {connections[s][0] for s in links}
+                backends.append((backend, backend_start, links, peers, backend_sockets))
+            except OSError:
+                continue
+        if len(backends) != 1:
+            return None
+        backend, backend_start, links, peers, backend_sockets = backends[0]
+        if len(links) != 1 or len(peers) != 1 or not peers <= tui_sockets or peers & backend_sockets:
+            return None
+        candidates = open_codex_transcript(backend, {backend: table[backend]})
+        if candidates is None or len(candidates) != 1:
+            return None
+        latest = codex_unix_connections()
+        tui_after, backend_after = codex_socket_fds(pid), codex_socket_fds(backend)
+        if latest is None or tui_after is None or backend_after is None:
+            return None
+        latest_links = {s for s in backend_after if s in latest and isinstance(latest[s][1], str) and endpoint.fullmatch(latest[s][1])}
+        if (codex_process_start(pid) != start or codex_process_start(backend) != backend_start or
+                not peers <= tui_after or peers & backend_after or latest_links != links or
+                open_codex_transcript(backend, {backend: table[backend]}) != candidates or
+                any(latest.get(s) != connections.get(s) for s in links | peers)):
+            return None
+        return next(iter(candidates))
+    except (OSError, KeyError):
+        return None
 
 
 def resolve_tmux_agent(agent, name, pid=None, require_bound=False):
@@ -460,7 +573,12 @@ def resolve_tmux_agent(agent, name, pid=None, require_bound=False):
         return None
     if table is None:
         table = process_table(pids=[pid])
-    return open_codex_transcript(pid, table)
+    candidates = open_codex_transcript(pid, table)
+    if candidates is None or len(candidates) > 1:
+        return None
+    if candidates:
+        return next(iter(candidates))
+    return codex_daemon_transcript(pid)
 
 
 def conversation_event(event, agent):
@@ -2492,7 +2610,7 @@ elif __name__ == "__main__":
         print("@mp\t0\thistory\terror\t-\t0\n" + END)
 
 '''
-RUNTIME_GENERATION = 7
+RUNTIME_GENERATION = 8
 
 if __name__ == '__main__':
     import fcntl
