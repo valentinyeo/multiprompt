@@ -1076,12 +1076,12 @@ test('native frame sampling stays scheduled while retaining every measured gap a
 test('Windows notification stand-in keeps the supplied reader push algorithm and emits appended data', () => {
   assert.match(read('tools/verify-chat-delivery/boundary.py'), /def watch_reader\(\):/);
   const script = String.raw`
-import ast,base64,ctypes,ctypes.wintypes,io,json,os,re,sys,tempfile,time,subprocess
+import ast,base64,ctypes,ctypes.wintypes,importlib.util,io,json,os,re,sys,tempfile,time,subprocess
 from pathlib import Path
 from unittest.mock import patch
 root = Path(sys.argv[1])
 tree = ast.parse((root / 'tools/verify-chat-delivery/boundary.py').read_text(encoding='utf-8'))
-function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'watch_reader')
+functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in ('reader_namespace', 'watch_reader')]
 with tempfile.TemporaryDirectory() as temp:
     home = Path(temp)
     cwd = str(home / 'work' / 'demo')
@@ -1115,8 +1115,8 @@ with tempfile.TemporaryDirectory() as temp:
         assert escapes
         captures.append(True)
         return 'Ready\n❯ typed draft\n' + '─' * 50 + '\n'
-    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,sys=sys,os=os,time=time,capture_screen=capture_screen)
-    exec(compile(ast.Module(body=[function],type_ignores=[]), '<boundary-watch>', 'exec'), scope)
+    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,importlib=importlib,Path=Path,__file__=str(root / 'tools/verify-chat-delivery/boundary.py'),sys=sys,os=os,time=time,capture_screen=capture_screen)
+    exec(compile(ast.Module(body=functions,type_ignores=[]), '<boundary-watch>', 'exec'), scope)
     with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.dict(sys.modules, pwd=None), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True), patch.object(subprocess,'run',side_effect=AssertionError('stream spawned a capture process')):
         try: scope['watch_reader']()
         except RuntimeError as error: assert str(error) == 'fixture finished'
@@ -1254,21 +1254,20 @@ test('IGSH-1055 removing the read anchor rotates source identity without truncat
   }
 });
 
-test('native runner-session journeys run automatically for candidates and published releases', () => {
-  const call = workflow.slice(workflow.indexOf('  workflow_call:'), workflow.indexOf('  pull_request:'));
+test('native runner-session journeys are manual and nightly, not release gates', () => {
+  const call = workflow.slice(workflow.indexOf('  workflow_call:'), workflow.indexOf('  schedule:'));
   assert.match(call, /      hax_sessions_proof:\n        required: false\n        default: false\n        type: boolean/);
-  assert.match(workflow, /!inputs\.hax_sessions_proof && github\.event_name == 'pull_request'/);
-  const caller = '.github/workflows/hax-sessions.yml';
-  assert.ok(fs.existsSync(path.join(root, caller)), 'candidate Windows journey has an automatic trigger');
-  assert.match(read(caller), /  pull_request:/);
-  assert.match(read(caller), /uses: \.\/\.github\/workflows\/verify\.yml/);
-  assert.match(read(caller), /feature: chat-delivery\n      hax_sessions_proof: true/);
+  const caller = read('.github/workflows/hax-sessions.yml');
+  assert.match(caller, /  workflow_dispatch:/);
+  assert.match(caller, /  schedule:/);
+  assert.doesNotMatch(caller, /^  (?:pull_request|push|workflow_call):/m);
+  assert.match(caller, /uses: \.\/\.github\/workflows\/verify\.yml/);
+  assert.match(caller, /feature: chat-delivery\n      hax_sessions_proof: true/);
   const redRun = read('.github/workflows/check-red-run.yml');
   assert.match(redRun, /name: Install Zig 0\.16\.0/);
   assert.match(redRun, /zig-x86_64-linux-0\.16\.0.*GITHUB_PATH/);
   const released = read('.github/workflows/release.yml');
-  assert.match(released, /  runner-sessions:\n    needs: \[prepare, release\]/);
-  assert.match(released, /feature: chat-delivery\n      hax_sessions_proof: true\n      tag: \$\{\{ needs\.prepare\.outputs\.tag \}\}/);
+  assert.doesNotMatch(released, /runner-sessions|hax_sessions_proof|hax-sessions\.yml/);
 });
 
 test('native runner file descriptors share one Windows notification root with their fixture state', () => {
