@@ -1,1 +1,1 @@
-Sidebar restart recording now includes resize recovery.
+Sidebar restart recording checks saved sections and width.

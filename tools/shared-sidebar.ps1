@@ -130,21 +130,15 @@ $script:nextJob = $null
 
 function Memory-Evidence([string]$Name) {
     Copy-Item "$settings/session.json" "$Output/$Name.session.json"
+    if (Test-Path "$settings/session.json.launch.json") { Copy-Item "$settings/session.json.launch.json" "$Output/$Name.session.json.launch.json" }
     Shot $Name
     $script:frames += $Name
 }
 function Memory-ToggleUnread([bool]$Expected, [string]$Name) {
     Focus
-    $log = "$settings/debug.log"
-    $start = (Get-Content $log -Raw).Length
-    [ChatDeliveryDesktop]::Chord(@(0x11, 0x4B))
-    $result.actions += 'Ctrl+K: open command palette'
-    [void](Wait-For 'palette ready' { ((Get-Content $log -Raw).Substring($start)) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-    foreach ($char in 'toggle unread only'.ToCharArray()) { [ChatDeliveryDesktop]::Character($char) }
-    $result.actions += 'Type toggle unread only'
-    [void](Wait-For 'unread command selected' { ((Get-Content $log -Raw).Substring($start)) -match '\[palette\] ready chars=18 count=[1-9]\d* target=6219(?:\r?\n|$)' })
-    [ChatDeliveryDesktop]::Chord(@(0x0D))
-    $result.actions += 'Enter: toggle unread only'
+    if ((Flag (Session) 'unread_only') -eq $Expected) { throw "unread_only already $Expected before toggle" }
+    [ChatDeliveryDesktop]::Chord(@(0x11, 0x10, 0x55))
+    $result.actions += 'Ctrl+Shift+U: toggle unread only'
     [void](Wait-For "unread_only saved $Expected" { (Flag (Session) 'unread_only') -eq $Expected })
     Memory-Evidence $Name
 }
@@ -182,14 +176,14 @@ function Memory-Identity([string]$Stage) {
 }
 function Memory-Recheck([string]$Stage) {
     Memory-Identity $Stage
+    if (-not (Flag (Session) 'unread_only') -or -not (Flag (Session) 'recents_section_collapsed') -or -not (Memory-GroupCollapsed)) { throw "$Stage nondefault sidebar choices not restored" }
     Focus
     Memory-Evidence "after-$Stage"
-    # Turning the restored filter off makes both headers visible again.
     Memory-ToggleUnread $false "$Stage-unread-off"
-    Memory-Click 64 'Click group: prove restored open' { Memory-GroupCollapsed } "$Stage-group-closed"
-    Memory-Click 92 'Click Recents: prove restored closed' { -not (Flag (Session) 'recents_section_collapsed') } "$Stage-recents-open"
-    Memory-Click 64 'Click group: reopen' { -not (Memory-GroupCollapsed) } "$Stage-group-open"
-    Memory-Click 150 'Click Recents: close again' { Flag (Session) 'recents_section_collapsed' } "$Stage-recents-closed"
+    Memory-Click 64 'Click group: prove restored closed' { -not (Memory-GroupCollapsed) } "$Stage-group-open"
+    Memory-Click 150 'Click Recents: prove restored closed' { -not (Flag (Session) 'recents_section_collapsed') } "$Stage-recents-open"
+    Memory-Click 64 'Click group: close again' { Memory-GroupCollapsed } "$Stage-group-closed"
+    Memory-Click 92 'Click Recents: close again' { Flag (Session) 'recents_section_collapsed' } "$Stage-recents-closed"
     Memory-ToggleUnread $true "$Stage-configured"
 }
 function Memory-Restart([bool]$Updater) {
@@ -239,6 +233,10 @@ function Memory-Restart([bool]$Updater) {
         $trace = (Get-Content "$settings/debug.log" -Raw).Substring($logStart)
         [string]$inbox.hwnd -eq [string]$main.ToInt64() -and @($inbox.shells).Count -eq 3 -and $trace -match 'launch step=browser'
     } 60)
+    [void](Wait-For 'new process applied sidebar width 340' {
+        $trace = (Get-Content "$settings/debug.log" -Raw).Substring($logStart)
+        $trace -match '(?s)launch step=snapshot[^\r\n]*\r?\n.*?\[reposition\] client=\d+x\d+ sidebar=340(?:\r?\n|$)'
+    } 60)
     Focus
 }
 function Memory-Journey {
@@ -246,7 +244,7 @@ function Memory-Journey {
     $result.identities = @()
     $result.exits = @()
     if ([SidebarDrag]::GetDpiForWindow($main) -ne 96) { throw 'Memory journey requires 96 DPI' }
-    $result.limitations = @('Expanded Pinned header is suppressed by the existing tile layout; group and Recents used instead', 'Other groups and Starred groups not exercised', 'Updater helper relaunch exercised; download, signature and binary replacement not exercised')
+    $result.limitations = @('Expanded Pinned header is suppressed by the existing tile layout; group and Recents used instead', 'Other groups and Starred groups not exercised', 'Restart while sidebar collapsed not exercised', 'Updater helper relaunch exercised; download, signature, version and binary replacement not exercised')
     $result.executable = @{ path=$Exe; sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion }
     Memory-Identity 'initial'
     if ((Flag (Session) 'unread_only') -or (Flag (Session) 'recents_section_collapsed') -or (Memory-GroupCollapsed)) { throw 'Missing flags did not default off' }
@@ -261,12 +259,19 @@ function Memory-Journey {
     [void](Wait-For 'drag collapsed saved on release' { Flag (Session) 'sidebar_collapsed' })
     Memory-Evidence 'drag-collapsed'
     Focus
-    [SidebarDrag]::Drag($main, $app.Id, 44, 300, 200)
+    [SidebarDrag]::Drag($main, $app.Id, 44, 340, 200)
     $result.actions += 'Drag collapsed sidebar boundary right; release expanded'
     [void](Wait-For 'drag expanded saved on release' { -not (Flag (Session) 'sidebar_collapsed') })
+    [void](Wait-For 'sidebar width 340 saved in launch snapshot' {
+        if (-not (Test-Path "$settings/session.json.launch.json")) { return $false }
+        $snapshot = Read-Json "$settings/session.json.launch.json"
+        $property = $snapshot.PSObject.Properties['sidebar_width']
+        $null -ne $property -and $property.Value -eq 340
+    })
     Memory-Evidence 'drag-expanded'
     Memory-ToggleUnread $true 'unread-on'
     Memory-ToggleUnread $false 'unread-off'
+    Memory-Click 64 'Click group: close again' { Memory-GroupCollapsed } 'group-configured-closed'
     Memory-ToggleUnread $true 'configured'
     Memory-Restart $false
     Memory-Recheck 'restart'
@@ -355,7 +360,7 @@ try {
                     $result.cleanupErrors += $_.Exception.Message
                 } finally { $ownedJob.Dispose() }
             }
-            foreach ($name in @('session.json', 'debug.log', 'inbox-default.json')) {
+            foreach ($name in @('session.json', 'session.json.launch.json', 'debug.log', 'inbox-default.json')) {
                 try { if (Test-Path "$settings/$name") { Copy-Item "$settings/$name" "$Output/$name" } } catch { $result.cleanupErrors += $_.Exception.Message }
             }
             if ($result.cleanup -eq 0) {
