@@ -6,6 +6,7 @@ import io
 import os
 import selectors
 import shutil
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
@@ -3219,6 +3220,56 @@ class HeldQueueTest(unittest.TestCase):
 
     def cancel(self, text, stamp):
         return reader.cancel_queued_response(dict(id=2, tmux='term-1', text=text, queued_at=stamp, message_id=f'message-{stamp}'))
+
+    def test_handoff_holds_writer_lock_after_durable_submission(self):
+        self.enqueue('first', 1)
+        self.enqueue('next', 2)
+        self.ready.return_value = True
+        db_path = reader.held_queue_path('term-1')
+
+        def handoff(_query):
+            with sqlite3.connect(db_path, timeout=0) as other:
+                self.assertEqual(other.execute('SELECT state FROM messages ORDER BY created').fetchall(),
+                                 [('submitted',), ('queued',)])
+                with self.assertRaisesRegex(sqlite3.OperationalError, 'locked'):
+                    other.execute('BEGIN IMMEDIATE')
+            return '@mp\t1\tsend\tok\t-\t0\n@@MP_END@@\n'
+
+        self.send.side_effect = handoff
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        with sqlite3.connect(db_path, timeout=0) as other:
+            other.execute('BEGIN IMMEDIATE')
+            self.assertEqual(other.execute('SELECT state FROM messages ORDER BY created').fetchall(),
+                             [('submitted',), ('queued',)])
+        self.send.assert_called_once()
+
+    def test_handoff_subprocess_failure_keeps_submission_and_blocks_next(self):
+        self.enqueue('first', 1)
+        self.enqueue('next', 2)
+        self.ready.return_value = True
+        self.send.side_effect = subprocess.TimeoutExpired(['tmux'], 5)
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        with sqlite3.connect(reader.held_queue_path('term-1'), timeout=0) as other:
+            other.execute('BEGIN IMMEDIATE')
+            self.assertEqual(other.execute('SELECT state,receipt FROM messages ORDER BY created').fetchall(),
+                             [('submitted', 'Terminal handoff interrupted; receipt not confirmed'),
+                              ('queued', '')])
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.send.assert_called_once()
+
+    def test_handoff_rollback_keeps_submission_and_blocks_next(self):
+        self.enqueue('first', 1)
+        self.enqueue('next', 2)
+        self.ready.return_value = True
+        self.send.side_effect = RuntimeError('handoff interrupted')
+        with self.assertRaisesRegex(RuntimeError, 'handoff interrupted'):
+            reader.drain_held_queue('term-1', 'sid', self.path)
+        with sqlite3.connect(reader.held_queue_path('term-1'), timeout=0) as other:
+            other.execute('BEGIN IMMEDIATE')
+            self.assertEqual(other.execute('SELECT state FROM messages ORDER BY created').fetchall(),
+                             [('submitted',), ('queued',)])
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.send.assert_called_once()
 
     def test_busy_empty_handoff_waits_for_receipt_and_never_replays(self):
         self.path.write_text(json.dumps(dict(type='assistant', message=dict(stop_reason=None))) + '\n')
