@@ -95,6 +95,90 @@ if (fs.existsSync(checker)) {
     }
   });
 
+  const nativeSource = String.raw`const text = "test \"fake\" { }";
+const brace = '}';
+const lines =
+    \\test "fake" { }
+;
+// test "not a declaration" { }
+test "native proof" {
+    const value = "} // test {";
+    _ = value;
+    // } test "fake" {
+}
+const after = 1;
+`;
+
+  test('native chat test edits require Windows execution, not fake portable proof', t => {
+    const f = fixture(t);
+    f.write('src/chat_render.zig', nativeSource);
+    const base = f.commit();
+    f.write('src/chat_render.zig', nativeSource.replace('_ = value;', '_ = value;\n    try @import("std").testing.expect(true);'));
+    f.commit();
+    const result = f.run(base);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /native chat test edits only; Windows tests still required/);
+    assert.doesNotMatch(result.stdout, /RED PROVEN|TEST_ONLY_PROVEN/);
+  });
+
+  for (const [name, update] of [
+    ['product before test', source => source.replace('const brace', 'pub const brace')],
+    ['product after test', source => source.replace('const after = 1;', 'const after = 2;')],
+    ['misleading string', source => source.replace('fake\\" { }', 'changed\\" { }')],
+    ['misleading comment', source => source.replace('not a declaration', 'changed comment')],
+    ['multiline string', source => source.replace('\\\\test "fake"', '\\\\test "changed"')],
+    ['deleted test', source => source.replace(/test "native proof" \{[\s\S]*?\n\}\n/, '')],
+    ['renamed test', source => source.replace('test "native proof"', 'test "other proof"')],
+    ['malformed source', source => source.replace('const after = 1;', 'const after = ;')],
+  ]) {
+    test(`native classifier rejects ${name}`, t => {
+      const f = fixture(t);
+      f.write('src/chat_render.zig', nativeSource);
+      const base = f.commit();
+      f.write('src/chat_render.zig', update(nativeSource));
+      f.commit();
+      const result = f.run(base);
+      assert.notEqual(result.status, 0, result.stdout + result.stderr);
+      assert.match(result.stderr, /No changed regression tests/);
+    });
+  }
+
+  test('native test edits cannot hide unrelated source or bypass red assertions', t => {
+    const f = fixture(t);
+    f.write('src/chat_render.zig', nativeSource);
+    const base = f.commit();
+    f.write('src/chat_render.zig', nativeSource.replace('_ = value;', '_ = value;\n    try @import("std").testing.expect(true);'));
+    f.write('src/value.txt', 'fixed');
+    f.write('tools/value.test.cjs', "require('node:test')('always passes',()=>{});\n");
+    f.commit();
+    const result = f.run(base);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /stayed green on merge-base source/);
+  });
+
+  test('chat product changes still admit a real portable red assertion', t => {
+    const f = fixture(t);
+    f.write('src/chat_render.zig', nativeSource);
+    const base = f.commit();
+    f.write('src/chat_render.zig', nativeSource.replace('const after = 1;', 'const after = 2;'));
+    f.write('tools/chat.test.cjs', "const assert=require('node:assert/strict'); const fs=require('node:fs'); require('node:test')('change',()=>assert.match(fs.readFileSync('src/chat_render.zig','utf8'),/const after = 2;/));\n");
+    f.commit();
+    const result = f.run(base);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /RED PROVEN tools\/chat.test.cjs/);
+  });
+
+  test('other Zig files do not receive native chat admission', t => {
+    const f = fixture(t);
+    f.write('src/other.zig', nativeSource);
+    const base = f.commit();
+    f.write('src/other.zig', nativeSource.replace('_ = value;', '_ = value;\n    try @import("std").testing.expect(true);'));
+    f.commit();
+    const result = f.run(base);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /No changed regression tests/);
+  });
+
   test('a genuine changed regression fails only on merge-base production source', t => {
     const f = fixture(t);
     f.write('src/value.txt', 'fixed');
