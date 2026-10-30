@@ -4114,6 +4114,33 @@ class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
         events = self.request('events', after=page['seq'])['events']
         self.assertTrue(any(event['event'].get('id') == 'message_fixture_late' for event in events))
 
+    def test_event_and_status_reads_restart_only_observable_work(self):
+        import fcntl
+        def serve_one(op, **values):
+            request = dict(self.base, id=1, op='message_' + op, **values)
+            incoming = types.SimpleNamespace(buffer=io.BytesIO((json.dumps(request) + '\n').encode()))
+            output = io.StringIO()
+            with patch.object(reader.sys, 'stdin', incoming), patch.object(reader.sys, 'stdout', output):
+                reader.serve('pass')
+            return json.loads(output.getvalue())
+        def child(*args, **kwargs):
+            return types.SimpleNamespace(stdin=io.BytesIO())
+        with patch.object(reader.subprocess, 'Popen', side_effect=child) as spawn:
+            self.assertEqual(serve_one('events', after=0)['result']['events'], [])
+            self.assertIsNone(serve_one('status', message_id='message_fixture_0001')['result']['message'])
+            self.assertEqual(spawn.call_count, 0)
+            self.submit()
+            self.assertTrue(serve_one('events', after=0)['result']['events'])
+            self.assertEqual(serve_one('status', message_id='message_fixture_0001')['result']['message']['state'], 'queued')
+            self.assertEqual(spawn.call_count, 2)
+            path = reader.message_store_path().with_suffix('.' + hashlib.sha256(b'claude:sid').hexdigest() + '.message-worker')
+            with path.open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                serve_one('events', after=0)
+                serve_one('status', message_id='message_fixture_0001')
+            self.assertEqual(spawn.call_count, 2)
+            self.assertEqual(self.send.call_count, 0)
+
     def test_duplicate_worker_returns_without_blocking(self):
         import fcntl
         self.submit()

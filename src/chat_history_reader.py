@@ -2484,9 +2484,14 @@ def message_poll_locked(tmux, provider, sid):
                 message_apply_connector(db, provider, sid, epoch, result)
 
 
-def start_message_worker(q, source):
+def start_message_worker(q, source, only_if_work=False):
     if source is None:
         return
+    if only_if_work:
+        from contextlib import closing
+        with closing(message_store_db(q['tmux'])) as db:
+            if not db.execute("SELECT 1 FROM shared_messages WHERE provider=? AND sid=? AND state IN ('queued','sent','failed','accepted','started') LIMIT 1", (q['provider'], q['sid'])).fetchone():
+                return
     import fcntl
     path = message_store_path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -3281,6 +3286,8 @@ def serve(source):
                 result = message_store_request(query)
                 if query.get('op') in ('message_submit', 'message_retry', 'message_snapshot'):
                     start_message_worker(query, source)
+                elif query.get('op') in ('message_events', 'message_status'):
+                    start_message_worker(query, source, only_if_work=True)
                 print(json.dumps(dict(id=rid, message_protocol=1, result=result), separators=(",", ":")), flush=True)
                 continue
             if query.get("op") in ("send", "question_text"):
@@ -3324,7 +3331,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 16
+RUNTIME_GENERATION = 17
 
 if __name__ == '__main__':
     import fcntl
