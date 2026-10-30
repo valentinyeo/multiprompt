@@ -1656,12 +1656,12 @@ pub fn chatEchoRemove(id: u64) void {
     const ei = chatOutboxIndexById(id) orelse return;
     if (!chat_echo.pendingActions(app_state.g_chat_outbox.items[ei].state).remove) return;
     const pending = app_state.g_chat_outbox.items[ei];
-    if (pending.message_v1 and pending.message_phase[0] != 0) {
+    if (pending.message_v1 and pending.channel_pending) return;
+    if (pending.message_v1 and (pending.message_phase[0] != 0 or pending.write_started)) {
         const si = chatOutboxShellForKey(pending.key[0..pending.key_len]) orelse return;
-        _ = chatTmuxSendStart(si, pending.text, id, false, false, true);
+        if (!chatTmuxSendStart(si, pending.text, id, false, false, true)) showHeaderNoticeAscii("Could not remove yet. Try again", 3500, true);
         return;
     }
-    if (pending.message_v1 and (pending.channel_pending or pending.write_started)) return;
     const entry = app_state.g_chat_outbox.orderedRemove(ei);
     if (!saveChatOutbox()) {
         app_state.g_chat_outbox.insertAssumeCapacity(ei, entry);
@@ -2997,6 +2997,17 @@ fn chatTmuxSendFinish() void {
         if (ei) |i| {
             const entry = &app_state.g_chat_outbox.items[i];
             if (std.mem.eql(u8, &entry.message_wire_id, &job.message_wire_id)) entry.channel_pending = false;
+        }
+        if (job.message_dismiss) {
+            if (ei) |i| {
+                if (std.mem.eql(u8, &app_state.g_chat_outbox.items[i].message_wire_id, &job.message_wire_id) and std.mem.eql(u8, std.mem.sliceTo(&job.message_state, 0), "cancelled")) {
+                    chatOutboxRemoveAtIn(&app_state.g_chat_outbox, std.heap.page_allocator, i);
+                    _ = saveChatOutbox();
+                    chatOutboxChanged();
+                    return;
+                }
+            }
+            showHeaderNoticeAscii("Could not remove yet. Try again", 3500, true);
         }
         const current = chatFileIdentityForShell(idx);
         if (!std.meta.eql(current, job.key)) return;
