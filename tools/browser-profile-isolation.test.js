@@ -48,7 +48,7 @@ test("same-sized painted chat browsers are uncovered before draft binding withou
   assert.match(reveal, /setBrowserWindowPosAsync\(bh, null, target.left, target.top, 0, 0, SWP_NOSIZE \| SWP_NOZORDER \| SWP_NOACTIVATE \| SWP_NOREDRAW\)/);
   assert.match(reveal, /defer switch_timing.record\(\.position, timing_started\)/);
   assert.doesNotMatch(reveal, /ShowWindow|SWP_SHOWWINDOW|SetFocus|SetForegroundWindow|SetTimer|Sleep|WaitFor|launchBrowser|navigateBrowser/);
-  const order = /app_state.active_shell = idx;\s+parkStrayBrowserPanes\([^;]+;\s+if \(defer_browser and defer_native_browser\) @import\("browser_pane.zig"\).revealPaintedChatBrowser\(\);\s+chatDraftBindToActive\(\);/;
+  const order = /app_state.active_shell = idx;\s+parkStrayBrowserPanes\([^;]+;\s+if \(defer_browser and defer_native_browser\) @import\("browser_pane.zig"\).revealPaintedChatBrowser\(\);\s+\{\s+const timing_started = switch_timing.start\(\);\s+defer switch_timing.record\(\.draft_bind, timing_started\);\s+chatDraftBindToActive\(\);\s+\}/;
   assert.match(switching, order);
   assert.doesNotMatch(switching.replace('.revealPaintedChatBrowser();', '.positionActiveBrowser();'), order);
   const park = pane.slice(pane.indexOf('pub fn parkBrowserWindow('), pane.indexOf('fn hideBrowserWindowHard('));

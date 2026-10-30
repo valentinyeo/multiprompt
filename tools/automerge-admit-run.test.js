@@ -80,9 +80,11 @@ test('one completed PR check reads only its PR, with one snapshot and no writes'
   assert.match(result.stdout, /dry.run/);
 });
 
-test('no timer or shared cancellation queue remains', () => {
+test('automerge remains disabled without automatic triggers or a shared queue', () => {
   assert.doesNotMatch(workflow, /schedule:|cron:|concurrency:/);
-  assert.match(workflow, /branches-ignore: \[master\]/);
+  assert.match(workflow, /^  workflow_dispatch:/m);
+  assert.doesNotMatch(workflow, /^  (?:push|pull_request|workflow_run):/m);
+  assert.match(workflow, /^  automerge:\n    if: \$\{\{ false \}\}/m);
 });
 
 for (const [name, change] of [
@@ -237,11 +239,12 @@ test('completed merged PR never merges or dispatches again', t => {
   assert.equal(f.calls().length, 1);
 });
 
-test('dispatch checks the selected branch, while events check trusted default code', () => {
+test('disabled manual workflow retains selected-branch checkout and admission runner', () => {
   assert.match(workflow, /ref: \$\{\{ github.event_name == 'workflow_dispatch' && github.ref \|\| github.event.repository.default_branch \}\}/);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
-  assert.match(workflow, /github.event.workflow_run.event == 'pull_request'/);
-  assert.match(workflow, /pull_requests\[1\] == null/);
+  assert.match(workflow, /^  automerge:\n    if: \$\{\{ false \}\}/m);
+  assert.doesNotMatch(workflow, /^  workflow_run:/m);
+  assert.match(workflow, /node tools\/automerge-admit-run\.js/);
 });
 
 test('old workflow is a failing API-budget control', () => {

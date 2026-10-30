@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { copyZig } = require('./zig-copy');
 const read = name => fs.readFileSync(path.join(__dirname, '..', 'src', name), 'utf8');
 const session = read('chat_session.zig');
 const history = read('chat_history.zig');
@@ -17,7 +18,13 @@ function between(source, start, end) {
 test('IGSH-871 unread divider stays above the first unread reply until leaving the tab', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-unread-visit-'));
   try {
+    copyZig(['switch_timing.zig'], dir);
     const source = `const std = @import("std");
+const switch_timing = struct {
+  const Step = @import("switch_timing.zig").Step;
+  fn start() i64 { return 0; }
+  fn record(_: Step, _: i64) void {}
+};
 const Block = struct { role: enum { prose, user, tool } = .prose, first: bool = true, message_id: u64, start: usize = 0, len: usize = 1 };
 const md = struct { const Block = ThisBlock; };
 const ThisBlock = Block;
@@ -60,10 +67,8 @@ ${between(session, '    app_state.g_chat_new_messages = .{};', '    if (app_stat
   app_state.g_chat_read_open_pending = false;
   app_state.g_chat_read_open_ready = true;
 }
-fn leaveTab() void {
-  const idx: u32 = 1;
-  const prev: u32 = 0;
-${between(consoleSource, '    if (idx != prev) _ = @import("chat_session.zig").chatReadMark(false);', '    app_state.active_shell = idx;').replaceAll('@import("chat_session.zig").', '')}
+fn leaveTab(idx: u32, prev: u32) void {
+${between(consoleSource, '    if (idx != prev) {\n        const timing_started = switch_timing.start();', '    app_state.active_shell = idx;').replaceAll('@import("chat_session.zig").', '')}
 }
 test "divider stays at first unread after reading and clears on all-read revisit" {
   openTab();
@@ -78,7 +83,9 @@ test "divider stays at first unread after reading and clears on all-read revisit
   try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
   openTab();
   try std.testing.expectEqual(@as(?usize, 1), chatReadBoundary().index);
-  leaveTab();
+  leaveTab(0, 0);
+  try std.testing.expectEqual(@as(u32, 7), app_state.g_chat_read_visit_shell_id);
+  leaveTab(1, 0);
   openTab();
   try std.testing.expectEqual(@as(?usize, null), chatReadBoundary().index);
   app_state.g_chat_block_count = 5;
