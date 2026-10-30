@@ -85,6 +85,7 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertIsNone(next(row for row in self.read()[1] if row["role"] == "status")["question"])
 
     def test_igsh1063_codex_structured_questions_complete(self):
+        self.query["tmux"] = ""
         self.query["codex"] = True
         self.path = self.home / ".codex/sessions/rollout-2026-sid.jsonl"
         self.path.parent.mkdir(parents=True)
@@ -368,6 +369,7 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual([row for row in rows if row["role"] == "status"], status)
 
     def test_codex_status_header(self):
+        self.query["tmux"] = ""
         self.query["codex"] = True
         self.path = self.home / ".codex/sessions/2026/10/20/rollout-2026-sid.jsonl"
         self.path.parent.mkdir(parents=True)
@@ -481,6 +483,7 @@ class HistoryReaderTest(unittest.TestCase):
             self.assertEqual((status["model"], status["percent_left"]), ("Opus 5.5", 62))
 
     def test_status_cache_codex_updates_plan_and_usage(self):
+        self.query["tmux"] = ""
         self.query["codex"] = True
         self.path = self.home / ".codex/sessions/rollout-2026-sid.jsonl"
         self.path.parent.mkdir(parents=True)
@@ -992,6 +995,7 @@ class HistoryReaderTest(unittest.TestCase):
             self.assertEqual(rows, [])
 
     def test_igsh263_codex_real_shapes_and_errors(self):
+        self.query['tmux'] = ''
         self.path = self.home / '.codex/sessions/2026/10/18/rollout-test-sid.jsonl'
         self.path.parent.mkdir(parents=True)
         self.query.update(codex=True)
@@ -1813,6 +1817,7 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(rows[2]['timestamp'], '2026-10-13T11:06:59.443Z')
 
     def test_codex_rollout_and_input_output_text(self):
+        self.query['tmux'] = ''
         path = self.home / '.codex/sessions/2026/rollout-day-sid.jsonl'
         path.parent.mkdir(parents=True)
         path.write_text(json.dumps(dict(type='response_item', payload=dict(type='message', role='user', content=[dict(type='input_text', text='codex prompt')]))) + '\n')
