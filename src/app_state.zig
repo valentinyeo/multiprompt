@@ -2642,6 +2642,15 @@ pub const ChatHistoryEntry = struct {
     key: chat_transcript.Identity,
     layout: ?ChatLayoutSnapshot = null,
     generation: u64 = 0,
+    message_epoch: u64 = 0,
+    message_seq: u64 = 0,
+    message_generation: u64 = 0,
+    message_snapshot: [33]u8 = @splat(0),
+    message_cursor: u64 = 0,
+    message_snapshot_seq: u64 = 0,
+    message_synced: bool = false,
+    message_v1_owned: bool = false,
+    message_next_tick: u64 = 0,
     history: chat_history.History = .{},
     backfill: chat_history.Backfill = .{},
     staged: bool = false,
@@ -2923,6 +2932,13 @@ pub const ChatOutboxEntry = struct {
     host_held: bool = false,
     host_confirmed: bool = false,
     queue_id: u64 = 0,
+    message_nonce: u64 = 0,
+    message_v1: bool = false,
+    message_sid: [40]u8 = @splat(0),
+    message_phase: [16]u8 = @splat(0),
+    message_wire_id: [81]u8 = @splat(0),
+    retry_nonce: u64 = 0,
+    reset_pending: bool = false,
     channel_pending: bool = false,
     steer_pending: bool = false,
     sent_tick_ms: i64 = 0,
@@ -3669,6 +3685,19 @@ pub const ChatTmuxSendJob = struct {
     retry: bool,
     queued_at: i64 = 0,
     queue_id: u64 = 0,
+    message_nonce: u64 = 0,
+    request_nonce: u64 = 0,
+    message_v1: bool = false,
+    message_status: bool = false,
+    message_reset: bool = false,
+    message_dismiss: bool = false,
+    reset_cutoff: u64 = 0,
+    history_instance: u64 = 0,
+    message_generation: u64 = 0,
+    message_epoch: u64 = 0,
+    reset_result_epoch: u64 = 0,
+    message_state: [16]u8 = @splat(0),
+    message_wire_id: [81]u8 = @splat(0),
     held: bool = false,
     written: bool = false,
     rejected: bool = false,
@@ -3676,6 +3705,29 @@ pub const ChatTmuxSendJob = struct {
     finished: std.atomic.Value(bool) = .init(false),
 };
 pub var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;
+pub const ChatPendingReset = struct {
+    key: chat_transcript.Identity = .{},
+    nonce: u64 = 0,
+    request_nonce: u64 = 0,
+};
+pub var g_chat_pending_reset: ?ChatPendingReset = null;
+pub var g_chat_reset_next: u64 = 0;
+
+pub const ChatMessageSyncJob = struct {
+    key: chat_transcript.Identity,
+    instance: u64,
+    generation: u64,
+    epoch: u64,
+    seq: u64,
+    snapshot: [33]u8,
+    cursor: u64,
+    synced: bool,
+    response: std.ArrayList(u8) = .empty,
+    ok: bool = false,
+    finished: std.atomic.Value(bool) = .init(false),
+};
+pub var g_chat_message_sync_job: ?*ChatMessageSyncJob = null;
+pub var g_chat_message_sync_next: usize = 0;
 
 pub const ChatFullSettleJob = struct {
     key: chat_transcript.Identity,

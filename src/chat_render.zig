@@ -2109,7 +2109,7 @@ pub fn chatRelayout(client_width: i32) void {
             reaction_count += 1;
         }
         if (chatHistoryEntry(chatFileIdentity())) |history| {
-            for (history.history.status.queue[0..history.history.status.queue_len]) |*item| {
+            for (history.history.status.queue[0..if (history.message_v1_owned) @as(usize, 0) else history.history.status.queue_len]) |*item| {
                 if (item.injected or reaction_count >= reaction_pending.len) continue;
                 const text = item.text[0..item.len];
                 reaction_pending[reaction_count] = .{ .id = chatShellReactionId(text), .text = text };

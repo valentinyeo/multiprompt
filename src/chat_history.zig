@@ -330,6 +330,58 @@ pub const History = struct {
         const old_suffix = self.rows.items.len - self.last_row;
         if (next.rows.items.len < old_suffix) return error.InvalidHistory;
         const added = next.rows.items[old_suffix..];
+        var arena = std.heap.ArenaAllocator.init(a);
+        defer arena.deinit();
+        const scratch = arena.allocator();
+        var identities = std.HashMap(RowIdentity, void, RowIdentity.Context, 80).init(scratch);
+        var max_offset: ?u64 = null;
+        var previous = std.mem.splitScalar(u8, self.rows.items, '\n');
+        while (previous.next()) |old| {
+            if (old.len == 0) continue;
+            const key = try rowIdentity(scratch, old);
+            try identities.put(key, {});
+            if (key.end > key.offset) max_offset = @max(max_offset orelse key.offset, key.offset);
+        }
+        var incoming = std.mem.splitScalar(u8, added, '\n');
+        var overlap = false;
+        var ordered = false;
+        var all_positioned = true;
+        var added_rows: std.ArrayList([]const u8) = .empty;
+        while (incoming.next()) |line| {
+            if (line.len == 0) continue;
+            const key = try rowIdentity(scratch, line);
+            try added_rows.append(scratch, line);
+            overlap = overlap or identities.contains(key);
+            if (key.end <= key.offset) {
+                all_positioned = false;
+            } else if (max_offset) |last| {
+                if (key.offset <= last) ordered = true;
+            }
+        }
+        if (ordered) {
+            if (!all_positioned) return error.InvalidHistory;
+            try self.upsertNativeRows(a, added_rows.items, self.inode);
+            self.updateCursor(next.*);
+            self.revision = next.revision;
+            return;
+        }
+        if (overlap) {
+            var combined = self.cursor();
+            errdefer combined.deinit(a);
+            try combined.rows.appendSlice(a, self.rows.items);
+            var incoming_history = self.cursor();
+            defer incoming_history.deinit(a);
+            try incoming_history.rows.appendSlice(a, added);
+            try incoming_history.retainRows(a, combined);
+            try incoming_history.render(a);
+            incoming_history.updateCursor(next.*);
+            incoming_history.revision = next.revision;
+            self.deinit(a);
+            self.* = incoming_history;
+            incoming_history = .{};
+            combined.deinit(a);
+            return;
+        }
         try self.rows.ensureUnusedCapacity(a, added.len);
         try self.text.ensureTotalCapacity(a, self.last_text + next.text.items.len);
         try self.blocks.ensureTotalCapacity(a, self.last_block + next.blocks.items.len);
@@ -424,6 +476,8 @@ pub const History = struct {
     const RowIdentity = struct {
         role: []const u8,
         id: []const u8,
+        offset: u64,
+        end: u64,
         segment: u64,
         timestamp: []const u8,
         text: []const u8,
@@ -432,6 +486,8 @@ pub const History = struct {
         const Context = struct {
             pub fn hash(_: @This(), key: RowIdentity) u64 {
                 var h = std.hash.Wyhash.init(key.segment);
+                std.hash.autoHash(&h, key.offset);
+                std.hash.autoHash(&h, key.end);
                 inline for (.{ "role", "id", "timestamp", "text" }) |field| {
                     const bytes = @field(key, field);
                     std.hash.autoHash(&h, bytes.len);
@@ -447,7 +503,7 @@ pub const History = struct {
             }
 
             pub fn eql(_: @This(), lhs: RowIdentity, rhs: RowIdentity) bool {
-                if (lhs.segment != rhs.segment or (lhs.settlement == null) != (rhs.settlement == null)) return false;
+                if (lhs.segment != rhs.segment or lhs.offset != rhs.offset or lhs.end != rhs.end or (lhs.settlement == null) != (rhs.settlement == null)) return false;
                 inline for (.{ "role", "id", "timestamp", "text" }) |field| {
                     if (!std.mem.eql(u8, @field(lhs, field), @field(rhs, field))) return false;
                 }
@@ -462,7 +518,8 @@ pub const History = struct {
     fn rowIdentity(a: std.mem.Allocator, line: []const u8) !RowIdentity {
         const m = try std.json.parseFromSliceLeaky(Message, a, line, .{ .ignore_unknown_fields = true });
         const id = m.read_id orelse m.id;
-        return .{ .role = m.role, .id = id, .segment = m.segment, .timestamp = m.timestamp, .text = if (id.len == 0) m.text else "", .settlement = if (id.len == 0) m.settlement else null };
+        const occurrence = m.end > m.offset;
+        return .{ .role = m.role, .id = id, .offset = if (occurrence) m.offset else 0, .end = if (occurrence) m.end else 0, .segment = m.segment, .timestamp = if (id.len > 0 or occurrence) "" else m.timestamp, .text = if (id.len == 0 and !occurrence) m.text else "", .settlement = if (id.len == 0 and !occurrence) m.settlement else null };
     }
 
     pub fn cacheRows(self: History, a: std.mem.Allocator) ![]const u8 {
@@ -521,6 +578,48 @@ pub const History = struct {
         try result.rows.appendSlice(a, tail);
         try result.render(a);
         return result;
+    }
+
+    pub fn upsertNativeRows(self: *History, a: std.mem.Allocator, rows: []const []const u8, inode: u64) !void {
+        if (self.inode == 0 or inode == 0) return error.InvalidHistory;
+        if (inode != self.inode) return;
+        var arena = std.heap.ArenaAllocator.init(a);
+        defer arena.deinit();
+        const scratch = arena.allocator();
+        const Item = struct { line: []const u8, key: RowIdentity };
+        var merged: std.ArrayList(Item) = .empty;
+        var lines = std.mem.splitScalar(u8, self.rows.items, '\n');
+        while (lines.next()) |line| {
+            if (line.len != 0) try merged.append(scratch, .{ .line = line, .key = try rowIdentity(scratch, line) });
+        }
+        var changed = false;
+        for (rows) |row| {
+            const key = try rowIdentity(scratch, row);
+            if (key.end <= key.offset) return error.InvalidHistory;
+            if (key.end <= self.start) continue;
+            var index: usize = 0;
+            while (index < merged.items.len) : (index += 1) {
+                const old = merged.items[index].key;
+                if (RowIdentity.Context.eql(.{}, old, key)) {
+                    if (!std.mem.eql(u8, merged.items[index].line, row)) { merged.items[index].line = row; changed = true; }
+                    break;
+                }
+                if (old.end > old.offset and (old.offset > key.offset or (old.offset == key.offset and old.segment > key.segment))) {
+                    try merged.insert(scratch, index, .{ .line = row, .key = key });
+                    changed = true;
+                    break;
+                }
+            }
+            if (index == merged.items.len) { try merged.append(scratch, .{ .line = row, .key = key }); changed = true; }
+        }
+        if (!changed) return;
+        var next = self.cursor();
+        errdefer next.deinit(a);
+        for (merged.items) |item| { try next.rows.appendSlice(a, item.line); try next.rows.append(a, '\n'); }
+        try next.render(a);
+        next.revision +%= 1;
+        self.deinit(a);
+        self.* = next;
     }
 
     pub fn apply(self: *History, a: std.mem.Allocator, wire: []const u8, id: u32, key: transcript.Identity) !void {
@@ -1152,6 +1251,22 @@ test "ISSUE-349 enqueue content must match the whole pending message" {
     try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\t-\n{\"role\":\"assistant\",\"text\":\"\",\"timestamp\":\"2026-10-17T12:00:01Z\",\"settlement\":{\"operation\":\"enqueue\",\"content\":\"please check the build and tests\"}}\n@@MP_END@@\n", 1, key);
     const facts = try h.deliveryEvidence(a, .{ .prefix = &.{}, .text = std.unicode.utf8ToUtf16LeStringLiteral("please check the build"), .anchor = .{ .after_ms = echo.stampMs("2026-10-17T12:00:00Z") } });
     try std.testing.expect(!facts.enqueued);
+}
+
+test "IGSH-1266 rich delta precedes later native assistant" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(1, 0, false, "term-1", "");
+    var h: History = .{};
+    defer h.deinit(a);
+    try h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t100\t9\t0\tclaude\tterm-1\t1\t\ttail\t0\n{\"role\":\"user\",\"id\":\"u\",\"text\":\"hello\",\"offset\":0,\"end\":10}\n@@MP_END@@\n", 1, key);
+    const reply = "{\"role\":\"assistant\",\"id\":\"reply\",\"text\":\"done\",\"offset\":200,\"end\":220}";
+    try h.upsertNativeRows(a, &.{reply}, 9);
+    try h.apply(a, "@mp\t2\thistory\tok\tsid\t100\t150\t9\t0\tclaude\tterm-1\t2\t\tdelta\t0\n{\"role\":\"tool\",\"id\":\"call\",\"text\":\"running\",\"detail\":\"input\",\"offset\":100,\"end\":120}\n@@MP_END@@\n", 2, key);
+    const tool_at = std.mem.indexOf(u8, h.rows.items, "\"id\":\"call\"").?;
+    const reply_at = std.mem.indexOf(u8, h.rows.items, "\"id\":\"reply\"").?;
+    try std.testing.expect(tool_at < reply_at);
+    try h.apply(a, "@mp\t3\thistory\tok\tsid\t150\t250\t9\t0\tclaude\tterm-1\t3\t\tdelta\t0\n" ++ reply ++ "\n@@MP_END@@\n", 3, key);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, h.rows.items, "\"id\":\"reply\""));
 }
 
 test "ISSUE-263 tool row is one folded block and later result pairs across worker suffix and cache" {

@@ -3895,5 +3895,249 @@ class HeldQueueTest(unittest.TestCase):
             self.assertEqual(reader.prompt_box_text('=term-1:'), '')
 
 
+
+
+class IGSH_1266_SharedMessageHostTest(unittest.TestCase):
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.path = self.home / 'sid.jsonl'
+        self.path.write_text('')
+        self.base = dict(message_protocol=1, provider='claude', sid='sid', tmux='fixture')
+        self.sources = {name: base64.b64encode((ROOT / 'src/chat_connectors' / (name + '.py')).read_bytes()).decode()
+                        for name in ('claude', 'codex')}
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'CONNECTOR_SOURCES', self.sources, create=True).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=('sid', self.path)).start()
+        self.send = patch.object(reader, 'send_response_preserve_draft', return_value={'status': 'sent'}).start()
+
+    def request(self, op, **values):
+        return reader.message_store_request(dict(self.base, op='message_' + op, **values))
+
+    def submit(self, token='message_fixture_0001', text='synthetic prompt'):
+        return self.request('submit', message_id=token, text=text)['message']
+
+    def status(self, token='message_fixture_0001'):
+        return self.request('status', message_id=token)['message']
+
+    def append(self, event):
+        with self.path.open('a') as output:
+            output.write(json.dumps(event) + '\n')
+
+    def poll(self):
+        reader.message_poll('fixture', 'claude', 'sid')
+
+    def accept(self, text='synthetic prompt'):
+        self.append(dict(type='queue-operation', operation='enqueue', content=text, sessionId='sid'))
+        self.poll()
+
+    def test_submit_replay_has_one_handoff_and_global_id(self):
+        first = self.submit()
+        self.assertEqual(self.submit()['attempt'], first['attempt'])
+        self.request('dispatch')
+        self.submit()
+        self.request('dispatch')
+        self.assertEqual(self.send.call_count, 1)
+        with self.assertRaises(ValueError):
+            self.submit(text='different synthetic prompt')
+        self.assertEqual(self.status()['state'], 'sent')
+
+    def test_global_id_replay_across_tmux_locators(self):
+        first = self.submit()
+        self.request('dispatch')
+        sent = self.status()
+        other = dict(self.base, tmux='fixture-other')
+        replay = reader.message_store_request(dict(other, op='message_submit', message_id=first['id'], text=first['text']))['message']
+        reader.message_store_request(dict(other, op='message_dispatch'))
+        observed = reader.message_store_request(dict(other, op='message_status', message_id=first['id']))['message']
+        self.assertEqual((replay['attempt'], replay['state']), (sent['attempt'], sent['state']))
+        self.assertEqual((observed['attempt'], observed['state']), (sent['attempt'], sent['state']))
+        self.assertEqual(self.send.call_count, 1)
+
+    def test_legacy_watcher_tracks_shared_acceptance(self):
+        from contextlib import closing
+        token = 'legacy_fixture_0001'
+        request = dict(id=1, tmux='fixture', message_id=token, text='synthetic prompt', queued_at=1)
+        self.assertIn('\tsend\tok\t', reader.enqueue_response(request))
+        identity = reader.legacy_message_id(token)
+        self.assertEqual(self.status(identity)['state'], 'queued')
+        with closing(reader.held_queue_db('fixture')) as db:
+            self.assertEqual(db.execute('SELECT sid,state FROM messages WHERE key=?', (token,)).fetchone(), ('sid', 'submitted'))
+            with db:
+                db.execute("UPDATE messages SET state='delivered',receipt='old-worker' WHERE key=?", (token,))
+            self.assertEqual(db.execute('SELECT state FROM messages WHERE key=?', (token,)).fetchone(), ('submitted',))
+        self.request('dispatch')
+        self.assertEqual(self.status(identity)['state'], 'sent')
+        with closing(reader.held_queue_db('fixture')) as db:
+            self.assertEqual(db.execute('SELECT state FROM messages WHERE key=?', (token,)).fetchone(), ('submitted',))
+        reader.legacy_projection('fixture', 'sid', self.path, [token])
+        self.accept()
+        self.assertEqual(self.status(identity)['state'], 'accepted')
+        with closing(reader.held_queue_db('fixture')) as db:
+            self.assertEqual(db.execute('SELECT sid,state FROM messages WHERE key=?', (token,)).fetchone(), ('sid', 'delivered'))
+            with db:
+                db.execute("UPDATE messages SET state='cancelled',receipt='old-worker' WHERE key=?", (token,))
+            self.assertEqual(db.execute('SELECT state FROM messages WHERE key=?', (token,)).fetchone(), ('delivered',))
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM held_receipts WHERE key=?', (token,)).fetchone()[0], 0)
+        self.assertEqual(self.send.call_count, 1)
+
+    def test_legacy_replay_updates_original_watcher_across_locators(self):
+        from contextlib import closing
+        token = 'legacy_fixture_0002'
+        request = dict(id=1, tmux='fixture', message_id=token, text='synthetic prompt', queued_at=1)
+        self.assertIn('\tsend\tok\t', reader.enqueue_response(request))
+        identity = reader.legacy_message_id(token)
+        initial = self.status(identity)
+        self.request('dispatch')
+        other = dict(request, tmux='fixture-other')
+        self.assertIn('\tsend\tok\t', reader.enqueue_response(other))
+        self.assertEqual(self.status(identity)['attempt'], initial['attempt'])
+        self.accept()
+        self.assertEqual(self.status(identity)['state'], 'accepted')
+        self.assertIn('\tsend\tok\t', reader.enqueue_response(other))
+        self.request('snapshot')
+        self.request('dispatch')
+        for locator in ('fixture', 'fixture-other'):
+            with closing(reader.held_queue_db(locator)) as db:
+                self.assertEqual(db.execute('SELECT sid,state FROM messages WHERE key=?', (token,)).fetchone(), ('sid', 'delivered'))
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM held_receipts WHERE key=?', (token,)).fetchone()[0], 0)
+        with closing(reader.message_store_db('fixture')) as db:
+            self.assertEqual(db.execute('SELECT sid,id FROM legacy_bindings WHERE token=?', (token,)).fetchone(), ('sid', identity))
+            self.assertEqual(db.execute('SELECT id,attempt,state FROM shared_messages').fetchall(), [(identity, initial['attempt'], 'accepted')])
+        with patch.object(reader, 'resolve_tmux_agent', return_value=('other-sid', self.path)):
+            with self.assertRaises(ValueError):
+                reader.enqueue_response(dict(other, tmux='fixture-conflict'))
+        self.assertEqual(self.send.call_count, 1)
+
+    def test_busy_native_acceptance_does_not_expire(self):
+        self.submit()
+        self.request('dispatch')
+        self.accept()
+        with patch.object(reader.time, 'time', return_value=time.time() + 60):
+            self.assertEqual(self.status()['state'], 'accepted')
+        self.assertEqual(self.send.call_count, 1)
+
+    def test_late_native_acceptance_wins_after_timeout(self):
+        self.submit()
+        self.request('dispatch')
+        with patch.object(reader.time, 'time', return_value=time.time() + 60):
+            self.assertEqual(self.status()['state'], 'failed')
+        self.accept()
+        self.assertEqual(self.status()['state'], 'accepted')
+        self.assertEqual(self.send.call_count, 1)
+
+    def test_retry_replay_keeps_new_attempt_and_one_handoff(self):
+        first = self.submit()
+        self.request('dispatch')
+        with patch.object(reader.time, 'time', return_value=time.time() + 60):
+            self.assertEqual(self.status()['state'], 'failed')
+        retry = self.request('retry', message_id=first['id'], retry_id='retry_fixture_0001')['message']
+        replay = self.request('retry', message_id=first['id'], retry_id='retry_fixture_0001')['message']
+        self.assertNotEqual(retry['attempt'], first['attempt'])
+        self.assertEqual(replay['attempt'], retry['attempt'])
+        self.request('dispatch')
+        self.request('dispatch')
+        self.assertEqual(self.send.call_count, 2)
+        self.assertEqual(self.status()['state'], 'sent')
+
+    def test_reset_preserves_accepted_and_native_history(self):
+        self.submit()
+        self.request('dispatch')
+        self.accept()
+        self.append(dict(type='user', sessionId='sid', message=dict(role='user', content='synthetic prompt')))
+        self.poll()
+        self.submit('message_fixture_0002', 'pending prompt')
+        before = self.path.read_text()
+        reset = self.request('reset', reset_id='reset_fixture_0001')
+        self.assertEqual(self.request('reset', reset_id='reset_fixture_0001')['epoch'], reset['epoch'])
+        self.assertIn(self.status()['state'], ('accepted', 'started'))
+        self.assertEqual(self.status('message_fixture_0002')['state'], 'cancelled')
+        self.assertEqual(self.path.read_text(), before)
+        self.assertTrue(any('native_message' in item for item in self.request('snapshot')['items']))
+        self.request('dispatch')
+        self.assertEqual(self.send.call_count, 1)
+
+    def test_old_poll_callback_cannot_resurrect_reset_message(self):
+        self.submit()
+        self.request('dispatch')
+        self.append(dict(type='queue-operation', operation='enqueue', content='synthetic prompt', sessionId='sid'))
+        original = reader.load_line
+        def reset_during_poll(line):
+            result = original(line)
+            self.request('reset', reset_id='reset_fixture_0001')
+            return result
+        with patch.object(reader, 'load_line', side_effect=reset_during_poll):
+            reader.message_poll_locked('fixture', 'claude', 'sid')
+        self.assertEqual(self.status()['state'], 'cancelled')
+        self.request('dispatch')
+        self.assertEqual(self.send.call_count, 1)
+
+    def test_snapshot_pages_are_frozen_and_events_catch_up(self):
+        for index in range(130):
+            self.submit('message_fixture_%04d' % index, 'prompt %d' % index)
+        page = self.request('snapshot')
+        self.assertIsNotNone(page['next_cursor'])
+        self.submit('message_fixture_late', 'late prompt')
+        tail = self.request('snapshot', snapshot_id=page['snapshot_id'], cursor=page['next_cursor'])
+        self.assertEqual(page['seq'], tail['seq'])
+        ids = [item['message']['id'] for item in page['items'] + tail['items'] if 'message' in item]
+        self.assertEqual(len(ids), 130)
+        self.assertNotIn('message_fixture_late', ids)
+        events = self.request('events', after=page['seq'])['events']
+        self.assertTrue(any(event['event'].get('id') == 'message_fixture_late' for event in events))
+
+    def test_duplicate_worker_returns_without_blocking(self):
+        import fcntl
+        self.submit()
+        with patch.object(fcntl, 'flock', side_effect=BlockingIOError) as lock, \
+                patch.object(reader, 'message_poll') as poll:
+            reader.message_worker('fixture', 'claude', 'sid')
+        self.assertEqual(lock.call_args.args[1], fcntl.LOCK_EX | fcntl.LOCK_NB)
+        poll.assert_not_called()
+        self.assertEqual(self.status()['state'], 'queued')
+        self.assertEqual(self.send.call_count, 0)
+
+    def test_native_history_continues_after_started(self):
+        self.submit()
+        self.request('dispatch')
+        self.accept()
+        self.append(dict(type='user', sessionId='sid', message=dict(role='user', content='synthetic prompt')))
+        self.poll()
+        self.assertEqual(self.status()['state'], 'started')
+        snapshot = self.request('snapshot')
+        self.append(dict(type='assistant', sessionId='sid', message=dict(role='assistant', content=[dict(type='text', text='synthetic reply')])))
+        self.poll()
+        events = self.request('events', after=snapshot['seq'])['events']
+        self.assertTrue(any(event['event'].get('native_message', {}).get('text') == 'synthetic reply' for event in events))
+        self.assertEqual(self.send.call_count, 1)
+
+
+class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
+    def test_preserve_draft_handoff_boundaries(self):
+        request = dict(tmux='fixture', sid='sid', text='synthetic prompt')
+        for draft, fail, expected in (('unfinished synthetic draft', False, 'not_sent'),
+                                      ('', False, 'sent'), ('', True, 'uncertain')):
+            with self.subTest(draft=draft, fail=fail):
+                def run(command, **kwargs):
+                    if fail and 'paste-buffer' in command:
+                        raise subprocess.TimeoutExpired(command, 5)
+                    return types.SimpleNamespace(returncode=0, stdout='')
+                with patch.object(reader, 'resolve_tmux_agent', return_value=('sid', '/synthetic/sid.jsonl')), \
+                        patch.object(reader, 'box_draft', return_value=draft), \
+                        patch.object(reader.subprocess, 'run', side_effect=run) as calls:
+                    result = reader.send_response_preserve_draft(request)
+                self.assertEqual(result['status'], expected)
+                commands = [call.args[0] for call in calls.call_args_list]
+                handoffs = [command for command in commands if 'paste-buffer' in command]
+                self.assertEqual(len(handoffs), 0 if draft else 1)
+                self.assertEqual(sum(command.count('Enter') for command in commands), 0 if draft else 1)
+                self.assertFalse(any('C-u' in command or 'C-k' in command or '-l' in command for command in commands))
+                self.assertFalse(any('send-keys' in command and 'paste-buffer' not in command for command in commands))
+                self.assertFalse(any('delete-buffer' in command and 'send-keys' in command for command in commands))
+
+
 if __name__ == '__main__':
     unittest.main()

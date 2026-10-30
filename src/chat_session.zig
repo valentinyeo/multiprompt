@@ -723,12 +723,27 @@ fn chatHistoryChannelStart(host: u8, ch: *ChatHistoryChannel) bool {
     _ = CloseHandle(pi.hThread);
     ch.process = pi.hProcess;
     if (app_state.g_tunnel_job == null or AssignProcessToJobObject(app_state.g_tunnel_job, ch.process) == 0) return false;
-    const reader = @embedFile("chat_history_reader.py");
-    var encoded: [std.base64.standard.Encoder.calcSize(reader.len) + 1]u8 = undefined;
+    const a = std.heap.page_allocator;
+    const reader = chatReaderBundle(a) orelse return false;
+    defer a.free(reader);
+    const encoded = a.alloc(u8, std.base64.standard.Encoder.calcSize(reader.len) + 1) catch return false;
+    defer a.free(encoded);
     _ = std.base64.standard.Encoder.encode(encoded[0 .. encoded.len - 1], reader);
     encoded[encoded.len - 1] = '\n';
     var written: DWORD = 0;
-    return WriteFile(ch.input, &encoded, encoded.len, &written, null) != 0 and written == encoded.len;
+    return WriteFile(ch.input, encoded.ptr, @intCast(encoded.len), &written, null) != 0 and written == encoded.len;
+}
+
+fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
+    const claude = @embedFile("chat_connectors/claude.py");
+    const codex = @embedFile("chat_connectors/codex.py");
+    const claude64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(claude.len)) catch return null;
+    defer allocator.free(claude64);
+    const codex64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(codex.len)) catch return null;
+    defer allocator.free(codex64);
+    _ = std.base64.standard.Encoder.encode(claude64, claude);
+    _ = std.base64.standard.Encoder.encode(codex64, codex);
+    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\n{s}", .{ claude64, codex64, @embedFile("chat_history_reader.py") }) catch null;
 }
 
 pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
@@ -774,13 +789,22 @@ pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: u
         if (frame.items.len + n > 6 * wire_limit + 1024) return false;
         frame.appendSlice(a, chunk[0..n]) catch return false;
         if (std.mem.indexOfScalar(u8, chunk[0..n], '\n') != null) {
-            const Reply = struct { id: u32, wire: []const u8 };
-            const reply = std.json.parseFromSlice(Reply, a, frame.items, .{}) catch return false;
+            const Reply = struct { id: u32, wire: ?[]const u8 = null, message_protocol: ?u32 = null, result: ?std.json.Value = null };
+            const reply = std.json.parseFromSlice(Reply, a, frame.items, .{ .ignore_unknown_fields = true }) catch return false;
             defer reply.deinit();
-            if (reply.value.id != id or reply.value.wire.len > wire_limit or
-                !std.mem.endsWith(u8, reply.value.wire, "@@MP_END@@\n") or
-                std.mem.indexOf(u8, reply.value.wire, "\thistory\terror\t") != null) return false;
-            out.appendSlice(a, reply.value.wire) catch return false;
+            if (reply.value.id != id) return false;
+            if (reply.value.message_protocol == 1) {
+                const result = reply.value.result orelse return false;
+                const encoded = std.json.Stringify.valueAlloc(a, result, .{}) catch return false;
+                defer a.free(encoded);
+                if (encoded.len > wire_limit) return false;
+                out.appendSlice(a, encoded) catch return false;
+            } else {
+                const wire = reply.value.wire orelse return false;
+                if (wire.len > wire_limit or !std.mem.endsWith(u8, wire, "@@MP_END@@\n") or
+                    std.mem.indexOf(u8, wire, "\thistory\terror\t") != null) return false;
+                out.appendSlice(a, wire) catch return false;
+            }
             ch.retry_at = 0;
             ok = true;
             return true;
@@ -798,6 +822,7 @@ fn chatHistoryQuery(key: chat_transcript.Identity, id: u32, history: chat_histor
         .tmux = std.mem.sliceTo(&key.tmux, 0),
         .cwd = std.mem.sliceTo(&key.cwd, 0),
         .settlement = true,
+        .message_protocol = 1,
         .source_offsets = true,
         .live = true,
         .follow = true,
@@ -867,9 +892,10 @@ pub fn chatHistoryFetchOnce(host: u8, query: []const u8, wire_limit: usize, out:
     if (app_state.g_tunnel_job == null or AssignProcessToJobObject(app_state.g_tunnel_job, pi.hProcess) == 0) return false;
     _ = CloseHandle(child_output);
     child_output = null;
-    const reader = @embedFile("chat_history_reader.py");
+    const reader = chatReaderBundle(a) orelse return false;
+    defer a.free(reader);
     var written: DWORD = 0;
-    if (WriteFile(input, reader.ptr, reader.len, &written, null) == 0 or written != reader.len) return false;
+    if (WriteFile(input, reader.ptr, @intCast(reader.len), &written, null) == 0 or written != reader.len) return false;
     _ = CloseHandle(input);
     input = null;
     const deadline = GetTickCount64() + 60_000;
