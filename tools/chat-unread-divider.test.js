@@ -61,7 +61,7 @@ test('IGSH-814 leave, bottom and send lifecycle preserve anchors until live hist
   assert.match(model, /restore_read or \(!app_state.g_chat_read_open_pending and !previous_boundary.unknown and app_state.g_chat_read_boundary.unknown\)/);
   assert.match(model, /read <= previous\.\?/);
   assert.match(read('src/chat_composer.zig'), /chatReadMark\(false\)/);
-  assert.match(read('src/console.zig'), /if \(idx != prev\) _ = @import\("chat_session.zig"\).chatReadMark\(false\)/);
+  assert.match(read('src/console.zig'), /if \(idx != prev\) \{\s+const timing_started = switch_timing.start\(\);\s+defer switch_timing.record\(\.read_marker, timing_started\);\s+_ = @import\("chat_session.zig"\).chatReadMark\(false\);\s+\}\s+if \(idx != prev\) app_state.g_chat_read_visit_shell_id = 0;\s+app_state.active_shell = idx;/);
   assert.match(read('src/main.zig'), /chatReadMark\(false\);\s+logSessionAudit\("WM_CLOSE/);
   assert.match(read('src/chat_send.zig'), /g_chat_read_open_pending = false;\s+app_state.g_chat_read_hold = false;\s+app_state.g_chat_read_open_ready = true;\s+_ = @import\("chat_session.zig"\).chatReadMark\(true\)/);
   const render = read('src/chat_render.zig');
