@@ -1500,6 +1500,7 @@ def search_response(q, path, agent, sid):
 
 
 def response(q, source=None, as_owner=False, resolved=None):
+    q["_held_queue_progress"] = False
     if ISSUE_268_CHAT_FIND and "search" in q:
         query = q["search"]
         if not isinstance(query, str) or not 1 <= len(query) <= 200:
@@ -1512,7 +1513,7 @@ def response(q, source=None, as_owner=False, resolved=None):
     rid, tmux = q["id"], q["tmux"]
     if agent == "claude" and tmux:
         start_held_worker(tmux, sid, path, source)
-        drain_held_queue(tmux, sid, path)
+        q["_held_queue_progress"] = bool(drain_held_queue(tmux, sid, path))
     rows, budget = [], 0
     queue_stamps = {}
     with path.open("rb") as source:
@@ -1730,6 +1731,11 @@ def held_queue_db(tmux):
         if db.execute("PRAGMA user_version").fetchone()[0] < 1:
             db.execute("UPDATE messages SET scan=origin WHERE state IN ('queued','submitted')")
             db.execute("PRAGMA user_version=1")
+        if "recovery_scan" not in {row[1] for row in db.execute("PRAGMA table_info(messages)")}:
+            db.execute("ALTER TABLE messages ADD COLUMN recovery_scan INTEGER")
+        db.execute("UPDATE messages SET recovery_scan=origin WHERE recovery_scan IS NULL")
+        if db.execute("PRAGMA user_version").fetchone()[0] < 2:
+            db.execute("PRAGMA user_version=2")
         db.execute("CREATE TABLE IF NOT EXISTS held_receipts (sid TEXT NOT NULL, inode INTEGER NOT NULL, offset INTEGER NOT NULL, key TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(sid,inode,offset))")
     return db
 
@@ -1795,7 +1801,10 @@ def held_queue_worker(tmux, sid, transcript):
                     current = resolve_tmux_agent("claude", tmux, require_bound=True)
                     if current is None or current[0] != sid or Path(current[1]) != Path(transcript):
                         return
-                    drain_held_queue(tmux, sid, transcript)
+                    progressing = drain_held_queue(tmux, sid, transcript)
+                    if progressing:
+                        time.sleep(0.01)
+                        continue
                     with closing(held_queue_db(tmux)) as db:
                         pending = db.execute("SELECT 1 FROM messages WHERE sid=? AND state IN ('queued','submitted') LIMIT 1", (sid,)).fetchone()
                     if not pending:
@@ -1896,11 +1905,13 @@ def drain_held_queue(tmux, sid, transcript):
         with transcript.open("rb") as source, db:
             db.execute("BEGIN IMMEDIATE")
             info = os.fstat(source.fileno())
-            pending = db.execute("SELECT key,text,scan,origin,source_inode,state,created FROM messages WHERE sid=? AND state IN ('submitted','queued') ORDER BY CASE state WHEN 'submitted' THEN 0 ELSE 1 END,created", (sid,)).fetchall()
+            db.execute("UPDATE messages SET recovery_scan=origin WHERE recovery_scan IS NULL")
+            pending = db.execute("SELECT key,text,recovery_scan,origin,source_inode,state,created FROM messages WHERE sid=? AND state IN ('submitted','queued') ORDER BY CASE state WHEN 'submitted' THEN 0 ELSE 1 END,created", (sid,)).fetchall()
             if any(inode != info.st_ino or origin > info.st_size or scan > info.st_size for _, _, scan, origin, inode, _, _ in pending):
                 return
             deferred = []
             unfinished = False
+            progressing = False
             delivered = db.execute("SELECT text,created,source_inode,origin FROM messages WHERE sid=? AND state='delivered'", (sid,)).fetchall()
             for key, text, scanned, origin, inode, state, created in pending:
                 claim = db.execute("SELECT offset,digest FROM held_receipts WHERE key=? AND sid=? AND inode=? AND offset>=? ORDER BY offset LIMIT 1", (key, sid, inode, origin)).fetchone()
@@ -1918,7 +1929,7 @@ def drain_held_queue(tmux, sid, transcript):
                         deferred.append((offset + len(raw), event.get("timestamp", ""), key))
                     else:
                         delivered.append((text, created, inode, origin))
-                        db.execute("UPDATE messages SET scan=?,state='delivered',receipt=? WHERE key=? AND state='queued'", (offset + len(raw), event.get("timestamp", ""), key))
+                        db.execute("UPDATE messages SET scan=?1,recovery_scan=?1,state='delivered',receipt=?2 WHERE key=?3 AND state='queued'", (offset + len(raw), event.get("timestamp", ""), key))
                     continue
                 scanned = max(scanned, origin)
                 source.seek(scanned)
@@ -1951,15 +1962,16 @@ def drain_held_queue(tmux, sid, transcript):
                     deferred.append((consumed, receipt, key))
                 elif receipt is not None:
                     delivered.append((text, created, inode, origin))
-                    db.execute("UPDATE messages SET scan=?,state='delivered',receipt=? WHERE key=? AND state='queued'", (consumed, receipt, key))
+                    db.execute("UPDATE messages SET scan=?1,recovery_scan=?1,state='delivered',receipt=?2 WHERE key=?3 AND state='queued'", (consumed, receipt, key))
                 else:
-                    db.execute("UPDATE messages SET scan=? WHERE key=? AND state=?", (consumed, key, state))
+                    progressing |= consumed > scanned
+                    db.execute("UPDATE messages SET scan=?1,recovery_scan=?1 WHERE key=?2 AND state=?3 AND (scan!=?1 OR recovery_scan!=?1)", (consumed, key, state))
                     if consumed < info.st_size:
                         unfinished = True
             if unfinished:
-                return
+                return progressing
             for consumed, receipt, key in deferred:
-                db.execute("UPDATE messages SET scan=?,state='delivered',receipt=? WHERE key=? AND state='submitted'", (consumed, receipt, key))
+                db.execute("UPDATE messages SET scan=?1,recovery_scan=?1,state='delivered',receipt=?2 WHERE key=?3 AND state='submitted'", (consumed, receipt, key))
             if db.execute("SELECT 1 FROM messages WHERE sid=? AND state='submitted' LIMIT 1", (sid,)).fetchone():
                 return
             if not db.execute("SELECT 1 FROM messages WHERE sid=? AND state='queued' LIMIT 1", (sid,)).fetchone():
@@ -1978,9 +1990,9 @@ def drain_held_queue(tmux, sid, transcript):
                 return
             key, text, inode = pending
             info = transcript.stat()
-            if info.st_ino != inode or db.execute("SELECT 1 FROM messages WHERE sid=? AND state='queued' AND (source_inode!=? OR scan<?) LIMIT 1", (sid, info.st_ino, info.st_size)).fetchone():
+            if info.st_ino != inode or db.execute("SELECT 1 FROM messages WHERE sid=? AND state='queued' AND (source_inode!=? OR recovery_scan IS NULL OR recovery_scan<?) LIMIT 1", (sid, info.st_ino, info.st_size)).fetchone():
                 return
-            db.execute("UPDATE messages SET state='submitted',scan=? WHERE key=? AND state='queued'", (info.st_size, key))
+            db.execute("UPDATE messages SET state='submitted',scan=?1,recovery_scan=?1 WHERE key=?2 AND state='queued'", (info.st_size, key))
         try:
             result = send_response(dict(id=0, tmux=tmux, text=text))
             failure = "Terminal handoff failed; receipt not confirmed" if "\tsend\terror\t" in result else ""
@@ -2367,7 +2379,9 @@ def watch(source, as_owner=False):
             q.update(cached_sid=fields[4], offset=int(fields[6]), inode=int(fields[7]),
                      mtime=int(fields[11]), probe=fields[12], start=int(fields[14]), before=0)
             if fields[8] != "1":
-                break
+                if not q["_held_queue_progress"]:
+                    break
+                time.sleep(0.01)
 
 
 def serve(source):

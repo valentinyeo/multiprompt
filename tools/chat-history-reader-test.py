@@ -3112,7 +3112,7 @@ class HeldQueueTest(unittest.TestCase):
         record = json.dumps(dict(type='user', message=dict(role='user', content=text), timestamp='2026-10-28T20:00:00Z'))
         self.path.write_text(record)
         reader.drain_held_queue('term-1', 'other-sid', self.path)
-        reader.drain_held_queue('term-1', 'sid', self.path)
+        self.assertFalse(reader.drain_held_queue('term-1', 'sid', self.path))
         with reader.held_queue_db('term-1') as db:
             self.assertEqual(db.execute("SELECT sid,source_inode,scan,state FROM messages WHERE key='message-1'").fetchone(), ('sid', inode, 0, 'submitted'))
         self.send.assert_called_once()
@@ -3172,6 +3172,131 @@ class HeldQueueTest(unittest.TestCase):
         reader.drain_held_queue('term-1', 'sid', self.path)
         self.assertEqual(reader.held_queue_fields('term-1', 'sid')['sent'], ['target'])
 
+
+    def test_recovery_ignores_legacy_cursor_before_first_claim(self):
+        import sqlite3
+        self.ready.return_value = True
+        self.enqueue('head ', 1)
+        self.ready.return_value = False
+        self.path.write_text(json.dumps(dict(type='user', message=dict(role='user', content='head'), timestamp='receipt')) + '\n')
+        with sqlite3.connect(reader.held_queue_path('term-1')) as db:
+            db.execute('UPDATE messages SET recovery_scan=NULL, scan=?', (self.path.stat().st_size + 100,))
+            db.execute('PRAGMA user_version=1')
+        reader.drain_held_queue('term-1', 'sid', self.path)
+        with reader.held_queue_db('term-1') as db:
+            self.assertEqual(db.execute("SELECT state,scan,recovery_scan FROM messages WHERE key='message-1'").fetchone(),
+                             ('delivered', self.path.stat().st_size, self.path.stat().st_size))
+        self.send.assert_called_once()
+
+    def test_recovery_ignores_legacy_cursor_between_slices(self):
+        self.ready.return_value = True
+        self.enqueue('head ', 1)
+        self.ready.return_value = False
+        padding = (json.dumps(dict(type='system', message='padding')) + '\n') * 12
+        self.path.write_text(padding + json.dumps(dict(type='user', message=dict(role='user', content='head'), timestamp='receipt')) + '\n')
+        with patch.object(reader, 'TAIL_BYTES', 128):
+            for index in range(20):
+                with reader.held_queue_db('term-1') as db:
+                    db.execute('UPDATE messages SET scan=? WHERE state IN ("queued", "submitted")', (self.path.stat().st_size + 100,))
+                progressing = reader.drain_held_queue('term-1', 'sid', self.path)
+                if index == 0:
+                    self.assertTrue(progressing)
+        with reader.held_queue_db('term-1') as db:
+            self.assertEqual(db.execute("SELECT state FROM messages WHERE key='message-1'").fetchone(), ('delivered',))
+        self.send.assert_called_once()
+
+    def test_legacy_insert_and_newer_schema_version(self):
+        import sqlite3
+        self.enqueue('first', 1)
+        with sqlite3.connect(reader.held_queue_path('term-1')) as db:
+            db.execute('PRAGMA user_version=42')
+            db.execute("INSERT INTO messages(key,sid,text,queued_at,state,scan,origin,source_inode,created) VALUES (?,?,?,?,?,?,?,?,?)",
+                       ('legacy', 'sid', 'second', 2, 'queued', 999, 0, self.path.stat().st_ino, 2))
+        with reader.held_queue_db('term-1') as db:
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (42,))
+            self.assertEqual(db.execute("SELECT scan,recovery_scan FROM messages WHERE key='legacy'").fetchone(), (999, 0))
+
+    def test_consumer_status_wire_and_foreground_recovery_with_worker_lock(self):
+        import fcntl
+        import hashlib
+        self.ready.return_value = True
+        self.enqueue('accepted ', 1)
+        self.ready.return_value = False
+        self.enqueue('waiting', 2)
+        self.path.write_text(json.dumps(dict(type='user', message=dict(role='user', content='accepted'), timestamp='receipt')) + '\n')
+        lock_path = reader.held_queue_path('term-1').with_suffix('.' + hashlib.sha256(b'sid').hexdigest() + '.worker')
+        query = dict(id=7, tmux='term-1', offset=0, cached_sid='', inode=0,
+                     held=True, delivery_ids=['message-1', 'message-2', 'unknown'])
+        with lock_path.open('a') as lock, patch.object(reader, 'resolve_response_path', return_value=('claude', 'sid', self.path, None)):
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            wire = reader.response(query, source='pass')
+        lines = wire.splitlines()
+        self.assertEqual(len(lines[0].split('\t')), 15)
+        status = next(json.loads(line) for line in lines[1:-1] if json.loads(line).get('role') == 'status')
+        self.assertEqual(status['deliveries'], [dict(id='message-1', state='delivered'), dict(id='message-2', state='queued')])
+        self.assertEqual(status['held'], [dict(id='message-2', text='waiting', queued_at=2, state='queued', offset=0, inode=self.path.stat().st_ino, sid='sid')])
+        self.send.assert_called_once()
+        with patch.object(reader, 'resolve_response_path', return_value=('claude', 'other-sid', self.path, None)):
+            other = reader.response(query)
+        status = next(json.loads(line) for line in other.splitlines()[1:-1] if json.loads(line).get('role') == 'status')
+        self.assertEqual(status['deliveries'], [])
+        self.assertEqual(status['held'], [])
+
+    def test_watch_finishes_recovery_at_cached_eof_with_one_event(self):
+        import fcntl
+        import hashlib
+        self.enqueue('head', 1)
+        self.enqueue('accepted', 2)
+        with reader.held_queue_db('term-1') as db:
+            db.execute("UPDATE messages SET state='submitted' WHERE key='message-1'")
+        padding = (json.dumps(dict(type='system', message='padding')) + '\n') * 12
+        self.path.write_text(
+            json.dumps(dict(type='user', message=dict(role='user', content='head'), timestamp='head')) + '\n'
+            + padding
+            + json.dumps(dict(type='user', message=dict(role='user', content='accepted'), timestamp='accepted')) + '\n')
+        info = self.path.stat()
+        resolved = ('claude', 'sid', self.path, None)
+        query = dict(id=7, tmux='term-1', cwd='', offset=info.st_size, cached_sid='sid', inode=info.st_ino,
+                     held=True, delivery_ids=['message-1', 'message-2'], _held_queue_progress=True)
+        request = io.TextIOWrapper(io.BytesIO((json.dumps(query) + '\n').encode()))
+        output = io.StringIO()
+        lock_path = reader.held_queue_path('term-1').with_suffix('.' + hashlib.sha256(b'sid').hexdigest() + '.worker')
+        events = []
+
+        def one_event(*args):
+            events.append('initial')
+            yield resolved
+
+        real_response = reader.response
+        calls = []
+
+        def bounded_response(*args):
+            calls.append(1)
+            self.assertLess(len(calls), 40, 'recovery failed to stop')
+            return real_response(*args)
+
+        with lock_path.open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with patch.object(sys, 'stdin', request), patch.object(sys, 'stdout', output), \
+                    patch.object(reader, 'conversation_owner', return_value=None), \
+                    patch.object(reader, 'resolve_response_path', return_value=resolved), \
+                    patch.object(reader, 'watch_changes', side_effect=one_event), \
+                    patch.object(reader, 'response', side_effect=bounded_response), \
+                    patch.object(reader, 'TAIL_BYTES', 128), patch.object(reader.time, 'sleep'), \
+                    patch.object(reader.subprocess, 'Popen', side_effect=AssertionError('worker started')):
+                reader.watch('source', as_owner=True)
+        frames = [json.loads(line)['wire'] for line in output.getvalue().splitlines()]
+        self.assertEqual(events, ['initial'])
+        self.assertGreater(len(calls), 2)
+        self.assertTrue(all(wire.splitlines()[0].split('\t')[8] == '0' for wire in frames))
+        status = next(json.loads(line) for line in frames[-1].splitlines()[1:-1] if json.loads(line).get('role') == 'status')
+        self.assertEqual(status['deliveries'], [dict(id='message-1', state='delivered'), dict(id='message-2', state='delivered')])
+        self.assertEqual(status['held'], [])
+        with reader.held_queue_db('term-1') as db:
+            self.assertEqual(db.execute('SELECT key,state FROM messages ORDER BY created').fetchall(),
+                             [('message-1', 'delivered'), ('message-2', 'delivered')])
+            self.assertEqual(db.execute('SELECT count(*) FROM held_receipts').fetchone(), (2,))
+        self.send.assert_not_called()
 
     def test_deferred_receipt_survives_old_worker_cursor_overwrite(self):
         self.ready.return_value = True
