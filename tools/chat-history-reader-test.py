@@ -3482,16 +3482,31 @@ class HeldQueueTest(unittest.TestCase):
                 self.enqueue('target', 1)
             except BaseException as error:
                 errors.append(error)
+        cancel_started = threading.Event()
+        cancel_results = []
+        def cancel():
+            try:
+                cancel_started.set()
+                cancel_results.append(self.cancel('target', 1))
+            except BaseException as error:
+                errors.append(error)
         worker = threading.Thread(target=enqueue)
+        canceller = threading.Thread(target=cancel)
         worker.start()
         try:
             self.assertTrue(entered.wait(5))
-            self.assertIn('\tcancel_queued\terror\tnot_queued\t', self.cancel('target', 1))
+            canceller.start()
+            self.assertTrue(cancel_started.wait(5))
         finally:
             release.set()
             worker.join(5)
+            if canceller.ident is not None:
+                canceller.join(5)
         self.assertFalse(worker.is_alive())
+        self.assertFalse(canceller.is_alive())
         self.assertEqual(errors, [])
+        self.assertEqual(len(cancel_results), 1)
+        self.assertIn('\tcancel_queued\terror\tnot_queued\t', cancel_results[0])
         self.send.assert_called_once()
 
 
@@ -3700,8 +3715,11 @@ class HeldQueueTest(unittest.TestCase):
         self.ready.return_value = True
 
         def verify_before_send(request):
-            with reader.held_queue_db('term-1') as db:
+            db = sqlite3.connect(reader.held_queue_path('term-1').as_uri() + '?mode=ro', uri=True, timeout=0)
+            try:
                 states = dict(db.execute('SELECT key,state FROM messages'))
+            finally:
+                db.close()
             self.assertEqual(states['message-1'], 'delivered')
             self.assertEqual(states['message-4'], 'delivered')
             self.assertEqual(states['message-3'], 'queued')
