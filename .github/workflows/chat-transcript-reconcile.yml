@@ -23,6 +23,8 @@ jobs:
         run: node --test tools/verify-chat-delivery.test.js
       - name: Check Windows notification reader contracts
         run: node --test --test-name-pattern='^(Windows notification stand-in keeps the supplied reader push algorithm and emits appended data|native runner file descriptors share one Windows notification root with their fixture state)$' tools/verify-chat-delivery.test.js
+      - name: Check recovery proof oracle
+        run: node --test --test-name-pattern='^recovery oracle' tools/chat-resync.test.js
       - name: Check remote sync proof oracle
         run: node --test tools/chat-remote-sync-proof.test.mjs tools/remote-switch-proof.test.mjs tools/chat-missing-note-proof.test.mjs
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065

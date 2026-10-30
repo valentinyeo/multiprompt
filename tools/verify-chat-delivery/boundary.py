@@ -396,6 +396,79 @@ def fake_seed_many(rounds):
     return 0
 
 
+RECOVERY_TEXTS = {
+    "recovery-head": "RECOVERY_HEAD_".ljust(200, "h") + " ",
+    "pending-one": "PENDING_ONE",
+    "pending-two": "PENDING_TWO",
+    "accepted-fourth": "ACCEPTED_FOURTH",
+}
+
+
+RECOVERY_IDS = dict(zip(RECOVERY_TEXTS, ("desktop-101", "desktop-102", "desktop-103", "desktop-104")))
+
+
+def recovery_queue():
+    import hashlib
+    return Path(os.environ["HOME"]) / ".local/state/multiprompt/held-messages" / hashlib.sha256(b"verify-agent").hexdigest() / "queue.sqlite3"
+
+
+def recovery_snapshot():
+    import sqlite3
+    value = state()
+    path = Path(value["transcript"])
+    info = path.stat()
+    with sqlite3.connect(recovery_queue().resolve().as_uri() + "?mode=ro", uri=True, timeout=30) as db:
+        db.row_factory = sqlite3.Row
+        rows = [dict(row) for row in db.execute("SELECT key,sid,text,state,scan,origin,source_inode,created,recovery_scan FROM messages ORDER BY created")]
+        claims = [dict(row) for row in db.execute("SELECT sid,inode,offset,key,digest FROM held_receipts ORDER BY offset")]
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+    return dict(sid=value["sid"], inode=info.st_ino, source_bytes=info.st_size,
+                schema_version=version, rows=rows, claims=claims, screen=fake_screen(fake_read(), False))
+
+
+def recovery_fixture(op):
+    import sqlite3
+    value = state()
+    path = Path(value["transcript"])
+    queue = recovery_queue()
+    if op == "recovery-init":
+        queue.parent.mkdir(parents=True, exist_ok=True)
+        if queue.exists():
+            raise ValueError("recovery queue must be fresh")
+        info = path.stat()
+        with sqlite3.connect(queue) as db:
+            db.execute("CREATE TABLE messages (key TEXT PRIMARY KEY, sid TEXT NOT NULL, text TEXT NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL, scan INTEGER NOT NULL DEFAULT 0, origin INTEGER NOT NULL, source_inode INTEGER NOT NULL, receipt TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, recovery_scan INTEGER)")
+            db.execute("CREATE TABLE held_receipts (sid TEXT NOT NULL, inode INTEGER NOT NULL, offset INTEGER NOT NULL, key TEXT NOT NULL, digest TEXT NOT NULL, PRIMARY KEY(sid,inode,offset))")
+            for index, (key, text) in enumerate(RECOVERY_TEXTS.items(), 1):
+                db.execute("INSERT INTO messages(key,sid,text,queued_at,state,scan,origin,source_inode,created,recovery_scan) VALUES (?,?,?,?,?,?,?,?,?,NULL)",
+                           (RECOVERY_IDS[key], value["sid"], text, time.time_ns() // 1000000 + index, "submitted" if index == 1 else "queued", info.st_size, info.st_size, info.st_ino, index))
+            db.execute("PRAGMA user_version=1")
+        fake_run("shell", op, [], lambda claude: claude.__setitem__("box", "unsent terminal draft") is None)
+        return 0
+    if op == "recovery-accept":
+        with sqlite3.connect(queue, timeout=30) as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("UPDATE messages SET recovery_scan=NULL")
+            db.execute("PRAGMA user_version=1")
+            rows = db.execute("SELECT key,sid,text,state,scan,origin,source_inode,created,recovery_scan FROM messages ORDER BY created").fetchall()
+            origin = path.stat().st_size
+            (ROOT / "recovery-source-before.jsonl").write_bytes(path.read_bytes())
+            fake_event("user", message=dict(role="user", content=RECOVERY_TEXTS["recovery-head"].rstrip(" ")))
+            with path.open("ab") as output:
+                padding = (json.dumps(dict(type="system", sessionId=value["sid"], message="padding" * 128)) + "\n").encode()
+                output.write(padding * (512 * 1024 // len(padding) + 2))
+            fake_event("user", message=dict(role="user", content=RECOVERY_TEXTS["accepted-fourth"]))
+            end = path.stat().st_size
+            (ROOT / "recovery-source-appended.jsonl").write_bytes(path.read_bytes())
+            db.execute("UPDATE messages SET scan=?", (end,))
+            record("recovery-event.jsonl", legacy_rows=rows, origin=origin, eof=end, inode=path.stat().st_ino, appended_rows=db.execute("SELECT key,sid,text,state,scan,origin,source_inode,created,recovery_scan FROM messages ORDER BY created").fetchall())
+        return 0
+    if op == "recovery-snapshot":
+        print(json.dumps(recovery_snapshot()))
+        return 0
+    raise ValueError("unknown recovery fixture operation")
+
+
 def shell():
     op = ARGS[0] if ARGS else ""
     if op == "history-refresh":
@@ -437,6 +510,8 @@ def shell():
         return 0
     if op == "init":
         return fake_init()
+    if op in ("recovery-init", "recovery-accept", "recovery-snapshot"):
+        return recovery_fixture(op)
     if op == "resync-init":
         fake_event("assistant", message=dict(role="assistant", content=[dict(type="text", text="Before resync")]))
         result = fake_run("shell", op, ARGS, lambda claude: fake_submit(claude, "stale waiting message") is None)
@@ -908,6 +983,14 @@ def reader_namespace():
     source = base64.b64decode(sys.stdin.buffer.readline()).decode("utf-8")
     namespace = dict(__name__="verified_remote_reader")
     exec(compile(source, "<app-supplied-reader>", "exec"), namespace)
+    if state().get("name") == "resync-recovery":
+        import hashlib
+        full = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        inner = hashlib.sha256(namespace["READER_SOURCE"].encode("utf-8")).hexdigest()
+        generation = namespace.get("RUNTIME_GENERATION")
+        record("recovery-bootstrap.jsonl", full_sha256=full, inner_sha256=inner, generation=generation)
+        if (full, inner, generation) != ("27e681fab0bbebf4620f0ff47c66d1fcc4442152fb1c7046eac376726a2672d0", "458a0cb74a3500963f4a50e5ee01d25422f860b76ee4507a56f1aab13e0abaee", 3):
+            raise ValueError("unexpected published reader bootstrap")
     try:
         spec = importlib.util.spec_from_file_location("queue_trace", Path(__file__).with_name("queue_trace.py"))
         trace = importlib.util.module_from_spec(spec)

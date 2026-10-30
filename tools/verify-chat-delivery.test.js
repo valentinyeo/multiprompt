@@ -1115,7 +1115,7 @@ with tempfile.TemporaryDirectory() as temp:
         assert escapes
         captures.append(True)
         return 'Ready\n❯ typed draft\n' + '─' * 50 + '\n'
-    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,importlib=importlib,Path=Path,__file__=str(root / 'tools/verify-chat-delivery/boundary.py'),sys=sys,os=os,time=time,capture_screen=capture_screen)
+    scope = dict(ROOT=state,ctypes=ctypes,wintypes=ctypes.wintypes,importlib=importlib,Path=Path,__file__=str(root / 'tools/verify-chat-delivery/boundary.py'),sys=sys,os=os,time=time,capture_screen=capture_screen,state=lambda: {"name": "notification-fixture"})
     exec(compile(ast.Module(body=functions,type_ignores=[]), '<boundary-watch>', 'exec'), scope)
     with patch.dict(os.environ, HOME=str(home), USERPROFILE=str(home)), patch.dict(sys.modules, pwd=None), patch.object(sys,'stdin',stream), patch.object(sys,'stdout',output), patch.object(ctypes,'WinDLL',return_value=kernel,create=True), patch.object(subprocess,'run',side_effect=AssertionError('stream spawned a capture process')):
         try: scope['watch_reader']()

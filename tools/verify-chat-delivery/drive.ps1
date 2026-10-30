@@ -19,6 +19,8 @@ Add-Type -Path "$PSScriptRoot/desktop.cs"
 Add-Type -Path "$PSScriptRoot/job.cs"
 if ($Feature -eq 'chat-full-history') { Add-Type -Path "$PSScriptRoot/chat-switch-observer.cs" -ReferencedAssemblies System.Drawing }
 [void][ChatDeliveryDesktop]::SetThreadDpiAwarenessContext([IntPtr](-4))
+$recoveryPair = $env:CHAT_RESYNC_PROOF -eq '1' -and $ExpectedVersion -eq '0.28.1042'
+if ($recoveryPair -and $ExpectedHash -ine '22cd593c3c4146860d140606b2104e86459de990b7447abfa7d891beeffb07b1') { throw 'Recovery proof requires published Desktop v0.28.1042 hash' }
 if ($env:CHAT_REPLY_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Reply proof requires chat-delivery' }
 if ($env:CHAT_SKILLS_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Fresh skills proof requires chat-delivery' }
 if ($env:CHAT_NOTES_PROOF -eq '1' -and $Feature -ne 'chat-delivery') { throw 'Session notes proof requires chat-delivery' }
@@ -48,7 +50,10 @@ if ($env:CHAT_MISSING_PROOF -eq '1') { $plans = @(@{name='missing-transcript'; m
 if ($env:CHAT_NOTES_PROOF -eq '1') { $plans = @(@{name='session-notes'; mode='idle'; text='runner note disclosure'}) }
 if ($env:CHAT_REACTIONS_PROOF -eq '1') { $plans = @(@{name='reactions'; mode='busy'; text='draft stays here'}) }
 if ($env:CHAT_REPLY_PROOF -eq '1') { $plans = @(@{name='reply-reference'; mode='idle'; text='compact reply navigation'}) }
-if ($env:CHAT_RESYNC_PROOF -eq '1') { $plans = @(@{name='resync'; mode='busy'; text='draft stays here'}) }
+if ($env:CHAT_RESYNC_PROOF -eq '1') {
+    $plans = @(@{name='resync'; mode='busy'; text='draft stays here'})
+    if ($recoveryPair) { $plans += @{name='resync-recovery'; mode='busy'; text='draft stays here'} }
+}
 if ($env:CHAT_HAX_PROOF -eq '1') { $plans = @(@{name='hax-reader'; mode='idle'; text='saved runner replies'}, @{name='hax-close'; mode='idle'; text='close stays closed'}) }
 $queueTexts = @{a='shell queued alpha'; b='chat queued beta'; a2='shell queued alpha edited'; shellDraft='shell draft gamma'; chatDraft='chat draft delta'; agentPaste="agent report line one`nagent report line two"; suggestion='Try asking about the next step'}
 if ($env:CHAT_CANCEL_PROOF -eq '1') { $plans = @(@{name='cancel-held'; mode='busy'; text='cancel keep one'}) }
@@ -64,6 +69,9 @@ $env:ZIGSHELL_DEBUG = '1'
 $env:IGSH_246 = '0'
 foreach ($file in @('agent-buffer.jsonl', 'invocations.jsonl', 'debug.log')) { [IO.File]::WriteAllText("$Evidence/$file", '') }
 function Save($Value, [string]$Path) { [IO.File]::WriteAllText($Path, ($Value | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false)) }
+if ($env:CHAT_RESYNC_PROOF -eq '1') {
+    Save @{recovery_required=$recoveryPair; cases=@($plans | ForEach-Object { $_.name }); app=@{version=$ExpectedVersion; sha256=$ExpectedHash}; harness=@{source=$env:GITHUB_SHA}} "$Evidence/resync-plan.json"
+}
 function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 60) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 100 } while ($timer.Elapsed.TotalSeconds -lt $Seconds)
@@ -511,7 +519,8 @@ foreach ($plan in $plans) {
     $job = $null
     $main = [IntPtr]::Zero
     $composer = [IntPtr]::Zero
-    $isResync = $plan.name -eq 'resync'
+    $isRecovery = $plan.name -eq 'resync-recovery'
+    $isResync = $plan.name -eq 'resync' -or $isRecovery
     $isReaction = $plan.name -eq 'reactions'
     $isAccepted = $plan.name -eq 'accepted-message'
     $isSwitch = $plan.name -eq 'remote-switch'
@@ -587,7 +596,11 @@ foreach ($plan in $plans) {
             [IO.File]::WriteAllText("$profile/home/.claude/skills/verify-yak/SKILL.md", "---`nname: verify-yak`ndescription: Cached selection fixture`n---`nFixture")
         }
         if ($hasTranscript) { Shell-Run @('init') }
-        if ($isResync) { Shell-Run @('resync-init') }
+        if ($isRecovery) { Shell-Run @('recovery-init') } elseif ($isResync) { Shell-Run @('resync-init') }
+        if ($isRecovery) {
+            & $env:MP_VERIFY_PYTHON "$PSScriptRoot/recovery-provenance.py" "$caseDir/canonical-corpus-sha256.txt" "$caseDir/provenance.json"
+            if ($LASTEXITCODE -ne 0) { throw 'Published application corpus verification failed' }
+        }
         if ($isReply) { Shell-Run @('reply-reference') }
         if ($isNotes) { Shell-Run @('session-notes') }
         if ($isLiveDelivery -and $env:CHAT_LONG_PROOF -eq '1') { Shell-Run @('history') }
@@ -606,6 +619,19 @@ foreach ($plan in $plans) {
             $expectedShells = 2
             $sent = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             Save @{version=2; queues=@(@{key='tmux:0:verify-background'; messages=@(@{t='Outstanding background delivery'; s=3; x=1; w=$sent})})} "$settings/chat-outbox.json"
+        }
+        if ($isRecovery) {
+            $sent = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            $mapping = @(
+                @{logical='recovery-head'; server='desktop-101'; qid=0x101; text=('RECOVERY_HEAD_'.PadRight(200, 'h') + ' ')}
+                @{logical='pending-one'; server='desktop-102'; qid=0x102; text='PENDING_ONE'}
+                @{logical='pending-two'; server='desktop-103'; qid=0x103; text='PENDING_TWO'}
+                @{logical='accepted-fourth'; server='desktop-104'; qid=0x104; text='ACCEPTED_FOURTH'}
+            )
+            $messages = @($mapping | ForEach-Object { @{t=$_.text; s=3; a=0; h=0; w=$sent; c=0; n=0; x=1; r=0; d=($sent + 600000); held=1; qid=$_.qid} })
+            Save @{version=2; queues=@(@{key='tmux:0:verify-agent'; messages=$messages})} "$settings/chat-outbox.json"
+            Copy-Item "$settings/chat-outbox.json" "$caseDir/outbox-seed.json"
+            Save $mapping "$caseDir/mapping.json"
         }
         Save $savedSession "$settings/session.json"
         if ($isRemote) {
@@ -630,7 +656,7 @@ foreach ($plan in $plans) {
         [void](Wait-For 'composer typing focus' { $f = [ChatDeliveryDesktop]::Focus($main); $f[0] -eq $main.ToInt64() -and $f[1] -eq $composer.ToInt64() })
         Doctor $true
         if ($isResync) {
-            . "$PSScriptRoot/resync.ps1"
+            if ($isRecovery) { . "$PSScriptRoot/resync-recovery.ps1" } else { . "$PSScriptRoot/resync.ps1" }
         } elseif ($isHax) {
             . "$PSScriptRoot/hax-sessions.ps1"
         } elseif ($env:CHAT_SKILLS_PROOF -eq '1') {

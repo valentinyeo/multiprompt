@@ -88,3 +88,50 @@ test "fresh source without stale disk, unchanged draft and outbox, guarded inval
   assert.throws(() => verifyObserved(value, [{ms: 15, argv: ['send-keys', 'Enter']}], rewrite, log), /no message transport/);
   assert.throws(() => verifyObserved(value, [], rewrite, ''), /source reload completed/);
 });
+
+test('recovery oracle rejects missing claims and duplicate input', async () => {
+  const { verifyRecovery } = await import('./chat-resync-proof.mjs');
+  const texts = ['RECOVERY_HEAD_'.padEnd(200, 'h') + ' ', 'PENDING_ONE', 'PENDING_TWO', 'ACCEPTED_FOURTH'];
+  const keys = ['desktop-101', 'desktop-102', 'desktop-103', 'desktop-104'];
+  const rows = keys.map((key, i) => ({key, sid:'sid', text:texts[i], state:i ? 'queued' : 'submitted', scan:100, origin:100, source_inode:7, created:i + 1, recovery_scan:100}));
+  const before = {sid:'sid', inode:7, source_bytes:100, schema_version:2, screen:'esc to interrupt unsent terminal draft', rows, claims:[]};
+  const event = {inode:7, origin:100, eof:600000,
+    legacy_rows:rows.map(r => [r.key,r.sid,r.text,r.state,r.scan,r.origin,r.source_inode,r.created,null]),
+    appended_rows:rows.map(r => [r.key,r.sid,r.text,r.state,600000,r.origin,r.source_inode,r.created,null])};
+  const after = structuredClone(before);
+  after.source_bytes = 600000;
+  after.rows[0].state = after.rows[3].state = 'delivered';
+  after.claims = ['desktop-101','desktop-104'].map((key, i) => ({key,sid:'sid',inode:7,offset:100+i,digest:'a'.repeat(64)}));
+  const observation = {error:null,headUnconfirmedBefore:true,renderedBefore:'',draftBefore:'draft stays here',draftAfter:'draft stays here',draftRepeat:'draft stays here',sendStart:1,sendEnd:10,renderedAfter:'RECOVERY_HEAD_'.padEnd(200, 'h') + ' ACCEPTED_FOURTH',renderedRepeat:'RECOVERY_HEAD_'.padEnd(200, 'h') + ' ACCEPTED_FOURTH',queueBefore:'queued:PENDING_ONE|queued:PENDING_TWO|queued:ACCEPTED_FOURTH',queueAfter:'queued:PENDING_ONE|queued:PENDING_TWO',queueRepeat:'queued:PENDING_ONE|queued:PENDING_TWO'};
+  const boots = [{full_sha256:'27e681fab0bbebf4620f0ff47c66d1fcc4442152fb1c7046eac376726a2672d0',inner_sha256:'458a0cb74a3500963f4a50e5ee01d25422f860b76ee4507a56f1aab13e0abaee',generation:3}];
+  const logical = ['recovery-head','pending-one','pending-two','accepted-fourth'];
+  const mapping = keys.map((server,i) => ({logical:logical[i],server,qid:0x101+i,text:texts[i]}));
+  const entries = mapping.map(row => ({t:row.text,s:3,x:1,held:1,w:100,d:600100,qid:row.qid}));
+  const box = messages => ({version:2,queues:[{key:'tmux:0:verify-agent',messages}]});
+  const clients = {before:box(entries),after:box(entries.slice(1,3)),repeat:box(entries.slice(1,3))};
+  assert.equal(verifyRecovery(before,event,after,structuredClone(after),observation,[],boots,mapping,clients), true);
+  assert.throws(() => verifyRecovery(before,event,after,after,{...observation,headUnconfirmedBefore:false},[],boots,mapping,clients), /pending desktop head/);
+  const broken = structuredClone(after); broken.claims.pop();
+  assert.throws(() => verifyRecovery(before,event,broken,broken,observation,[],boots,mapping,clients));
+  assert.throws(() => verifyRecovery(before,event,after,after,observation,[{ms:5}],boots,mapping,clients));
+  const wrong = structuredClone(event); wrong.appended_rows[3][8] = 100;
+  assert.throws(() => verifyRecovery(before,wrong,after,after,observation,[],boots,mapping,clients));
+  const missing = structuredClone(clients); missing.before.queues[0].messages.shift();
+  assert.throws(() => verifyRecovery(before,event,after,after,observation,[],boots,mapping,missing), /initial identities/);
+  const retained = structuredClone(clients); retained.after.queues[0].messages.push(entries[3]);
+  assert.throws(() => verifyRecovery(before,event,after,after,observation,[],boots,mapping,retained), /accepted echoes/);
+  const lost = structuredClone(clients); lost.repeat.queues[0].messages.pop();
+  assert.throws(() => verifyRecovery(before,event,after,after,observation,[],boots,mapping,lost), /pending must survive/);
+  const badMap = structuredClone(mapping); badMap[0].qid = 0x102;
+  assert.throws(() => verifyRecovery(before,event,after,after,observation,[],boots,badMap,clients), /identity mapping/);
+});
+
+
+test('recovery oracle enforces declared plan selection', async () => {
+  const { verifyRecoveryPlan } = await import('./chat-resync-proof.mjs');
+  const plan = {recovery_required:true,cases:['resync','resync-recovery'],app:{version:'0.28.1042',sha256:'hash'},harness:{source:'revision'}};
+  assert.equal(verifyRecoveryPlan(plan), true);
+  assert.equal(verifyRecoveryPlan({...plan,recovery_required:false,cases:['resync'],app:{...plan.app,version:'0.28.1043'}}), false);
+  assert.throws(() => verifyRecoveryPlan({...plan,cases:['resync']}), /case mismatch/);
+  assert.throws(() => verifyRecoveryPlan({...plan,recovery_required:false}), /case mismatch/);
+});
