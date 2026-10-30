@@ -192,7 +192,9 @@ class SendTest(unittest.TestCase):
                 run.assert_not_called()
 
     def test_serve_invalid_name_and_error_envelope(self):
-        result = subprocess.run([sys.executable, str(ROOT / "src/chat_history_reader.py"), "--serve"], input=json.dumps(dict(op="send", id=91, tmux="a;b", text="please check the build")) + "\n", text=True, capture_output=True, check=True, timeout=5)
+        with tempfile.TemporaryDirectory() as home:
+            result = subprocess.run([sys.executable, str(ROOT / "src/chat_history_reader.py"), "--serve"], input=json.dumps(dict(op="send", id=91, tmux="a;b", text="please check the build")) + "\n", text=True, capture_output=True, check=True, timeout=5, env=dict(os.environ, HOME=home))
+            self.assertTrue((Path(home) / ".multiprompt-runtime/active.json").exists())
         self.assertEqual(json.loads(result.stdout), dict(id=91, wire="@mp\t91\tsend\terror\tinvalid_tmux_name\t0\n@@MP_END@@\n"))
 
 
