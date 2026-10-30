@@ -7472,8 +7472,9 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
             try std.testing.expect(layout.composer.left > layout.composer_card.left);
             const row_y = @divTrunc(layout.send_btn.top + layout.send_btn.bottom, 2);
             const gap_x = @divTrunc(layout.attach_btn.right + layout.composer_card.left, 2);
+            try std.testing.expect(gap_x >= layout.attach_btn.right and gap_x < layout.composer_card.left);
             const gap_pixel = scrollProofColor(frame_pixels[@intCast(row_y * frame_w + gap_x)]);
-            if (gap_pixel != bg) {
+            if (gap_pixel != gap_transcript) {
                 std.debug.print("IGSH-933 gap x={d} y={d} bg={x} underlay={x} transcript={x} composite={x} scroll={d}\n", .{ gap_x, row_y, bg, gap_underlay, gap_transcript, gap_pixel, app_state.g_chat_scroll_y });
                 std.debug.print("IGSH-933 window={d},{d},{d},{d} attach={d},{d},{d},{d} card={d},{d},{d},{d}\n", .{ window.left, window.top, window.right, window.bottom, layout.attach_btn.left, layout.attach_btn.top, layout.attach_btn.right, layout.attach_btn.bottom, card.left, card.top, card.right, card.bottom });
                 for (app_state.g_chat_layout_rects[0..block_count], 0..) |rc, i| {
@@ -7488,7 +7489,28 @@ test "IGSH-933 messages scroll behind the floating title pill and into the messa
                 const layer_bytes = @as([*]const u8, @ptrCast(layer_bits.?))[0..@as(usize, @intCast(win_w * win_h * 4))];
                 try scrollProofSave(L("chat-shared-gap-transcript.bmp"), layer_bytes, layer_info.header);
             }
-            try std.testing.expectEqual(bg, gap_pixel);
+            try std.testing.expectEqual(gap_transcript, gap_pixel);
+            {
+                const masked_region = floatProofRegion(window) orelse return error.TestUnexpectedResult;
+                defer _ = DeleteObject(masked_region);
+                const masked_pixel = w.CreateRectRgn(gap_x, row_y, gap_x + 1, row_y + 1) orelse return error.TestUnexpectedResult;
+                defer _ = DeleteObject(masked_pixel);
+                try std.testing.expect(w.OffsetRgn(masked_region, window.left, window.top) != 0);
+                try std.testing.expect(w.CombineRgn(masked_region, masked_region, masked_pixel, 4) != 0);
+                const writable_pixels = @as([*]u32, @ptrCast(@alignCast(frame_bits.?)))[0 .. frame_w * frame_h];
+                const index: usize = @intCast(row_y * frame_w + gap_x);
+                writable_pixels[index] ^= 0x00ffffff;
+                try std.testing.expect(w.SelectClipRgn(frame_dc, masked_region) != 0);
+                const masked_blit = w.BitBlt(frame_dc, window.left, window.top, win_w, win_h, layer_dc, 0, 0, 0x00CC0020);
+                _ = w.SelectClipRgn(frame_dc, null);
+                _ = GdiFlush();
+                const masked_color = scrollProofColor(frame_pixels[index]);
+                const restored = w.BitBlt(frame_dc, gap_x, row_y, 1, 1, layer_dc, gap_x - window.left, row_y - window.top, 0x00CC0020);
+                _ = GdiFlush();
+                try std.testing.expect(masked_blit != 0 and restored != 0);
+                try std.testing.expect(masked_color != gap_transcript);
+                try std.testing.expectEqual(gap_transcript, scrollProofColor(frame_pixels[index]));
+            }
             try std.testing.expectEqual(if (app_state.g_light_theme) RGB(236, 238, 243) else @as(u32, 0x353535), scrollProofColor(frame_pixels[@intCast(row_y * frame_w + layout.send_btn.right - uiScaled(5))]));
             try std.testing.expectEqual(@as(u8, 4), @import("chat_composer.zig").chatButtonAt(@divTrunc(layout.attach_btn.left + layout.attach_btn.right, 2), row_y));
             try scrollProofSave(L("chat-shared-desktop.bmp"), frame_bytes, frame_info.header);
