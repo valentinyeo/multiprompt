@@ -570,3 +570,118 @@ test('manual release uses the same source-bound publisher', () => {
   assert.match(release, /BUILT_SHA: \$\{\{ needs.prepare.outputs.sha \}\}/);
   assert.match(release, /--target "\$BUILT_SHA"/);
 });
+
+async function releasePushFixture(t) {
+  const guard = path.join(root, 'tools/release-push-guard.cjs');
+  assert.ok(fs.existsSync(guard), 'release push guard exists');
+  const { default: { checkPush, workflowDiff } } = await import('./release-push-guard.cjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-push-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git('init', '-b', 'master');
+  git('config', 'user.name', 'Release Test');
+  git('config', 'user.email', 'release@example.invalid');
+  git('config', 'commit.gpgsign', 'false');
+  const write = (name, content) => {
+    const file = path.join(dir, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  };
+  const commit = () => { git('add', '-A'); git('commit', '-qm', 'fixture'); return git('rev-parse', 'HEAD'); };
+  write('src/app.txt', 'before');
+  write('.github/workflows/a.yml', 'before');
+  const base = commit();
+  write('src/app.txt', 'after');
+  const code = commit();
+  write('.github/workflows/a.yml', 'after');
+  const workflow = commit();
+  fs.unlinkSync(path.join(dir, '.github/workflows/a.yml'));
+  const removed = commit();
+  const calls = [];
+  let tokenCalls = 0;
+  const deps = {
+    git: (old, next) => workflowDiff(old, next, dir),
+    token: () => { tokenCalls++; return 'test-app-token'; },
+    request: async (url, options) => {
+      calls.push({ url, options });
+      return { ok: true, json: async () => ({ total_count: 0, workflow_runs: [] }) };
+    },
+  };
+  const input = (old, next, ref = 'refs/heads/master') => `refs/heads/master ${next} ${ref} ${old}\n`;
+  const run = (old, next, ref) => checkPush(input(old, next, ref), 'git@github.com:valentinyeo/multiprompt.git', deps);
+  return { base, code, workflow, removed, deps, calls, run, tokenCalls: () => tokenCalls };
+}
+
+const releasePushStatuses = ['requested', 'pending', 'waiting', 'queued', 'in_progress'];
+
+test('ordinary pushes inspect exact Git range without App or GitHub calls', async t => {
+  const f = await releasePushFixture(t);
+  await f.run(f.base, f.code);
+  await f.run(f.base, f.workflow, 'refs/heads/other');
+  assert.equal(f.tokenCalls(), 0);
+  assert.equal(f.calls.length, 0);
+});
+
+test('workflow push scans every active state with private App authentication', async t => {
+  const f = await releasePushFixture(t);
+  await f.run(f.code, f.workflow);
+  assert.equal(f.tokenCalls(), 1);
+  assert.deepEqual(f.calls.map(call => new URL(call.url).searchParams.get('status')), releasePushStatuses);
+  for (const { url, options } of f.calls) {
+    const request = new URL(url);
+    assert.equal(request.origin, 'https://api.github.com');
+    assert.equal(request.pathname, '/repos/valentinyeo/multiprompt/actions/workflows/auto-release.yml/runs');
+    assert.equal(request.searchParams.get('branch'), 'master');
+    assert.equal(request.searchParams.get('per_page'), '1');
+    assert.equal(options.headers.Authorization, 'Bearer test-app-token');
+    assert.equal(options.redirect, 'error');
+  }
+});
+
+for (const active of releasePushStatuses) {
+  test(`workflow push blocks ${active} release`, async t => {
+    const f = await releasePushFixture(t);
+    f.deps.request = async url => {
+      const status = new URL(url).searchParams.get('status');
+      f.calls.push(status);
+      return { ok: true, json: async () => ({ total_count: status === active ? 2 : 0, workflow_runs: status === active ? [{ status }] : [] }) };
+    };
+    await assert.rejects(f.run(f.code, f.workflow), new RegExp(`auto-release is ${active}`));
+    assert.deepEqual(f.calls, releasePushStatuses.slice(0, releasePushStatuses.indexOf(active) + 1));
+  });
+}
+
+test('deleted workflows and full multi-commit push ranges are checked', async t => {
+  const f = await releasePushFixture(t);
+  await f.run(f.workflow, f.removed);
+  assert.equal(f.calls.length, 5);
+  f.calls.length = 0;
+  await f.run(f.base, f.workflow);
+  assert.equal(f.calls.length, 5);
+});
+
+test('workflow pushes fail closed on authentication, API and malformed responses', async t => {
+  const f = await releasePushFixture(t);
+  f.deps.token = () => { throw new Error('authentication failed'); };
+  await assert.rejects(f.run(f.code, f.workflow));
+  assert.equal(f.calls.length, 0);
+  f.deps.token = () => 'test-app-token';
+  for (const request of [
+    async () => { throw new Error('network failed'); },
+    async () => ({ ok: false }),
+    async () => ({ ok: true, json: async () => ({ total_count: 0 }) }),
+    async () => ({ ok: true, json: async () => ({ total_count: 0, workflow_runs: [{ status: 'unknown' }] }) }),
+    async () => ({ ok: true, json: async () => ({ total_count: 1, workflow_runs: [{ status: 'unknown' }] }) }),
+  ]) {
+    f.deps.request = request;
+    await assert.rejects(f.run(f.code, f.workflow));
+  }
+});
+
+test('unavailable master baselines fail closed without GitHub reads', async t => {
+  const f = await releasePushFixture(t);
+  await assert.rejects(f.run('0'.repeat(40), f.workflow));
+  await assert.rejects(f.run('1'.repeat(40), f.workflow));
+  assert.equal(f.tokenCalls(), 0);
+  assert.equal(f.calls.length, 0);
+});
