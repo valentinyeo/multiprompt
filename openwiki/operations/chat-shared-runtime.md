@@ -38,6 +38,8 @@
 {"id":1,"engine_info":{"protocol":1,"generation":1,"sha256":"..."}}
 ```
 
+- Live history requests must send `follow: true`.
+- This resolves the live session before saved IDs.
 - Existing history responses remain unchanged.
 - Watch and one-shot calls use selected source.
 - Owner and held-worker calls also use it.
