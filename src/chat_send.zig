@@ -3087,7 +3087,7 @@ fn chatFullSettleStart() void {
     const now_ms: i64 = @intCast(GetTickCount64());
     const tick = GetTickCount64();
     for (app_state.g_chat_outbox.items) |entry| {
-        if (entry.message_v1 or !chat_echo.needsFullSettle(entry.state, entry.write_started, entry.transcript_queued, entry.sent_tick_ms, now_ms)) continue;
+        if (entry.message_v1 or entry.anchor.sent_ms <= 0 or !chat_echo.needsFullSettle(entry.state, entry.write_started, entry.transcript_queued, entry.sent_tick_ms, now_ms)) continue;
         const outbox_key = entry.key[0..entry.key_len];
         const idx = chatOutboxShellForKey(outbox_key) orelse continue;
         const key = chatFileIdentityForShell(idx);
@@ -3111,7 +3111,8 @@ fn chatFullSettleStart() void {
             for (app_state.g_chat_outbox.items) |candidate| {
                 if (job.count == job.entries.len) break;
                 if ((candidate.id > last_id) != (pass == 0)) continue;
-                if (!std.mem.eql(u8, candidate.key[0..candidate.key_len], outbox_key) or
+                if (candidate.message_v1 or candidate.anchor.sent_ms <= 0 or
+                    !std.mem.eql(u8, candidate.key[0..candidate.key_len], outbox_key) or
                     !chat_echo.needsFullSettle(candidate.state, candidate.write_started, candidate.transcript_queued, candidate.sent_tick_ms, now_ms)) continue;
                 const text = a.dupe(u16, candidate.text) catch {
                     for (job.entries[0..job.count]) |target| a.free(target.text);

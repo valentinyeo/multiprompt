@@ -3897,6 +3897,25 @@ class HeldQueueTest(unittest.TestCase):
             self.assertEqual(json.loads(wire.splitlines()[1])['delivered_ms'], 0)
         self.send.assert_not_called()
 
+    def test_settle_without_a_start_time_never_sweeps_other_transcripts(self):
+        self.path.write_text('')
+        row = json.dumps(dict(type='user', message=dict(role='user', content='elsewhere'), timestamp='2026-10-28T20:00:00Z')) + '\n'
+        for n in range(6):
+            (self.path.parent / f'other-{n}.jsonl').write_text(row)
+        query = dict(id=7, tmux='term-1', texts=['elsewhere'], message_ids=[''], after_ms=0)
+        opened = []
+        real_open = Path.open
+        def tracking_open(path, *args, **kwargs):
+            opened.append(path.name)
+            return real_open(path, *args, **kwargs)
+        with patch.object(reader, 'resolve_response_path', return_value=('claude', 'sid', self.path, None)), patch.object(Path, 'open', tracking_open):
+            wire = reader.settle_response(query)
+            self.assertEqual(json.loads(wire.splitlines()[1])['delivered_ms'], 0)
+            self.assertFalse([name for name in opened if name.startswith('other-')])
+            opened.clear()
+            wire = reader.settle_response(dict(query, after_ms=1))
+            self.assertLessEqual(len([name for name in opened if name.startswith('other-')]), reader.SETTLE_SIBLINGS_MAX)
+
 
     def test_worker_lock_never_strands_a_new_session(self):
         import fcntl

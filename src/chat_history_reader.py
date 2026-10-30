@@ -40,6 +40,7 @@ DRAFT_TEXT = 4000
 SGR = re.compile(r"\x1b\[([0-9;:]*)m")
 ANSI = re.compile(r"\x1b(?:\[[0-9;:?]*[ -/]*[@-~]|[@-Z\\-_])")
 SETTLE_SUFFIX_MIN = 24
+SETTLE_SIBLINGS_MAX = 4
 ISSUE_345_STALE_JUMPS_TO_TAIL = True
 ISSUE_349_QUEUED_STAMP_FROM_QUEUE = True
 ISSUE_358_TAIL_STARTS_AT_QUESTION = True
@@ -3034,10 +3035,10 @@ def settle_response(q, source=None, as_owner=False):
             return (f"@mp\t{rid}\tsettle\tok\t-\t{len(rows)}\n" +
                     "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows) + END + "\n")
         paths = [path]
-        if agent == "claude":
+        if agent == "claude" and q["after_ms"] > 0:
             paths += sorted((p for p in path.parent.glob("*.jsonl")
                              if p != path and p.stat().st_mtime * 1000 >= q["after_ms"] - 5000),
-                            key=lambda p: p.stat().st_mtime, reverse=True)
+                            key=lambda p: p.stat().st_mtime, reverse=True)[:SETTLE_SIBLINGS_MAX]
         for source_path in paths:
             if all(row["line"] for row in rows):
                 break
@@ -3331,7 +3332,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 17
+RUNTIME_GENERATION = 19
 
 if __name__ == '__main__':
     import fcntl
