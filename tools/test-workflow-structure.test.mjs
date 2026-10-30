@@ -1,9 +1,18 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import test from 'node:test';
 
 const workflow = fs.readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
 const names = ['test', 'test-update-source', 'test-windows-update', 'test-vps', 'test-worker', 'build-windows'];
+
+function verifyManualNightly(text) {
+  const events = text.split('\non:\n')[1]?.split('\npermissions:')[0];
+  assert.ok(events, 'workflow events are declared');
+  assert.match(events, /^  workflow_dispatch:/m);
+  assert.match(events, /^  schedule:/m);
+  assert.doesNotMatch(events, /^  (?:push|pull_request|workflow_run|repository_dispatch):/m);
+}
 
 function verifyRouting(text) {
   const jobs = Object.fromEntries([...text.matchAll(/^  ([\w-]+):\n((?:(?!^  [\w-]+:)[\s\S])*)/gm)].map(match => [match[1], match[2]]));
@@ -22,7 +31,7 @@ function verifyRouting(text) {
     const classify = steps[checkout + 1];
     assert.match(classify, /id: paths\n        shell: bash\n/);
     assert.match(classify, /EVENT: \$\{\{ github.event_name \}\}/);
-    assert.match(classify, /BASE: \$\{\{ github.event.pull_request.base.sha \|\| \(github.ref != 'refs\/heads\/master' && 'origin\/master'\) \|\| github.event.before \}\}/);
+    assert.match(classify, /BASE: \$\{\{ github.event_name == 'schedule' && github.sha \|\| github.event.pull_request.base.sha \|\| \(github.ref != 'refs\/heads\/master' && 'origin\/master'\) \|\| github.event.before \|\| format\('\{0\}\^', github.sha\) \}\}/);
     assert.match(classify, /HEAD: \$\{\{ github.event.pull_request.head.sha \|\| github.sha \}\}/);
     assert.match(classify, /run: bash -e -o pipefail tools\/classify-test-paths.sh/);
     for (const step of steps.slice(checkout + 2)) {
@@ -49,6 +58,8 @@ test('routing checks reject the removed dependency, missing history, classifier 
     ['    runs-on: windows-latest', '    needs: changes\n    runs-on: windows-latest'],
     ['          fetch-depth: 0', '          fetch-depth: 1'],
     ['        id: paths', '        id: missing'],
+    ["github.event_name == 'schedule' && github.sha || ", ''],
+    [" || format('{0}^', github.sha)", ''],
     ["${{ matrix.group == 1 && '-j1' || '' }}", ''],
     ["${{ matrix.group == 2 && '-j1' || '' }}", ''],
     ["        if: steps.paths.outputs.heavy == 'true'", '        if: true'],
@@ -68,51 +79,70 @@ test('red regression job installs the Zig compiler before running changed suites
   assert.match(red.slice(install, execute), /zig-x86_64-linux-0\.16\.0.*GITHUB_PATH/);
 });
 
-test('branch reaction proof uses the shared journey without changing production triggers', async () => {
+test('manual and nightly reaction proof uses the shared journey', () => {
   const adapterFile = new URL('../.github/workflows/reaction-journey.yml', import.meta.url);
   assert.ok(fs.existsSync(adapterFile), 'reaction workflow adapter exists');
   const adapter = fs.readFileSync(adapterFile, 'utf8');
-  assert.match(adapter, /branches: \[ceo\/IGSH-1012\]/);
+  verifyManualNightly(adapter);
   assert.match(adapter, /uses: \.\/\.github\/workflows\/verify\.yml/);
   assert.match(adapter, /feature: chat-delivery/);
   assert.match(adapter, /chat_reactions_proof: true/);
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
   assert.match(verify, /workflow_call:\n    inputs:\n(?:      [\s\S]*?)      chat_reactions_proof:/);
   assert.match(verify, /workflow_call:\n    inputs:\n      revision:\n        required: false\n        type: string/);
-  const checker = new URL('./verify-workflow-branches.mjs', import.meta.url);
-  assert.ok(fs.existsSync(checker), 'shared workflow branch checker exists');
-  const { verifyPushBranches } = await import(checker);
-  verifyPushBranches(verify);
+  verifyManualNightly(verify);
+  assert.match(verify, /CHAT_REACTIONS_PROOF: \$\{\{ inputs.chat_reactions_proof && '1' \|\| '' \}\}/);
+  assert.match(verify, /control\.ps1 -Feature \$env:FEATURE/);
 });
 
-test('IGSH-1113 every pull request receives the required native appearance check', async () => {
+test('manual and nightly verification execute native appearance', async () => {
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
-  const paths = verify.match(/^  pull_request:\n    paths:\n((?:      - [^\n]+\n)+)/m);
-  assert.ok(paths);
-  for (const file of ['build.zig', 'build.zig.zon', 'tools/test-workflow-structure.test.mjs', 'tools/verify-workflow-branches.mjs', 'tools/chat-history-reader-test.py', 'tools/check-red-run.mjs']) assert.ok(paths[1].split('\n').includes('      - ' + file), file);
-  const trigger = verify.match(/^  pull_request:\r?\n((?:[ \t]+[^\n]*\r?\n)+)/m)?.[1];
-  assert.ok(trigger?.includes("      - '**'"), 'required verification cannot exclude release tooling, notes or other PR paths');
-  assert.doesNotMatch(trigger, /^    (?:branches(?:-ignore)?|paths-ignore|types):|^      - ['"]?!/m);
+  verifyManualNightly(verify);
+  assert.match(verify, /feature:\n        description: Feature map file stem[^\n]*\n        required: true\n        default: appearance/);
   const { discoverFeatures } = await import('./verify-features.cjs');
-  assert.ok(discoverFeatures().pr.includes('appearance'));
-  assert.match(verify, /github\.event_name == 'pull_request' && fromJSON\(needs\.journeys\.outputs\.pr\)/);
+  const features = discoverFeatures();
+  assert.ok(features.full.includes('appearance'));
+  const expression = verify.match(/^        feature: \$\{\{ (.+) \}\}$/m)?.[1];
+  assert.ok(expression);
+  const matrix = (event, feature, source = expression) => JSON.parse(JSON.stringify(vm.runInNewContext(source, {
+    inputs: { feature }, github: { event_name: event, ref: 'refs/heads/master' },
+    needs: { journeys: { outputs: { full: JSON.stringify(features.full), pr: JSON.stringify(features.pr) } } },
+    fromJSON: JSON.parse, format: (pattern, value) => pattern.replace('{0}', value), startsWith: (value, prefix) => value.startsWith(prefix),
+  })));
+  assert.deepEqual(matrix('schedule', ''), ['appearance']);
+  assert.deepEqual(matrix('workflow_dispatch', 'appearance'), ['appearance']);
+  assert.ok(matrix('workflow_dispatch', 'all').includes('appearance'));
+  const oldFallback = expression.replace("inputs.feature || 'appearance'", 'inputs.feature');
+  assert.notEqual(oldFallback, expression);
+  assert.notDeepEqual(matrix('schedule', '', oldFallback), ['appearance']);
+  assert.match(verify, /runs-on: windows-latest/);
+  assert.match(verify, /FEATURE: \$\{\{ matrix.feature \}\}/);
+  const driver = verify.split('      - name: Launch Doctor Drive Evidence Cleanup\n')[1]?.split(/\n      - /)[0];
+  assert.ok(driver);
+  assert.match(driver, /control\.ps1 -Feature \$env:FEATURE/);
+  assert.doesNotMatch(driver, /env\.FEATURE != 'appearance'|continue-on-error:/);
+  const policy = JSON.parse(fs.readFileSync(new URL('./journey-policy.json', import.meta.url), 'utf8'));
+  assert.equal(policy.quarantined.appearance, undefined);
 });
 
-test('push verification accepts another ticket branch and rejects losing master or unrelated branches', async () => {
-  const checker = new URL('./verify-workflow-branches.mjs', import.meta.url);
-  assert.ok(fs.existsSync(checker), 'shared workflow branch checker exists');
-  const { verifyPushBranches } = await import(checker);
+test('report-only triggers reject automatic pushes and preserve legacy branch checker controls', async () => {
   const verify = fs.readFileSync(new URL('../.github/workflows/verify.yml', import.meta.url), 'utf8');
-  verifyPushBranches(verify);
-  const extra = verify.replace('branches: [master,', 'branches: [master, ceo/IGSH-9999,');
-  assert.notEqual(extra, verify);
-  verifyPushBranches(extra);
-  for (const replacement of ['', 'main, ', 'unrelated, ', "'ceo/OTHER-123', "]) {
-    const invalid = verify.replace('branches: [master, ', 'branches: [' + replacement);
-    assert.notEqual(invalid, verify);
-    assert.throws(() => verifyPushBranches(invalid), assert.AssertionError);
+  verifyManualNightly(verify);
+  for (const [before, after] of [
+    ['  schedule:', '  removed_schedule:'],
+    ['  workflow_dispatch:', '  removed_dispatch:'],
+    ['  workflow_dispatch:', '  push:\n  workflow_dispatch:'],
+    ['  workflow_dispatch:', '  pull_request:\n  workflow_dispatch:'],
+  ]) {
+    assert.ok(verify.includes(before));
+    assert.throws(() => verifyManualNightly(verify.replace(before, after)), assert.AssertionError);
   }
-  const unrelated = verify.replace('branches: [master,', 'branches: [master, unrelated,');
-  assert.notEqual(unrelated, verify);
-  assert.throws(() => verifyPushBranches(unrelated), assert.AssertionError);
+  const { verifyPushBranches } = await import('./verify-workflow-branches.mjs');
+  const legacy = 'on:\n  push:\n    branches: [master, ceo/IGSH-1012]\n';
+  verifyPushBranches(legacy);
+  verifyPushBranches(legacy.replace('branches: [master,', 'branches: [master, ceo/IGSH-9999,'));
+  for (const replacement of ['', 'main, ', 'unrelated, ', "'ceo/OTHER-123', "]) {
+    assert.throws(() => verifyPushBranches(legacy.replace('branches: [master, ', 'branches: [' + replacement)), assert.AssertionError);
+  }
+  assert.throws(() => verifyPushBranches(legacy.replace('branches: [master,', 'branches: [master, unrelated,')), assert.AssertionError);
 });
