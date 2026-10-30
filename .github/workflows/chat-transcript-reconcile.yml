@@ -51,3 +51,16 @@ jobs:
         run: python3 -m unittest discover -s tools/verify-chat-delivery -p test_queue_trace.py -v
       - name: Verify shared reader selection
         run: python3 tools/chat-shared-runtime.test.py -v
+
+  native-structural-replay:
+    # Independent, report-only investigation; never a release gate.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Native identity model controls
+        run: python3 -m unittest discover -s tools/chat-native-replay -p 'test_*.py' -v
+      - name: Replay anonymized real-derived structural corpus
+        run: python3 tools/chat-native-replay/replay.py tools/chat-native-replay/structural.jsonl.gz

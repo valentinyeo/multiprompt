@@ -1,0 +1,134 @@
+{
+  "provenance": "selected real-derived structural occurrences; all surrounding selected events retained in corpus",
+  "timestamp_rank_scope": "within original selected group only, not globally comparable",
+  "cases": {
+    "D": [
+      {
+        "source": "s2",
+        "position": 0
+      },
+      {
+        "source": "s2",
+        "position": 1
+      },
+      {
+        "source": "s2",
+        "position": 2
+      }
+    ],
+    "E_side": [
+      {
+        "source": "s108",
+        "position": 11,
+        "case_timestamp_rank": 0
+      }
+    ],
+    "E_main": [
+      {
+        "source": "s115",
+        "position": 55,
+        "case_timestamp_rank": 1
+      }
+    ],
+    "H": [
+      {
+        "source": "s165",
+        "position": 112,
+        "case_timestamp_rank": 0
+      },
+      {
+        "source": "s165",
+        "position": 114,
+        "case_timestamp_rank": 1
+      },
+      {
+        "source": "s165",
+        "position": 140,
+        "case_timestamp_rank": 2
+      },
+      {
+        "source": "s165",
+        "position": 142,
+        "case_timestamp_rank": 3
+      }
+    ],
+    "F": [
+      {
+        "source": "s282",
+        "position": 386
+      },
+      {
+        "source": "s282",
+        "position": 387
+      },
+      {
+        "source": "s282",
+        "position": 388
+      }
+    ],
+    "B": [
+      {
+        "source": "s305",
+        "position": 3,
+        "case_timestamp_rank": 0
+      },
+      {
+        "source": "s305",
+        "position": 17,
+        "case_timestamp_rank": 2
+      },
+      {
+        "source": "s305",
+        "position": 18,
+        "case_timestamp_rank": 3
+      },
+      {
+        "source": "s305",
+        "position": 20,
+        "case_timestamp_rank": 1
+      },
+      {
+        "source": "s305",
+        "position": 27,
+        "case_timestamp_rank": 5
+      },
+      {
+        "source": "s305",
+        "position": 28,
+        "case_timestamp_rank": 6
+      },
+      {
+        "source": "s305",
+        "position": 30,
+        "case_timestamp_rank": 4
+      }
+    ],
+    "A": [
+      {
+        "source": "s1179",
+        "position": 9,
+        "case_timestamp_rank": 1
+      },
+      {
+        "source": "s1179",
+        "position": 10,
+        "case_timestamp_rank": 2
+      },
+      {
+        "source": "s1179",
+        "position": 12,
+        "case_timestamp_rank": 0
+      }
+    ],
+    "G": [
+      {
+        "source": "s1998",
+        "position": 595
+      },
+      {
+        "source": "s1998",
+        "position": 597
+      }
+    ]
+  }
+}
