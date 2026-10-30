@@ -331,23 +331,56 @@ def main():
                 if mode == 'direct':
                     tmux('kill-session', '-t', 'smoke-a')
                     continue
-            count = len(observations())
+            rows = transcript_rows()
+            queued_index = next(i for i, row in enumerate(rows)
+                                if row.get('role') == 'user' and row.get('text') == queued['text'])
+            earlier_reply = next(row['text'] for row in rows[queued_index + 1:]
+                                 if row.get('role') == 'assistant' and row.get('text') in replies() - initial_replies - {server.busy_reply})
             start('smoke-b', resume=sid, endpoint=endpoint)
-            second = wait_for(lambda: observations()[count:count + 1], 'second native SessionStart missing')[0]
-            assert second.get('session_id') == sid, 'second client did not resume the first thread'
             backend = backend_process.pid
             value = reader.process_table()[backend]
             assert backend_process.poll() is None and reader.codex_process_start(backend) == backend_start
             pane_b = int(tmux('display-message', '-p', '-t', 'smoke-b:0.0', '#{pane_pid}'))
-            table_b = reader.process_table(pids=[pane_b])
-            native_b = reader.agent_pid_for_panes([pane_b], table_b, 'codex')
-            assert native_b and reader.open_codex_transcript(native_b, table_b) == set(), 'second remote TUI owns rollout FDs'
+            def second_ready():
+                table_b = reader.process_table(pids=[pane_b])
+                native_b = reader.agent_pid_for_panes([pane_b], table_b, 'codex')
+                if not native_b or native_b == native:
+                    return None
+                started = reader.codex_process_start(native_b)
+                backend_fds = reader.codex_socket_fds(backend)
+                tui_fds = reader.codex_socket_fds(native_b)
+                connections = reader.codex_unix_connections()
+                if not started or backend_fds is None or tui_fds is None or connections is None:
+                    return None
+                links = {fd for fd in backend_fds if connections.get(fd, (None, None))[1] == path
+                         and connections[fd][0] in tui_fds
+                         and connections.get(connections[fd][0], (None, None))[0] == fd}
+                display = tmux('capture-pane', '-p', '-t', 'smoke-b:0.0', '-S', '-100')
+                if (len(links) == 1 and earlier_reply in display and
+                        reader.open_codex_transcript(native_b, table_b) == set() and
+                        reader.open_codex_transcript(backend, {backend: value}) == {(sid, transcript)} and
+                        backend_process.poll() is None and reader.codex_process_start(backend) == backend_start and
+                        reader.codex_process_start(native_b) == started and reader.codex_process_start(native) == native_start):
+                    return native_b
+                return None
+            native_b = wait_for(second_ready, 'second remote TUI did not attach to the exact thread')
             sources = reader.open_codex_transcript(backend, {backend: value})
             assert sources is not None and len(sources) == 1, 'two-client one-writer precondition not observed'
             assert '\thistory\tmissing\t' in response('smoke-a')
             assert '\thistory\tmissing\t' in response('smoke-b')
+            ambiguous = dict(request, message_id='native_smoke_daemon_ambiguous_0001',
+                             text='ambiguous synthetic prompt must not be sent')
+            before_ambiguous = replies()
+            reader.message_store_request(dict(ambiguous, op='message_submit'))
+            refused = reader.message_store_request(dict(ambiguous, op='message_dispatch'))
+            assert refused['message']['state'] == 'failed', 'ambiguous dispatch was not refused'
+            assert replies() == before_ambiguous, 'ambiguous dispatch reached provider'
             tmux('kill-session', '-t', 'smoke-b')
             wait_for(lambda: '\thistory\tok\t' + sid + '\t' in response('smoke-a'), 'single-client binding did not recover')
+            threading.Event().wait(35)
+            assert replies() == before_ambiguous, 'ambiguous dispatch reached provider after recovery'
+            assert not any(row.get('role') == 'user' and row.get('text') == ambiguous['text']
+                           for row in transcript_rows()), 'ambiguous dispatch reached native transcript'
             count = len(observations())
             tmux('send-keys', '-t', 'smoke-a:0.0', '/new', 'Enter')
             tmux('send-keys', '-t', 'smoke-a:0.0', 'new synthetic session prompt', 'Enter')

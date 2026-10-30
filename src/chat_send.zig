@@ -917,6 +917,7 @@ pub fn loadChatOutbox() void {
         if (pending.key.tmux[0] != 0 and pending.key.sid[0] != 0 and pending.nonce != 0 and pending.request_nonce != 0) app_state.g_chat_pending_reset = pending;
     }
     _ = chatOutboxPurgeOrphans();
+    _ = chatHoldLegacyCodex();
     _ = saveChatOutbox();
     armChatOutboxTimerIfNeeded();
 }
@@ -1071,6 +1072,22 @@ pub fn chatOutboxDropForShell(idx: u32) void {
     chatOutboxDropForKey(key);
 }
 
+fn chatHoldLegacyCodex() bool {
+    var changed = false;
+    for (app_state.g_chat_outbox.items) |*entry| {
+        if (entry.message_v1 or entry.state == .cancelled) continue;
+        const idx = chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse continue;
+        if (app_state.shells[idx].kind != .tmux or app_state.shells[idx].ai_agent != 2) continue;
+        if (entry.state != .not_sent or entry.channel_sent or entry.retryable) {
+            entry.state = .not_sent;
+            entry.channel_sent = false;
+            entry.retryable = false;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 fn chatOutboxPurgeOrphans() bool {
     var removed = false;
     var i: usize = 0;
@@ -1130,6 +1147,9 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
     for (app_state.g_chat_outbox.items) |e| {
         if (result.count >= pending.len) break;
         if (e.message_v1 or e.state == .cancelled or (e.host_held and !e.host_confirmed) or (!e.write_started and !e.retryable) or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+        if (chatOutboxShellForKey(e.key[0..e.key_len])) |idx| {
+            if (app_state.shells[idx].kind == .tmux and app_state.shells[idx].ai_agent == 2) continue;
+        }
         pending[result.count] = .{
             .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
             .text = e.text,
@@ -1474,15 +1494,65 @@ pub fn chatEchoSendAgain(id: u64) void {
     const ei = chatOutboxIndexById(id) orelse return;
     const entry = &app_state.g_chat_outbox.items[ei];
     if (!chat_echo.pendingActions(entry.state).send_again or entry.channel_pending) return;
+    if (!entry.message_v1) {
+        const origin = chatOutboxShellForKey(entry.key[0..entry.key_len]);
+        if (origin != null and app_state.shells[origin.?].kind == .tmux and app_state.shells[origin.?].ai_agent == 2) {
+            const idx = app_state.active_shell;
+            if (idx >= app_state.shell_count or app_state.shells[idx].kind != .tmux or app_state.shells[idx].ai_agent != 2) {
+                showHeaderNoticeAscii("Open the Codex chat before sending again", 5000, true);
+                return;
+            }
+            const current = chatFileIdentityForShell(idx);
+            if (!current.codex or current.sid[0] == 0 or current.tmux[0] == 0) {
+                showHeaderNoticeAscii("Cannot verify this Codex chat yet", 5000, true);
+                return;
+            }
+            if (@import("win32.zig").MessageBoxW(app_state.g_main_hwnd, L("The original chat cannot be verified. This message may already have been sent. Sending again may duplicate it. Send to this Codex chat?"), L("Send again"), 0x24) != 6) return;
+            if (app_state.active_shell != idx or idx >= app_state.shell_count or !std.meta.eql(chatFileIdentityForShell(idx), current)) return;
+            const confirmed_index = chatOutboxIndexById(id) orelse return;
+            const confirmed_entry = &app_state.g_chat_outbox.items[confirmed_index];
+            if (confirmed_entry.message_v1 or confirmed_entry.channel_pending or !chat_echo.pendingActions(confirmed_entry.state).send_again) return;
+            const confirmed_origin = chatOutboxShellForKey(confirmed_entry.key[0..confirmed_entry.key_len]) orelse return;
+            if (app_state.shells[confirmed_origin].kind != .tmux or app_state.shells[confirmed_origin].ai_agent != 2) return;
+            var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
+            const key = chatOutboxKeyForShell(idx, &key_buf);
+            if (key.len == 0) return;
+            const previous = confirmed_entry.*;
+            @memset(&confirmed_entry.key, 0);
+            @memcpy(confirmed_entry.key[0..key.len], key);
+            confirmed_entry.key_len = @intCast(key.len);
+            confirmed_entry.message_v1 = true;
+            confirmed_entry.message_sid = current.sid;
+            confirmed_entry.message_phase = @splat(0);
+            confirmed_entry.state = .sending;
+            confirmed_entry.write_started = true;
+            confirmed_entry.channel_sent = false;
+            confirmed_entry.retryable = false;
+            if (!saveChatOutbox()) {
+                confirmed_entry.* = previous;
+                showHeaderNoticeAscii("Could not save message. Try again", 5000, true);
+                return;
+            }
+            if (!chatTmuxSendStart(idx, confirmed_entry.text, id, false, false, false)) {
+                confirmed_entry.state = .not_sent;
+                _ = saveChatOutbox();
+                chatOutboxChanged();
+            }
+            return;
+        }
+    }
     if (entry.message_v1) {
         if (@import("win32.zig").MessageBoxW(app_state.g_main_hwnd, L("Your agent may already have this message. Sending again may duplicate it. Send again?"), L("Send again"), 0x24) != 6) return;
-        const si = chatOutboxShellForKey(entry.key[0..entry.key_len]) orelse return;
+        const confirmed_index = chatOutboxIndexById(id) orelse return;
+        const confirmed_entry = &app_state.g_chat_outbox.items[confirmed_index];
+        if (!confirmed_entry.message_v1 or confirmed_entry.channel_pending or !chat_echo.pendingActions(confirmed_entry.state).send_again) return;
+        const si = chatOutboxShellForKey(confirmed_entry.key[0..confirmed_entry.key_len]) orelse return;
         var random_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
         defer random_io.deinit();
-        const host_failed = std.mem.eql(u8, std.mem.sliceTo(&entry.message_phase, 0), "failed");
-        if (host_failed) while (entry.retry_nonce == 0) random_io.io().random(std.mem.asBytes(&entry.retry_nonce));
+        const host_failed = std.mem.eql(u8, std.mem.sliceTo(&confirmed_entry.message_phase, 0), "failed");
+        if (host_failed) while (confirmed_entry.retry_nonce == 0) random_io.io().random(std.mem.asBytes(&confirmed_entry.retry_nonce));
         if (!saveChatOutbox()) return;
-        _ = chatTmuxSendStart(si, entry.text, id, host_failed, false, false);
+        _ = chatTmuxSendStart(si, confirmed_entry.text, id, host_failed, false, false);
         return;
     }
     if (chatEchoTryMatchEntry(ei)) return;
@@ -1729,6 +1799,7 @@ fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: 
     if (shell_index >= app_state.shell_count) return .write_failed;
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = &app_state.g_chat_outbox.items[ei];
+        if (!entry.message_v1 and app_state.shells[shell_index].kind == .tmux and app_state.shells[shell_index].ai_agent == 2) return .write_failed;
         if (entry.write_started) return .write_failed;
         entry.state = .sending;
         entry.anchor = chatEchoAnchorNow(shell_index);
@@ -1828,6 +1899,10 @@ fn chatOutboxTrySendEntry(shell_index: u32, e: usize) bool {
 }
 
 pub fn chatOutboxTick() void {
+    if (chatHoldLegacyCodex()) {
+        _ = saveChatOutbox();
+        chatOutboxChanged();
+    }
     chatCancelFinish();
     chatTmuxSendFinish();
     chatMessageSyncFinish();
@@ -2349,6 +2424,45 @@ test "outbox reordered queues and raw Unicode use the old-version state fallback
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Raw 日🚀 \"key\":\"fake\" } ]"), list.items[0].text);
 }
 
+test "IGSH-1266 restored Codex queue requires explicit binding" {
+    const allocator = std.testing.allocator;
+    const saved_outbox = app_state.g_chat_outbox;
+    const saved_count = app_state.shell_count;
+    const saved_shell = app_state.shells[0];
+    app_state.g_chat_outbox = .empty;
+    app_state.shell_count = 1;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].ai_agent = 2;
+    app_state.shells[0].tmux_host = 0;
+    @memcpy(app_state.shells[0].tmux_session[0..5], "codex");
+    app_state.shells[0].tmux_session_len = 5;
+    defer {
+        for (app_state.g_chat_outbox.items) |entry| allocator.free(entry.text);
+        app_state.g_chat_outbox.deinit(allocator);
+        app_state.g_chat_outbox = saved_outbox;
+        app_state.shell_count = saved_count;
+        app_state.shells[0] = saved_shell;
+    }
+    chatOutboxParseJson(&app_state.g_chat_outbox, allocator, "{\"version\":1,\"queues\":[{\"key\":\"tmux:0:codex\",\"messages\":[{\"t\":\"hello\",\"s\":0}]}]}");
+    try std.testing.expect(chatHoldLegacyCodex());
+    const entry = app_state.g_chat_outbox.items[0];
+    try std.testing.expectEqual(ChatEchoState.not_sent, entry.state);
+    try std.testing.expect(!entry.message_v1);
+    try std.testing.expect(!chat_echo.mayType(entry.state, entry.write_started, false, false));
+    try std.testing.expect(std.mem.sliceTo(&entry.message_wire_id, 0).len > 0);
+    var len: usize = 0;
+    const encoded = chatOutboxSerialize(&app_state.g_chat_outbox, allocator, &len) orelse return error.OutOfMemory;
+    defer allocator.free(encoded);
+    var restored: std.ArrayList(ChatOutboxEntry) = .empty;
+    defer {
+        for (restored.items) |item| allocator.free(item.text);
+        restored.deinit(allocator);
+    }
+    chatOutboxParseJson(&restored, allocator, encoded[0..len]);
+    try std.testing.expectEqualSlices(u8, std.mem.sliceTo(&entry.message_wire_id, 0), std.mem.sliceTo(&restored.items[0].message_wire_id, 0));
+    try std.testing.expectEqual(ChatEchoState.not_sent, restored.items[0].state);
+}
+
 test "Chat View outbox prefix matches the Enter-retry prefix" {
     var out: [20]u16 = undefined;
     const text = std.unicode.utf8ToUtf16LeStringLiteral("   hello world");
@@ -2537,6 +2651,7 @@ fn chatTmuxSendStart(idx: u32, text: []const u16, echo_id: u64, retry: bool, sta
     }, .retry = retry, .queued_at = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].anchor.sent_ms else 0, .held = app_state.shells[idx].ai_agent == 1, .queue_id = if (chatOutboxIndexById(echo_id)) |ei| app_state.g_chat_outbox.items[ei].queue_id else 0 };
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = app_state.g_chat_outbox.items[ei];
+        if (!entry.message_v1 and app_state.shells[idx].ai_agent == 2) { a.free(job.text); a.destroy(job); return false; }
         job.message_v1 = entry.message_v1;
         job.message_nonce = entry.message_nonce;
         job.message_wire_id = entry.message_wire_id;
