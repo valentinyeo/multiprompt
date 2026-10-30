@@ -2599,6 +2599,15 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
             return;
         }
         const message = json_reader.field(parsed.value, "message");
+        const ack_id = json_reader.string(json_reader.field(message, "id")) orelse return;
+        const ack_sid = json_reader.string(json_reader.field(message, "sid")) orelse return;
+        const ack_provider = json_reader.string(json_reader.field(message, "provider")) orelse return;
+        const phase = json_reader.string(json_reader.field(message, "state")) orelse return;
+        if (!std.mem.eql(u8, ack_id, token) or !std.mem.eql(u8, ack_sid, std.mem.sliceTo(&job.key.sid, 0)) or
+            !std.mem.eql(u8, ack_provider, if (job.key.codex) "codex" else "claude")) return;
+        if (!std.mem.eql(u8, phase, "queued") and !std.mem.eql(u8, phase, "sent") and
+            !std.mem.eql(u8, phase, "accepted") and !std.mem.eql(u8, phase, "started") and
+            !std.mem.eql(u8, phase, "failed") and !std.mem.eql(u8, phase, "cancelled")) return;
         _ = json_reader.copyString(message, "state", &job.message_state);
         return;
     }
@@ -2826,7 +2835,7 @@ fn chatTmuxSendFinish() void {
             if (!std.mem.eql(u8, &entry.message_wire_id, &job.message_wire_id)) return;
             entry.channel_pending = false;
             if (job.retry and job.message_state[0] != 0) entry.retry_nonce = 0;
-            if (entry.message_phase[0] == 0 and entry.state == .sending) entry.state = if (job.written) .queued else .not_sent;
+            if (entry.message_phase[0] == 0 and entry.state == .sending) entry.state = if (job.message_state[0] != 0) .queued else .not_sent;
             entry.channel_sent_ms = @intCast(GetTickCount64());
         }
         history.message_next_tick = 0;
