@@ -1,6 +1,7 @@
-param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof)
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($MemoryProof -and $OrderProof) { throw 'Proof modes are exclusive' }
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
 $Exe = (Resolve-Path $Exe).Path
 New-Item -ItemType Directory -Force $Output | Out-Null
@@ -14,6 +15,7 @@ $settings = "$profile/roaming/ZigShell"
 $job = $null
 $script:toggleReady = [DateTime]::MinValue
 $result = @{passed=$false; error=$null; cleanup='pending'; comparisons=@(); actions=@()}
+if ($OrderProof) { $result.reportedUserTriggerConfirmed = $false }
 function Wait-For([string]$Description, [scriptblock]$Check, [int]$Seconds = 30) {
     $watch = [Diagnostics.Stopwatch]::StartNew()
     do { $value = & $Check; if ($value) { return $value }; Start-Sleep -Milliseconds 150 } while ($watch.Elapsed.TotalSeconds -lt $Seconds)
@@ -84,7 +86,7 @@ function Compare-Views([string]$Name) {
     [void](Wait-For 'return sidebar unchanged' { (Capture "$Name-return-sidebar") -eq $before })
 }
 
-if ($MemoryProof) {
+if ($MemoryProof -or $OrderProof) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -107,6 +109,21 @@ public static class SidebarDrag {
         var input = new Input();
         input.Data.Mouse = new MouseInput { X = (int)Math.Round(x * 65535.0 / (GetSystemMetrics(0) - 1)), Y = (int)Math.Round(y * 65535.0 / (GetSystemMetrics(1) - 1)), Flags = 0x8001 | flags };
         if (SendInput(1, new[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Sidebar mouse input failed");
+    }
+    public static void DragVertical(IntPtr hwnd, uint pid, int x, int from, int to) {
+        var start = new Point { X = x, Y = from };
+        var end = new Point { X = x, Y = to };
+        uint owner;
+        GetWindowThreadProcessId(hwnd, out owner);
+        if (!ClientToScreen(hwnd, ref start) || !ClientToScreen(hwnd, ref end) || owner != pid || GetForegroundWindow() != hwnd || WindowFromPoint(start) != hwnd || GetAncestor(WindowFromPoint(end), 2) != hwnd) throw new InvalidOperationException("Sidebar drag ownership mismatch");
+        Mouse(start.X, start.Y, 0);
+        Mouse(start.X, start.Y, 2);
+        try {
+            for (int step = 1; step <= 16; step++) {
+                Mouse(start.X, start.Y + (end.Y - start.Y) * step / 16, 0);
+                Thread.Sleep(20);
+            }
+        } finally { Mouse(end.X, end.Y, 4); }
     }
     public static void Drag(IntPtr hwnd, uint pid, int from, int to, int y) {
         var start = new Point { X = from, Y = y };
@@ -281,12 +298,124 @@ function Memory-Journey {
     $result.passed = $true
 }
 
+function Order-State([string]$Stage, [bool]$AllowCollapsedC = $false) {
+    $saved = Session
+    if ([ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Window($app.Id) -ne $main -or -not $job.Contains($app)) { throw "$Stage window ownership mismatch" }
+    if (@($saved.groups).Count -ne 3 -or @($saved.tabs).Count -ne 3 -or (Flag $saved 'single_window') -or (Flag $saved 'sidebar_collapsed') -or (Flag $saved 'starred_view') -or (Flag $saved 'unread_only')) { throw "$Stage fixture layout changed" }
+    foreach ($id in @(17, 18, 19)) {
+        $groups = @($saved.groups | Where-Object { $_.id -eq $id })
+        $tabs = @($saved.tabs | Where-Object { $_.group_id -eq $id })
+        if ($groups.Count -ne 1 -or $tabs.Count -ne 1 -or ((Flag $groups[0] 'collapsed') -and -not ($AllowCollapsedC -and $id -eq 19)) -or (Flag $tabs[0] 'pinned_top') -or (Flag $tabs[0] 'cv')) { throw "$Stage group $id fixture changed" }
+        $index = $id - 17
+        if ($groups[0].name -cne @('A','B','C')[$index] -or $tabs[0].name -cne @('First shell','Second shell','Third shell')[$index] -or $tabs[0].kind -cne 'cmd' -or -not (Flag $tabs[0] 'manual')) { throw "$Stage group $id identity changed" }
+    }
+    return $saved
+}
+function Order-Ids($Saved) { $Saved.groups | ForEach-Object { [int]$_.id } }
+function Order-Expect($Saved, [int[]]$Expected, [string]$Stage) {
+    $actual = @(Order-Ids $Saved)
+    if (($actual -join ',') -cne ($Expected -join ',')) { throw "$Stage unexpected order: $($actual -join ',')" }
+}
+function Order-Evidence([string]$Name) {
+    Copy-Item "$settings/session.json" "$Output/$Name.session.json"
+    Shot $Name
+}
+function Order-Journey {
+    $result.limitations = @('Fixture coordinates are source-derived hypotheses, not screenshot recognition', 'Reported screenshot identity and trigger remain unknown')
+    $result.geometry = @{dpi=96; headerY=@(60,146,232); tabHeight=58; source='src/sidebar.zig layoutRowsInner'; screenshot='before-actions.png'}
+    $result.executable = @{path=$Exe; sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion}
+    $result.identities = @(); $result.exits = @(); $result.classification = 'none'
+    if ([SidebarDrag]::GetDpiForWindow($main) -ne 96) { throw 'Order journey requires 96 DPI' }
+    $saved = Order-State 'initial'
+    Order-Expect $saved @(17,18,19) 'initial'
+    $result.identities += @{stage='initial'; pid=$app.Id; hwnd=$main.ToInt64()}
+    Focus
+    Order-Evidence 'before-actions'
+    foreach ($entry in @(@{id=18; y=185}, @{id=19; y=271}, @{id=17; y=99})) {
+        $saved = Order-State 'before click'
+        Order-Expect $saved @(17,18,19) 'before click'
+        Focus
+        $result.actions += @{action='select'; x=100; y=$entry.y; groupId=$entry.id; before=@(Order-Ids $saved)}
+        [ChatDeliveryDesktop]::PressClient($main, $app.Id, 100, $entry.y)
+        [void](Wait-For 'selected group saved' { $s = Session; $s.tabs[$s.active_tab].group_id -eq $entry.id })
+        $saved = Order-State 'after click'
+        $result.actions[-1].after = @(Order-Ids $saved)
+        Order-Expect $saved @(17,18,19) 'after click'
+    }
+    $saved = Order-State 'before wobble'
+    Order-Expect $saved @(17,18,19) 'before wobble'
+    Focus
+    $result.actions += @{action='wobble'; x=100; fromY=235; toY=227; before=@(Order-Ids $saved); expected=@(17,18,19)}
+    [SidebarDrag]::DragVertical($main, $app.Id, 100, 235, 227)
+    Start-Sleep -Seconds 2
+    $saved = Order-State 'after wobble' $true
+    $order = @(Order-Ids $saved)
+    $collapsedC = Flag (@($saved.groups | Where-Object { $_.id -eq 19 })[0]) 'collapsed'
+    $result.actions[-1].after = $order
+    $result.actions[-1].collapsedC = $collapsedC
+    Order-Evidence 'after-wobble'
+    if (($order -join ',') -eq '17,19,18') { $result.classification = 'accidental_header_drag_reordered' }
+    elseif (($order -join ',') -ne '17,18,19') { throw "Wobble unexpected order: $($order -join ',')" }
+    if ($collapsedC) {
+        Order-Expect $saved @(17,18,19) 'before reopening C'
+        Focus
+        $result.actions += @{action='reopen C'; x=100; y=235; before=$order}
+        [ChatDeliveryDesktop]::PressClient($main, $app.Id, 100, 235)
+        [void](Wait-For 'group C reopened' {
+            $state = Order-State 'reopening C' $true
+            Order-Expect $state @(17,18,19) 'reopening C'
+            -not (Flag (@($state.groups | Where-Object { $_.id -eq 19 })[0]) 'collapsed')
+        })
+        $saved = Order-State 'after reopening C'
+        Order-Expect $saved @(17,18,19) 'after reopening C'
+        $result.actions[-1].after = @(Order-Ids $saved)
+    }
+    $fromY = if ($order[1] -eq 19) { 149 } else { 235 }
+    $saved = Order-State 'before deliberate drag'
+    Order-Expect $saved $order 'before deliberate drag'
+    Focus
+    $result.actions += @{action='deliberate'; x=100; fromY=$fromY; toY=63; before=$order; expected=@(19,17,18)}
+    [SidebarDrag]::DragVertical($main, $app.Id, 100, $fromY, 63)
+    Start-Sleep -Seconds 2
+    $saved = Order-State 'after deliberate drag'
+    $result.actions[-1].after = @(Order-Ids $saved)
+    Order-Evidence 'after-deliberate'
+    Order-Expect $saved @(19,17,18) 'after deliberate drag'
+    $oldPid = $app.Id; $oldHwnd = $main
+    Focus
+    $result.actions += @{action='normal restart'; before=@(Order-Ids $saved); pid=$oldPid; hwnd=$oldHwnd.ToInt64()}
+    if (-not $app.CloseMainWindow() -or -not $app.WaitForExit(20000)) { throw 'Owned app did not close normally' }
+    $stopped = $job.Stop()
+    $result.exits += @{pid=$oldPid; activeAfterStop=$stopped.ActiveProcesses}
+    if ($stopped.ActiveProcesses -ne 0) { throw 'Old owned processes remained after close' }
+    $app.Dispose(); $job.Dispose(); $script:job = $null
+    $script:job = [VerifyJob]::new()
+    $script:app = $job.Start($Exe, $profile, "$Output/restart-stdout.log", "$Output/restart-stderr.log", '--no-window-restore')
+    $script:main = Wait-For 'restarted owned visible application' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
+    if ($app.Id -eq $oldPid -or $main -eq $oldHwnd) { throw 'Restart did not create new PID and HWND' }
+    [void](Wait-For 'restarted owned sessions published' {
+        if (-not (Test-Path "$settings/inbox-default.json")) { return $false }
+        $inbox = Read-Json "$settings/inbox-default.json"
+        [string]$inbox.hwnd -eq [string]$main.ToInt64() -and @($inbox.shells).Count -eq 3
+    } 60)
+    $saved = Order-State 'after restart'
+    $result.identities += @{stage='restart'; pid=$app.Id; hwnd=$main.ToInt64()}
+    $result.actions[-1].after = @(Order-Ids $saved)
+    Focus
+    Order-Evidence 'after-restart'
+    Order-Expect $saved @(19,17,18) 'after restart'
+    $result.passed = $result.classification -eq 'none'
+}
+
 try {
     New-Item -ItemType Directory -Force $settings, "$profile/local", "$profile/home" | Out-Null
     $env:APPDATA = "$profile/roaming"; $env:LOCALAPPDATA = "$profile/local"; $env:USERPROFILE = "$profile/home"; $env:HOME = "$profile/home"
     $env:MULTIPROMPT_NO_LOGIN = '1'; $env:IGSH_246 = '0'; $env:ZIGSHELL_DEBUG = '1'
     $tabs = @('First shell', 'Second shell', 'Third shell') | ForEach-Object { @{kind='cmd'; name=$_; manual=$true; cv=$false; pid=0} }
-    if ($MemoryProof) {
+    if ($OrderProof) {
+        for ($i = 0; $i -lt 3; $i++) { $tabs[$i].group_id = 17 + $i }
+        Save @{active_tab=0; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=@($tabs); groups=@(@{id=17; name='A'}, @{id=18; name='B'}, @{id=19; name='C'})} "$settings/session.json"
+    } elseif ($MemoryProof) {
         $tabs[1].group_id = 17
         Save @{active_tab=0; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=@($tabs); groups=@(@{id=17; name='Proof group'})} "$settings/session.json"
     } else {
@@ -304,7 +433,7 @@ try {
         $inbox = Read-Json "$settings/inbox-default.json"
         @($inbox.shells).Count -eq 3
     })
-    if ($MemoryProof) { Memory-Journey } else {
+    if ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
     Toggle-View
     [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
     [void](Wait-For 'initial console poll' {
@@ -343,7 +472,7 @@ try {
     Write-Host $result.error
     if (Get-Variable main -ErrorAction SilentlyContinue) { Shot 'failure' }
 } finally {
-    if ($MemoryProof) {
+    if ($MemoryProof -or $OrderProof) {
         $result.scratchRemoved = $false
         $result.cleanupErrors = @()
         try {
@@ -391,5 +520,5 @@ try {
         if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
     }
 }
-if (-not $result.passed -or $result.cleanup -ne 0 -or ($MemoryProof -and -not $result.scratchRemoved)) { throw 'Shared sidebar journey failed; see result.json' }
+if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof) -and -not $result.scratchRemoved)) { throw 'Shared sidebar journey failed; see result.json' }
 Write-Host 'SHARED_SIDEBAR_JOURNEY_OK'

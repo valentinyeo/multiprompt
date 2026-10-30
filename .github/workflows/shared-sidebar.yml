@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: false
+      order_proof:
+        description: Run the bounded sidebar order journey
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: '4 4 * * *'
 
@@ -37,7 +42,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
+          MEMORY_PROOF: ${{ inputs.memory_proof }}
+          ORDER_PROOF: ${{ inputs.order_proof }}
         run: |
+          if ($env:ORDER_PROOF -eq 'true' -and ($env:MEMORY_PROOF -eq 'true' -or -not $env:RELEASE_TAG)) { throw 'Order proof requires a published tag and excludes memory proof' }
           New-Item -ItemType Directory -Force bin, evidence | Out-Null
           if ($env:RELEASE_TAG) {
             if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
@@ -59,14 +67,17 @@ jobs:
         shell: powershell
         env:
           MEMORY_PROOF: ${{ inputs.memory_proof }}
+          ORDER_PROOF: ${{ inputs.order_proof }}
         run: |
           if ($env:MEMORY_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -MemoryProof
+          } elseif ($env:ORDER_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -OrderProof
           } else {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
           }
       - name: Reject the old published sidebar
-        if: inputs.tag == '' && !inputs.memory_proof
+        if: inputs.tag == '' && !inputs.memory_proof && !inputs.order_proof
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
