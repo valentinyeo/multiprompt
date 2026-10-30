@@ -54,6 +54,7 @@ pub fn plain(text: []const u8) bool {
     for ([_][]const u8{ "Various improvements.", "Bug fixes.", "Maintenance.", "Improvements.", "Fixes." }) |filler| {
         if (std.ascii.eqlIgnoreCase(text, filler)) return false;
     }
+    if (std.mem.eql(u8, text, "Checks and fixes, no visible change")) return true;
     var words = std.mem.tokenizeAny(u8, text, " .,;:!?()-");
     while (words.next()) |word| {
         for ([_][]const u8{ "check", "checks", "test", "tests", "CI", "proof", "proofs", "pipeline", "pipelines", "workflow", "workflows" }) |internal| {
@@ -88,6 +89,13 @@ pub fn pick(releases: []const Release, installed: []const u8, offered: []const u
         }
     }
     return result;
+}
+
+test "IGSH-1243 shows checks-only release notes" {
+    const releases = [_]Release{.{ .version = "0.28.1048", .changes = &.{"Checks and fixes, no visible change"} }};
+    const notes = pick(&releases, "0.28.1047", "0.28.1048");
+    try std.testing.expectEqual(@as(usize, 1), notes.count);
+    try std.testing.expectEqualStrings("Checks and fixes, no visible change", notes.line(0));
 }
 
 test "IGSH-728 picks only versions between installed and offered, newest first" {

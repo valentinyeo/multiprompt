@@ -598,7 +598,9 @@ test('IGSH-1113 omits filtered historical releases while preserving current note
   assert.deepEqual(releaseNotes(generated, 'v0.28.900'), {
     version: '0.28.900', releases: [
       { version: '0.28.900', changes: ['The update card explains each change.'] },
+      { version: '0.28.899', changes: [] },
       { version: '0.28.898', changes: ['Switching chats is faster.'] },
+      { version: '0.28.897', changes: [] },
       { version: '0.28.735', changes: ['Existing.'] },
     ],
   });
@@ -710,4 +712,28 @@ test('IGSH-1131 pending notes include only changed unpublished product fragments
   assert.equal(quiet.status, 0, quiet.stderr);
   assert.equal(quiet.stdout, '');
   assert.equal(pending(maintenance).stdout.trim(), 'Your chats keep their saved order.');
+});
+
+test('IGSH-1243 build reads ticketed commits between published tags', async t => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  for (const subject of ['IGSH-1111: Repair checks', 'Repair checks']) {
+    const r = repo(t);
+    r.git('tag', 'v0.29.1');
+    r.write({ 'tools/repair.txt': 'Updated checks.\n' });
+    r.git('add', 'tools/repair.txt');
+    r.git('commit', '-m', subject);
+    const sha = r.git('rev-parse', 'HEAD');
+    const result = spawnSync(process.execPath, [tool, 'build', 'v0.29.2', '["v0.29.1"]'], { cwd: r.dir, encoding: 'utf8' });
+    if (subject.startsWith('IGSH-')) {
+      assert.equal(result.status, 0, result.stderr);
+      const notes = releaseNotes(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), 'v0.29.2');
+      assert.deepEqual(notes.releases[0].changes, ['Checks and fixes, no visible change']);
+      assert.deepEqual(notes.releases[0].tickets, ['https://app.hypertask.ai/detail/project-2060/1111']);
+    } else {
+      assert.equal(result.status, 1);
+      assert.ok(result.stderr.includes(sha));
+      assert.match(result.stderr, /leading ticket ID/);
+      assert.equal(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), changelog);
+    }
+  }
 });

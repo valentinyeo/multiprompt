@@ -34,16 +34,16 @@ test('release asset includes every historical version, plain lines only, and the
 test('publication exports pending fragments after the release fold and handles older Zig string escapes', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const { stampTree } = await import('./version-stamp.mjs');
-  const changelog = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "1.0.0", .summary = "Old", .ticket = "", .items = &.{\n        .{ .text = "Opening browser\\u{2026}", .ticket = "" },\n        .{ .text = "Fix IGSH-123.", .ticket = "" },\n        .{ .text = "Fix src/main.zig.", .ticket = "" },\n        .{ .text = "Fix #12.", .ticket = "" },\n    } },\n};\n';
+  const changelog = 'pub const CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.900", .summary = "Old", .ticket = "", .items = &.{\n        .{ .text = "Opening browser\\u{2026}", .ticket = "" },\n        .{ .text = "Fix IGSH-123.", .ticket = "" },\n        .{ .text = "Fix src/main.zig.", .ticket = "" },\n        .{ .text = "Fix #12.", .ticket = "" },\n    } },\n};\n';
   const stamp = stampTree({
-    'src/main.zig': 'pub const APP_VERSION = "1.0.0";\n',
+    'src/main.zig': 'pub const APP_VERSION = "0.28.900";\n',
     'src/changelog.zig': changelog,
     'changelog.d/DEMO-1-notes.md': 'Tabs open sooner.\n',
   });
-  assert.deepEqual(releaseNotes(stamp.files['src/changelog.zig'], 'v1.0.1'), {
-    version: '1.0.1', releases: [
-      { version: '1.0.1', changes: ['Tabs open sooner.'] },
-      { version: '1.0.0', changes: ['Opening browser…'] },
+  assert.deepEqual(releaseNotes(stamp.files['src/changelog.zig'], 'v0.28.901'), {
+    version: '0.28.901', releases: [
+      { version: '0.28.901', changes: ['Tabs open sooner.'] },
+      { version: '0.28.900', changes: ['Opening browser…'] },
     ],
   });
 });
@@ -151,13 +151,13 @@ test('safe-updates journey requires painted multi-version notes and screenshot f
 test('IGSH-1090 publication removes engineering notes and filler, not real product lines', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const source = `pub const CHANGELOG = [_]ChangelogEntry{
-    .{ .ver = "1.1.0", .items = &.{
+    .{ .ver = "0.28.901", .items = &.{
         .{ .text = "Behind the scenes fixes.", .ticket = "" },
         .{ .text = "Chat speed checks now ignore shared-machine pauses.", .ticket = "" },
         .{ .text = "Dictation shortcuts keep working when keys queue up.", .ticket = "" },
     } },
 };`;
-  assert.deepEqual(releaseNotes(source, 'v1.1.0').releases[0].changes, ['Dictation shortcuts keep working when keys queue up.']);
+  assert.deepEqual(releaseNotes(source, 'v0.28.901').releases[0].changes, ['Dictation shortcuts keep working when keys queue up.']);
   assert.doesNotMatch(read('tools/version-stamp.mjs'), /IGSH-834-maintenance|export const behindTheScenes/);
 });
 
@@ -279,4 +279,62 @@ test('IGSH-1118 native card wraps long real notes, scrolls internally, and rejec
   assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-scrolled:/);
   assert.match(green.stdout, /WRAPPED_CARD_IMAGE=wrapped-collapsed:/);
   console.log(green.stdout);
+});
+
+test('IGSH-1243 builds one linked line for each commit ticket', async () => {
+  const { buildChangelog } = await import('./version-stamp.mjs');
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const files = {
+    'src/main.zig': 'pub const APP_VERSION = "0.28.883";\n',
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
+    'changelog.d/IGSH-2-chat.md': 'Chats open sooner.\nDrafts stay visible.\n',
+  };
+  const commits = [{ sha: 'aaa', subject: 'IGSH-2: Improve chats' }, { sha: 'bbb', subject: 'IGSH-3: Repair checks' }, { sha: 'ccc', subject: 'IGSH-2: Follow up' }];
+  const generated = buildChangelog(files, 'v0.28.1100', [], commits);
+  const latest = releaseNotes(generated, 'v0.28.1100').releases[0];
+  assert.deepEqual(latest.changes, ['Chats open sooner. Drafts stay visible.', 'Checks and fixes, no visible change']);
+  assert.deepEqual(latest.tickets, ['https://app.hypertask.ai/detail/project-2060/2', 'https://app.hypertask.ai/detail/project-2060/3']);
+  assert.match(generated, /\.text = "Chats open sooner\. Drafts stay visible\.", \.ticket = "IGSH-2"/);
+  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [{ sha: 'bad123', subject: 'Repair checks' }]), /bad123.*leading ticket ID/);
+  assert.throws(() => buildChangelog(files, 'v0.28.1100', [], []), /fragment has no matching commit ticket/);
+  const noFragments = { ...files };
+  delete noFragments['changelog.d/IGSH-2-chat.md'];
+  assert.throws(() => buildChangelog(noFragments, 'v0.28.1100'), /no ticketed release lines/);
+  const tooling = releaseNotes(buildChangelog(noFragments, 'v0.28.1100', [], [commits[1]]), 'v0.28.1100').releases[0];
+  assert.deepEqual(tooling.changes, ['Checks and fixes, no visible change']);
+  assert.deepEqual(tooling.tickets, ['https://app.hypertask.ai/detail/project-2060/3']);
+  assert.throws(() => releaseNotes(generated.replace('.ticket = "IGSH-2"', '.ticket = ""'), 'v0.28.1100'), /needs plain ticketed lines/);
+});
+
+test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => {
+  const { execFileSync } = require('node:child_process');
+  const { buildChangelog } = await import('./version-stamp.mjs');
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  const tags = [1027, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1036, 1037, 1038, 1039, 1040, 1042, 1043, 1044, 1045, 1046, 1047, 1048].map(n => `v0.28.${n}`);
+  const source = {
+    'src/main.zig': 'pub const APP_VERSION = "0.28.883";\n',
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
+  };
+  const history = [{ tag: 'v0.28.1026', files: source }];
+  for (const tag of tags) {
+    const names = git('diff', '--name-only', '--diff-filter=AM', 'v0.28.1026', tag, '--', 'changelog.d/').split('\n').filter(Boolean);
+    const fragments = Object.fromEntries(names.map(name => [name, git('show', `${tag}:${name}`)]));
+    history.push({ tag, files: { ...source, ...fragments }, sha: git('rev-parse', `${tag}^{commit}`) });
+  }
+  const files = { ...history.at(-1).files, 'changelog.d/IGSH-1243-notes.md': 'Changelog ticket links now open their tickets.\n' };
+  const generated = buildChangelog(files, 'v0.28.1100', history, [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }]);
+  const notes = releaseNotes(generated, 'v0.28.1100');
+  for (const tag of tags) {
+    const release = notes.releases.find(item => item.version === tag.slice(1));
+    assert.ok(release?.changes.length, tag);
+    assert.equal(release.changes.length, release.tickets.length, tag);
+    assert.ok(release.tickets.every(ticket => /^https:\/\/app\.hypertask\.ai\/detail\/project-2060\/\d+$/.test(ticket)), tag);
+  }
+  assert.equal(notes.releases.some(item => item.version === '0.28.1041'), false);
+  const release1038 = notes.releases.find(item => item.version === '0.28.1038');
+  const actualFragment = git('show', 'v0.28.1038:changelog.d/IGSH-1238-busy-queue.md').split('\n').join(' ');
+  const fragmentIndex = release1038.tickets.indexOf('https://app.hypertask.ai/detail/project-2060/1238');
+  assert.equal(release1038.changes[fragmentIndex], actualFragment);
+  assert.throws(() => buildChangelog(files, 'v0.28.1100', history.map(item => item.tag === 'v0.28.1048' ? { ...item, sha: 'wrong' } : item), [{ sha: 'new', subject: 'IGSH-1243: Explain releases' }]), /reviewed release commit does not match/);
 });

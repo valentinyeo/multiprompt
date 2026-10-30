@@ -2698,7 +2698,22 @@ pub fn moveChangelogSelection(action: WPARAM) void {
     clampChangelogState(layout.view_h, @max(0, changelogTotalContentHeight(summary_w) - layout.view_h), summary_w);
 }
 
-pub fn openAsciiUrlInDefaultBrowser(url: []const u8) void {
+fn changelogTicketUrl(ticket: []const u8, buf: []u8) []const u8 {
+    if (!std.mem.startsWith(u8, ticket, "IGSH-") or ticket.len == 5) return ticket;
+    for (ticket[5..]) |c| if (c < '0' or c > '9') return ticket;
+    return std.fmt.bufPrint(buf, "https://app.hypertask.ai/detail/project-2060/{s}", .{ticket[5..]}) catch "";
+}
+
+test "changelog ticket IDs resolve without changing existing links" {
+    var buf: [512]u8 = undefined;
+    try std.testing.expectEqualStrings("https://app.hypertask.ai/detail/project-2060/1243", changelogTicketUrl("IGSH-1243", &buf));
+    try std.testing.expectEqualStrings("https://example.com/ticket", changelogTicketUrl("https://example.com/ticket", &buf));
+    try std.testing.expectEqualStrings("IGSH-x", changelogTicketUrl("IGSH-x", &buf));
+}
+
+pub fn openAsciiUrlInDefaultBrowser(ticket: []const u8) void {
+    var buf: [512]u8 = undefined;
+    const url = changelogTicketUrl(ticket, &buf);
     if (url.len == 0) return;
     var wbuf: [512]u16 = undefined;
     const n = @min(url.len, wbuf.len - 1);
