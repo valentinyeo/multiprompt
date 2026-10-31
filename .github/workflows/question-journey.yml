@@ -1,0 +1,16 @@
+name: Structured question journey
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '44 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  questions:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-options
+      tag: ${{ github.event.client_payload.tag || '' }}

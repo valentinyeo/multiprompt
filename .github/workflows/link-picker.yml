@@ -1,0 +1,20 @@
+name: Link picker
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional published release tag
+        type: string
+  schedule:
+    - cron: '20 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  link-picker:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: link-picker
+      tag: ${{ inputs.tag || '' }}

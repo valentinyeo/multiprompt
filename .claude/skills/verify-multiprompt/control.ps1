@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('appearance', 'sessions', 'session-restore', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'chat-tables', 'chat-code-font', 'chat-composer-text', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -2118,10 +2118,6 @@ function Assert-ChatTyping([string]$Text, [string]$Step, [scriptblock]$TypingAct
 }
 
 try {
-    if ($Feature -eq 'title-bar') {
-        Add-Type -ReferencedAssemblies System, System.Core, System.Drawing -Path (Join-Path $PSScriptRoot 'title-bar-native.cs')
-        [CaptionProof]::SetDpi([int]$env:CAPTION_DPI)
-    }
     if ($Feature -eq 'chat-composer-text') {
         $originalFontSmoothing = [VerifyNative]::FontSmoothing()
         [VerifyNative]::FontSmoothing($false)
@@ -2135,10 +2131,6 @@ try {
     if ($Feature -in @('browser-switch-speed', 'browser-own-profile')) {
         $chrome = & node (Join-Path $PSScriptRoot 'browser-switch-chrome.mjs')
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chrome)) { throw 'Pinned Chrome for Testing executable unavailable' }
-    }
-    if ($Feature -eq 'title-bar') {
-        $chrome = & node (Join-Path $PSScriptRoot 'browser-switch-chrome.mjs')
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chrome)) { throw 'Pinned caption browser executable unavailable' }
     }
     foreach ($directory in @('roaming', 'local', 'profile')) { New-Item -ItemType Directory -Force (Join-Path $scratch $directory) | Out-Null }
     $env:APPDATA = Join-Path $scratch 'roaming'
@@ -2176,16 +2168,6 @@ try {
         [IO.File]::WriteAllText((Join-Path $config 'chrome-exe.txt'), $chrome)
         [IO.File]::WriteAllText((Join-Path $config 'browser-engine.txt'), 'chrome')
         Save-Json @{ extensionId = $extensionId; version = $manifest.version; installed = $true; executable = $chrome; configuration = 'chrome-exe.txt + browser-engine.txt' } 'switch-extension.json'
-    }
-    if ($Feature -eq 'title-bar') {
-        $edge = $chrome
-        $profile = Join-Path $env:LOCALAPPDATA 'ZigShell/ChromeUserData'
-        $config = Join-Path $env:APPDATA 'ZigShell'
-        New-Item -ItemType Directory -Force $config, (Join-Path $profile 'Default') | Out-Null
-        [IO.File]::WriteAllText((Join-Path $config 'chrome-exe.txt'), $chrome)
-        [IO.File]::WriteAllText((Join-Path $config 'browser-engine.txt'), 'chrome')
-        $scheme = if ($env:CAPTION_BROWSER_THEME -eq 'light') { 1 } else { 2 }
-        @{ browser = @{ theme = @{ color_scheme = $scheme } } } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 (Join-Path $profile 'Default/Preferences')
     }
     $paletteUsageFixture = Join-Path $PSScriptRoot '../../../tools/fixtures/IGSH-612/palette-usage.tsv'
     if ($Feature -eq 'palette-order') {
@@ -2237,19 +2219,6 @@ try {
         [void][VerifyNative]::ShowWindow($warmup.MainWindowHandle, 0)
         Save-Json @{ pid = $warmup.Id; ready = $true; timeoutSeconds = 60 } 'browser-setup.json'
     }
-    if ($Feature -eq 'title-bar') {
-        $warmupJob = New-Object VerifyJob
-        $arguments = '--user-data-dir="' + $profile + '" --profile-directory=Default --no-first-run --no-default-browser-check --disable-notifications --disable-background-mode --app="data:text/html,<title>Multiprompt caption browser ready</title>"'
-        if ($env:CAPTION_BROWSER_THEME -eq 'dark') { $arguments += ' --force-dark-mode' }
-        $warmup = $warmupJob.Start($chrome, $scratch, (Join-Path $Evidence 'browser-setup.stdout.log'), (Join-Path $Evidence 'browser-setup.stderr.log'), $arguments)
-        Wait-Until {
-            $warmup.Refresh()
-            if ($warmup.HasExited) { throw 'Caption browser setup exited before readiness' }
-            $warmup.MainWindowHandle -ne [IntPtr]::Zero -and $warmup.MainWindowTitle -match '^Multiprompt caption browser ready'
-        } 'isolated browser rendered the requested caption theme' 60
-        [void][VerifyNative]::ShowWindow($warmup.MainWindowHandle, 0)
-        Save-Json @{ pid = $warmup.Id; executable = $chrome; browserTheme = $env:CAPTION_BROWSER_THEME; dpi = [int]$env:CAPTION_DPI } 'caption-browser-setup.json'
-    }
     if ($Feature -eq 'appearance') {
         Doctor
         $maximized = [VerifyNative]::IsZoomed($script:window)
@@ -2266,9 +2235,6 @@ try {
     Record 'Launch complete; read-only Doctor passed'
     Snapshot 'before'
     switch ($Feature) {
-        'title-bar' {
-            . (Join-Path $PSScriptRoot 'title-bar.ps1')
-        }
         'palette-order' {
             $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
             $usage = @(Get-Content $paletteUsageFixture | Where-Object { $_ } | ForEach-Object { $fields = $_ -split "`t"; [pscustomobject]@{ id = [string]$fields[0]; count = [int]$fields[1]; last = [uint64]$fields[2] } })
@@ -2545,48 +2511,6 @@ try {
                 }
             }
             if ($result.checks.Count -ne 3) { throw 'IGSH-812 requires all three dictation stop cases' }
-            $draft = [VerifyNative]::EditText($handle)
-            Press @(0x11, 0x44) 'Ctrl+D: start dictation over the existing draft'
-            $iteration++
-            Wait-Until {
-                @(Get-Content $auditPath | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
-            } 'IGSH-846 cancellation recording reached the real capture worker' -Seconds 2 -PollMilliseconds 20
-            Assert-DictationMic $mic $true 'escape-listening'
-            Type-Text ' keep this'
-            $draft += ' keep this'
-            Wait-Until { [VerifyNative]::EditText($handle) -ceq $draft } 'IGSH-846 draft includes typing during recording'
-            Press @(0x1B, 0x1B) 'Escape with a repeated keydown: discard the recording once'
-            Wait-Until {
-                $audit = @(Get-Content $auditPath)
-                @($audit | Where-Object { $_ -match '\tcancel\t0$' }).Count -eq 1 -and
-                    @($audit | Where-Object { $_ -match '\taudio-bytes\t89160$' }).Count -eq $iteration
-            } 'IGSH-846 cancellation stopped the capture worker' -Seconds 2 -PollMilliseconds 20
-            Assert-DictationMic $mic $false 'escape-cancelled'
-            if ([VerifyNative]::EditText($handle) -cne $draft) { throw 'IGSH-846 Escape changed the existing draft' }
-            Snapshot 'escape-cancelled'
-            $result.checks += @{ name = 'dictation-escape'; passed = $true; WM_GETTEXT = $draft; idleMicPixels = $true }
-            $delivered = $iteration - 1
-            Press @(0x11, 0x44) 'Ctrl+D: restart dictation after cancellation'
-            $iteration++
-            Wait-Until {
-                @(Get-Content $auditPath | Where-Object { $_ -match '\tfixture-audio-bytes\t89160$' }).Count -eq $iteration
-            } 'IGSH-846 a new recording starts after cancellation' -Seconds 2 -PollMilliseconds 20
-            Assert-DictationMic $mic $true 'escape-restarted'
-            if ([VerifyNative]::EditText($handle) -cne $draft) { throw 'IGSH-846 cancelled transcript arrived late' }
-            $audit = @(Get-Content $auditPath)
-            foreach ($stage in @('fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
-                if (@($audit | Where-Object { $_ -match ('\t' + $stage + '$') }).Count -ne $delivered) { throw "IGSH-846 cancelled recording reached transcription or delivery: $stage" }
-            }
-            Press @(0x0D) 'Enter: transcribe only the restarted recording'
-            $expected = $draft + ' Go forward ten meters.'
-            Wait-Until { [VerifyNative]::EditText($handle) -ceq $expected } 'IGSH-846 restarted recording delivers exactly once' -Seconds 1 -PollMilliseconds 10
-            Assert-DictationMic $mic $false 'escape-restart-stopped'
-            $audit = @(Get-Content $auditPath)
-            foreach ($stage in @('fixture-response-bytes\t101', 'http-status\t200', 'target-chat-composer\t22')) {
-                if (@($audit | Where-Object { $_ -match ('\t' + $stage + '$') }).Count -ne ($delivered + 1)) { throw "IGSH-846 restarted recording did not deliver exactly once: $stage" }
-            }
-            Save-Json @{ preservedDraft = $draft; WM_GETTEXT = [VerifyNative]::EditText($handle); audit = $audit } 'escape-restart.text.json'
-            $result.checks += @{ name = 'dictation-escape-restart'; passed = $true; WM_GETTEXT = [VerifyNative]::EditText($handle); idleMicPixels = $true }
             Snapshot 'after'
         }
         'chat-tables' {
@@ -4943,9 +4867,6 @@ try {
     if ($null -ne $process) { $process.Dispose() }
     foreach ($name in $original.Keys) { [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process') }
     if ($null -ne $originalFontSmoothing) { [VerifyNative]::FontSmoothing([bool]$originalFontSmoothing) }
-    if ($Feature -eq 'title-bar' -and ('CaptionProof' -as [type])) {
-        try { [CaptionProof]::RestoreDpi() } catch { $result.status = 'failed'; $result.dpiCleanupError = $_.Exception.Message }
-    }
     Save-Json $result 'result.json'
 }
 if ($result.status -ne 'passed') { throw ('Verification failed: ' + ($result | ConvertTo-Json -Depth 8 -Compress)) }

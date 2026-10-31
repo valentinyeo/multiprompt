@@ -1621,8 +1621,6 @@ pub var g_shot_paste_count: usize = 0;
 pub var g_dictation_recording = std.atomic.Value(bool).init(false);
 pub var g_dictation_running = std.atomic.Value(bool).init(false);
 pub var g_dictation_enter_stop_queued = std.atomic.Value(bool).init(false);
-pub var g_dictation_cancelled = std.atomic.Value(bool).init(false);
-pub var g_dictation_escape_held: bool = false;
 pub var g_dictation_mutex: SpinMutex = .{};
 pub var g_dictation_transcript: [8192]u16 = std.mem.zeroes([8192]u16);
 pub var g_dictation_transcript_len: usize = 0;
@@ -2518,10 +2516,6 @@ pub const ChatHistoryEntry = struct {
     key: chat_transcript.Identity,
     generation: u64 = 0,
     history: chat_history.History = .{},
-    backfill: chat_history.Backfill = .{},
-    staged: bool = false,
-    stalled: bool = false,
-    show_older: bool = false,
     tables: chat_markdown.TableCache = .{},
     pending: bool = false,
     retired: bool = false,
@@ -2549,6 +2543,7 @@ pub var g_chat_histories: std.ArrayList(*ChatHistoryEntry) = .empty;
 pub var g_chat_history_generation: u64 = 0;
 pub var g_chat_cache_generation: u64 = 0;
 pub var g_chat_fetch_mutex: HANDLE = null;
+pub var g_chat_priority_reservation: HANDLE = null;
 pub var g_chat_fetch_busy = false;
 pub var g_chat_cache_pruned: u64 = 0;
 
