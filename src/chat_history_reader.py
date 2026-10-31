@@ -3014,7 +3014,7 @@ def host_status(provider, sid):
 
 
 def host_cli(argv):
-    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover"):
+    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt"):
         return dict(status="error", reason="invalid_command")
     command, rest = argv[0], argv[1:]
     if len(rest) < 2:
@@ -3073,11 +3073,76 @@ def host_cli(argv):
                 config["permission_mode"] = mode
             host_write(paths["config"], config)
         return host_start(provider, sid)
+    if command == "adopt":
+        return host_adopt(provider, sid, tmux, folder, mode)
     if command == "stop":
         return host_stop(provider, sid)
     if command == "handover":
         return host_handover(provider, sid)
     return host_status(provider, sid)
+
+
+HOST_ADOPT_PANE_TIMEOUT = 20
+HOST_ADOPT_PROMPT = re.compile(r"[\$#] ?$")
+
+
+def host_pane_prompt(tmux):
+    try:
+        shown = subprocess.run(["tmux", "capture-pane", "-p", "-t", "=" + tmux + ":"],
+                               capture_output=True, text=True, timeout=5, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    lines = [line.rstrip() for line in ANSI.sub("", shown).splitlines() if line.strip()]
+    if not lines:
+        return None
+    return lines[-1] if HOST_ADOPT_PROMPT.search(lines[-1]) else None
+
+
+def host_pane_release(tmux, sid):
+    if not tmux:
+        return dict(status="refused", reason="no_chat")
+    bound = resolve_tmux_agent("claude", tmux, require_bound=True)
+    if not bound or bound[0] != sid:
+        return dict(status="already", reason="no_pane_agent")
+    try:
+        subprocess.run(["tmux", "send-keys", "-t", "=" + tmux + ":", "-l", "--", "/exit"],
+                       capture_output=True, timeout=5, check=True)
+        subprocess.run(["tmux", "send-keys", "-t", "=" + tmux + ":", "Enter"],
+                       capture_output=True, timeout=5, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return dict(status="error", reason="pane_input_failed")
+    deadline = time.time() + HOST_ADOPT_PANE_TIMEOUT
+    while time.time() < deadline:
+        current = resolve_tmux_agent("claude", tmux, require_bound=True)
+        if not current or current[0] != sid:
+            break
+        time.sleep(0.2)
+    else:
+        return dict(status="error", reason="pane_agent_busy")
+    deadline = time.time() + HOST_ADOPT_PANE_TIMEOUT
+    while time.time() < deadline:
+        if host_pane_prompt(tmux) is not None:
+            return dict(status="released")
+        time.sleep(0.2)
+    return dict(status="error", reason="pane_prompt_timeout")
+
+
+def host_adopt(provider, sid, tmux, cwd=None, mode=None):
+    if not host_identity(provider, sid):
+        return dict(status="refused", reason="unsupported_provider")
+    if tmux is not None and TMUX_NAME.fullmatch(tmux) is None:
+        return dict(status="refused", reason="invalid_chat")
+    if host_enabled(provider, sid) and host_owned(provider, sid):
+        return dict(status="already", reason="host_running")
+    released = host_pane_release(tmux, sid)
+    if released.get("status") != "released" and released.get("status") != "already":
+        return released
+    settings = dict(status="ok", released=released.get("status"))
+    host_cli(["enable", provider, sid] + (["--tmux", tmux] if tmux else []) + (["--cwd", cwd] if cwd else []) + (["--permission-mode", mode] if mode else []))
+    started = host_start(provider, sid)
+    settings["start"] = started.get("status")
+    settings["reason"] = started.get("reason")
+    return settings
 
 
 def host_dispatch_switch(provider, sid):
@@ -4290,6 +4355,10 @@ def serve(source):
                 raise ValueError("invalid request id")
             if query.get("op") == "engine_info":
                 print(json.dumps(dict(id=rid, engine_info=globals().get("ENGINE_INFO"), message_protocols=[1]), separators=(",", ":")), flush=True)
+                continue
+            if query.get("op") == "host_adopt":
+                print(json.dumps(dict(id=rid, host_adopt=host_adopt(
+                    query.get("provider"), query.get("sid"), query.get("tmux"), query.get("cwd"))), separators=(",", ":")), flush=True)
                 continue
             if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
                 result = message_store_request(query)

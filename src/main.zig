@@ -734,6 +734,7 @@ const SEARCH_WORKSPACE_OFFSET = @import("app_state.zig").SEARCH_WORKSPACE_OFFSET
 const SEARCH_RENAMEWIN_OFFSET = @import("app_state.zig").SEARCH_RENAMEWIN_OFFSET;
 const SEARCH_TABCTX_BACK = @import("app_state.zig").SEARCH_TABCTX_BACK;
 const SEARCH_TABCTX_START_SESSION = @import("app_state.zig").SEARCH_TABCTX_START_SESSION;
+const SEARCH_TABCTX_ADOPT_HOST = @import("app_state.zig").SEARCH_TABCTX_ADOPT_HOST;
 const SEARCH_TABCTX_RECONNECT = @import("app_state.zig").SEARCH_TABCTX_RECONNECT;
 const SEARCH_TABCTX_MUTE = @import("app_state.zig").SEARCH_TABCTX_MUTE;
 const SEARCH_TABCTX_KEEPALIVE = @import("app_state.zig").SEARCH_TABCTX_KEEPALIVE;
@@ -6482,6 +6483,25 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_search_scroll = 0;
                     updateSearchResults();
                     _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_TABCTX_ADOPT_HOST) {
+                    const adopt_tab = findShellById(app_state.g_tabctx_sid);
+                    app_state.g_search_active = false;
+                    app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
+                    app_state.g_tabctx_sid = 0;
+                    app_state.g_shell_focused = true;
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 0;
+                    app_state.g_search_scroll = 0;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    if (adopt_tab) |ti| {
+                        if (!@import("command_palette.zig").startAdoptHost(ti)) showHeaderNoticeAscii("Move chat: this session cannot move yet", 4000, true);
+                    }
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
                 }
                 if (target == SEARCH_TABCTX_GROUP_NEW_TAB_IN) {

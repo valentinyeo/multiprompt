@@ -4327,6 +4327,65 @@ class AgentHostTest(unittest.TestCase):
         self.assertEqual(reader.host_cli(['status', 'codex', self.sid])['status'], 'refused')
 
 
+class AdoptHostTest(unittest.TestCase):
+    sid = 'adopt-host-session'
+    tmux = 'adopt-fixture-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        self.transcript = self.home / 'adopt.jsonl'
+        self.transcript.write_text('')
+        self.commands = []
+        self.agent_present = [True]
+
+        def resolve(agent, name, pid=None, require_bound=False):
+            return (self.sid, self.transcript) if self.agent_present[0] else None
+
+        def run(command, **kwargs):
+            self.commands.append(command)
+            if command[:2] == ['tmux', 'capture-pane']:
+                return types.SimpleNamespace(stdout='valentin@host:~/projects$ ', returncode=0)
+            if command[:2] == ['tmux', 'send-keys'] and command[-1] == 'Enter':
+                self.agent_present[0] = False
+            return types.SimpleNamespace(stdout='', returncode=0)
+
+        patch.object(reader, 'resolve_tmux_agent', side_effect=resolve).start()
+        patch.object(reader.subprocess, 'run', side_effect=run).start()
+
+    def test_adopt_exits_the_pane_agent_and_starts_the_host(self):
+        release = reader.host_pane_release(self.tmux, self.sid)
+        self.assertEqual(release['status'], 'released')
+        typed = [c for c in self.commands if c[:2] == ['tmux', 'send-keys']]
+        self.assertEqual(typed[0][-1], '/exit')
+
+    def test_adopt_is_idempotent_when_no_pane_agent_runs(self):
+        self.agent_present[0] = False
+        self.assertEqual(reader.host_pane_release(self.tmux, self.sid)['status'], 'already')
+
+    def test_adopt_sends_nothing_to_a_foreign_pane(self):
+        patch.object(reader, 'resolve_tmux_agent', return_value=('other-session', self.transcript)).start()
+        self.assertEqual(reader.host_pane_release(self.tmux, self.sid)['status'], 'already')
+        self.assertEqual([c for c in self.commands if c[:2] == ['tmux', 'send-keys']], [])
+
+    def test_the_reader_channel_answers_a_host_adopt_request(self):
+        incoming = types.SimpleNamespace(buffer=io.BytesIO((json.dumps(dict(id=5, op='host_adopt', provider='claude', sid=self.sid, tmux=self.tmux)) + '\n').encode()), fileno=lambda: 55)
+        output = io.StringIO()
+        with patch.object(reader, 'host_adopt', return_value=dict(status='ok', start='started')) as adopt, \
+                patch.object(reader.sys, 'stdin', incoming), patch.object(reader.sys, 'stdout', output):
+            reader.serve(reader.READER_SOURCE)
+        frame = json.loads(output.getvalue().splitlines()[0])
+        self.assertEqual(frame['id'], 5)
+        self.assertEqual(frame['host_adopt']['start'], 'started')
+        adopt.assert_called_once_with('claude', self.sid, self.tmux, None)
+
+    def test_adopt_requires_a_body(self):
+        self.assertEqual(reader.host_cli(['adopt', 'claude', self.sid, '--tmux', 'bad name'])['reason'], 'invalid_chat')
+
+
 class EmptyHostedChatTest(unittest.TestCase):
     sid = 'empty-hosted-session'
     tmux = 'empty-hosted-chat'

@@ -294,6 +294,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+K UI Size", .b = "App/sidebar only, layered over native monitor DPI", .header = false },
     .{ .a = "Ctrl+Shift+R", .b = "Reattach active SSH/tmux tab", .header = false },
     .{ .a = "Ctrl+K \u{2192} Reconnect", .b = "Restart an ended server session with the same name (also in tab actions)", .header = false },
+    .{ .a = "Ctrl+K -> Move chat to new mode", .b = "Hand an idle old-style Claude tab to the app-owned chat, keeping its session id and history", .header = false },
     .{ .a = "Ctrl+K -> New chat in this group", .b = "Open a Claude chat in the tab's group straight away", .header = false },
     .{ .a = "Ctrl+K -> All Sessions", .b = "Open session overview (w = Waiting, a = Archived, u = unattached)", .header = false },
     .{ .a = "Ctrl+F in All Sessions", .b = "Reduce the list to matching sessions", .header = false },

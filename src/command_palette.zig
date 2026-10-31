@@ -246,6 +246,7 @@ const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_AL
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
 const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
 const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
+const SEARCH_TABCTX_ADOPT_HOST = @import("app_state.zig").SEARCH_TABCTX_ADOPT_HOST;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
 const SEARCH_MOBILE_OFFSET = @import("app_state.zig").SEARCH_MOBILE_OFFSET;
@@ -451,6 +452,18 @@ fn paletteUsagePath(buf: *[512]u8) ?[]const u8 {
 
 const ShellRow = struct { target: usize, keywords: []const u8 };
 
+const AdoptHostJob = struct {
+    id: u32 = 0,
+    host: u8 = 0,
+    sid: [36]u8 = std.mem.zeroes([36]u8),
+    sid_len: u8 = 0,
+    tmux: [64]u8 = std.mem.zeroes([64]u8),
+    tmux_len: u8 = 0,
+    cwd: [256]u8 = std.mem.zeroes([256]u8),
+    cwd_len: u16 = 0,
+    finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
 const SHELL_ROWS = [_]ShellRow{
     .{ .target = SEARCH_NEW_OFFSET + 0, .keywords = "command prompt cmd shell new cmd shell" },
     .{ .target = SEARCH_NEW_OFFSET + 5, .keywords = "powershell pwsh shell new powershell" },
@@ -628,6 +641,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET or target == SEARCH_TABCTX_CLOSE_DISCONNECTED) return "close all disconnected sessions";
     if (target == SEARCH_TABCTX_CHAT_ALLOW) return "chat view allow";
     if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
+    if (target == SEARCH_TABCTX_ADOPT_HOST) return "Move chat to new mode";
     if (target == SEARCH_TABCTX_RECONNECT) return "Reconnect restart session reattach tab";
     if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
     if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
@@ -646,6 +660,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
             SEARCH_TABCTX_WSMOVE => "move to workspace",
             SEARCH_TABCTX_GROUP_NEW => "add to new group",
             SEARCH_TABCTX_GROUP_REMOVE => "remove from group",
+            SEARCH_TABCTX_ADOPT_HOST => "move chat to new mode",
             SEARCH_TABCTX_GROUP_NEW_TAB_IN => "new chat in this group",
             SEARCH_TABCTX_MOVE_NEW_WS => "move to new workspace",
             SEARCH_TABCTX_CLEAR_SEL => "clear tab selection",
@@ -1833,6 +1848,67 @@ test "IGSH-1266 a new Claude session spawns exactly the host launch command" {
     try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
 }
 
+fn adoptHostThread(job: *AdoptHostJob) void {
+    defer job.finished.store(true, .release);
+    const a = std.heap.page_allocator;
+    defer a.destroy(job);
+    var buf: [512]u8 = undefined;
+    const request = adoptHostRequest(job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len], &buf) orelse return;
+    var response: std.ArrayList(u8) = .empty;
+    defer response.deinit(a);
+    var written: ?*bool = null;
+    _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, &written);
+    if (std.mem.indexOf(u8, response.items, "\"start\":\"started\"") != null or std.mem.indexOf(u8, response.items, "\"status\":\"already\"") != null) {
+        if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOGGLE, 0, 0);
+    } else {
+        if (app_state.g_main_hwnd != null) showHeaderNoticeAscii("Move chat: the session did not move, see the tab", 5000, true);
+    }
+}
+
+pub fn startAdoptHost(tab: usize) bool {
+    if (tab >= app_state.shell_count) return false;
+    const shell = &app_state.shells[tab];
+    const job = std.heap.page_allocator.create(AdoptHostJob) catch return false;
+    var cwd: [256]u8 = undefined;
+    var cwd_len: usize = 0;
+    for (shell.cached_cwd[0..shell.cached_cwd_len], 0..) |c, i| {
+        if (i >= cwd.len) break;
+        cwd[i] = c;
+        cwd_len = i + 1;
+    }
+    job.* = .{ .id = shell.shell_id, .host = shell.tmux_host, .sid_len = @intCast(@min(shell.claude_sid_len, 36)), .tmux_len = @intCast(@min(shell.tmux_session_len, 64)), .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
+    @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
+    @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+    @memcpy(job.cwd[0..job.cwd_len], cwd[0..job.cwd_len]);
+    const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, adoptHostThread, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    thread.detach();
+    return true;
+}
+
+pub fn canAdoptHostTab(ai_agent: u8, claude_sid_len: usize, tmux_len: usize, working: bool) bool {
+    return ai_agent == 1 and claude_sid_len > 0 and tmux_len > 0 and !working;
+}
+
+pub fn adoptHostRequest(id: u32, host: u8, sid: []const u8, tmux: []const u8, cwd: []const u8, out: []u8) ?[]const u8 {
+    if (sid.len == 0 or sid.len > 80 or tmux.len == 0 or tmux.len > 80) return null;
+    return std.fmt.bufPrint(out, "{{\"op\":\"host_adopt\",\"id\":{d},\"host\":{d},\"provider\":\"claude\",\"sid\":\"{s}\",\"tmux\":\"{s}\",\"cwd\":\"{s}\"}}", .{ id, host, sid, tmux, cwd }) catch null;
+}
+
+test "IGSH-1266 moving a chat to the new mode needs an idle old-style Claude tab" {
+    try std.testing.expect(canAdoptHostTab(1, 36, 12, false));
+    try std.testing.expect(!canAdoptHostTab(1, 36, 12, true));
+    try std.testing.expect(!canAdoptHostTab(2, 36, 12, false));
+    try std.testing.expect(!canAdoptHostTab(1, 0, 12, false));
+    try std.testing.expect(!canAdoptHostTab(1, 36, 0, false));
+    var buf: [512]u8 = undefined;
+    const request = adoptHostRequest(7, 0, "ffffffff-ffff-4fff-bfff-ffffffffffff", "term-abc", "/home/x/proj", &buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("{\"op\":\"host_adopt\",\"id\":7,\"host\":0,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"term-abc\",\"cwd\":\"/home/x/proj\"}", request);
+    try std.testing.expect(adoptHostRequest(7, 0, "", "term-abc", "/home/x/proj", &buf) == null);
+}
+
 pub fn newTabOpensChatView(program: []const u8) bool {
     return @import("agent_host.zig").eligible(program);
 }
@@ -2612,6 +2688,16 @@ pub fn updateSearchResults() void {
             }
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len) {
+            if (tc_idx) |ti| {
+                const tab = &app_state.shells[ti];
+                if (canAdoptHostTab(tab.ai_agent, tab.claude_sid_len, tab.tmux_session_len, app_state.g_chat_screen_working) and
+                    app_state.g_search_result_count < app_state.g_search_results.len and
+                    labelsMatchQuery(&.{ "Move chat to new mode", "adopt", "convert", "transition" }, app_state.g_search_buf[0..app_state.g_search_len]))
+                {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_ADOPT_HOST;
+                    app_state.g_search_result_count += 1;
+                }
+            }
             const label = if (tc_idx) |ti| (if (app_state.shells[ti].favorite) "Unfavorite" else "Favorite") else "Favorite";
             if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ label, "favorite", "star" }, app_state.g_search_buf[0..app_state.g_search_len])) {
                 app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_FAVORITE;
