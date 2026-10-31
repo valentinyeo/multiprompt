@@ -29,8 +29,8 @@ test('IGSH-1266 the host start command starts the host and never types into a pa
   const host = read('src/agent_host.zig');
   const start = host.indexOf('pub fn launchCommand(');
   const body = host.slice(start, host.indexOf('test "IGSH-1266 session ids'));
-  assert.match(body, /python3 \{s\} host enable claude \{s\} --tmux \{s\}/);
-  assert.match(body, /python3 \{s\} host start claude \{s\} --tmux \{s\}/);
+  assert.match(body, /python3 \{s\} host enable claude \{s\} --tmux \{s\} --cwd \{s\}/);
+  assert.match(body, /python3 \{s\} host start claude \{s\} --tmux \{s\} --cwd \{s\}/);
   assert.match(body, /tmux new-session -d -s \{s\} -c \{s\}/);
   assert.match(body, /tmux attach -t \{s\}/);
   assert.ok(!body.includes('send-keys'), 'the Claude start must not type into a pane');

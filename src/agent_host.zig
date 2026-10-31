@@ -61,7 +61,7 @@ fn safePath(value: []const u8) bool {
 
 pub fn launchCommand(out: []u8, session: []const u8, cwd: []const u8, sid: []const u8) ?[]const u8 {
     if (!safeName(session) or !safePath(cwd) or !safeSessionId(sid)) return null;
-    return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c {s} 2>/dev/null; python3 {s} host enable claude {s} --tmux {s} >/dev/null 2>&1; python3 {s} host start claude {s} --tmux {s} >/dev/null 2>&1; tmux attach -t {s}", .{ session, cwd, READER, sid, session, READER, sid, session, session }) catch null;
+    return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c {s} 2>/dev/null; python3 {s} host enable claude {s} --tmux {s} --cwd {s} >/dev/null 2>&1; python3 {s} host start claude {s} --tmux {s} --cwd {s} >/dev/null 2>&1; tmux attach -t {s}", .{ session, cwd, READER, sid, session, cwd, READER, sid, session, cwd, session }) catch null;
 }
 
 test "IGSH-1266 session ids are version four uuids" {
@@ -85,8 +85,8 @@ test "IGSH-1266 host start types nothing into a pane and names the reader" {
     var out: [1024]u8 = undefined;
     const command = launchCommand(&out, "term-abc", "~/projects", "ffffffff-ffff-4fff-bfff-ffffffffffff") orelse return error.TestUnexpectedResult;
     try std.testing.expect(std.mem.startsWith(u8, command, "tmux new-session -d -s term-abc -c ~/projects"));
-    try std.testing.expect(std.mem.indexOf(u8, command, "host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux term-abc") != null);
-    try std.testing.expect(std.mem.indexOf(u8, command, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux term-abc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, command, "host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux term-abc --cwd ~/projects") != null);
+    try std.testing.expect(std.mem.indexOf(u8, command, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux term-abc --cwd ~/projects") != null);
     try std.testing.expect(std.mem.indexOf(u8, command, "send-keys") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "reader.py") != null);
     try std.testing.expect(launchCommand(&out, "term-abc", "~/projects", "bad") == null);

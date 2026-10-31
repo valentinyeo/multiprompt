@@ -3994,7 +3994,7 @@ def record(value):
     with open(log, 'a') as stream:
         stream.write(json.dumps(value) + '\n')
         stream.flush()
-record(dict(kind='start', args=sys.argv[1:], pid=os.getpid()))
+record(dict(kind='start', args=sys.argv[1:], pid=os.getpid(), cwd=os.getcwd()))
 sys.stdout.write(json.dumps(dict(type='system', subtype='init', session_id='native-fixture', uuid='u0')) + '\n')
 sys.stdout.flush()
 for raw in sys.stdin:
@@ -4289,6 +4289,103 @@ class AgentHostTest(unittest.TestCase):
         self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux])['status'], 'enabled')
         self.assertTrue(reader.host_enabled(self.provider, self.sid))
         self.assertEqual(reader.host_cli(['status', 'codex', self.sid])['status'], 'refused')
+
+
+class AgentHostReviewTest(AgentHostTest):
+    second = 'host_fixture_message_02'
+
+    def test_a_locked_store_does_not_kill_the_shared_channel(self):
+        first = dict(message_protocol=1, tmux=self.tmux, provider=self.provider, sid=self.sid,
+                     op='message_status', message_id=self.token)
+        second = dict(first, op='message_events', after=0)
+        seen = []
+
+        def request(query):
+            seen.append(query['op'])
+            if len(seen) == 1:
+                raise sqlite3.OperationalError('database is locked')
+            return dict(epoch=0, seq=0, events=[], next_after=0)
+
+        incoming = types.SimpleNamespace(buffer=io.BytesIO((json.dumps(first) + '\n' + json.dumps(second) + '\n').encode()),
+                                         fileno=lambda: 55)
+        output = io.StringIO()
+        with patch.object(reader, 'message_store_request', side_effect=request), \
+                patch.object(reader.sys, 'stdin', incoming), patch.object(reader.sys, 'stdout', output):
+            reader.serve(reader.READER_SOURCE)
+        frames = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(seen, ['message_status', 'message_events'])
+        self.assertEqual(len(frames), 2)
+        self.assertIn('\thistory\terror\t', frames[0]['wire'])
+        self.assertEqual(frames[1]['result']['next_after'], 0)
+
+    def test_host_start_does_not_hold_the_shared_store_lock(self):
+        self.enable()
+        self.seed()
+        real = reader.host_dispatch_start
+        observed = []
+
+        def probe(provider, sid):
+            from contextlib import closing
+            try:
+                with closing(sqlite3.connect(str(reader.message_store_path()), timeout=0.25)) as other, other:
+                    other.execute('BEGIN IMMEDIATE')
+                    other.execute("UPDATE message_chats SET seq=seq WHERE provider='claude'")
+                observed.append('free')
+            except sqlite3.OperationalError as error:
+                observed.append(str(error))
+            return real(provider, sid)
+
+        with patch.object(reader, 'host_dispatch_start', side_effect=probe):
+            self.assertIsNone(self.dispatch()['message'])
+        self.assertEqual(observed, ['free'])
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+
+    def test_handover_gives_delivery_back_to_the_terminal(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        self.assertEqual(reader.host_handover(self.provider, self.sid)['status'], 'handover')
+        self.seed(token=self.second, text='terminal prompt')
+        self.dispatch()
+        time.sleep(1.0)
+        self.assertEqual(self.message(self.second)['state'], 'failed')
+        self.assertEqual(self.user_lines(), [self.text])
+        self.assertEqual(reader.host_cli(['enable', self.provider, self.sid])['status'], 'enabled')
+        self.request('retry', message_id=self.second, retry_id='reviewretry0000001')
+        self.assertIsNone(self.dispatch()['message'])
+        self.wait_for(lambda: (self.message(self.second) or {}).get('state') == 'accepted')
+        self.assertEqual(self.user_lines(), [self.text, 'terminal prompt'])
+
+    def test_a_long_first_token_keeps_the_host_message_sent(self):
+        self.enable(mode='silent')
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("UPDATE shared_messages SET state='sent',deadline=? WHERE id=?", (time.time() - 1, self.token))
+        db.close()
+        self.dispatch()
+        self.assertEqual(self.message()['state'], 'sent')
+
+    def test_host_enable_records_the_chat_folder(self):
+        folder = self.home / 'work'
+        folder.mkdir()
+        self.enable()
+        self.assertEqual(reader.host_cwd(self.provider, self.sid), str(self.home))
+        self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--cwd', 'relative/dir'])['reason'], 'invalid_cwd')
+        self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--cwd', '~']).get('cwd'), str(self.home))
+        reply = reader.host_cli(['enable', self.provider, self.sid, '--cwd', str(folder)])
+        self.assertEqual(reply['status'], 'enabled')
+        self.assertEqual(reader.host_cwd(self.provider, self.sid), str(folder))
+        config = reader.host_read(reader.host_paths(self.provider, self.sid)['config'])
+        self.assertEqual(config['cwd'], str(folder))
+        self.assertEqual(config['command'][0], sys.executable)
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        self.assertEqual(self.agent_rows('start')[0]['cwd'], str(folder))
 
 
 if __name__ == '__main__':

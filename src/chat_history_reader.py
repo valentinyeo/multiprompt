@@ -13,6 +13,7 @@ try:
 except ImportError:
     pwd = None
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -2077,6 +2078,10 @@ def message_row(row):
 
 def message_expire(db, provider, sid):
     rows = db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state='sent' AND deadline<=? ORDER BY position", (provider, sid, time.time())).fetchall()
+    if rows and provider == 'claude' and host_owned(provider, sid):
+        inflight = host_session_state(provider, sid).get('inflight')
+        current = inflight.get('id') if isinstance(inflight, dict) else None
+        rows = [row for row in rows if row[0] != current]
     for row in rows:
         db.execute("UPDATE shared_messages SET state='failed',deadline=NULL WHERE id=? AND state='sent'", (row[0],))
         message_event(db, provider, sid, message_row(db.execute("SELECT * FROM shared_messages WHERE id=?", (row[0],)).fetchone()))
@@ -2242,6 +2247,7 @@ def import_legacy_messages(db, sid, transcript, epoch):
 
 
 HOST_PROVIDERS = ('claude',)
+HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
 HOST_IDLE_SECONDS = 300
 HOST_DELIVERY_TIMEOUT = 15
@@ -2333,10 +2339,16 @@ def host_command(provider, sid):
     return parts + (["--permission-mode", mode] if mode in HOST_PERMISSION_MODES else [])
 
 
+def host_folder(value):
+    if not isinstance(value, str) or not value or len(value) > 220 or HOST_FOLDER.fullmatch(value) is None:
+        return None
+    expanded = os.path.expanduser(value)
+    return expanded if os.path.isabs(expanded) else None
+
+
 def host_cwd(provider, sid):
     config = host_config(provider, sid) or {}
-    cwd = config.get("cwd")
-    return str(cwd) if isinstance(cwd, str) and cwd else str(HOME)
+    return host_folder(config.get("cwd")) or str(HOME)
 
 
 def host_located_chat(provider, sid):
@@ -2411,6 +2423,11 @@ def host_alive(provider, sid):
 def host_owned(provider, sid):
     owner = host_owner(provider, sid)
     return bool(owner) and owner["owner"] == "host" and host_alive(provider, sid)
+
+
+def host_handed_over(provider, sid):
+    owner = host_owner(provider, sid)
+    return bool(owner) and owner["owner"] == "terminal"
 
 
 def host_clear_stale(provider, sid):
@@ -2945,6 +2962,11 @@ def host_cli(argv):
         return dict(status="refused", reason="unsupported_provider")
     tmux = rest[rest.index("--tmux") + 1] if "--tmux" in rest[:-1] else None
     mode = rest[rest.index("--permission-mode") + 1] if "--permission-mode" in rest[:-1] else None
+    folder = None
+    if "--cwd" in rest[:-1]:
+        folder = host_folder(rest[rest.index("--cwd") + 1])
+        if folder is None:
+            return dict(status="refused", reason="invalid_cwd")
     if tmux is not None and TMUX_NAME.fullmatch(tmux) is None:
         return dict(status="refused", reason="invalid_chat")
     if mode is not None and mode not in HOST_PERMISSION_MODES:
@@ -2955,11 +2977,18 @@ def host_cli(argv):
         config["enabled"] = True
         if tmux is not None:
             config["tmux"] = tmux
+        if folder is not None:
+            config["cwd"] = folder
         if mode is not None:
             config["permission_mode"] = mode
         host_write(paths["config"], config)
+        if host_handed_over(provider, sid):
+            try:
+                paths["owner"].unlink()
+            except OSError:
+                pass
         host_log(provider, sid, "enabled", dict(tmux=config.get("tmux")))
-        return dict(status="enabled", sid=sid, tmux=config.get("tmux"))
+        return dict(status="enabled", sid=sid, tmux=config.get("tmux"), cwd=config.get("cwd"))
     if command == "disable":
         host_stop(provider, sid)
         try:
@@ -2972,9 +3001,12 @@ def host_cli(argv):
     if command == "start":
         config = host_read(paths["config"]) or {}
         if config.get("enabled") is True and ((tmux is not None and config.get("tmux") != tmux)
+                                             or (folder is not None and config.get("cwd") != folder)
                                              or (mode is not None and config.get("permission_mode") != mode)):
             if tmux is not None:
                 config["tmux"] = tmux
+            if folder is not None:
+                config["cwd"] = folder
             if mode is not None:
                 config["permission_mode"] = mode
             host_write(paths["config"], config)
@@ -2987,7 +3019,7 @@ def host_cli(argv):
 
 
 def host_dispatch_switch(provider, sid):
-    return provider == "claude" and host_enabled(provider, sid)
+    return provider == "claude" and host_enabled(provider, sid) and not host_handed_over(provider, sid)
 
 
 def host_dispatch_start(provider, sid):
@@ -3121,7 +3153,12 @@ def message_store_transaction(q):
                 seq = message_event(db, provider, sid, row)
                 return dict(epoch=epoch, seq=seq, message=row)
             if hosting:
+                db.commit()
                 ready = host_dispatch_start(provider, sid)
+                db.execute('BEGIN IMMEDIATE')
+                fresh = db.execute('SELECT state,epoch FROM shared_messages WHERE id=?', (row[0],)).fetchone()
+                if not fresh or fresh != ('queued', epoch):
+                    return dict(epoch=fresh[1] if fresh else epoch, seq=seq, message=None)
                 if ready['status'] != 'owned':
                     if ready['status'] == 'start_failed':
                         host_backoff_fail(provider, sid)
@@ -4208,7 +4245,7 @@ def serve(source):
                 wire = settle_response(query, source)
             else:
                 wire = response(query, source)
-        except (OSError, ValueError, KeyError, TypeError, IndexError):
+        except (OSError, ValueError, KeyError, TypeError, IndexError, sqlite3.Error):
             wire = f"@mp\t{rid}\thistory\terror\t-\t0\n{END}\n"
         print(json.dumps(dict(id=rid, wire=wire), separators=(",", ":")), flush=True)
 
@@ -4241,7 +4278,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 27
+RUNTIME_GENERATION = 28
 
 if __name__ == '__main__':
     import base64 as _base64
