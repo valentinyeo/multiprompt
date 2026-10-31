@@ -17,6 +17,7 @@ public static class LinkFixtureNative {
 '@
 $script:linkCreated = @(); $script:linkBefore = @{}; $script:linkKey = $null; $script:linkAck = $null; $script:linkPath = $null
 function Start-LinkFixture {
+    param([Parameter(Mandatory)][string]$ReceiverSource)
     $result.registryRestored = $false
     $result.limitations = @('Receipt proves native URL dispatch, not authenticated page loading', 'Manifest index requires selected-version screenshot review', 'Other ticket links are audited as data, not clicked')
     $result.audit = Read-Json "$Output/changelog-audit.json"
@@ -47,7 +48,7 @@ function Start-LinkFixture {
     $script:linkAck = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $eventName, [ref]$created)
     if (-not $created) { throw 'Receiver event already exists' }
     $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-    & $csc /nologo /target:winexe "/out:$linkExe" "$PSScriptRoot/changelog-receiver.cs"
+    & $csc /nologo /target:winexe "/out:$linkExe" $ReceiverSource
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $linkExe)) { throw 'Receiver compilation failed' }
     $command = '"{0}" "{1}" "%1" "{2}" "{3}"' -f $linkExe, $linkReceipt, $eventName, $linkNonce
     $linkKey.SetValue('', $command, [Microsoft.Win32.RegistryValueKind]::String)

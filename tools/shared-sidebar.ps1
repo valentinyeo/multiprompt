@@ -431,9 +431,10 @@ try {
     New-Item -ItemType Directory -Force $settings, "$profile/local", "$profile/home" | Out-Null
     if ($ChangelogLinks) {
         $result.registryRestored = $false; $result.receipts = @()
+        $receiverSource = (Resolve-Path -LiteralPath "$PSScriptRoot/changelog-receiver.cs" -ErrorAction Stop).ProviderPath
         . "$PSScriptRoot/changelog-link-fixture.ps1"
         $linkFixtureLoaded = $true
-        Start-LinkFixture
+        Start-LinkFixture -ReceiverSource $receiverSource
     }
     $env:APPDATA = "$profile/roaming"; $env:LOCALAPPDATA = "$profile/local"; $env:USERPROFILE = "$profile/home"; $env:HOME = "$profile/home"
     $env:MULTIPROMPT_NO_LOGIN = '1'; $env:IGSH_246 = '0'; $env:ZIGSHELL_DEBUG = '1'
