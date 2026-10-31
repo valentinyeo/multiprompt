@@ -6,6 +6,7 @@
 - [Release cleanup and merge review, 2026-10-27](operations/release-audit-2026-10-27.md)
 - [Architecture](architecture/overview.md)
 - [App-owned agent session host](architecture/agent-host.md)
+- [How a session starts](architecture/session-start.md)
 - [Browser routing and isolation](browser/routing-state-machine.md)
 - [Browser power management](browser/pane-hibernation.md)
 - [Browser CLI selftest](browser/zsb-selftest.md)
