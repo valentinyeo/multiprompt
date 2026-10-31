@@ -1856,8 +1856,7 @@ fn adoptHostThread(job: *AdoptHostJob) void {
     const request = adoptHostRequest(job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len], &buf) orelse return;
     var response: std.ArrayList(u8) = .empty;
     defer response.deinit(a);
-    var written: ?*bool = null;
-    _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, &written);
+    _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, null);
     if (std.mem.indexOf(u8, response.items, "\"start\":\"started\"") != null or std.mem.indexOf(u8, response.items, "\"status\":\"already\"") != null) {
         if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOGGLE, 0, 0);
     } else {
