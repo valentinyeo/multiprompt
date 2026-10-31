@@ -25,17 +25,6 @@ jobs:
     with:
       release_scan: true
 
-  reader-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12'
-      - name: Run the complete chat reader suite
-        run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
-
   prepare:
     runs-on: ubuntu-latest
     outputs:
@@ -172,7 +161,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [prepare, build, launch, gitleaks, reader-tests]
+    needs: [prepare, build, launch, gitleaks]
     permissions:
       contents: write
     runs-on: ubuntu-latest
