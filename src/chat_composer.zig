@@ -1688,7 +1688,15 @@ test "ISSUE-440 full width respects remembered views" {
 pub const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
 
 fn shellConsoleVisibilityAllowed(is_active: bool, chat_active: bool, tab_wants_chat: bool, covered: bool) bool {
-    return is_active and !chat_active and !tab_wants_chat and !covered;
+    return is_active and !chat_active and !(tab_wants_chat and chat_active) and !covered;
+}
+
+test "IGSH-1266 a tab that wants chat but has no chat window still shows its console" {
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, true, true, false) == false);
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, false, true, false) == true);
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, false, false, false) == true);
+    try std.testing.expect(shellConsoleVisibilityAllowed(false, false, false, false) == false);
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, false, false, true) == false);
 }
 
 pub fn shellConsoleShouldBeVisible(idx: u32) bool {

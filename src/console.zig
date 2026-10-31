@@ -2825,6 +2825,24 @@ pub fn switchToShell(idx: u32) void {
         }
     }
     app_state.g_chat_switch_preparing = false;
+    {
+        var view_buf: [200]u8 = undefined;
+        var chat_rect: RECT = std.mem.zeroes(RECT);
+        if (app_state.g_chat_transcript_hwnd != null) _ = @import("win32.zig").GetWindowRect(app_state.g_chat_transcript_hwnd, &chat_rect);
+        const console_visible = idx < app_state.shell_count and app_state.shells[idx].hwnd != null and @import("win32.zig").IsWindowVisible(app_state.shells[idx].hwnd) != 0;
+        const chat_visible = app_state.g_chat_transcript_hwnd != null and @import("win32.zig").IsWindowVisible(app_state.g_chat_transcript_hwnd) != 0;
+        debugLog(std.fmt.bufPrint(&view_buf, "[view] switch tab={d} chat_active={} tab_wants_chat={} chat_visible={} chat_rect={d},{d},{d},{d} console_visible={}", .{
+            if (idx < app_state.shell_count) app_state.shells[idx].shell_id else 0,
+            app_state.g_chat_active,
+            idx < app_state.shell_count and chatViewShouldShowForTab(app_state.shells[idx].chat_view_on),
+            chat_visible,
+            chat_rect.left,
+            chat_rect.top,
+            chat_rect.right - chat_rect.left,
+            chat_rect.bottom - chat_rect.top,
+            console_visible,
+        }) catch "[view] switch");
+    }
     if (defer_browser and app_state.g_chat_transcript_hwnd != null) {
         _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
         _ = @import("win32.zig").UpdateWindow(app_state.g_chat_transcript_hwnd);

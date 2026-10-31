@@ -59,3 +59,16 @@ test('IGSH-1266 the layout logs its real client, slot and DPI numbers', () => {
   assert.match(layout, /\[chat\] layout rc \{d\},\{d\},\{d\},\{d\} slot \{d\},\{d\},\{d\},\{d\} dpi=\{d\}/, 'one line with the numbers to read');
   assert.match(layout, /@import\("win32\.zig"\)\.GetClientRect\(app_state\.g_main_hwnd, &frame\)/, 'the client rect is read at layout time');
 });
+
+test('IGSH-1266 a console is never hidden unless the chat view is actually up', () => {
+  const composer = read('src/chat_composer.zig');
+  assert.match(composer, /return is_active and !chat_active and !\(tab_wants_chat and chat_active\) and !covered;/, 'the console only hides when chat is live');
+  assert.match(composer, /test "IGSH-1266 a tab that wants chat but has no chat window still shows its console"/);
+});
+
+test('IGSH-1266 every tab switch logs the view mode and window state', () => {
+  const console_zig = read('src/console.zig');
+  const marker = '[view] switch tab={d} chat_active={} tab_wants_chat={} chat_visible={} chat_rect={d},{d},{d},{d} console_visible={}';
+  assert.ok(console_zig.includes(marker), 'one line per switch');
+});
+
