@@ -33,3 +33,6 @@ tools/usage-telemetry/__pycache__/
 /*.bmp
 /*.webp
 dev-rig-evidence/
+STATUS-*.md
+REVIEW.md
+dev-rig-evidence/
