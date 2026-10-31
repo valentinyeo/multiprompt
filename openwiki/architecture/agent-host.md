@@ -31,11 +31,15 @@ server runtime and every client.
 | `<key>.config.json` | Per-chat switch and options. Absent means off. |
 | `<key>.owner.lock` | `flock` lock file. Holding it is being the owner. |
 | `<key>.owner.json` | Who holds the lock: `host` or `terminal`, plus pid and start time. |
-| `<key>.sock` | Unix socket the host listens on for delivery requests. |
 | `<key>.state.json` | Host state: session id, written message ids, accepted flags, last events. |
 | `<key>.backoff` | Per-chat retry backoff: next try time and current delay. |
+| `<key>.events.log` | One line per lifecycle event, useful when a chat misbehaves. |
+| `<key>.stderr.log` | The host process's own stderr. |
 
 `<key>` is the first 32 hex characters of `sha256(provider + ":" + sid)`.
+
+The delivery socket is `$TMPDIR/mp-agent-host-<uid>/<key>.sock`, owner-only. Its path stays
+under the 108-character limit a Unix socket path has, whatever the home directory looks like.
 
 ## Per-chat switch (default off)
 
@@ -121,7 +125,10 @@ python3 <reader> host handover <provider> <sid>
 - `status` prints one JSON object: enabled, owner, pid, session id, in-flight message,
   written count, last event type, next backoff.
 - Only `claude` is accepted today; other providers are refused.
-- Each command prints one JSON object and exits non-zero on refusal.
+- Each command prints one JSON object. The host process exits `1` when another owner holds the
+  lock, `2` for an unsupported provider, `3` when the chat is switched off, `4` when it cannot
+  start the agent; `host start` reports those as `owner_busy`, `unsupported_provider`,
+  `host_disabled` or `host_error`.
 
 ## Delivery integration
 
@@ -143,4 +150,5 @@ python3 <reader> host handover <provider> <sid>
   gives it (`--permission-mode`), and anything that would still prompt is denied.
 - Editor and interactive-session state belongs to the agent CLI, not the app.
 - A crash between the stdin write and the accepted event leaves the message `sent` until the
-  attempt deadline or the next host start settles it.
+  attempt deadline expires, after which the client may show it as failed and the user decides
+  whether to send again.
