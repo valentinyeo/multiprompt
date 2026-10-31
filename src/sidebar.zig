@@ -2825,7 +2825,6 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = paletteDrawText(hdc, L("drag"), -1, &sm_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_wssort) {
                         const slot: u8 = @intCast(result_idx - SEARCH_WSSORT_OFFSET);
-                        const dragging_this = app_state.g_wssort_dragging and slot == app_state.g_wssort_drag_slot;
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var sh_rc = RECT{ .left = text_left, .top = ry, .right = ox + 34, .bottom = ry + row_h };
