@@ -4289,6 +4289,31 @@ class AgentHostTest(unittest.TestCase):
         self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
         self.assertEqual(self.user_lines(), [self.text])
 
+    def test_host_finds_claude_outside_the_login_path(self):
+        self.enable()
+        binary = self.home / '.local/bin/claude'
+        binary.parent.mkdir(parents=True)
+        binary.write_text('#!/bin/sh\nexit 0\n')
+        binary.chmod(0o755)
+        with patch.dict(os.environ, dict(PATH='/usr/bin:/bin', HOME=str(self.home))):
+            config = reader.host_read(reader.host_paths(self.provider, self.sid)['config'])
+            config.pop('command', None)
+            reader.host_write(reader.host_paths(self.provider, self.sid)['config'], config)
+            command = reader.host_command(self.provider, self.sid)
+        self.assertIsNotNone(command, 'a host must find its agent outside the login PATH')
+        self.assertEqual(command[0], str(binary))
+
+    def test_host_reports_a_missing_agent_instead_of_raising(self):
+        self.enable()
+        empty = self.home / 'empty-home'
+        empty.mkdir()
+        with patch.dict(os.environ, dict(PATH='/usr/bin:/bin', HOME=str(empty))):
+            config = reader.host_read(reader.host_paths(self.provider, self.sid)['config'])
+            config.pop('command', None)
+            reader.host_write(reader.host_paths(self.provider, self.sid)['config'], config)
+            self.assertIsNone(reader.host_command(self.provider, self.sid))
+            self.assertIsNone(reader.host_agent_start(self.provider, self.sid))
+
     def test_host_cli_status_and_disable(self):
         self.enable()
         status = reader.host_cli(['status', self.provider, self.sid])

@@ -13,6 +13,7 @@ try:
 except ImportError:
     pwd = None
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -2247,6 +2248,8 @@ def import_legacy_messages(db, sid, transcript, epoch):
 
 
 HOST_PROVIDERS = ('claude',)
+HOST_BINARY_NAMES = {'claude': 'claude'}
+HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
 HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
 HOST_IDLE_SECONDS = 300
@@ -2256,7 +2259,7 @@ HOST_STOP_GRACE = 5.0
 HOST_LINE_LIMIT = 4 * 1024 * 1024
 HOST_LOG_TAIL = 6
 HOST_BACKOFF_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
-HOST_EXIT_REASONS = {1: "owner_busy", 2: "unsupported_provider", 3: "host_disabled", 4: "host_error"}
+HOST_EXIT_REASONS = {1: "owner_busy", 2: "unsupported_provider", 3: "host_disabled", 4: "host_error", 5: "agent_not_found"}
 HOST_CHILDREN = []
 
 
@@ -2329,10 +2332,35 @@ def host_enabled(provider, sid):
     return host_config(provider, sid) is not None
 
 
+def host_binary_name(provider):
+    return HOST_BINARY_NAMES.get(provider, provider if isinstance(provider, str) else "")
+
+
+def host_agent_binary(name):
+    if not name:
+        return None
+    found = shutil.which(name)
+    if found:
+        return found
+    for folder in HOST_BINARY_FOLDERS:
+        try:
+            candidate = Path(os.path.expanduser(folder)) / name
+            if candidate.is_file() and os.access(str(candidate), os.X_OK):
+                return str(candidate)
+        except OSError:
+            continue
+    return None
+
+
 def host_command(provider, sid):
     config = host_config(provider, sid) or {}
     command = config.get("command")
-    parts = command if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command) else ["claude"]
+    parts = command if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command) else None
+    if parts is None:
+        resolved = host_agent_binary(host_binary_name(provider))
+        if resolved is None:
+            return None
+        parts = [resolved]
     extra = config.get("args")
     parts = parts + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
     mode = config.get("permission_mode")
@@ -2662,7 +2690,10 @@ def host_transcript_exists(provider, sid):
 
 
 def host_agent_start(provider, sid):
-    command = host_command(provider, sid) + ["--print", "--input-format", "stream-json",
+    base = host_command(provider, sid)
+    if base is None:
+        return None
+    command = base + ["--print", "--input-format", "stream-json",
                                             "--output-format", "stream-json", "--verbose"]
     command += ["--resume", sid] if host_transcript_exists(provider, sid) else ["--session-id", sid]
     return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -2919,6 +2950,9 @@ def host_main(provider, sid):
         os.chmod(paths["socket"], 0o600)
         server.listen(8)
         agent = host_agent_start(provider, sid)
+        if agent is None:
+            host_log(provider, sid, "host_error", dict(error="agent_not_found", name=host_binary_name(provider)))
+            return 5
         host_log(provider, sid, "agent_started", dict(pid=agent.pid))
         host_loop(provider, sid, tmux, dict(state=state), server, agent)
         return 0
@@ -4296,7 +4330,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 30
+RUNTIME_GENERATION = 31
 
 if __name__ == '__main__':
     import base64 as _base64
