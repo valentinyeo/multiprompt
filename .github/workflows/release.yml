@@ -15,6 +15,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+
 jobs:
   gitleaks:
     uses: ./.github/workflows/gitleaks.yml
@@ -173,9 +177,6 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    concurrency:
-      group: release-publication
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
