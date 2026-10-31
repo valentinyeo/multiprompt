@@ -1,4 +1,42 @@
 
+            $commandsPath = Join-Path $scratch 'roaming/ZigShell/commands.json'
+            New-Item -ItemType Directory -Force -Path (Split-Path $commandsPath) | Out-Null
+            $folder = '/tmp/multiprompt-harness-folder'
+            [ordered]@{ commands = @(
+                [ordered]@{ label = 'Harness workspace folder'; kind = 'vps'; default = $true; workspace = 'Workspace 1'; cwd = $folder },
+                [ordered]@{ label = 'Harness starred folder'; kind = 'vps'; default = $true; workspace = 'Starred'; cwd = $folder }
+            ) } | ConvertTo-Json -Depth 5 | Set-Content -Path $commandsPath -Encoding UTF8
+            Start-Sleep -Milliseconds 500
+            $beforeClaude = @( (Read-Session).tabs ).Count
+            Press @(0x11, 0x54) 'Ctrl+T: new Claude chat'
+            Start-Sleep -Milliseconds 2000
+            $entry = 'Ctrl+T'
+            if (@( (Read-Session).tabs ).Count -ne $beforeClaude + 1) {
+                $entry = 'palette New Claude chat'
+                Palette 'New Claude chat'
+                Press @(0x0D) 'Enter: New Claude chat'
+                Start-Sleep -Milliseconds 2000
+            }
+            Wait-Until { @( (Read-Session).tabs ).Count -eq $beforeClaude + 1 } 'new Claude chat tab saved'
+            Wait-Until {
+                $state = Read-Session
+                if ($null -eq $state) { return $false }
+                $tab = @($state.tabs)[$state.active_tab]
+                $null -ne $tab -and $tab.PSObject.Properties['cv'] -and $tab.cv -eq $true
+            } 'new Claude tab saved in Chat View'
+            Wait-Until {
+                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                $transcript = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+                $composer = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                $shown = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $transcript) | Where-Object { -not $_.Current.IsOffscreen }).Count -ge 1
+                $shown -and @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $composer) | Where-Object { -not $_.Current.IsOffscreen }).Count -ge 1
+            } 'Chat View transcript and composer visible for the new Claude tab'
+            Snapshot 'ctrl-t-chat-view'
+            $result.checks += @{ name = 'ctrl-t-chat-view'; entry = $entry; tabsBefore = $beforeClaude; tabsAfter = @( (Read-Session).tabs ).Count; commands = 'harness workspace folder seeded' }
+            Press @(0x11, 0x57) 'Ctrl+W: close the new Claude tab'
+            Wait-Until { @( (Read-Session).tabs ).Count -eq $beforeClaude } 'new Claude tab closed'
+            Remove-Item -LiteralPath $commandsPath -Force
+
             $before = @( (Read-Session).tabs ).Count
             Palette 'new cmd'
             Snapshot 'action'
