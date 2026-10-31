@@ -1,0 +1,19 @@
+name: Workspace identity journey
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '40 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workspace-identity-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  workspace:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: workspaces

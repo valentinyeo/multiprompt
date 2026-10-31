@@ -1,11 +1,9 @@
 name: docs-site
 
 on:
-  pull_request:
-    paths: ['docs-site/**', '.github/workflows/docs-site.yml']
-  push:
-    branches: [master]
-    paths: ['docs-site/**', '.github/workflows/docs-site.yml']
+  workflow_dispatch:
+  schedule:
+    - cron: '56 2 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

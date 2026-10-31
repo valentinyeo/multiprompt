@@ -306,6 +306,15 @@ test('packaging includes extension contents, excludes current themes and covers 
   execFileSync('sha256sum', ['-c', 'SHA256SUMS.txt'], { cwd: path.join(f.dir, 'dist') });
 });
 
+test('event-scoped automerge regressions', { skip: process.platform === 'win32' }, () => {
+  const result = spawnSync(process.execPath, ['--test', 'tools/automerge-admit-run.test.js'], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, NODE_TEST_CONTEXT: undefined },
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /# pass [1-9][0-9]*/);
+  assert.match(result.stdout, /# fail 0/);
+});
+
 test('automatic admission fixtures reject unsafe heads', { skip: process.platform === 'win32' }, () => {
   const result = spawnSync('bash', ['tools/automerge-admit.test.sh'], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
