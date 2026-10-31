@@ -95,7 +95,7 @@ jobs:
           0x29EA2
           EOF
           mapfile -t RVAS < /tmp/report-rvas.txt
-          llvm-symbolizer --use-native-pdb-reader --relative-address --functions=linkage --demangle \
+          llvm-symbolizer --relative-address --functions=linkage --demangle \
             --obj=symbols/multiprompt.exe "${RVAS[@]}" | tee symbols/frames.txt
           echo "match=$SYMBOL_MATCH" >> symbols/frames.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
