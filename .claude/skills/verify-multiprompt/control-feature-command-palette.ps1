@@ -22,9 +22,15 @@
             Palette 'More shells'
             Snapshot 'more-shells-search'
             Press @(0x0D) 'Enter: More shells'
+            Wait-Until {
+                $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
+                $trace = ((Get-Content $log -Raw) -join '')
+                $trace -match '\[palette\] ready chars=0 count=\d+'
+            } 'More shells sub-list opened'
+            Start-Sleep -Milliseconds 400
             Snapshot 'more-shells'
-            Press @(0x1B) 'Esc: close More shells'
             $result.checks += @{ name = 'new-session-rows'; empty = 'ctrl-k-empty.png'; shells = 'more-shells.png' }
+            Press @(0x1B) 'Esc: close More shells'
             $pickTabsBefore = @((Read-Session).tabs).Count
             Palette 'pick repo'
             Snapshot 'pick-repo-row'
