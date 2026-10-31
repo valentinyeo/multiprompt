@@ -4382,6 +4382,20 @@ class AdoptHostTest(unittest.TestCase):
         self.assertEqual(frame['host_adopt']['start'], 'started')
         adopt.assert_called_once_with('claude', self.sid, self.tmux, None)
 
+    def test_adopt_accepts_a_shell_pane_before_the_prompt_text(self):
+        commands = []
+        def run(command, **kwargs):
+            commands.append(command)
+            if command[:2] == ['tmux', 'send-keys'] and command[-1] == 'Enter':
+                self.agent_present[0] = False
+            if command[:2] == ['tmux', 'display']:
+                return types.SimpleNamespace(stdout='/usr/bin/bash\n', returncode=0)
+            return types.SimpleNamespace(stdout='', returncode=0)
+        with patch.object(reader.subprocess, 'run', side_effect=run):
+            self.assertEqual(reader.host_pane_is_shell(self.tmux), True)
+            self.assertEqual(reader.host_pane_release(self.tmux, self.sid)['status'], 'released')
+        self.assertEqual([c for c in commands if c[:2] == ['tmux', 'capture-pane']], [])
+
     def test_adopt_requires_a_body(self):
         self.assertEqual(reader.host_cli(['adopt', 'claude', self.sid, '--tmux', 'bad name'])['reason'], 'invalid_chat')
 

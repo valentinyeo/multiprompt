@@ -3098,6 +3098,18 @@ def host_pane_prompt(tmux):
     return lines[-1] if HOST_ADOPT_PROMPT.search(lines[-1]) else None
 
 
+HOST_ADOPT_SHELLS = ("bash", "zsh", "sh", "dash", "fish", "ksh")
+
+
+def host_pane_is_shell(tmux):
+    try:
+        shown = subprocess.run(["tmux", "display", "-p", "-t", "=" + tmux + ":", "#{pane_current_command}"],
+                               capture_output=True, text=True, timeout=5, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return shown.strip().split("/")[-1].lower() in HOST_ADOPT_SHELLS
+
+
 def host_pane_release(tmux, sid):
     if not tmux:
         return dict(status="refused", reason="no_chat")
@@ -3121,7 +3133,7 @@ def host_pane_release(tmux, sid):
         return dict(status="error", reason="pane_agent_busy")
     deadline = time.time() + HOST_ADOPT_PANE_TIMEOUT
     while time.time() < deadline:
-        if host_pane_prompt(tmux) is not None:
+        if host_pane_is_shell(tmux) or host_pane_prompt(tmux) is not None:
             return dict(status="released")
         time.sleep(0.2)
     return dict(status="error", reason="pane_prompt_timeout")
@@ -4413,7 +4425,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 33
+RUNTIME_GENERATION = 34
 
 if __name__ == '__main__':
     import base64 as _base64
