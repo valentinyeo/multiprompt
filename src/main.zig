@@ -1922,7 +1922,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             return 0;
                         }
                     }
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_CONFIRM, 0, 0);
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_CONFIRM, @as(usize, app_state.g_search_sel) + 1, @intCast(app_state.g_search_revision));
                     return 0;
                 }
                 if (mx < click_ox or mx >= click_ox + click_ow or my < click_oy or my >= click_oy + click_oh) {
@@ -3824,7 +3824,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (wp == 0x0D) {
-                    _ = PostMessageW(hwnd, WM_APP_SEARCH_CONFIRM, 0, 0);
+                    _ = PostMessageW(hwnd, WM_APP_SEARCH_CONFIRM, @as(usize, app_state.g_search_sel) + 1, @intCast(app_state.g_search_revision));
                     return 0;
                 }
                 if (wp == 0x1B) {
@@ -4029,7 +4029,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_wssort_dragging = false;
                 _ = ReleaseCapture();
             }
-            app_state.g_shell_focused = true;
+            app_state.g_shell_focused = !@import("room_frontend.zig").isActive();
             app_state.g_search_wheel_remainder = 0;
             clearSearchBackdrop();
             app_state.g_pending_new_tab_group = 0;
@@ -4038,7 +4038,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             } else {
                 showActiveShellAfterOverlay();
                 _ = InvalidateRect(hwnd, null, 0);
-                if (app_state.shell_count > 0) {
+                if (app_state.shell_count > 0 and !@import("room_frontend.zig").isActive()) {
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 100, null);
                 }
             }
@@ -4620,6 +4620,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_SEARCH_CONFIRM => {
+            if (lp != 0 and (lp != @as(isize, @intCast(app_state.g_search_revision)) or wp != @as(usize, app_state.g_search_sel) + 1)) return 0;
             if (app_state.g_search_active and app_state.g_browser_url_mode) {
                 _ = PostMessageW(hwnd, WM_APP_BROWSER_OPEN_URL, 0, 0);
                 return 0;
@@ -4667,6 +4668,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_search_active and app_state.g_search_result_count > 0) {
                 const target = app_state.g_search_results[app_state.g_search_sel];
                 if (paletteRowIsHeader(target)) return 0;
+                if (@import("room_frontend.zig").isActive() and !app_state.g_search_theme_mode and !@import("command_palette.zig").roomPaletteAllowed(target)) return 0;
+                if (@import("room_frontend.zig").enabled and target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS) {
+                    const hit = @import("room_frontend.zig").paletteRoomHit(target - app_state.SEARCH_ROOM_ROW_OFFSET) orelse return 0;
+                    app_state.g_search_active = false;
+                    clearSearchBackdrop();
+                    if (app_state.g_inbox_active) closeInbox(hwnd);
+                    if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
+                    @import("room_frontend.zig").selectHit(hit);
+                    _ = @import("room_frontend.zig").restoreAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 recordPaletteUsage(target);
                 if (target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET) {
                     debugLog("[pick] open list");
@@ -5481,6 +5494,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     endActiveTmuxSession();
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    return 0;
+                }
+                if (@import("room_frontend.zig").enabled and target == @import("room_frontend.zig").edit_room_target) {
+                    _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+                    @import("room_frontend.zig").editPaletteRoom();
                     return 0;
                 }
                 if (@import("room_frontend.zig").enabled and target == @import("room_frontend.zig").new_room_target) {
@@ -7028,6 +7046,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     applyPendingGroup();
                 } else if (target >= SEARCH_TMUX_OFFSET) {
+                    @import("room_frontend.zig").leaveForSession();
                     applySearchSpawnContext(hwnd);
                     const cache_idx = target - SEARCH_TMUX_OFFSET;
                     if (cache_idx < app_state.g_tmux_cache_count) {

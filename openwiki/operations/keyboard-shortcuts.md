@@ -200,6 +200,9 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Keys | Action |
 | --- | --- |
 | Ctrl+K | Open command palette; it opens with your last 5 sessions |
+| Ctrl+K -&gt; New room | Create a Room |
+| Ctrl+K -&gt; Room name | Open a Room |
+| Ctrl+K -&gt; Edit room | Edit the selected Room |
 | Ctrl+K -&gt; Account: Sign Out | Forget this device login and lock Multi Bot |
 | Ctrl+K -&gt; Account: Approve devices | Approve or deny a new device reaching your servers |
 | Ctrl+K -&gt; Account: Remove server 1 | Remove server 1 from your account on every device after confirmation |

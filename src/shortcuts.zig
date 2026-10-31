@@ -315,6 +315,9 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Win+Shift+Left/Right", .b = "Move window to the adjacent monitor", .header = false },
     .{ .a = "Palette / Actions", .b = "", .header = true },
     .{ .a = "Ctrl+K", .b = "Open command palette; it opens with your last 5 sessions", .header = false },
+    .{ .a = "Ctrl+K -> New room", .b = "Create a Room", .header = false },
+    .{ .a = "Ctrl+K -> Room name", .b = "Open a Room", .header = false },
+    .{ .a = "Ctrl+K -> Edit room", .b = "Edit the selected Room", .header = false },
     .{ .a = "Ctrl+K -> Account: Sign Out", .b = "Forget this device login and lock Multi Bot", .header = false },
     .{ .a = "Ctrl+K -> Account: Approve devices", .b = "Approve or deny a new device reaching your servers", .header = false },
     .{ .a = "Ctrl+K -> Account: Remove server 1", .b = "Remove server 1 from your account on every device after confirmation", .header = false },
@@ -1651,7 +1654,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 1;
                 }
                 if (kb.vkCode == 0x0D) {
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_CONFIRM, 0, 0);
+                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_SEARCH_CONFIRM, @as(usize, app_state.g_search_sel) + 1, @intCast(app_state.g_search_revision));
                     return 1;
                 }
                 if (ctrl and kb.vkCode == 0x41 and app_state.g_search_rename_input_mode) {

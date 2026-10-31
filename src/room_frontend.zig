@@ -5,6 +5,7 @@ const room_view = @import("room_view.zig");
 
 pub const enabled = false;
 pub const new_room_target: usize = 5105;
+pub const edit_room_target: usize = 5106;
 
 pub const StoreLocation = struct {
     account: [256]u8,
@@ -88,6 +89,8 @@ var catalog_after: u64 = 0;
 var catalog_through: ?u64 = null;
 var catalog_complete = false;
 var catalog_store_uuid: ?[36]u8 = null;
+var palette_hits: [app_state.MAX_ROOM_PALETTE_ROWS]?app_state.HitTarget = @splat(null);
+var palette_edit_hit: ?app_state.HitTarget = null;
 var catalog_generation: u64 = 0;
 var metadata_generation: u64 = 0;
 var metadata_cursor: usize = 0;
@@ -215,6 +218,43 @@ pub fn roomHit(index: usize) ?app_state.HitTarget {
     var id: [36]u8 = undefined;
     @memcpy(&id, rows[index].id);
     return .{ .room = .{ .index = @intCast(index), .generation = catalog_generation, .id = id, .store_uuid = store } };
+}
+
+pub fn resetPaletteRooms() void { palette_hits = @splat(null); palette_edit_hit = null; }
+
+pub fn capturePaletteEdit() bool {
+    if (!canEditSelected()) return false;
+    for (catalog(), 0..) |row, index| if (std.mem.eql(u8, row.id, &front.selected.room_id)) {
+        palette_edit_hit = roomHit(index) orelse return false;
+        return true;
+    };
+    return false;
+}
+
+pub fn editPaletteRoom() void {
+    const hit = palette_edit_hit orelse return;
+    const current = roomHit(hit.room.index) orelse return;
+    if (!std.meta.eql(hit, current) or !canEditSelected() or !std.mem.eql(u8, &front.selected.room_id, &hit.room.id) or !std.mem.eql(u8, &front.selected.store.store_uuid, &hit.room.store_uuid)) return;
+    editSelected();
+}
+
+pub fn capturePaletteRoom(index: usize) bool {
+    if (index >= palette_hits.len) return false;
+    palette_hits[index] = roomHit(index) orelse return false;
+    return true;
+}
+
+pub fn paletteRoomHit(index: usize) ?app_state.HitTarget {
+    if (index >= palette_hits.len) return null;
+    const hit = palette_hits[index] orelse return null;
+    const current = roomHit(index) orelse return null;
+    if (!std.meta.eql(hit, current)) return null;
+    return hit;
+}
+
+pub fn paletteRoomName(index: usize) ?[]const u8 {
+    _ = paletteRoomHit(index) orelse return null;
+    return catalog()[index].name;
 }
 
 pub fn selectHit(hit: app_state.HitTarget) void {
@@ -1397,6 +1437,16 @@ fn enter() bool {
     _ = w.KillTimer(app_state.g_main_hwnd, w.TIMER_CHAT_BROWSER_SWAP);
     @import("rename.zig").hideShellsForOverlay();
     return true;
+}
+
+pub fn canEditSelected() bool {
+    return enabled and created and front == .selected and owned_model != null and std.mem.eql(u8, owned_model.?.value.room_id, &front.selected.room_id);
+}
+
+pub fn editSelected() void {
+    if (!canEditSelected()) return;
+    view.openEdit();
+    view.focus();
 }
 
 pub fn openCreate() void {

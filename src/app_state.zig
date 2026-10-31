@@ -1566,7 +1566,10 @@ pub const MAX_SESSION_OVERVIEW_SEARCH_ROWS: usize = 256;
 pub const SEARCH_SESSION_OVERVIEW_ROW_OFFSET: usize = 7500;
 pub const SEARCH_SKILL_ROW_OFFSET: usize = 4100;
 pub const MAX_PALETTE_SKILLS: usize = 512;
-pub var g_search_results: [MAX_SHELLS + MAX_TMUX_SESSIONS + MAX_SESSION_OVERVIEW_SEARCH_ROWS + 128]usize = undefined;
+pub const SEARCH_ROOM_ROW_OFFSET: usize = 20000;
+pub const MAX_ROOM_PALETTE_ROWS: usize = 4096;
+pub var g_search_revision: u32 = 0;
+pub var g_search_results: [MAX_SHELLS + MAX_TMUX_SESSIONS + MAX_SESSION_OVERVIEW_SEARCH_ROWS + 128 + MAX_ROOM_PALETTE_ROWS]usize = undefined;
 pub var g_search_result_count: u32 = 0;
 
 pub var g_shell_focused: bool = true;

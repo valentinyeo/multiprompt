@@ -624,6 +624,10 @@ pub fn recordPaletteUsage(target: usize) void {
 }
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
+    const room = @import("room_frontend.zig");
+    if (target == room.new_room_target) return "New room";
+    if (target == room.edit_room_target) return "Edit room";
+    if (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS) return room.paletteRoomName(target - app_state.SEARCH_ROOM_ROW_OFFSET);
     if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) return "New Claude chat";
     if (target == SEARCH_CODEX_TMUX_OFFSET) return "New Codex chat";
     if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
@@ -1156,7 +1160,15 @@ fn paletteRowIsSession(target: usize) bool {
     return target < SEARCH_TMUX_OFFSET + MAX_TMUX_SESSIONS;
 }
 
+pub fn roomPaletteAllowed(target: usize) bool {
+    if (target == @import("room_frontend.zig").new_room_target or target == @import("room_frontend.zig").edit_room_target or (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) return true;
+    if (target < SEARCH_TMUX_OFFSET + MAX_TMUX_SESSIONS) return true;
+    const group = paletteGroupOf(target) orelse return false;
+    return group == 3 or group == 6;
+}
+
 pub fn paletteGroupOf(target: usize) ?u8 {
+    if (target == @import("room_frontend.zig").new_room_target or target == @import("room_frontend.zig").edit_room_target or (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) return 0;
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
     if (paletteRowIsSession(target)) return 0;
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
@@ -2288,6 +2300,9 @@ fn appendGroupPaletteResults() void {
 }
 
 pub fn updateSearchResults() void {
+    app_state.g_search_revision +%= 1;
+    if (app_state.g_search_revision == 0) app_state.g_search_revision = 1;
+    @import("room_frontend.zig").resetPaletteRooms();
     defer {
         if (app_state.g_search_active) {
             var trace: [128]u8 = undefined;
@@ -4808,7 +4823,29 @@ pub fn updateSearchResults() void {
         }
     }
 
+    const room = @import("room_frontend.zig");
+    if (room.enabled) {
+        const query = app_state.g_search_buf[0..app_state.g_search_len];
+        if (app_state.g_search_result_count < app_state.g_search_results.len and (query.len == 0 or labelsMatchQuery(&.{ "new room", "create room" }, query))) {
+            app_state.g_search_results[app_state.g_search_result_count] = room.new_room_target;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and (query.len == 0 or labelsMatchQuery(&.{ "edit room", "room members", "rename room" }, query)) and room.capturePaletteEdit()) {
+            app_state.g_search_results[app_state.g_search_result_count] = room.edit_room_target;
+            app_state.g_search_result_count += 1;
+        }
+        for (room.catalog(), 0..) |row, index| {
+            if (index >= app_state.MAX_ROOM_PALETTE_ROWS or app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            var wide_name: [256]u16 = undefined;
+            const len = std.unicode.utf8ToUtf16Le(&wide_name, row.name) catch continue;
+            if (query.len > 0 and !u16ContainsInsensitive(wide_name[0..len], query)) continue;
+            if (!room.capturePaletteRoom(index)) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_ROOM_ROW_OFFSET + index;
+            app_state.g_search_result_count += 1;
+        }
+    }
     for (0..app_state.shell_count) |i| {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
         if (app_state.g_search_len == 0) {
             app_state.g_search_results[app_state.g_search_result_count] = i;
             app_state.g_search_result_count += 1;
@@ -4967,6 +5004,15 @@ pub fn updateSearchResults() void {
     }
 
     if (app_state.g_search_len > 0) appendGroupPaletteResults();
+    if (@import("room_frontend.zig").isActive()) {
+        var kept: usize = 0;
+        for (app_state.g_search_results[0..app_state.g_search_result_count]) |target| {
+            if (!roomPaletteAllowed(target)) continue;
+            app_state.g_search_results[kept] = target;
+            kept += 1;
+        }
+        app_state.g_search_result_count = @intCast(kept);
+    }
     sortSearchResultsByRank();
 
     if (app_state.g_search_len == 0) {

@@ -2528,9 +2528,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_session_overview_menu = result_idx == SEARCH_SESSION_OVERVIEW_MENU_OFFSET;
                     const is_session_overview_row = result_idx >= SEARCH_SESSION_OVERVIEW_ROW_OFFSET and result_idx < SEARCH_SESSION_OVERVIEW_ROW_OFFSET + MAX_SESSION_OVERVIEW_SEARCH_ROWS;
                     const is_archived_view = result_idx == SEARCH_ARCHIVED_VIEW_OFFSET;
-                    const is_renamewin = !is_chat_action and !is_addfavicon and !is_mobile_toggle and !is_sync_signout and !is_sync_status and !is_session_overview_menu and !is_session_overview_row and !is_archived_view and result_idx >= SEARCH_RENAMEWIN_OFFSET;
+                    const is_room_result = result_idx >= app_state.SEARCH_ROOM_ROW_OFFSET and result_idx < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS;
+                    const is_renamewin = !is_room_result and !is_chat_action and !is_addfavicon and !is_mobile_toggle and !is_sync_signout and !is_sync_status and !is_session_overview_menu and !is_session_overview_row and !is_archived_view and result_idx >= SEARCH_RENAMEWIN_OFFSET;
                     const is_wsmove_workspace = app_state.g_search_ws_move_mode and !is_addfavicon and !is_mobile_toggle and !is_renamewin and result_idx >= SEARCH_WORKSPACE_OFFSET and result_idx < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES;
-                    const is_workspace = !is_chat_action and !is_addfavicon and !is_mobile_toggle and !is_sync_signout and !is_sync_status and !is_renamewin and !is_wsmove_workspace and result_idx >= SEARCH_WORKSPACE_OFFSET;
+                    const is_workspace = !is_room_result and !is_chat_action and !is_addfavicon and !is_mobile_toggle and !is_sync_signout and !is_sync_status and !is_renamewin and !is_wsmove_workspace and result_idx >= SEARCH_WORKSPACE_OFFSET;
                     const is_workspace_delete = !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and result_idx >= SEARCH_WORKSPACE_DELETE_OFFSET and result_idx < SEARCH_WORKSPACE_DELETE_OFFSET + MAX_WORKSPACES;
                     const is_workspace_back = !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and result_idx == SEARCH_WORKSPACE_BACK_OFFSET;
                     const is_workspace_delete_menu = !is_addfavicon and !is_mobile_toggle and !is_renamewin and !is_workspace and !is_workspace_delete and !is_workspace_back and result_idx == SEARCH_WORKSPACE_DELETE_MENU_OFFSET;
@@ -3667,6 +3668,21 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                             var pr_hint_rc = RECT{ .left = ox + overlay_w - 175, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                             drawAscii(hdc, folder_buf[0..folder_len], &pr_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        }
+                    } else if (result_idx == @import("room_frontend.zig").new_room_target or result_idx == @import("room_frontend.zig").edit_room_target or (result_idx >= app_state.SEARCH_ROOM_ROW_OFFSET and result_idx < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var room_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        if (result_idx == @import("room_frontend.zig").new_room_target) {
+                            _ = DrawTextW(hdc, L("New room"), -1, &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        } else if (result_idx == @import("room_frontend.zig").edit_room_target) {
+                            _ = DrawTextW(hdc, L("Edit room"), -1, &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        } else if (@import("room_frontend.zig").paletteRoomName(result_idx - app_state.SEARCH_ROOM_ROW_OFFSET)) |name| {
+                            var wide: [256]u16 = undefined;
+                            const count = std.unicode.utf8ToUtf16Le(&wide, name) catch 0;
+                            if (count > 0) _ = DrawTextW(hdc, &wide, @intCast(count), &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        } else {
+                            _ = DrawTextW(hdc, L("Room unavailable"), -1, &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         }
                     } else if (is_new_session_row) {
                         _ = SelectObject(hdc, palette_font);
