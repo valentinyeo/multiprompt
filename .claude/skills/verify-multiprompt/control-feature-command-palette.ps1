@@ -52,12 +52,11 @@
                 Start-Sleep -Milliseconds 700
                 $shellsOpened = (Test-FreshPaletteLog $debugLog $logStart)
             }
+            Snapshot 'more-shells'
             Type-Text 'powershell'
             Start-Sleep -Milliseconds 400
             Snapshot 'more-shells-search-inside'
             Press @(0x1B) 'Esc: clear the sub-list query'
-            Start-Sleep -Milliseconds 250
-            Snapshot 'more-shells'
             $result.checks += @{ name = 'new-session-rows'; empty = 'ctrl-k-empty.png'; shells = 'more-shells.png'; fallbackDown = (-not $shellsOpened); commands = 'harness workspace folder seeded' }
             Press @(0x1B) 'Esc: close More shells'
             Remove-Item -LiteralPath $commandsPath -Force
