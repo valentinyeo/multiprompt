@@ -15,7 +15,8 @@ test('IGSH-1266 the app owned Claude start is off by default and typing a comman
   assert.ok(start >= 0 && end > start, 'spawnWorkspaceTmuxSession must exist');
   const body = palette.slice(start, end);
   assert.match(body, /if \(agent_host\.eligible\(program\)\) agent_host\.mintSessionId\(&sid_buf\) else null/);
-  assert.match(body, /agent_host\.launchCommand\(&cmd_buf, session, cwd, sid\)/);
+  assert.match(body, /agent_host\.launchCommand\(&host_buf, session, cwd, sid\)/);
+  assert.ok(body.indexOf('var host_buf: [1024]u8') < body.indexOf('agent_host.launchCommand'), 'the host buffer must outlive the command');
   assert.match(body, /buildWorkspaceTmuxLaunchCmd\(&cmd_buf, session, cwd, program\)/);
   assert.match(body, /claude_sid_len = @intCast\(sid_len\)/);
 

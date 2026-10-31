@@ -1535,9 +1535,10 @@ pub fn spawnWorkspaceTmuxSession() bool {
     const agent_host = @import("agent_host.zig");
     var sid_buf: [36]u8 = undefined;
     const host_sid: ?[]const u8 = if (agent_host.eligible(program)) agent_host.mintSessionId(&sid_buf) else null;
-    var cmd_buf: [1024]u8 = undefined;
+    var cmd_buf: [512]u8 = undefined;
+    var host_buf: [1024]u8 = undefined;
     const launch_cmd = if (host_sid) |sid|
-        agent_host.launchCommand(&cmd_buf, session, cwd, sid) orelse return false
+        agent_host.launchCommand(&host_buf, session, cwd, sid) orelse return false
     else
         buildWorkspaceTmuxLaunchCmd(&cmd_buf, session, cwd, program) orelse return false;
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
