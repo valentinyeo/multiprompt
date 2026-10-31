@@ -17,6 +17,9 @@ on:
         required: true
         default: '3'
         type: string
+  schedule:
+    - cron: '16 2 * * *'
+
 permissions:
   contents: read
 
@@ -25,9 +28,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
-      TAG_A: ${{ github.event_name == 'pull_request' && 'v0.28.789' || inputs.tag_a }}
-      TAG_B: ${{ github.event_name == 'pull_request' && 'v0.28.793' || inputs.tag_b }}
-      RUNS: ${{ github.event_name == 'pull_request' && '3' || inputs.runs }}
+      TAG_A: ${{ inputs.tag_a || 'v0.28.789' }}
+      TAG_B: ${{ inputs.tag_b || 'v0.28.793' }}
+      RUNS: ${{ inputs.runs || '3' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

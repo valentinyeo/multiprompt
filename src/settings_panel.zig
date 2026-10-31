@@ -450,7 +450,7 @@ fn paintWorkspaceColors(hdc: w.HANDLE) void {
         paintText(hdc, @import("workspaces.zig").workspaceDisplayName(@intCast(workspace), &name), lineRect(g.colors.top + s(@as(i32, @intCast(workspace)) * 80), s(36)), 0, tokens.ReaderForeground, 0);
         for (@import("bot_avatar.zig").colors, 0..) |hex, color| {
             var rc = colorDotRect(workspace, color);
-            const selected = @import("session_layout.zig").workspaceColor(workspace, state.g_ws_colors[workspace]) == color;
+            const selected = @import("session_layout.zig").workspaceColor(if (state.g_single_window) workspace else state.g_standalone_workspace_color, state.g_ws_colors[workspace]) == color;
             if (selected) smooth.fillEllipse(hdc, rc, tokens.ReaderForeground);
             rc.left += s(4);
             rc.right -= s(4);
@@ -635,7 +635,7 @@ fn contentProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) call
                 const rc = colorDotRect(color_focus, 0);
                 setScroll(scroll + rc.top - s(40));
             } else if (wp == 0x25 or wp == 0x27) {
-                const current = @import("session_layout.zig").workspaceColor(color_focus, state.g_ws_colors[color_focus]);
+                const current = @import("session_layout.zig").workspaceColor(if (state.g_single_window) color_focus else state.g_standalone_workspace_color, state.g_ws_colors[color_focus]);
                 chooseWorkspaceColor(color_focus, (current + @as(u8, if (wp == 0x25) 6 else 1)) % 7);
             } else if (wp == 0x24 or wp == 0x2e) chooseWorkspaceColor(color_focus, null);
             return 0;

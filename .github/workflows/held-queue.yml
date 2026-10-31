@@ -1,8 +1,6 @@
 name: Held message cancellation
 
 on:
-  push:
-    branches: [ceo/IGSH-1010-r9]
   workflow_dispatch:
     inputs:
       tag:
@@ -21,6 +19,8 @@ on:
         description: Require the original missing cancellation boundary
         type: boolean
         default: false
+  schedule:
+    - cron: '8 3 * * *'
 
 permissions:
   contents: read
@@ -70,7 +70,7 @@ jobs:
           path: verification-evidence/
 
   ui:
-    if: inputs.expected_red != true && inputs.app_ref == ''
+    if: inputs.expected_red != true && !inputs.app_ref
     uses: ./.github/workflows/verify.yml
     with:
       feature: chat-delivery

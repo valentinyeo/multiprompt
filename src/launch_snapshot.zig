@@ -31,6 +31,7 @@ pub const Snapshot = struct {
     starred: bool = false,
     workspaces: []const []const u8 = &.{},
     workspace_colors: []const ?u8 = &.{},
+    standalone_workspace_color: u8 = 0,
     groups: []const Group = &.{},
     rows: []const Row,
     chat: bool = false,
@@ -77,6 +78,7 @@ fn valid(s: Snapshot) bool {
     for (s.workspaces) |name| if (name.len > 31) return false;
     if (s.workspace_colors.len != 0 and s.workspace_colors.len != s.workspaces.len) return false;
     for (s.workspace_colors) |color| if (color != null and color.? >= 7) return false;
+    if (s.standalone_workspace_color >= 7) return false;
     for (s.blocks) |block| {
         if (block.kind != .list and block.level > 6) return false;
         if (block.start > s.text.len or block.len > s.text.len - block.start or block.prefix > block.len or block.detail_start > s.text.len or block.detail_len > s.text.len - block.detail_start or block.diff_start > s.text.len or block.diff_len > s.text.len - block.diff_start) return false;
@@ -222,12 +224,14 @@ test "IGSH-1172 launch cache preserves colors and raw face identity" {
         .rows = &.{.{ .id = 1, .name = &.{'X'}, .tmux_session = "agent-one", .workspace = 1 }},
         .workspaces = &.{ "Cedar", "Orbit" },
         .workspace_colors = &.{ null, 6 },
+        .standalone_workspace_color = 4,
     });
     defer a.free(bytes);
     const parsed = (try decode(a, bytes)).?;
     defer parsed.deinit();
     try std.testing.expectEqualStrings("agent-one", parsed.value.rows[0].tmux_session);
     try std.testing.expectEqualSlices(?u8, &.{ null, 6 }, parsed.value.workspace_colors);
+    try std.testing.expectEqual(@as(u8, 4), parsed.value.standalone_workspace_color);
     try std.testing.expectError(error.InvalidSnapshot, encode(a, .{
         .active = 1,
         .rows = &.{.{ .id = 1, .name = &.{'X'} }},

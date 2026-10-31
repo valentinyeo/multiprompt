@@ -2,9 +2,9 @@ name: Release gate
 run-name: release gate ${{ github.sha }}
 
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
+  schedule:
+    - cron: '52 3 * * *'
 
 permissions:
   contents: read

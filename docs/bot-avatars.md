@@ -33,3 +33,8 @@ Workspace JSON carries an optional `color` integer, from zero through six. An ab
 ## Visual evidence
 
 The visual workflows use Cedar, Orbit, and Lagoon. They capture three default colors and Settings pickers. Picker interactions also verify recoloring. Desktop proof checks persisted color metadata. Android proof checks inbox and reader colors. Both workflows accept `ceo/IGSH-1172-generic` pushes.
+
+
+Scoped service responses retain the account-wide default color. Unchanged scoped writes keep automatic colors automatic. Legacy clients still preserve stored overrides.
+
+Standalone desktop files store the effective `workspace_color`. `workspace_color_auto` distinguishes defaults from explicit picks. `workspace_color_default` retains the original palette default. Splitting preserves appearance, including after restarting. Auto restores that retained default while standalone. Rejoining restores shared-order defaults without creating overrides. Older standalone root picks and nested export picks remain readable.

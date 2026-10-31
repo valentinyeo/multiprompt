@@ -8,8 +8,8 @@ on:
         required: true
         default: build
         type: string
-  push:
-    branches: [ceo/IGSH-1162]
+  schedule:
+    - cron: '4 2 * * *'
 
 permissions:
   contents: read

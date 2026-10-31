@@ -85,6 +85,7 @@ pub fn restore() void {
     state.g_starred_workspace = s.starred;
     state.g_lws_count = @intCast(@max(s.workspaces.len, @as(usize, s.workspace) + 1));
     state.g_ws_colors = @splat(null);
+    state.g_standalone_workspace_color = s.standalone_workspace_color;
     for (s.workspace_colors, 0..) |color, i| state.g_ws_colors[i] = color;
     for (s.workspaces, 0..) |name, i| {
         @memcpy(state.g_ws_names[i][0..name.len], name);
@@ -309,6 +310,7 @@ pub fn save() void {
         .starred = state.g_starred_workspace,
         .workspaces = workspaces[0..state.g_lws_count],
         .workspace_colors = state.g_ws_colors[0..state.g_lws_count],
+        .standalone_workspace_color = state.g_standalone_workspace_color,
         .groups = groups[0..state.group_count],
         .rows = rows[0..state.shell_count],
         .chat = chat,

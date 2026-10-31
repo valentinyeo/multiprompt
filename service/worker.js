@@ -102,8 +102,10 @@ async function authenticateKey(db, key, pathname) {
 }
 function scoped(device, layout) {
   if (device.kind !== 'workspace') return layout;
-  if (!layout.workspaces.some(w => w.name === device.workspace)) fail(404, 'workspace_not_found');
-  return { schema: 1, revision: layout.revision, workspaces: [layout.workspaces.find(w => w.name === device.workspace)], tabs: layout.tabs.filter(tab => tab.workspace === device.workspace) };
+  const index = layout.workspaces.findIndex(w => w.name === device.workspace);
+  if (index < 0) fail(404, 'workspace_not_found');
+  const workspace = layout.workspaces[index];
+  return { schema: 1, revision: layout.revision, workspaces: [{ ...workspace, color: workspace.color ?? index % 7 }], tabs: layout.tabs.filter(tab => tab.workspace === device.workspace) };
 }
 function confine(device, layout, previous) {
   if (!previous) fail(503, 'layout_not_seeded');
@@ -119,7 +121,10 @@ function confine(device, layout, previous) {
     else if (!placed) { tabs.push(...layout.tabs); placed = true; }
   }
   if (!placed) tabs.push(...layout.tabs);
-  return validateLayout({ ...previous, revision: layout.revision, workspaces: previous.workspaces.map(w => w.name === name ? layout.workspaces[0] : w), tabs });
+  const index = previous.workspaces.findIndex(w => w.name === name);
+  const workspace = { ...layout.workspaces[0] };
+  if (previous.workspaces[index].color === undefined && workspace.color === index % 7) delete workspace.color;
+  return validateLayout({ ...previous, revision: layout.revision, workspaces: previous.workspaces.map(w => w.name === name ? workspace : w), tabs });
 }
 async function sessionAccount(request, env, auth) {
   if (!env.BETTER_AUTH_SECRET || !(request.headers.get('Cookie') || '').includes('session_token')) return null;

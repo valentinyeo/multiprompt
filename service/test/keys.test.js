@@ -195,3 +195,34 @@ test('workspace keys negotiate and update only their workspace color', async () 
   assert.equal((await put(innerKey, legacy.body.revision, legacy.body.layout)).status, 200);
   assert.equal((await stored()).layout.workspaces[0].color, 4);
 });
+
+test('scoped defaults match account order and legacy writes preserve automatic and picked colors', async () => {
+  await reset();
+  const orbitKey = 'mpk_w_' + 'F'.repeat(43);
+  await db.prepare('DELETE FROM service_keys WHERE hash=?').bind(await hash(orbitKey)).run();
+  await addKey(orbitKey, 'workspace', 'Orbit');
+  const initial = { schema: 1, revision: 7, workspaces: [{ name: 'Cedar' }, { name: 'Orbit' }, { name: 'Lagoon', color: 5 }], tabs: [] };
+  await db.prepare('UPDATE layouts SET layout=? WHERE account=?').bind(JSON.stringify(initial), account).run();
+  const headers = { 'X-Layout-Features': 'workspace_color' };
+  const all = await (await call('/v1/layout', adminKey, { headers })).json();
+  const scoped = await (await call('/v1/layout', orbitKey, { headers })).json();
+  const index = all.layout.workspaces.findIndex(workspace => workspace.name === 'Orbit');
+  assert.equal(scoped.layout.workspaces[0].color, all.layout.workspaces[index].color ?? index % 7);
+  const unchanged = await put(orbitKey, scoped.revision, scoped.layout, headers);
+  assert.equal(unchanged.status, 200);
+  assert.equal(Object.hasOwn((await stored()).layout.workspaces[1], 'color'), false);
+  const legacy = await get(orbitKey);
+  assert.deepEqual(legacy.body.layout.workspaces, [{ name: 'Orbit' }]);
+  assert.equal((await put(orbitKey, legacy.body.revision, legacy.body.layout)).status, 200);
+  assert.equal(Object.hasOwn((await stored()).layout.workspaces[1], 'color'), false);
+  const picked = await (await call('/v1/layout', orbitKey, { headers })).json();
+  picked.layout.workspaces[0].color = 4;
+  assert.equal((await put(orbitKey, picked.revision, picked.layout, headers)).status, 200);
+  const old = await get(orbitKey);
+  assert.equal((await put(orbitKey, old.body.revision, old.body.layout)).status, 200);
+  const after = (await stored()).layout;
+  assert.equal(after.workspaces[1].color, 4);
+  assert.equal(after.workspaces[2].color, 5);
+  const explicit = await (await call('/v1/layout', orbitKey, { headers })).json();
+  assert.equal(explicit.layout.workspaces[0].color, 4);
+});

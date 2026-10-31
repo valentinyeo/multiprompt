@@ -9,6 +9,10 @@ pub const Workspace = struct { name: []const u8, color: ?u8 = null };
 pub fn workspaceColor(order: usize, override: ?u8) u8 {
     return override orelse @as(u8, @intCast(order % 7));
 }
+pub fn writeStandaloneWorkspaceColor(out: []u8, order: usize, override: ?u8) ![]const u8 {
+    return std.fmt.bufPrint(out, ",\"workspace_color\":{d},\"workspace_color_auto\":{},\"workspace_color_default\":{d}", .{ workspaceColor(order, override), override == null, order % 7 });
+}
+
 pub const Tab = struct {
     kind: []const u8 = "tmux",
     name: []const u8,

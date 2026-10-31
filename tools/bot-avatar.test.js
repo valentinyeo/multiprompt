@@ -21,7 +21,7 @@ function block(source, prefix) {
 
 test('workspace order owns color and raw session owns face for arbitrary names', () => {
   const source = read('src/bot_avatar.zig');
-  assert.match(source, /workspaceColor\(workspace, state\.g_ws_colors\[workspace\]\)/);
+  assert.match(source, /workspaceColor\(order, state\.g_ws_colors\[workspace\]\)/);
   assert.doesNotMatch(source, /eqlIgnoreCase/);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-identity-'));
   try {
@@ -35,6 +35,8 @@ const state = struct {
     name: [64]u16 = @splat(0), name_len: u32 = 0, workspace: u8 = 0,
   };
   pub var g_lws_count: u32 = 9;
+  pub var g_single_window = true;
+  pub var g_standalone_workspace_color: u8 = 0;
   pub var g_ws_colors: [9]?u8 = @splat(null);
 };
 ${identity}
@@ -57,6 +59,9 @@ test "ordered palette cycles and overrides never change the face" {
     state.g_ws_colors = @splat(null);
     shell.workspace = 255;
     try std.testing.expectEqual(@as(u8, 0), forShell(&shell).color);
+    state.g_single_window = false;
+    state.g_standalone_workspace_color = 4;
+    try std.testing.expectEqual(@as(u8, 4), forShell(&shell).color);
     var seen: [20]bool = @splat(false);
     for (0..10000) |i| {
         var name: [32]u8 = undefined;

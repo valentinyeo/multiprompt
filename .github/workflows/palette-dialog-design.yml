@@ -1,30 +1,9 @@
 name: Palette and dialog design
 
 on:
-  pull_request:
-    paths:
-      - src/sidebar.zig
-      - src/dialog.zig
-      - src/palette_text.zig
-      - tools/palette-dialog-design.test.js
-      - .claude/skills/verify-multiprompt/control.ps1
-      - .claude/skills/verify-multiprompt/control-library.ps1
-      - .claude/skills/verify-multiprompt/control-native.cs
-      - .claude/skills/verify-multiprompt/control-feature-command-palette.ps1
-      - .github/workflows/palette-dialog-design.yml
-  push:
-    branches: [master, ceo/IGSH-1061, ceo/IGSH-1061-recovery]
-    paths:
-      - src/sidebar.zig
-      - src/dialog.zig
-      - src/palette_text.zig
-      - tools/palette-dialog-design.test.js
-      - .claude/skills/verify-multiprompt/control.ps1
-      - .claude/skills/verify-multiprompt/control-library.ps1
-      - .claude/skills/verify-multiprompt/control-native.cs
-      - .claude/skills/verify-multiprompt/control-feature-command-palette.ps1
-      - .github/workflows/palette-dialog-design.yml
   workflow_dispatch:
+  schedule:
+    - cron: '36 3 * * *'
 
 permissions:
   contents: read

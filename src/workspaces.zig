@@ -3274,6 +3274,7 @@ fn leaveSingleWindowMode() bool {
     for (0..app_state.shell_count) |i| app_state.shells[i].workspace = 0;
     app_state.g_active_workspace = 0;
     app_state.g_lws_count = 1;
+    app_state.g_standalone_workspace_color = @import("session_layout.zig").workspaceColor(active_slot, null);
     app_state.g_ws_colors[0] = app_state.g_ws_colors[active_slot];
     app_state.g_ws_last_shell[0] = app_state.g_ws_last_shell[active_slot];
     app_state.g_ws_focus[0] = app_state.g_ws_focus[active_slot];
@@ -3911,6 +3912,9 @@ fn exportSlotSessionFile(slot: u8) bool {
     const t3 = "}]";
     @memcpy(json_buf[pos .. pos + t3.len], t3);
     pos += t3.len;
+    const color_order = if (app_state.g_single_window) slot else app_state.g_standalone_workspace_color;
+    const encoded_color = @import("session_layout.zig").writeStandaloneWorkspaceColor(json_buf[pos..], color_order, app_state.g_ws_colors[slot]) catch return false;
+    pos += encoded_color.len;
 
     var wrote_group = false;
     for (0..app_state.group_count) |gi| {
@@ -4183,6 +4187,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
     logSavedTabsAudit("absorbWorkspace:parsed", tabs[0..tab_count]);
 
     var src_colors: [MAX_LWS]?u8 = @splat(null);
+    if (!json_reader.boolTrue(parsed.value, "single_window")) src_colors[0] = json_reader.standaloneWorkspaceColor(parsed.value);
     var src_names: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
     var src_name_len: [MAX_LWS]u32 = [_]u32{0} ** MAX_LWS;
     var src_wids: [MAX_LWS][32]u8 = std.mem.zeroes([MAX_LWS][32]u8);
@@ -4197,7 +4202,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
         if (ncap > 0) @memcpy(src_names[swi][0..ncap], nb[0..ncap]);
         src_name_len[swi] = ncap;
         const color = json_reader.uintDefault(obj, "color", 7);
-        src_colors[swi] = if (color < 7) @intCast(color) else null;
+        if (color < 7) src_colors[swi] = @intCast(color);
         var wb: [64]u8 = std.mem.zeroes([64]u8);
         const wn2 = json_reader.copyString(obj, "wid", &wb);
         const wcap = @min(wn2, @as(u32, @intCast(src_wids[swi].len)));

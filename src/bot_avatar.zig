@@ -22,7 +22,8 @@ pub fn forShell(shell: *const state.Shell) Appearance {
     };
     var appearance = Appearance.forSession(session);
     const workspace = if (shell.workspace < state.g_lws_count) shell.workspace else 0;
-    appearance.color = @import("session_layout.zig").workspaceColor(workspace, state.g_ws_colors[workspace]);
+    const order = if (state.g_single_window) workspace else state.g_standalone_workspace_color;
+    appearance.color = @import("session_layout.zig").workspaceColor(order, state.g_ws_colors[workspace]);
     return appearance;
 }
 

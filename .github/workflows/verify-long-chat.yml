@@ -1,9 +1,9 @@
 name: Verify long chat continuity
 
 on:
-  push:
-    branches: [ceo/IGSH-1059, ceo/IGSH-1059-release]
   workflow_dispatch:
+  schedule:
+    - cron: '24 4 * * *'
 
 permissions:
   contents: read

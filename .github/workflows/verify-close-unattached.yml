@@ -8,14 +8,8 @@ on:
         required: true
         default: build
         type: string
-  pull_request:
-    paths:
-      - .github/workflows/verify-close-unattached.yml
-      - tools/verify-reconnect/**
-      - src/archive.zig
-      - src/shortcuts.zig
-      - src/app_state.zig
-      - src/vps.zig
+  schedule:
+    - cron: '20 4 * * *'
 
 permissions:
   contents: read

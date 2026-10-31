@@ -49,6 +49,24 @@ pub fn boolFalse(value: std.json.Value, key: []const u8) bool {
     return !boolean(field(value, key), true);
 }
 
+pub fn standaloneWorkspaceColor(value: std.json.Value) ?u8 {
+    if (boolTrue(value, "workspace_color_auto")) return null;
+    const color = uintDefault(value, "workspace_color", 7);
+    if (color < 7) return @intCast(color);
+    const workspaces = array(field(value, "workspaces"));
+    if (workspaces.len == 1) {
+        const nested = uintDefault(workspaces[0], "color", 7);
+        if (nested < 7) return @intCast(nested);
+    }
+    return null;
+}
+
+pub fn standaloneWorkspaceDefault(value: std.json.Value) u8 {
+    const fallback = if (boolTrue(value, "workspace_color_auto")) uintDefault(value, "workspace_color", 0) else 0;
+    const color = uintDefault(value, "workspace_color_default", fallback);
+    return if (color < 7) @intCast(color) else 0;
+}
+
 pub fn copyString(value: std.json.Value, key: []const u8, out: []u8) u32 {
     if (out.len == 0) return 0;
     const text = string(field(value, key)) orelse return 0;
