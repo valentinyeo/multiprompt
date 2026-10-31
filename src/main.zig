@@ -8129,6 +8129,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             logSessionAudit("WM_CLOSE:entry-before-save");
             commitRename();
             chatDraftFlush();
+            @import("file_io.zig").flushPendingWrites();
 
             var has_keep_alive = false;
             for (0..app_state.shell_count) |i| {
