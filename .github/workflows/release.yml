@@ -1,21 +1,31 @@
 name: Release
 
 on:
-  push:
-    branches: [master]
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to create, for example v0.28.712
+        description: Optional new release tag
+        required: false
+        type: string
+  workflow_call:
+    secrets:
+      MULTIPROMPT_RELEASE_SIGNING_KEY:
         required: true
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+
 jobs:
+  gitleaks:
+    uses: ./.github/workflows/gitleaks.yml
+    with:
+      release_scan: true
+
   prepare:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
@@ -30,19 +40,46 @@ jobs:
       - name: Resolve release version and commit
         id: version
         env:
-          REQUESTED_TAG: ${{ github.event.inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+          REQUESTED_TAG: ${{ inputs.tag || '' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           sha=$(git rev-parse HEAD)
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && git show-ref --verify --quiet "refs/tags/$REQUESTED_TAG"; then
-            sha=$(git rev-parse "refs/tags/$REQUESTED_TAG^{commit}")
+          if [ -n "$REQUESTED_TAG" ]; then
+            [[ "$REQUESTED_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+            tag=$REQUESTED_TAG
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              git fetch --no-tags origin "+refs/tags/$tag:refs/tags/$tag"
+            else
+              status=$?
+              [ "$status" -eq 2 ] || exit "$status"
+            fi
+            if git show-ref --verify --quiet "refs/tags/$tag"; then
+              sha=$(git rev-parse --verify "refs/tags/$tag^{commit}")
+            fi
+          else
+            previous=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+            [[ "$previous" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+            if ! git rev-parse --verify --quiet "refs/tags/$previous^{commit}" >/dev/null; then
+              git fetch --no-tags origin "refs/tags/$previous:refs/tags/$previous"
+            fi
+            base=$(git rev-parse --verify "refs/tags/$previous^{commit}")
+            git merge-base --is-ancestor "$base" "$sha"
+            git rev-list --first-parent "$sha" | grep -Fx "$base" >/dev/null || { echo 'Latest release is not on the first-parent history' >&2; exit 1; }
+            distance=$(git rev-list --first-parent --count "$base..$sha")
+            [ "$distance" -gt 0 ] || { echo 'No commits since latest release' >&2; exit 1; }
+            tag=$(node --input-type=module - "$previous" "$distance" <<'NODE'
+          const match = /^v(\d+)\.(\d+)\.(\d+)$/.exec(process.argv[2]);
+          console.log(`v${match[1]}.${match[2]}.${BigInt(match[3]) + BigInt(process.argv[3])}`);
+          NODE
+            )
           fi
-          git show "$sha:src/changelog.zig" > "$RUNNER_TEMP/changelog.zig"
-          tag=$(node tools/release-version.mjs "$RUNNER_TEMP/changelog.zig" "$REQUESTED_TAG")
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   build:
     needs: prepare
+    timeout-minutes: 10
     name: build-${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
@@ -56,59 +93,171 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
       - name: Install Zig 0.16.0
         run: |
-          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz | tar -xJ
+          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
+          tar -xJf zig.tar.xz
           echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
       - name: Build
-        run: zig build -Dtarget=${{ matrix.target }}
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tools/version-stamp.mjs build "$TAG"
+          zig build -Dtarget=${{ matrix.target }} -Drelease=${{ github.event_name != 'pull_request' }} -Dversion="${TAG#v}"
+          node --input-type=module - "$TAG" <<'NODE'
+          import fs from 'node:fs';
+          const expected = process.argv[2].slice(1);
+          const versions = [...fs.readFileSync('zig-out/bin/multiprompt.exe').toString('latin1').matchAll(/MPVERSION=(\d+\.\d+\.\d+);/g)].map(match => match[1]);
+          if (versions.length === 0 || versions.some(version => version !== expected)) throw new Error('Executable embedded version does not match release tag');
+          NODE
       - name: Package
         run: |
           mkdir dist
           cp zig-out/bin/multiprompt.exe dist/multiprompt-${{ matrix.arch }}.exe
           cp zig-out/bin/zigshell-bridge.exe dist/zigshell-bridge-${{ matrix.arch }}.exe
+      - name: Build the symbolized twin
+        continue-on-error: true
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          zig build -Dtarget=${{ matrix.target }} -Drelease=${{ needs.prepare.outputs.tag != '' }} -Dsymbols -Dversion="${TAG#v}" --prefix zig-out-debug
+          mkdir -p dist-symbols
+          cp zig-out-debug/bin/multiprompt.exe dist-symbols/multiprompt-${{ matrix.arch }}-symbols.exe
+          shopt -s nullglob
+          for pdb in zig-out-debug/bin/*.pdb; do
+            cp "$pdb" "dist-symbols/multiprompt-${{ matrix.arch }}-symbols.pdb"
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: multiprompt-${{ matrix.arch }}
           path: dist/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: multiprompt-${{ matrix.arch }}-symbols
+          path: dist-symbols/*
+          if-no-files-found: warn
 
-  release:
+  launch:
     needs: [prepare, build]
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    concurrency:
-      group: release-${{ needs.prepare.outputs.tag }}
-      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    runs-on: windows-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
+          name: multiprompt-x64
+          path: release-bin
+      - name: Restore installed bridge filename
+        shell: powershell
+        run: Copy-Item release-bin/zigshell-bridge-x64.exe release-bin/zigshell-bridge.exe
+      - name: Open the built app and prove its main window
+        shell: powershell
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: ./tools/release-launch.ps1 -Exe release-bin/multiprompt-x64.exe -Evidence release-proof
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: release-launch-proof
+          path: release-proof/
+          if-no-files-found: error
+
+  release:
+    needs: [prepare, build, launch, gitleaks]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: multiprompt-x64
           path: dist
-          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: multiprompt-arm64
+          path: dist
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Publish plain versioned update notes
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tools/version-stamp.mjs build "$TAG"
+          node tools/release-notes.mjs src/changelog.zig "$TAG" dist/release-notes.json
       - name: Package extension and checksums
         run: |
           (cd extension && zip -r ../dist/multiprompt-extension.zip . -x 'themes/current/*')
-          (cd dist && sha256sum *.exe *.zip > SHA256SUMS.txt)
+          (cd dist && sha256sum *.exe *.zip release-notes.json > SHA256SUMS.txt)
+      - name: Sign checksum manifest
+        env:
+          MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}
+        run: node tools/sign-release.mjs
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          name: multiprompt-x64-symbols
+          path: symbols
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          name: multiprompt-arm64-symbols
+          path: symbols
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
           BUILT_SHA: ${{ needs.prepare.outputs.sha }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/master ]; then
-            status=0
-            git ls-remote --exit-code --tags origin "refs/tags/$TAG" || status=$?
-            if [ "$status" = 0 ]; then
-              echo "Tag $TAG already exists; skipping publication"
-              exit 0
-            fi
-            if [ "$status" != 2 ]; then exit "$status"; fi
-          fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; skipping publication"
+            echo "Release $TAG already exists; refusing publication" >&2
+            exit 1
+          fi
+          published_tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
+          latest=$(node --input-type=module - "$TAG" "$published_tag" <<'NODE'
+          const versions = process.argv.slice(2).map(tag => {
+            const match = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(tag);
+            if (!match) throw new Error(`Invalid release tag: ${tag}`);
+            return match.slice(1).map(BigInt);
+          });
+          const index = versions[0].findIndex((part, index) => part !== versions[1][index]);
+          console.log(index !== -1 && versions[0][index] > versions[1][index]);
+          NODE
+          )
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$BUILT_SHA" \
+            --latest="$latest" --title "multiprompt $TAG" --generate-notes
+      - name: Attach the symbolized twins for freeze reports
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          files=(symbols/*symbols.exe)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No symbolized twin was built; freeze reports stay unnamed"
             exit 0
           fi
-          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$BUILT_SHA" \
-            --latest --title "multiprompt $TAG" --generate-notes
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber

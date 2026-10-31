@@ -1,0 +1,35 @@
+name: Auto-revert master
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: auto-revert-master
+  cancel-in-progress: false
+
+jobs:
+  auto-revert:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Inspect failed run and revert only its master commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HYPERTASK_AGENT_TOKEN: ${{ secrets.HYPERTASK_AGENT_TOKEN }}
+          AUTO_REVERT_RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+        run: node tools/auto-revert-master.js

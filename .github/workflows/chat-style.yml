@@ -1,0 +1,21 @@
+name: Shared chat style
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '36 2 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-chat-style-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  reactions:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      tag: ${{ github.event.release.tag_name || '' }}
+      chat_reactions_proof: true

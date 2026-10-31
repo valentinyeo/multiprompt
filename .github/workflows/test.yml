@@ -1,9 +1,9 @@
 name: Tests
 
 on:
-  pull_request:
-  push:
-    branches: [master]
+  workflow_dispatch:
+  schedule:
+    - cron: '12 4 * * *'
 
 permissions:
   contents: read
@@ -13,71 +13,37 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  changes:
+  reader-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      heavy: ${{ steps.paths.outputs.heavy }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - name: Verify responsive startup ordering and original regression controls
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Test the runtime generation guard
+        run: node --test tools/check-runtime-generation.test.js
+      - name: Guard the reader runtime generation
         env:
-          STARTUP_BEFORE_REF: 508459a0022bb944a152d4f897d196d27dbb5455
-        run: node --test tools/startup-responsive.test.js
-      - name: Classify changed paths
-        id: paths
-        shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          base="$BASE"
-          if [ "$EVENT" = pull_request ]; then
-            base="$(git merge-base "$BASE" "$HEAD")"
-          elif [ "$base" = 0000000000000000000000000000000000000000 ]; then
-            base="$(git hash-object -t tree /dev/null)"
-          fi
-          git diff --name-only -z "$base" "$HEAD" > "$RUNNER_TEMP/changed-paths"
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import fs from 'node:fs';
-          const paths = fs.readFileSync(`${process.env.RUNNER_TEMP}/changed-paths`, 'utf8').split('\0').filter(Boolean);
-          const docs = /^(?:docs\/|openwiki\/|docs-site\/|changelog\.d\/|[^/]+\.md$)/;
-          const unusedTools = new Set(['tools/ci-cost.mjs']);
-          const requiresTests = paths => !paths.length || paths.some(path => !docs.test(path) && !unusedTools.has(path));
-          for (const [paths, expected] of [
-            [['README.md', 'openwiki/operations/build.md'], false],
-            [['changelog.d/IGSH-519-checks.md', 'CHANGELOG.md'], false],
-            [['docs/guide.md', 'docs-site/src/pages/index.astro'], false],
-            [['tools/ci-cost.mjs'], false],
-            [['tools/ci-cost.mjs', 'README.md'], false],
-            [['tools/ci-cost.mjs', 'tools/release-version.mjs'], true],
-            [['tools/app-source.js'], true],
-            [['tools/font-probe-dwrite.cpp'], true],
-            [['README.md', 'build.zig'], true],
-            [['src/testdata/history.md'], true],
-            [['.github/workflows/test.yml'], true],
-            [[], true],
-          ]) assert.equal(requiresTests(paths), expected);
-          console.log('Path routing controls passed');
-          const heavy = requiresTests(paths);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `heavy=${heavy}\n`);
-          console.log(JSON.stringify({ heavy, paths }));
-          NODE
+          BASE: ${{ github.event.before || '' }}
+          HEAD: ${{ github.sha }}
+        run: node tools/check-runtime-generation.mjs "${BASE}" "${HEAD}"
+      - name: Run the complete chat reader suite
+        run: python3 -W error::DeprecationWarning tools/chat-history-reader-test.py -v
 
   test:
     name: test-windows (${{ matrix.group }})
-    needs: changes
-    if: needs.changes.outputs.heavy == 'true'
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ matrix.group == 1 && 15 || 10 }}
     strategy:
       fail-fast: false
       matrix:
-        group: [1, 2, 3, 4]
+        group: [1, 2, 3, 4, 5]
     env:
       ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
@@ -86,58 +52,73 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+      - name: Classify changed paths
+        id: paths
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash -e -o pipefail tools/classify-test-paths.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: steps.paths.outputs.heavy == 'true'
         with:
           node-version: 22
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        if: steps.paths.outputs.heavy == 'true'
         with:
           python-version: '3.12'
       - name: Test release version
-        if: matrix.group == 1
+        if: steps.paths.outputs.heavy == 'true' && matrix.group == 5
         run: node --test tools/release-version.test.mjs
       - name: Check version rule
+        if: steps.paths.outputs.heavy == 'true'
         id: rule
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
       - name: Restore Zig toolchain (PR)
-        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Cache Zig toolchain
-        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Restore Zig (PR)
-        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v7-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v7-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-
       - name: Cache Zig
-        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             .zig-cache
             ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v7-group-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v3-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v7-group-${{ matrix.group }}-
+            ${{ runner.os }}-zig-0.16.0-shards-v6-group-${{ matrix.group }}-
       - name: Install Zig 0.16.0
-        if: steps.rule.outputs.kind != 'STAMP'
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
         run: |
           if (-not (Test-Path "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0\zig.exe")) {
@@ -150,77 +131,141 @@ jobs:
           }
           "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Run tests
-        if: steps.rule.outputs.kind != 'STAMP'
-        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        run: zig build test --summary all -Dtest-group=${{ matrix.group }} -Dcpu=x86_64_v3 ${{ matrix.group == 2 && '-j1' || '' }}
+      - name: Save approved shared chat proof
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: shared-chat-style-proof
+          path: chat-shared-*.bmp
+          if-no-files-found: error
+      - name: Save native header capacity proof
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: header-capacity-proof
+          path: '*header-capacity.bmp'
+          if-no-files-found: error
+      - name: Upload Chat View header ETA proof
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-header-eta
+          path: chat-header-eta-*.bmp
+          if-no-files-found: error
+      - name: Save native skill search proof
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: skill-search-proof
+          path: skill-search-*.bmp
+          if-no-files-found: error
+      - name: Run CLEAN chat pixel tests
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && !cancelled()
+        shell: bash
+        run: zig build test-clean-chat --summary all -Dcpu=x86_64_v3 2>&1 | tee clean-chat-output.log
+      - name: Require every CLEAN pixel test
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1 && always()
+        run: node tools/check-clean-chat-output.mjs clean-chat-output.log
+      - name: Sweep real zsb.exe command help
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
+        run: node --test tools/zsb-help.test.js
+      - name: Test installer prune
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 3
+        run: node --test tools/install-prune.test.js
+      - name: Check local listener accounts
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        shell: pwsh
+        run: |
+          zig build local-listener-helper -Dcpu=x86_64_v3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./tools/local-listener-accounts.ps1
+      - name: Bound Zig cache before save
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        shell: bash
+        run: |
+          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
+          python3 tools/trim-zig-cache.py --cap-mib 1600
+          du -sh "$ZIG_GLOBAL_CACHE_DIR"
+          if [ -d .zig-cache ]; then du -sh .zig-cache; fi
 
-  test-vps:
-    name: test-vps (${{ matrix.group }})
-    needs: changes
-    if: needs.changes.outputs.heavy == 'true'
+  test-update-source:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        group: [1, 2]
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+      - name: Classify changed paths
+        id: paths
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash -e -o pipefail tools/classify-test-paths.sh
+      - name: Test plain changelog fragments and update card notes
+        if: steps.paths.outputs.heavy == 'true'
+        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js
+      - name: Verify responsive startup ordering and original regression controls
+        run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: steps.paths.outputs.heavy == 'true'
         with:
           node-version: 22
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12'
-      - name: Test release version
-        if: matrix.group == 1
-        run: node --test tools/release-version.test.mjs
       - name: Check version rule
+        if: steps.paths.outputs.heavy == 'true'
         id: rule
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
+      - name: Test release update source regressions
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        shell: pwsh
+        run: |
+          $before = "$env:RUNNER_TEMP/update-review-before"
+          New-Item -ItemType Directory -Force $before | Out-Null
+          git fetch origin 1e557042ad06b6371baec41ab803dc759c989378
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git archive --format=tar --output="$env:RUNNER_TEMP/update-review-before.tar" 1e557042ad06b6371baec41ab803dc759c989378 -- src/main.zig src/update_release.zig src/update_release.ps1 src/update_card.zig tools/update-release.test.ps1 .github/workflows/verify.yml .github/workflows/release.yml build.zig
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tar -xf "$env:RUNNER_TEMP/update-review-before.tar" -C $before
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:UPDATE_SOURCE_ROOT = $before
+          node --test tools/update-release-review.test.js > "$env:RUNNER_TEMP/update-review-before.log"
+          $beforeExit = $LASTEXITCODE
+          Remove-Item Env:UPDATE_SOURCE_ROOT
+          $beforeLog = Get-Content "$env:RUNNER_TEMP/update-review-before.log" -Raw
+          if ($beforeExit -ne 1) { throw 'Review regression controls did not fail on the review baseline' }
+          foreach ($finding in 1..9) {
+            if ($beforeLog -notmatch "not ok $finding - R$finding ") { throw "Finding R$finding did not fail first" }
+            Write-Host "FAILING FIRST R$finding CONFIRMED against review baseline"
+          }
+          node --test tools/update-release-review.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test tools/update-release.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Restore Zig toolchain (PR)
-        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
+        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Cache Zig toolchain
-        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
           key: ${{ runner.os }}-zig-toolchain-0.16.0
-      - name: Restore Zig (PR)
-        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'pull_request'
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: |
-            .zig-cache
-            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
-          restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-
-      - name: Cache Zig
-        if: steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-        with:
-          path: |
-            .zig-cache
-            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
-          key: ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
-          restore-keys: |
-            ${{ runner.os }}-zig-0.16.0-shards-v3-vps-${{ matrix.group }}-
       - name: Install Zig 0.16.0
-        if: steps.rule.outputs.kind != 'STAMP'
+        if: steps.paths.outputs.heavy == 'true'
         run: |
           if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
             curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
@@ -228,69 +273,474 @@ jobs:
             tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           fi
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
-      - name: Run server tool tests
-        if: steps.rule.outputs.kind != 'STAMP'
-        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3
-      - name: Test cross-origin zsb frame input and eval
-        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
-        run: node --test tools/zsb-iframe.test.js
-      - name: Run session restore fixtures
-        if: steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
-        run: node tools/json-reader/benchmark.mjs --fixtures-only
-      - name: Build the account Worker
-        if: matrix.group == 1
-        working-directory: service
-        run: npm ci && npx wrangler deploy --dry-run --outdir .build
-      - name: Run account Worker tests
-        if: matrix.group == 1
-        run: node --test service/test/infra.test.js service/test/worker.test.js
+      - name: Reject placeholder release signing key
+        if: steps.paths.outputs.heavy == 'true'
+        run: |
+          key=src/release_signing_public_key.txt
+          cp "$key" "$RUNNER_TEMP/release-signing-public-key.txt"
+          trap 'cp "$RUNNER_TEMP/release-signing-public-key.txt" "$key"' EXIT
+          printf '%s\n' 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' > "$key"
+          if zig build -Dtarget=x86_64-windows-gnu -Drelease=true > "$RUNNER_TEMP/placeholder-error.txt" 2>&1; then
+            echo 'Release build did not reject the fake public key loudly'
+            exit 1
+          fi
+          grep -F 'Release signing public key is still the all-zero placeholder' "$RUNNER_TEMP/placeholder-error.txt"
+          echo 'Release placeholder rejected; ordinary tests remain buildable'
 
-  build-arm64:
-    name: build-arm64
-    needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.heavy == 'true'
+  test-windows-update:
+    needs: [build-windows]
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [Lifecycle, Rollback]
+    env:
+      MULTIPROMPT_TEST_SIGNING_KEY: ${{ github.workspace }}/update-verifier/update-test-key.der
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: paths
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash -e -o pipefail tools/classify-test-paths.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: steps.paths.outputs.heavy == 'true'
+        with:
+          node-version: 22
+      - name: Check version rule
+        if: steps.paths.outputs.heavy == 'true'
+        id: rule
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
+          else
+            node tools/version-stamp.mjs check HEAD^ HEAD
+          fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        with:
+          name: update-verifier-x64-${{ github.run_id }}
+          path: update-verifier
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        with:
+          name: native-update-x64-${{ github.run_id }}
+          path: native-update
+      - name: Test safe release updates
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        run: |
+          powershell -NoProfile -File tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell -NoProfile -File tools/update-release.test.ps1 -Verifier "$pwd/update-verifier/multiprompt.exe" -TestGroup ${{ matrix.scenario }} -Evidence "$env:RUNNER_TEMP/update-proof" -NativeUpdate "$pwd/native-update/multiprompt.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload update restart proof
+        if: steps.paths.outputs.heavy == 'true' && always() && steps.rule.outputs.kind != 'STAMP'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: update-proof-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/update-proof/
+          if-no-files-found: error
+
+  test-vps:
+    name: test-vps (${{ matrix.group }})
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3]
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Install Zig 0.16.0
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: paths
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash -e -o pipefail tools/classify-test-paths.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: steps.paths.outputs.heavy == 'true'
+        with:
+          node-version: 22
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        if: steps.paths.outputs.heavy == 'true'
+        with:
+          python-version: '3.12'
+      - name: Test notification relay
+        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
+        run: python3 -m unittest tools/agent-notifications/test_mp_notify_relay.py -v
+      - name: Test release version
+        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
+        run: node --test tools/release-version.test.mjs
+      - name: Test Zig cache trimming
+        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
+        run: node --test tools/trim-zig-cache.test.mjs
+      - name: Check version rule
+        if: steps.paths.outputs.heavy == 'true'
+        id: rule
+        shell: bash
         run: |
-          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz | tar -xJ
-          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
+          else
+            node tools/version-stamp.mjs check HEAD^ HEAD
+          fi
+      - name: Restore Zig toolchain (PR)
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Cache Zig toolchain
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Restore Zig (PR)
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-
+      - name: Cache Zig
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-shards-v6-vps-${{ matrix.group }}-
+      - name: Install Zig 0.16.0
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        run: |
+          if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
+            curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+            echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+            tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          fi
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Test remote browser command list
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        run: node --test tools/zsb-remote-commands.test.js
+      - name: Test held-session CDP scripts
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 1
+        run: node --test tools/zsb-cdp-script.test.js
+      - name: Run server tool tests
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        run: zig build test-vps --summary all -Dtest-vps-group=${{ matrix.group }} -Dcpu=x86_64_v3 ${{ matrix.group == 1 && '-j1' || '' }}
+      - name: Test cross-origin zsb frame input and eval
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
+        run: node --test tools/zsb-iframe.test.js
+      - name: Run session restore fixtures
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && matrix.group == 2
+        run: node tools/json-reader/benchmark.mjs --fixtures-only
+      - name: Bound Zig cache before save
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        shell: bash
+        run: |
+          du -sh .zig-cache "$ZIG_GLOBAL_CACHE_DIR"
+          python3 tools/trim-zig-cache.py --cap-mib 1600
+          du -sh "$ZIG_GLOBAL_CACHE_DIR"
+          if [ -d .zig-cache ]; then du -sh .zig-cache; fi
+
+  test-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: paths
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash -e -o pipefail tools/classify-test-paths.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: steps.paths.outputs.heavy == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: service/package-lock.json
+      - name: Check version rule
+        if: steps.paths.outputs.heavy == 'true'
+        id: rule
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node tools/version-stamp.mjs check "$(git merge-base ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }})" ${{ github.event.pull_request.head.sha }}
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            node tools/version-stamp.mjs check "$(git merge-base origin/${{ github.event.repository.default_branch }} HEAD)" HEAD
+          else
+            node tools/version-stamp.mjs check HEAD^ HEAD
+          fi
+      - name: Restore Zig toolchain (PR)
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && (github.event_name == 'pull_request' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Cache Zig toolchain
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Install Zig 0.16.0
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        run: |
+          if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
+            curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+            echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+            tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          fi
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Build the account Worker
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        working-directory: service
+        timeout-minutes: 2
+        run: npm ci --no-audit --no-fund --prefer-offline && npx wrangler deploy --dry-run --outdir .build
+      - name: Run account Worker tests
+        if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
+        run: node --test service/test/infra.test.js service/test/worker.test.js service/test/keys.test.js service/test/mp-layout.test.js
+
+  build-windows:
+    name: build-windows (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: paths
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'schedule' && github.sha || github.event.pull_request.base.sha || (github.ref != 'refs/heads/master' && 'origin/master') || github.event.before || format('{0}^', github.sha) }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash -e -o pipefail tools/classify-test-paths.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        with:
+          node-version: 22
+      - name: Restore Zig toolchain (PR)
+        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref != 'refs/heads/master'))
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Cache Zig toolchain
+        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-linux-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Restore Zig (PR)
+        if: steps.paths.outputs.heavy == 'true' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && github.ref != 'refs/heads/master'))
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v4-${{ matrix.arch }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-shards-v4-${{ matrix.arch }}-
+      - name: Cache Zig
+        if: steps.paths.outputs.heavy == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .zig-cache
+            ${{ env.ZIG_GLOBAL_CACHE_DIR }}
+          key: ${{ runner.os }}-zig-0.16.0-shards-v4-${{ matrix.arch }}-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-0.16.0-shards-v4-${{ matrix.arch }}-
+      - name: Install Zig 0.16.0
+        if: steps.paths.outputs.heavy == 'true'
+        run: |
+          if [ ! -x "$RUNNER_TEMP/zig-x86_64-linux-0.16.0/zig" ]; then
+            curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o "$RUNNER_TEMP/zig.tar.xz"
+            echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $RUNNER_TEMP/zig.tar.xz" | sha256sum -c -
+            tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+          fi
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Build release executables for arm64
-        run: zig build -Dtarget=aarch64-windows-gnu
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'arm64'
+        run: zig build -Dtarget=aarch64-windows-gnu --summary all
+      - name: Prepare throwaway update-test signing key
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: node tools/update-release-fixtures.mjs --prepare-key zig-out/bin/update-test-key.der
+      - name: Build release executable for x64
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true --summary all
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        with:
+          name: update-verifier-x64-${{ github.run_id }}
+          path: |
+            zig-out/bin/multiprompt.exe
+            zig-out/bin/update-test-key.der
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+      - name: Build newer native update fixture
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        run: zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dversion=9.99.999 --prefix "$RUNNER_TEMP/native-update" --summary all
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.paths.outputs.heavy == 'true' && matrix.arch == 'x64'
+        with:
+          name: native-update-x64-${{ github.run_id }}
+          path: ${{ runner.temp }}/native-update/bin/multiprompt.exe
+          if-no-files-found: error
+          retention-days: 1
+
+
+  check-red-run:
+    uses: ./.github/workflows/check-red-run.yml
+    with:
+      base: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && (github.event.before || format('{0}^', github.sha))) || 'origin/master' }}
+      head: ${{ github.event.pull_request.head.sha || github.sha }}
+
+  switch-performance:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Reject PowerShell host name collisions
+        shell: pwsh
+        run: ./tools/check-powershell-host-names.ps1
+      - name: Test session speed oracle
+        run: node --test tools/switch-performance.test.mjs
+      - name: Install Zig 0.16.0
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP/zig.zip"
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          tar -xf $zip -C $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Zig extraction failed' }
+          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Build baseline and candidate
+        shell: pwsh
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || (github.ref == 'refs/heads/master' && (github.event.before || format('{0}^', github.sha))) || 'origin/master' }}
+        run: |
+          $base = (git merge-base $env:BASE HEAD).Trim()
+          git worktree add --detach baseline $base
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline checkout failed' }
+          node tools/switch-performance.mjs instrument baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline timing instrumentation failed' }
+          node tools/switch-performance.mjs instrument .
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate timing instrumentation failed' }
+          Push-Location baseline
+          try { zig build; if ($LASTEXITCODE -ne 0) { throw 'Baseline build failed' } } finally { Pop-Location }
+          zig build
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate build failed' }
+          foreach ($root in @('baseline', '.')) {
+            zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o "$root/zig-out/bin/ssh.exe"
+            if ($LASTEXITCODE -ne 0) { throw 'SSH fixture build failed' }
+            zig cc -target x86_64-windows-gnu -municode -mwindows -O2 tools/verify-chat-delivery/launcher.c -o "$root/zig-out/bin/tmux.exe"
+            if ($LASTEXITCODE -ne 0) { throw 'tmux fixture build failed' }
+          }
+          "SPEED_HEAD=$((git rev-parse HEAD).Trim())" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "SPEED_BASE=$base" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Measure baseline session speed
+        shell: powershell
+        run: ./tools/switch-performance.ps1 -Exe baseline/zig-out/bin/multiprompt.exe -Evidence evidence/base -Revision "$env:SPEED_BASE"
+      - name: Measure candidate session speed
+        shell: powershell
+        run: ./tools/switch-performance.ps1 -Exe zig-out/bin/multiprompt.exe -Evidence evidence/head -Revision "$env:SPEED_HEAD"
+      - name: Require session speed limits
+        if: always()
+        run: node tools/switch-performance.mjs report evidence/base/samples.json evidence/head/samples.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: switch-performance-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: error
+          retention-days: 7
 
   test-result:
     name: test
-    needs: [changes, test, test-vps, build-arm64]
+    needs: [test, test-vps, build-windows, test-windows-update, test-worker, test-update-source, check-red-run, switch-performance]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require every test job
         env:
-          CHANGES: ${{ needs.changes.result }}
-          HEAVY: ${{ needs.changes.outputs.heavy }}
           WINDOWS: ${{ needs.test.result }}
           VPS: ${{ needs.test-vps.result }}
-          ARM64: ${{ github.event_name == 'pull_request' && needs.build-arm64.result || 'success' }}
+          BUILD: ${{ needs.build-windows.result }}
+          UPDATE: ${{ needs.test-windows-update.result }}
+          WORKER: ${{ needs.test-worker.result }}
+          UPDATE_SOURCE: ${{ needs.test-update-source.result }}
+          SPEED: ${{ needs.switch-performance.result }}
+          RED_RUN: ${{ needs.check-red-run.result }}
         run: |
           require_jobs() {
-            [ "$1" = success ] || return 1
-            case "$2" in
-              false) return 0 ;;
-              true) [ "$3" = success ] && [ "$4" = success ] && [ "$5" = success ] ;;
-              *) return 1 ;;
-            esac
+            for result in "$@"; do
+              [ "$result" = success ] || return 1
+            done
           }
-          require_jobs success true success success success
-          require_jobs success false skipped skipped skipped
+          require_jobs success success success success success success success success
           for result in failure cancelled skipped; do
-            if require_jobs "$result" false skipped skipped skipped; then exit 1; fi
-            if require_jobs success true "$result" success success; then exit 1; fi
-            if require_jobs success true success "$result" success; then exit 1; fi
-            if require_jobs success true success success "$result"; then exit 1; fi
+            if require_jobs "$result" success success success success success success success; then exit 1; fi
+            if require_jobs success "$result" success success success success success success; then exit 1; fi
+            if require_jobs success success "$result" success success success success success; then exit 1; fi
+            if require_jobs success success success "$result" success success success success; then exit 1; fi
+            if require_jobs success success success success "$result" success success success; then exit 1; fi
+            if require_jobs success success success success success "$result" success success; then exit 1; fi
+            if require_jobs success success success success success success "$result" success; then exit 1; fi
+            if require_jobs success success success success success success success "$result"; then exit 1; fi
           done
-          if require_jobs success invalid success success success; then exit 1; fi
           echo 'Aggregate routing controls passed'
-          require_jobs "$CHANGES" "$HEAVY" "$WINDOWS" "$VPS" "$ARM64"
+          require_jobs "$WINDOWS" "$VPS" "$BUILD" "$UPDATE" "$WORKER" "$UPDATE_SOURCE" "$RED_RUN" "$SPEED"

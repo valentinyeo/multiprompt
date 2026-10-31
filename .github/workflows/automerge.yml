@@ -1,0 +1,36 @@
+name: automerge
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  checks: read
+  statuses: read
+
+jobs:
+  automerge:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record checked out head
+        run: git rev-parse HEAD
+      - name: Prove regression on merge-base source
+        if: github.event_name == 'workflow_dispatch' && github.ref_name != github.event.repository.default_branch
+        run: node tools/check-red-run.mjs origin/master HEAD
+      - name: Check admission regressions before manual inspection
+        if: github.event_name == 'workflow_dispatch'
+        run: node --test tools/automerge-admit-run.test.js tools/ci-admission.test.js && bash tools/automerge-admit.test.sh
+      - name: Inspect one PR and start master checks only after merging
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tools/automerge-admit-run.js
