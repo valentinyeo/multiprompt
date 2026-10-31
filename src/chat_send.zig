@@ -1330,6 +1330,24 @@ pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {
     return chatConfirmedHas(key, p, block.stamp_ms, block.message_id);
 }
 
+pub const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
+
+pub fn chatSendRoute(kind: @import("app_state.zig").ShellKind, ai_agent: u8, sid_present: bool) ChatSendRoute {
+    if (chatMessageGoesToHost(kind, ai_agent)) return if (sid_present) .host_message else .wait_for_start;
+    if (kind == .tmux and ai_agent == 0) return .wait_for_start;
+    return .terminal_send;
+}
+
+test "IGSH-1266 a chat typed before the tab finished starting still goes to the host" {
+    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 1, true));
+    try std.testing.expectEqual(ChatSendRoute.host_message, chatSendRoute(.tmux, 2, true));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 1, false));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, true));
+    try std.testing.expectEqual(ChatSendRoute.wait_for_start, chatSendRoute(.tmux, 0, false));
+    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.cmd, 0, false));
+    try std.testing.expectEqual(ChatSendRoute.terminal_send, chatSendRoute(.vps, 0, false));
+}
+
 pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8) bool {
     return kind == .tmux and (ai_agent == 1 or ai_agent == 2);
 }
@@ -1862,11 +1880,66 @@ fn chatOutboxInputRowIdle(shell_index: u32) bool {
     return false;
 }
 
+fn chatLogSendPath(shell_index: u32, entry: ?*const app_state.ChatOutboxEntry, route: ChatSendRoute, stage: []const u8) void {
+    const shell = &app_state.shells[shell_index];
+    const identity = chatFileIdentityForShell(shell_index);
+    var log_buf: [220]u8 = undefined;
+    @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&log_buf, "[chat] send path={s} stage={s} v1={} ai_agent={d} sid_present={} host={d} wire_id={s}", .{
+        @tagName(route),
+        stage,
+        if (entry) |e| e.message_v1 else false,
+        shell.ai_agent,
+        identity.sid[0] != 0,
+        identity.host,
+        if (entry) |e| std.mem.sliceTo(&e.message_wire_id, 0) else "",
+    }) catch "[chat] send path");
+}
+
+fn chatUpgradeToHostMessage(shell_index: u32, entry: *app_state.ChatOutboxEntry) bool {
+    if (entry.message_v1) return true;
+    const identity = chatFileIdentityForShell(shell_index);
+    if (identity.sid[0] == 0 or identity.tmux[0] == 0) return false;
+    var random_io = std.Io.Threaded.init(std.heap.page_allocator, .{});
+    defer random_io.deinit();
+    while (entry.message_nonce == 0) random_io.io().random(std.mem.asBytes(&entry.message_nonce));
+    while (entry.queue_id == 0) random_io.io().random(std.mem.asBytes(&entry.queue_id));
+    _ = std.fmt.bufPrint(&entry.message_wire_id, "desktop-{x:0>16}{x:0>16}", .{ entry.message_nonce, entry.queue_id }) catch return false;
+    entry.message_v1 = true;
+    entry.message_sid = identity.sid;
+    entry.channel_pending = false;
+    entry.write_started = false;
+    entry.retryable = false;
+    entry.state = .queued;
+    return true;
+}
+
 fn sendTextToShellVerifiedAt(shell_index: u32, send_text: []const u16, echo_id: u64) ShellSendResult {
     if (shell_index >= app_state.shell_count) return .write_failed;
+    const shell = &app_state.shells[shell_index];
+    const identity = chatFileIdentityForShell(shell_index);
+    const route = chatSendRoute(shell.kind, shell.ai_agent, identity.sid[0] != 0);
     if (chatOutboxIndexById(echo_id)) |ei| {
         const entry = &app_state.g_chat_outbox.items[ei];
-        if (!entry.message_v1 and app_state.shells[shell_index].kind == .tmux and app_state.shells[shell_index].ai_agent == 2) return .write_failed;
+        chatLogSendPath(shell_index, entry, route, "enter");
+        if (route == .wait_for_start) {
+            entry.state = .queued;
+            entry.write_started = false;
+            chatLogSendPath(shell_index, entry, route, "hold");
+            return .write_failed;
+        }
+        if (route == .host_message and !entry.message_v1) {
+            if (!chatUpgradeToHostMessage(shell_index, entry)) {
+                entry.state = .queued;
+                entry.write_started = false;
+                return .write_failed;
+            }
+            chatLogSendPath(shell_index, entry, route, "upgraded");
+        }
+        if (route == .terminal_send and entry.message_v1) {
+            entry.message_v1 = false;
+            chatLogSendPath(shell_index, entry, route, "legacy");
+        }
+        if (!entry.message_v1 and shell.kind == .tmux and shell.ai_agent == 2) return .write_failed;
         if (entry.write_started) return .write_failed;
         entry.state = .sending;
         entry.anchor = chatEchoAnchorNow(shell_index);
@@ -2834,6 +2907,14 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
     if (@import("chat_session.zig").chatHistoryPersistent(job.key.host, id, query, 4096, &wire, &job.written)) {
         job.rejected = chatTmuxSendRejected(wire.items);
         job.box_not_clear = std.mem.indexOf(u8, wire.items, "\tsend\terror\tbox_not_clear\t") != null;
+        var reply_buf: [128]u8 = undefined;
+        const ok = std.mem.indexOf(u8, wire.items, "\tsend\tok\t") != null;
+        const reason = if (ok) "ok" else if (job.box_not_clear) "box_not_clear" else if (job.rejected) "rejected" else "unclear";
+        @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&reply_buf, "[chat] send legacy reply={s} written={}", .{ reason, job.written }) catch "[chat] send legacy reply");
+        if (!ok) job.rejected = true;
+    } else {
+        @import("diagnostics.zig").debugLog("[chat] send legacy channel unavailable");
+        job.rejected = true;
     }
 }
 
