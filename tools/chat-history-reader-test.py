@@ -4369,6 +4369,19 @@ class AgentHostReviewTest(AgentHostTest):
         self.dispatch()
         self.assertEqual(self.message()['state'], 'sent')
 
+    def test_a_busy_host_keeps_its_owner_file(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: reader.host_owned(self.provider, self.sid))
+        paths = reader.host_paths(self.provider, self.sid)
+        owner = paths['owner'].read_text()
+        with patch.object(reader, 'host_request', return_value=dict(status='unavailable')):
+            self.assertEqual(reader.host_start(self.provider, self.sid)['status'], 'error')
+        self.assertEqual(paths['owner'].read_text(), owner)
+        self.assertTrue(reader.host_owned(self.provider, self.sid))
+        self.assertEqual(paths['socket'].exists(), True)
+
     def test_a_host_chat_refuses_typing_into_its_pane(self):
         self.enable()
         with patch.object(reader, 'subprocess') as processes:

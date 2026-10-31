@@ -2443,6 +2443,8 @@ def host_handed_over(provider, sid):
 
 
 def host_clear_stale(provider, sid):
+    if host_alive(provider, sid):
+        return
     paths = host_paths(provider, sid)
     for name in ("socket", "owner"):
         try:
@@ -4294,7 +4296,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 29
+RUNTIME_GENERATION = 30
 
 if __name__ == '__main__':
     import base64 as _base64
