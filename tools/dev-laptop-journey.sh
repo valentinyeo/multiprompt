@@ -60,19 +60,35 @@ type_text() {
     hc "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('$escaped'); 'ok'" 30 >/dev/null
 }
 
+readonly FOREGROUND_CS="using System; using System.Runtime.InteropServices; public class MpFg {
+  [DllImport(\"user32.dll\")] static extern IntPtr GetForegroundWindow();
+  [DllImport(\"user32.dll\")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport(\"user32.dll\")] static extern uint GetCurrentThreadId();
+  [DllImport(\"user32.dll\", SetLastError=true)] static extern bool AttachThreadInput(uint from, uint to, bool attach);
+  [DllImport(\"user32.dll\")] static extern bool BringWindowToTop(IntPtr h);
+  [DllImport(\"user32.dll\")] static extern IntPtr SetForegroundWindow(IntPtr h);
+  [DllImport(\"user32.dll\")] static extern bool AllowSetForegroundWindow(uint pid);
+  [DllImport(\"user32.dll\")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport(\"user32.dll\")] static extern bool ShowWindow(IntPtr h, int c);
+  public static uint ForegroundPid() { uint p; GetWindowThreadProcessId(GetForegroundWindow(), out p); return p; }
+  public static void BringToForeground(IntPtr hwnd) {
+    uint pid; uint foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+    uint currentThread = GetCurrentThreadId(); uint targetPid; uint targetThread = GetWindowThreadProcessId(hwnd, out targetPid);
+    bool attached = foregroundThread != 0 && foregroundThread != currentThread && AttachThreadInput(currentThread, foregroundThread, true);
+    bool attachedTarget = targetThread != 0 && targetThread != currentThread && targetThread != foregroundThread && AttachThreadInput(currentThread, targetThread, true);
+    keybd_event(0x12, 0, 0, UIntPtr.Zero);
+    try { AllowSetForegroundWindow(targetPid); BringWindowToTop(hwnd); SetForegroundWindow(hwnd); }
+    finally { keybd_event(0x12, 0, 2, UIntPtr.Zero); if (attachedTarget) AttachThreadInput(currentThread, targetThread, false); if (attached) AttachThreadInput(currentThread, foregroundThread, false); }
+  }
+}"
+
 focus_dev() {
     local h
     h=$(dev_hwnd)
     [[ -z $h || $h == 0 ]] && { echo "dev window missing" >&2; return 1; }
     hc "\$d = @'
-using System; using System.Runtime.InteropServices;
-public class MpS {
-  [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int c);
-  [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
-  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);
-  [DllImport(\"user32.dll\")] public static extern bool BringWindowToTop(IntPtr h);
-}
-'@; Add-Type -TypeDefinition \$d; \$h = [IntPtr]$h; [MpS]::ShowWindow(\$h, 3) | Out-Null; [MpS]::SetWindowPos(\$h, [IntPtr]::Zero, -2560, -493, 2048, 1280, 0x0040) | Out-Null; [MpS]::BringWindowToTop(\$h) | Out-Null; [MpS]::SetForegroundWindow(\$h) | Out-Null; 'focused'" 30 >/dev/null
+$FOREGROUND_CS
+'@; Add-Type -TypeDefinition \$d; \$h = [IntPtr]$h; [MpFg]::ShowWindow(\$h, 3) | Out-Null; [MpFg]::BringToForeground(\$h); Start-Sleep -Milliseconds 400; 'fg=' + [MpFg]::ForegroundPid()" 45 | tail -1
 }
 
 shot() {
