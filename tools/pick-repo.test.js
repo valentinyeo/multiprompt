@@ -67,3 +67,11 @@ test('IGSH-1266 saving the workspace folder tells the user', () => {
   assert.match(main, /if \(saving_folder and picked\) showHeaderNoticeAscii\("Workspace folder saved; new tabs start there"/,
     'saving the folder must confirm it on screen, not only in the file');
 });
+
+test('IGSH-1266 the pick rows paint their ellipsis on the wide text path', () => {
+  const sidebar = read('src/sidebar.zig');
+  assert.match(sidebar, /paletteDrawText\(hdc, if \(result_idx == SEARCH_PICK_REPO_OFFSET\) L\("Pick repo\\u\{2026\}"\) else L\("Set workspace folder\\u\{2026\}"\)/,
+    'the row labels must go through the same wide-text path as the other rows, not raw UTF-8 bytes');
+  assert.doesNotMatch(sidebar, /drawAscii\(hdc, pickRepoLabel/,
+    'a UTF-8 ellipsis drawn as ASCII paints as mojibake');
+});

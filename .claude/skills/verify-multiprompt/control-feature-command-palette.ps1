@@ -72,8 +72,9 @@
             Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore + 1 } 'harness folder tab open'
             Press @(0x12, 0x43) 'Alt+C: return to the terminal view'
             Start-Sleep -Milliseconds 500
-            Remove-Item -LiteralPath $repoCommands -Force
-            Start-Sleep -Milliseconds 500
+            $otherEntries = @($repoEntries | Where-Object { $_.workspace -ne 'Other' })
+            [IO.File]::WriteAllText($repoCommands, ([ordered]@{ commands = $otherEntries } | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+            Start-Sleep -Milliseconds 700
             $pickTabsBefore = @((Read-Session).tabs).Count
             Palette 'pick repo'
             Snapshot 'pick-repo-row'
@@ -95,6 +96,7 @@
             Press @(0x11, 0x57) 'Ctrl+W: close the harness folder tab'
             Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore } 'harness folder tab closed'
             Snapshot 'pick-repo-closed'
+            Remove-Item -LiteralPath $repoCommands -Force
             Palette 'interface'
             Snapshot 'action'
             Press @(0x0D) 'Enter: UI Size: Increase'
