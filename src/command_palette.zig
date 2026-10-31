@@ -1532,8 +1532,14 @@ pub fn spawnWorkspaceTmuxSession() bool {
 
     var session_buf: [64]u8 = undefined;
     const session = buildWorkspaceTmuxSessionName(&session_buf);
-    var cmd_buf: [512]u8 = undefined;
-    const launch_cmd = buildWorkspaceTmuxLaunchCmd(&cmd_buf, session, cwd, program) orelse return false;
+    const agent_host = @import("agent_host.zig");
+    var sid_buf: [36]u8 = undefined;
+    const host_sid: ?[]const u8 = if (agent_host.eligible(program)) agent_host.mintSessionId(&sid_buf) else null;
+    var cmd_buf: [1024]u8 = undefined;
+    const launch_cmd = if (host_sid) |sid|
+        agent_host.launchCommand(&cmd_buf, session, cwd, sid) orelse return false
+    else
+        buildWorkspaceTmuxLaunchCmd(&cmd_buf, session, cwd, program) orelse return false;
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
     app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
     app_state.g_pending_tmux_host = host;
@@ -1547,6 +1553,11 @@ pub fn spawnWorkspaceTmuxSession() bool {
         setShellName(&app_state.shells[ns], if (claude) "Claude" else "Terminal");
         app_state.shells[ns].name_source = .default;
         app_state.shells[ns].ai_agent = if (claude) 1 else 0;
+        if (host_sid) |sid| {
+            const sid_len = @min(sid.len, app_state.shells[ns].claude_sid.len);
+            @memcpy(app_state.shells[ns].claude_sid[0..sid_len], sid[0..sid_len]);
+            app_state.shells[ns].claude_sid_len = @intCast(sid_len);
+        }
         const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
         @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
         app_state.shells[ns].cached_cwd_len = @intCast(n);

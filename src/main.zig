@@ -1221,6 +1221,7 @@ comptime {
         _ = @import("launch_plan.zig");
         _ = @import("launch_snapshot.zig");
         _ = @import("console.zig");
+        _ = @import("agent_host.zig");
         _ = @import("sidebar.zig");
         _ = @import("themes.zig");
         _ = @import("browser_pane.zig");
