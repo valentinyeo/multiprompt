@@ -1500,6 +1500,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_APP_UPDATE_CHANGED => {
             if (wp != 0) _ = SetTimer(hwnd, TIMER_UPDATE_CHECK, UPDATE_CHECK_MS, null);
             updateCardPoll();
+            @import("usage_card.zig").refresh();
             return 0;
         },
         WM_SETTINGCHANGE, WM_THEMECHANGED => {
@@ -1973,11 +1974,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 {
-                    if (@import("usage_card.zig").versionStripHit(mx, my)) {
-                        updateCardRelaunch(hwnd);
-                        return 0;
-                    }
-                    const upd_hit = if (app_state.g_sidebar_collapsed) updateCardHit(mx, my) else 0;
+                    const upd_hit = updateCardHit(mx, my);
                     if (upd_hit != 0) {
                         app_state.g_shell_focused = false;
                         if (upd_hit == 1) updateCardRelaunch(hwnd) else if (upd_hit == 2) updateCardDismiss() else if (upd_hit == 4) updateCardToggleNotes();
@@ -1985,7 +1982,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         return 0;
                     }
                 }
-                if (sidebarStickyCardHitTest(my)) {
+                if (sidebarStickyCardHitTest(my) or sidebarStickyCardHoverTest(mx, my)) {
                     app_state.g_shell_focused = false;
                     if (app_state.g_sidebar_collapsed) {
                         cycleSidebarStatusCard(1);
@@ -2170,6 +2167,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
+        0x02A1 => {
+            const x = GET_X(lp);
+            const y = GET_Y(lp);
+            if (sidebarStickyCardHoverTest(x, y) and updateCardHit(x, y) == 0) @import("usage_card.zig").openHover();
+            return 0;
+        },
         0x02A3 => {
             @import("usage_card.zig").updateHoverSuppression();
             if (app_state.g_status_card_hover) {
@@ -2195,7 +2198,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOUSEMOVE => {
-            const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and !sidebarStickyCardHitTest(GET_Y(lp)) and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll)) {
+            const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and !sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0 and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll)) {
                 .tab => |index| index,
                 else => null,
             } else null;
@@ -2209,19 +2212,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             {
                 @import("usage_card.zig").updateHoverSuppression();
-                const card_hover = sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp));
+                const card_hover = sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0;
                 if (card_hover != app_state.g_status_card_hover) {
                     app_state.g_status_card_hover = card_hover;
                     _ = InvalidateRect(hwnd, null, 0);
-                }
-                if (card_hover) {
-                    @import("usage_card.zig").openHover();
-                    var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                    var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = if (card_hover) 3 else 0x80000001, .hwndTrack = hwnd, .dwHoverTime = 400 };
                     _ = TrackMouseEvent(&tracking);
                 }
             }
+
             {
-                const upd_hit = if (app_state.g_sidebar_collapsed) updateCardHit(GET_X(lp), GET_Y(lp)) else 0;
+                const upd_hit = updateCardHit(GET_X(lp), GET_Y(lp));
                 const upd_now: u8 = if (upd_hit == 1 or upd_hit == 2) upd_hit else 0;
                 if (upd_now != app_state.g_update_hover) {
                     app_state.g_update_hover = upd_now;
@@ -2349,7 +2350,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     const now = GetTickCount64();
                     if (app_state.drag_last_swap_tick != 0 and now - app_state.drag_last_swap_tick < 120) return 0;
                     if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
-                    if (sidebarStickyCardHitTest(my)) return 0;
+                    if (sidebarStickyCardHitTest(my) or sidebarStickyCardHoverTest(mx, my) or updateCardHit(mx, my) != 0) return 0;
 
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
                     const ht = hitTestSidebar(mx, logical_my_drag);
@@ -2441,7 +2442,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
                 const REORDER_X_MARGIN: i32 = 32;
                 const sidebar_w_for_reorder = SIDEBAR_W();
-                if (my >= 0 and !sidebarStickyCardHitTest(my) and mx >= -REORDER_X_MARGIN and mx < sidebar_w_for_reorder + REORDER_X_MARGIN) {
+                if (my >= 0 and !sidebarStickyCardHitTest(my) and !sidebarStickyCardHoverTest(mx, my) and updateCardHit(mx, my) == 0 and mx >= -REORDER_X_MARGIN and mx < sidebar_w_for_reorder + REORDER_X_MARGIN) {
                     const logical_my_drag = my + app_state.g_sidebar_scroll;
                     const ht = hitTestSidebar(mx, logical_my_drag);
                     if (sidebarTierForDrop(ht)) |want_tier| {
@@ -2577,7 +2578,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
                 if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
-                if (sidebarStickyCardHitTest(my)) return 0;
+                if (sidebarStickyCardHitTest(my) or sidebarStickyCardHoverTest(mx, my) or updateCardHit(mx, my) != 0) return 0;
                 const logical_my = my + app_state.g_sidebar_scroll;
                 const ht = hitTestSidebar(mx, logical_my);
                 switch (ht) {
@@ -2634,7 +2635,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (mx < SIDEBAR_W() and my >= 0) {
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
-                if (sidebarStickyCardHitTest(my)) {
+                if (updateCardHit(mx, my) != 0) return 0;
+                if (sidebarStickyCardHitTest(my) or sidebarStickyCardHoverTest(mx, my)) {
                     if (!app_state.g_sidebar_collapsed and sidebarStickyCardHoverTest(mx, my)) {
                         @import("telemetry_panel.zig").showSidebarAiUsageMenu();
                     }
@@ -3131,6 +3133,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             const next = app_state.g_ai_pace_pending;
             app_state.g_ai_pace_mutex.unlock();
             if (next.available) app_state.g_ai_pace = next;
+            @import("usage_card.zig").refresh();
             clampSidebarScroll();
             invalidateSidebar();
             return 0;
@@ -6842,6 +6845,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_TMUX_LIST_READY => {
+            @import("usage_card.zig").refresh();
             if (app_state.g_vps_poll_is_leader) writeVpsPollCache();
             _ = syncLiveTmuxMetadataFromCache();
             announceCapacityTransitions();
@@ -7152,6 +7156,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (wp == TIMER_UPDATE_CHECK) {
                 updateCardPoll();
+                @import("usage_card.zig").refresh();
                 return 0;
             }
             if (wp == TIMER_CHAT_AC_DEBOUNCE) {
@@ -7532,6 +7537,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     fetchTmuxSessions();
                 } else {
                     loadVpsPollCacheIfChanged();
+                    @import("usage_card.zig").refresh();
+                    invalidateSidebar();
                 }
             } else if (wp == TIMER_AI_PACE) {
                 requestAiPaceRefresh();

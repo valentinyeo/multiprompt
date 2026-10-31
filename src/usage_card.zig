@@ -19,8 +19,6 @@ var previous_focus: w.HANDLE = null;
 var bounds: RECT = std.mem.zeroes(RECT);
 var anchor: RECT = std.mem.zeroes(RECT);
 var snapshot: state.AiPaceSnapshot = .{};
-var footer_focused = false;
-var scroll: i32 = 0;
 var hover_open = false;
 var hover_suppressed_until_row_exit = false;
 var footer_fonts: [5]w.HANDLE = @splat(null);
@@ -32,7 +30,7 @@ pub fn resetFooterFonts() void {
     }
 }
 
-fn footerFont(index: usize, size: i32, weight: i32) w.HANDLE {
+pub fn footerFont(index: usize, size: i32, weight: i32) w.HANDLE {
     if (footer_fonts[index] == null) footer_fonts[index] = fonts.create(-px(size), 0, 0, 0, weight, 0, 0, 0, 0, 0, 0, 5, 0, if (weight == 500) L(fonts.UI_MEDIUM_FACE) else null);
     return footer_fonts[index];
 }
@@ -41,90 +39,65 @@ pub fn updateReady() bool {
     return state.g_update_ver_len > 0 and !state.g_update_relaunching;
 }
 
-pub fn versionStripRect() RECT {
-    const footer = @import("capacity.zig").sidebarStickyCardRect();
-    return .{ .left = footer.left + px(12), .top = footer.top + px(58), .right = footer.right - px(12), .bottom = footer.top + px(92) };
-}
-
-pub fn versionStripHit(x: i32, y: i32) bool {
-    return !state.g_hide_sidebar and !state.g_sidebar_collapsed and updateReady() and inside(versionStripRect(), x, y);
-}
-
-pub fn paintVersionStrip(dc: w.HANDLE) void {
-    if (state.g_hide_sidebar or state.g_sidebar_collapsed) return;
-    const rect = versionStripRect();
-    const regular = footerFont(0, 12, 400);
-    const medium = footerFont(1, 13, 500);
-    const semibold = footerFont(2, 13, 600);
-    const old = w.SelectObject(dc, regular);
-    defer _ = w.SelectObject(dc, old);
-    const dim = if (state.g_light_theme) RGB(100, 100, 100) else RGB(138, 138, 138);
-    if (!updateReady()) {
-        text(dc, "Multi Bot v" ++ @import("main.zig").APP_VERSION, .{ .left = rect.left + px(4), .top = rect.top + px(6), .right = rect.right, .bottom = rect.top + px(18) }, dim, 0);
-        return;
-    }
-    smooth.fillRoundRect(dc, rect, px(17), if (state.g_light_theme) RGB(215, 215, 215) else RGB(53, 53, 53));
-    const ink = if (state.g_light_theme) RGB(30, 30, 30) else RGB(242, 242, 242);
-    _ = w.SelectObject(dc, medium);
-    text(dc, "Update ready", .{ .left = rect.left + px(14), .top = rect.top, .right = rect.right - px(90), .bottom = rect.bottom }, ink, 0);
-    smooth.fillRoundRect(dc, .{ .left = rect.right - px(74), .top = rect.top + px(14), .right = rect.right - px(68), .bottom = rect.top + px(20) }, px(3), RGB(80, 150, 255));
-    _ = w.SelectObject(dc, semibold);
-    text(dc, "Restart", .{ .left = rect.right - px(62), .top = rect.top, .right = rect.right - px(14), .bottom = rect.bottom }, ink, w.DT_RIGHT);
-}
-
-pub fn paintSidebarFooter(dc: w.HANDLE) void {
-    if (state.g_hide_sidebar or state.g_sidebar_collapsed) return;
-    const rect = @import("capacity.zig").sidebarStickyCardRect();
-    const background = w.CreateSolidBrush(@import("themes.zig").themeSidebarBg());
-    _ = w.FillRect(dc, &rect, background);
-    _ = w.DeleteObject(background);
-    const track = if (state.g_light_theme) RGB(205, 205, 205) else RGB(46, 46, 46);
-    const divider = RECT{ .left = rect.left, .top = rect.top, .right = rect.right, .bottom = rect.top + @max(1, px(1)) };
-    const brush = w.CreateSolidBrush(track);
-    _ = w.FillRect(dc, &divider, brush);
-    _ = w.DeleteObject(brush);
-    const regular = footerFont(3, 11, 400);
-    const medium = footerFont(4, 11, 500);
-    const old = w.SelectObject(dc, regular);
-    defer _ = w.SelectObject(dc, old);
-    const dim = if (state.g_light_theme) RGB(100, 100, 100) else RGB(138, 138, 138);
-    const normal = if (state.g_light_theme) RGB(55, 55, 55) else RGB(200, 200, 200);
-    const labels = [_][]const u8{ "Claude", "Codex", "Claude 2" };
+fn usageSlots(data: *const state.AiPaceSnapshot) [3]?state.AiPaceGoal {
     var slots: [3]?state.AiPaceGoal = .{ null, null, null };
-    for (state.g_ai_pace.goals[0..@min(state.g_ai_pace.goal_count, state.g_ai_pace.goals.len)]) |goal| {
+    for (data.goals[0..@min(data.goal_count, data.goals.len)]) |goal| {
         if (goal.provider == .codex and slots[1] == null) slots[1] = goal else if (goal.provider == .claude) {
             if (slots[0] == null) slots[0] = goal else if (slots[2] == null) slots[2] = goal;
         }
     }
-    const left = rect.left + px(16);
-    const width = @max(0, @divTrunc(rect.right - rect.left - px(32) - 2 * px(10), 3));
-    for (labels, 0..) |label, i| {
-        const x = left + @as(i32, @intCast(i)) * (width + px(10));
-        const label_rect = RECT{ .left = x, .top = rect.top + px(12), .right = x + width, .bottom = rect.top + px(28) };
-        _ = w.SelectObject(dc, regular);
-        text(dc, label, label_rect, dim, 0);
-        const goal = slots[i];
-        const known = if (goal) |g| g.available and g.has_total_used else false;
-        const used: u16 = if (goal) |g| @min(g.total_used_tenths, 1000) else 0;
-        const ink = if (!known) dim else if (used >= 1000) RGB(242, 139, 130) else if (used >= 850) RGB(240, 196, 75) else normal;
-        var value: [24]u8 = undefined;
-        _ = w.SelectObject(dc, medium);
-        text(dc, if (known) telemetry.formatAiPacePercent(&value, used) else "n/a", label_rect, ink, w.DT_RIGHT);
-        if (known) {
-            const bar = RECT{ .left = x, .top = rect.top + px(34), .right = x + width, .bottom = rect.top + px(37) };
-            smooth.fillRoundRect(dc, bar, @max(1, px(2)), track);
-            if (used > 0) smooth.fillRoundRect(dc, .{ .left = x, .top = bar.top, .right = x + @divTrunc(width * @as(i32, used), 1000), .bottom = bar.bottom }, @max(1, px(2)), if (used >= 850) ink else if (state.g_light_theme) RGB(55, 55, 55) else RGB(242, 242, 242));
+    return slots;
+}
+
+fn statusColor(used: u16) w.DWORD {
+    var red = used >= 1000;
+    var amber = used >= 850;
+    for (0..state.g_host_capacity.len) |i| {
+        switch (@import("capacity.zig").effectiveCapacityState(@intCast(i))) {
+            .red, .critical => red = true,
+            .amber => amber = true,
+            else => {},
         }
     }
-    paintVersionStrip(dc);
+    return if (red) RGB(229, 72, 77) else if (amber) RGB(245, 165, 36) else RGB(242, 242, 242);
+}
+
+pub fn paintSidebarFooter(dc: w.HANDLE) void {
+    if (state.g_hide_sidebar or state.g_sidebar_collapsed) return;
+    const rect = @import("capacity.zig").sidebarUsageRowRect();
+    smooth.fillEllipse(dc, rect, RGB(26, 26, 26));
+    var used: u16 = 0;
+    var known = false;
+    for (usageSlots(&state.g_ai_pace)) |slot| {
+        if (slot) |goal| {
+            if (goal.available and goal.status != .stale and goal.has_total_used) {
+                known = true;
+                used = @max(used, @min(goal.total_used_tenths, 1000));
+            }
+        }
+    }
+    var points: [33]w.POINT = undefined;
+    const cx: f64 = @floatFromInt(rect.left + px(18));
+    const cy: f64 = @floatFromInt(rect.top + px(22));
+    const radius: f64 = @floatFromInt(px(10));
+    for (&points, 0..) |*point, i| {
+        const angle = std.math.pi + std.math.pi * @as(f64, @floatFromInt(i)) / 32.0;
+        point.* = .{ .x = @intFromFloat(cx + radius * @cos(angle)), .y = @intFromFloat(cy + radius * @sin(angle)) };
+    }
+    var canvas = smooth.Canvas.init(dc);
+    defer canvas.deinit();
+    canvas.strokePolyline(&points, RGB(64, 64, 64), @floatFromInt(px(4)));
+    const segments: usize = if (known) @intCast(@divTrunc(@as(u32, used) * 32, 1000)) else 0;
+    if (segments > 0) canvas.strokePolyline(points[0 .. segments + 1], statusColor(used), @floatFromInt(px(4)));
+    smooth.fillEllipse(dc, .{ .left = rect.left + px(16), .top = rect.top + px(20), .right = rect.left + px(20), .bottom = rect.top + px(24) }, if (known or statusColor(used) != RGB(242, 242, 242)) statusColor(used) else RGB(100, 100, 100));
 }
 
 pub fn geometry(client: RECT, pill: RECT, count: usize) RECT {
-    const width = @min(px(308), client.right - client.left - px(16));
+    _ = count;
+    const width = @min(px(240), client.right - client.left - px(16));
     const left = @max(client.left + px(8), @min(pill.left, client.right - width - px(8)));
     const bottom = pill.top - px(8);
-    const height = px(74) + @as(i32, @intCast(@max(1, count))) * px(109);
-    return .{ .left = left, .top = @max(client.top + px(8), bottom - height), .right = left + width, .bottom = bottom };
+    return .{ .left = left, .top = @max(client.top + px(8), bottom - px(206)), .right = left + width, .bottom = bottom };
 }
 
 fn inside(rect: RECT, x: i32, y: i32) bool {
@@ -178,75 +151,64 @@ pub fn fiveHourDetail(buffer: []u8, goal: state.AiPaceGoal, now: u64) []const u8
 }
 
 pub fn paint(dc: w.HANDLE, client: RECT, pill: RECT, data: *const state.AiPaceSnapshot) void {
-    const count = @min(data.goal_count, data.goals.len);
-    const card = geometry(client, pill, count);
-    const light = state.g_light_theme;
-    const panel = if (light) RGB(250, 250, 250) else RGB(24, 24, 24);
-    const edge = if (light) RGB(220, 220, 220) else RGB(46, 46, 46);
-    const ink = if (light) RGB(28, 28, 28) else RGB(242, 242, 242);
-    const dim = if (light) RGB(100, 100, 100) else RGB(138, 138, 138);
-    const track = if (light) RGB(225, 225, 225) else RGB(42, 42, 42);
-    smooth.fillRoundRect(dc, card, px(16), edge);
-    smooth.fillRoundRect(dc, .{ .left = card.left + 1, .top = card.top + 1, .right = card.right - 1, .bottom = card.bottom - 1 }, px(16) - 1, panel);
-    const regular = fonts.create(-px(12), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, null);
-    defer _ = w.DeleteObject(regular);
-    const heading = fonts.create(-px(14), 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 5, 0, null);
-    defer _ = w.DeleteObject(heading);
-    const small = fonts.create(-px(11), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, null);
-    defer _ = w.DeleteObject(small);
-    const old = w.SelectObject(dc, small);
+    const card = geometry(client, pill, data.goal_count);
+    smooth.fillRoundRect(dc, .{ .left = card.left, .top = card.top + px(3), .right = card.right, .bottom = card.bottom + px(3) }, px(12), RGB(10, 10, 10));
+    smooth.fillRoundRect(dc, card, px(12), RGB(46, 46, 46));
+    smooth.fillRoundRect(dc, .{ .left = card.left + 1, .top = card.top + 1, .right = card.right - 1, .bottom = card.bottom - 1 }, px(11), RGB(30, 30, 30));
+    const regular = footerFont(0, 12, 400);
+    const medium = footerFont(1, 12, 500);
+    const old = w.SelectObject(dc, regular);
     defer _ = w.SelectObject(dc, old);
     const old_mode = w.SetBkMode(dc, w.TRANSPARENT);
     defer _ = w.SetBkMode(dc, old_mode);
     const left = card.left + px(16);
     const right = card.right - px(16);
-    text(dc, "AI USAGE THIS WEEK", .{ .left = left, .top = card.top + px(12), .right = right, .bottom = card.top + px(32) }, dim, 0);
-    const clipped = w.SaveDC(dc);
-    _ = w.IntersectClipRect(dc, left, card.top + px(38), right, card.bottom - px(50));
-    var y = card.top + px(40) - scroll;
-    const now = @import("inbox.zig").nowFileTime();
-    for (data.goals[0..count], 0..) |goal, slot| {
-        _ = w.SelectObject(dc, heading);
-        text(dc, goal.shortLabel(), .{ .left = left, .top = y, .right = right - px(48), .bottom = y + px(20) }, ink, 0);
-        const name_width = drawing.asciiTextWidth(dc, goal.shortLabel());
-        _ = w.SelectObject(dc, small);
-        var short: [16]u8 = undefined;
-        text(dc, telemetry.aiPoolShortLabel(&short, data, slot), .{ .left = left + name_width + px(6), .top = y, .right = right - px(44), .bottom = y + px(20) }, dim, 0);
-        _ = w.SelectObject(dc, heading);
-        var percent: [24]u8 = undefined;
-        text(dc, if (goal.has_total_used) telemetry.formatAiPacePercent(&percent, goal.total_used_tenths) else "--", .{ .left = right - px(48), .top = y, .right = right, .bottom = y + px(20) }, ink, w.DT_RIGHT);
-        const bar = RECT{ .left = left, .top = y + px(30), .right = right, .bottom = y + px(36) };
-        smooth.fillRoundRect(dc, bar, px(3), track);
-        if (goal.has_total_used and goal.total_used_tenths > 0) smooth.fillRoundRect(dc, .{ .left = left, .top = bar.top, .right = left + @divTrunc((right - left) * @as(i32, goal.total_used_tenths), 1000), .bottom = bar.bottom }, px(3), ink);
-        if (weeklyElapsed(goal, now)) |elapsed| {
-            const x = std.math.clamp(left + @divTrunc((right - left) * @as(i32, elapsed), 1000), left, right - @max(1, px(1)));
-            const brush = w.CreateSolidBrush(dim);
-            defer _ = w.DeleteObject(brush);
-            const tick = RECT{ .left = x, .top = bar.top - px(2), .right = x + @max(1, px(1)), .bottom = bar.bottom + px(2) };
-            _ = w.FillRect(dc, &tick, brush);
-        }
+    const slots = usageSlots(data);
+    const labels = [_][]const u8{ "Claude", "Codex", "Claude 2" };
+    for (slots, labels, 0..) |slot, label, i| {
+        const y = card.top + px(14) + @as(i32, @intCast(i)) * px(34);
         _ = w.SelectObject(dc, regular);
-        var detail: [192]u8 = undefined;
-        text(dc, weeklyDetail(&detail, goal, now), .{ .left = left, .top = y + px(42), .right = right, .bottom = y + px(61) }, dim, 0);
-        text(dc, fiveHourDetail(&detail, goal, now), .{ .left = left, .top = y + px(63), .right = right, .bottom = y + px(82) }, dim, 0);
-        const divider = RECT{ .left = left, .top = y + px(96), .right = right, .bottom = y + px(96) + 1 };
-        const brush = w.CreateSolidBrush(track);
-        _ = w.FillRect(dc, &divider, brush);
-        _ = w.DeleteObject(brush);
-        y += px(109);
+        text(dc, label, .{ .left = left, .top = y, .right = right, .bottom = y + px(16) }, RGB(138, 138, 138), 0);
+        const known = if (slot) |goal| goal.available and goal.status != .stale and goal.has_total_used else false;
+        const used: u16 = if (slot) |goal| @min(goal.total_used_tenths, 1000) else 0;
+        var value: [24]u8 = undefined;
+        _ = w.SelectObject(dc, medium);
+        text(dc, if (known) telemetry.formatAiPacePercent(&value, used) else "n/a", .{ .left = left, .top = y, .right = right, .bottom = y + px(16) }, RGB(242, 242, 242), w.DT_RIGHT);
+        const bar = RECT{ .left = left, .top = y + px(21), .right = right, .bottom = y + px(24) };
+        smooth.fillRoundRect(dc, bar, px(2), RGB(64, 64, 64));
+        if (known and used > 0) smooth.fillRoundRect(dc, .{ .left = left, .top = bar.top, .right = left + @divTrunc((right - left) * @as(i32, used), 1000), .bottom = bar.bottom }, px(2), statusColor(used));
     }
-    if (count == 0) {
-        _ = w.SelectObject(dc, regular);
-        text(dc, "Usage is loading", .{ .left = left, .top = y, .right = right, .bottom = y + px(24) }, dim, 0);
-    }
-    _ = w.RestoreDC(dc, clipped);
     _ = w.SelectObject(dc, regular);
-    const footer = RECT{ .left = left, .top = card.bottom - px(48), .right = right, .bottom = card.bottom - px(22) };
-    text(dc, "Multi Bot", footer, dim, 0);
-    text(dc, "v" ++ @import("main.zig").APP_VERSION, .{ .left = left + px(85), .top = footer.top, .right = right - px(90), .bottom = footer.bottom }, ink, 0);
-    text(dc, "Release notes \xe2\x80\xba", .{ .left = right - px(88), .top = footer.top, .right = right, .bottom = footer.bottom }, if (footer_focused) ink else dim, w.DT_RIGHT);
-    _ = w.SelectObject(dc, small);
-    text(dc, "Grey tick = how much of the week has passed", .{ .left = left, .top = card.bottom - px(22), .right = right, .bottom = card.bottom - px(3) }, if (light) dim else RGB(90, 90, 90), 0);
+    const sy = card.top + px(119);
+    text(dc, "Servers", .{ .left = left, .top = sy, .right = right, .bottom = sy + px(16) }, RGB(138, 138, 138), 0);
+    const hosts = [_]u8{ 1, 0 };
+    const names = [_][]const u8{ "UK", "DE" };
+    for (hosts, names, 0..) |host, name, i| {
+        const hs = @import("capacity.zig").effectiveCapacityState(host);
+        const metrics = state.g_host_capacity[host];
+        var buf: [32]u8 = undefined;
+        const value = if (hs == .unknown) std.fmt.bufPrint(&buf, "{s} ?", .{name}) catch "?" else std.fmt.bufPrint(&buf, "{s} {d}/{d}", .{ name, metrics.load_milli / 1000, metrics.cores }) catch "?";
+        const color = switch (hs) { .red, .critical => RGB(229, 72, 77), .amber => RGB(245, 165, 36), .green => RGB(242, 242, 242), .unknown => RGB(138, 138, 138) };
+        const x = right - px(104) + @as(i32, @intCast(i)) * px(54);
+        text(dc, value, .{ .left = x, .top = sy, .right = x + px(53), .bottom = sy + px(16) }, color, 0);
+    }
+    const line = RECT{ .left = left, .top = card.top + px(148), .right = right, .bottom = card.top + px(149) };
+    const brush = w.CreateSolidBrush(RGB(46, 46, 46));
+    _ = w.FillRect(dc, &line, brush);
+    _ = w.DeleteObject(brush);
+    text(dc, "Multiprompt v" ++ @import("main.zig").APP_VERSION, .{ .left = left, .top = card.top + px(158), .right = right, .bottom = card.top + px(174) }, RGB(138, 138, 138), 0);
+    const update_status = if (state.g_update_relaunching) "Restarting" else if (updateReady()) "Update ready" else if (@import("update_release.zig").checking()) "Checking for updates" else "Up to date";
+    text(dc, update_status, .{ .left = left, .top = card.top + px(176), .right = right, .bottom = card.top + px(192) }, RGB(110, 110, 110), 0);
+}
+
+pub fn refresh() void {
+    if (backdrop == null) return;
+    if (hover_open and @import("update_card.zig").updateCardVisible()) {
+        close();
+        return;
+    }
+    snapshot = state.g_ai_pace;
+    _ = w.InvalidateRect(window, null, 0);
 }
 
 pub fn close() void {
@@ -344,8 +306,6 @@ fn openMode(passive: bool) void {
         state.g_popup_menu_active = true;
     }
     snapshot = state.g_ai_pace;
-    footer_focused = false;
-    scroll = 0;
     _ = w.MoveWindow(window, 0, 0, bounds.right, bounds.bottom, 0);
     if (passive) {
         const card = geometry(bounds, anchor, snapshot.goal_count);
@@ -388,20 +348,7 @@ pub fn key(value: usize) bool {
         if (value == w.VK_ESCAPE) dismiss() else close();
         return value == w.VK_ESCAPE;
     }
-    switch (value) {
-        w.VK_ESCAPE => dismiss(),
-        0x09 => {
-            footer_focused = true;
-            _ = w.InvalidateRect(window, null, 0);
-        },
-        0x0D => {
-            if (footer_focused) {
-                dismiss();
-                _ = focus.PostMessageW(state.g_main_hwnd, w.WM_APP_CHANGELOG_OPEN, 0, 0);
-            }
-        },
-        else => {},
-    }
+    if (value == w.VK_ESCAPE) dismiss();
     return true;
 }
 
@@ -450,10 +397,7 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             if (hover_open and (inside(@import("capacity.zig").sidebarUsageRowRect(), x, y) or inside(card, x, y))) {
                 close();
                 open();
-            } else if (!inside(card, x, y)) dismiss() else if (x >= card.right - px(110) and y >= card.bottom - px(48) and y < card.bottom - px(22)) {
-                dismiss();
-                _ = focus.PostMessageW(state.g_main_hwnd, w.WM_APP_CHANGELOG_OPEN, 0, 0);
-            }
+            } else if (!inside(card, x, y)) dismiss();
             return 0;
         },
         0x02A3 => {
@@ -467,14 +411,6 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
                 debugLog("[usage-hover] close on mouse leave");
                 close();
             }
-            return 0;
-        },
-        w.WM_MOUSEWHEEL => {
-            const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
-            const card = geometry(bounds, anchor, snapshot.goal_count);
-            const overflow = @max(0, @as(i32, @intCast(snapshot.goal_count)) * px(109) - (card.bottom - card.top - px(90)));
-            scroll = std.math.clamp(scroll - @divTrunc(@as(i32, delta) * px(54), 120), 0, overflow);
-            _ = w.InvalidateRect(hwnd, null, 0);
             return 0;
         },
         w.WM_KEYDOWN => {

@@ -62,8 +62,6 @@ const inboxButtonRect = @import("browser_pane.zig").inboxButtonRect;
 const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
 const threadTitleTop = @import("browser_pane.zig").threadTitleTop;
 const tintColor = @import("sidebar.zig").tintColor;
-const CapacityState = @import("app_state.zig").CapacityState;
-const activeCapacityStatus = @import("capacity.zig").activeCapacityStatus;
 const workspaceCapacityState = @import("capacity.zig").workspaceCapacityState;
 const SEARCH_VISIBLE_ROWS = @import("app_state.zig").SEARCH_VISIBLE_ROWS;
 const mainWindowDpi = @import("console.zig").mainWindowDpi;
@@ -839,32 +837,14 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
         _ = DrawTextW(hdc, voiceStatusLabel(), -1, &vs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
     }
 
-    var capacity_buf: [48]u16 = undefined;
-    var capacity_state: CapacityState = .unknown;
-    const capacity_len = if (!app_state.g_chat_active and !cap_msg and !voice_status and show_meta) activeCapacityStatus(&capacity_buf, &capacity_state) else 0;
-    if (capacity_len > 0) {
-        _ = SelectObject(hdc, uiFontSubtitle());
-        const capacity_col: DWORD = switch (capacity_state) {
-            .green => if (app_state.g_light_theme) RGB(30, 125, 70) else RGB(85, 190, 115),
-            .amber => if (app_state.g_light_theme) RGB(150, 95, 0) else RGB(245, 170, 70),
-            .red, .critical => RGB(235, 80, 75),
-            .unknown => dim_col,
-        };
-        _ = SetTextColor(hdc, capacity_col);
-        var capacity_rc = RECT{ .left = right_x, .top = title_top, .right = band_right - 8, .bottom = title_bottom };
-        _ = DrawTextW(hdc, @ptrCast(&capacity_buf), @intCast(capacity_len), &capacity_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
-    }
-
     if (!app_state.g_chat_active and !cap_msg and !voice_status and show_meta) {
-        if (capacity_len == 0) {
-            var time_buf: [24]u16 = undefined;
-            const time_len = inboxRelTime(app_state.shells[app_state.active_shell].last_active, &time_buf);
-            if (time_len > 0) {
-                _ = SelectObject(hdc, uiFontSubtitle());
-                _ = SetTextColor(hdc, dim_col);
-                var t_rc = RECT{ .left = right_x, .top = title_top, .right = band_right - 8, .bottom = title_bottom };
-                _ = DrawTextW(hdc, @ptrCast(&time_buf), @intCast(time_len), &t_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-            }
+        var time_buf: [24]u16 = undefined;
+        const time_len = inboxRelTime(app_state.shells[app_state.active_shell].last_active, &time_buf);
+        if (time_len > 0) {
+            _ = SelectObject(hdc, uiFontSubtitle());
+            _ = SetTextColor(hdc, dim_col);
+            var t_rc = RECT{ .left = right_x, .top = title_top, .right = band_right - 8, .bottom = title_bottom };
+            _ = DrawTextW(hdc, @ptrCast(&time_buf), @intCast(time_len), &t_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         }
     }
 

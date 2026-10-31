@@ -107,10 +107,8 @@ pub fn stopUpdateCardWatch() void {
 }
 
 pub fn updateCardVisible() bool {
-    if (app_state.g_sidebar_status_card == 2) return false;
     if (app_state.g_update_ver_len == 0 or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed or app_state.g_update_relaunching) return false;
-    const cur = app_state.g_update_ver[0..app_state.g_update_ver_len];
-    return !std.mem.eql(u8, cur, app_state.g_update_dismissed[0..app_state.g_update_dismissed_len]);
+    return app_state.g_update_dismissed_len == 0;
 }
 
 var card_notes: @import("update_notes.zig").Notes = .{};
@@ -179,21 +177,17 @@ pub fn updateCardSpan() i32 {
 }
 
 pub fn updateCardRect() RECT {
-    const sticky = sidebarStickyCardRect();
-    return .{
-        .left = sticky.left,
-        .top = sticky.top - @import("window_layout.zig").paneGap() - updateCardHeight() - uiScaled(22),
-        .right = sticky.right,
-        .bottom = sticky.top - uiScaled(22) - @import("window_layout.zig").paneGap(),
-    };
+    var client: RECT = std.mem.zeroes(RECT);
+    if (app_state.g_main_hwnd != null) _ = @import("win32.zig").GetClientRect(app_state.g_main_hwnd, &client);
+    return .{ .left = uiScaled(8), .top = client.bottom - uiScaled(96), .right = @import("browser_pane.zig").SIDEBAR_W() - uiScaled(8), .bottom = client.bottom - uiScaled(8) };
 }
 
 fn updateCardButtonRect(card: RECT) RECT {
-    return .{ .left = card.left + uiScaled(10), .top = card.bottom - uiScaled(26), .right = card.left + uiScaled(96), .bottom = card.bottom - uiScaled(7) };
+    return .{ .left = card.left + uiScaled(16), .top = card.bottom - uiScaled(32), .right = card.left + uiScaled(96), .bottom = card.bottom - uiScaled(8) };
 }
 
 fn updateCardCloseRect(card: RECT) RECT {
-    return .{ .left = card.right - uiScaled(24), .top = card.top + uiScaled(3), .right = card.right - uiScaled(4), .bottom = card.top + uiScaled(23) };
+    return .{ .left = card.left + uiScaled(104), .top = card.bottom - uiScaled(32), .right = @min(card.left + uiScaled(150), card.right - uiScaled(4)), .bottom = card.bottom - uiScaled(8) };
 }
 
 fn updateCardMoreRect(card: RECT) RECT {
@@ -227,7 +221,6 @@ pub fn updateCardHit(x: i32, y: i32) u8 {
     if (!ptInRect(card, x, y)) return 0;
     if (ptInRect(updateCardCloseRect(card), x, y)) return 2;
     if (ptInRect(updateCardButtonRect(card), x, y)) return 1;
-    if (cardHasToggle() and ptInRect(updateCardMoreRect(card), x, y)) return 4;
     return 3;
 }
 
@@ -367,89 +360,36 @@ fn lightenColor(c: DWORD, amount: DWORD) DWORD {
 pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HANDLE) void {
     if (!updateCardVisible()) return;
     const card = updateCardRect();
-    paintSidebarCardFrame(hdc, card);
-    const bright: DWORD = customColorOr("text_active", if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(235, 238, 244));
-    const dim: DWORD = customColorOr("muted", if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(135, 142, 152));
-    const accent: DWORD = customColorOr("selected_bg", if (app_state.g_light_theme) RGB(54, 118, 232) else RGB(63, 120, 190));
-    var text_buf: [96]u8 = undefined;
-    const text = if (restart_status.len > 0) restart_status else std.fmt.bufPrint(&text_buf, "Update ready: restart to get v{s}", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Update is ready";
-    _ = SelectObject(hdc, font_title);
-    _ = SetTextColor(hdc, bright);
-    var text_rc = RECT{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(5), .right = card.right - uiScaled(26), .bottom = card.top + uiScaled(46) };
-    drawAscii(hdc, text, &text_rc, DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-    _ = SelectObject(hdc, font_subtitle);
-    var close_rc = updateCardCloseRect(card);
-    _ = SetTextColor(hdc, if (app_state.g_update_hover == 2) bright else dim);
-    drawAscii(hdc, "x", &close_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
-
-    _ = SetTextColor(hdc, dim);
-    const shown = card_notes.shown(card_expanded);
-    const notes_rect = updateCardNotesRect(card);
-    const viewport_height = @max(0, notes_rect.bottom - notes_rect.top);
-    if (!std.meta.eql(last_notes_rect, notes_rect)) {
-        last_notes_rect = notes_rect;
-        card_notes_logged = false;
-    }
-    card_scroll = std.math.clamp(card_scroll, 0, @max(0, notes_height - viewport_height));
-    const saved_dc = @import("win32.zig").SaveDC(hdc);
-    if (saved_dc != 0) {
-        _ = @import("win32.zig").IntersectClipRect(hdc, notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom);
-        var top = notes_rect.top - card_scroll;
-        for (0..shown) |i| {
-            var note_rc = RECT{ .left = notes_rect.left, .top = top, .right = notes_rect.right, .bottom = top + note_heights[i] - uiScaled(4) };
-            var wide: [512]u16 = undefined;
-            const n = std.unicode.utf8ToUtf16Le(&wide, card_notes.line(i)) catch continue;
-            _ = @import("win32.zig").DrawTextW(hdc, &wide, @intCast(n), &note_rc, DT_WORDBREAK | DT_NOPREFIX);
-            top += note_heights[i];
-        }
-        _ = @import("win32.zig").RestoreDC(hdc, saved_dc);
-    }
-    if (notes_height > viewport_height and viewport_height > 0) {
-        const thumb_h = @max(uiScaled(8), @divTrunc(viewport_height * viewport_height, notes_height));
-        const thumb_top = notes_rect.top + @divTrunc(card_scroll * (viewport_height - thumb_h), notes_height - viewport_height);
-        var thumb = RECT{ .left = card.right - uiScaled(5), .top = thumb_top, .right = card.right - uiScaled(3), .bottom = thumb_top + thumb_h };
-        const brush = CreateSolidBrush(dim);
-        _ = @import("win32.zig").FillRect(hdc, &thumb, brush);
-        _ = DeleteObject(brush);
-    }
-    var more_buf: [32]u8 = undefined;
-    const more_text: []const u8 = if (card_expanded) "Show less" else card_notes.more(&more_buf, false);
-    if (cardHasToggle()) {
-        _ = SetTextColor(hdc, accent);
-        var more_rc = updateCardMoreRect(card);
-        drawAscii(hdc, more_text, &more_rc, DT_SINGLELINE | DT_NOPREFIX);
-    }
-    if (!card_notes_logged) {
-        card_notes_logged = true;
-        var log_buf: [640]u8 = undefined;
-        debugLog(std.fmt.bufPrint(&log_buf, "[update] notes viewport={d},{d},{d},{d} content={d} scroll={d}", .{ notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom, notes_height, card_scroll }) catch "[update] notes viewport unavailable");
-        for (0..shown) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] note height {d}={d}", .{ i, note_heights[i] }) catch continue);
-        const restart_button = updateCardButtonRect(card);
-        debugLog(std.fmt.bufPrint(&log_buf, "[update] restart button={d},{d}", .{ @divTrunc(restart_button.left + restart_button.right, 2), @divTrunc(restart_button.top + restart_button.bottom, 2) }) catch "[update] restart button unavailable");
-        if (cardHasToggle()) {
-            const more_button = updateCardMoreRect(card);
-            debugLog(std.fmt.bufPrint(&log_buf, "[update] more row={d},{d}", .{ @divTrunc(more_button.left + more_button.right, 2), @divTrunc(more_button.top + more_button.bottom, 2) }) catch "[update] more row unavailable");
-        }
-        debugLog(std.fmt.bufPrint(&log_buf, "[update] card view={s} n={d} first={s}", .{ if (card_expanded) "expanded" else "collapsed", shown, if (shown > 0) card_notes.line(0) else "" }) catch "[update] card view unavailable");
-        for (0..shown) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] card note {d}={s}", .{ i, card_notes.line(i) }) catch continue);
-        debugLog2("[update] card remaining=", more_text);
-    }
-
-    const btn = updateCardButtonRect(card);
-    const btn_color: DWORD = if (app_state.g_update_hover == 1) lightenColor(accent, 28) else accent;
-    const brush = CreateSolidBrush(btn_color);
-    const pen = CreatePen(0, 1, btn_color);
-    const old_brush = SelectObject(hdc, brush);
-    const old_pen = SelectObject(hdc, pen);
-    _ = @import("smooth.zig").drawRoundRect(hdc, btn.left, btn.top, btn.right, btn.bottom, uiScaled(6), uiScaled(6));
-    _ = SelectObject(hdc, old_brush);
-    _ = SelectObject(hdc, old_pen);
-    _ = DeleteObject(brush);
-    _ = DeleteObject(pen);
-    _ = SetTextColor(hdc, RGB(255, 255, 255));
-    var btn_rc = btn;
-    drawAscii(hdc, "Restart", &btn_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    const smooth = @import("smooth.zig");
+    smooth.fillRoundRect(hdc, .{ .left = card.left, .top = card.top + uiScaled(3), .right = card.right, .bottom = card.bottom + uiScaled(3) }, uiScaled(14), RGB(12, 12, 12));
+    smooth.fillRoundRect(hdc, card, uiScaled(14), RGB(46, 46, 46));
+    smooth.fillRoundRect(hdc, .{ .left = card.left + 1, .top = card.top + 1, .right = card.right - 1, .bottom = card.bottom - 1 }, uiScaled(13), RGB(30, 30, 30));
+    _ = font_title;
+    _ = font_subtitle;
+    const footerFont = @import("usage_card.zig").footerFont;
+    const old_font = SelectObject(hdc, footerFont(2, 14, 600));
+    defer _ = SelectObject(hdc, old_font);
+    _ = SetTextColor(hdc, RGB(242, 242, 242));
+    var title = RECT{ .left = card.left + uiScaled(16), .top = card.top + uiScaled(10), .right = card.right - uiScaled(16), .bottom = card.top + uiScaled(30) };
+    drawAscii(hdc, if (restart_status.len > 0) restart_status else "Update ready", &title, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    _ = SelectObject(hdc, footerFont(3, 12, 400));
+    _ = SetTextColor(hdc, RGB(138, 138, 138));
+    var buf: [128]u8 = undefined;
+    const subtitle = std.fmt.bufPrint(&buf, "v{s} \xc2\xb7 takes a few seconds", .{app_state.g_update_ver[0..app_state.g_update_ver_len]}) catch "Takes a few seconds";
+    var wide: [128]u16 = undefined;
+    const length = std.unicode.utf8ToUtf16Le(&wide, subtitle) catch 0;
+    var sub = RECT{ .left = card.left + uiScaled(16), .top = card.top + uiScaled(32), .right = card.right - uiScaled(16), .bottom = card.top + uiScaled(49) };
+    _ = @import("win32.zig").DrawTextW(hdc, &wide, @intCast(length), &sub, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    const button = updateCardButtonRect(card);
+    smooth.fillRoundRect(hdc, button, uiScaled(12), RGB(242, 242, 242));
+    _ = SelectObject(hdc, footerFont(4, 12, 600));
+    _ = SetTextColor(hdc, RGB(0, 0, 0));
+    var br = button;
+    drawAscii(hdc, "Restart", &br, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+    _ = SelectObject(hdc, footerFont(3, 12, 400));
+    _ = SetTextColor(hdc, RGB(138, 138, 138));
+    var later = updateCardCloseRect(card);
+    drawAscii(hdc, "Later", &later, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 }
 
 pub fn hostBusyAgentCount(host: u8) u16 {

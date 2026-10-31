@@ -757,7 +757,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_MULTIPROMPT_LOGIN_OFFSET => "sign in to multi bot sync",
         SEARCH_SYNC_SIGNOUT_OFFSET => "account: sign out",
         SEARCH_SYNC_STATUS_OFFSET => "account: devices",
-        SEARCH_AI_USAGE_OFFSET => "ai usage / collapsed status cards",
+        SEARCH_AI_USAGE_OFFSET => "usage and servers / collapsed status cards",
         SEARCH_APPROVE_DEVICES_OFFSET => "account: approve devices",
         SEARCH_REMOVE_SERVER_1_OFFSET => "account: remove server 1",
         SEARCH_REMOVE_SERVER_2_OFFSET => "account: remove server 2",
@@ -3349,7 +3349,7 @@ pub fn updateSearchResults() void {
         }
     }
 
-    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "ai usage / collapsed status cards", "ai usage", "status cards" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&[_][]const u8{ "usage and servers / collapsed status cards", "ai usage / collapsed status cards", "ai usage", "status cards", "server status", "app version" }, app_state.g_search_buf[0..app_state.g_search_len])) {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_AI_USAGE_OFFSET;
         app_state.g_search_result_count += 1;
     }

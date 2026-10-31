@@ -2185,6 +2185,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
             paintSidebarStickyStatusCard(hdc, font_status_card);
         } else {
             @import("usage_card.zig").paintSidebarFooter(hdc);
+            paintSidebarUpdateCard(hdc, font_title, font_status_card);
         }
 
         paintWorkspaceStrip(hdc, sidebar_bg);
@@ -3097,7 +3098,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var usage_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, L("AI usage / collapsed status cards"), -1, &usage_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, L("Usage and servers / collapsed status cards"), -1, &usage_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         var hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, L("Ctrl+Shift+G"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
