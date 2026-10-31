@@ -9,7 +9,7 @@ const query = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     deleteBranchOnMerge
     pullRequest(number: $number) {
-      id number state isDraft isCrossRepository author { login __typename } baseRefName headRefName headRefOid baseRefOid mergeable changedFiles
+      id number state isDraft isCrossRepository author { login __typename } baseRefName headRefName headRefOid baseRef { target { oid } } mergeable changedFiles
       labels(first: 100) { nodes { name } ${pageInfo} }
       files(first: 100) { nodes { path changeType } totalCount ${pageInfo} }
       headRef { compare(headRef: "master") { aheadBy baseTarget { oid } headTarget { oid } } }
@@ -90,8 +90,9 @@ function main() {
   }
   const commit = pr.commits?.nodes?.[0]?.commit;
   const comparison = pr.headRef?.compare;
-  if (commit?.oid !== pr.headRefOid || comparison?.baseTarget?.oid !== pr.headRefOid
-    || comparison?.headTarget?.oid !== pr.baseRefOid || !Number.isSafeInteger(comparison?.aheadBy) || comparison.aheadBy < 0) {
+  const baseOid = pr.baseRef?.target?.oid;
+  if (!/^[0-9a-f]{40}$/.test(baseOid || '') || commit?.oid !== pr.headRefOid || comparison?.baseTarget?.oid !== pr.headRefOid
+    || comparison?.headTarget?.oid !== baseOid || !Number.isSafeInteger(comparison?.aheadBy) || comparison.aheadBy < 0) {
     throw new Error('incoherent PR head or master comparison');
   }
   const paginated = pr.labels?.pageInfo?.hasNextPage || commit.statusCheckRollup?.contexts?.pageInfo?.hasNextPage;
@@ -114,9 +115,9 @@ function main() {
   }
   if (paginated || fileFallback) {
     const current = graphql(`query($owner: String!, $name: String!, $number: Int!) {
-      repository(owner: $owner, name: $name) { pullRequest(number: $number) { headRefOid baseRefOid } }
+      repository(owner: $owner, name: $name) { pullRequest(number: $number) { headRefOid baseRef { target { oid } } } }
     }`, { owner, name, number }).repository?.pullRequest;
-    if (current?.headRefOid !== pr.headRefOid || current?.baseRefOid !== pr.baseRefOid) throw new Error('PR changed during paginated read');
+    if (current?.headRefOid !== pr.headRefOid || current?.baseRef?.target?.oid !== baseOid) throw new Error('PR changed during paginated read');
   }
   const dir = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'automerge-'));
   let verdict;

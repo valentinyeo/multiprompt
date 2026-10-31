@@ -14,11 +14,8 @@ on:
         required: true
         default: '3'
         type: string
-  pull_request:
-    paths:
-      - .github/workflows/chat-perf-bisect.yml
-      - tools/chat-perf-table.mjs
-      - tools/chat-perf-table.test.js
+  schedule:
+    - cron: '24 2 * * *'
 
 permissions:
   contents: read
@@ -41,8 +38,8 @@ jobs:
       - name: Validate refs and create matrix
         id: matrix
         env:
-          REFS: ${{ github.event_name == 'pull_request' && 'v0.28.900 v0.28.917' || inputs.refs }}
-          REPEATS: ${{ github.event_name == 'pull_request' && '3' || inputs.repeats }}
+          REFS: ${{ inputs.refs || 'v0.28.900 v0.28.917' }}
+          REPEATS: ${{ inputs.repeats || '3' }}
         run: |
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
@@ -81,7 +78,7 @@ jobs:
           echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - name: Run the native 50 MB history benchmark
         env:
-          REPEATS: ${{ github.event_name == 'pull_request' && '3' || inputs.repeats }}
+          REPEATS: ${{ inputs.repeats || '3' }}
           REF: ${{ matrix.ref }}
         run: |
           mkdir -p out
