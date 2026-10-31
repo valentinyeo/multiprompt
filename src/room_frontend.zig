@@ -610,8 +610,8 @@ fn loadPin(c: *rooms.Controller) bool {
         defer std.heap.page_allocator.free(bytes);
         return c.bindHost(bytes);
     }
-    var wide: [640]u16 = undefined;
-    const path_w = file_io.win32WidePath(&wide, path) orelse return false;
+    var path_wide: [640]u16 = undefined;
+    const path_w = file_io.win32WidePath(&path_wide, path) orelse return false;
     if (w.GetFileAttributesW(path_w.ptr) != 0xffffffff) return false;
     return w.GetLastError() == 2;
 }
@@ -619,8 +619,8 @@ fn loadPin(c: *rooms.Controller) bool {
 fn savePin(uuid: []const u8) bool {
     var buf: [600]u8 = undefined;
     const path = pinPath(&buf) orelse return false;
-    var wide: [640]u16 = undefined;
-    const path_w = file_io.win32WidePath(&wide, path) orelse return false;
+    var path_wide: [640]u16 = undefined;
+    const path_w = file_io.win32WidePath(&path_wide, path) orelse return false;
     var temp_buf: [640]u8 = undefined;
     const temp = std.fmt.bufPrint(&temp_buf, "{s}.{d}.{d}.tmp", .{ path, w.GetCurrentProcessId(), w.GetTickCount64() }) catch return false;
     var temp_wide: [680]u16 = undefined;

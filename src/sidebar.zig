@@ -2030,7 +2030,7 @@ fn paintRoomRow(hdc: HANDLE, column: RECT, y: i32, row: Row) void {
     var subtitle: [512]u16 = undefined;
     var used: usize = 0;
     if (item.preview.len > 0) {
-        const speaker = if (item.preview_author) |author| author.name else L("You");
+        const speaker: []const u16 = if (item.preview_author) |author| author.name else std.mem.span(L("You"));
         var speaker_len = @min(speaker.len, @min(@as(usize, 48), subtitle.len - 2));
         if (speaker_len < speaker.len and speaker_len > 0 and speaker[speaker_len - 1] >= 0xd800 and speaker[speaker_len - 1] <= 0xdbff) speaker_len -= 1;
         @memcpy(subtitle[0..speaker_len], speaker[0..speaker_len]);

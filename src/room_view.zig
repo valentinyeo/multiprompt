@@ -565,7 +565,7 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     const height = bounds.bottom;
     if (view.too_small) {
         view.clearHits();
-        text(dc, L("Make this window larger"), bounds, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
+        text(dc, std.mem.span(L("Make this window larger")), bounds, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
         return;
     }
     if (view.mode != .room) {
@@ -603,7 +603,7 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
         view.restart_hit = .{ .left = bar.right - view.px(90), .top = bar.top + view.px(4), .right = bar.right - view.px(8), .bottom = bar.bottom - view.px(4) };
         view.restart_member = member.id;
         smooth.fillRoundRect(dc, view.restart_hit, view.px(18), rgb(if (w.GetFocus() == view.hwnd and view.focus_target == 1) 0xb0b0b0 else 0xf2f2f2));
-        text(dc, L("Restart"), view.restart_hit, 0x181818, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER);
+        text(dc, std.mem.span(L("Restart")), view.restart_hit, 0x181818, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER);
         break;
     };
     const top = view.px(78);
@@ -624,7 +624,7 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
         _ = w.SelectObject(dc, heading);
         text(dc, view.model.name, .{ .left = left, .top = mid - view.px(12), .right = right, .bottom = mid + view.px(18) }, 0xf2f2f2, w.DT_SINGLELINE | w.DT_CENTER | w.DT_END_ELLIPSIS);
         _ = w.SelectObject(dc, body);
-        text(dc, L("Start the conversation"), .{ .left = left, .top = mid + view.px(22), .right = right, .bottom = mid + view.px(52) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
+        text(dc, std.mem.span(L("Start the conversation")), .{ .left = left, .top = mid + view.px(22), .right = right, .bottom = mid + view.px(52) }, 0x8a8a8a, w.DT_SINGLELINE | w.DT_CENTER);
     }
     for (view.model.messages) |message| {
         const member = message.author;
@@ -664,9 +664,9 @@ fn draw(view: *View, dc: w.HANDLE, bounds: w.RECT) void {
     smooth.fillRoundRect(dc, composer, view.px(27), rgb(0x1e1e1e));
     view.send_hit = .{ .left = composer.right - view.px(45), .top = composer.top + view.px(8), .right = composer.right - view.px(8), .bottom = composer.bottom - view.px(8) };
     smooth.fillRoundRect(dc, view.send_hit, view.px(18), rgb(0xf2f2f2));
-    text(dc, L("↑"), view.send_hit, 0x111111, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
+    text(dc, std.mem.span(L("↑")), view.send_hit, 0x111111, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     if (view.picker) drawPicker(view, dc, composer, body);
-    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.result == .unsupported) L("Action unavailable") else L("Action failed"), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
+    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.result == .unsupported) std.mem.span(L("Action unavailable")) else std.mem.span(L("Action failed")), .{ .left = left, .top = height - view.px(94), .right = right, .bottom = height - view.px(76) }, 0xf5c26b, w.DT_SINGLELINE);
 }
 
 fn matchSearch(value: []const u16, query: []const u16) bool {
@@ -719,7 +719,7 @@ fn drawDialog(view: *View, dc: w.HANDLE, bounds: w.RECT, body: w.HANDLE, heading
     const inset = @max(1, view.px(1));
     smooth.fillRoundRect(dc, .{ .left = left + inset, .top = top + inset, .right = left + width - inset, .bottom = bottom - inset }, view.px(19), rgb(0x181818));
     _ = w.SelectObject(dc, heading);
-    text(dc, if (view.mode == .create) L("New room") else L("Edit room"), .{ .left = left + view.px(24), .top = top + view.px(20), .right = left + width - view.px(24), .bottom = top + view.px(48) }, 0xf2f2f2, w.DT_SINGLELINE);
+    text(dc, if (view.mode == .create) std.mem.span(L("New room")) else std.mem.span(L("Edit room")), .{ .left = left + view.px(24), .top = top + view.px(20), .right = left + width - view.px(24), .bottom = top + view.px(48) }, 0xf2f2f2, w.DT_SINGLELINE);
     const list_top = top + view.px(160);
     const list_bottom = @max(list_top, bottom - view.px(84));
     const clip = w.CreateRectRgn(left + view.px(16), list_top, left + width - view.px(16), list_bottom);
@@ -744,7 +744,7 @@ fn drawDialog(view: *View, dc: w.HANDLE, bounds: w.RECT, body: w.HANDLE, heading
         text(dc, member.name, .{ .left = row.left + view.px(52), .top = y, .right = row.right - view.px(42), .bottom = row.bottom }, 0xf2f2f2, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_END_ELLIPSIS);
         const check = w.RECT{ .left = row.right - view.px(28), .top = y + view.px(14), .right = row.right - view.px(8), .bottom = y + view.px(34) };
         smooth.fillRoundRect(dc, check, view.px(4), rgb(if (view.selectedIndex(member.id) != null) 0xf2f2f2 else 0x555555));
-        if (view.selectedIndex(member.id) != null) text(dc, L("✓"), check, 0x181818, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
+        if (view.selectedIndex(member.id) != null) text(dc, std.mem.span(L("✓")), check, 0x181818, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
         y += view.px(48);
     }
     _ = w.SelectClipRgn(dc, null);
@@ -753,14 +753,14 @@ fn drawDialog(view: *View, dc: w.HANDLE, bounds: w.RECT, body: w.HANDLE, heading
     view.confirm_hit = .{ .left = left + width - view.px(132), .top = bottom - view.px(60), .right = left + width - view.px(20), .bottom = bottom - view.px(20) };
     smooth.fillRoundRect(dc, view.cancel_hit, view.px(20), rgb(if (w.GetFocus() == view.hwnd and view.focus_target == 0) 0x777777 else 0x333333));
     smooth.fillRoundRect(dc, view.confirm_hit, view.px(20), rgb(if (w.GetFocus() == view.hwnd and view.focus_target == 1) 0xb0b0b0 else 0xf2f2f2));
-    text(dc, L("Cancel"), view.cancel_hit, 0xf2f2f2, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
+    text(dc, std.mem.span(L("Cancel")), view.cancel_hit, 0xf2f2f2, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     var count_buf: [48]u8 = undefined;
     const count = if (view.mode == .create) (std.fmt.bufPrint(&count_buf, "Create · {d}", .{view.selected_count}) catch "") else (std.fmt.bufPrint(&count_buf, "Save · {d}", .{view.selected_count}) catch "");
     var count_w: [48]u16 = undefined;
     const count_len = std.unicode.utf8ToUtf16Le(&count_w, count) catch 0;
     text(dc, count_w[0..count_len], view.confirm_hit, 0x181818, w.DT_SINGLELINE | w.DT_CENTER | w.DT_VCENTER);
     _ = w.SelectObject(dc, small);
-    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.result == .unsupported) L("Action unavailable") else L("Check name and members, then try again"), .{ .left = left + view.px(24), .top = bottom - view.px(82), .right = left + width - view.px(24), .bottom = bottom - view.px(62) }, 0xf5c26b, w.DT_SINGLELINE | w.DT_END_ELLIPSIS);
+    if (view.result == .failed or view.result == .unsupported) text(dc, if (view.result == .unsupported) std.mem.span(L("Action unavailable")) else std.mem.span(L("Check name and members, then try again")), .{ .left = left + view.px(24), .top = bottom - view.px(82), .right = left + width - view.px(24), .bottom = bottom - view.px(62) }, 0xf5c26b, w.DT_SINGLELINE | w.DT_END_ELLIPSIS);
 }
 
 fn drawPicker(view: *View, dc: w.HANDLE, composer: w.RECT, body: w.HANDLE) void {
@@ -922,8 +922,8 @@ fn editProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.
                 var box: w.RECT = undefined;
                 _ = w.GetClientRect(hwnd, &box);
                 var hint: [320]u16 = undefined;
-                const prefix = L("Message ");
-                const suffix = L(" · type @ to ask one agent");
+                const prefix = std.mem.span(L("Message "));
+                const suffix = std.mem.span(L(" · type @ to ask one agent"));
                 const len = @min(view.model.name.len, hint.len - prefix.len - suffix.len);
                 @memcpy(hint[0..prefix.len], prefix);
                 @memcpy(hint[prefix.len .. prefix.len + len], view.model.name[0..len]);
@@ -1133,17 +1133,17 @@ fn windowProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(
 }
 
 test "room mention picker recognizes only standalone aliases" {
-    try std.testing.expectEqual(@as(?usize, 3), mentionStart(L("hi @alpha")));
-    try std.testing.expectEqual(@as(?usize, null), mentionStart(L("user@example")));
-    try std.testing.expectEqual(@as(?usize, null), mentionStart(L("\\@alpha")));
-    try std.testing.expect(matchSearch(L("Alpha Agent"), L("agent")));
-    try std.testing.expect(!matchSearch(L("Alpha"), L("beta")));
+    try std.testing.expectEqual(@as(?usize, 3), mentionStart(std.mem.span(L("hi @alpha"))));
+    try std.testing.expectEqual(@as(?usize, null), mentionStart(std.mem.span(L("user@example"))));
+    try std.testing.expectEqual(@as(?usize, null), mentionStart(std.mem.span(L("\\@alpha"))));
+    try std.testing.expect(matchSearch(std.mem.span(L("Alpha Agent")), std.mem.span(L("agent"))));
+    try std.testing.expect(!matchSearch(std.mem.span(L("Alpha")), std.mem.span(L("beta"))));
 }
 
 test "room token and model validation preserve identity" {
     const a = ActionToken{ .generation = 2, .serial = 3, .kind = .edit };
     const b = ActionToken{ .generation = 2, .serial = 4, .kind = .edit };
-    const model = ViewModel{ .room_id = "room", .name = L("Room"), .revision = 1, .members = &.{}, .candidates = &.{}, .messages = &.{} };
+    const model = ViewModel{ .room_id = "room", .name = std.mem.span(L("Room")), .revision = 1, .members = &.{}, .candidates = &.{}, .messages = &.{} };
     var pending_view = View{ .model = &model, .callbacks = undefined, .mode = .edit, .pending = b, .result = .pending };
     pending_view.completeAction(a, .accepted);
     try std.testing.expectEqual(b, pending_view.pending.?);
@@ -1168,12 +1168,12 @@ test "room token and model validation preserve identity" {
 test "candidate paging reaches past membership limit" {
     var candidates: [80]Member = undefined;
     for (&candidates, 0..) |*member, i| {
-        member.* = .{ .id = "session", .alias = L("agent"), .name = if (i == 79) L("Needle") else L("Agent"), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0, .presence = .unknown };
+        member.* = .{ .id = "session", .alias = std.mem.span(L("agent")), .name = if (i == 79) std.mem.span(L("Needle")) else std.mem.span(L("Agent")), .appearance = .{ .face = 0, .color = 0 }, .name_color = 0, .presence = .unknown };
     }
-    try std.testing.expectEqual(@as(usize, 80), filteredCount(&candidates, L("")));
-    try std.testing.expectEqual(@as(?usize, 79), filteredIndex(&candidates, L("needle"), 0));
-    try std.testing.expectEqual(@as(?usize, 79), filteredIndex(&candidates, L(""), 79));
+    try std.testing.expectEqual(@as(usize, 80), filteredCount(&candidates, std.mem.span(L(""))));
+    try std.testing.expectEqual(@as(?usize, 79), filteredIndex(&candidates, std.mem.span(L("needle")), 0));
+    try std.testing.expectEqual(@as(?usize, 79), filteredIndex(&candidates, std.mem.span(L("")), 79));
     try std.testing.expectEqual(@as(usize, 74), boundedScroll(100, 80, 6));
-    try std.testing.expectEqual(@as(?usize, 73), filteredIndex(&candidates, L(""), boundedScroll(73, 80, 6)));
+    try std.testing.expectEqual(@as(?usize, 73), filteredIndex(&candidates, std.mem.span(L("")), boundedScroll(73, 80, 6)));
     try std.testing.expectEqual(@as(usize, 0), boundedScroll(73, 1, 6));
 }

@@ -113,13 +113,13 @@ fn run(job: *Job) void {
     var child_input: w.HANDLE = null;
     var input: w.HANDLE = null;
     if (w.CreatePipe(&child_input, &input, &attributes, 1 << 20) == 0) return;
-    defer if (child_input != null) _ = w.CloseHandle(child_input);
-    defer if (input != null) _ = w.CloseHandle(input);
+    defer { if (child_input != null) _ = w.CloseHandle(child_input); }
+    defer { if (input != null) _ = w.CloseHandle(input); }
     var output: w.HANDLE = null;
     var child_output: w.HANDLE = null;
     if (w.CreatePipe(&output, &child_output, &attributes, 1 << 20) == 0) return;
     defer _ = w.CloseHandle(output);
-    defer if (child_output != null) _ = w.CloseHandle(child_output);
+    defer { if (child_output != null) _ = w.CloseHandle(child_output); }
     if (w.SetHandleInformation(input, app_state.HANDLE_FLAG_INHERIT, 0) == 0 or w.SetHandleInformation(output, app_state.HANDLE_FLAG_INHERIT, 0) == 0) return;
     const stderr = w.CreateFileW(L("NUL"), w.GENERIC_WRITE, w.FILE_SHARE_READ | w.FILE_SHARE_WRITE, &attributes, w.OPEN_EXISTING, w.FILE_ATTRIBUTE_NORMAL, null);
     if (stderr == w.INVALID_HANDLE_VALUE_PTR) return;
