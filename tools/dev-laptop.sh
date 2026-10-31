@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -u
 
+evidence="${DEV_RIG_EVIDENCE:-./dev-rig-evidence}"
+
 dev_dir() {
     lh_shell "\$d = Join-Path \$env:LOCALAPPDATA 'MultipromptDev'; New-Item -ItemType Directory -Force -Path \$d | Out-Null; \$d" 30 | tr -d '\r'
 }
@@ -105,7 +107,22 @@ public class MpShot {
 }
 '@; Add-Type -TypeDefinition \$d; [MpShot]::Save(\"\$env:TEMP\\$name.png\")" 45)
     echo "$out"
-    lh read "C:\\Users\\valentin\\AppData\\Local\\Temp%2F$name.png" >/dev/null 2>&1 || true
+    mkdir -p "$evidence"
+    local local_png="$evidence/$name.png"
+    : > "$local_png.b64"
+    local offset=0 chunk_b64=0
+    while :; do
+        chunk_b64=$(lh_shell "\$p = Join-Path \$env:TEMP '$name.png'; if (-not (Test-Path \$p)) { '' } else { \$b = [IO.File]::ReadAllBytes(\$p); \$take = [Math]::Min(150000, [Math]::Max(0, \$b.Length - $offset)); if (\$take -le 0) { '' } else { [Convert]::ToBase64String(\$b, $offset, \$take) } }" 45 | tr -d '\r\n')
+        [[ -z $chunk_b64 ]] && break
+        printf '%s' "$chunk_b64" >> "$local_png.b64"
+        offset=$((offset + 150000))
+    done
+    if [[ -s $local_png.b64 ]]; then
+        base64 -d "$local_png.b64" > "$local_png" && rm -f "$local_png.b64" && echo "screenshot: $local_png"
+    else
+        echo "no screenshot bytes came back from the laptop" >&2
+        return 1
+    fi
 }
 
 cleanup() {

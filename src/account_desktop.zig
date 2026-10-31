@@ -1,4 +1,5 @@
 const app_state = @import("app_state.zig");
+const IS_DEV = @import("main.zig").IS_DEV;
 const std = @import("std");
 const tmux_identity = @import("tmux_identity.zig");
 const sync_auth = @import("sync_auth.zig");
@@ -1510,13 +1511,13 @@ pub fn accountClaim(hwnd: HANDLE) bool {
     var token_path_buf: [512]u8 = undefined;
     const token_path = syncAuthPath(&token_path_buf, "account-device.dat") orelse return false;
     var mutex_name_buf: [96]u8 = undefined;
-    const mutex_name = std.fmt.bufPrint(&mutex_name_buf, "Local\\ZigShell-account-{x}", .{std.hash.Wyhash.hash(0, token_path)}) catch return false;
+    const mutex_name = std.fmt.bufPrint(&mutex_name_buf, "Local\\ZigShell-account{s}-{x}", .{ if (IS_DEV) "-dev" else "", std.hash.Wyhash.hash(0, token_path) }) catch return false;
     var mutex_name_wide: [96]u16 = @splat(0);
     for (mutex_name, 0..) |c, i| mutex_name_wide[i] = c;
     const mutex = CreateMutexW(null, 0, @ptrCast(&mutex_name_wide)) orelse return false;
     var result = WaitForSingleObject(mutex, 0);
     var instance_path_buf: [512]u8 = undefined;
-    const instance_path = syncAuthPath(&instance_path_buf, "account-instance.pid") orelse {
+    const instance_path = syncAuthPath(&instance_path_buf, if (IS_DEV) "account-instance-dev.pid" else "account-instance.pid") orelse {
         _ = CloseHandle(mutex);
         return false;
     };
@@ -1545,8 +1546,10 @@ pub fn accountClaim(hwnd: HANDLE) bool {
                 if (c.* >= 'A' and c.* <= 'Z') c.* += 'a' - 'A';
             }
             const name = image[basename..image_len];
-            is_app = std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("multiprompt")) or
-                std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("zigshell"));
+            const other_is_dev = std.mem.indexOf(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("-dev")) != null;
+            is_app = other_is_dev == IS_DEV and
+                (std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("multiprompt")) or
+                    std.mem.startsWith(u16, name, std.unicode.utf8ToUtf16LeStringLiteral("zigshell")));
         }
         var window_pid: DWORD = 0;
         const has_window = IsWindow(owner_hwnd) != 0 and GetWindowThreadProcessId(owner_hwnd, &window_pid) != 0 and window_pid == pid;
