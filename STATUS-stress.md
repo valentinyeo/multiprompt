@@ -49,4 +49,42 @@ Attach the input thread to the dev window (AttachThreadInput with its thread id)
 window's title area, which is what the app's own second-launch path does), then rerun
 `tools/dev-laptop-journey.sh stress`. Nothing else in the stress plan needs his app.
 
+
+---
+
+# Round 2
+
+Ordered tasks from brief-stress2. Nothing here claims a PASS; `runs` stays 0.
+
+## 1. Foreground: reuse BringToForeground - NOT PROVEN
+
+`tools/dev-laptop-journey.sh focus_dev` now loads the same algorithm as
+`.claude/skills/verify-multiprompt/control-native.cs` (AttachThreadInput to the foreground and target
+threads, ALT down, AllowSetForegroundWindow, BringWindowToTop, SetForegroundWindow, ALT up) instead of
+the plain SetForegroundWindow that Windows refuses from a background process.
+
+The check (one Ctrl+T on DEV, foreground pid == DEV pid) did not pass: `focus_dev` printed nothing,
+i.e. the inline `Add-Type -TypeDefinition` block did not compile under the nested bash/PowerShell
+quoting. The robust route is to ship the C# as a file: base64 chunks to `%TEMP%`, join, `Add-Type
+-Path`, then call `[VerifyNative]::BringToForeground(hwnd)`. That upload is half-working - small
+`lh write` chunks succeed, but a later chunk failed and the 0-byte assembled file made `Add-Type`
+a no-op - so it needs chunk-size/escaping work before it can be trusted.
+
+## 2. `tools/dev-laptop.sh place` - NOT DONE this round
+
+Still finds `MultipromptDevWindow` by class. The DEV window's class is `ZigShell` (the dev marker is a
+window property), so it needs the pid-based lookup the journey script already uses.
+
+## 3-6. Not started
+
+DEV identity (title/taskbar "Multibot DEV", visible badge, updater disabled in DEV with red-first
+tests), the 20:59 stable-exit read, the missing stress cases 5/8/10, and the stress loop are all
+untouched this round.
+
+## Hard rules respected
+
+His stable window was never focused, moved or typed into; his app was never relaunched; no server tmux
+session was created; the dev app (pid 16096, build 41241349333) is still installed and running on
+DISPLAY1 for the next attempt.
+
 RUNNER DONE stress FAIL 0.28.1183 runs=0
