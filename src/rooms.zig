@@ -23,6 +23,12 @@ pub const Result = struct {
     }
 };
 
+pub const Completion = union(enum) {
+    pending,
+    failed: RequestKind,
+    finished: Result,
+};
+
 pub const Controller = struct {
     host: u8,
     host_uuid: [36]u8 = undefined,
@@ -113,18 +119,30 @@ pub const Controller = struct {
         return .unsupported;
     }
 
-    pub fn poll(self: *Controller) ?Result {
+    pub fn poll(self: *Controller) ?Completion {
         const job = self.job orelse return null;
-        if (!job.finished.load(.acquire)) return null;
+        if (!job.finished.load(.acquire)) return .pending;
         defer {
             allocator.free(job.request);
             allocator.free(job.output);
             allocator.destroy(job);
             self.job = null;
         }
-        if (!job.success) return null;
-        const parsed = std.json.parseFromSlice(std.json.Value, allocator, job.output[0..job.output_len], .{ .allocate = .alloc_always }) catch return null;
-        return .{ .kind = self.kind, .value = parsed };
+        if (!job.success) return .{ .failed = self.kind };
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, job.output[0..job.output_len], .{ .allocate = .alloc_always }) catch return .{ .failed = self.kind };
+        if (parsed.value != .object) {
+            parsed.deinit();
+            return .{ .failed = self.kind };
+        }
+        const ok = parsed.value.object.get("ok") orelse {
+            parsed.deinit();
+            return .{ .failed = self.kind };
+        };
+        if (ok != .bool or !ok.bool or parsed.value.object.get("result") == null) {
+            parsed.deinit();
+            return .{ .failed = self.kind };
+        }
+        return .{ .finished = .{ .kind = self.kind, .value = parsed } };
     }
 };
 

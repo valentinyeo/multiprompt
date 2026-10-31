@@ -1557,6 +1557,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_DPICHANGED => {
             _ = syncMainWindowDpi(hwnd, @intCast(wp & 0xFFFF));
+            @import("room_frontend.zig").dpiChanged(@intCast(wp & 0xFFFF));
             if (lp != 0) {
                 const sug: *const RECT = @ptrFromInt(@as(usize, @bitCast(lp)));
                 _ = SetWindowPos(hwnd, null, sug.left, sug.top, sug.right - sug.left, sug.bottom - sug.top, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -1605,6 +1606,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SIZE => {
+            @import("room_frontend.zig").resize(hwnd);
             debugLog("[usage-hover] close requested by main resize");
             @import("usage_card.zig").close();
             more_menu.close();
@@ -8205,6 +8207,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_DESTROY => {
+            @import("room_frontend.zig").deinit();
             freeze_recorder.closing();
             if (std.Thread.spawn(.{}, exitWatchdog, .{})) |thread| thread.detach() else |_| {}
             chatDraftFlush();
@@ -8466,6 +8469,8 @@ pub fn main(init: std.process.Init) void {
     }
 
     app_state.g_main_hwnd = hwnd;
+    @import("room_frontend.zig").init(hwnd);
+    @import("room_frontend.zig").resize(hwnd);
     if (IS_DEV) _ = @import("win32.zig").SetPropW(hwnd, L("MultipromptDevWindow"), @ptrFromInt(1));
     _ = @import("win32.zig").SetPropW(hwnd, L("MultipromptWorkspaceInstance"), @ptrFromInt(@import("workspaces.zig").workspaceInstanceProperty(getInstanceName())));
     @import("browser_pane.zig").installBrowserDockHooks();
