@@ -31,17 +31,41 @@
             Snapshot 'more-shells'
             $result.checks += @{ name = 'new-session-rows'; empty = 'ctrl-k-empty.png'; shells = 'more-shells.png' }
             Press @(0x1B) 'Esc: close More shells'
+            $repoCommands = Join-Path $scratch 'roaming/ZigShell/commands.json'
+            New-Item -ItemType Directory -Force -Path (Split-Path $repoCommands) | Out-Null
+            $repoFolder = '/tmp/multiprompt-harness-folder'
+            $repoNames = @('Other', 'Workspace 1', 'Workspace 2', 'Starred', 'Main', 'Software Factory', 'Verification')
+            $repoEntries = @(foreach ($name in $repoNames) { [ordered]@{ label = ('Harness folder ' + $name); kind = 'vps'; folder_host = '0'; default = $true; workspace = $name; cwd = $repoFolder } })
+            [IO.File]::WriteAllText($repoCommands, ([ordered]@{ commands = $repoEntries } | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+            Start-Sleep -Milliseconds 500
+            $repoTabsBefore = @((Read-Session).tabs).Count
+            Press @(0x11, 0x54) 'Ctrl+T: new tab in the harness folder'
+            Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore + 1 } 'harness folder tab open'
+            Press @(0x12, 0x43) 'Alt+C: return to the terminal view'
+            Start-Sleep -Milliseconds 500
+            Remove-Item -LiteralPath $repoCommands -Force
+            Start-Sleep -Milliseconds 500
             $pickTabsBefore = @((Read-Session).tabs).Count
             Palette 'pick repo'
             Snapshot 'pick-repo-row'
             Press @(0x0D) 'Enter: Pick repo'
+            Wait-Until {
+                $repoLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+                ((Get-Content $repoLog -Raw) -join '') -match '\[palette\] rows chars=0 count=2 ids=6702 6710'
+            } 'Pick repo list shows Back and the harness folder repo'
             Snapshot 'pick-repo-list'
+            $repoLogText = ((Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -join '')
+            $repoRows = ([regex]::Matches($repoLogText, '\[palette\] rows chars=0 count=2 ids=6702 6710')).Count
+            if ($repoRows -lt 1) { throw 'Pick repo list showed no repo row for the harness folder' }
             Press @(0x1B) 'Esc: leave Pick repo list'
             Snapshot 'pick-repo-back'
             Press @(0x1B) 'Esc: close command palette'
             $pickTabsAfter = @((Read-Session).tabs).Count
             if ($pickTabsAfter -ne $pickTabsBefore) { throw ('Pick repo changed the tab count: ' + $pickTabsBefore + ' -> ' + $pickTabsAfter) }
-            $result.checks += @{ name = 'pick-repo-list'; row = 'pick-repo-row.png'; list = 'pick-repo-list.png'; back = 'pick-repo-back.png'; tabsBefore = $pickTabsBefore; tabsAfter = $pickTabsAfter; escapeLeavesTabs = $true }
+            $result.checks += @{ name = 'pick-repo-list'; row = 'pick-repo-row.png'; list = 'pick-repo-list.png'; back = 'pick-repo-back.png'; tabsBefore = $pickTabsBefore; tabsAfter = $pickTabsAfter; escapeLeavesTabs = $true; repoRows = $repoRows; repo = $repoFolder }
+            Press @(0x11, 0x57) 'Ctrl+W: close the harness folder tab'
+            Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore } 'harness folder tab closed'
+            Snapshot 'pick-repo-closed'
             Palette 'interface'
             Snapshot 'action'
             Press @(0x0D) 'Enter: UI Size: Increase'
