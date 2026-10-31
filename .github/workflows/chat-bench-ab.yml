@@ -17,11 +17,8 @@ on:
         required: true
         default: '3'
         type: string
-  pull_request:
-    paths:
-      - .github/workflows/chat-bench-ab.yml
-      - .gitattributes
-      - tools/chat-bench/**
+  schedule:
+    - cron: '16 2 * * *'
 
 permissions:
   contents: read
@@ -31,9 +28,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
-      TAG_A: ${{ github.event_name == 'pull_request' && 'v0.28.789' || inputs.tag_a }}
-      TAG_B: ${{ github.event_name == 'pull_request' && 'v0.28.793' || inputs.tag_b }}
-      RUNS: ${{ github.event_name == 'pull_request' && '3' || inputs.runs }}
+      TAG_A: ${{ inputs.tag_a || 'v0.28.789' }}
+      TAG_B: ${{ inputs.tag_b || 'v0.28.793' }}
+      RUNS: ${{ inputs.runs || '3' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -47,8 +44,9 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Test summary calculations
-        run: node --test candidate/tools/chat-bench-ab-summary.test.js
+      - name: Test benchmark contracts
+        working-directory: candidate
+        run: node --test tools/chat-bench-ab-summary.test.js tools/chat-bench-ab-extra.test.js tools/chat-bench-reader.test.mjs tools/chat-bench.test.js tools/chat-bench/receipt.test.mjs
       - name: Download and verify release executables
         env:
           GH_TOKEN: ${{ github.token }}
@@ -151,6 +149,9 @@ jobs:
       - name: Write A/B summary
         if: always()
         run: node candidate/tools/chat-bench/ab-summary.mjs results/manifest.json results
+      - name: Write CPU, memory and paint metrics per tag
+        if: always()
+        run: node candidate/tools/chat-bench/ab-extra.mjs results/manifest.json results
       - name: Upload all benchmark evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

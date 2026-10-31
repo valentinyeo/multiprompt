@@ -1,0 +1,17 @@
+name: Real-size session switch proof
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '32 2 * * *'
+
+permissions:
+  contents: read
+jobs:
+  baseline:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-switch-speed
+      tag: v0.28.946
+      chat_shape_baseline: true
+      chat_shape_proof: true
+      chat_switch_profile: true

@@ -1,0 +1,16 @@
+name: Runner message parity
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  notes:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_notes_proof: true

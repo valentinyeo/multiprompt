@@ -1,0 +1,14 @@
+name: Retained chat history
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 2 * * *'
+
+permissions:
+  contents: read
+jobs:
+  retention:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-full-history
+      chat_retention_proof: true
