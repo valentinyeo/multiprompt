@@ -10,6 +10,7 @@ const L = @import("startup.zig").L;
 const RGB = @import("startup.zig").RGB;
 const px = drawing.uiScaled;
 const RECT = w.RECT;
+const debugLog = @import("diagnostics.zig").debugLog;
 
 var window: w.HANDLE = null;
 var registered = false;
@@ -249,6 +250,8 @@ pub fn paint(dc: w.HANDLE, client: RECT, pill: RECT, data: *const state.AiPaceSn
 
 pub fn close() void {
     if (backdrop == null) return;
+    var log: [160]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[usage-hover] close hover={} visible={} caller=0x{x}", .{ hover_open, w.IsWindowVisible(window), @returnAddress() }) catch "[usage-hover] close");
     var saved = backdrop.?;
     const was_hover = hover_open;
     backdrop = null;
@@ -327,22 +330,33 @@ fn openMode(passive: bool) void {
         const card = geometry(bounds, anchor, snapshot.goal_count);
         const row = @import("capacity.zig").sidebarUsageRowRect();
         const region = w.CreateRectRgn(@min(card.left, row.left), card.top, @max(card.right, row.right), row.bottom) orelse {
+            var log: [96]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&log, "[usage-hover] create-region failed error={d}", .{w.GetLastError()}) catch "[usage-hover] create-region failed");
             close();
             return;
         };
         if (w.SetWindowRgn(window, region, 0) == 0) {
+            var log: [96]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&log, "[usage-hover] set-region failed error={d}", .{w.GetLastError()}) catch "[usage-hover] set-region failed");
             _ = w.DeleteObject(region);
             close();
             return;
         }
+        var log: [160]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[usage-hover] set-region ok rect={d},{d},{d},{d}", .{ @min(card.left, row.left), card.top, @max(card.right, row.right), row.bottom }) catch "[usage-hover] set-region ok");
     } else if (w.SetWindowRgn(window, null, 0) == 0) {
         close();
         return;
     }
-    _ = focus.SetWindowPos(window, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
+    const shown = focus.SetWindowPos(window, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
     if (passive) {
+        const show_error = if (shown == 0) w.GetLastError() else 0;
+        var log: [160]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log, "[usage-hover] show result={d} error={d} visible={} open={}", .{ shown, show_error, w.IsWindowVisible(window), backdrop != null }) catch "[usage-hover] show");
         var tracking = w.TRACKMOUSEEVENT{ .cbSize = @sizeOf(w.TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = window, .dwHoverTime = 0 };
-        _ = w.TrackMouseEvent(&tracking);
+        const tracked = w.TrackMouseEvent(&tracking);
+        const track_error = if (tracked == 0) w.GetLastError() else 0;
+        debugLog(std.fmt.bufPrint(&log, "[usage-hover] track result={d} error={d}", .{ tracked, track_error }) catch "[usage-hover] track");
     } else {
         _ = focus.SetFocus(window);
         _ = w.SetCapture(window);
@@ -353,6 +367,7 @@ fn openMode(passive: bool) void {
 pub fn key(value: usize) bool {
     if (backdrop == null) return false;
     if (hover_open) {
+        debugLog("[usage-hover] close on key");
         close();
         return value == w.VK_ESCAPE;
     }
@@ -395,7 +410,11 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
                 const y = @import("startup.zig").GET_Y(lp);
                 var card = geometry(bounds, anchor, snapshot.goal_count);
                 card.bottom = anchor.top;
-                if (!inside(card, x, y) and !inside(@import("capacity.zig").sidebarUsageRowRect(), x, y)) close();
+                if (!inside(card, x, y) and !inside(@import("capacity.zig").sidebarUsageRowRect(), x, y)) {
+                    var log: [128]u8 = undefined;
+                    debugLog(std.fmt.bufPrint(&log, "[usage-hover] close on move x={d} y={d}", .{ x, y }) catch "[usage-hover] close on move");
+                    close();
+                }
             }
             return 0;
         },
@@ -413,7 +432,10 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             return 0;
         },
         0x02A3 => {
-            if (hover_open) close();
+            if (hover_open) {
+                debugLog("[usage-hover] close on mouse leave");
+                close();
+            }
             return 0;
         },
         w.WM_MOUSEWHEEL => {
@@ -429,6 +451,8 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             return 0;
         },
         w.WM_RBUTTONDOWN, w.WM_KILLFOCUS, 0x0215 => {
+            var log: [96]u8 = undefined;
+            debugLog(std.fmt.bufPrint(&log, "[usage-hover] close on window message=0x{x}", .{msg}) catch "[usage-hover] close on window message");
             close();
             return 0;
         },

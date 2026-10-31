@@ -1583,6 +1583,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SIZE => {
+            debugLog("[usage-hover] close requested by main resize");
             @import("usage_card.zig").close();
             more_menu.close();
             @import("workspace_switcher.zig").close();
@@ -3755,6 +3756,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_APP_SEARCH_OPEN => {
+            debugLog("[usage-hover] close requested by palette");
             @import("usage_card.zig").close();
             app_state.g_search_snippet_mode = false;
             app_state.g_search_snippet_manage_mode = false;
@@ -7056,6 +7058,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_ACTIVATEAPP => {
             if (wp == 0) {
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
+                debugLog("[usage-hover] close requested by app deactivation");
                 @import("usage_card.zig").close();
                 @import("chat_session.zig").chatReadDeactivate();
             } else {
