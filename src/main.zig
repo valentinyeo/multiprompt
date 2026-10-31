@@ -7371,6 +7371,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_TIMER => {
+            if (@import("room_frontend.zig").pollTimer(wp)) return 0;
             if (wp == app_state.TIMER_VISIT_DWELL) {
                 sessionFrontChanged();
                 recordFrontVisit();

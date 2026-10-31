@@ -410,6 +410,7 @@ fn accountDeleteToken() void {
     }
 }
 fn accountLock() void {
+    @import("room_frontend.zig").setAccount(null);
     if (g_account_pending_device_keys) |bytes| std.heap.page_allocator.free(bytes);
     g_account_pending_device_keys = null;
     app_state.g_account_locked = true;
@@ -822,6 +823,9 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         reply.unauthorized = account_state.invalidCredential(response.status, response.bytes);
         return error.Authentication;
     }
+    if (@import("room_frontend.zig").enabled and job.kind != .signout) {
+        reply.account_id = account_client.field(response.bytes, "account_id") catch null;
+    }
     if (renewed) try app_state.g_account_access.remember(a, response.bytes, GetTickCount64());
     reply.has_token = true;
     if (job.kind != .signout and !writeDpapiFile("account-device.dat", response.bytes)) return error.Storage;
@@ -992,6 +996,7 @@ fn layoutSyncWorker(submitted: AccountJob) void {
     if (PostMessageW(app_state.g_main_hwnd, WM_APP_LAYOUT_READY, 0, @bitCast(@intFromPtr(reply))) == 0) {
         accountJobFree(job);
         if (reply.bytes) |bytes| a.free(bytes);
+        if (reply.account_id) |id| a.free(id);
         if (reply.device_keys) |bytes| a.free(bytes);
         if (reply.key_error) |bytes| a.free(bytes);
         a.destroy(reply);
@@ -1302,6 +1307,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     app_state.g_account_busy = false;
     app_state.g_account_login_active = false;
     if (lp == 0) {
+        @import("room_frontend.zig").setAccount(null);
         g_account_key_prompt_active = false;
         accountSyncFailed(app_state.g_account_has_token);
         return;
@@ -1312,6 +1318,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     defer accountJobFree(reply.job);
     if (reply.job.kind == .decide_keys) g_account_key_prompt_active = false;
     defer if (reply.bytes) |bytes| a.free(bytes);
+    defer if (reply.account_id) |id| a.free(id);
     defer if (reply.device_keys) |bytes| a.free(bytes);
     defer if (reply.key_error) |bytes| a.free(bytes);
     defer {
@@ -1329,11 +1336,13 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         return;
     }
     if (reply.cancelled) {
+        @import("room_frontend.zig").setAccount(null);
         app_state.g_account_status = "Sign-in cancelled. Press Enter to retry.";
         _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
         return;
     }
     if (reply.unauthorized) {
+        @import("room_frontend.zig").setAccount(null);
         accountDeleteToken();
         app_state.g_account_has_token = false;
         app_state.g_account_reauth = true;
@@ -1355,6 +1364,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     }
     if (reply.job.kind == .device_keys or reply.job.kind == .decide_keys) return;
     const bytes = reply.bytes orelse {
+        @import("room_frontend.zig").setAccount(null);
         accountSyncFailed(reply.has_token or app_state.g_account_has_token);
         return;
     };
@@ -1362,6 +1372,8 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         accountDevices(bytes);
         return;
     }
+    var room_layout_applied = false;
+    defer if (!room_layout_applied) @import("room_frontend.zig").setAccount(null);
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -1391,8 +1403,10 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         const rebased = account_layout.rebase(alloc, sent.value, current, apply_remote) catch return;
         to_apply = session_layout.encode(alloc, rebased) catch return;
     }
+    var room_prepare_ok = true;
     if (app_state.g_account_bootstrapping) {
         accountPrepareRestore(to_apply, !reply.colors_supported and reply.job.edited == null) catch {
+            room_prepare_ok = false;
             app_state.g_account_status = "Could not reconcile saved layout. Local cache kept.";
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
         };
@@ -1419,6 +1433,10 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
     if (app_state.g_account_base) |old| a.free(old);
     app_state.g_account_base = a.dupe(u8, bytes) catch return;
+    if (room_prepare_ok and @import("room_frontend.zig").enabled) {
+        @import("room_frontend.zig").setAccount(reply.account_id);
+        room_layout_applied = @import("room_frontend.zig").setAppliedLayout(to_apply);
+    }
     for (app_state.shells[0..app_state.shell_count]) |*shell| {
         shell.synced_input = 0;
         shell.input_publish_pending = false;

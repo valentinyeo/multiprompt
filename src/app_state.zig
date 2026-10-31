@@ -2168,7 +2168,7 @@ pub const TIMER_UPDATE_CHECK: usize = 172;
 pub const TIMER_ACCOUNT_SAVE: usize = 171;
 pub const AccountJobKind = enum { startup, login, pull, push, devices, revoke, signout, device_keys, decide_keys, remove_host };
 pub const AccountJob = struct { kind: AccountJobKind, slot: ?u8 = null, base: ?[]u8 = null, edited: ?[]u8 = null, device: ?[]u8 = null, credential: ?[]u8 = null };
-pub const LayoutReply = struct { colors_supported: bool = false, job: AccountJob, bytes: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
+pub const LayoutReply = struct { colors_supported: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
 pub const AccountClosed = struct { host: u8 = 0, len: u8 = 0, session: [64]u8 = undefined };
 pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;

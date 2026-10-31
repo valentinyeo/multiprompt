@@ -23,14 +23,24 @@ pub const Result = struct {
     }
 };
 
+pub const Failure = struct {
+    kind: RequestKind,
+    reason: enum { transport, timeout, cancelled, parse, remote },
+    code: [64]u8 = @splat(0),
+    code_len: usize = 0,
+    outcome_unknown: bool = false,
+};
 pub const Completion = union(enum) {
     pending,
-    failed: RequestKind,
+    failed: Failure,
     finished: Result,
 };
 
 pub const Controller = struct {
     host: u8,
+    route: ?transport.Route = null,
+    account_digest: [64]u8 = undefined,
+    has_account: bool = false,
     host_uuid: [36]u8 = undefined,
     has_host_uuid: bool = false,
     job: ?*transport.Job = null,
@@ -38,6 +48,23 @@ pub const Controller = struct {
 
     pub fn init(host: u8) Controller {
         return .{ .host = host };
+    }
+
+    pub fn bindRoute(self: *Controller, hostname: []const u8, user: []const u8, port: u16) bool {
+        if (self.route != null or self.job != null) return false;
+        self.route = transport.Route.init(hostname, user, port, self.host) orelse return false;
+        return true;
+    }
+
+    pub fn bindAccount(self: *Controller, account: []const u8) bool {
+        if (account.len == 0 or account.len > 256) return false;
+        var digest: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(account, &digest, .{});
+        const hex = std.fmt.bytesToHex(digest, .lower);
+        if (self.has_account) return std.mem.eql(u8, &self.account_digest, &hex);
+        self.account_digest = hex;
+        self.has_account = true;
+        return true;
     }
 
     pub fn bindHost(self: *Controller, expected: []const u8) bool {
@@ -54,7 +81,8 @@ pub const Controller = struct {
     }
 
     fn launch(self: *Controller, kind: RequestKind, value: anytype) bool {
-        if (self.job != null) return false;
+        if (!self.has_account or self.job != null) return false;
+        const route = self.route orelse return false;
         const request = std.json.Stringify.valueAlloc(allocator, value, .{}) catch return false;
         const output = allocator.alloc(u8, 262145) catch {
             allocator.free(request);
@@ -65,7 +93,7 @@ pub const Controller = struct {
             allocator.free(request);
             return false;
         };
-        job.* = .{ .host = self.host, .request = request, .output = output };
+        job.* = .{ .route = route, .account_digest = self.account_digest, .request = request, .output = output };
         if (!transport.start(job)) {
             allocator.destroy(job);
             allocator.free(output);
@@ -119,28 +147,52 @@ pub const Controller = struct {
         return .unsupported;
     }
 
+    pub fn shutdown(self: *Controller) void {
+        const job = self.job orelse return;
+        job.cancelled.store(true, .release);
+        if (job.thread) |thread| thread.join();
+        allocator.free(job.request);
+        allocator.free(job.output);
+        allocator.destroy(job);
+        self.job = null;
+    }
+
     pub fn poll(self: *Controller) ?Completion {
         const job = self.job orelse return null;
         if (!job.finished.load(.acquire)) return .pending;
+        if (job.thread) |thread| thread.join();
         defer {
             allocator.free(job.request);
             allocator.free(job.output);
             allocator.destroy(job);
             self.job = null;
         }
-        if (!job.success) return .{ .failed = self.kind };
-        var parsed = std.json.parseFromSlice(std.json.Value, allocator, job.output[0..job.output_len], .{ .allocate = .alloc_always }) catch return .{ .failed = self.kind };
+        const mutation = self.kind == .create or self.kind == .edit;
+        if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = if (job.cancelled.load(.acquire)) .cancelled else if (job.timed_out) .timeout else .transport, .outcome_unknown = mutation } };
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, job.output[0..job.output_len], .{ .allocate = .alloc_always }) catch return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
         if (parsed.value != .object) {
             parsed.deinit();
-            return .{ .failed = self.kind };
+            return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
         }
         const ok = parsed.value.object.get("ok") orelse {
             parsed.deinit();
-            return .{ .failed = self.kind };
+            return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
         };
-        if (ok != .bool or !ok.bool or parsed.value.object.get("result") == null) {
+        if (ok == .bool and !ok.bool) {
+            var failure = Failure{ .kind = self.kind, .reason = .remote };
+            if (parsed.value.object.get("error")) |code| {
+                if (code == .string and code.string.len <= failure.code.len) {
+                    failure.code_len = code.string.len;
+                    @memcpy(failure.code[0..failure.code_len], code.string);
+                }
+            }
             parsed.deinit();
-            return .{ .failed = self.kind };
+            if (failure.code_len == 0) return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
+            return .{ .failed = failure };
+        }
+        if (ok != .bool or parsed.value.object.get("result") == null) {
+            parsed.deinit();
+            return .{ .failed = .{ .kind = self.kind, .reason = .parse, .outcome_unknown = mutation } };
         }
         return .{ .finished = .{ .kind = self.kind, .value = parsed } };
     }
