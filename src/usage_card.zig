@@ -117,7 +117,6 @@ pub fn paint(dc: w.HANDLE, client: RECT, pill: RECT, data: *const state.AiPaceSn
     const ink = if (light) RGB(28, 28, 28) else RGB(242, 242, 242);
     const dim = if (light) RGB(100, 100, 100) else RGB(138, 138, 138);
     const track = if (light) RGB(225, 225, 225) else RGB(42, 42, 42);
-    drawing.drawModalShadow(dc, card.left, card.top, card.right - card.left, card.bottom - card.top, px(32));
     smooth.fillRoundRect(dc, card, px(16), edge);
     smooth.fillRoundRect(dc, .{ .left = card.left + 1, .top = card.top + 1, .right = card.right - 1, .bottom = card.bottom - 1 }, px(16) - 1, panel);
     const regular = fonts.create(-px(12), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, null);
