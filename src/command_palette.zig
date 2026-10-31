@@ -1607,6 +1607,22 @@ test "IGSH-1266 a new Claude session spawns exactly the host launch command" {
     try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
 }
 
+pub fn newTabOpensChatView(program: []const u8) bool {
+    return @import("agent_host.zig").eligible(program);
+}
+
+test "IGSH-1266 a hosted Claude tab opens in Chat View and a neutral tab does not" {
+    try std.testing.expect(newTabOpensChatView("claude"));
+    try std.testing.expect(newTabOpensChatView("claude-code"));
+    try std.testing.expect(!newTabOpensChatView(""));
+    try std.testing.expect(!newTabOpensChatView("codex"));
+    try std.testing.expect(!newTabOpensChatView("pi"));
+    try std.testing.expect(!newTabOpensChatView("bash"));
+    try std.testing.expect(workspaceSessionProgram("", true).len > 0 and newTabOpensChatView(workspaceSessionProgram("", true)));
+    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
+    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
+}
+
 pub fn workspaceSessionProgram(configured: []const u8, with_agent: bool) []const u8 {
     if (!with_agent) return "";
     return if (configured.len > 0) configured else "claude";
@@ -1680,15 +1696,18 @@ fn spawnWorkspaceSession(with_agent: bool) bool {
         setShellName(&app_state.shells[ns], if (claude) "Claude" else "Terminal");
         app_state.shells[ns].name_source = .default;
         app_state.shells[ns].ai_agent = if (claude) 1 else 0;
+        var hosted_claude = false;
         if (host_sid) |sid| {
             const sid_len = @min(sid.len, app_state.shells[ns].claude_sid.len);
             @memcpy(app_state.shells[ns].claude_sid[0..sid_len], sid[0..sid_len]);
             app_state.shells[ns].claude_sid_len = @intCast(sid_len);
+            hosted_claude = newTabOpensChatView(program);
         }
         const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
         @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
         app_state.shells[ns].cached_cwd_len = @intCast(n);
         publishInboxState();
+        if (hosted_claude) @import("chat_composer.zig").openChatView();
         saveSession();
     }
     return ok;
