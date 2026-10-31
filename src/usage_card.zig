@@ -353,10 +353,6 @@ fn openMode(passive: bool) void {
         const show_error = if (shown == 0) w.GetLastError() else 0;
         var log: [160]u8 = undefined;
         debugLog(std.fmt.bufPrint(&log, "[usage-hover] show result={d} error={d} visible={} open={}", .{ shown, show_error, w.IsWindowVisible(window), backdrop != null }) catch "[usage-hover] show");
-        var tracking = w.TRACKMOUSEEVENT{ .cbSize = @sizeOf(w.TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = window, .dwHoverTime = 0 };
-        const tracked = w.TrackMouseEvent(&tracking);
-        const track_error = if (tracked == 0) w.GetLastError() else 0;
-        debugLog(std.fmt.bufPrint(&log, "[usage-hover] track result={d} error={d}", .{ tracked, track_error }) catch "[usage-hover] track");
     } else {
         _ = focus.SetFocus(window);
         _ = w.SetCapture(window);
@@ -414,6 +410,13 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
                     var log: [128]u8 = undefined;
                     debugLog(std.fmt.bufPrint(&log, "[usage-hover] close on move x={d} y={d}", .{ x, y }) catch "[usage-hover] close on move");
                     close();
+                } else {
+                    var tracking = w.TRACKMOUSEEVENT{ .cbSize = @sizeOf(w.TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
+                    if (w.TrackMouseEvent(&tracking) == 0) {
+                        var log: [96]u8 = undefined;
+                        debugLog(std.fmt.bufPrint(&log, "[usage-hover] track failed error={d}", .{w.GetLastError()}) catch "[usage-hover] track failed");
+                        close();
+                    }
                 }
             }
             return 0;
@@ -433,6 +436,11 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
         },
         0x02A3 => {
             if (hover_open) {
+                var point: w.POINT = undefined;
+                var card = geometry(bounds, anchor, snapshot.goal_count);
+                card.bottom = anchor.top;
+                if (w.GetCursorPos(&point) != 0 and w.ScreenToClient(hwnd, &point) != 0 and
+                    (inside(card, point.x, point.y) or inside(@import("capacity.zig").sidebarUsageRowRect(), point.x, point.y))) return 0;
                 debugLog("[usage-hover] close on mouse leave");
                 close();
             }
