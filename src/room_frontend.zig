@@ -3,7 +3,7 @@ const w = @import("win32.zig");
 const app_state = @import("app_state.zig");
 const room_view = @import("room_view.zig");
 
-pub const enabled = false;
+pub const enabled = if (@hasDecl(@import("root"), "ROOMS_PREVIEW")) @import("root").ROOMS_PREVIEW else false;
 pub const new_room_target: usize = 5105;
 pub const edit_room_target: usize = 5106;
 
@@ -390,7 +390,6 @@ pub fn selectedRoom(id: []const u8) bool {
     return std.mem.eql(u8, &store, &front.selected.store.store_uuid) and std.mem.eql(u8, id, &front.selected.room_id);
 }
 
-// The row pointer lasts until catalog replacement; its metadata lasts until its next successful read.
 pub fn requestCatalogRow(id: []const u8) ?*const CatalogRow {
     if (catalog().len == 0) return null;
     for (catalog_rows.items) |*row| {
@@ -783,7 +782,7 @@ fn nextStatus(c: *rooms.Controller) bool {
         @memcpy(pending_sid[0..sid.len], sid);
         pending_sid_len = sid.len;
         status_generation = candidate_generation;
-        return c.status(sid);
+        if (c.status(sid)) return true;
     }
     return false;
 }
@@ -866,6 +865,10 @@ fn startSnapshot(c: *rooms.Controller) bool {
     const route = configuredRoute(route_slot) orelse return false;
     const key = routeKey(route);
     if (!std.mem.eql(u8, &key, &route_key)) return false;
+    if (candidate_scan < discovered_count and nextStatus(c)) {
+        _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+        return true;
+    }
     if (!c.snapshot(&location.room_id)) return false;
     read_generation = selection_generation;
     selection_waiting = false;
@@ -926,7 +929,7 @@ fn finishRefresh(c: *rooms.Controller, success: bool) void {
 }
 
 fn scheduleMetadata(c: *rooms.Controller) bool {
-    if (c.job == null and front == .create and c.has_host_uuid and candidate_scan < discovered_count and nextStatus(c)) return true;
+    if (c.job == null and (front == .create or front == .selected) and c.has_host_uuid and candidate_scan < discovered_count and nextStatus(c)) return true;
     if (pumpRefresh(c)) return true;
     if (c.job != null or !catalog_complete or !c.has_host_uuid or request_generation != account_generation) return false;
     const route = configuredRoute(route_slot) orelse return false;
@@ -1214,8 +1217,12 @@ fn publishModel() bool {
                 if (ok) row.members = metadata;
             } else |_| {}
             if (item.messages.items.len > 0) {
-                const text = item.messages.items[item.messages.items.len - 1].text;
-                row.preview = a.dupe(u16, text[0..@min(text.len, 256)]) catch row.preview;
+                const message = item.messages.items[item.messages.items.len - 1];
+                const text = a.dupe(u16, message.text[0..@min(message.text.len, 256)]) catch break;
+                var author = message.author;
+                if (author) |*value| value.name = a.dupe(u16, value.name) catch break;
+                row.preview = text;
+                row.preview_author = author;
             }
             break;
         }
@@ -1492,7 +1499,10 @@ pub fn pollTimer(id: usize) bool {
                 if (failure.kind == .catalog) finishRefresh(c, false);
                 if (failure.kind == .capabilities or failure.kind == .catalog) scheduleDiscovery(c);
                 clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
-            } else if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+            } else {
+                if (front == .selected and owned_model != null and c.has_host_uuid and std.mem.eql(u8, &front.selected.store.store_uuid, &c.host_uuid) and std.mem.eql(u8, owned_model.?.value.room_id, &front.selected.room_id)) selection_waiting = true;
+                if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+            }
         },
         .finished => |finished| {
             var result = finished;
@@ -1617,6 +1627,7 @@ pub fn pollTimer(id: usize) bool {
                         }
                     } else |_| {}
                 }
+                if (front == .selected and owned_model != null and c.has_host_uuid and std.mem.eql(u8, &front.selected.store.store_uuid, &c.host_uuid) and std.mem.eql(u8, owned_model.?.value.room_id, &front.selected.room_id)) selection_waiting = true;
             }
             if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
         },
@@ -1846,15 +1857,7 @@ pub fn isVisible() bool {
 fn enter() bool {
     if (!enabled or !created or scope_blocked or !ui_ready or app_state.g_account_locked) return false;
     @import("chat_composer.zig").chatDraftFlush();
-    const voice = @import("voice.zig");
-    app_state.g_dictation_cancelled.store(true, .release);
-    app_state.g_dictation_recording.store(false, .release);
-    app_state.g_dictation_send_queued.store(false, .release);
-    voice.cancelDictation();
-    voice.setVoiceModeActive(false);
-    voice.voiceManualStop();
-    voice.voiceStopSpeaking();
-    voice.voiceMicStop();
+    @import("voice.zig").leavePrivateVoiceTarget();
     app_state.g_chat_browser_swap.cancel();
     _ = w.KillTimer(app_state.g_main_hwnd, w.TIMER_CHAT_BROWSER_SWAP);
     @import("rename.zig").hideShellsForOverlay();
@@ -1880,7 +1883,7 @@ pub fn openCreate() void {
     markUiDirty();
     if (controller != null) scanCandidates();
     _ = publishCreateCandidates();
-    _ = w.SetWindowTextW(app_state.g_main_hwnd, std.unicode.utf8ToUtf16LeStringLiteral("Multi Bot"));
+    @import("workspaces.zig").updateMainWindowTitle();
     resize(app_state.g_main_hwnd);
     syncVisibility();
     view.openCreate();
@@ -1916,7 +1919,7 @@ pub fn select(location: RoomLocation) void {
         restore_pending = false;
         selection_generation +%= 1;
         markUiDirty();
-        _ = w.SetWindowTextW(app_state.g_main_hwnd, std.unicode.utf8ToUtf16LeStringLiteral("Multi Bot"));
+        @import("workspaces.zig").updateMainWindowTitle();
         resize(app_state.g_main_hwnd);
         syncVisibility();
         view.focus();
@@ -1941,7 +1944,7 @@ pub fn select(location: RoomLocation) void {
     front = .{ .selected = location };
     restoreDraft(location);
     markUiDirty();
-    _ = w.SetWindowTextW(app_state.g_main_hwnd, std.unicode.utf8ToUtf16LeStringLiteral("Multi Bot"));
+    @import("workspaces.zig").updateMainWindowTitle();
     resize(app_state.g_main_hwnd);
     syncVisibility();
     view.showUnavailable();

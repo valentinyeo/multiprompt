@@ -372,6 +372,18 @@ pub fn startGroupRename(gidx: u32) void {
 
 pub fn commitRename() void {
     if (app_state.g_edit_hwnd == null) return;
+    if (!@import("room_frontend.zig").privateActionsAllowed() and !app_state.g_edit_is_window) {
+        const edit = app_state.g_edit_hwnd;
+        app_state.g_edit_hwnd = null;
+        app_state.g_edit_is_group = false;
+        app_state.g_edit_is_browser_urlbar = false;
+        app_state.g_edit_is_thread_title = false;
+        app_state.g_edit_is_inbox = false;
+        app_state.g_edit_sync_remote_name = false;
+        _ = DestroyWindow(edit);
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        return;
+    }
     if (app_state.g_edit_is_browser_urlbar) {
         var buf: [512]u16 = std.mem.zeroes([512]u16);
         const len = GetWindowTextW(app_state.g_edit_hwnd, &buf, 512);

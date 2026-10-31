@@ -60,6 +60,8 @@ zig build -Dtarget=aarch64-windows-gnu
 
 The app lands in `zig-out/bin/multiprompt.exe`.
 
+Use `-Drooms-preview=true` for isolated Rooms builds. Preview defaults off. It cannot accompany `-Drelease=true`. Live Room sending remains unsupported.
+
 ## Contributing
 
 Bug reports and ideas are welcome as GitHub issues. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.

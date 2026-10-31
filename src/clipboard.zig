@@ -1140,7 +1140,7 @@ pub fn handleShotPaste() void {
     }
     app_state.g_shot_paste_mutex.unlock();
 
-    if (shell_id == 0 or local_len == 0) return;
+    if (shell_id == 0 or local_len == 0 or !@import("room_frontend.zig").privateActionsAllowed()) return;
     const idx = findShellById(shell_id) orelse {
         debugLog("[paste-focus] failed: target shell disappeared before paste");
         return;

@@ -2029,14 +2029,12 @@ fn paintRoomRow(hdc: HANDLE, column: RECT, y: i32, row: Row) void {
     var preview_rect = RECT{ .left = left, .top = y + uiScaled(31), .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
     var subtitle: [512]u16 = undefined;
     var used: usize = 0;
-    for (item.members[0..@min(item.members.len, 3)], 0..) |member, index| {
-        if (index > 0 and used + 2 <= subtitle.len) { subtitle[used] = ','; subtitle[used + 1] = ' '; used += 2; }
-        var n = @min(member.name.len, @min(@as(usize, 48), subtitle.len - used));
-        if (n < member.name.len and n > 0 and member.name[n - 1] >= 0xd800 and member.name[n - 1] <= 0xdbff) n -= 1;
-        @memcpy(subtitle[used..][0..n], member.name[0..n]);
-        used += n;
-    }
-    if (item.preview.len > 0 and used + 2 <= subtitle.len) {
+    if (item.preview.len > 0) {
+        const speaker = if (item.preview_author) |author| author.name else L("You");
+        var speaker_len = @min(speaker.len, @min(@as(usize, 48), subtitle.len - 2));
+        if (speaker_len < speaker.len and speaker_len > 0 and speaker[speaker_len - 1] >= 0xd800 and speaker[speaker_len - 1] <= 0xdbff) speaker_len -= 1;
+        @memcpy(subtitle[0..speaker_len], speaker[0..speaker_len]);
+        used = speaker_len;
         if (used > 0) { subtitle[used] = ':'; subtitle[used + 1] = ' '; used += 2; }
         var n = @min(item.preview.len, subtitle.len - used);
         if (n < item.preview.len and n > 0 and item.preview[n - 1] >= 0xd800 and item.preview[n - 1] <= 0xdbff) n -= 1;

@@ -107,10 +107,10 @@ class RoomBridge:
             if existing is None:
                 self.store.validate_members(members)
                 for member in members:
-                    if member['provider'] == 'codex' and op == 'edit':
+                    previous = None
+                    if op == 'edit':
                         previous = self.store.db.execute('SELECT host_uuid, provider, provider_sid, session_identity FROM members WHERE room_id=? AND alias=? AND active=1', (command.get('room_id'), member['alias'])).fetchone()
-                        if previous is None or any(previous[key] != member[key] for key in ('host_uuid', 'provider', 'provider_sid', 'session_identity')):
-                            fail('unsupported_provider')
+                    if previous is not None and all(previous[key] == member[key] for key in ('host_uuid', 'provider', 'provider_sid', 'session_identity')):
                         continue
                     if member['provider'] != 'claude':
                         fail('unsupported_provider')

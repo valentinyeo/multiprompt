@@ -1163,6 +1163,13 @@ fn paletteRowIsSession(target: usize) bool {
 pub fn roomPaletteAllowed(target: usize) bool {
     if (target == @import("room_frontend.zig").new_room_target or target == @import("room_frontend.zig").edit_room_target or (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) return true;
     if (target < SEARCH_TMUX_OFFSET + MAX_TMUX_SESSIONS) return true;
+    if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return !app_state.g_search_ws_move_mode and !app_state.g_search_workspace_delete_mode;
+    switch (target) {
+        SEARCH_CLOSEWIN_OFFSET, SEARCH_CREATEWS_OFFSET, SEARCH_NEWWIN_OFFSET, SEARCH_QUIT_OFFSET, SEARCH_RENAMEWIN_OFFSET, SEARCH_SINGLEWIN_OFFSET, SEARCH_STARRED_OFFSET, SEARCH_WORKSPACES_MENU_OFFSET, SEARCH_WORKSPACE_BACK_OFFSET,
+        SEARCH_FREQUENT_FIRST_OFFSET, SEARCH_HIDEPILLS_OFFSET, SEARCH_HIDESIDEBAR_OFFSET, SEARCH_SHOW_ALL_OFFSET, SEARCH_SHOW_FAVORITES_OFFSET, SEARCH_SHOW_FREQUENT_OFFSET, SEARCH_SIDEBAR_COLLAPSE_OFFSET, SEARCH_SIDEBAR_HIDE_OFFSET, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET, SEARCH_UNREADONLY_OFFSET => return true,
+        else => {},
+    }
+    if (target == SEARCH_FULLWIDTH_OFFSET) return false;
     const group = paletteGroupOf(target) orelse return false;
     return group == 3 or group == 6;
 }

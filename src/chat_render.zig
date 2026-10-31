@@ -5046,6 +5046,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
         anchor.bottom += origin.y;
         break :custom @import("message_menu.zig").track(app_state.g_main_hwnd, anchor, items.items[0..items.len]);
     } else @intCast(TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null));
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
     switch (cmd) {
         8, 9, 10 => if (reply_text) |quote| {
             const current_identity = chatFileIdentity();
@@ -5327,6 +5328,10 @@ fn ensureTranscriptBackbuffer(hdc: HANDLE, w: i32, h: i32) HANDLE {
 }
 
 fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) {
+        if (msg == 0x0233) { DragFinish(@ptrFromInt(wp)); return 0; }
+        if ((msg >= 0x0100 and msg <= 0x0109) or (msg >= 0x0200 and msg <= 0x020e) or msg == 0x007b or msg == 0x0111) return 0;
+    }
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;

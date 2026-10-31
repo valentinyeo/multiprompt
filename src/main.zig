@@ -1312,6 +1312,7 @@ const account_client = @import("account_client.zig");
 const sync_protocol = @import("sync_protocol.zig");
 const sync_vault = @import("sync_vault.zig");
 pub const IS_DEV = if (@hasDecl(build_config, "is_dev")) build_config.is_dev else false;
+pub const ROOMS_PREVIEW = if (@hasDecl(build_config, "rooms_preview")) build_config.rooms_preview else false;
 pub const LOOK_UNIFIED = true;
 pub const BROWSER_EDGE_MASKS = true;
 pub const APP_VERSION = build_config.app_version orelse "0.28.883";
@@ -2718,6 +2719,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_RENAME_TAB => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.shell_count > 0) {
                 startRename(app_state.active_shell);
             }
@@ -2759,14 +2761,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_FAVORITE_TOGGLE => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             toggleFavorite(app_state.active_shell);
             return 0;
         },
         WM_APP_WEBVIEW2_TOGGLE => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             toggleWebView2();
             return 0;
         },
         WM_APP_WEBVIEW2_ACTION => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.g_webview2_active) {
                 switch (wp) {
                     1 => if (app_state.g_webview2_back) |action| action(),
@@ -2793,6 +2798,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_WEBVIEW2_FOCUS => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (webView2OwnsActiveShell()) {
                 if (wp == 2) {
                     requestWebView2Focus();
@@ -2809,6 +2815,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_TOGGLE_FULLWIDTH => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.active_shell < app_state.shell_count) {
                 app_state.shells[app_state.active_shell].full_width = !app_state.shells[app_state.active_shell].full_width;
                 if (@import("chat_composer.zig").fullWidthShouldResizeConsole(app_state.g_chat_active)) {
@@ -2823,20 +2830,24 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_RECONNECT => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.active_shell < app_state.shell_count) {
                 @import("chat_send.zig").sshReconnectNow(app_state.active_shell);
             }
             return 0;
         },
         WM_APP_HIDE_TAB_UNTIL_ATTENTION => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             hideActiveTabUntilAttention();
             return 0;
         },
         WM_APP_ARCHIVE_ARM => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.active_shell < app_state.shell_count) archiveArmOrCommit(app_state.active_shell);
             return 0;
         },
         WM_APP_BROWSER_TOGGLE => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             const physical_shortcut = wp == 1 or wp == 2;
             if (physical_shortcut) {
                 const event_time: u32 = @truncate(@as(usize, @bitCast(lp)));
@@ -2900,6 +2911,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_BROWSER_MODE_TOGGLE => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.active_shell < app_state.shell_count) {
                 app_state.shells[app_state.active_shell].browser_native = !app_state.shells[app_state.active_shell].browser_native;
                 app_state.g_browser_native_default = app_state.shells[app_state.active_shell].browser_native;
@@ -2918,10 +2930,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_BROWSER_ENGINE_TOGGLE => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             switchBrowserEngine(hwnd);
             return 0;
         },
         WM_APP_BROWSER_OPEN_URL => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.active_shell < app_state.shell_count) {
                 setBrowserUrlFromSearch(app_state.active_shell);
                 app_state.shells[app_state.active_shell].browser_enabled = true;
@@ -2948,10 +2962,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CHAT_TAB_URL => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             @import("chat_render.zig").chatInsertBrowserTabUrl();
             return 0;
         },
         WM_APP_BROWSER_SHOTURL => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             runActiveBrowserShotUrl();
             return 0;
         },
@@ -2962,10 +2978,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_BROWSER_BACK => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             browserHistoryNav(false);
             return 0;
         },
         WM_APP_BROWSER_FORWARD => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             browserHistoryNav(true);
             return 0;
         },
@@ -2977,6 +2995,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_BROWSER_FOCUS_URL => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {
                 startBrowserUrlBarEdit();
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2984,6 +3003,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_BROWSER_FOCUS_TOGGLE => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.g_chat_find_open) @import("chat_find_ui.zig").close(false);
             const pane_present = webView2OwnsActiveShell() or (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled);
             const focus_drifted = @import("chat_composer.zig").chatFocusDrifted() and !activeBrowserHasForegroundFocus() and !webView2HasInputFocus();
@@ -3167,19 +3187,23 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_PASTE => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             pasteClipboardToShell(@intCast(wp));
             return 0;
         },
         WM_APP_COPY => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             const result = copyConsoleSelectionToClipboard(@intCast(wp));
             if (result == .no_selection) _ = copyClaudeLoginUrlFromActiveShell();
             return 0;
         },
         WM_APP_COPY_CLAUDE_LOGIN_URL => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (wp == app_state.active_shell) _ = copyClaudeLoginUrlFromActiveShell();
             return 0;
         },
         WM_APP_DICTATION_TOGGLE => {
+            if (wp != 1 and !@import("room_frontend.zig").privateActionsAllowed() and foregroundIsOurs()) return 0;
             if (wp == 1) {
                 cancelDictation();
             } else {
@@ -3211,16 +3235,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_COPY_OR_INTERRUPT => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             copySelectionOrSendCtrlC(@intCast(wp));
             return 0;
         },
         @import("win32.zig").WM_APP_SHELL_DOUBLE_CLICK => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             const sx: i32 = @bitCast(@as(u32, @truncate(wp)));
             const sy: i32 = @bitCast(@as(u32, @truncate(wp >> 32)));
             @import("clipboard.zig").shellDoubleClickAtScreenPoint(@intCast(lp), sx, sy);
             return 0;
         },
         WM_APP_OPEN_URL_AT => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             const sx: i32 = @bitCast(@as(u32, @truncate(wp)));
             const sy: i32 = @bitCast(@as(u32, @truncate(wp >> 32)));
             openUrlAtScreenPoint(sx, sy);
@@ -3243,6 +3270,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_TOGGLE_INBOX => {
+            if (!app_state.g_inbox_active) @import("room_frontend.zig").cancelRestoreForUser();
             toggleInbox(hwnd);
             return 0;
         },
@@ -3255,6 +3283,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_ALL_SESSIONS_OPEN => {
+            @import("room_frontend.zig").cancelRestoreForUser();
             openAllSessions(hwnd);
             return 0;
         },
@@ -3313,6 +3342,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_FOCUS_SHELL => {
+            if (lp >= 0 and !@import("room_frontend.zig").privateActionsAllowed()) return 0;
             const sid: u32 = @truncate(wp);
             const inbox_ctx_encoded: u32 = if (lp > 0) @intCast(lp) else 0;
             if (inbox_ctx_encoded > 0) armInboxStepContext(inbox_ctx_encoded - 1);
@@ -3426,10 +3456,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_MARK_ACTIVE_UNREAD => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             markActiveShellUnread();
             return 0;
         },
         WM_APP_TOGGLE_KEEP_AWAKE => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             toggleKeepAwakeForActiveShell();
             return 0;
         },
@@ -3532,6 +3564,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_MOVE_TAB => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             const dir: i32 = if (wp == 1) 1 else -1;
             if (app_state.g_tab_sort_auto) {
                 return 0;
@@ -3544,6 +3577,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_TOGGLE_GROUP => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.active_shell >= app_state.shell_count) return 0;
             const gid = @import("sidebar.zig").tabGroupId(app_state.active_shell);
             if (gid == 0) return 0;
@@ -3563,12 +3597,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CLOSE => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.shell_count > 0) {
                 closeShell(app_state.active_shell);
             }
             return 0;
         },
         WM_APP_CLOSE_SESSION => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.shell_count > 0) {
                 if (app_state.shells[app_state.active_shell].tmux_session_len > 0) {
                     endActiveTmuxSession();
@@ -3615,6 +3651,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CHAT_COPY_CODE => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             chatCopyLatestCode();
             return 0;
         },
@@ -3632,21 +3669,26 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CHAT_COPY_SELECTION => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             chatCopySelection();
             return 0;
         },
         WM_APP_CHAT_SELECT_ALL => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             chatSelectAll();
             return 0;
         },
         app_state.WM_APP_CHAT_FIND => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             @import("chat_find_ui.zig").key(wp, @truncate(@as(usize, @bitCast(lp))));
             return 0;
         },
         WM_APP_CHAT_FILE_READY => {
             chatFileOnReady();
-            @import("voice.zig").voiceManualRetry();
-            @import("voice.zig").voiceManualHighlight();
+            if (@import("room_frontend.zig").privateActionsAllowed()) {
+                @import("voice.zig").voiceManualRetry();
+                @import("voice.zig").voiceManualHighlight();
+            }
             return 0;
         },
         WM_APP_CHAT_AC_READY => {
@@ -3736,6 +3778,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_VOICE_TTS_AUDIO_STARTED => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             if (app_state.g_voice_state == .speaking) {
                 invalidateChatHeader();
                 if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_VOICE_TTS_POS, 1000, null);
@@ -3754,7 +3797,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             const fallback_shell = app_state.g_voice_tts_fallback_shell_id;
             app_state.g_voice_tts_mutex.unlock();
-            if (!valid or (app_state.g_voice_manual_playing and !@import("voice.zig").voiceManualValid()) or
+            if (!@import("room_frontend.zig").privateActionsAllowed() or !valid or (app_state.g_voice_manual_playing and !@import("voice.zig").voiceManualValid()) or
                 (!app_state.g_voice_replay_only and !app_state.g_voice_mode_active) or app_state.g_voice_state != .speaking or app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != fallback_shell) return 0;
             if (!app_state.g_voice_tts_fallback_shown.swap(true, .acq_rel)) {
                 showHeaderNoticeAscii("Deepgram voice unavailable, using Windows voice", 4000, true);
@@ -4629,6 +4672,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (app_state.g_search_active and app_state.g_search_rename_input_mode) {
+                if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
                 const idx = findShellById(app_state.g_search_rename_sid) orelse {
                     showHeaderNoticeAscii("Rename target is gone", 3000, true);
                     return 0;
@@ -4661,6 +4705,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = snoozeWorkspaceUntil(hwnd, ws, due);
                     return 0;
                 }
+                if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
                 const idx = findShellById(app_state.g_remind_sid) orelse {
                     showHeaderNoticeAscii("Reminder tab is gone", 3000, true);
                     return 0;
@@ -7520,6 +7565,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (wp == TIMER_CHAT_FOREGROUND_RETRY) {
+                if (!@import("room_frontend.zig").privateActionsAllowed()) { _ = KillTimer(hwnd, TIMER_CHAT_FOREGROUND_RETRY); return 0; }
                 if (!focusGuard(app_state.g_chat_composer_hwnd)) {
                     _ = KillTimer(hwnd, TIMER_CHAT_FOREGROUND_RETRY);
                     return 0;
@@ -7656,7 +7702,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (wp == TIMER_NATIVE_BROWSER_FOCUS) {
                 const pending_sid = app_state.g_native_browser_focus_pending_shell_id;
-                if (pending_sid == 0 or app_state.active_shell >= app_state.shell_count or
+                if (!@import("room_frontend.zig").privateActionsAllowed() or pending_sid == 0 or app_state.active_shell >= app_state.shell_count or
                     app_state.shells[app_state.active_shell].shell_id != pending_sid or
                     !foregroundIsOurs())
                 {
@@ -7886,6 +7932,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 invalidateSidebar();
             } else if (wp == TIMER_REFOCUS) {
                 _ = KillTimer(hwnd, TIMER_REFOCUS);
+                if (!@import("room_frontend.zig").privateActionsAllowed()) { cancelShellRefocus(hwnd); return 0; }
                 if (app_state.g_search_active) {
                     altqLog("palette_refocus suppressed foreground={X} rem={} wait_alt={}", .{ altqPtr(GetForegroundWindow()), app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release });
                     cancelShellRefocus(hwnd);

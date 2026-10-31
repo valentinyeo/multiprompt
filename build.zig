@@ -27,7 +27,9 @@ pub fn build(b: *std.Build) void {
             .optimize = stable_optimize,
         }),
     });
+    const rooms_preview = b.option(bool, "rooms-preview", "Compile the experimental desktop Rooms integration") orelse false;
     const release = b.option(bool, "release", "Build a publishable release with a configured signing public key") orelse false;
+    if (release and rooms_preview) @panic("Rooms preview cannot be included in a release");
     if (release) {
         const encoded = std.mem.trim(u8, @embedFile("src/release_signing_public_key.txt"), " \r\n\t");
         if ((std.base64.standard.Decoder.calcSizeForSlice(encoded) catch 0) != 32) @panic("Invalid release signing public key: expected base64 raw 32-byte key");
@@ -75,6 +77,7 @@ pub fn build(b: *std.Build) void {
     const stable_opts = b.addOptions();
     stable_opts.addOption(?[]const u8, "app_version", app_version);
     stable_opts.addOption(bool, "is_dev", false);
+    stable_opts.addOption(bool, "rooms_preview", rooms_preview);
     exe.root_module.addOptions("build_config", stable_opts);
 
     b.installArtifact(exe);
@@ -123,6 +126,7 @@ pub fn build(b: *std.Build) void {
     const dev_opts = b.addOptions();
     dev_opts.addOption(?[]const u8, "app_version", app_version);
     dev_opts.addOption(bool, "is_dev", true);
+    dev_opts.addOption(bool, "rooms_preview", rooms_preview);
     dev_exe.root_module.addOptions("build_config", dev_opts);
     b.installArtifact(dev_exe);
 

@@ -143,6 +143,10 @@ const invalidateChatHeader = @import("chat_composer.zig").invalidateChatHeader;
 const voiceScreenFallbackShouldSpeak = @import("app_state.zig").voiceScreenFallbackShouldSpeak;
 const VoiceMic = @import("app_state.zig").VoiceMic;
 const VoiceResult = @import("app_state.zig").VoiceResult;
+var dictation_private_epoch: u64 = 0;
+var dictation_capture_epoch: u64 = 0;
+var dictation_private_capture = false;
+var dictation_external_target: @import("win32.zig").HANDLE = null;
 const VoiceJob = @import("app_state.zig").VoiceJob;
 const VoiceFrame = @import("app_state.zig").VoiceFrame;
 const ReadConsoleOutputCharacterW = @import("win32.zig").ReadConsoleOutputCharacterW;
@@ -931,7 +935,7 @@ pub fn voiceCheckScreenFallback() void {
 }
 
 pub fn voiceOnTurnEnd(shell_id: u32) void {
-    if (!app_state.g_voice_mode_active) return;
+    if (!@import("room_frontend.zig").privateActionsAllowed() or !app_state.g_voice_mode_active) return;
     if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != shell_id) {
         dictationAudit("voice-turn-end-not-active-shell", 0);
         return;
@@ -1094,6 +1098,7 @@ pub fn voiceManualHighlight() void {
 }
 
 pub fn voiceManualPress(packet: app_state.VoicePressPacket) void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
     if (packet.epoch != app_state.g_voice_manual_epoch.load(.acquire)) return;
     const target = @import("chat_session.zig").chatVoiceTarget();
     if (!app_state.g_voice_manual_target.accepts(target, packet.target)) return;
@@ -1121,6 +1126,7 @@ pub fn voiceManualPress(packet: app_state.VoicePressPacket) void {
 }
 
 pub fn voiceReadReply(step: voice_filter.ReplyStep) void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
     const identity = @import("chat_session.zig").chatVoiceIdentity() orelse {
         showHeaderNoticeAscii("No reply to read yet", 3000, true);
         return;
@@ -1187,6 +1193,7 @@ test "reply source requires complete live publication" {
 }
 
 pub fn voiceManualRetry() void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
     const step = app_state.g_voice_manual_pending orelse return;
     if (GetTickCount64() >= app_state.g_voice_manual_deadline) {
         voiceManualStop();
@@ -1607,6 +1614,7 @@ fn voiceTypingKeyTick() u32 {
 }
 
 pub fn voiceHandleSpeechStart(id: u32, overlapped: bool) void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
     if (!app_state.g_voice_mode_active or !app_state.g_voice_always_listen or app_state.active_shell >= app_state.shell_count) return;
     app_state.g_voice_last_activity_tick = GetTickCount64();
     const slot = &app_state.g_voice_utt_open[id % app_state.g_voice_utt_open.len];
@@ -1625,6 +1633,7 @@ pub fn voiceHandleSpeechStart(id: u32, overlapped: bool) void {
     invalidateChatHeader();
 }
 pub fn voiceHandleUtterance(result: *VoiceResult) void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
     if (result.epoch != app_state.g_voice_mic_epoch.load(.acquire) or !app_state.g_voice_mode_active or !app_state.g_voice_always_listen) return;
     const slot = &app_state.g_voice_utt_open[result.id % app_state.g_voice_utt_open.len];
     if (!duplex.voiceResultMatchesSlot(slot.id, result.id)) return;
@@ -2166,6 +2175,21 @@ test "dictation verification ignores TUI framing and requires new console text" 
     try std.testing.expectEqual(false, dictationOutputShowsNewText(normalized[0..normalized_len], normalized[0..normalized_len], &spoken));
 }
 
+pub fn leavePrivateVoiceTarget() void {
+    dictation_private_epoch +%= 1;
+    _ = app_state.g_voice_manual_epoch.fetchAdd(1, .acq_rel);
+    if (dictation_private_capture and app_state.g_dictation_running.load(.acquire)) {
+        app_state.g_dictation_cancelled.store(true, .release);
+        app_state.g_dictation_recording.store(false, .release);
+        app_state.g_dictation_send_queued.store(false, .release);
+        cancelDictation();
+    }
+    setVoiceModeActive(false);
+    voiceManualStop();
+    voiceStopSpeaking();
+    voiceMicStop();
+}
+
 pub fn cancelDictation() void {
     if (!app_state.g_dictation_running.load(.acquire) or !app_state.g_dictation_cancelled.load(.acquire)) return;
     app_state.g_dictation_send_queued.store(false, .release);
@@ -2202,7 +2226,7 @@ pub fn handleDictationReady() void {
     app_state.g_voice_listening_active.store(false, .release);
     const discard_legacy = app_state.g_voice_legacy_discard;
     app_state.g_voice_legacy_discard = false;
-    if (app_state.g_dictation_cancelled.load(.acquire)) {
+    if (app_state.g_dictation_cancelled.load(.acquire) or (dictation_private_capture and dictation_capture_epoch != dictation_private_epoch)) {
         if (was_voice_listening) {
             app_state.g_voice_state = .idle;
             invalidateChatHeader();
@@ -2238,6 +2262,13 @@ pub fn handleDictationReady() void {
         return;
     }
 
+    if (!dictation_private_capture) {
+        if (dictation_external_target == null or @import("win32.zig").GetForegroundWindow() != dictation_external_target) return;
+        if (!setUnicodeClipboardTextWithRetry(transcript)) return;
+        if (@import("win32.zig").GetForegroundWindow() != dictation_external_target) return;
+        synthesizeCtrlVIntoForeground();
+        return;
+    }
     rememberLastPasteText(transcript);
 
     if (was_voice_listening) {
@@ -2350,8 +2381,12 @@ pub fn toggleDictation() void {
         app_state.g_dictation_transcript_len = 0;
         app_state.g_dictation_error_len = 0;
     }
+    const foreground = @import("win32.zig").GetForegroundWindow();
+    dictation_private_capture = app_state.g_voice_mode_active or @import("focus.zig").foregroundHwndIsOurs(foreground);
+    dictation_capture_epoch = dictation_private_epoch;
+    dictation_external_target = if (dictation_private_capture) null else foreground;
     app_state.g_dictation_draft_owner_len = 0;
-    if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) {
+    if (dictation_private_capture and app_state.g_chat_active and app_state.active_shell < app_state.shell_count) {
         const id = @import("chat_composer.zig").chatDraftKeyForShell(app_state.active_shell, &app_state.g_dictation_draft_owner);
         app_state.g_dictation_draft_owner_len = id.len;
     }

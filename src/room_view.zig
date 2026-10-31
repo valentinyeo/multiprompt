@@ -934,9 +934,15 @@ fn editProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.
         return result;
     }
     if (msg == w.WM_KEYDOWN) {
-        if (wp == 'K' and w.GetKeyState(0x11) < 0 and w.GetKeyState(0x12) >= 0 and w.GetKeyState(0x10) >= 0) {
-            _ = w.PostMessageW(@import("app_state.zig").g_main_hwnd, w.WM_APP_SEARCH_OPEN, 0, 0);
-            return 0;
+        if (w.GetKeyState(0x11) < 0 and w.GetKeyState(0x12) >= 0) {
+            if (wp == 'K') {
+                _ = w.PostMessageW(@import("app_state.zig").g_main_hwnd, w.WM_APP_SEARCH_OPEN, if (w.GetKeyState(0x10) < 0) 1 else 0, 0);
+                return 0;
+            }
+            if (wp == 'I' and w.GetKeyState(0x10) < 0) {
+                _ = w.PostMessageW(@import("app_state.zig").g_main_hwnd, w.WM_APP_TOGGLE_INBOX, 0, 0);
+                return 0;
+            }
         }
         refreshHits(view);
         if (view.too_small) return 0;

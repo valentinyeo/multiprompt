@@ -1416,6 +1416,7 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
     defer @import("chat_composer_text.zig").resumeNativePaint(hwnd, msg, redraw);
     if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
     if (msg == 0x0233) {
+        if (!@import("room_frontend.zig").privateActionsAllowed()) { @import("win32.zig").DragFinish(@ptrFromInt(wp)); return 0; }
         chatDropFiles(@ptrFromInt(wp));
         return 0;
     }
