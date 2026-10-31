@@ -4,6 +4,17 @@ pub fn shouldShow(on: bool) bool {
     return on;
 }
 
+pub fn fetchWanted(chat_active: bool, tab_wants_chat: bool) bool {
+    return chat_active and tab_wants_chat;
+}
+
+test "IGSH-1266 a tab in terminal view schedules no chat fetch" {
+    try std.testing.expect(fetchWanted(true, true));
+    try std.testing.expect(!fetchWanted(true, false));
+    try std.testing.expect(!fetchWanted(false, true));
+    try std.testing.expect(!fetchWanted(false, false));
+}
+
 pub fn setEverywhere(sessions: anytype, on: bool) void {
     for (sessions) |*session| {
         session.chat_view_on = on;

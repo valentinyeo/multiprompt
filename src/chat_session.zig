@@ -597,10 +597,19 @@ pub fn chatFileRequest(key: chat_transcript.Identity) void {
     chatFileRequestForDelivery(key, false);
 }
 
+pub fn chatActiveTabWantsChat() bool {
+    if (app_state.active_shell >= app_state.shell_count) return true;
+    return @import("chat_view.zig").shouldShow(app_state.shells[app_state.active_shell].chat_view_on);
+}
+
+pub fn chatFetchWanted(chat_active: bool) bool {
+    return @import("chat_view.zig").fetchWanted(chat_active, chatActiveTabWantsChat());
+}
+
 pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool) void {
-    const live_shell_id = if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+    const live_shell_id = if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and chatActiveTabWantsChat()) app_state.shells[app_state.active_shell].shell_id else 0;
     chatHistoryStreamsKeep(live_shell_id);
-    if ((!delivery and !app_state.g_chat_active) or key.shell_id == 0) return;
+    if ((!delivery and !chatFetchWanted(app_state.g_chat_active)) or key.shell_id == 0) return;
     if (app_state.g_main_hwnd == null or (!delivery and (IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0))) return;
     const entry = chatHistoryEntry(key) orelse return;
     const now = GetTickCount64();
@@ -1313,7 +1322,7 @@ pub fn chatFileOnReady() void {
         refreshChatTranscript(false);
         if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
-    if (app_state.g_chat_active) chatFileRequest(chatFileIdentity());
+    if (chatFetchWanted(app_state.g_chat_active)) chatFileRequest(chatFileIdentity());
     if (read_ready) |ready| app_state.g_chat_read_open_ready = ready;
     if (app_state.g_chat_read_open_ready) _ = chatReadBoundary();
 }
