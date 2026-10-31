@@ -1330,6 +1330,19 @@ pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {
     return chatConfirmedHas(key, p, block.stamp_ms, block.message_id);
 }
 
+pub fn chatMessageGoesToHost(kind: @import("app_state.zig").ShellKind, ai_agent: u8) bool {
+    return kind == .tmux and (ai_agent == 1 or ai_agent == 2);
+}
+
+test "IGSH-1266 a hosted agent tab sends as a host message and a plain tmux tab does not" {
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 1));
+    try std.testing.expect(chatMessageGoesToHost(.tmux, 2));
+    try std.testing.expect(!chatMessageGoesToHost(.tmux, 0));
+    try std.testing.expect(!chatMessageGoesToHost(.cmd, 1));
+    try std.testing.expect(!chatMessageGoesToHost(.vps, 1));
+    try std.testing.expect(!chatMessageGoesToHost(.vps2, 2));
+}
+
 fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState) ?usize {
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
     const key = chatOutboxKeyForShell(idx, &key_buf);
@@ -1338,7 +1351,7 @@ fn chatEchoEnqueueForShell(idx: u32, text: []const u16, state: ChatEchoState) ?u
     if (!chatOutboxEnqueueInState(&app_state.g_chat_outbox, std.heap.page_allocator, key, text, state)) return null;
     const added = app_state.g_chat_outbox.items.len - 1;
     app_state.g_chat_outbox.items[added].anchor = anchor;
-    if (idx < app_state.shell_count and app_state.shells[idx].kind == .tmux and (app_state.shells[idx].ai_agent == 1 or app_state.shells[idx].ai_agent == 2)) {
+    if (idx < app_state.shell_count and chatMessageGoesToHost(app_state.shells[idx].kind, app_state.shells[idx].ai_agent)) {
         app_state.g_chat_outbox.items[added].message_v1 = true;
         app_state.g_chat_outbox.items[added].message_sid = chatFileIdentityForShell(idx).sid;
     }
@@ -2760,7 +2773,10 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
         defer a.free(query);
         var response: std.ArrayList(u8) = .empty;
         defer response.deinit(a);
-        if (!@import("chat_session.zig").chatHistoryPersistent(job.key.host, id, query, 65536, &response, &job.written)) return;
+        if (!@import("chat_session.zig").chatHistoryPersistent(job.key.host, id, query, 65536, &response, &job.written)) {
+            response.clearRetainingCapacity();
+            if (!@import("chat_session.zig").chatHistorySendForced(job.key.host, id, query, 65536, &response, &job.written)) return;
+        }
         var parsed = json_reader.parse(a, response.items) catch return;
         defer parsed.deinit();
         if (job.message_reset) {

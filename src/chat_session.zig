@@ -901,6 +901,23 @@ pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: u
     return false;
 }
 
+pub fn chatHistorySendForced(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {
+    if (host < app_state.g_chat_history_channels.len) {
+        const deadline = GetTickCount64() + 5_000;
+        while (!app_state.g_chat_history_channel_mutex.tryLock()) {
+            if (GetTickCount64() >= deadline) return false;
+            Sleep(1);
+        }
+        {
+            const ch = &app_state.g_chat_history_channels[host];
+            ch.retry_at = 0;
+            chatHistoryChannelClose(ch);
+        }
+        app_state.g_chat_history_channel_mutex.unlock();
+    }
+    return chatHistoryPersistent(host, id, query, wire_limit, out, request_written);
+}
+
 fn chatHistoryQuery(key: chat_transcript.Identity, id: u32, history: chat_history.History, before: u64) ?[]u8 {
     const a = std.heap.page_allocator;
     return std.json.Stringify.valueAlloc(a, .{
