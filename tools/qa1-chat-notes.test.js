@@ -45,3 +45,17 @@ test('IGSH-1266 a missing transcript is an empty new chat on both sides', () => 
 test('IGSH-1266 the composer never lands outside the live client rect', () => {
   assert.match(read('src/chat_composer.zig'), /const bottom = @min\(slot\.bottom, rc\.bottom\);/, 'the composer is clamped to the live client height');
 });
+
+test('IGSH-1266 the reader empty reply is a successful empty chat, not a failure', () => {
+  const session = read('src/chat_session.zig');
+  const branch = session.slice(session.indexOf('if (chat_history.noTranscriptYet(wire.items)) {'), session.indexOf('} else if (chat_history.missingReason(wire.items, id))'));
+  assert.match(branch, /entry\.failures = 0;/, 'failures are cleared');
+  assert.match(branch, /ok = true;/, 'the fetch counts as ok so no failure is recorded');
+  assert.ok(!/ok = false;/.test(branch), 'a new chat must not be counted as a failed load');
+});
+
+test('IGSH-1266 the layout logs its real client, slot and DPI numbers', () => {
+  const layout = read('src/window_layout.zig');
+  assert.match(layout, /\[chat\] layout rc \{d\},\{d\},\{d\},\{d\} slot \{d\},\{d\},\{d\},\{d\} dpi=\{d\}/, 'one line with the numbers to read');
+  assert.match(layout, /@import\("win32\.zig"\)\.GetClientRect\(app_state\.g_main_hwnd, &frame\)/, 'the client rect is read at layout time');
+});
