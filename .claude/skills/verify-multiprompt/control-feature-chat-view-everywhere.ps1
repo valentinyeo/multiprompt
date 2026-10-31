@@ -25,8 +25,6 @@
             Snapshot 'pin-action'
             Press @(0x0D) 'Enter: Pin to Top on session 3'
             Wait-ChatViews @($false, $false, $false) 2 'pinned-shell'
-            Press @(0x11, 0x57) 'Ctrl+W: refuse closing the pinned session'
-            Wait-ChatViews @($false, $false, $false) 2 'pinned-close-refused'
             Press @(0x12, 0x43) 'Alt+C: pinned session can enter Chat View'
             $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
             Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'

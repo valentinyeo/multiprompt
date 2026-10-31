@@ -16,12 +16,14 @@ function bodyOf(signature) {
 test("IGSH-820 pinned protection uses one guard and no session lock state", () => {
   const reject = bodyOf("fn rejectPinnedSessionClose(i: usize) bool {");
   assert.match(reject, /!shells\[i\]\.pinned_top/);
-  assert.match(reject, /unpin it before closing or archiving/);
+  assert.match(reject, /Pinned session\. Unpin before this action\./);
   assert.doesNotMatch(source, /\blocked: (?:bool|u8)|drawSessionLockIcon|SEARCH_LOCK_SESSION_OFFSET|SEARCH_TABCTX_LOCK/);
   assert.doesNotMatch(jsonReader, /"locked"|"chat_view_lock"/);
-  for (const name of ["closeShell", "archiveTabAt", "endTmuxSessionAt", "closeNonTmuxTabAt", "archiveArmOrCommit"]) {
+  for (const name of ["archiveTabAt", "endTmuxSessionAt", "archiveArmOrCommit", "archiveActiveTab"]) {
     assert.match(bodyOf(`fn ${name}(`), /rejectPinnedSessionClose/);
   }
+  assert.doesNotMatch(bodyOf("fn closeShell("), /rejectPinnedSessionClose/);
+  assert.match(bodyOf("fn closeShell("), /pinned_top = false;[\s\S]*starred_pinned_top = false;[\s\S]*closeShellRemember/);
   for (const name of ["rejectPinnedWorkspaceClose", "rejectPinnedGroupClose", "rejectPinnedCloseAll"]) {
     assert.match(bodyOf(`fn ${name}(`), /rejectPinnedSessionClose/);
   }

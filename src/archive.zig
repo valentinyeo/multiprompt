@@ -915,7 +915,7 @@ pub fn preparePendingResurrectCommand(tmux_session: []const u8, claude_sid: []co
 
 pub fn rejectPinnedSessionClose(i: usize) bool {
     if (i >= app_state.shell_count or !app_state.shells[i].pinned_top) return false;
-    showHeaderNoticeAscii("Session is pinned - unpin it before closing or archiving", 4500, true);
+    showHeaderNoticeAscii("Pinned session. Unpin before this action.", 4500, true);
     return true;
 }
 
@@ -1002,6 +1002,7 @@ pub fn archiveTabAt(i: usize) void {
 
 pub fn archiveActiveTab() void {
     if (app_state.active_shell >= app_state.shell_count) return;
+    if (rejectPinnedSessionClose(app_state.active_shell)) return;
     if (app_state.shells[app_state.active_shell].tmux_session_len > 0) {
         archiveTabAt(app_state.active_shell);
     } else {
@@ -1011,7 +1012,6 @@ pub fn archiveActiveTab() void {
 
 pub fn closeNonTmuxTabAt(i: usize) void {
     if (i >= app_state.shell_count) return;
-    if (rejectPinnedSessionClose(i)) return;
     _ = parkMainWindowBeforeActiveShellRemoval(i);
     closeShell(@intCast(i));
     publishInboxState();

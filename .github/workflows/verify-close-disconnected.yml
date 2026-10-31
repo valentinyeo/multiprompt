@@ -1,0 +1,80 @@
+name: Verify disconnected session close
+run-name: disconnected close ${{ inputs.tag || github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag; empty builds this branch
+        required: false
+        type: string
+  schedule:
+    - cron: '24 4 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: node tools/check-routing-ids.mjs
+      - run: node tools/shortcuts-doc.mjs --check
+      - run: node --test tools/session-lock.test.js tools/chat-view-everywhere.test.js tools/palette-rows.test.js tools/shortcuts-doc.test.js
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Acquire candidate and baseline
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          New-Item -ItemType Directory -Force bin, old-bin, evidence | Out-Null
+          function Download-Release([string]$Tag, [string]$Directory) {
+            if ($Tag -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
+            gh release download $Tag --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt --dir $Directory
+            if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+            $line = @(Get-Content "$Directory/SHA256SUMS.txt" | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?multiprompt-x64\.exe$' })
+            if ($line.Count -ne 1 -or (Get-FileHash "$Directory/multiprompt-x64.exe" -Algorithm SHA256).Hash.ToLower() -ne ($line[0] -split '\s+')[0].ToLower()) { throw 'Release checksum mismatch' }
+          }
+          Download-Release 'v0.28.1099' 'old-bin'
+          if ($env:RELEASE_TAG) {
+            Download-Release $env:RELEASE_TAG 'bin'
+            Copy-Item bin/multiprompt-x64.exe bin/multiprompt.exe
+          } else {
+            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
+            if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+            Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
+            & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" build
+            if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
+            Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+          }
+          @{tag=$env:RELEASE_TAG; revision=(git rev-parse HEAD).Trim(); sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower(); baseline='v0.28.1099'; baseline_sha256=(Get-FileHash old-bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower(); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"} | ConvertTo-Json | Set-Content evidence/provenance.json
+      - name: Old release rejects pinned ordinary close
+        shell: pwsh
+        run: |
+          try { & tools/close-disconnected.ps1 -Exe "$PWD/old-bin/multiprompt-x64.exe" -Output "$PWD/evidence/negative" -Negative } catch { Write-Host $_ }
+          $result = Get-Content evidence/negative/result.json -Raw | ConvertFrom-Json
+          if ($result.passed -or $result.cleanup -ne 0 -or !$result.profileRemoved -or $result.error -cne 'Timed out: pinned ordinary close') { throw 'Baseline did not fail at pinned ordinary close' }
+      - name: Candidate closes disconnected sessions through palette
+        if: always()
+        shell: pwsh
+        run: ./tools/close-disconnected.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence/palette" -Entry palette
+      - name: Candidate closes disconnected sessions through sidebar
+        if: always()
+        shell: pwsh
+        run: ./tools/close-disconnected.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence/sidebar" -Entry sidebar
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: disconnected-close-proof
+          path: evidence
+          if-no-files-found: error
+          retention-days: 14

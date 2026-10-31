@@ -29,6 +29,7 @@ Windows Terminal costs about 30 to 50 MB per window. A raw console costs 2 to 3 
 - Activity spinner while an agent works, and a blue dot when it is waiting for you
 - Cross-workspace inbox (Ctrl+Shift+I) for every session in every window
 - Ctrl+K command palette for every action, F1 for every shortcut
+- Close pinned sessions directly. Close disconnected sessions together. Use Ctrl+K or the tab's right-click menu.
 - Sessions restore after a restart, including tmux tabs on remote machines
 
 Full shortcut list: [openwiki/operations/keyboard-shortcuts.md](openwiki/operations/keyboard-shortcuts.md)

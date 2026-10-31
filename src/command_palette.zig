@@ -88,6 +88,8 @@ const SEARCH_ARCHIVE_OFFSET = @import("app_state.zig").SEARCH_ARCHIVE_OFFSET;
 const SEARCH_REOPEN_OFFSET = @import("app_state.zig").SEARCH_REOPEN_OFFSET;
 const SEARCH_URLPICK_OFFSET = @import("app_state.zig").SEARCH_URLPICK_OFFSET;
 const SEARCH_CLOSETAB_OFFSET = @import("app_state.zig").SEARCH_CLOSETAB_OFFSET;
+const SEARCH_CLOSE_DISCONNECTED_OFFSET = @import("app_state.zig").SEARCH_CLOSE_DISCONNECTED_OFFSET;
+const SEARCH_TABCTX_CLOSE_DISCONNECTED = @import("app_state.zig").SEARCH_TABCTX_CLOSE_DISCONNECTED;
 const SEARCH_MUTETAB_OFFSET = @import("app_state.zig").SEARCH_MUTETAB_OFFSET;
 const SEARCH_KEEPALIVE_OFFSET = @import("app_state.zig").SEARCH_KEEPALIVE_OFFSET;
 const SEARCH_BROWSER_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_TOGGLE_OFFSET;
@@ -547,6 +549,7 @@ pub fn recordPaletteUsage(target: usize) void {
 }
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
+    if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET or target == SEARCH_TABCTX_CLOSE_DISCONNECTED) return "close all disconnected sessions";
     if (target == SEARCH_TABCTX_CHAT_ALLOW) return "chat view allow";
     if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
     if (target == SEARCH_TABCTX_START_SESSION) return "start new session";
@@ -944,6 +947,8 @@ fn paletteTargetIsDestructive(target: usize) bool {
         target == SEARCH_ARCHIVE_OFFSET or
         target == SEARCH_END_TMUX_OFFSET or
         target == SEARCH_CLOSETAB_OFFSET or
+        target == SEARCH_CLOSE_DISCONNECTED_OFFSET or
+        target == SEARCH_TABCTX_CLOSE_DISCONNECTED or
         target == SEARCH_WORKSPACE_DELETE_MENU_OFFSET or
         target == SEARCH_SYNC_SIGNOUT_OFFSET;
 }
@@ -1053,6 +1058,7 @@ fn paletteRowIsSession(target: usize) bool {
 }
 
 pub fn paletteGroupOf(target: usize) ?u8 {
+    if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
     if (paletteRowIsSession(target)) return 0;
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
     if (target >= SEARCH_CUSTOMCMD_OFFSET and target < SEARCH_CUSTOMCMD_OFFSET + MAX_CUSTOM_CMDS) return 0;
@@ -2156,6 +2162,10 @@ pub fn updateSearchResults() void {
                     }
                 }
             }
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "close all disconnected sessions", "close dead sessions" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CLOSE_DISCONNECTED;
+            app_state.g_search_result_count += 1;
         }
         if (tc_idx) |ti| {
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
@@ -3740,6 +3750,10 @@ pub fn updateSearchResults() void {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_URLPICK_OFFSET;
             app_state.g_search_result_count += 1;
         }
+    }
+    if (app_state.g_search_result_count < app_state.g_search_results.len and labelsMatchQuery(&.{ "close all disconnected sessions", "close dead sessions" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CLOSE_DISCONNECTED_OFFSET;
+        app_state.g_search_result_count += 1;
     }
     if (app_state.shell_count > 0) {
         var show_closetab = (app_state.g_search_len == 0);

@@ -60,7 +60,7 @@ test('IGSH-820 commands expose pin protection and bulk views without removed row
   assert.match(main, /applySessionView\(\);\s*saveSession\(\);/);
   const shortcuts = read('src/shortcuts.zig');
   assert.match(shortcuts, /Pin to Top/);
-  assert.match(shortcuts, /protect it from closing or archiving/);
+  assert.match(shortcuts, /Closing unpins them\. Archiving and group closing remain protected\./);
 });
 
 function journeyContract(source, restartSource = restart) {
@@ -68,7 +68,6 @@ function journeyContract(source, restartSource = restart) {
     "Focus-Palette 'tab order' 6217", "'manual tab order saved before creating sessions'",
     "Focus-Palette 'new cmd' 2000", "Focus-Palette 'pin to top' 6293",
     "Wait-ChatViews @($false, $false, $false) 2 'pinned-shell'",
-    "Press @(0x11, 0x57)", "Wait-ChatViews @($false, $false, $false) 2 'pinned-close-refused'",
     "Press @(0x12, 0x43) 'Alt+C: pinned session can enter Chat View'",
     '$toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)',
     "Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'",
@@ -109,9 +108,9 @@ function journeyContract(source, restartSource = restart) {
   assert.doesNotMatch(source, /Set-Content|WriteAllText|WriteAllBytes|PostMessage|SetEnvironmentVariable/);
 }
 
-test('IGSH-820 Windows journey checks pinned toggles, refused Ctrl+W, all views and removed commands', () => {
+test('IGSH-820 Windows journey checks pinned toggles, all views and removed commands', () => {
   journeyContract(journey);
-  for (const step of ["Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'", "Wait-ChatViews @($false, $false, $false) 2 'pinned-close-refused'", "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before pinned shell toggle'", "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before session 1 toggle'", '$query.Length + " count=0 target=0', "Focus-Palette 'unpin from top' 6293"]) assert.throws(() => journeyContract(journey.replace(step, '')));
+  for (const step of ["Wait-ChatViews @($false, $false, $true) 2 'pinned-toggle-chat'", "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before pinned shell toggle'", "Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce elapsed before session 1 toggle'", '$query.Length + " count=0 target=0', "Focus-Palette 'unpin from top' 6293"]) assert.throws(() => journeyContract(journey.replace(step, '')));
   assert.throws(() => journeyContract(journey.replaceAll('AddMilliseconds(1600)', 'AddMilliseconds(100)')));
   assert.throws(() => journeyContract(journey.replace("@($false, $false, $false) 2 'pinned-toggle-shell'", "@($false, $false, $false) 0 'pinned-toggle-shell'")));
   assert.throws(() => journeyContract(journey, restart.replace('$stopped.ActiveProcesses -ne 0', '$false')));
@@ -134,8 +133,6 @@ test('IGSH-820 pinned view expectations follow serialized shell order and the de
 test('IGSH-820 native refused-action tests, maps and existing Windows journey are wired', () => {
   const main = read('src/main.zig');
   for (const title of [
-    'IGSH-820 pinned tab refuses close',
-    'IGSH-820 pinned tab refuses Ctrl+W',
     'IGSH-820 pinned tab refuses archive',
     'IGSH-820 pinned tab refuses end session',
     'IGSH-820 pinned tab refuses group close atomically',

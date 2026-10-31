@@ -123,6 +123,16 @@ public static class ChatDeliveryDesktop {
         inputs[2].Data.Mouse.Flags = 4;
         if (SendInput(3, inputs, Marshal.SizeOf(typeof(Input))) != 3) throw new InvalidOperationException("Mouse SendInput failed");
     }
+    public static void RightClickClient(IntPtr hwnd, uint pid, int x, int y) {
+        if (Owner(hwnd) != pid || GetForegroundWindow() != hwnd) throw new InvalidOperationException("Right-click owner mismatch");
+        var point = new Point { X = x, Y = y };
+        if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Right-click target is not the owned HWND");
+        var inputs = new Input[3];
+        inputs[0].Data.Mouse = new Mouse { X = (int)Math.Round(point.X * 65535.0 / (GetSystemMetrics(0) - 1)), Y = (int)Math.Round(point.Y * 65535.0 / (GetSystemMetrics(1) - 1)), Flags = 0x8001 };
+        inputs[1].Data.Mouse.Flags = 8;
+        inputs[2].Data.Mouse.Flags = 16;
+        if (SendInput(3, inputs, Marshal.SizeOf(typeof(Input))) != 3) throw new InvalidOperationException("Mouse SendInput failed");
+    }
     public static void WheelOwnedTranscript(IntPtr main, uint pid, IntPtr transcript, int delta) {
         Rect rect;
         if (Owner(main) != pid || Class(main) != "ZigShell" || GetForegroundWindow() != main ||

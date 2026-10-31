@@ -149,6 +149,8 @@ const SEARCH_ARCHIVE_OFFSET = @import("app_state.zig").SEARCH_ARCHIVE_OFFSET;
 const SEARCH_REOPEN_OFFSET = @import("app_state.zig").SEARCH_REOPEN_OFFSET;
 const SEARCH_URLPICK_OFFSET = @import("app_state.zig").SEARCH_URLPICK_OFFSET;
 const SEARCH_CLOSETAB_OFFSET = @import("app_state.zig").SEARCH_CLOSETAB_OFFSET;
+const SEARCH_CLOSE_DISCONNECTED_OFFSET = @import("app_state.zig").SEARCH_CLOSE_DISCONNECTED_OFFSET;
+const SEARCH_TABCTX_CLOSE_DISCONNECTED = @import("app_state.zig").SEARCH_TABCTX_CLOSE_DISCONNECTED;
 const SEARCH_MUTETAB_OFFSET = @import("app_state.zig").SEARCH_MUTETAB_OFFSET;
 const SEARCH_KEEPALIVE_OFFSET = @import("app_state.zig").SEARCH_KEEPALIVE_OFFSET;
 const SEARCH_BROWSER_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_TOGGLE_OFFSET;
@@ -2399,7 +2401,16 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         @import("smooth.zig").fillRoundRect(hdc, sel_rc, uiScaled(10), if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(0x35, 0x35, 0x35));
                     }
 
-                    if (paletteHeaderIndex(result_idx)) |header| {
+                    if (result_idx == SEARCH_CLOSE_DISCONNECTED_OFFSET or result_idx == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(0xF2, 0xF2, 0xF2));
+                        var text: [80]u8 = undefined;
+                        const label = std.fmt.bufPrint(&text, "Close all disconnected sessions ({d})", .{@import("console.zig").disconnectedSessionCount()}) catch "Close all disconnected sessions";
+                        var wide: [80]u16 = undefined;
+                        for (label, 0..) |c, i| wide[i] = c;
+                        var rc = RECT{ .left = ox + uiScaled(28), .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, @ptrCast(&wide), @intCast(label.len), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    } else if (paletteHeaderIndex(result_idx)) |header| {
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, customColorOr("hint", if (app_state.g_light_theme) RGB(120, 120, 120) else RGB(140, 140, 140)));
                         const header_label: [*:0]const u16 = switch (header) {

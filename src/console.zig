@@ -196,7 +196,6 @@ const registerShellExitWait = @import("workspaces.zig").registerShellExitWait;
 const unregisterShellExitWait = @import("workspaces.zig").unregisterShellExitWait;
 const appendAsciiBuf = @import("archive.zig").appendAsciiBuf;
 const requestRemoteTmuxPaneRedraw = @import("archive.zig").requestRemoteTmuxPaneRedraw;
-const rejectPinnedSessionClose = @import("archive.zig").rejectPinnedSessionClose;
 const fetchTmuxSessions = @import("vps.zig").fetchTmuxSessions;
 const sshOneShotCapture = @import("vps.zig").sshOneShotCapture;
 const buildSessionOverviewRows = @import("archive.zig").buildSessionOverviewRows;
@@ -2352,7 +2351,7 @@ pub fn markPinnedLocalTabDisconnected(idx: u32) void {
     app_state.shells[idx].activity = .idle;
     app_state.shells[idx].needs_attention = false;
     app_state.shells[idx].disconnected = true;
-    showHeaderNoticeAscii("Pinned session exited - unpin before closing", 8000, true);
+    showHeaderNoticeAscii("Pinned session disconnected", 8000, true);
     logSessionAuditAlways("pinned-local-session-exited-preserved");
     invalidateSidebar();
     saveSession();
@@ -2557,8 +2556,37 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
 }
 
 pub fn closeShell(idx: u32) void {
-    if (rejectPinnedSessionClose(@intCast(idx))) return;
+    if (idx >= app_state.shell_count) return;
+    app_state.shells[idx].pinned_top = false;
+    app_state.shells[idx].starred_pinned_top = false;
     closeShellRemember(idx, true);
+}
+
+pub fn disconnectedSessionCount() usize {
+    var count: usize = 0;
+    for (app_state.shells[0..app_state.shell_count]) |shell| {
+        if (shell.disconnected) count += 1;
+    }
+    return count;
+}
+
+pub fn closeDisconnectedSessions() void {
+    var ids: [app_state.MAX_SHELLS]u32 = undefined;
+    var count: usize = 0;
+    for (app_state.shells[0..app_state.shell_count]) |shell| {
+        if (shell.disconnected) {
+            ids[count] = shell.shell_id;
+            count += 1;
+        }
+    }
+    for (ids[0..count]) |id| {
+        for (0..app_state.shell_count) |i| {
+            if (app_state.shells[i].shell_id == id and app_state.shells[i].disconnected) {
+                closeShell(@intCast(i));
+                break;
+            }
+        }
+    }
 }
 
 pub fn sidebarContentH() i32 {

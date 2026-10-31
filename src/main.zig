@@ -593,6 +593,8 @@ const SEARCH_ARCHIVE_OFFSET = @import("app_state.zig").SEARCH_ARCHIVE_OFFSET;
 const SEARCH_REOPEN_OFFSET = @import("app_state.zig").SEARCH_REOPEN_OFFSET;
 const SEARCH_URLPICK_OFFSET = @import("app_state.zig").SEARCH_URLPICK_OFFSET;
 const SEARCH_CLOSETAB_OFFSET = @import("app_state.zig").SEARCH_CLOSETAB_OFFSET;
+const SEARCH_CLOSE_DISCONNECTED_OFFSET = @import("app_state.zig").SEARCH_CLOSE_DISCONNECTED_OFFSET;
+const SEARCH_TABCTX_CLOSE_DISCONNECTED = @import("app_state.zig").SEARCH_TABCTX_CLOSE_DISCONNECTED;
 const SEARCH_MUTETAB_OFFSET = @import("app_state.zig").SEARCH_MUTETAB_OFFSET;
 const SEARCH_KEEPALIVE_OFFSET = @import("app_state.zig").SEARCH_KEEPALIVE_OFFSET;
 const SEARCH_BROWSER_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_TOGGLE_OFFSET;
@@ -5340,6 +5342,18 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET or target == SEARCH_TABCTX_CLOSE_DISCONNECTED) {
+                    app_state.g_search_active = false;
+                    app_state.g_search_tabctx_mode = false;
+                    app_state.g_tabctx_sid = 0;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    @import("console.zig").closeDisconnectedSessions();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    return 0;
+                }
                 if (target == SEARCH_CLOSETAB_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
@@ -8547,7 +8561,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
     return false;
 }
 
-fn expectPinnedActionRefused(action: enum { close, ctrl_w, archive, end_session, group_close, workspace_close, inbox_archive }) !void {
+fn expectPinnedActionRefused(action: enum { archive, end_session, group_close, workspace_close, inbox_archive }) !void {
     const old_shells = app_state.shells[0..2].*;
     const old_count = app_state.shell_count;
     const old_active = app_state.active_shell;
@@ -8603,8 +8617,6 @@ fn expectPinnedActionRefused(action: enum { close, ctrl_w, archive, end_session,
     app_state.shells[1].tmux_session_len = 1;
     const before = app_state.shells[0..2].*;
     switch (action) {
-        .close => closeShell(1),
-        .ctrl_w => _ = wndProc(null, WM_APP_CLOSE, 0, 0),
         .archive => archiveTabAt(1),
         .inbox_archive => try std.testing.expect(!recordInboxArchive(1)),
         .end_session => endTmuxSessionAt(1),
@@ -8615,19 +8627,11 @@ fn expectPinnedActionRefused(action: enum { close, ctrl_w, archive, end_session,
     try std.testing.expectEqualDeep(before, app_state.shells[0..2].*);
     try std.testing.expectEqual(@as(u32, 1), app_state.group_count);
     try std.testing.expectEqual(@as(u8, 2), app_state.g_lws_count);
-    const notice = std.unicode.utf8ToUtf16LeStringLiteral("Session is pinned - unpin it before closing or archiving");
+    const notice = std.unicode.utf8ToUtf16LeStringLiteral("Pinned session. Unpin before this action.");
     try std.testing.expectEqualSlices(u16, notice, app_state.g_cap_msg_text[0..app_state.g_cap_msg_len]);
     app_state.shells[1].pinned_top = false;
     try std.testing.expect(!@import("archive.zig").rejectPinnedSessionClose(1));
     try std.testing.expect(!@import("archive.zig").rejectPinnedSessionClose(app_state.shell_count));
-}
-
-test "IGSH-820 pinned tab refuses close" {
-    try expectPinnedActionRefused(.close);
-}
-
-test "IGSH-820 pinned tab refuses Ctrl+W" {
-    try expectPinnedActionRefused(.ctrl_w);
 }
 
 test "IGSH-820 pinned tab refuses archive" {
