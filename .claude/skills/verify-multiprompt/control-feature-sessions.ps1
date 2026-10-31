@@ -2,10 +2,10 @@
             $commandsPath = Join-Path $scratch 'roaming/ZigShell/commands.json'
             New-Item -ItemType Directory -Force -Path (Split-Path $commandsPath) | Out-Null
             $folder = '/tmp/multiprompt-harness-folder'
-            [ordered]@{ commands = @(
-                [ordered]@{ label = 'Harness workspace folder'; kind = 'vps'; default = $true; workspace = 'Workspace 1'; cwd = $folder },
-                [ordered]@{ label = 'Harness starred folder'; kind = 'vps'; default = $true; workspace = 'Starred'; cwd = $folder }
-            ) } | ConvertTo-Json -Depth 5 | Set-Content -Path $commandsPath -Encoding UTF8
+            $names = @('Workspace 1', 'Workspace 2', 'Starred', 'Main', 'Software Factory', 'Verification')
+            $entries = @(foreach ($name in $names) { [ordered]@{ label = ('Harness folder ' + $name); kind = 'vps'; default = $true; workspace = $name; cwd = $folder } })
+            $json = [ordered]@{ commands = $entries } | ConvertTo-Json -Depth 5
+            [IO.File]::WriteAllText($commandsPath, $json, (New-Object Text.UTF8Encoding($false)))
             Start-Sleep -Milliseconds 500
             $beforeClaude = @( (Read-Session).tabs ).Count
             Press @(0x11, 0x54) 'Ctrl+T: new Claude chat'
