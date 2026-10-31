@@ -515,12 +515,12 @@ function Highlight-Journey {
             $x=[int]$m.Groups[1].Value; $y=[int]$m.Groups[2].Value; $size=[int]$m.Groups[3].Value-$x
             if ($size -eq 56 -or $size -eq 40) { $found["$x,$y,$size"] = @{x=$x; y=$y; size=$size} }
         }
-        $pins = @($found.Values | Where-Object { $_.size -eq 56 } | Sort-Object x)
-        $rows = @($found.Values | Where-Object { $_.size -eq 40 } | Sort-Object y)
+        $pins = @($found.Values | Where-Object { $_.size -eq 56 } | Sort-Object { [int]$_['x'] })
+        $rows = @($found.Values | Where-Object { $_.size -eq 40 } | Sort-Object { [int]$_['y'] })
         if ($pins.Count -eq 2 -and $rows.Count -eq 1) { return @{pins=$pins; row=$rows[0]} }
     } 60
-    if ($positions.pins[0].y -ne $positions.pins[1].y -or $positions.pins[1].x - $positions.pins[0].x -ne 92 -or $positions.row.y - $positions.pins[0].y -ne 105) { throw 'Unexpected Starred layout' }
-    $result.geometry = @{source='native avatar layout; tile radius 16, row radius 12'; pins=$positions.pins; row=$positions.row; dpi=96}
+    $result.geometry = @{source='native avatar layout; tile radius 16, row radius 12'; pins=$positions.pins; row=$positions.row; dpi=96; pinDeltaX=($positions.pins[1].x - $positions.pins[0].x); rowDeltaY=($positions.row.y - $positions.pins[0].y)}
+    if ($positions.pins[0].y -ne $positions.pins[1].y -or ($positions.pins[1].x - $positions.pins[0].x) -ne 92 -or ($positions.row.y - $positions.pins[0].y) -ne 105) { throw 'Unexpected Starred layout' }
     Highlight-Click $positions.row 'Third shell'
     Highlight-Click $positions.pins[0] 'First shell'
     Highlight-Click $positions.pins[1] 'Second shell'
