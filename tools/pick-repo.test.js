@@ -70,8 +70,9 @@ test('IGSH-1266 saving the workspace folder tells the user', () => {
 
 test('IGSH-1266 the pick rows paint their ellipsis on the wide text path', () => {
   const sidebar = read('src/sidebar.zig');
-  assert.match(sidebar, /paletteDrawText\(hdc, if \(result_idx == SEARCH_PICK_REPO_OFFSET\) L\("Pick repo\\u\{2026\}"\) else L\("Set workspace folder\\u\{2026\}"\)/,
-    'the row labels must go through the same wide-text path as the other rows, not raw UTF-8 bytes');
+  assert.match(sidebar, /paletteDrawText\(hdc, if \(result_idx == SEARCH_PICK_REPO_OFFSET\) L\("Pick repo\.\.\."\) else L\("Set workspace folder\.\.\."\)/,
+    'the row labels must go through the same wide-text path as the other rows, in plain ASCII that always paints');
+  assert.match(read('src/command_palette.zig'), /pub const PICK_REPO_LABEL = "Pick repo\.\.\.";/);
   assert.doesNotMatch(sidebar, /drawAscii\(hdc, pickRepoLabel/,
     'a UTF-8 ellipsis drawn as ASCII paints as mojibake');
 });

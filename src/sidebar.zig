@@ -3528,7 +3528,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var pr_row_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 175, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, if (result_idx == SEARCH_PICK_REPO_OFFSET) L("Pick repo\u{2026}") else L("Set workspace folder\u{2026}"), -1, &pr_row_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, if (result_idx == SEARCH_PICK_REPO_OFFSET) L("Pick repo...") else L("Set workspace folder..."), -1, &pr_row_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         var folder_buf: [256]u8 = undefined;
                         var folder_len: u32 = 0;
                         if (result_idx == SEARCH_SET_FOLDER_OFFSET and workspaceFolderCurrent(activeWorkspaceSlot(), &folder_buf, &folder_len)) {
