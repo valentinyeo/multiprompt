@@ -1588,6 +1588,13 @@ pub const AiUsagePace = struct {
     comparison: ?AiPaceComparison = null,
 };
 
+pub const AiMainQuotaWindow = struct {
+    minutes: u32,
+    used_tenths: u16,
+    reset_filetime: ?u64 = null,
+    elapsed_tenths: ?u16 = null,
+};
+
 pub const AiPaceGoal = struct {
     label: [128]u8 = std.mem.zeroes([128]u8),
     label_len: usize = 0,
@@ -1599,6 +1606,8 @@ pub const AiPaceGoal = struct {
     target_quota_tenths: u16 = 0,
     used_today_tenths: u16 = 0,
     remaining_today_tenths: u16 = 0,
+    main_quota: ?AiMainQuotaWindow = null,
+    quota_current: bool = false,
     has_total_used: bool = false,
     total_used_tenths: u16 = 0,
     has_five_hour_used: bool = false,

@@ -21,7 +21,10 @@ var anchor: RECT = std.mem.zeroes(RECT);
 var snapshot: state.AiPaceSnapshot = .{};
 var hover_open = false;
 var hover_suppressed_until_row_exit = false;
-var footer_fonts: [5]w.HANDLE = @splat(null);
+var footer_fonts: [7]w.HANDLE = @splat(null);
+var scroll_y: i32 = 0;
+var notes_focus = false;
+var notes_down = false;
 
 pub fn resetFooterFonts() void {
     for (&footer_fonts) |*font| {
@@ -42,8 +45,8 @@ pub fn updateReady() bool {
 fn usageSlots(data: *const state.AiPaceSnapshot) [3]?state.AiPaceGoal {
     var slots: [3]?state.AiPaceGoal = .{ null, null, null };
     for (data.goals[0..@min(data.goal_count, data.goals.len)]) |goal| {
-        if (goal.provider == .codex and slots[1] == null) slots[1] = goal else if (goal.provider == .claude) {
-            if (slots[0] == null) slots[0] = goal else if (slots[2] == null) slots[2] = goal;
+        if (goal.provider == .codex and slots[2] == null) slots[2] = goal else if (goal.provider == .claude) {
+            if (slots[0] == null) slots[0] = goal else if (slots[1] == null) slots[1] = goal;
         }
     }
     return slots;
@@ -70,9 +73,11 @@ pub fn paintSidebarFooter(dc: w.HANDLE) void {
     var known = false;
     for (usageSlots(&state.g_ai_pace)) |slot| {
         if (slot) |goal| {
-            if (goal.available and goal.status != .stale and goal.has_total_used) {
-                known = true;
-                used = @max(used, @min(goal.total_used_tenths, 1000));
+            if (goal.available and goal.quota_current) {
+                if (goal.main_quota) |main| {
+                    known = true;
+                    used = @max(used, @min(main.used_tenths, 1000));
+                }
             }
         }
     }
@@ -92,12 +97,32 @@ pub fn paintSidebarFooter(dc: w.HANDLE) void {
     smooth.fillEllipse(dc, .{ .left = rect.left + px(16), .top = rect.top + px(20), .right = rect.left + px(20), .bottom = rect.top + px(24) }, if (known or statusColor(used) != RGB(242, 242, 242)) statusColor(used) else RGB(100, 100, 100));
 }
 
+fn rowCount(data: *const state.AiPaceSnapshot) usize {
+    var count: usize = 0;
+    for (usageSlots(data)) |slot| {
+        if (slot != null) count += 1;
+    }
+    return count;
+}
+
+fn contentHeight(count: usize) i32 {
+    return px(151 + @as(i32, @intCast(@max(count, 1))) * 109);
+}
+
 pub fn geometry(client: RECT, pill: RECT, count: usize) RECT {
-    _ = count;
-    const width = @min(px(240), client.right - client.left - px(16));
+    const width = @max(1, @min(px(308), client.right - client.left - px(16)));
     const left = @max(client.left + px(8), @min(pill.left, client.right - width - px(8)));
-    const bottom = pill.top - px(8);
-    return .{ .left = left, .top = @max(client.top + px(8), bottom - px(206)), .right = left + width, .bottom = bottom };
+    const bottom = @max(client.top + px(9), pill.top - px(8));
+    return .{ .left = left, .top = @max(client.top + px(8), bottom - contentHeight(count)), .right = left + width, .bottom = bottom };
+}
+
+fn scrollLimit(card: RECT, count: usize) i32 {
+    return @max(0, contentHeight(count) - (card.bottom - card.top));
+}
+
+fn notesRect(card: RECT, count: usize) RECT {
+    const y = card.top + px(91 + @as(i32, @intCast(@max(count, 1))) * 109) - scroll_y;
+    return .{ .left = card.right - px(115), .right = card.right - px(16), .top = y, .bottom = y + px(24) };
 }
 
 fn inside(rect: RECT, x: i32, y: i32) bool {
@@ -150,37 +175,98 @@ pub fn fiveHourDetail(buffer: []u8, goal: state.AiPaceGoal, now: u64) []const u8
     return std.fmt.bufPrint(buffer, "5-hour window {s} \xc2\xb7 {s}{s}", .{ telemetry.formatAiPacePercent(&percent, goal.five_hour_used_tenths), if (goal.has_five_hour_reset) "resets in " else "reset not reported", if (goal.has_five_hour_reset) countdown(&remaining, goal.five_hour_reset_filetime, now) else "" }) catch "5-hour window not reported";
 }
 
+fn mainDetail(buffer: []u8, goal: state.AiPaceGoal, now: u64) []const u8 {
+    if (!goal.available or !goal.quota_current) return "Usage not reported";
+    const main = goal.main_quota orelse return "Main usage not reported";
+    var window_buf: [32]u8 = undefined;
+    const name = if (main.minutes == 10080) blk: {
+        const comparison = goal.weekly_pace.comparison orelse break :blk "Week";
+        break :blk switch (comparison.verdict) { .ahead => "Ahead pace", .on_pace => "On pace", .behind => "Below pace" };
+    } else if (main.minutes == 300) "5-hour window" else std.fmt.bufPrint(&window_buf, "{d}-minute window", .{main.minutes}) catch "Window";
+    const reset = main.reset_filetime orelse return std.fmt.bufPrint(buffer, "{s} \xc2\xb7 reset not reported", .{name}) catch "Usage reported";
+    const local = telemetry.aiPaceLocalTime(reset) orelse return std.fmt.bufPrint(buffer, "{s} \xc2\xb7 reset time unavailable", .{name}) catch "Usage reported";
+    const days = [_][]const u8{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    var remaining: [32]u8 = undefined;
+    return std.fmt.bufPrint(buffer, "{s} \xc2\xb7 resets {s} {d:0>2}:{d:0>2}, in {s}", .{ name, days[@min(local.day_of_week, 6)], local.hour, local.minute, countdown(&remaining, reset, now) }) catch "Usage reported";
+}
+
+fn mainElapsed(main: state.AiMainQuotaWindow, now: u64) ?u16 {
+    if (main.elapsed_tenths) |elapsed| return @min(elapsed, 1000);
+    const reset = main.reset_filetime orelse return null;
+    const duration = @as(u64, main.minutes) * 60 * 10_000_000;
+    if (reset <= now or reset - now > duration) return null;
+    return @intCast((duration - (reset - now)) * 1000 / duration);
+}
+
+fn divider(dc: w.HANDLE, left: i32, right: i32, y: i32) void {
+    const rect = RECT{ .left = left, .top = y, .right = right, .bottom = y + 1 };
+    const brush = w.CreateSolidBrush(RGB(46, 46, 46));
+    _ = w.FillRect(dc, &rect, brush);
+    _ = w.DeleteObject(brush);
+}
+
 pub fn paint(dc: w.HANDLE, client: RECT, pill: RECT, data: *const state.AiPaceSnapshot) void {
-    const card = geometry(client, pill, data.goal_count);
-    smooth.fillRoundRect(dc, .{ .left = card.left, .top = card.top + px(3), .right = card.right, .bottom = card.bottom + px(3) }, px(12), RGB(10, 10, 10));
-    smooth.fillRoundRect(dc, card, px(12), RGB(46, 46, 46));
-    smooth.fillRoundRect(dc, .{ .left = card.left + 1, .top = card.top + 1, .right = card.right - 1, .bottom = card.bottom - 1 }, px(11), RGB(30, 30, 30));
-    const regular = footerFont(0, 12, 400);
-    const medium = footerFont(1, 12, 500);
-    const old = w.SelectObject(dc, regular);
-    defer _ = w.SelectObject(dc, old);
-    const old_mode = w.SetBkMode(dc, w.TRANSPARENT);
-    defer _ = w.SetBkMode(dc, old_mode);
+    const count = rowCount(data);
+    const card = geometry(client, pill, count);
+    smooth.fillRoundRect(dc, card, px(16), RGB(46, 46, 46));
+    smooth.fillRoundRect(dc, .{ .left = card.left + 1, .top = card.top + 1, .right = card.right - 1, .bottom = card.bottom - 1 }, px(15), RGB(24, 24, 24));
+    const saved = w.SaveDC(dc);
+    defer _ = w.RestoreDC(dc, saved);
+    _ = w.IntersectClipRect(dc, card.left + 1, card.top + 1, card.right - 1, card.bottom - 1);
+    _ = w.SetBkMode(dc, w.TRANSPARENT);
+    const regular = footerFont(3, 12, 400);
+    const medium = footerFont(2, 14, 600);
+    const hint = footerFont(5, 11, 400);
+    const heading = footerFont(6, 11, 600);
     const left = card.left + px(16);
     const right = card.right - px(16);
-    const slots = usageSlots(data);
-    const labels = [_][]const u8{ "Claude", "Codex", "Claude 2" };
-    for (slots, labels, 0..) |slot, label, i| {
-        const y = card.top + px(14) + @as(i32, @intCast(i)) * px(34);
-        _ = w.SelectObject(dc, regular);
-        text(dc, label, .{ .left = left, .top = y, .right = right, .bottom = y + px(16) }, RGB(138, 138, 138), 0);
-        const known = if (slot) |goal| goal.available and goal.status != .stale and goal.has_total_used else false;
-        const used: u16 = if (slot) |goal| @min(goal.total_used_tenths, 1000) else 0;
-        var value: [24]u8 = undefined;
+    const origin = card.top - scroll_y;
+    _ = w.SelectObject(dc, heading);
+    text(dc, "AI SUBSCRIPTIONS", .{ .left = left, .right = right, .top = origin + px(16), .bottom = origin + px(32) }, RGB(138, 138, 138), 0);
+    const now = @import("inbox.zig").nowFileTime();
+    var index: i32 = 0;
+    for (usageSlots(data)) |slot| {
+        const goal = slot orelse continue;
+        const y = origin + px(46 + index * 109);
+        index += 1;
+        const provider: []const u8 = if (goal.provider == .claude) "Claude" else "Codex";
         _ = w.SelectObject(dc, medium);
-        text(dc, if (known) telemetry.formatAiPacePercent(&value, used) else "n/a", .{ .left = left, .top = y, .right = right, .bottom = y + px(16) }, RGB(242, 242, 242), w.DT_RIGHT);
-        const bar = RECT{ .left = left, .top = y + px(21), .right = right, .bottom = y + px(24) };
-        smooth.fillRoundRect(dc, bar, px(2), RGB(64, 64, 64));
-        if (known and used > 0) smooth.fillRoundRect(dc, .{ .left = left, .top = bar.top, .right = left + @divTrunc((right - left) * @as(i32, used), 1000), .bottom = bar.bottom }, px(2), statusColor(used));
+        text(dc, provider, .{ .left = left, .right = left + px(60), .top = y, .bottom = y + px(18) }, RGB(242, 242, 242), 0);
+        _ = w.SelectObject(dc, hint);
+        const label = goal.shortLabel();
+        if (!std.mem.eql(u8, label, provider)) text(dc, label, .{ .left = left + px(62), .right = right - px(48), .top = y, .bottom = y + px(18) }, RGB(138, 138, 138), 0);
+        const main = if (goal.available and goal.quota_current) goal.main_quota else null;
+        var value: [24]u8 = undefined;
+        const used = if (main) |m| @min(m.used_tenths, 1000) else 0;
+        const color = if (main == null) RGB(138, 138, 138) else if (used >= 1000) RGB(229, 72, 77) else if (used >= 850) RGB(245, 165, 36) else RGB(242, 242, 242);
+        _ = w.SelectObject(dc, medium);
+        text(dc, if (main != null) telemetry.formatAiPacePercent(&value, used) else "--", .{ .left = right - px(48), .right = right, .top = y, .bottom = y + px(18) }, color, w.DT_RIGHT);
+        const bar = RECT{ .left = left, .right = right, .top = y + px(25), .bottom = y + px(31) };
+        smooth.fillRoundRect(dc, bar, px(3), RGB(46, 46, 46));
+        if (main) |m| {
+            if (used > 0) smooth.fillRoundRect(dc, .{ .left = left, .right = left + @divTrunc((right - left) * @as(i32, used), 1000), .top = bar.top, .bottom = bar.bottom }, px(3), color);
+            if (mainElapsed(m, now)) |elapsed| {
+                const x = @min(right - 1, left + @divTrunc((right - left) * @as(i32, elapsed), 1000));
+                const tick = RECT{ .left = x, .right = x + @max(1, px(2)), .top = bar.top - px(2), .bottom = bar.bottom + px(2) };
+                const brush = w.CreateSolidBrush(RGB(150, 150, 150));
+                _ = w.FillRect(dc, &tick, brush);
+                _ = w.DeleteObject(brush);
+            }
+        }
+        _ = w.SelectObject(dc, regular);
+        var detail: [192]u8 = undefined;
+        text(dc, mainDetail(&detail, goal, now), .{ .left = left, .right = right, .top = y + px(37), .bottom = y + px(54) }, RGB(138, 138, 138), 0);
+        var five: [128]u8 = undefined;
+        text(dc, if (goal.available and goal.quota_current) fiveHourDetail(&five, goal, now) else "5-hour window not reported", .{ .left = left, .right = right, .top = y + px(58), .bottom = y + px(75) }, RGB(138, 138, 138), 0);
+        divider(dc, left, right, y + px(91));
     }
+    if (count == 0) {
+        _ = w.SelectObject(dc, regular);
+        text(dc, "Subscriptions not reported", .{ .left = left, .right = right, .top = origin + px(46), .bottom = origin + px(66) }, RGB(138, 138, 138), 0);
+    }
+    const sy = origin + px(50 + @as(i32, @intCast(@max(count, 1))) * 109);
     _ = w.SelectObject(dc, regular);
-    const sy = card.top + px(119);
-    text(dc, "Servers", .{ .left = left, .top = sy, .right = right, .bottom = sy + px(16) }, RGB(138, 138, 138), 0);
+    text(dc, "Servers", .{ .left = left, .right = right, .top = sy, .bottom = sy + px(18) }, RGB(138, 138, 138), 0);
     const hosts = [_]u8{ 1, 0 };
     const names = [_][]const u8{ "UK", "DE" };
     for (hosts, names, 0..) |host, name, i| {
@@ -189,16 +275,15 @@ pub fn paint(dc: w.HANDLE, client: RECT, pill: RECT, data: *const state.AiPaceSn
         var buf: [32]u8 = undefined;
         const value = if (hs == .unknown) std.fmt.bufPrint(&buf, "{s} ?", .{name}) catch "?" else std.fmt.bufPrint(&buf, "{s} {d}/{d}", .{ name, metrics.load_milli / 1000, metrics.cores }) catch "?";
         const color = switch (hs) { .red, .critical => RGB(229, 72, 77), .amber => RGB(245, 165, 36), .green => RGB(242, 242, 242), .unknown => RGB(138, 138, 138) };
-        const x = right - px(104) + @as(i32, @intCast(i)) * px(54);
-        text(dc, value, .{ .left = x, .top = sy, .right = x + px(53), .bottom = sy + px(16) }, color, 0);
+        const x = right - px(112) + @as(i32, @intCast(i)) * px(56);
+        text(dc, value, .{ .left = x, .top = sy, .right = x + px(56), .bottom = sy + px(18) }, color, 0);
     }
-    const line = RECT{ .left = left, .top = card.top + px(148), .right = right, .bottom = card.top + px(149) };
-    const brush = w.CreateSolidBrush(RGB(46, 46, 46));
-    _ = w.FillRect(dc, &line, brush);
-    _ = w.DeleteObject(brush);
-    text(dc, "Multiprompt v" ++ @import("main.zig").APP_VERSION, .{ .left = left, .top = card.top + px(158), .right = right, .bottom = card.top + px(174) }, RGB(138, 138, 138), 0);
-    const update_status = if (state.g_update_relaunching) "Restarting" else if (updateReady()) "Update ready" else if (@import("update_release.zig").checking()) "Checking for updates" else "Up to date";
-    text(dc, update_status, .{ .left = left, .top = card.top + px(176), .right = right, .bottom = card.top + px(192) }, RGB(110, 110, 110), 0);
+    divider(dc, left, right, sy + px(30));
+    const nr = notesRect(card, count);
+    text(dc, "Multiprompt v" ++ @import("main.zig").APP_VERSION, .{ .left = left, .right = nr.left, .top = nr.top, .bottom = nr.bottom }, RGB(138, 138, 138), 0);
+    text(dc, "Release notes \xe2\x80\xba", nr, if (notes_focus) RGB(242, 242, 242) else RGB(138, 138, 138), w.DT_RIGHT);
+    _ = w.SelectObject(dc, hint);
+    text(dc, "Grey tick = time passed in the window", .{ .left = left, .right = right, .top = nr.bottom + px(4), .bottom = nr.bottom + px(20) }, RGB(105, 105, 105), 0);
 }
 
 pub fn refresh() void {
@@ -207,7 +292,23 @@ pub fn refresh() void {
         close();
         return;
     }
+    const old_count = rowCount(&snapshot);
     snapshot = state.g_ai_pace;
+    const count = rowCount(&snapshot);
+    if (hover_open and old_count != count) {
+        const card = geometry(bounds, anchor, count);
+        const row = @import("capacity.zig").sidebarUsageRowRect();
+        const region = w.CreateRectRgn(@min(card.left, row.left), card.top, @max(card.right, row.right), row.bottom) orelse {
+            close();
+            return;
+        };
+        if (w.SetWindowRgn(window, region, 1) == 0) {
+            _ = w.DeleteObject(region);
+            close();
+            return;
+        }
+    }
+    scroll_y = @min(scroll_y, scrollLimit(geometry(bounds, anchor, count), count));
     _ = w.InvalidateRect(window, null, 0);
 }
 
@@ -294,8 +395,11 @@ fn openMode(passive: bool) void {
         }
     }
     hover_open = passive;
+    scroll_y = 0;
+    notes_focus = false;
+    notes_down = false;
     backdrop = .{ .dc = dc, .bitmap = bitmap, .old = old, .width = bounds.right, .height = bounds.bottom };
-    if (window == null) window = w.CreateWindowExW(0, L("MultiPromptUsageCard"), L("AI usage this week"), w.WS_CHILD | w.WS_CLIPSIBLINGS, 0, 0, bounds.right, bounds.bottom, main, null, null, null);
+    if (window == null) window = w.CreateWindowExW(0, L("MultiPromptUsageCard"), L("AI subscriptions"), w.WS_CHILD | w.WS_CLIPSIBLINGS, 0, 0, bounds.right, bounds.bottom, main, null, null, null);
     if (window == null) {
         close();
         return;
@@ -308,7 +412,7 @@ fn openMode(passive: bool) void {
     snapshot = state.g_ai_pace;
     _ = w.MoveWindow(window, 0, 0, bounds.right, bounds.bottom, 0);
     if (passive) {
-        const card = geometry(bounds, anchor, snapshot.goal_count);
+        const card = geometry(bounds, anchor, rowCount(&snapshot));
         const row = @import("capacity.zig").sidebarUsageRowRect();
         const region = w.CreateRectRgn(@min(card.left, row.left), card.top, @max(card.right, row.right), row.bottom) orelse {
             var log: [96]u8 = undefined;
@@ -341,6 +445,11 @@ fn openMode(passive: bool) void {
     _ = w.InvalidateRect(window, null, 0);
 }
 
+fn openNotes() void {
+    dismiss();
+    _ = focus.PostMessageW(state.g_main_hwnd, w.WM_APP_CHANGELOG_OPEN, 0, 0);
+}
+
 pub fn key(value: usize) bool {
     if (backdrop == null) return false;
     if (hover_open) {
@@ -348,7 +457,23 @@ pub fn key(value: usize) bool {
         if (value == w.VK_ESCAPE) dismiss() else close();
         return value == w.VK_ESCAPE;
     }
-    if (value == w.VK_ESCAPE) dismiss();
+    if (value == w.VK_ESCAPE) {
+        dismiss();
+    } else if (value == 0x09) {
+        notes_focus = true;
+        const count = rowCount(&snapshot);
+        const card = geometry(bounds, anchor, count);
+        scroll_y = scrollLimit(card, count);
+        _ = w.InvalidateRect(window, null, 0);
+    } else if (value == 0x0D and notes_focus) {
+        openNotes();
+    } else if (value == 0x26 or value == 0x28 or value == 0x21 or value == 0x22) {
+        const count = rowCount(&snapshot);
+        const card = geometry(bounds, anchor, count);
+        const step = if (value == 0x21 or value == 0x22) card.bottom - card.top - px(24) else px(40);
+        scroll_y = std.math.clamp(scroll_y + (if (value == 0x26 or value == 0x21) -step else step), 0, scrollLimit(card, count));
+        _ = w.InvalidateRect(window, null, 0);
+    }
     return true;
 }
 
@@ -373,7 +498,7 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             if (hover_open) {
                 const x = @import("startup.zig").GET_X(lp);
                 const y = @import("startup.zig").GET_Y(lp);
-                var card = geometry(bounds, anchor, snapshot.goal_count);
+                var card = geometry(bounds, anchor, rowCount(&snapshot));
                 card.bottom = anchor.top;
                 if (!inside(card, x, y) and !inside(@import("capacity.zig").sidebarUsageRowRect(), x, y)) {
                     var log: [128]u8 = undefined;
@@ -390,21 +515,54 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             }
             return 0;
         },
+        w.WM_MOUSEWHEEL => {
+            const count = rowCount(&snapshot);
+            const card = geometry(bounds, anchor, count);
+            const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
+            scroll_y = std.math.clamp(scroll_y - @divTrunc(@as(i32, delta) * px(48), 120), 0, scrollLimit(card, count));
+            _ = w.InvalidateRect(hwnd, null, 0);
+            return 0;
+        },
+        w.WM_SETCURSOR => {
+            var point: w.POINT = undefined;
+            const count = rowCount(&snapshot);
+            const card = geometry(bounds, anchor, count);
+            if (w.GetCursorPos(&point) != 0 and w.ScreenToClient(hwnd, &point) != 0 and inside(card, point.x, point.y) and inside(notesRect(card, count), point.x, point.y)) {
+                _ = w.SetCursor(w.LoadCursorW(null, @ptrFromInt(32649)));
+                return 1;
+            }
+            return w.DefWindowProcW(hwnd, msg, wp, lp);
+        },
         w.WM_LBUTTONDOWN => {
             const x = @import("startup.zig").GET_X(lp);
             const y = @import("startup.zig").GET_Y(lp);
-            const card = geometry(bounds, anchor, snapshot.goal_count);
-            if (hover_open and (inside(@import("capacity.zig").sidebarUsageRowRect(), x, y) or inside(card, x, y))) {
+            const card = geometry(bounds, anchor, rowCount(&snapshot));
+            if (hover_open and inside(card, x, y) and inside(notesRect(card, rowCount(&snapshot)), x, y)) {
+                openNotes();
+            } else if (hover_open and (inside(@import("capacity.zig").sidebarUsageRowRect(), x, y) or inside(card, x, y))) {
                 close();
                 open();
-            } else if (!inside(card, x, y)) dismiss();
+            } else if (!inside(card, x, y)) {
+                dismiss();
+            } else {
+                notes_down = inside(notesRect(card, rowCount(&snapshot)), x, y);
+            }
+            return 0;
+        },
+        w.WM_LBUTTONUP => {
+            const x = @import("startup.zig").GET_X(lp);
+            const y = @import("startup.zig").GET_Y(lp);
+            const card = geometry(bounds, anchor, rowCount(&snapshot));
+            const activate = notes_down and inside(card, x, y) and inside(notesRect(card, rowCount(&snapshot)), x, y);
+            notes_down = false;
+            if (activate) openNotes();
             return 0;
         },
         0x02A3 => {
             updateHoverSuppression();
             if (hover_open) {
                 var point: w.POINT = undefined;
-                var card = geometry(bounds, anchor, snapshot.goal_count);
+                var card = geometry(bounds, anchor, rowCount(&snapshot));
                 card.bottom = anchor.top;
                 if (w.GetCursorPos(&point) != 0 and w.ScreenToClient(hwnd, &point) != 0 and
                     (inside(card, point.x, point.y) or inside(@import("capacity.zig").sidebarUsageRowRect(), point.x, point.y))) return 0;

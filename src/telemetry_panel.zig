@@ -279,6 +279,7 @@ fn parseAiPaceSnapshot(json: []const u8) !AiPaceSnapshot {
             next.available = true;
             continue;
         }
+        goal.quota_current = true;
         var guidance_quota_id: []const u8 = "";
         if (object.get("guidance")) |guidance_value| {
             if (guidance_value == .object) {
@@ -318,15 +319,27 @@ fn parseAiPaceSnapshot(json: []const u8) !AiPaceSnapshot {
                         continue;
                     }
                     const window_minutes = aiPaceJsonNumber(quota.get("windowMinutes")) orelse continue;
-                    if (window_minutes < 299 or window_minutes > 301) continue;
+                    if (!std.math.isFinite(window_minutes) or window_minutes < 1 or window_minutes > 525600 or @floor(window_minutes) != window_minutes) continue;
                     if (goal.provider == .codex) {
                         const limit_id = aiPaceJsonString(quota.get("limitId")) orelse "";
                         if (limit_id.len > 0) {
                             if (!std.mem.eql(u8, limit_id, "codex")) continue;
                         } else if (quota_id.len > 0 and !std.mem.startsWith(u8, quota_id, "codex-")) continue;
                     }
-                    if (goal.has_five_hour_used) continue;
                     const used = aiPacePercentTenths(quota.get("usedPercent")) orelse continue;
+                    const main_provider = switch (goal.provider) {
+                        .claude => std.mem.eql(u8, quota_id, "five_hour") or std.mem.eql(u8, quota_id, "seven_day"),
+                        .codex => true,
+                        else => false,
+                    };
+                    const minutes: u32 = @intFromFloat(window_minutes);
+                    const raw_used = aiPaceJsonNumber(quota.get("usedPercent")) orelse continue;
+                    if (main_provider and raw_used >= 0 and raw_used <= 100 and (goal.main_quota == null or minutes > goal.main_quota.?.minutes)) {
+                        var main = app_state.AiMainQuotaWindow{ .minutes = minutes, .used_tenths = used };
+                        if (aiPaceJsonString(quota.get("resetsAt"))) |reset| main.reset_filetime = aiPaceIsoUtcFileTime(reset);
+                        goal.main_quota = main;
+                    }
+                    if (window_minutes < 299 or window_minutes > 301 or goal.has_five_hour_used) continue;
                     goal.five_hour_used_tenths = used;
                     goal.has_five_hour_used = true;
                     if (aiPaceJsonString(quota.get("resetsAt"))) |resets_at| {
@@ -364,6 +377,29 @@ fn parseAiPaceSnapshot(json: []const u8) !AiPaceSnapshot {
     }
     next.updated_tick = GetTickCount64();
     return next;
+}
+
+test "subscription main window ignores guidance and side pools" {
+    const json =
+        \\{"accounts":[
+        \\ {"id":"claude-primary","provider":"claude","status":"ok","guidance":{"usedPercent":91,"quotaId":"five_hour"},"quotas":[{"id":"seven_day_fable","windowMinutes":10080,"usedPercent":99},{"id":"five_hour","windowMinutes":300,"usedPercent":91},{"id":"seven_day","windowMinutes":10080,"usedPercent":42}]},
+        \\ {"id":"codex","provider":"codex","status":"ok","quotas":[{"id":"other-secondary","windowMinutes":20000,"usedPercent":100},{"id":"codex-primary","windowMinutes":300,"usedPercent":88},{"id":"codex-secondary","windowMinutes":10080,"usedPercent":35}]},
+        \\ {"id":"missing","provider":"claude","status":"error","quotas":[]}
+        \\]}
+    ;
+    const parsed = try parseAiPaceSnapshot(json);
+    try std.testing.expectEqual(@as(u32, 10080), parsed.goals[0].main_quota.?.minutes);
+    try std.testing.expectEqual(@as(u16, 420), parsed.goals[0].main_quota.?.used_tenths);
+    try std.testing.expectEqual(@as(u16, 910), parsed.goals[0].total_used_tenths);
+    try std.testing.expectEqual(@as(u32, 10080), parsed.goals[1].main_quota.?.minutes);
+    try std.testing.expectEqual(@as(u16, 350), parsed.goals[1].main_quota.?.used_tenths);
+    try std.testing.expect(parsed.goals[2].main_quota == null);
+    const short = try parseAiPaceSnapshot(
+        \\{"accounts":[{"id":"claude-secondary","provider":"claude","status":"ok","quotas":[{"id":"five_hour","windowMinutes":300,"usedPercent":23},{"id":"seven_day_sonnet","windowMinutes":10080,"usedPercent":96}]}]}
+    );
+    try std.testing.expectEqual(@as(u32, 300), short.goals[0].main_quota.?.minutes);
+    try std.testing.expectEqual(@as(u16, 230), short.goals[0].main_quota.?.used_tenths);
+    try std.testing.expect(short.goals[0].main_quota.?.reset_filetime == null);
 }
 
 fn aiPaceSnapshotPath(out: *[768]u8) ?[]const u8 {
@@ -457,6 +493,11 @@ fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []c
     }
     goal.weekly_pace = ladderWindowPace(o.get("week"));
     goal.five_hour_pace = ladderWindowPace(o.get("five_hour"));
+    if (goal.has_total_used) {
+        goal.main_quota = .{ .minutes = 10080, .used_tenths = goal.total_used_tenths, .reset_filetime = if (goal.has_weekly_reset) goal.weekly_reset_filetime else null, .elapsed_tenths = goal.week_elapsed_tenths };
+    } else if (goal.has_five_hour_used) {
+        goal.main_quota = .{ .minutes = 300, .used_tenths = goal.five_hour_used_tenths, .reset_filetime = if (goal.has_five_hour_reset) goal.five_hour_reset_filetime else null };
+    }
     if (o.get("resets")) |resets| {
         if (resets == .array) {
             const now = ladderUnixToFileTime(now_secs);
@@ -475,6 +516,7 @@ fn ladderAddGoal(next: *AiPaceSnapshot, item: std.json.Value, default_label: []c
     var flagged_stale = false;
     if (o.get("stale")) |st| flagged_stale = st == .bool and st.bool;
     if (o.get("error")) |err| flagged_stale = flagged_stale or err == .string;
+    goal.quota_current = !flagged_stale;
     if (!goal.has_total_used or flagged_stale) {
         goal.status = .stale;
         goal.weekly_pace = .{};
