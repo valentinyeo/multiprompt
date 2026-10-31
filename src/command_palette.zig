@@ -1861,7 +1861,8 @@ fn adoptHostThread(job: *AdoptHostJob) void {
     if (std.mem.indexOf(u8, response.items, "\"start\":\"started\"") != null or std.mem.indexOf(u8, response.items, "\"status\":\"already\"") != null) {
         if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOGGLE, 0, 0);
     } else {
-        if (app_state.g_main_hwnd != null) showHeaderNoticeAscii("Move chat: the session did not move, see the tab", 5000, true);
+        const notice = a.dupeZ(u8, "Move chat: the session did not move, see the tab") catch return;
+        if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
     }
 }
 
