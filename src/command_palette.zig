@@ -464,6 +464,9 @@ const SHELL_ROWS = [_]ShellRow{
     .{ .target = SEARCH_SET_FOLDER_OFFSET, .keywords = "set workspace folder declare workspace folder repo" },
 };
 
+pub const PICK_REPO_LABEL = "Pick repo\u{2026}";
+pub const SET_FOLDER_LABEL = "Set workspace folder\u{2026}";
+
 fn newSessionRowOrder(target: usize) u16 {
     const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| {
