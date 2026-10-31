@@ -28,6 +28,11 @@ on:
         required: false
         type: boolean
         default: false
+      highlight_proof:
+        description: Capture active Starred tile and row in both themes
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: '4 4 * * *'
 
@@ -56,8 +61,10 @@ jobs:
           ORDER_PROOF: ${{ inputs.order_proof }}
           CHANGELOG_PROOF: ${{ inputs.changelog_proof }}
           CHANGELOG_LINKS: ${{ inputs.changelog_links }}
+          HIGHLIGHT_PROOF: ${{ inputs.highlight_proof }}
         run: |
           New-Item -ItemType Directory -Force bin, evidence | Out-Null
+          if ($env:HIGHLIGHT_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true')) { throw 'Highlight proof requires a published tag and excludes other proof modes' }
           trap { if ($env:CHANGELOG_LINKS -eq 'true') { @{passed=$false; error='Link proof acquisition or audit failed'; cleanup=0; scratchRemoved=$true} | ConvertTo-Json | Set-Content evidence/result.json }; throw $_ }
           if ($env:CHANGELOG_LINKS -eq 'true' -and $env:CHANGELOG_PROOF -ne 'true') { throw 'Changelog links requires changelog proof' }
           if ($env:CHANGELOG_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true')) { throw 'Changelog proof requires a published tag and excludes other proof modes' }
@@ -96,8 +103,12 @@ jobs:
           ORDER_PROOF: ${{ inputs.order_proof }}
           CHANGELOG_PROOF: ${{ inputs.changelog_proof }}
           CHANGELOG_LINKS: ${{ inputs.changelog_links }}
+          HIGHLIGHT_PROOF: ${{ inputs.highlight_proof }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          if ($env:CHANGELOG_PROOF -eq 'true') {
+          if ($env:HIGHLIGHT_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -HighlightProof
+          } elseif ($env:CHANGELOG_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -ChangelogProof -ChangelogLinks:($env:CHANGELOG_LINKS -eq 'true')
           } elseif ($env:MEMORY_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -MemoryProof

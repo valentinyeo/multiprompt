@@ -1744,8 +1744,18 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     const size = uiScaled(56);
     const left = row.x + @divTrunc(row.width - size, 2);
     const top = y + uiScaled(8);
-    if (row.shell_idx == app_state.active_shell or shell.selected) {
-        @import("smooth.zig").fillRoundRect(hdc, .{ .left = row.x, .top = y, .right = row.x + row.width, .bottom = y + uiScaled(92) }, uiScaled(16), if (shell.selected) RGB(53, 53, 53) else if (app_state.g_light_theme) RGB(230, 230, 230) else RGB(24, 24, 24));
+    if (row.shell_idx == app_state.active_shell) {
+        const brush = CreateSolidBrush(if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58));
+        const pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(154, 154, 154) else RGB(138, 138, 138));
+        const old_brush = SelectObject(hdc, brush);
+        const old_pen = SelectObject(hdc, pen);
+        _ = @import("smooth.zig").drawRoundRect(hdc, row.x, y, row.x + row.width, y + uiScaled(92), uiScaled(32), uiScaled(32));
+        _ = SelectObject(hdc, old_brush);
+        _ = SelectObject(hdc, old_pen);
+        _ = DeleteObject(brush);
+        _ = DeleteObject(pen);
+    } else if (shell.selected) {
+        @import("smooth.zig").fillRoundRect(hdc, .{ .left = row.x, .top = y, .right = row.x + row.width, .bottom = y + uiScaled(92) }, uiScaled(16), RGB(53, 53, 53));
     }
     const avatar = @import("bot_avatar.zig");
     avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(shell));
@@ -1908,10 +1918,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
             }
 
             if (i == app_state.active_shell and LOOK_UNIFIED) {
-                const reader = @import("themes.zig").themeReaderDark();
-                const hl = if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_amoled_theme) RGB(42, 42, 42) else tintColor(sidebar_bg, RGB(160, 160, 160), 1, 6);
-                const hl_brush = CreateSolidBrush(if (!app_state.g_sidebar_collapsed and !app_state.g_light_theme) RGB(53, 53, 53) else if (reader or !app_state.g_light_theme) tokens.ReaderControl else hl);
-                const hl_pen = CreatePen(0, 1, if (reader or !app_state.g_light_theme) tokens.ReaderOutline else customColorOr("overlay_border", hl));
+                const hl_brush = CreateSolidBrush(if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58));
+                const hl_pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(154, 154, 154) else RGB(138, 138, 138));
                 const hl_radius: i32 = uiScaled(24);
                 const ob = SelectObject(hdc, hl_brush);
                 const op = SelectObject(hdc, hl_pen);

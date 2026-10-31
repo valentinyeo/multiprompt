@@ -1,7 +1,7 @@
-param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof, [switch]$ChangelogLinks)
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof, [switch]$ChangelogLinks, [switch]$HighlightProof)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-if (($MemoryProof -and $OrderProof) -or ($ChangelogProof -and ($MemoryProof -or $OrderProof)) -or ($ChangelogLinks -and -not $ChangelogProof)) { throw 'Invalid proof modes' }
+if (($MemoryProof -and $OrderProof) -or ($ChangelogProof -and ($MemoryProof -or $OrderProof)) -or ($ChangelogLinks -and -not $ChangelogProof) -or ($HighlightProof -and ($MemoryProof -or $OrderProof -or $ChangelogProof -or $ChangelogLinks))) { throw 'Invalid proof modes' }
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
 $Exe = (Resolve-Path $Exe).Path
 New-Item -ItemType Directory -Force $Output | Out-Null
@@ -86,7 +86,8 @@ function Compare-Views([string]$Name) {
     [void](Wait-For 'return sidebar unchanged' { (Capture "$Name-return-sidebar") -eq $before })
 }
 
-if ($MemoryProof -or $OrderProof) {
+if ($HighlightProof) { Add-Type -Path "$PSScriptRoot/../.claude/skills/verify-multiprompt/title-bar-native.cs" }
+if ($MemoryProof -or $OrderProof -or $HighlightProof) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -426,8 +427,122 @@ function Open-Changelog {
     $result.actions += 'Enter: open selected changelog'
     Start-Sleep -Seconds 2
 }
+function Highlight-Owned {
+    if ([ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or [ChatDeliveryDesktop]::Window($app.Id) -ne $main -or -not $job.Contains($app)) { throw 'Highlight window ownership mismatch' }
+}
+function Highlight-State([string]$Name) {
+    $saved = Session
+    $inbox = Read-Json "$settings/inbox-default.json"
+    $matches = @($inbox.shells | Where-Object { $_.name -ceq $Name -and $_.sid -eq $inbox.active_shell_id })
+    $tab = $saved.tabs[$saved.active_tab]
+    if (-not (Flag $inbox 'starred_view') -or $matches.Count -ne 1 -or $inbox.active_shell_id -eq 0 -or $tab.name -cne $Name -or -not $tab.PSObject.Properties['shell_id'] -or $tab.shell_id -ne $inbox.active_shell_id -or [string]$inbox.hwnd -ne [string]$main.ToInt64()) { return $false }
+    return $matches[0]
+}
+function Highlight-Click($Target, [string]$Name) {
+    Highlight-Owned
+    Focus
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Highlight click lost foreground' }
+    [ChatDeliveryDesktop]::PressClient($main, $app.Id, ($Target.x + 10), ($Target.y + 15))
+    $selected = Wait-For "selected $Name" { Highlight-State $Name }
+    $result.actions += @{input='mouse'; x=($Target.x + 10); y=($Target.y + 15); name=$Name; id=$selected.sid}
+}
+function Highlight-Frame([string]$Theme, [string]$Kind, [string]$Name, $Target) {
+    Highlight-Owned
+    $selected = Highlight-State $Name
+    if (-not $selected) { throw "Active session changed before $Theme $Kind" }
+    if ((Get-Content "$settings/theme-mode.txt" -Raw).Trim() -cne $Theme) { throw 'Theme changed before capture' }
+    Focus
+    [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(900, 500)
+    $script:previousHash = ''
+    [void](Wait-For 'stable sidebar paint' { $hash = Capture 'highlight-stability'; if ($hash -eq $script:previousHash) { return $true }; $script:previousHash = $hash; $false })
+    $frame = [ChatDeliveryDesktop+Rect]::new()
+    if (-not [ChatDeliveryDesktop]::GetWindowRect($main, [ref]$frame) -or $frame.Left -ne 0 -or $frame.Top -ne 0 -or $frame.Right -ne 1920 -or $frame.Bottom -ne 1032 -or [SidebarDrag]::GetDpiForWindow($main) -ne 96) { throw 'Unexpected owned frame or DPI' }
+    $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
+    if ($Kind -eq 'tile') { $fillX = $Target.x - 11; $fillY = $Target.y + 38; $ringX = $Target.x - 16; $ringY = $Target.y + 38 }
+    else { $fillX = $Target.x + 45; $fillY = $Target.y + 45; $ringX = $Target.x - 10; $ringY = $Target.y + 20 }
+    $bitmap = [Drawing.Bitmap]::new(1920, 1032)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen($frame.Left, $frame.Top, 0, 0, $bitmap.Size)
+        $bitmap.Save("$Output/highlight-$Theme-$Kind.png")
+        $fx = $origin.X + $fillX - $frame.Left; $fy = $origin.Y + $fillY - $frame.Top
+        $rx = $origin.X + $ringX - $frame.Left; $ry = $origin.Y + $ringY - $frame.Top
+        $fill = $bitmap.GetPixel($fx, $fy); $ring = $bitmap.GetPixel($rx, $ry); $inside = $bitmap.GetPixel($rx + 1, $ry)
+        $result.frames += @{theme=$Theme; kind=$Kind; name=$Name; id=$selected.sid; frame=@($frame.Left,$frame.Top,$frame.Right,$frame.Bottom); clientOrigin=@($origin.X,$origin.Y); avatar=$Target; fill=@{point=@($fx,$fy); rgb=@([int]$fill.R,[int]$fill.G,[int]$fill.B)}; ring=@{point=@($rx,$ry); rgb=@([int]$ring.R,[int]$ring.G,[int]$ring.B)}; insideRing=@{point=@(($rx + 1),$ry); rgb=@([int]$inside.R,[int]$inside.G,[int]$inside.B)}}
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+}
+function Highlight-ThemeLight {
+    Highlight-Owned
+    Focus
+    $start = (Get-Content "$settings/debug.log" -Raw).Length
+    [ChatDeliveryDesktop]::Chord(@(0x11,0x4B))
+    [void](Wait-For 'palette initialized' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    foreach ($key in @(0x54,0x48,0x45,0x4D,0x45,0x53)) { [ChatDeliveryDesktop]::Type($key) }
+    [void](Wait-For 'Themes command selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=6 count=[1-9]\d* target=4000(?:\r?\n|$)' })
+    Highlight-Owned
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Theme palette lost foreground' }
+    [ChatDeliveryDesktop]::Chord(@(0x0D))
+    foreach ($key in @(0x4C,0x49,0x47,0x48,0x54)) { [ChatDeliveryDesktop]::Type($key) }
+    [void](Wait-For 'Light theme selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=5 count=[1-9]\d* target=4012(?:\r?\n|$)' })
+    Highlight-Owned
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Theme palette lost foreground' }
+    [ChatDeliveryDesktop]::Chord(@(0x0D))
+    [void](Wait-For 'app persisted light theme' { (Get-Content "$settings/theme-mode.txt" -Raw).Trim() -ceq 'light' })
+    [ChatDeliveryDesktop]::Chord(@(0x1B))
+    $result.actions += @{input='Ctrl+K Themes Light'; theme='light'}
+}
+function Highlight-Journey {
+    $result.executable = @{path=$Exe; sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion; tag=$env:RELEASE_TAG}
+    $result.frames = @()
+    $result.limitations = @('Avatar positions come from native debug layout; ring pixels require visual review for antialiasing', 'Selection-only styling inspected in source, not exercised')
+    Highlight-Owned
+    if ([ChatDeliveryDesktop]::GetSystemMetrics(0) -ne 1920 -or [ChatDeliveryDesktop]::GetSystemMetrics(1) -ne 1080 -or [SidebarDrag]::GetDpiForWindow($main) -ne 96) { throw 'Highlight proof requires 1920x1080 at 96 DPI' }
+    [void](Wait-For 'restored Starred fixture' {
+        $saved = Session; $inbox = Read-Json "$settings/inbox-default.json"
+        if (-not (Flag $inbox 'starred_view') -or -not (Flag $saved 'starred_view') -or @($saved.tabs).Count -ne 3 -or @($inbox.shells).Count -ne 3) { return $false }
+        for ($i = 0; $i -lt 3; $i++) {
+            $tab = $saved.tabs[$i]
+            if ($tab.name -cne @('First shell','Second shell','Third shell')[$i] -or -not (Flag $tab 'favorite') -or (Flag $tab 'starred_pinned_top') -ne ($i -lt 2)) { return $false }
+            if (@($inbox.shells | Where-Object { $_.sid -ne 0 -and $_.name -ceq $tab.name }).Count -ne 1) { return $false }
+        }
+        return $true
+    } 60)
+    Highlight-Owned
+    if (-not [ChatDeliveryDesktop]::MoveWindow($main, 0, 0, 1920, 1032, $true)) { throw 'Owned window resize failed' }
+    $positions = Wait-For 'two pinned avatars and one list avatar' {
+        $found = @{}
+        foreach ($m in [regex]::Matches((Get-Content "$settings/debug.log" -Raw), '\[bots\] face=\d+ color=\d+ rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
+            $x=[int]$m.Groups[1].Value; $y=[int]$m.Groups[2].Value; $size=[int]$m.Groups[3].Value-$x
+            if ($size -eq 56 -or $size -eq 40) { $found["$x,$y,$size"] = @{x=$x; y=$y; size=$size} }
+        }
+        $pins = @($found.Values | Where-Object { $_.size -eq 56 } | Sort-Object x)
+        $rows = @($found.Values | Where-Object { $_.size -eq 40 } | Sort-Object y)
+        if ($pins.Count -eq 2 -and $rows.Count -eq 1) { return @{pins=$pins; row=$rows[0]} }
+    } 60
+    if ($positions.pins[0].y -ne $positions.pins[1].y -or $positions.pins[1].x - $positions.pins[0].x -ne 92 -or $positions.row.y - $positions.pins[0].y -ne 105) { throw 'Unexpected Starred layout' }
+    $result.geometry = @{source='native avatar layout; tile radius 16, row radius 12'; pins=$positions.pins; row=$positions.row; dpi=96}
+    Highlight-Click $positions.row 'Third shell'
+    Highlight-Click $positions.pins[0] 'First shell'
+    Highlight-Click $positions.pins[1] 'Second shell'
+    Highlight-Frame 'amoled' 'tile' 'Second shell' $positions.pins[1]
+    Highlight-Click $positions.row 'Third shell'
+    Highlight-Frame 'amoled' 'row' 'Third shell' $positions.row
+    Highlight-ThemeLight
+    Highlight-Click $positions.pins[0] 'First shell'
+    Highlight-Frame 'light' 'tile' 'First shell' $positions.pins[0]
+    Highlight-Click $positions.row 'Third shell'
+    Highlight-Frame 'light' 'row' 'Third shell' $positions.row
+    foreach ($frame in $result.frames) {
+        $fill = if ($frame.theme -eq 'light') { 214 } else { 58 }
+        $ring = if ($frame.theme -eq 'light') { 154 } else { 138 }
+        if (@($frame.fill.rgb | Where-Object { $_ -ne $fill }).Count -ne 0 -or @($frame.ring.rgb | Where-Object { [Math]::Abs($_ - $ring) -gt 8 }).Count -ne 0 -or @($frame.insideRing.rgb | Where-Object { [Math]::Abs($_ - $fill) -gt 8 }).Count -ne 0) { throw 'Highlight fill or ring differs; see all frames' }
+    }
+    $result.passed = $true
+}
 $linkFixtureLoaded = $false
+$displayAttempted = $false
 try {
+    if ($HighlightProof) { $displayAttempted = $true; [CaptionProof]::SetDpi(96) }
     New-Item -ItemType Directory -Force $settings, "$profile/local", "$profile/home" | Out-Null
     if ($ChangelogLinks) {
         $result.registryRestored = $false; $result.receipts = @()
@@ -439,7 +554,10 @@ try {
     $env:APPDATA = "$profile/roaming"; $env:LOCALAPPDATA = "$profile/local"; $env:USERPROFILE = "$profile/home"; $env:HOME = "$profile/home"
     $env:MULTIPROMPT_NO_LOGIN = '1'; $env:IGSH_246 = '0'; $env:ZIGSHELL_DEBUG = '1'
     $tabs = @('First shell', 'Second shell', 'Third shell') | ForEach-Object { @{kind='cmd'; name=$_; manual=$true; cv=$false; pid=0} }
-    if ($OrderProof) {
+    if ($HighlightProof) {
+        for ($i = 0; $i -lt 3; $i++) { $tabs[$i].favorite = $true; $tabs[$i].starred_pinned_top = $i -lt 2 }
+        Save @{active_tab=0; single_window=$true; starred_view=$true; chat_active=$false; amoled_theme=$true; tabs=@($tabs)} "$settings/session.json"
+    } elseif ($OrderProof) {
         for ($i = 0; $i -lt 3; $i++) { $tabs[$i].group_id = 17 + $i }
         Save @{active_tab=0; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=@($tabs); groups=@(@{id=17; name='A'}, @{id=18; name='B'}, @{id=19; name='C'})} "$settings/session.json"
     } elseif ($MemoryProof) {
@@ -499,7 +617,7 @@ try {
             Receive-Link $result.audit.oldTicket '1048-keyboard'
         }
         $result.passed = $true
-    } elseif ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
+    } elseif ($HighlightProof) { Highlight-Journey } elseif ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
     Toggle-View
     [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
     [void](Wait-For 'initial console poll' {
@@ -538,7 +656,7 @@ try {
     Write-Host $result.error
     if (Get-Variable main -ErrorAction SilentlyContinue) { Shot 'failure' }
 } finally {
-    if ($MemoryProof -or $OrderProof -or $ChangelogProof) {
+    if ($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof) {
         $result.scratchRemoved = $false
         $result.cleanupErrors = @()
         try {
@@ -576,6 +694,10 @@ try {
         } catch {
             $result.cleanupErrors += $_.Exception.Message
         } finally {
+            if ($HighlightProof) {
+                $result.displayRestored = $false
+                try { if ($displayAttempted) { [CaptionProof]::RestoreDpi() }; $result.displayRestored = $true } catch { $result.cleanupErrors += "Display restoration failed: $($_.Exception.Message)" }
+            }
             try { $result.scratchRemoved = -not (Test-Path -LiteralPath $profile) } catch { $result.cleanupErrors += $_.Exception.Message }
             if ($result.cleanupErrors.Count -gt 0 -or ($ChangelogLinks -and -not $result.registryRestored)) { $result.passed = $false }
             Save $result "$Output/result.json"
@@ -588,5 +710,5 @@ try {
         if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
     }
 }
-if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof -or $ChangelogProof) -and -not $result.scratchRemoved)) { throw 'Shared sidebar journey failed; see result.json' }
+if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof) -and -not $result.scratchRemoved) -or ($HighlightProof -and -not $result.displayRestored)) { throw 'Shared sidebar journey failed; see result.json' }
 Write-Host 'SHARED_SIDEBAR_JOURNEY_OK'
