@@ -2004,9 +2004,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     },
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) {
-                            if (!app_state.g_sidebar_collapsed and !app_state.shells[tab_idx].pinned_top and mx > SIDEBAR_W() - 30) {
-                                closeShell(tab_idx);
-                            } else if (isCtrlDown()) {
+                            if (isCtrlDown()) {
                                 commitRename();
                                 const had_selection = selectedTabCount() > 0;
                                 if (!had_selection) {

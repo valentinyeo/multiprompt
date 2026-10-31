@@ -363,7 +363,6 @@ const uiFontTitle = @import("drawing.zig").uiFontTitle;
 const uiFontShellTabTitle = @import("drawing.zig").uiFontShellTabTitle;
 const uiFontSubtitle = @import("drawing.zig").uiFontSubtitle;
 const uiFontStatusCard = @import("drawing.zig").uiFontStatusCard;
-const uiFontClose = @import("drawing.zig").uiFontClose;
 const drawAgentIcon = @import("drawing.zig").drawAgentIcon;
 const paintThreadTitle = @import("drawing.zig").paintThreadTitle;
 const threadTitleHeight = @import("browser_pane.zig").threadTitleHeight;
@@ -1694,23 +1693,40 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]con
     _ = DrawTextW(hdc, &upper, @intCast(n), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
+fn drawStarBadge(hdc: HANDLE, rect: RECT, avatar_size: i32, background: DWORD) void {
+    const badge = @import("star_badge_geometry.zig");
+    const g = badge.geometry(rect.right, rect.bottom, avatar_size, uiScaled);
+    const left = g.center_x - @divTrunc(g.diameter, 2);
+    const top = g.center_y - @divTrunc(g.diameter, 2);
+    const smooth = @import("smooth.zig");
+    smooth.fillEllipse(hdc, .{ .left = left - g.ring, .top = top - g.ring, .right = left + g.diameter + g.ring, .bottom = top + g.diameter + g.ring }, background);
+    smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, RGB(240, 196, 75));
+    const points = [_]@import("win32.zig").POINT{
+        .{ .x = 0, .y = -50 }, .{ .x = 12, .y = -16 }, .{ .x = 48, .y = -15 },
+        .{ .x = 19, .y = 6 }, .{ .x = 29, .y = 40 }, .{ .x = 0, .y = 20 },
+        .{ .x = -29, .y = 40 }, .{ .x = -19, .y = 6 }, .{ .x = -48, .y = -15 },
+        .{ .x = -12, .y = -16 },
+    };
+    var scaled: [points.len]@import("win32.zig").POINT = undefined;
+    for (points, 0..) |point, i| {
+        scaled[i] = .{ .x = g.center_x + @divTrunc(point.x * g.star, 100), .y = g.center_y + @divTrunc(point.y * g.star, 100) };
+    }
+    smooth.fillPolygon(hdc, &scaled, RGB(16, 16, 16));
+}
+
 fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     const shell = &app_state.shells[index];
     const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else if (index == app_state.active_shell) RGB(200, 200, 200) else RGB(138, 138, 138);
     var right = column.right - uiScaled(12);
     if (app_state.g_sidebar_hover == index) {
-        right -= uiScaled(18);
-        _ = SelectObject(hdc, uiFontClose());
         _ = SetTextColor(hdc, hint);
-        var close = RECT{ .left = right, .top = y, .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
-        _ = DrawTextW(hdc, L("\u{00d7}"), -1, &close, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
         var time: [24]u16 = undefined;
         const time_len = @import("inbox.zig").inboxRelTime(shell.last_active, &time);
         if (time_len > 0) {
             _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
             var measure: RECT = std.mem.zeroes(RECT);
             _ = DrawTextW(hdc, &time, @intCast(time_len), &measure, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
-            var stamp = RECT{ .left = right - measure.right - uiScaled(6), .top = y + uiScaled(5), .right = right - uiScaled(6), .bottom = y + uiScaled(29) };
+            var stamp = RECT{ .left = right - measure.right, .top = y + uiScaled(5), .right = right, .bottom = y + uiScaled(29) };
             _ = DrawTextW(hdc, &time, @intCast(time_len), &stamp, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
             right = stamp.left - uiScaled(6);
         }
@@ -1719,9 +1735,14 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     const left = column.left + uiScaled(10);
     const top = y + @divTrunc(tabRowH() - size, 2);
     const avatar = @import("bot_avatar.zig");
-    avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(shell));
+    const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+    avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
+    if (shell.favorite) {
+        const background = if (index == app_state.active_shell) (if (LOOK_UNIFIED) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else themeConsoleBg()) else themeSidebarBg();
+        drawStarBadge(hdc, avatar_rect, 40, background);
+    }
     if (shell.needs_attention or shell.disconnected) {
-        drawAttentionDot(hdc, left + size - uiScaled(3), top + size - uiScaled(3), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
+        drawAttentionDot(hdc, if (shell.favorite) left + uiScaled(3) else left + size - uiScaled(3), top + size - uiScaled(3), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
     }
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
@@ -1758,8 +1779,13 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
         @import("smooth.zig").fillRoundRect(hdc, .{ .left = row.x, .top = y, .right = row.x + row.width, .bottom = y + uiScaled(92) }, uiScaled(16), RGB(53, 53, 53));
     }
     const avatar = @import("bot_avatar.zig");
-    avatar.draw(hdc, .{ .left = left, .top = top, .right = left + size, .bottom = top + size }, avatar.forShell(shell));
-    if (shell.needs_attention or shell.disconnected) drawAttentionDot(hdc, left + size - uiScaled(4), top + size - uiScaled(4), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
+    const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
+    avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
+    if (shell.favorite) {
+        const background = if (row.shell_idx == app_state.active_shell) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else if (shell.selected) RGB(53, 53, 53) else themeSidebarBg();
+        drawStarBadge(hdc, avatar_rect, 56, background);
+    }
+    if (shell.needs_attention or shell.disconnected) drawAttentionDot(hdc, if (shell.favorite) left + uiScaled(4) else left + size - uiScaled(4), top + size - uiScaled(4), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
     var name = RECT{ .left = row.x + uiScaled(4), .top = top + size + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };

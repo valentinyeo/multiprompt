@@ -1,6 +1,7 @@
-param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof, [switch]$ChangelogLinks, [switch]$HighlightProof)
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof, [switch]$ChangelogLinks, [switch]$HighlightProof, [switch]$StarBadgeProof)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($StarBadgeProof -and ($MemoryProof -or $OrderProof -or $ChangelogProof -or $ChangelogLinks -or $HighlightProof)) { throw 'Invalid proof modes' }
 if (($MemoryProof -and $OrderProof) -or ($ChangelogProof -and ($MemoryProof -or $OrderProof)) -or ($ChangelogLinks -and -not $ChangelogProof) -or ($HighlightProof -and ($MemoryProof -or $OrderProof -or $ChangelogProof -or $ChangelogLinks))) { throw 'Invalid proof modes' }
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
 $Exe = (Resolve-Path $Exe).Path
@@ -86,8 +87,8 @@ function Compare-Views([string]$Name) {
     [void](Wait-For 'return sidebar unchanged' { (Capture "$Name-return-sidebar") -eq $before })
 }
 
-if ($HighlightProof) { Add-Type -Path "$PSScriptRoot/../.claude/skills/verify-multiprompt/title-bar-native.cs" }
-if ($MemoryProof -or $OrderProof -or $HighlightProof) {
+if ($HighlightProof -or $StarBadgeProof) { Add-Type -Path "$PSScriptRoot/../.claude/skills/verify-multiprompt/title-bar-native.cs" }
+if ($MemoryProof -or $OrderProof -or $HighlightProof -or $StarBadgeProof) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -555,10 +556,82 @@ function Highlight-Journey {
     }
     $result.passed = $true
 }
+function StarBadge-Journey {
+    $result.executable = @{sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; tag=$env:RELEASE_TAG; version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion}
+    $result.limitations = @('Avatar positions use native debug layout; hover appearance requires human review', 'Badge pixels and input actions run independently of geometry tests')
+    if ([ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or -not $job.Contains($app)) { throw 'Window ownership mismatch' }
+    if ([SidebarDrag]::GetDpiForWindow($main) -ne 96) { throw 'Star badge proof requires 96 DPI' }
+    [void](Wait-For 'initial console poll' {
+        if (-not (Test-Path "$settings/debug.log")) { return $false }
+        try { (Get-Content "$settings/debug.log" -Raw) -match 'POLL\[t=[^\r\n]+,#1\]' } catch { $false }
+    })
+    $fixture = Session
+    if (@($fixture.tabs).Count -ne 3 -or $fixture.tabs[0].name -cne 'First shell' -or $fixture.tabs[1].name -cne 'Second shell' -or $fixture.tabs[2].name -cne 'Third shell' -or -not (Flag $fixture.tabs[0] 'pinned_top') -or -not (Flag $fixture.tabs[0] 'favorite') -or -not (Flag $fixture.tabs[1] 'favorite') -or (Flag $fixture.tabs[2] 'favorite')) { throw 'Star badge fixture changed' }
+    $positions = Wait-For 'pinned and list avatar positions' {
+        $found = @{}
+        foreach ($m in [regex]::Matches((Get-Content "$settings/debug.log" -Raw), '\[bots\] face=\d+ color=\d+ rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
+            $x=[int]$m.Groups[1].Value; $y=[int]$m.Groups[2].Value; $size=[int]$m.Groups[3].Value-$x
+            if ($size -eq 56 -or $size -eq 40) { $found["$x,$y,$size"] = @{x=$x; y=$y; size=$size} }
+        }
+        $pins = @($found.Values | Where-Object { $_.size -eq 56 })
+        $rows = @($found.Values | Where-Object { $_.size -eq 40 } | Sort-Object { [int]$_['y'] })
+        if ($pins.Count -eq 1 -and $rows.Count -eq 2) { return @{pin=$pins[0]; rows=$rows} }
+    } 60
+    $result.geometry = $positions
+    $result.initial = Session
+    $result.initialInbox = Read-Json "$settings/inbox-default.json"
+    $script:previousHash = ''
+    [void](Wait-For 'stable badge paint' { $hash = Capture 'star-stability'; if ($hash -eq $script:previousHash) { return $true }; $script:previousHash = $hash; $false })
+    Shot 'star-mixed'
+    $hover = $positions.rows[0]
+    $hoverPoint = [ChatDeliveryDesktop]::ScreenPoint($main, 285, ($hover.y + 20))
+    [Windows.Forms.Cursor]::Position = [Drawing.Point]::new($hoverPoint.X, $hoverPoint.Y)
+    Start-Sleep -Milliseconds 500
+    Shot 'star-hover'
+    $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
+    $bitmap = [Drawing.Bitmap]::new("$Output/star-mixed.png")
+    try {
+        $yellow = @()
+        foreach ($target in @($positions.pin, $positions.rows[0], $positions.rows[1])) {
+            $pixel = $bitmap.GetPixel(($origin.X + $target.x + $target.size + 1), ($origin.Y + $target.y + $target.size - 4))
+            $yellow += ($pixel.R -ge 225 -and $pixel.G -ge 175 -and $pixel.G -le 210 -and $pixel.B -le 100)
+        }
+        $result.yellow = @(
+            @{name=$fixture.tabs[0].name; favorite=$true; yellow=[bool]$yellow[0]},
+            @{name=$fixture.tabs[1].name; favorite=$true; yellow=[bool]$yellow[1]},
+            @{name=$fixture.tabs[2].name; favorite=$false; yellow=[bool]$yellow[2]}
+        )
+    } finally { $bitmap.Dispose() }
+    if (-not $yellow[0] -or -not $yellow[1] -or $yellow[2]) { throw 'Star badge pixels missing' }
+    Focus
+    $before = Session
+    [ChatDeliveryDesktop]::PressClient($main, $app.Id, 285, ($hover.y + 20))
+    [void](Wait-For 'former close location selects second shell without closing' { $s = Session; @($s.tabs).Count -eq 3 -and $s.active_tab -ne $before.active_tab -and $s.tabs[$s.active_tab].name -ceq 'Second shell' })
+    $result.actions += @{input='former close location'; count=@((Session).tabs).Count; active=(Session).active_tab}
+    $selected = (Session).active_tab
+    $beforeFavorite = Flag (Session).tabs[$selected] 'favorite'
+    Focus
+    [ChatDeliveryDesktop]::Chord(@(0x12,0x53))
+    [void](Wait-For 'favorite toggled and persisted' { (Flag (Session).tabs[$selected] 'favorite') -ne $beforeFavorite })
+    $result.actions += @{input='Alt+S'; before=$beforeFavorite; after=(Flag (Session).tabs[$selected] 'favorite')}
+    $script:previousHash = ''
+    [void](Wait-For 'stable toggled paint' { $hash = Capture 'star-toggle-stability'; if ($hash -eq $script:previousHash) { return $true }; $script:previousHash = $hash; $false })
+    Shot 'star-toggled'
+    Focus
+    $start = (Get-Content "$settings/debug.log" -Raw).Length
+    [ChatDeliveryDesktop]::Chord(@(0x11,0x4B))
+    [void](Wait-For 'palette initialized' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    foreach ($key in @(0x43,0x4C,0x4F,0x53,0x45,0x20,0x54,0x41,0x42)) { [ChatDeliveryDesktop]::Type($key) }
+    [void](Wait-For 'close tab selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=9 count=[1-9]\d* target=6232(?:\r?\n|$)' })
+    [ChatDeliveryDesktop]::Chord(@(0x0D))
+    [void](Wait-For 'palette close removes fixture session' { @((Session).tabs).Count -eq 2 })
+    $result.actions += @{input='Ctrl+K Close Tab'; count=@((Session).tabs).Count}
+    $result.passed = $true
+}
 $linkFixtureLoaded = $false
 $displayAttempted = $false
 try {
-    if ($HighlightProof) { $displayAttempted = $true; [CaptionProof]::SetDpi(96) }
+    if ($HighlightProof -or $StarBadgeProof) { $displayAttempted = $true; [CaptionProof]::SetDpi(96) }
     New-Item -ItemType Directory -Force $settings, "$profile/local", "$profile/home" | Out-Null
     if ($ChangelogLinks) {
         $result.registryRestored = $false; $result.receipts = @()
@@ -570,7 +643,11 @@ try {
     $env:APPDATA = "$profile/roaming"; $env:LOCALAPPDATA = "$profile/local"; $env:USERPROFILE = "$profile/home"; $env:HOME = "$profile/home"
     $env:MULTIPROMPT_NO_LOGIN = '1'; $env:IGSH_246 = '0'; $env:ZIGSHELL_DEBUG = '1'
     $tabs = @('First shell', 'Second shell', 'Third shell') | ForEach-Object { @{kind='cmd'; name=$_; manual=$true; cv=$false; pid=0} }
-    if ($HighlightProof) {
+    if ($StarBadgeProof) {
+        $tabs[0].favorite = $true; $tabs[0].pinned_top = $true
+        $tabs[1].favorite = $true; $tabs[2].favorite = $false
+        Save @{active_tab=0; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=@($tabs)} "$settings/session.json"
+    } elseif ($HighlightProof) {
         for ($i = 0; $i -lt 3; $i++) { $tabs[$i].favorite = $true; $tabs[$i].starred_pinned_top = $i -lt 2 }
         Save @{active_tab=0; single_window=$true; starred_view=$true; chat_active=$false; amoled_theme=$true; tabs=@($tabs)} "$settings/session.json"
     } elseif ($OrderProof) {
@@ -633,7 +710,7 @@ try {
             Receive-Link $result.audit.oldTicket '1048-keyboard'
         }
         $result.passed = $true
-    } elseif ($HighlightProof) { Highlight-Journey } elseif ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
+    } elseif ($StarBadgeProof) { StarBadge-Journey } elseif ($HighlightProof) { Highlight-Journey } elseif ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
     Toggle-View
     [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
     [void](Wait-For 'initial console poll' {
@@ -660,11 +737,9 @@ try {
     [ChatDeliveryDesktop]::PressClient($main, $app.Id, 100, 64)
     [void](Wait-For 'Recents reopened' { -not (Flag (Session) 'recents_section_collapsed') })
     $result.actions += 'section-expand'
-    $selectedName = (Session).tabs[(Session).active_tab].name
     [ChatDeliveryDesktop]::PressClient($main, $app.Id, 285, 229)
-    [void](Wait-For 'sidebar close removes a session' { (Session).tabs.Count -eq 2 })
-    if ((Session).tabs[(Session).active_tab].name -cne $selectedName) { throw 'Closing another session changed selection' }
-    $result.actions += 'sidebar-close'
+    [void](Wait-For 'sidebar edge selects without closing' { (Session).tabs.Count -eq 3 -and (Session).tabs[(Session).active_tab].name -ceq 'Third shell' })
+    $result.actions += 'sidebar-edge-select'
     $result.passed = $true
     }
 } catch {
@@ -672,7 +747,7 @@ try {
     Write-Host $result.error
     if (Get-Variable main -ErrorAction SilentlyContinue) { Shot 'failure' }
 } finally {
-    if ($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof) {
+    if ($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof -or $StarBadgeProof) {
         $result.scratchRemoved = $false
         $result.cleanupErrors = @()
         try {
@@ -710,7 +785,7 @@ try {
         } catch {
             $result.cleanupErrors += $_.Exception.Message
         } finally {
-            if ($HighlightProof) {
+            if ($HighlightProof -or $StarBadgeProof) {
                 $result.displayRestored = $false
                 try { if ($displayAttempted) { [CaptionProof]::RestoreDpi() }; $result.displayRestored = $true } catch { $result.cleanupErrors += "Display restoration failed: $($_.Exception.Message)" }
             }
@@ -726,5 +801,5 @@ try {
         if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
     }
 }
-if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof) -and -not $result.scratchRemoved) -or ($HighlightProof -and -not $result.displayRestored)) { throw 'Shared sidebar journey failed; see result.json' }
+if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof -or $StarBadgeProof) -and -not $result.scratchRemoved) -or (($HighlightProof -or $StarBadgeProof) -and -not $result.displayRestored)) { throw 'Shared sidebar journey failed; see result.json' }
 Write-Host 'SHARED_SIDEBAR_JOURNEY_OK'

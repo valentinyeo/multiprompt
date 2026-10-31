@@ -28,6 +28,11 @@ on:
         required: false
         type: boolean
         default: false
+      star_badge_proof:
+        description: Capture starred badges and verify hover and close actions
+        required: false
+        type: boolean
+        default: false
       highlight_proof:
         description: Capture active Starred tile and row in both themes
         required: false
@@ -44,6 +49,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  badge-geometry:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Test badge geometry
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
+          if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
+          & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" test src/star_badge_geometry.zig
+          if ($LASTEXITCODE -ne 0) { throw 'Badge geometry failed' }
   sidebar:
     runs-on: windows-latest
     timeout-minutes: 15
@@ -62,8 +79,10 @@ jobs:
           CHANGELOG_PROOF: ${{ inputs.changelog_proof }}
           CHANGELOG_LINKS: ${{ inputs.changelog_links }}
           HIGHLIGHT_PROOF: ${{ inputs.highlight_proof }}
+          STAR_BADGE_PROOF: ${{ inputs.star_badge_proof }}
         run: |
           New-Item -ItemType Directory -Force bin, evidence | Out-Null
+          if ($env:STAR_BADGE_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true' -or $env:HIGHLIGHT_PROOF -eq 'true')) { throw 'Star badge proof requires a published tag and excludes other proof modes' }
           if ($env:HIGHLIGHT_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true')) { throw 'Highlight proof requires a published tag and excludes other proof modes' }
           trap { if ($env:CHANGELOG_LINKS -eq 'true') { @{passed=$false; error='Link proof acquisition or audit failed'; cleanup=0; scratchRemoved=$true} | ConvertTo-Json | Set-Content evidence/result.json }; throw $_ }
           if ($env:CHANGELOG_LINKS -eq 'true' -and $env:CHANGELOG_PROOF -ne 'true') { throw 'Changelog links requires changelog proof' }
@@ -104,9 +123,12 @@ jobs:
           CHANGELOG_PROOF: ${{ inputs.changelog_proof }}
           CHANGELOG_LINKS: ${{ inputs.changelog_links }}
           HIGHLIGHT_PROOF: ${{ inputs.highlight_proof }}
+          STAR_BADGE_PROOF: ${{ inputs.star_badge_proof }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          if ($env:HIGHLIGHT_PROOF -eq 'true') {
+          if ($env:STAR_BADGE_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -StarBadgeProof
+          } elseif ($env:HIGHLIGHT_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -HighlightProof
           } elseif ($env:CHANGELOG_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -ChangelogProof -ChangelogLinks:($env:CHANGELOG_LINKS -eq 'true')
@@ -117,6 +139,21 @@ jobs:
           } else {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
           }
+      - name: Capture old starred sidebar
+        if: always() && inputs.star_badge_proof
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v0.28.1098
+        run: |
+          New-Item -ItemType Directory -Force old-star-bin, evidence/old-star | Out-Null
+          gh release download $env:RELEASE_TAG --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt --dir old-star-bin
+          if ($LASTEXITCODE -ne 0) { throw 'Old release download failed' }
+          $line = @(Get-Content old-star-bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?multiprompt-x64\.exe$' })
+          if ($line.Count -ne 1 -or (Get-FileHash old-star-bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne ($line[0] -split '\s+')[0].ToLower()) { throw 'Old release checksum mismatch' }
+          try { ./tools/shared-sidebar.ps1 -Exe "$PWD/old-star-bin/multiprompt-x64.exe" -Output "$PWD/evidence/old-star" -StarBadgeProof } catch { Write-Host $_ }
+          $result = Get-Content evidence/old-star/result.json -Raw | ConvertFrom-Json
+          if ($result.passed -or $result.cleanup -ne 0 -or -not $result.scratchRemoved -or -not $result.displayRestored -or $result.error -cne 'Star badge pixels missing') { throw 'Old release did not fail the intended badge assertion' }
       - name: Reject the old published sidebar
         if: inputs.tag == '' && !inputs.memory_proof && !inputs.order_proof && !inputs.changelog_proof
         shell: powershell
