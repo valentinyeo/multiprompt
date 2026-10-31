@@ -3,6 +3,17 @@ const w = @import("win32.zig");
 const file_io = @import("file_io.zig");
 const allocator = std.heap.page_allocator;
 const max_file = 64 * 1024 * 1024;
+var owner_path: [512]u8 = undefined;
+var owner_path_len: usize = 0;
+
+pub fn bindOwner() bool {
+    var buf: [512]u8 = undefined;
+    const path = @import("session.zig").getSessionPath(&buf) orelse return false;
+    if (owner_path_len != 0) return std.mem.eql(u8, owner_path[0..owner_path_len], path);
+    @memcpy(owner_path[0..path.len], path);
+    owner_path_len = path.len;
+    return true;
+}
 
 pub const Location = struct { store_uuid: []const u8, room_id: []const u8 };
 pub const Draft = struct { location: Location, text: []const u8 };
@@ -48,10 +59,9 @@ fn valid(account: []const u8, record: Record) bool {
 }
 fn identity(account: []const u8) ![64]u8 {
     if (!validAccount(account)) return error.InvalidScope;
-    var session_path: [512]u8 = undefined;
-    const path = @import("session.zig").getSessionPath(&session_path) orelse return error.InvalidPath;
+    if (owner_path_len == 0 or !bindOwner()) return error.InvalidPath;
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update(path);
+    hash.update(owner_path[0..owner_path_len]);
     hash.update("\x00");
     hash.update(account);
     var digest: [32]u8 = undefined;

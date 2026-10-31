@@ -47,6 +47,8 @@ const ui_store = @import("room_ui_store.zig");
 const file_io = @import("file_io.zig");
 const TIMER_ROOM: usize = 0xB312;
 const TIMER_ROOM_UI: usize = 0xB313;
+const TIMER_ROOM_EVIDENCE: usize = 0xB314;
+const TIMER_ROOM_DISCOVERY: usize = 0xB315;
 const Candidate = struct {
     sid: [40]u8 = undefined,
     sid_len: usize = 0,
@@ -63,10 +65,13 @@ var controller: ?rooms.Controller = null;
 var request_generation: u64 = 0;
 var route_key: [64]u8 = undefined;
 var route_slot: u8 = 0;
+var bound_preexisting_pin = false;
 const CandidateSid = struct { bytes: [40]u8 = undefined, len: usize = 0 };
 var discovered_sids: [app_state.MAX_SHELLS]CandidateSid = undefined;
 var discovered_count: usize = 0;
 var candidate_scan: usize = 0;
+var candidate_generation: u64 = 0;
+var status_generation: u64 = 0;
 var pending_sid: [40]u8 = undefined;
 var pending_sid_len: usize = 0;
 var candidates: [app_state.MAX_SHELLS]Candidate = undefined;
@@ -154,6 +159,22 @@ const Draft = struct { location: RoomLocation, text: [:0]u16 };
 var drafts: std.ArrayList(Draft) = .empty;
 var ui_ready = false;
 var scope_blocked = false;
+var buffered_location: ?RoomLocation = null;
+var desired_account: [256]u8 = undefined;
+var desired_account_len: usize = 0;
+var desired_layout: ?[]u8 = null;
+var desired_signout = false;
+var recovery_delay_ms: u32 = 1000;
+var evidence_attempts: u8 = 0;
+var discovery_attempts: u8 = 0;
+var discovery_waiting = false;
+var discovery_generation: u64 = 0;
+var discovery_slot: u8 = 0;
+var discovery_key: [64]u8 = undefined;
+var discovery_pin: ?[36]u8 = null;
+var startup_settled = false;
+var journal_checked_generation: ?u64 = null;
+var journal_checked_store: ?[36]u8 = null;
 var ui_dirty = false;
 var restore_intent: ?RoomLocation = null;
 var restore_front = false;
@@ -164,7 +185,8 @@ fn sameLocation(left: RoomLocation, right: RoomLocation) bool {
 }
 
 fn saveDraft() bool {
-    if (!created or front != .selected) return true;
+    if (!created) return true;
+    const location = if (buffered_location) |value| value else if (front == .selected) front.selected else return true;
     const a = std.heap.page_allocator;
     const buf = a.alloc(u16, 65537) catch return false;
     defer a.free(buf);
@@ -173,7 +195,7 @@ fn saveDraft() bool {
     defer a.free(encoded);
     if (encoded.len > 65536 or std.mem.indexOfScalar(u8, encoded, 0) != null) return false;
     if (text.len == 0) {
-        for (drafts.items, 0..) |entry, index| if (sameLocation(entry.location, front.selected)) {
+        for (drafts.items, 0..) |entry, index| if (sameLocation(entry.location, location)) {
             a.free(entry.text);
             _ = drafts.orderedRemove(index);
             break;
@@ -181,13 +203,13 @@ fn saveDraft() bool {
         return true;
     }
     const copy = a.dupeZ(u16, text) catch return false;
-    for (drafts.items) |*entry| if (sameLocation(entry.location, front.selected)) {
+    for (drafts.items) |*entry| if (sameLocation(entry.location, location)) {
         a.free(entry.text);
         entry.text = copy;
         return true;
     };
     if (drafts.items.len >= 128) { a.free(copy); return false; }
-    drafts.append(a, .{ .location = front.selected, .text = copy }) catch { a.free(copy); return false; };
+    drafts.append(a, .{ .location = location, .text = copy }) catch { a.free(copy); return false; };
     return true;
 }
 
@@ -266,6 +288,8 @@ pub fn flushUi() bool {
     const selected: ?ui_store.Location = if (selection) |*value| .{ .store_uuid = &value.store.store_uuid, .room_id = &value.room_id } else null;
     ui_store.save(account[0..account_len], .{ .version = 1, .account = account[0..account_len], .selected = selected, .selected_front = if (restore_pending) restore_front else front == .selected, .drafts = values }) catch return false;
     ui_dirty = false;
+    buffered_location = null;
+    if (front == .hidden and desired_layout == null) scope_blocked = false;
     _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_UI);
     return true;
 }
@@ -399,20 +423,31 @@ fn clearCatalog() void {
 
 pub fn setAccount(id: ?[]const u8) void {
     if (!enabled) return;
+    if (id == null) {
+        desired_signout = true;
+        if (desired_layout) |bytes| std.heap.page_allocator.free(bytes);
+        desired_layout = null;
+        desired_account_len = 0;
+    }
     const value = id orelse "";
     const valid = value.len > 0 and value.len <= account.len and std.mem.indexOfScalar(u8, value, 0) == null;
     const next = if (valid) value else "";
     if (std.mem.eql(u8, account[0..account_len], next)) {
         if (scope_blocked and flushUi()) scope_blocked = false;
+        if (id == null and account_len == 0) desired_signout = false;
         return;
     }
     if (!flushUi()) {
+        if (front == .selected) buffered_location = front.selected;
+        front = .hidden;
+        restore_pending = false;
         scope_blocked = true;
         applied_routes = @splat(null);
         applied_keys = @splat(@splat(0));
         account_generation +%= 1;
         if (created and shown) view.show(false);
         shown = false;
+        _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_UI, recovery_delay_ms, null);
         return;
     }
     leaveForOtherFront();
@@ -426,10 +461,76 @@ pub fn setAccount(id: ?[]const u8) void {
     clearCatalog();
     candidate_count = 0;
     if (controller) |*c| if (c.job == null) { controller = null; };
+    discovery_attempts = 0;
+    discovery_waiting = false;
+    _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY);
     account_len = next.len;
     @memcpy(account[0..account_len], next);
     account_generation +%= 1;
+    desired_signout = false;
     _ = loadUiAccount();
+}
+
+pub fn startupSettled() void {
+    if (!enabled) return;
+    startup_settled = true;
+    accountReady();
+}
+
+pub fn accountReady() void {
+    if (pending_command) |item| if (item.evidence != null and evidence_attempts >= 3) {
+        evidence_attempts = 0;
+        _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE, 1000, null);
+    };
+    if (discovery_attempts >= 3 and !discovery_waiting) discovery_attempts = 0;
+    accountReadyInternal();
+}
+
+fn accountReadyInternal() void {
+    if (!enabled or !startup_settled or scope_blocked or !ui_store.bindOwner() or app_state.g_account_locked or app_state.g_account_bootstrapping or app_state.g_restoring or app_state.g_account_applying or desired_layout != null) return;
+    if (!ui_ready and account_len != 0 and !ui_dirty and !loadUiAccount()) {
+        recovery_delay_ms = @min(recovery_delay_ms * 2, 60000);
+        _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_UI, recovery_delay_ms, null);
+        return;
+    }
+    if (!ui_ready) return;
+    if (controller == null) {
+        if (!discovery_waiting and discovery_attempts < 3) beginDiscovery(false);
+    } else if (controller) |*c| {
+        if (c.job == null) _ = driveRestore(c);
+    }
+}
+
+pub fn applyAccountLayout(id: ?[]const u8, bytes: []const u8) bool {
+    if (!enabled) return false;
+    const value = id orelse return false;
+    if (value.len == 0 or value.len > desired_account.len or !std.unicode.utf8ValidateSlice(value) or std.mem.indexOfScalar(u8, value, 0) != null or bytes.len > 2 * 1024 * 1024) return false;
+    var parsed = @import("session_layout.zig").parse(std.heap.page_allocator, bytes) catch return false;
+    defer parsed.deinit();
+    const hosts = parsed.value.hosts orelse return false;
+    @import("account_hosts.zig").validate(hosts) catch return false;
+    const copy = std.heap.page_allocator.dupe(u8, bytes) catch return false;
+    if (desired_layout) |old| std.heap.page_allocator.free(old);
+    desired_layout = copy;
+    desired_signout = false;
+    @memcpy(desired_account[0..value.len], value);
+    desired_account_len = value.len;
+    recovery_delay_ms = 1000;
+    if (!recoverAccountLayout()) _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_UI, recovery_delay_ms, null);
+    return true;
+}
+
+fn recoverAccountLayout() bool {
+    const bytes = desired_layout orelse return true;
+    const desired = desired_account[0..desired_account_len];
+    setAccount(desired);
+    if (scope_blocked or !std.mem.eql(u8, account[0..account_len], desired) or !setAppliedLayout(bytes)) return false;
+    std.heap.page_allocator.free(bytes);
+    desired_layout = null;
+    desired_account_len = 0;
+    recovery_delay_ms = 1000;
+    accountReady();
+    return true;
 }
 
 pub fn setAppliedLayout(bytes: []const u8) bool {
@@ -446,7 +547,7 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
         for (host.host_keys orelse &.{}) |key| { hash.update(key); hash.update("\x00"); }
         hash.final(&keys[host.slot]);
     }
-    const was_bound = catalog_complete;
+    const was_bound = catalog_complete or controller != null or owned_model != null;
     applied_routes = routes;
     applied_keys = keys;
     if (was_bound) {
@@ -454,9 +555,8 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
         const key = if (route) |value| routeKey(value) else @as([64]u8, @splat(0));
         if (route == null or !std.mem.eql(u8, &key, &route_key)) {
             if (!flushUi()) {
-                scope_blocked = true;
-                if (created and shown) view.show(false);
-                shown = false;
+                account_generation +%= 1;
+                if (created and front == .selected) view.showUnavailable();
                 return false;
             }
             clearModels();
@@ -539,17 +639,108 @@ fn savePin(uuid: []const u8) bool {
     return std.mem.eql(u8, existing, uuid);
 }
 
-fn beginDiscovery() void {
-    if (!enabled or account_len == 0 or controller != null or app_state.active_shell >= app_state.shell_count) return;
-    const shell = app_state.shells[app_state.active_shell];
-    if (!shell.sync_owned or shell.kind != .tmux) return;
-    const route = configuredRoute(shell.tmux_host) orelse return;
-    route_slot = shell.tmux_host;
+fn scheduleDiscovery(c: *const rooms.Controller) void {
+    if (created and front == .selected) view.showUnavailable();
+    if (discovery_attempts >= 3) return;
+    discovery_generation = account_generation;
+    discovery_slot = route_slot;
+    discovery_key = route_key;
+    discovery_pin = if (bound_preexisting_pin and c.has_host_uuid) c.host_uuid else null;
+    discovery_attempts += 1;
+    discovery_waiting = true;
+    _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY, @as(u32, 1000) << @intCast(discovery_attempts - 1), null);
+}
+
+fn beginDiscovery(retry: bool) void {
+    if (!enabled or !startup_settled or scope_blocked or !ui_ready or app_state.g_account_locked or app_state.g_account_bootstrapping or app_state.g_restoring or app_state.g_account_applying or desired_layout != null or account_len == 0 or controller != null) return;
+    var chosen: ?u8 = null;
+    var pin_required = false;
+    var expected_pin: [36]u8 = undefined;
+    const wanted = if (restore_pending) restore_intent else if (front == .selected) front.selected else null;
+    if (wanted) |intent| {
+        for (applied_routes, 0..) |maybe_route, index| {
+            const candidate = maybe_route orelse continue;
+            const key = routeKeyFor(@intCast(index), candidate);
+            var path_buf: [600]u8 = undefined;
+            const path = pinPathFor(&path_buf, &key) orelse continue;
+            const bytes = file_io.readFileAllocWin32(path, 64) orelse continue;
+            defer std.heap.page_allocator.free(bytes);
+            if (std.mem.eql(u8, bytes, &intent.store.store_uuid)) { chosen = @intCast(index); pin_required = true; expected_pin = intent.store.store_uuid; break; }
+        }
+    } else if (app_state.active_shell < app_state.shell_count) {
+        const shell = app_state.shells[app_state.active_shell];
+        if (shell.sync_owned and shell.kind == .tmux) {
+            if (front == .create) chosen = shell.tmux_host else if (configuredRoute(shell.tmux_host)) |candidate| {
+                const key = routeKeyFor(shell.tmux_host, candidate);
+                var path_buf: [600]u8 = undefined;
+                if (pinPathFor(&path_buf, &key)) |path| if (file_io.readFileAllocWin32(path, 64)) |bytes| {
+                    defer std.heap.page_allocator.free(bytes);
+                    var validate = rooms.Controller.init(0);
+                    if (validate.bindHost(bytes)) { chosen = shell.tmux_host; pin_required = true; expected_pin = validate.host_uuid; }
+                };
+            };
+        }
+    }
+    if (chosen == null and wanted == null) if (retained_selection) |intent| {
+        for (applied_routes, 0..) |maybe_route, index| {
+            const candidate = maybe_route orelse continue;
+            const key = routeKeyFor(@intCast(index), candidate);
+            var path_buf: [600]u8 = undefined;
+            const path = pinPathFor(&path_buf, &key) orelse continue;
+            const bytes = file_io.readFileAllocWin32(path, 64) orelse continue;
+            defer std.heap.page_allocator.free(bytes);
+            if (std.mem.eql(u8, bytes, &intent.store.store_uuid)) { chosen = @intCast(index); pin_required = true; expected_pin = intent.store.store_uuid; break; }
+        }
+    };
+    if (chosen == null and wanted == null) {
+        for (applied_routes, 0..) |maybe_route, index| {
+            const candidate = maybe_route orelse continue;
+            const key = routeKeyFor(@intCast(index), candidate);
+            var path_buf: [600]u8 = undefined;
+            const path = pinPathFor(&path_buf, &key) orelse continue;
+            const bytes = file_io.readFileAllocWin32(path, 64) orelse continue;
+            defer std.heap.page_allocator.free(bytes);
+            var validate = rooms.Controller.init(0);
+            if (!validate.bindHost(bytes)) continue;
+            chosen = @intCast(index);
+            pin_required = true;
+            expected_pin = validate.host_uuid;
+            break;
+        }
+    }
+    if (retry) {
+        if (discovery_generation != account_generation) return;
+        const retry_route = configuredRoute(discovery_slot) orelse return;
+        const retry_key = routeKeyFor(discovery_slot, retry_route);
+        if (!std.mem.eql(u8, &retry_key, &discovery_key)) return;
+        chosen = discovery_slot;
+        pin_required = discovery_pin != null;
+        if (discovery_pin) |pin| expected_pin = pin;
+    }
+    const slot = chosen orelse return;
+    const route = configuredRoute(slot) orelse return;
+    route_slot = slot;
     route_key = routeKey(route);
     var c = rooms.Controller.init(route_slot);
     if (!c.bindAccount(account[0..account_len]) or !c.bindRoute(route.hostname[0..route.hostname_len], route.user[0..route.user_len], route.port) or !loadPin(&c)) return;
-    if (!c.capabilities()) return;
+    if (pin_required and (!c.has_host_uuid or !std.mem.eql(u8, &c.host_uuid, &expected_pin))) return;
+    if (retry) if (wanted) |intent| {
+        if (!c.has_host_uuid or !std.mem.eql(u8, &c.host_uuid, &intent.store.store_uuid)) return;
+    };
+    if (front != .create and !c.has_host_uuid) return;
+    if (restore_pending) if (restore_intent) |intent| {
+        if (!c.has_host_uuid or !std.mem.eql(u8, &c.host_uuid, &intent.store.store_uuid)) return;
+    };
+    bound_preexisting_pin = c.has_host_uuid;
+    if (!c.capabilities()) { scheduleDiscovery(&c); return; }
     request_generation = account_generation;
+    scanCandidates();
+    controller = c;
+    _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+}
+
+fn scanCandidates() void {
+    candidate_generation +%= 1;
     candidate_count = 0;
     candidate_scan = 0;
     discovered_count = 0;
@@ -574,8 +765,6 @@ fn beginDiscovery() void {
         while (j > 0 and std.mem.order(u8, item.bytes[0..item.len], discovered_sids[j - 1].bytes[0..discovered_sids[j - 1].len]) == .lt) : (j -= 1) discovered_sids[j] = discovered_sids[j - 1];
         discovered_sids[j] = item;
     }
-    controller = c;
-    _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
 }
 
 fn eligibleShell(sid: []const u8) ?*const app_state.Shell {
@@ -593,6 +782,7 @@ fn nextStatus(c: *rooms.Controller) bool {
         if (eligibleShell(sid) == null) continue;
         @memcpy(pending_sid[0..sid.len], sid);
         pending_sid_len = sid.len;
+        status_generation = candidate_generation;
         return c.status(sid);
     }
     return false;
@@ -736,6 +926,7 @@ fn finishRefresh(c: *rooms.Controller, success: bool) void {
 }
 
 fn scheduleMetadata(c: *rooms.Controller) bool {
+    if (c.job == null and front == .create and c.has_host_uuid and candidate_scan < discovered_count and nextStatus(c)) return true;
     if (pumpRefresh(c)) return true;
     if (c.job != null or !catalog_complete or !c.has_host_uuid or request_generation != account_generation) return false;
     const route = configuredRoute(route_slot) orelse return false;
@@ -1054,6 +1245,8 @@ fn finishMetadata(c: *rooms.Controller, fresh: bool, payload: ?std.json.Value) v
 }
 
 fn freePending(item: *PendingCommand) void {
+    _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE);
+    evidence_attempts = 0;
     item.arena.deinit();
     std.heap.page_allocator.destroy(item);
     pending_command = null;
@@ -1118,8 +1311,17 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
     const visible = fresh and commandVisible(item);
     if (evidence) |bytes| {
         journal.update(item.scope, &item.id, state, bytes) catch |err| {
+            if (err != error.InvalidJournal) {
+                if (visible) {
+                    view.completeAction(item.token, if (state == .accepted) .accepted else .failed);
+                    if (state == .accepted and item.kind == .create and room_id != null) created_selection = .{ .location = .{ .store = item.location, .room_id = room_id.? }, .generation = item.generation, .token_generation = item.token.generation };
+                }
+                item.evidence = bytes; item.evidence_state = state;
+                evidence_attempts = 0;
+                _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE, 1000, null);
+                return;
+            }
             if (visible) view.completeAction(item.token, .failed);
-            if (err != error.InvalidJournal) { item.evidence = bytes; item.evidence_state = state; return; }
             freePending(item);
             return;
         };
@@ -1127,7 +1329,12 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
     if (state == .accepted and !enqueueRefresh(item.location)) {
         item.evidence = evidence;
         item.evidence_state = state;
-        if (visible) view.completeAction(item.token, .failed);
+        evidence_attempts = 0;
+        _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE, 1000, null);
+        if (visible) {
+            view.completeAction(item.token, .accepted);
+            if (item.kind == .create and room_id != null) created_selection = .{ .location = .{ .store = item.location, .room_id = room_id.? }, .generation = item.generation, .token_generation = item.token.generation };
+        }
         return;
     }
     if (visible) view.completeAction(item.token, if (state == .accepted) .accepted else .failed);
@@ -1146,11 +1353,96 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
     freePending(item);
 }
 
+fn driveRestore(c: *rooms.Controller) bool {
+    if (pending_command) |item| if (item.evidence != null) return false;
+    if (!startup_settled or scope_blocked or !ui_ready or !ui_store.bindOwner() or app_state.g_account_locked or app_state.g_account_bootstrapping or app_state.g_restoring or app_state.g_account_applying or desired_layout != null or c.job != null or !catalog_complete or !c.has_host_uuid or !bound_preexisting_pin or request_generation != account_generation) return false;
+    const route = configuredRoute(route_slot) orelse return false;
+    const key = routeKey(route);
+    if (!std.mem.eql(u8, &key, &route_key)) return false;
+    const checked = journal_checked_generation != null and journal_checked_generation.? == account_generation and journal_checked_store != null and std.mem.eql(u8, &journal_checked_store.?, &c.host_uuid);
+    if (!checked) {
+        var location = StoreLocation{ .account = @splat(0), .account_len = account_len, .store_uuid = c.host_uuid };
+        @memcpy(location.account[0..account_len], account[0..account_len]);
+        const scope = commandScope(location) orelse return false;
+        var entry = (journal.load(scope) catch {
+            recovery_delay_ms = @min(recovery_delay_ms * 2, 60000);
+            _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_UI, recovery_delay_ms, null);
+            return false;
+        });
+        defer if (entry) |*value| value.deinit();
+        if (entry) |*value| {
+            switch (value.record().state) {
+                .prepared, .uncertain => {
+                    retryCommand(location) catch {
+                        recovery_delay_ms = @min(recovery_delay_ms * 2, 60000);
+                        _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_UI, recovery_delay_ms, null);
+                        return false;
+                    };
+                    journal_checked_generation = account_generation;
+                    journal_checked_store = c.host_uuid;
+                    return true;
+                },
+                .accepted => {
+                    if (!enqueueRefresh(location)) {
+                        recovery_delay_ms = @min(recovery_delay_ms * 2, 60000);
+                        _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_UI, recovery_delay_ms, null);
+                        return false;
+                    }
+                    journal_checked_generation = account_generation;
+                    journal_checked_store = c.host_uuid;
+                    if (pumpRefresh(c)) return true;
+                },
+                .rejected => {},
+            }
+        }
+        journal_checked_generation = account_generation;
+        journal_checked_store = c.host_uuid;
+    }
+    if (restore_pending and restore_front and front == .hidden) if (restore_intent) |intent| {
+        if (!std.mem.eql(u8, &intent.store.store_uuid, &c.host_uuid)) return false;
+        for (catalog()) |row| if (std.mem.eql(u8, row.id, &intent.room_id)) {
+            select(intent);
+            return c.job != null;
+        };
+    };
+    return false;
+}
+
 pub fn pollTimer(id: usize) bool {
     if (!enabled) return false;
+    if (id == TIMER_ROOM_EVIDENCE) {
+        _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE);
+        if (pending_command) |item| if (item.evidence != null) {
+            retryCommandEvidence() catch {
+                evidence_attempts += 1;
+                if (evidence_attempts < 3) _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE, @as(u32, 1000) << @intCast(evidence_attempts), null);
+                return true;
+            };
+            evidence_attempts = 0;
+            accountReadyInternal();
+        };
+        return true;
+    }
+    if (id == TIMER_ROOM_DISCOVERY) {
+        _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY);
+        discovery_waiting = false;
+        const route = configuredRoute(discovery_slot);
+        const key = if (route) |value| routeKeyFor(discovery_slot, value) else @as([64]u8, @splat(0));
+        if (discovery_generation != account_generation or route == null or !std.mem.eql(u8, &key, &discovery_key)) {
+            discovery_attempts = 0;
+            accountReadyInternal();
+        } else beginDiscovery(true);
+        return true;
+    }
     if (id == TIMER_ROOM_UI) {
         _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_UI);
-        _ = flushUi();
+        const saved = flushUi();
+        if (saved and desired_signout) setAccount(null);
+        const recovered = if (saved) recoverAccountLayout() else false;
+        if ((!saved or !recovered) and (ui_dirty or desired_layout != null or desired_signout)) {
+            recovery_delay_ms = @min(recovery_delay_ms * 2, 60000);
+            _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_UI, recovery_delay_ms, null);
+        } else accountReadyInternal();
         return true;
     }
     if (id != TIMER_ROOM) return false;
@@ -1163,7 +1455,7 @@ pub fn pollTimer(id: usize) bool {
     const mutation = switch (completion) { .failed => |failure| failure.kind == .create or failure.kind == .edit, .finished => |result| result.kind == .create or result.kind == .edit, .pending => false };
     if (mutation and pending_command != null) {
         finishCommand(c, completion, fresh);
-        if (!fresh) { discardBuilding(); clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); }
+        if (!fresh) { discardBuilding(); clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); accountReady(); }
         return true;
     }
     if (!fresh) {
@@ -1181,6 +1473,7 @@ pub fn pollTimer(id: usize) bool {
         clearCatalog();
         controller = null;
         _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+        accountReady();
         return true;
     }
     switch (completion) {
@@ -1197,6 +1490,7 @@ pub fn pollTimer(id: usize) bool {
                 if (!startSnapshot(c)) { view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); }
             } else if (failure.kind != .status) {
                 if (failure.kind == .catalog) finishRefresh(c, false);
+                if (failure.kind == .capabilities or failure.kind == .catalog) scheduleDiscovery(c);
                 clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
             } else if (!startSnapshot(c) and !nextStatus(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
         },
@@ -1208,14 +1502,14 @@ pub fn pollTimer(id: usize) bool {
                 finishMetadata(c, fresh, payload orelse .null);
                 return true;
             }
-            if (result.value.value != .object) { if (result.kind == .catalog) finishRefresh(c, false); discardBuilding(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
+            if (result.value.value != .object) { if (result.kind == .catalog) finishRefresh(c, false); if (result.kind == .capabilities or result.kind == .catalog) scheduleDiscovery(c); discardBuilding(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
             if ((result.kind == .snapshot or result.kind == .events) and read_generation != selection_generation) {
                 discardBuilding();
                 if (!startSnapshot(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
                 return true;
             }
-            const payload = result.value.value.object.get("result") orelse { if (result.kind == .catalog) finishRefresh(c, false); discardBuilding(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
-            if (payload != .object) { if (result.kind == .catalog) finishRefresh(c, false); discardBuilding(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
+            const payload = result.value.value.object.get("result") orelse { if (result.kind == .catalog) finishRefresh(c, false); if (result.kind == .capabilities or result.kind == .catalog) scheduleDiscovery(c); discardBuilding(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
+            if (payload != .object) { if (result.kind == .catalog) finishRefresh(c, false); if (result.kind == .capabilities or result.kind == .catalog) scheduleDiscovery(c); discardBuilding(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
             if (result.kind == .snapshot) {
                 if (!acceptSnapshot(payload)) { discardBuilding(); last_failure = .{ .kind = .snapshot, .reason = .parse }; view.showUnavailable(); if (!scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; }
                 const item = building_model.?;
@@ -1244,27 +1538,34 @@ pub fn pollTimer(id: usize) bool {
                 const live = payload.object.get("live_send") orelse .null;
                 const uuid = payload.object.get("host_uuid") orelse .null;
                 if (version != .integer or version.integer != 1 or store != .bool or !store.bool or live != .bool or live.bool or uuid != .string or !c.bindHost(uuid.string) or !savePin(uuid.string)) {
-                    controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
+                    scheduleDiscovery(c); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
                 }
                 clearCatalog();
                 if (c.catalog(0, null)) return true;
-                controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
+                scheduleDiscovery(c); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
             } else if (result.kind == .catalog) {
                 if (!applyCatalogPage(payload)) {
                     last_failure = .{ .kind = .catalog, .reason = .parse };
                     finishRefresh(c, false);
+                    scheduleDiscovery(c);
                     clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
                 }
                 if (catalog_after < catalog_through.?) {
                     if (c.catalog(catalog_after, catalog_through)) return true;
                     finishRefresh(c, false);
+                    scheduleDiscovery(c);
                     clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
                 }
+                discovery_attempts = 0;
+                discovery_waiting = false;
+                _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY);
                 catalog_store_uuid = c.host_uuid;
                 catalog_complete = true;
                 finishRefresh(c, true);
+                if (created_selection != null and (!isVisible() or !view.ownsFocus())) created_selection = null;
+                if (driveRestore(c)) return true;
                 if (created_selection) |selection| {
-                    if (front != .create or selection_generation != selection.generation or view.generation != selection.token_generation or commandScope(selection.location.store) == null) {
+                    if (front != .create or selection_generation != selection.generation or view.generation != selection.token_generation or commandScope(selection.location.store) == null or !isVisible() or !view.ownsFocus()) {
                         created_selection = null;
                     } else {
                         var found = false;
@@ -1283,7 +1584,7 @@ pub fn pollTimer(id: usize) bool {
                 const alive = payload.object.get("alive") orelse .null;
                 const owner = payload.object.get("owner") orelse .null;
                 const shell = eligibleShell(pending_sid[0..pending_sid_len]);
-                if (provider == .string and std.mem.eql(u8, provider.string, "claude") and sid == .string and std.mem.eql(u8, sid.string, pending_sid[0..pending_sid_len]) and active == .bool and active.bool and alive == .bool and (owner == .null or (owner == .string and (std.mem.eql(u8, owner.string, "host") or std.mem.eql(u8, owner.string, "terminal")))) and shell != null and shell.?.name_len > 0 and shell.?.name_len <= shell.?.name.len and candidate_count < candidates.len) {
+                if (status_generation == candidate_generation and provider == .string and std.mem.eql(u8, provider.string, "claude") and sid == .string and std.mem.eql(u8, sid.string, pending_sid[0..pending_sid_len]) and active == .bool and active.bool and alive == .bool and (owner == .null or (owner == .string and (std.mem.eql(u8, owner.string, "host") or std.mem.eql(u8, owner.string, "terminal")))) and shell != null and shell.?.name_len > 0 and shell.?.name_len <= shell.?.name.len and candidate_count < candidates.len) {
                     var candidate = Candidate{};
                     candidate.sid_len = pending_sid_len;
                     @memcpy(candidate.sid[0..pending_sid_len], pending_sid[0..pending_sid_len]);
@@ -1577,13 +1878,16 @@ pub fn openCreate() void {
     selection_waiting = false;
     front = .{ .create = null };
     markUiDirty();
+    if (controller != null) scanCandidates();
     _ = publishCreateCandidates();
     _ = w.SetWindowTextW(app_state.g_main_hwnd, std.unicode.utf8ToUtf16LeStringLiteral("Multi Bot"));
     resize(app_state.g_main_hwnd);
     syncVisibility();
     view.openCreate();
     view.showUnavailable();
-    beginDiscovery();
+    discovery_attempts = 0;
+    beginDiscovery(false);
+    if (controller) |*c| if (c.job == null and nextStatus(c)) { _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null); };
 }
 
 pub fn select(location: RoomLocation) void {
@@ -1603,6 +1907,21 @@ pub fn select(location: RoomLocation) void {
         if (std.mem.eql(u8, bytes, &location.store.store_uuid)) { pinned = true; break; }
     }
     if (!pinned) return;
+    if (buffered_location) |buffered| if (scope_blocked and front == .hidden and sameLocation(buffered, location)) {
+        if (desired_signout or desired_layout != null or !ui_store.bindOwner()) return;
+        scope_blocked = false;
+        if (!enter()) { scope_blocked = true; return; }
+        front = .{ .selected = location };
+        retained_selection = location;
+        restore_pending = false;
+        selection_generation +%= 1;
+        markUiDirty();
+        _ = w.SetWindowTextW(app_state.g_main_hwnd, std.unicode.utf8ToUtf16LeStringLiteral("Multi Bot"));
+        resize(app_state.g_main_hwnd);
+        syncVisibility();
+        view.focus();
+        return;
+    };
     const route = configuredRoute(route_slot);
     const key = if (route) |value| routeKey(value) else @as([64]u8, @splat(0));
     const c: ?*rooms.Controller = if (controller) |*value| if (request_generation == account_generation and route != null and std.mem.eql(u8, &key, &route_key) and value.has_host_uuid and std.mem.eql(u8, &location.store.store_uuid, &value.host_uuid)) value else null else null;
@@ -1632,17 +1951,23 @@ pub fn select(location: RoomLocation) void {
     if (c) |value| _ = startSnapshot(value);
 }
 
+pub fn cancelRestoreForUser() void {
+    if (!enabled or scope_blocked or !restore_pending) return;
+    restore_pending = false;
+    restore_front = false;
+    markUiDirty();
+}
+
 pub fn leaveForSession() void {
-    if (!isActive()) {
-        if (enabled and !scope_blocked and restore_pending) {
-            restore_pending = false;
-            restore_front = false;
-            markUiDirty();
-        }
-        return;
-    }
+    if (!isActive()) return;
     if (!saveDraft()) {
+        if (front == .selected) buffered_location = front.selected;
+        front = .hidden;
+        restore_pending = false;
         scope_blocked = true;
+        selection_generation +%= 1;
+        selection_waiting = false;
+        markUiDirty();
         if (created and shown) view.show(false);
         shown = false;
         return;
@@ -1681,7 +2006,8 @@ pub fn restoreAfterOverlay() bool {
 }
 
 pub fn init(parent: w.HANDLE) void {
-    if (!enabled or created) return;
+    if (!enabled or created or !ui_store.bindOwner()) return;
+    if (account_len > 0 and !ui_ready and !ui_dirty) _ = loadUiAccount();
     created = view.create(parent, &model, .{ .context = &context, .create = createRoom, .edit = editRoom, .submit = submit, .restart = restart, .draft_changed = draftChanged });
 }
 pub fn resize(parent: w.HANDLE) void {
@@ -1703,8 +2029,14 @@ pub fn deinit() void {
     shown = false;
     _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
     _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_UI);
+    _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_EVIDENCE);
+    _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_DISCOVERY);
+    discovery_waiting = false;
     if (controller) |*c| c.shutdown();
     controller = null;
+    if (desired_layout) |bytes| std.heap.page_allocator.free(bytes);
+    desired_layout = null;
+    desired_account_len = 0;
     if (pending_command) |item| {
         if (item.evidence) |evidence| journal.update(item.scope, &item.id, item.evidence_state, evidence) catch {};
         freePending(item);

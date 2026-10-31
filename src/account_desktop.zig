@@ -1434,8 +1434,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     if (app_state.g_account_base) |old| a.free(old);
     app_state.g_account_base = a.dupe(u8, bytes) catch return;
     if (room_prepare_ok and @import("room_frontend.zig").enabled) {
-        @import("room_frontend.zig").setAccount(reply.account_id);
-        room_layout_applied = @import("room_frontend.zig").setAppliedLayout(to_apply);
+        room_layout_applied = @import("room_frontend.zig").applyAccountLayout(reply.account_id, to_apply);
     }
     for (app_state.shells[0..app_state.shell_count]) |*shell| {
         shell.synced_input = 0;
@@ -1445,6 +1444,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     }
     app_state.g_account_dirty_at = 0;
     app_state.g_account_locked = false;
+    @import("room_frontend.zig").accountReady();
     if (app_state.g_account_local_base) |old| a.free(old);
     app_state.g_account_local_base = if (local_ack) |ack| a.dupe(u8, ack) catch null else null;
     if (!app_state.g_account_bootstrapping) {

@@ -1995,6 +1995,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) {
                     if (workspaceStripHitTest(mx, my)) |ws| {
                         const was_room = @import("room_frontend.zig").isActive();
+                        @import("room_frontend.zig").cancelRestoreForUser();
                         @import("room_frontend.zig").leaveForOtherFront();
                         if (ws == WS_NEW_PILL) newWorkspace() else switchToWorkspace(ws);
                         if (was_room and ws != WS_NEW_PILL) showActiveShellAfterOverlay();
@@ -3118,6 +3119,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_SWITCH_WORKSPACE => {
+            @import("room_frontend.zig").cancelRestoreForUser();
             const was_room = @import("room_frontend.zig").isActive();
             @import("room_frontend.zig").leaveForOtherFront();
             if (app_state.g_inbox_active) closeInbox(hwnd);
@@ -3127,6 +3129,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CYCLE_WORKSPACE => {
+            @import("room_frontend.zig").cancelRestoreForUser();
             const was_room = @import("room_frontend.zig").isActive();
             @import("room_frontend.zig").leaveForOtherFront();
             if (app_state.g_inbox_active) closeInbox(hwnd);
@@ -6355,6 +6358,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     showActiveShellAfterOverlay();
                     if (slot < app_state.g_lws_count) {
                         const was_room = @import("room_frontend.zig").isActive();
+                        @import("room_frontend.zig").cancelRestoreForUser();
                         @import("room_frontend.zig").leaveForOtherFront();
                         switchToWorkspace(slot);
                         if (was_room) showActiveShellAfterOverlay();
@@ -8885,7 +8889,10 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                 debugLog(freeze_recorder.NOTICE_TEXT);
             } else if (crash_recorder.takeRestartNotice()) showHeaderNoticeAscii(crash_recorder.NOTICE_TEXT, 8000, false);
         },
-        .done => return true,
+        .done => {
+            @import("room_frontend.zig").startupSettled();
+            return true;
+        },
     }
     startup_phase = @enumFromInt(@intFromEnum(startup_phase) + 1);
     return false;

@@ -188,6 +188,15 @@ pub const View = struct {
         self.setFocus(if (self.too_small) self.hwnd else if (self.mode == .room) self.composer else self.name_edit);
     }
 
+    pub fn ownsFocus(self: *const View) bool {
+        if (self.hwnd == null or w.IsWindowVisible(self.hwnd) == 0) return false;
+        const focused = w.GetFocus();
+        if (focused == null or (focused != self.hwnd and w.IsChild(self.hwnd, focused) == 0)) return false;
+        const root = w.GetAncestor(self.hwnd, 2);
+        const foreground = w.GetForegroundWindow();
+        return root != null and foreground != null and w.GetAncestor(foreground, 2) == root;
+    }
+
     pub fn showUnavailable(self: *View) void {
         self.result = .unsupported;
         self.invalidate();
@@ -256,9 +265,10 @@ pub const View = struct {
         self.result = result;
         if (result != .pending) self.pending = null;
         if (result == .accepted and (token_value.kind == .create or token_value.kind == .edit)) {
+            const owned_focus = self.ownsFocus();
             self.mode = .room;
             self.layout();
-            self.setFocus(self.composer);
+            if (owned_focus) self.setFocus(self.composer);
         }
         self.invalidate();
     }
