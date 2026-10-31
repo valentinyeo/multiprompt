@@ -20,14 +20,28 @@ var anchor: RECT = std.mem.zeroes(RECT);
 var snapshot: state.AiPaceSnapshot = .{};
 var footer_focused = false;
 var scroll: i32 = 0;
+var hover_open = false;
+var footer_fonts: [5]w.HANDLE = @splat(null);
+
+pub fn resetFooterFonts() void {
+    for (&footer_fonts) |*font| {
+        if (font.* != null) _ = w.DeleteObject(font.*);
+        font.* = null;
+    }
+}
+
+fn footerFont(index: usize, size: i32, weight: i32) w.HANDLE {
+    if (footer_fonts[index] == null) footer_fonts[index] = fonts.create(-px(size), 0, 0, 0, weight, 0, 0, 0, 0, 0, 0, 5, 0, if (weight == 500) L(fonts.UI_MEDIUM_FACE) else null);
+    return footer_fonts[index];
+}
 
 pub fn updateReady() bool {
     return state.g_update_ver_len > 0 and !state.g_update_relaunching;
 }
 
 pub fn versionStripRect() RECT {
-    const pill = @import("capacity.zig").sidebarStickyCardRect();
-    return .{ .left = pill.left + px(10), .top = pill.top - px(22), .right = pill.right, .bottom = pill.top - px(2) };
+    const footer = @import("capacity.zig").sidebarStickyCardRect();
+    return .{ .left = footer.left + px(12), .top = footer.top + px(58), .right = footer.right - px(12), .bottom = footer.top + px(92) };
 }
 
 pub fn versionStripHit(x: i32, y: i32) bool {
@@ -36,18 +50,71 @@ pub fn versionStripHit(x: i32, y: i32) bool {
 
 pub fn paintVersionStrip(dc: w.HANDLE) void {
     if (state.g_hide_sidebar or state.g_sidebar_collapsed) return;
-    const font = fonts.create(-px(11), 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 5, 0, null);
-    defer _ = w.DeleteObject(font);
-    const old = w.SelectObject(dc, font);
-    defer _ = w.SelectObject(dc, old);
-    _ = w.SetTextColor(dc, if (state.g_light_theme) RGB(110, 110, 110) else RGB(90, 90, 90));
-    var buffer: [128]u8 = undefined;
-    const label = if (updateReady())
-        std.fmt.bufPrint(&buffer, "Update ready: v{s} \xc2\xb7 Restart", .{state.g_update_ver[0..state.g_update_ver_len]}) catch "Update ready"
-    else
-        "Multi Bot v" ++ @import("main.zig").APP_VERSION;
     const rect = versionStripRect();
-    text(dc, label, rect, if (state.g_light_theme) RGB(110, 110, 110) else RGB(90, 90, 90), 0);
+    const regular = footerFont(0, 12, 400);
+    const medium = footerFont(1, 13, 500);
+    const semibold = footerFont(2, 13, 600);
+    const old = w.SelectObject(dc, regular);
+    defer _ = w.SelectObject(dc, old);
+    const dim = if (state.g_light_theme) RGB(100, 100, 100) else RGB(138, 138, 138);
+    if (!updateReady()) {
+        text(dc, "Multi Bot v" ++ @import("main.zig").APP_VERSION, .{ .left = rect.left + px(4), .top = rect.top + px(6), .right = rect.right, .bottom = rect.top + px(18) }, dim, 0);
+        return;
+    }
+    smooth.fillRoundRect(dc, rect, px(17), if (state.g_light_theme) RGB(215, 215, 215) else RGB(53, 53, 53));
+    const ink = if (state.g_light_theme) RGB(30, 30, 30) else RGB(242, 242, 242);
+    _ = w.SelectObject(dc, medium);
+    text(dc, "Update ready", .{ .left = rect.left + px(14), .top = rect.top, .right = rect.right - px(90), .bottom = rect.bottom }, ink, 0);
+    smooth.fillRoundRect(dc, .{ .left = rect.right - px(74), .top = rect.top + px(14), .right = rect.right - px(68), .bottom = rect.top + px(20) }, px(3), RGB(80, 150, 255));
+    _ = w.SelectObject(dc, semibold);
+    text(dc, "Restart", .{ .left = rect.right - px(62), .top = rect.top, .right = rect.right - px(14), .bottom = rect.bottom }, ink, w.DT_RIGHT);
+}
+
+pub fn paintSidebarFooter(dc: w.HANDLE) void {
+    if (state.g_hide_sidebar or state.g_sidebar_collapsed) return;
+    const rect = @import("capacity.zig").sidebarStickyCardRect();
+    const background = w.CreateSolidBrush(@import("themes.zig").themeSidebarBg());
+    _ = w.FillRect(dc, &rect, background);
+    _ = w.DeleteObject(background);
+    const track = if (state.g_light_theme) RGB(205, 205, 205) else RGB(46, 46, 46);
+    const divider = RECT{ .left = rect.left, .top = rect.top, .right = rect.right, .bottom = rect.top + @max(1, px(1)) };
+    const brush = w.CreateSolidBrush(track);
+    _ = w.FillRect(dc, &divider, brush);
+    _ = w.DeleteObject(brush);
+    const regular = footerFont(3, 11, 400);
+    const medium = footerFont(4, 11, 500);
+    const old = w.SelectObject(dc, regular);
+    defer _ = w.SelectObject(dc, old);
+    const dim = if (state.g_light_theme) RGB(100, 100, 100) else RGB(138, 138, 138);
+    const normal = if (state.g_light_theme) RGB(55, 55, 55) else RGB(200, 200, 200);
+    const labels = [_][]const u8{ "Claude", "Codex", "Claude 2" };
+    var slots: [3]?state.AiPaceGoal = .{ null, null, null };
+    for (state.g_ai_pace.goals[0..@min(state.g_ai_pace.goal_count, state.g_ai_pace.goals.len)]) |goal| {
+        if (goal.provider == .codex and slots[1] == null) slots[1] = goal else if (goal.provider == .claude) {
+            if (slots[0] == null) slots[0] = goal else if (slots[2] == null) slots[2] = goal;
+        }
+    }
+    const left = rect.left + px(16);
+    const width = @max(0, @divTrunc(rect.right - rect.left - px(32) - 2 * px(10), 3));
+    for (labels, 0..) |label, i| {
+        const x = left + @as(i32, @intCast(i)) * (width + px(10));
+        const label_rect = RECT{ .left = x, .top = rect.top + px(12), .right = x + width, .bottom = rect.top + px(28) };
+        _ = w.SelectObject(dc, regular);
+        text(dc, label, label_rect, dim, 0);
+        const goal = slots[i];
+        const known = if (goal) |g| g.available and g.has_total_used else false;
+        const used: u16 = if (goal) |g| @min(g.total_used_tenths, 1000) else 0;
+        const ink = if (!known) dim else if (used >= 1000) RGB(242, 139, 130) else if (used >= 850) RGB(240, 196, 75) else normal;
+        var value: [24]u8 = undefined;
+        _ = w.SelectObject(dc, medium);
+        text(dc, if (known) telemetry.formatAiPacePercent(&value, used) else "n/a", label_rect, ink, w.DT_RIGHT);
+        if (known) {
+            const bar = RECT{ .left = x, .top = rect.top + px(34), .right = x + width, .bottom = rect.top + px(37) };
+            smooth.fillRoundRect(dc, bar, @max(1, px(2)), track);
+            if (used > 0) smooth.fillRoundRect(dc, .{ .left = x, .top = bar.top, .right = x + @divTrunc(width * @as(i32, used), 1000), .bottom = bar.bottom }, @max(1, px(2)), if (used >= 850) ink else if (state.g_light_theme) RGB(55, 55, 55) else RGB(242, 242, 242));
+        }
+    }
+    paintVersionStrip(dc);
 }
 
 pub fn geometry(client: RECT, pill: RECT, count: usize) RECT {
@@ -183,20 +250,32 @@ pub fn paint(dc: w.HANDLE, client: RECT, pill: RECT, data: *const state.AiPaceSn
 pub fn close() void {
     if (backdrop == null) return;
     var saved = backdrop.?;
+    const was_hover = hover_open;
     backdrop = null;
+    hover_open = false;
     state.g_popup_menu_active = false;
     if (w.GetCapture() == window) _ = w.ReleaseCapture();
     _ = focus.ShowWindow(window, w.SW_HIDE);
     saved.release();
-    if (previous_focus != null and w.IsWindow(previous_focus) != 0) _ = focus.SetFocus(previous_focus);
+    if (!was_hover and previous_focus != null and w.IsWindow(previous_focus) != 0) _ = focus.SetFocus(previous_focus);
     _ = w.InvalidateRect(state.g_main_hwnd, null, 0);
+}
+
+pub fn openHover() void {
+    if (backdrop != null) return;
+    openMode(true);
 }
 
 pub fn open() void {
     if (backdrop != null) {
+        const was_hover = hover_open;
         close();
-        return;
+        if (!was_hover) return;
     }
+    openMode(false);
+}
+
+fn openMode(passive: bool) void {
     const main = state.g_main_hwnd orelse return;
     if (state.g_sidebar_collapsed or state.g_hide_sidebar) return;
     _ = w.GetClientRect(main, &bounds);
@@ -222,31 +301,45 @@ pub fn open() void {
     _ = w.BitBlt(dc, 0, 0, bounds.right, bounds.bottom, screen, origin.x, origin.y, 0x40CC0020);
     _ = w.GdiFlush();
     const pixels = @as([*]u32, @ptrCast(@alignCast(bits.?)))[0 .. @as(usize, @intCast(bounds.right)) * @as(usize, @intCast(bounds.bottom))];
-    for (pixels) |*pixel| {
-        const value = pixel.*;
-        pixel.* = ((((value >> 16) & 255) * 7 / 10) << 16) | ((((value >> 8) & 255) * 7 / 10) << 8) | ((value & 255) * 7 / 10);
+    if (!passive) {
+        for (pixels) |*pixel| {
+            const value = pixel.*;
+            pixel.* = ((((value >> 16) & 255) * 7 / 10) << 16) | ((((value >> 8) & 255) * 7 / 10) << 8) | ((value & 255) * 7 / 10);
+        }
     }
+    hover_open = passive;
     backdrop = .{ .dc = dc, .bitmap = bitmap, .old = old, .width = bounds.right, .height = bounds.bottom };
     if (window == null) window = w.CreateWindowExW(0, L("MultiPromptUsageCard"), L("AI usage this week"), w.WS_CHILD | w.WS_CLIPSIBLINGS, 0, 0, bounds.right, bounds.bottom, main, null, null, null);
     if (window == null) {
         close();
         return;
     }
-    previous_focus = w.GetFocus();
-    focus.cancelShellRefocus(main);
-    state.g_popup_menu_active = true;
+    previous_focus = if (passive) null else w.GetFocus();
+    if (!passive) {
+        focus.cancelShellRefocus(main);
+        state.g_popup_menu_active = true;
+    }
     snapshot = state.g_ai_pace;
     footer_focused = false;
     scroll = 0;
     _ = w.MoveWindow(window, 0, 0, bounds.right, bounds.bottom, 0);
     _ = focus.SetWindowPos(window, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
-    _ = focus.SetFocus(window);
-    _ = w.SetCapture(window);
+    if (passive) {
+        var tracking = w.TRACKMOUSEEVENT{ .cbSize = @sizeOf(w.TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = window, .dwHoverTime = 0 };
+        _ = w.TrackMouseEvent(&tracking);
+    } else {
+        _ = focus.SetFocus(window);
+        _ = w.SetCapture(window);
+    }
     _ = w.InvalidateRect(window, null, 0);
 }
 
 pub fn key(value: usize) bool {
     if (backdrop == null) return false;
+    if (hover_open) {
+        close();
+        return value == w.VK_ESCAPE;
+    }
     switch (value) {
         w.VK_ESCAPE => close(),
         0x09 => {
@@ -280,14 +373,31 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             }
             return 0;
         },
+        w.WM_MOUSEMOVE => {
+            if (hover_open) {
+                const x = @import("startup.zig").GET_X(lp);
+                const y = @import("startup.zig").GET_Y(lp);
+                var card = geometry(bounds, anchor, snapshot.goal_count);
+                card.bottom = anchor.top;
+                if (!inside(card, x, y) and !inside(@import("capacity.zig").sidebarUsageRowRect(), x, y)) close();
+            }
+            return 0;
+        },
         w.WM_LBUTTONDOWN => {
             const x = @import("startup.zig").GET_X(lp);
             const y = @import("startup.zig").GET_Y(lp);
             const card = geometry(bounds, anchor, snapshot.goal_count);
-            if (!inside(card, x, y)) close() else if (x >= card.right - px(110) and y >= card.bottom - px(48) and y < card.bottom - px(22)) {
+            if (hover_open and (inside(@import("capacity.zig").sidebarUsageRowRect(), x, y) or inside(card, x, y))) {
+                close();
+                open();
+            } else if (!inside(card, x, y)) close() else if (x >= card.right - px(110) and y >= card.bottom - px(48) and y < card.bottom - px(22)) {
                 close();
                 _ = focus.PostMessageW(state.g_main_hwnd, w.WM_APP_CHANGELOG_OPEN, 0, 0);
             }
+            return 0;
+        },
+        0x02A3 => {
+            if (hover_open) close();
             return 0;
         },
         w.WM_MOUSEWHEEL => {

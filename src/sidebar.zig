@@ -190,6 +190,7 @@ const SEARCH_MULTIPROMPT_LOGIN_OFFSET = @import("app_state.zig").SEARCH_MULTIPRO
 const SEARCH_SYNC_SIGNOUT_OFFSET = @import("app_state.zig").SEARCH_SYNC_SIGNOUT_OFFSET;
 const SEARCH_LAYOUT_PULL_OFFSET = @import("app_state.zig").SEARCH_LAYOUT_PULL_OFFSET;
 const SEARCH_SYNC_STATUS_OFFSET = @import("app_state.zig").SEARCH_SYNC_STATUS_OFFSET;
+const SEARCH_AI_USAGE_OFFSET = @import("app_state.zig").SEARCH_AI_USAGE_OFFSET;
 const SEARCH_APPROVE_DEVICES_OFFSET = @import("app_state.zig").SEARCH_APPROVE_DEVICES_OFFSET;
 const SEARCH_REMOVE_SERVER_1_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_1_OFFSET;
 const SEARCH_REMOVE_SERVER_2_OFFSET = @import("app_state.zig").SEARCH_REMOVE_SERVER_2_OFFSET;
@@ -2005,6 +2006,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const row_count = if (app_state.g_hide_sidebar) 0 else layoutRows(&rows_arr);
         const column = @import("window_layout.zig").activePaneRects(client_rc).sidebar;
 
+        const sidebar_clip = @import("win32.zig").SaveDC(hdc);
+        _ = @import("win32.zig").IntersectClipRect(hdc, 0, 0, SIDEBAR_W(), @max(0, client_rc.bottom - sidebarStickyCardSpan()));
         for (0..row_count) |ri| {
             const row = rows_arr[ri];
             const y: i32 = row.y - app_state.g_sidebar_scroll;
@@ -2177,13 +2180,16 @@ pub fn paintSidebar(hdc: HANDLE) void {
             }
         }
 
-        paintSidebarStickyStatusCard(hdc, font_status_card);
-        paintSidebarUpdateCard(hdc, font_title, font_status_card);
-        @import("usage_card.zig").paintVersionStrip(hdc);
+        _ = @import("win32.zig").RestoreDC(hdc, sidebar_clip);
+        if (app_state.g_sidebar_collapsed) {
+            paintSidebarStickyStatusCard(hdc, font_status_card);
+        } else {
+            @import("usage_card.zig").paintSidebarFooter(hdc);
+        }
 
         paintWorkspaceStrip(hdc, sidebar_bg);
         @import("workspace_switcher.zig").paintHeader(hdc);
-        paintSidebarStatusCardPopup(hdc, font_title, font_status_card);
+        if (app_state.g_sidebar_collapsed) paintSidebarStatusCardPopup(hdc, font_title, font_status_card);
     }
 
     if (app_state.g_search_active) {
@@ -2363,7 +2369,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_layout_pull = result_idx == SEARCH_LAYOUT_PULL_OFFSET;
                     const is_approve_devices = result_idx == SEARCH_APPROVE_DEVICES_OFFSET;
                     const is_remove_server = result_idx == SEARCH_REMOVE_SERVER_1_OFFSET or result_idx == SEARCH_REMOVE_SERVER_2_OFFSET or result_idx == SEARCH_REMOVE_SERVER_3_OFFSET;
-                    const is_sync_status = result_idx == SEARCH_SYNC_STATUS_OFFSET or is_layout_pull or is_approve_devices or is_remove_server;
+                    const is_ai_usage = result_idx == SEARCH_AI_USAGE_OFFSET;
+                    const is_sync_status = result_idx == SEARCH_SYNC_STATUS_OFFSET or is_layout_pull or is_approve_devices or is_remove_server or is_ai_usage;
                     const is_addfavicon = !is_chat_action and !is_sync_signout and !is_sync_status and result_idx >= SEARCH_ADDFAVICON_OFFSET and result_idx < SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_mobile_toggle = !is_chat_action and !is_addfavicon and !is_sync_signout and !is_sync_status and result_idx >= SEARCH_MOBILE_OFFSET and result_idx < SEARCH_SYNC_SIGNOUT_OFFSET;
                     const is_session_overview_menu = result_idx == SEARCH_SESSION_OVERVIEW_MENU_OFFSET;
@@ -3086,6 +3093,14 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var val_hint = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, if (app_state.g_voice_always_listen == is_voice_always_on) L("current") else L(""), -1, &val_hint, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_ai_usage) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var usage_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, L("AI usage / collapsed status cards"), -1, &usage_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = SelectObject(hdc, palette_hint_font);
+                        var hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, L("Ctrl+Shift+G"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_ladder) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);

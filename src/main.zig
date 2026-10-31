@@ -1975,7 +1975,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         updateCardRelaunch(hwnd);
                         return 0;
                     }
-                    const upd_hit = updateCardHit(mx, my);
+                    const upd_hit = if (app_state.g_sidebar_collapsed) updateCardHit(mx, my) else 0;
                     if (upd_hit != 0) {
                         app_state.g_shell_focused = false;
                         if (upd_hit == 1) updateCardRelaunch(hwnd) else if (upd_hit == 2) updateCardDismiss() else if (upd_hit == 4) updateCardToggleNotes();
@@ -1985,9 +1985,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
                 if (sidebarStickyCardHitTest(my)) {
                     app_state.g_shell_focused = false;
-                    if (!app_state.g_sidebar_collapsed and app_state.g_sidebar_status_card == 2) {
+                    if (app_state.g_sidebar_collapsed) {
+                        cycleSidebarStatusCard(1);
+                    } else if (sidebarStickyCardHoverTest(mx, my)) {
                         @import("telemetry_panel.zig").showSidebarAiUsageMenu();
-                    } else cycleSidebarStatusCard(1);
+                    }
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
@@ -2132,8 +2134,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
             if (pt.x >= 0 and pt.x < SIDEBAR_W() and pt.y >= 0) {
                 const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
-                if (@import("update_card.zig").updateCardScroll(pt.x, pt.y, delta)) return 0;
-                if (sidebarStickyCardHitTest(pt.y)) {
+                if (app_state.g_sidebar_collapsed and @import("update_card.zig").updateCardScroll(pt.x, pt.y, delta)) return 0;
+                if (sidebarStickyCardHitTest(pt.y) and app_state.g_sidebar_collapsed) {
                     cycleSidebarStatusCard(if (delta < 0) 1 else -1);
                     return 0;
                 }
@@ -2190,7 +2192,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_MOUSEMOVE => {
-            const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll)) {
+            const sidebar_hover: ?u32 = if (!app_state.g_hide_sidebar and !app_state.g_sidebar_collapsed and !sidebarStickyCardHitTest(GET_Y(lp)) and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) switch (hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll)) {
                 .tab => |index| index,
                 else => null,
             } else null;
@@ -2209,12 +2211,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                 }
                 if (card_hover) {
+                    @import("usage_card.zig").openHover();
                     var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
                     _ = TrackMouseEvent(&tracking);
                 }
             }
             {
-                const upd_hit = updateCardHit(GET_X(lp), GET_Y(lp));
+                const upd_hit = if (app_state.g_sidebar_collapsed) updateCardHit(GET_X(lp), GET_Y(lp)) else 0;
                 const upd_now: u8 = if (upd_hit == 1 or upd_hit == 2) upd_hit else 0;
                 if (upd_now != app_state.g_update_hover) {
                     app_state.g_update_hover = upd_now;
@@ -2628,7 +2631,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (mx < SIDEBAR_W() and my >= 0) {
                 if (app_state.g_single_window and !app_state.g_sidebar_collapsed and !app_state.g_hide_pills and my < WS_STRIP_H) return 0;
                 if (sidebarStickyCardHitTest(my)) {
-                    if (!app_state.g_sidebar_collapsed and app_state.g_sidebar_status_card == 2) {
+                    if (!app_state.g_sidebar_collapsed and sidebarStickyCardHoverTest(mx, my)) {
                         @import("telemetry_panel.zig").showSidebarAiUsageMenu();
                     }
                     return 0;
@@ -3134,7 +3137,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CYCLE_STATUS_CARD => {
-            cycleSidebarStatusCard(1);
+            if (app_state.g_sidebar_collapsed) cycleSidebarStatusCard(1) else @import("telemetry_panel.zig").showSidebarAiUsageMenu();
             return 0;
         },
         WM_APP_COPY_OR_INTERRUPT => {
@@ -3752,6 +3755,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_APP_SEARCH_OPEN => {
+            @import("usage_card.zig").close();
             app_state.g_search_snippet_mode = false;
             app_state.g_search_snippet_manage_mode = false;
             app_state.g_focus_authorized_hwnd = null;
@@ -4553,6 +4557,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (verboseLoggingEnabled()) {
                     var dbg_cf: [96]u8 = undefined;
                     debugLog(std.fmt.bufPrint(&dbg_cf, "[confirm] sel={d} count={d} target={d} (tabsort_auto={d} manual={d})", .{ app_state.g_search_sel, app_state.g_search_result_count, target, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET }) catch "[confirm fmt-err]");
+                }
+                if (target == app_state.SEARCH_AI_USAGE_OFFSET) {
+                    app_state.g_search_active = false;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = PostMessageW(hwnd, WM_APP_CYCLE_STATUS_CARD, 0, 0);
+                    return 0;
                 }
                 if (target == SEARCH_LAYOUT_PULL_OFFSET) {
                     app_state.g_search_active = false;

@@ -194,6 +194,7 @@ pub fn ensurePaintBackbuffer(hdc: HANDLE, w: i32, h: i32) HANDLE {
 }
 
 pub fn resetFontCache() void {
+    @import("usage_card.zig").resetFooterFonts();
     @import("changelog.zig").resetChangelogLayout();
     for (&app_state.g_font_bot) |*font| {
         if (font.* != null) _ = DeleteObject(font.*);

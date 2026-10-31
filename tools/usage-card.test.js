@@ -15,7 +15,8 @@ test('approved card replaces the plain menu and shows the actual installed versi
   assert.match(card, /5-hour window not reported/);
   assert.match(card, /Grey tick = how much of the week has passed/);
   assert.match(read('src/telemetry_panel.zig'), /pub fn showSidebarAiUsageMenu\(\) void \{\s+@import\("usage_card.zig"\).open\(\)/);
-  assert.match(read('src/sidebar.zig'), /@import\("usage_card.zig"\).paintVersionStrip\(hdc\)/);
+  assert.match(read('src/sidebar.zig'), /@import\("usage_card.zig"\).paintSidebarFooter\(hdc\)/);
+  assert.match(card, /paintVersionStrip\(dc\)/);
   assert.match(read('src/main.zig'), /versionStripHit\(mx, my\)\) \{\s+updateCardRelaunch\(hwnd\)/);
   assert.match(read('src/update_card.zig'), /if \(app_state.g_sidebar_status_card == 2\) return false/);
 });

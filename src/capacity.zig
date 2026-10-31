@@ -239,26 +239,33 @@ fn sidebarAgentSessionBreakdown(host: u8) AgentSessionBreakdown {
 
 pub fn sidebarStickyCardSpan() i32 {
     if (app_state.g_hide_sidebar) return 0;
-    const height = if (app_state.g_sidebar_collapsed) SIDEBAR_STICKY_CARD_COLLAPSED_H else SIDEBAR_STICKY_CARD_H;
-    return uiScaled(height) + (if (app_state.g_sidebar_collapsed) @as(i32, 0) else uiScaled(22)) + @import("window_layout.zig").paneGap() + updateCardSpan();
+    if (!app_state.g_sidebar_collapsed) return uiScaled(104);
+    return uiScaled(SIDEBAR_STICKY_CARD_COLLAPSED_H) + @import("window_layout.zig").paneGap() + updateCardSpan();
 }
 
 pub fn sidebarStickyCardRect() RECT {
     var client: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = GetClientRect(app_state.g_main_hwnd, &client);
-    return @import("window_layout.zig").activePaneRects(client).burn;
+    if (app_state.g_sidebar_collapsed) return @import("window_layout.zig").activePaneRects(client).burn;
+    return .{ .left = 0, .top = @max(0, client.bottom - sidebarStickyCardSpan()), .right = SIDEBAR_W(), .bottom = client.bottom };
+}
+
+pub fn sidebarUsageRowRect() RECT {
+    var rect = sidebarStickyCardRect();
+    rect.bottom = @min(rect.bottom, rect.top + uiScaled(52));
+    return rect;
 }
 
 pub fn sidebarStickyCardHoverTest(mx: i32, my: i32) bool {
     if (app_state.g_hide_sidebar or app_state.g_sidebar_collapsed) return false;
-    const rect = sidebarStickyCardRect();
+    const rect = sidebarUsageRowRect();
     return mx >= rect.left and mx < rect.right and my >= rect.top and my < rect.bottom;
 }
 
 pub fn sidebarStickyCardHitTest(my: i32) bool {
     if (app_state.g_hide_sidebar or my < 0) return false;
     const rect = sidebarStickyCardRect();
-    if (updateCardVisible()) {
+    if (app_state.g_sidebar_collapsed and updateCardVisible()) {
         const ur = updateCardRect();
         if (my >= ur.top and my < ur.bottom) return true;
     }

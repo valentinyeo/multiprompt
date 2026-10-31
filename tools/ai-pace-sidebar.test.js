@@ -72,7 +72,7 @@ test("daily goals remain uncapped and persist through the sanitized snapshot", (
   assert.match(telemetry, /canonicalDeadline/);
 });
 
-test("one-line carousel retains overview/VPS hover while AI opens the existing data menu", () => {
+test("collapsed carousel retains status data and expanded footer opens usage", () => {
   assert.match(source, /const SIDEBAR_STICKY_CARD_H: i32 = 26;/);
   assert.match(source, /const SIDEBAR_STATUS_DETAIL_H: i32 = 222;/);
   assert.match(source, /const SIDEBAR_STICKY_CARD_COLLAPSED_H: i32 = 58;/);
@@ -90,7 +90,7 @@ test("one-line carousel retains overview/VPS hover while AI opens the existing d
   assert.match(popup, /g_sidebar_status_card == 2/);
   assert.doesNotMatch(popup, /paintSidebarAiPaceDetail/);
   assert.match(functionBody(source, "sidebarStatusPopupRect", "paintSidebarStatusCardPopup"), /uiScaled\(SIDEBAR_STATUS_DETAIL_H\)/);
-  const move = source.slice(source.indexOf("WM_MOUSEMOVE => {"), source.indexOf("const upd_hit = updateCardHit(GET_X(lp), GET_Y(lp));"));
+  const move = source.slice(source.indexOf("WM_MOUSEMOVE => {"), source.indexOf("const upd_hit = if (g_sidebar_collapsed) updateCardHit(GET_X(lp), GET_Y(lp))"));
   assert.match(move, /sidebarStickyCardHoverTest\(GET_X\(lp\), GET_Y\(lp\)\)/);
   assert.match(move, /TrackMouseEvent\(&tracking\)/);
   assert.match(source, /0x02A3 => \{\s+if \(g_status_card_hover\) \{\s+g_status_card_hover = false;/);
@@ -124,7 +124,7 @@ test("Ctrl+Shift+G cycles telemetry cards even when the browser owns focus", () 
   const browserIsolationAt = hook.indexOf("if (ctrl and (kb.flags & 0x20) == 0 and kb.vkCode != 0x09");
   assert.ok(shortcutAt >= 0 && shortcutAt < browserIsolationAt);
   assert.match(hook, /PostMessageW\(g_main_hwnd, WM_APP_CYCLE_STATUS_CARD, 0, 0\)/);
-  assert.match(source, /WM_APP_CYCLE_STATUS_CARD => \{[\s\S]*?cycleSidebarStatusCard\(1\)/);
+  assert.match(source, /WM_APP_CYCLE_STATUS_CARD => \{[\s\S]*?g_sidebar_collapsed\) cycleSidebarStatusCard\(1\) else @import\("telemetry_panel.zig"\).showSidebarAiUsageMenu\(\)/);
 });
 
 test("configured rows pair weekly usage with its reset and retain secondary quotas", () => {

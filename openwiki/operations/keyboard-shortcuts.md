@@ -208,7 +208,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+K | Open command palette from any Multi Bot surface, including browser |
 | Ctrl+K → Usage: Sign In to Primary / Secondary Claude Account | Force sign-in one telemetry profile in its own terminal |
 | Ctrl+K → Power Saver: Auto / Always / Off | Choose when background timers, VPS polling, and idle tabs slow down to save power |
-| Ctrl+Shift+G | Cycle Combined, VPS, and Today's AI telemetry cards |
+| Ctrl+Shift+G | Show AI usage; cycle collapsed status cards |
+| Ctrl+K -&gt; AI usage / collapsed status cards | Show AI usage; cycle collapsed status cards |
 | Alt+T | New workspace tmux tab (optional configured program) |
 | Ctrl+K Remind Me | Snooze active tmux/Claude tab via quick presets (or type a time) |
 | Ctrl+H | Remind Me: pick In 1, 2, 3, 6 or 12 hours, This evening, Tomorrow morning or evening, and more |
