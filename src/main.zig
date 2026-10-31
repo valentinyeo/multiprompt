@@ -2152,7 +2152,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
             if (pt.x >= 0 and pt.x < SIDEBAR_W() and pt.y >= 0) {
                 const delta: i16 = @bitCast(@as(u16, @truncate(wp >> 16)));
-                if (app_state.g_sidebar_collapsed and @import("update_card.zig").updateCardScroll(pt.x, pt.y, delta)) return 0;
+                if (@import("update_card.zig").updateCardScroll(pt.x, pt.y, delta)) return 0;
                 if (sidebarStickyCardHitTest(pt.y) and app_state.g_sidebar_collapsed) {
                     cycleSidebarStatusCard(if (delta < 0) 1 else -1);
                     return 0;

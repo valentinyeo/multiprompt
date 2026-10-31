@@ -125,9 +125,8 @@ var notes_height: i32 = 0;
 var last_notes_rect: RECT = std.mem.zeroes(RECT);
 
 fn measureNotes() void {
-    const sticky = sidebarStickyCardRect();
-    const width = @max(1, sticky.right - sticky.left - uiScaled(20));
-    const font = @import("drawing.zig").uiFontStatusCard();
+    const width = @max(1, @import("browser_pane.zig").SIDEBAR_W() - uiScaled(8) - uiScaled(16) - (uiScaled(8) + uiScaled(28)));
+    const font = @import("usage_card.zig").footerFont(3, 12, 400);
     const shown = card_notes.shown(card_expanded);
     if (measured_width == width and measured_font == font and measured_scale == uiScaled(18) and measured_shown == shown and measured_font_gen == app_state.g_font_gen) return;
     const dc = @import("win32.zig").GetDC(app_state.g_main_hwnd);
@@ -158,9 +157,14 @@ fn cardHasToggle() bool {
 
 fn updateCardHeight() i32 {
     measureNotes();
-    const desired = uiScaled(UPDATE_CARD_H) + notes_height + (if (cardHasToggle()) uiScaled(18) else @as(i32, 0));
-    const available = sidebarStickyCardRect().top - @import("window_layout.zig").paneGap() - uiScaled(48);
-    return @min(desired, @max(uiScaled(UPDATE_CARD_H + 36), available));
+    if (card_notes.count == 0) return uiScaled(88);
+    const toggle_height = if (cardHasToggle()) uiScaled(18) else @as(i32, 0);
+    const base = uiScaled(55) + uiScaled(38) + toggle_height;
+    const desired = base + notes_height;
+    var client: RECT = std.mem.zeroes(RECT);
+    if (app_state.g_main_hwnd != null) _ = @import("win32.zig").GetClientRect(app_state.g_main_hwnd, &client);
+    const available = client.bottom - uiScaled(8) - uiScaled(48);
+    return @min(desired, @max(base + uiScaled(18), available));
 }
 
 pub fn updateCardToggleNotes() void {
@@ -179,7 +183,8 @@ pub fn updateCardSpan() i32 {
 pub fn updateCardRect() RECT {
     var client: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = @import("win32.zig").GetClientRect(app_state.g_main_hwnd, &client);
-    return .{ .left = uiScaled(8), .top = client.bottom - uiScaled(96), .right = @import("browser_pane.zig").SIDEBAR_W() - uiScaled(8), .bottom = client.bottom - uiScaled(8) };
+    const bottom = client.bottom - uiScaled(8);
+    return .{ .left = uiScaled(8), .top = bottom - updateCardHeight(), .right = @import("browser_pane.zig").SIDEBAR_W() - uiScaled(8), .bottom = bottom };
 }
 
 fn updateCardButtonRect(card: RECT) RECT {
@@ -191,12 +196,12 @@ fn updateCardCloseRect(card: RECT) RECT {
 }
 
 fn updateCardMoreRect(card: RECT) RECT {
-    const bottom = card.bottom - uiScaled(30);
-    return .{ .left = card.left + uiScaled(10), .top = bottom - uiScaled(18), .right = card.right - uiScaled(10), .bottom = bottom };
+    const bottom = card.bottom - uiScaled(38);
+    return .{ .left = card.left + uiScaled(16), .top = bottom - uiScaled(18), .right = card.right - uiScaled(16), .bottom = bottom };
 }
 
 fn updateCardNotesRect(card: RECT) RECT {
-    return .{ .left = card.left + uiScaled(10), .top = card.top + uiScaled(46), .right = card.right - uiScaled(10), .bottom = if (cardHasToggle()) updateCardMoreRect(card).top else card.bottom - uiScaled(30) };
+    return .{ .left = card.left + uiScaled(16), .top = card.top + uiScaled(55), .right = card.right - uiScaled(16), .bottom = if (cardHasToggle()) updateCardMoreRect(card).top else card.bottom - uiScaled(38) };
 }
 
 pub fn updateCardScroll(x: i32, y: i32, delta: i16) bool {
@@ -221,6 +226,7 @@ pub fn updateCardHit(x: i32, y: i32) u8 {
     if (!ptInRect(card, x, y)) return 0;
     if (ptInRect(updateCardCloseRect(card), x, y)) return 2;
     if (ptInRect(updateCardButtonRect(card), x, y)) return 1;
+    if (cardHasToggle() and ptInRect(updateCardMoreRect(card), x, y)) return 4;
     return 3;
 }
 
@@ -380,6 +386,40 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     const length = std.unicode.utf8ToUtf16Le(&wide, subtitle) catch 0;
     var sub = RECT{ .left = card.left + uiScaled(16), .top = card.top + uiScaled(32), .right = card.right - uiScaled(16), .bottom = card.top + uiScaled(49) };
     _ = @import("win32.zig").DrawTextW(hdc, &wide, @intCast(length), &sub, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+
+    const notes_rect = updateCardNotesRect(card);
+    const viewport_height = @max(0, notes_rect.bottom - notes_rect.top);
+    card_scroll = std.math.clamp(card_scroll, 0, @max(0, notes_height - viewport_height));
+    const saved_dc = @import("win32.zig").SaveDC(hdc);
+    if (saved_dc != 0) {
+        _ = @import("win32.zig").IntersectClipRect(hdc, notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom);
+        var top = notes_rect.top - card_scroll;
+        for (0..card_notes.shown(card_expanded)) |i| {
+            var note_wide: [512]u16 = undefined;
+            const n = std.unicode.utf8ToUtf16Le(&note_wide, card_notes.line(i)) catch continue;
+            var bullet = RECT{ .left = notes_rect.left, .top = top, .right = notes_rect.left + uiScaled(12), .bottom = top + note_heights[i] - uiScaled(4) };
+            const bullet_text = [_]u16{0x2022};
+            _ = @import("win32.zig").DrawTextW(hdc, &bullet_text, 1, &bullet, DT_NOPREFIX);
+            var note = RECT{ .left = card.left + uiScaled(28), .top = top, .right = notes_rect.right, .bottom = top + note_heights[i] - uiScaled(4) };
+            _ = @import("win32.zig").DrawTextW(hdc, &note_wide, @intCast(n), &note, DT_WORDBREAK | DT_NOPREFIX);
+            top += note_heights[i];
+        }
+        _ = @import("win32.zig").RestoreDC(hdc, saved_dc);
+    }
+    if (notes_height > viewport_height and viewport_height > 0) {
+        const thumb_h = @min(viewport_height, @max(uiScaled(8), @divTrunc(viewport_height * viewport_height, notes_height)));
+        const thumb_top = notes_rect.top + @divTrunc(card_scroll * (viewport_height - thumb_h), notes_height - viewport_height);
+        var thumb = RECT{ .left = card.right - uiScaled(9), .top = thumb_top, .right = card.right - uiScaled(7), .bottom = thumb_top + thumb_h };
+        const brush = CreateSolidBrush(RGB(138, 138, 138));
+        _ = @import("win32.zig").FillRect(hdc, &thumb, brush);
+        _ = DeleteObject(brush);
+    }
+    if (cardHasToggle()) {
+        var more_buf: [32]u8 = undefined;
+        const more = if (card_expanded) "Show less" else card_notes.more(&more_buf, false);
+        var more_rect = updateCardMoreRect(card);
+        drawAscii(hdc, more, &more_rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
     const button = updateCardButtonRect(card);
     smooth.fillRoundRect(hdc, button, uiScaled(12), RGB(242, 242, 242));
     _ = SelectObject(hdc, footerFont(4, 12, 600));
