@@ -22,6 +22,7 @@ var snapshot: state.AiPaceSnapshot = .{};
 var footer_focused = false;
 var scroll: i32 = 0;
 var hover_open = false;
+var hover_suppressed_until_row_exit = false;
 var footer_fonts: [5]w.HANDLE = @splat(null);
 
 pub fn resetFooterFonts() void {
@@ -264,16 +265,36 @@ pub fn close() void {
     _ = w.InvalidateRect(state.g_main_hwnd, null, 0);
 }
 
+pub fn updateHoverSuppression() void {
+    if (!hover_suppressed_until_row_exit) return;
+    const main = state.g_main_hwnd orelse return;
+    var point: w.POINT = undefined;
+    if (w.GetCursorPos(&point) != 0 and w.ScreenToClient(main, &point) != 0 and
+        !inside(@import("capacity.zig").sidebarUsageRowRect(), point.x, point.y)) hover_suppressed_until_row_exit = false;
+}
+
+fn dismiss() void {
+    hover_suppressed_until_row_exit = true;
+    close();
+    updateHoverSuppression();
+    if (hover_suppressed_until_row_exit) {
+        var tracking = w.TRACKMOUSEEVENT{ .cbSize = @sizeOf(w.TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = state.g_main_hwnd, .dwHoverTime = 0 };
+        _ = w.TrackMouseEvent(&tracking);
+    }
+}
+
 pub fn openHover() void {
-    if (backdrop != null) return;
+    if (backdrop != null or hover_suppressed_until_row_exit) return;
     openMode(true);
 }
 
 pub fn open() void {
     if (backdrop != null) {
-        const was_hover = hover_open;
+        if (!hover_open) {
+            dismiss();
+            return;
+        }
         close();
-        if (!was_hover) return;
     }
     openMode(false);
 }
@@ -364,18 +385,18 @@ pub fn key(value: usize) bool {
     if (backdrop == null) return false;
     if (hover_open) {
         debugLog("[usage-hover] close on key");
-        close();
+        if (value == w.VK_ESCAPE) dismiss() else close();
         return value == w.VK_ESCAPE;
     }
     switch (value) {
-        w.VK_ESCAPE => close(),
+        w.VK_ESCAPE => dismiss(),
         0x09 => {
             footer_focused = true;
             _ = w.InvalidateRect(window, null, 0);
         },
         0x0D => {
             if (footer_focused) {
-                close();
+                dismiss();
                 _ = focus.PostMessageW(state.g_main_hwnd, w.WM_APP_CHANGELOG_OPEN, 0, 0);
             }
         },
@@ -401,6 +422,7 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             return 0;
         },
         w.WM_MOUSEMOVE => {
+            updateHoverSuppression();
             if (hover_open) {
                 const x = @import("startup.zig").GET_X(lp);
                 const y = @import("startup.zig").GET_Y(lp);
@@ -428,13 +450,14 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
             if (hover_open and (inside(@import("capacity.zig").sidebarUsageRowRect(), x, y) or inside(card, x, y))) {
                 close();
                 open();
-            } else if (!inside(card, x, y)) close() else if (x >= card.right - px(110) and y >= card.bottom - px(48) and y < card.bottom - px(22)) {
-                close();
+            } else if (!inside(card, x, y)) dismiss() else if (x >= card.right - px(110) and y >= card.bottom - px(48) and y < card.bottom - px(22)) {
+                dismiss();
                 _ = focus.PostMessageW(state.g_main_hwnd, w.WM_APP_CHANGELOG_OPEN, 0, 0);
             }
             return 0;
         },
         0x02A3 => {
+            updateHoverSuppression();
             if (hover_open) {
                 var point: w.POINT = undefined;
                 var card = geometry(bounds, anchor, snapshot.goal_count);

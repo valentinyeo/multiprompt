@@ -2170,6 +2170,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         0x02A3 => {
+            @import("usage_card.zig").updateHoverSuppression();
             if (app_state.g_status_card_hover) {
                 app_state.g_status_card_hover = false;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2206,6 +2207,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 _ = TrackMouseEvent(&tracking);
             }
             {
+                @import("usage_card.zig").updateHoverSuppression();
                 const card_hover = sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp));
                 if (card_hover != app_state.g_status_card_hover) {
                     app_state.g_status_card_hover = card_hover;
