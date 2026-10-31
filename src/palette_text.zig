@@ -18,10 +18,24 @@ pub fn keycap(dc: w.HANDLE, text: [*:0]const u16, rc: *w.RECT) void {
     _ = w.DrawTextW(dc, text, -1, rc, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_NOPREFIX);
 }
 
+fn titleCased(text: []const u16) bool {
+    var word_start = true;
+    for (text) |c| {
+        if (c == ' ') {
+            word_start = true;
+            continue;
+        }
+        if (word_start and c >= 'a' and c <= 'z') return false;
+        word_start = false;
+    }
+    return true;
+}
+
 pub fn sentence(text: []const u16, out: []u16) []const u16 {
     var len = @min(text.len, out.len);
     @memcpy(out[0..len], text[0..len]);
     while (len > 0 and (out[len - 1] == '.' or out[len - 1] == 0x2026)) : (len -= 1) {}
+    if (!titleCased(out[0..len])) return out[0..len];
     for (out[0..len], 0..) |*c, i| {
         if (i == 0 or c.* < 'A' or c.* > 'Z') continue;
         if (out[i - 1] == ' ' and i + 1 < len and out[i + 1] >= 'a' and out[i + 1] <= 'z') c.* += 32;
@@ -73,6 +87,9 @@ test "palette labels use sentence case without changing acronyms" {
     var out: [128]u16 = undefined;
     try std.testing.expectEqualSlices(u16, L("New host 1 VPS shell"), sentence(L("New Host 1 VPS Shell"), &out));
     try std.testing.expectEqualSlices(u16, L("Show all sessions"), sentence(L("Show All Sessions..."), &out));
+    try std.testing.expectEqualSlices(u16, L("New Claude chat"), sentence(L("New Claude chat"), &out));
+    try std.testing.expectEqualSlices(u16, L("New Codex chat"), sentence(L("New Codex chat"), &out));
+    try std.testing.expectEqualSlices(u16, L("Commands: Edit commands.json"), sentence(L("Commands: Edit commands.json"), &out));
 }
 
 pub fn footer(dc: w.HANDLE, rc: *const w.RECT) void {

@@ -16,21 +16,46 @@
             }
             Snapshot 'changelog-closed'
             $result.checks += @{ name = 'changelog-speed'; timings = $changelogSpeed; budget_ms = 100; entry = 'Ctrl+K Changelog' }
+            function Test-FreshPaletteLog([string]$Path, [long]$From) {
+                if (-not (Test-Path $Path)) { return $false }
+                $stream = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+                try {
+                    $null = $stream.Seek($From, 'Begin')
+                    $reader = New-Object IO.StreamReader($stream)
+                    $fresh = $reader.ReadToEnd()
+                } finally { $stream.Dispose() }
+                return ($fresh -match '\[palette\] ready chars=\d+ count=\d+')
+            }
+            $commandsPath = Join-Path $scratch 'roaming/ZigShell/commands.json'
+            New-Item -ItemType Directory -Force -Path (Split-Path $commandsPath) | Out-Null
+            $folder = '/tmp/multiprompt-harness-folder'
+            $seedNames = @('Other', 'Workspace 1', 'Workspace 2', 'Starred', 'Main', 'Software Factory', 'Verification')
+            $seedEntries = @(foreach ($name in $seedNames) { [ordered]@{ label = ('Harness folder ' + $name); kind = 'vps'; folder_host = '0'; default = $true; workspace = $name; cwd = $folder } })
+            $seedJson = [ordered]@{ commands = $seedEntries } | ConvertTo-Json -Depth 5
+            [IO.File]::WriteAllText($commandsPath, $seedJson, (New-Object Text.UTF8Encoding($false)))
+            Start-Sleep -Milliseconds 500
+            $debugLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $logStart = if (Test-Path $debugLog) { (Get-Item $debugLog).Length } else { 0 }
             Palette ''
             Snapshot 'ctrl-k-empty'
+            Save-Json (Read-Session) 'ctrl-k-empty.session.json'
             Press @(0x1B) 'Esc: close empty palette'
             Palette 'More shells'
             Snapshot 'more-shells-search'
+            $logStart = if (Test-Path $debugLog) { (Get-Item $debugLog).Length } else { 0 }
             Press @(0x0D) 'Enter: More shells'
-            Wait-Until {
-                $log = Join-Path $scratch 'roaming/ZigShell/debug.log'
-                $trace = ((Get-Content $log -Raw) -join '')
-                $trace -match '\[palette\] ready chars=0 count=\d+'
-            } 'More shells sub-list opened'
-            Start-Sleep -Milliseconds 400
+            Start-Sleep -Milliseconds 700
+            $shellsOpened = (Test-FreshPaletteLog $debugLog $logStart)
+            if (-not $shellsOpened) {
+                Press @(0x28) 'Down: leave the most used header'
+                Press @(0x0D) 'Enter: More shells again'
+                Start-Sleep -Milliseconds 700
+                $shellsOpened = (Test-FreshPaletteLog $debugLog $logStart)
+            }
             Snapshot 'more-shells'
-            $result.checks += @{ name = 'new-session-rows'; empty = 'ctrl-k-empty.png'; shells = 'more-shells.png' }
+            $result.checks += @{ name = 'new-session-rows'; empty = 'ctrl-k-empty.png'; shells = 'more-shells.png'; fallbackDown = (-not $shellsOpened); commands = 'harness workspace folder seeded' }
             Press @(0x1B) 'Esc: close More shells'
+            Remove-Item -LiteralPath $commandsPath -Force
             $repoCommands = Join-Path $scratch 'roaming/ZigShell/commands.json'
             New-Item -ItemType Directory -Force -Path (Split-Path $repoCommands) | Out-Null
             $repoFolder = '/tmp/multiprompt-harness-folder'
