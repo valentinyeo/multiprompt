@@ -16,6 +16,15 @@
             }
             Snapshot 'changelog-closed'
             $result.checks += @{ name = 'changelog-speed'; timings = $changelogSpeed; budget_ms = 100; entry = 'Ctrl+K Changelog' }
+            Palette ''
+            Snapshot 'ctrl-k-empty'
+            Press @(0x1B) 'Esc: close empty palette'
+            Palette 'More shells'
+            Snapshot 'more-shells-search'
+            Press @(0x0D) 'Enter: More shells'
+            Snapshot 'more-shells'
+            Press @(0x1B) 'Esc: close More shells'
+            $result.checks += @{ name = 'new-session-rows'; empty = 'ctrl-k-empty.png'; shells = 'more-shells.png' }
             Palette 'interface'
             Snapshot 'action'
             Press @(0x0D) 'Enter: UI Size: Increase'
