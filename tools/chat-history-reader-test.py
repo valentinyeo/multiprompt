@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -3984,6 +3985,240 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
         commands = [call.args[0] for call in calls.call_args_list]
         self.assertEqual(len([command for command in commands if 'paste-buffer' in command]), 1)
         self.assertTrue(any('C-u' in command for command in commands))
+
+FAKE_AGENT = r'''#!/usr/bin/env python3
+import json, os, sys
+log = os.environ['FAKE_AGENT_LOG']
+mode = os.environ.get('FAKE_AGENT_MODE', 'ok')
+def record(value):
+    with open(log, 'a') as stream:
+        stream.write(json.dumps(value) + '\n')
+        stream.flush()
+record(dict(kind='start', args=sys.argv[1:], pid=os.getpid()))
+sys.stdout.write(json.dumps(dict(type='system', subtype='init', session_id='native-fixture', uuid='u0')) + '\n')
+sys.stdout.flush()
+for raw in sys.stdin:
+    try:
+        line = json.loads(raw)
+    except ValueError:
+        continue
+    record(dict(kind='user', text=line['message']['content'][0]['text']))
+    if mode == 'crash':
+        os._exit(1)
+    sys.stdout.write(json.dumps(dict(type='assistant', message=dict(id='msg-fixture', role='assistant', content=[dict(type='text', text='ok')]), uuid='u1')) + '\n')
+    sys.stdout.flush()
+    if mode == 'silent':
+        continue
+    sys.stdout.write(json.dumps(dict(type='result', subtype='success', stop_reason='end_turn', session_id='native-fixture', usage={})) + '\n')
+    sys.stdout.flush()
+'''
+
+LOCK_PROBE = ("import importlib.util,sys;"
+              "spec=importlib.util.spec_from_file_location('reader',sys.argv[1]);"
+              "module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);"
+              "print(module.host_lock('claude',sys.argv[2]) is None)")
+
+
+class AgentHostTest(unittest.TestCase):
+    provider = 'claude'
+    sid = 'host-fixture-session'
+    tmux = 'fixture-chat'
+    token = 'host_fixture_message_01'
+    text = 'host delivery fixture'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        self.transcript = self.home / '.claude/projects/-work-demo' / (self.sid + '.jsonl')
+        self.transcript.parent.mkdir(parents=True)
+        self.transcript.write_text('')
+        self.agent = self.home / 'fake-agent.py'
+        self.agent.write_text(FAKE_AGENT)
+        self.agent.chmod(0o755)
+        self.log = self.home / 'fake-agent.log'
+        patch.dict(os.environ, dict(FAKE_AGENT_LOG=str(self.log), FAKE_AGENT_MODE='ok', HOME=str(self.home))).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=(self.sid, self.transcript)).start()
+        self.addCleanup(self.stop_hosts)
+
+    def stop_hosts(self):
+        reader.host_stop(self.provider, self.sid, force=True)
+        for path in reader.host_paths(self.provider, self.sid)['root'].glob('*.owner.json'):
+            try:
+                os.kill(json.loads(path.read_text())['pid'], 9)
+            except (OSError, ValueError, KeyError):
+                pass
+
+    def enable(self, mode='ok', **extra):
+        config = dict(enabled=True, tmux=self.tmux, command=[sys.executable, str(self.agent)], cwd=str(self.home))
+        config.update(extra)
+        reader.host_write(reader.host_paths(self.provider, self.sid)['config'], config)
+        os.environ['FAKE_AGENT_MODE'] = mode
+
+    def seed(self, token=None, text=None):
+        token = token or self.token
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("INSERT OR IGNORE INTO message_chats(provider,sid,epoch,seq) VALUES ('claude',?,0,0)", (self.sid,))
+            db.execute("INSERT OR REPLACE INTO shared_messages VALUES (?,?,?,?,?,'hostattempt0001','queued',NULL,NULL,0,?)",
+                       (token, 'claude', self.sid, text or self.text, 1, time.time()))
+        db.close()
+        return token
+
+    def request(self, op, **values):
+        return reader.message_store_request(dict(message_protocol=1, tmux=self.tmux, provider=self.provider,
+                                                 sid=self.sid, op='message_' + op, **values))
+
+    def dispatch(self):
+        return self.request('dispatch')
+
+    def message(self, token=None):
+        return self.request('status', message_id=token or self.token)['message']
+
+    def wait_for(self, predicate, timeout=20):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            value = predicate()
+            if value:
+                return value
+            time.sleep(0.05)
+        errors = reader.host_paths(self.provider, self.sid)['errors']
+        self.fail('timed out waiting for host state; events=%s; stderr=%s; config=%s' % (reader.host_log_tail(self.provider, self.sid), errors.read_text()[-2000:] if errors.exists() else None, reader.host_paths(self.provider, self.sid)['config'].read_text() if reader.host_paths(self.provider, self.sid)['config'].exists() else None))
+
+    def agent_rows(self, kind):
+        try:
+            rows = [json.loads(line) for line in self.log.read_text().splitlines() if line.strip()]
+        except OSError:
+            return []
+        return [row for row in rows if row.get('kind') == kind]
+
+    def user_lines(self):
+        return [row['text'] for row in self.agent_rows('user')]
+
+    def host_events(self, name):
+        reader.host_log_tail(self.provider, self.sid, 1)
+        try:
+            rows = [json.loads(line) for line in reader.host_paths(self.provider, self.sid)['log'].read_text().splitlines()]
+        except OSError:
+            return []
+        return [row for row in rows if row.get('event') == name]
+
+    def requeue(self, token=None):
+        token = token or self.token
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("UPDATE shared_messages SET state='queued',deadline=NULL WHERE id=?", (token,))
+        db.close()
+
+    def test_host_delivers_once_with_receipt(self):
+        self.enable()
+        token = self.seed()
+        self.assertIsNone(self.dispatch()['message'])
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        self.assertEqual(self.user_lines(), [self.text])
+        db = reader.message_store_db(self.tmux)
+        attempt = db.execute("SELECT id,outcome,binding FROM message_attempts WHERE provider='claude' AND sid=?", (self.sid,)).fetchone()
+        facts = [json.loads(body) for (body,) in db.execute("SELECT body FROM connector_facts WHERE provider='claude' AND sid=?", (self.sid,))]
+        db.close()
+        self.assertEqual(attempt[0], token)
+        self.assertEqual(attempt[1], 'sent')
+        self.assertEqual(json.loads(attempt[2])['mode'], 'stream_json_user_line')
+        self.assertTrue(any(fact['kind'] == 'accepted' and fact['id'] == token for fact in facts))
+        self.assertEqual(len(self.host_events('delivered')), 1)
+        self.assertEqual(len(self.host_events('accepted')), 1)
+
+    def test_host_message_worker_hands_owned_chat_to_host(self):
+        self.enable()
+        self.seed()
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("INSERT OR REPLACE INTO message_locators VALUES ('claude',?,?)", (self.sid, self.tmux))
+        db.close()
+        worker = threading.Thread(target=reader.message_worker, args=(self.tmux, self.provider, self.sid), daemon=True)
+        worker.start()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        worker.join(timeout=20)
+        self.assertEqual(self.user_lines(), [self.text])
+
+    def test_host_retry_is_idempotent_by_message_id(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        self.requeue()
+        self.dispatch()
+        self.wait_for(lambda: len(self.host_events('delivered')) >= 1)
+        time.sleep(1.0)
+        self.assertEqual(self.user_lines(), [self.text])
+        self.assertEqual(len(self.host_events('delivered')), 1)
+
+    def test_host_lock_refuses_second_owner(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: reader.host_owned(self.provider, self.sid))
+        self.assertIsNone(reader.host_lock(self.provider, self.sid))
+        self.assertEqual(reader.host_start(self.provider, self.sid)['status'], 'already')
+        probe = subprocess.run([sys.executable, '-c', LOCK_PROBE, str(ROOT / 'src/chat_history_reader.py'), self.sid],
+                               capture_output=True, text=True, env=dict(os.environ), timeout=60)
+        self.assertEqual(probe.stdout.strip(), 'True', probe.stderr)
+
+    def test_host_handover_releases_lock(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: reader.host_owned(self.provider, self.sid))
+        self.assertEqual(reader.host_handover(self.provider, self.sid)['status'], 'handover')
+        self.assertFalse(reader.host_owned(self.provider, self.sid))
+        self.assertEqual(reader.host_status(self.provider, self.sid)['owner'], 'terminal')
+        self.assertFalse(reader.host_paths(self.provider, self.sid)['socket'].exists())
+        handle = reader.host_lock(self.provider, self.sid)
+        self.assertIsNotNone(handle, 'handover must release the owner lock')
+        reader.host_release(handle)
+
+    def test_host_crash_restart_never_sends_twice(self):
+        self.enable(mode='crash')
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: self.user_lines() == [self.text])
+        self.wait_for(lambda: not reader.host_owned(self.provider, self.sid))
+        self.assertEqual(len(self.host_events('delivered')), 1)
+        os.environ['FAKE_AGENT_MODE'] = 'ok'
+        self.requeue()
+        self.dispatch()
+        self.wait_for(lambda: reader.host_owned(self.provider, self.sid))
+        time.sleep(1.0)
+        self.assertEqual(self.user_lines(), [self.text])
+        self.assertEqual(len(self.host_events('delivered')), 1)
+
+    def test_host_default_off_keeps_terminal_delivery(self):
+        self.seed()
+        self.assertFalse(reader.host_enabled(self.provider, self.sid))
+        sources = {name: base64.b64encode((ROOT / 'src/chat_connectors' / (name + '.py')).read_bytes()).decode()
+                   for name in ('claude', 'codex')}
+        with patch.object(reader, 'CONNECTOR_SOURCES', sources, create=True), \
+                patch.object(reader, 'send_response_preserve_draft', return_value=dict(status='sent')) as send:
+            reply = self.dispatch()
+        send.assert_called_once()
+        self.assertEqual(reply['handoff'], 'sent')
+        self.assertEqual(self.user_lines(), [])
+        self.assertFalse(reader.host_owned(self.provider, self.sid))
+        self.assertFalse(reader.host_paths(self.provider, self.sid)['socket'].exists())
+
+    def test_host_cli_status_and_disable(self):
+        self.enable()
+        status = reader.host_cli(['status', self.provider, self.sid])
+        self.assertTrue(status['enabled'])
+        self.assertEqual(status['tmux'], self.tmux)
+        self.assertEqual(reader.host_cli(['disable', self.provider, self.sid])['status'], 'disabled')
+        self.assertFalse(reader.host_enabled(self.provider, self.sid))
+        self.assertFalse(reader.host_cli(['status', self.provider, self.sid])['enabled'])
+        self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux])['status'], 'enabled')
+        self.assertTrue(reader.host_enabled(self.provider, self.sid))
+        self.assertEqual(reader.host_cli(['status', 'codex', self.sid])['status'], 'refused')
+
 
 if __name__ == '__main__':
     unittest.main()

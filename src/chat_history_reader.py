@@ -2241,6 +2241,730 @@ def import_legacy_messages(db, sid, transcript, epoch):
     db.execute('INSERT OR IGNORE INTO legacy.v1_admission VALUES (?)', (sid,))
 
 
+HOST_PROVIDERS = ('claude',)
+HOST_IDLE_SECONDS = 300
+HOST_DELIVERY_TIMEOUT = 15
+HOST_INFLIGHT_TIMEOUT = 900
+HOST_STOP_GRACE = 5.0
+HOST_LINE_LIMIT = 4 * 1024 * 1024
+HOST_LOG_TAIL = 6
+HOST_BACKOFF_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
+HOST_EXIT_REASONS = {1: "owner_busy", 2: "unsupported_provider", 3: "host_disabled", 4: "host_error"}
+HOST_CHILDREN = []
+
+
+def host_key(provider, sid):
+    return hashlib.sha256((provider + ":" + sid).encode()).hexdigest()[:32]
+
+
+def host_socket_root():
+    import tempfile
+    root = Path(tempfile.gettempdir()) / ("mp-agent-host-" + str(getattr(os, "getuid", lambda: 0)()))
+    if root.is_dir():
+        root.chmod(0o700)
+    else:
+        root.mkdir(mode=0o700)
+    return root
+
+
+def host_paths(provider, sid):
+    root = HOME / ".local/state/multiprompt/agent-host"
+    if root.is_dir():
+        root.chmod(0o700)
+    else:
+        root.mkdir(mode=0o700, parents=True)
+    key = host_key(provider, sid)
+    return dict(root=root, key=key, config=root / (key + ".config.json"), lock=root / (key + ".owner.lock"),
+                owner=root / (key + ".owner.json"), socket=host_socket_root() / (key + ".sock"),
+                state=root / (key + ".state.json"), backoff=root / (key + ".backoff"),
+                log=root / (key + ".events.log"), errors=root / (key + ".stderr.log"))
+
+
+def host_identity(provider, sid):
+    return (isinstance(provider, str) and provider in HOST_PROVIDERS and isinstance(sid, str)
+            and SESSION_ID.fullmatch(sid) is not None)
+
+
+def host_read(path):
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def host_write(path, value):
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = path.with_name("." + path.name + "." + str(os.getpid()) + ".tmp")
+    handle = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(value, separators=(",", ":"), sort_keys=True))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        os.chmod(path, 0o600)
+    finally:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+
+
+def host_config(provider, sid):
+    if not host_identity(provider, sid):
+        return None
+    config = host_read(host_paths(provider, sid)["config"])
+    return config if isinstance(config, dict) and config.get("enabled") is True else None
+
+
+def host_enabled(provider, sid):
+    return host_config(provider, sid) is not None
+
+
+def host_command(provider, sid):
+    config = host_config(provider, sid) or {}
+    command = config.get("command")
+    parts = command if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command) else ["claude"]
+    extra = config.get("args")
+    return parts + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
+
+
+def host_cwd(provider, sid):
+    config = host_config(provider, sid) or {}
+    cwd = config.get("cwd")
+    return str(cwd) if isinstance(cwd, str) and cwd else str(HOME)
+
+
+def host_located_chat(provider, sid):
+    import sqlite3
+    from contextlib import closing
+    path = message_store_path()
+    if not path.is_file():
+        return None
+    try:
+        with closing(sqlite3.connect(path)) as db:
+            row = db.execute("SELECT tmux FROM message_locators WHERE provider=? AND sid=?", (provider, sid)).fetchone()
+    except sqlite3.Error:
+        return None
+    return row[0] if row else None
+
+
+def host_chat_name(provider, sid):
+    config = host_config(provider, sid) or {}
+    tmux = config.get("tmux")
+    if isinstance(tmux, str) and TMUX_NAME.fullmatch(tmux):
+        return tmux
+    located = host_located_chat(provider, sid)
+    return located if isinstance(located, str) and TMUX_NAME.fullmatch(located) else None
+
+
+def host_lock(provider, sid, wait=False):
+    import fcntl
+    handle = host_paths(provider, sid)["lock"].open("a")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX if wait else fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return handle
+    except BlockingIOError:
+        handle.close()
+        return None
+    except OSError:
+        handle.close()
+        raise
+
+
+def host_release(handle):
+    if handle is None:
+        return
+    import fcntl
+    try:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+    finally:
+        handle.close()
+
+
+def host_owner(provider, sid):
+    owner = host_read(host_paths(provider, sid)["owner"])
+    if not isinstance(owner, dict) or owner.get("owner") not in ("host", "terminal"):
+        return None
+    if owner.get("owner") == "host" and (type(owner.get("pid")) is not int or owner["pid"] <= 0):
+        return None
+    return owner
+
+
+def host_alive(provider, sid):
+    owner = host_owner(provider, sid)
+    if not owner:
+        return False
+    if owner["owner"] != "host":
+        return True
+    try:
+        os.kill(owner["pid"], 0)
+        return True
+    except OSError:
+        return False
+
+
+def host_owned(provider, sid):
+    owner = host_owner(provider, sid)
+    return bool(owner) and owner["owner"] == "host" and host_alive(provider, sid)
+
+
+def host_clear_stale(provider, sid):
+    paths = host_paths(provider, sid)
+    for name in ("socket", "owner"):
+        try:
+            paths[name].unlink()
+        except OSError:
+            pass
+
+
+def host_log(provider, sid, event, detail=None):
+    line = json.dumps(dict(at=round(time.time(), 3), event=event, detail=detail), separators=(",", ":")) + "\n"
+    try:
+        with host_paths(provider, sid)["log"].open("a", encoding="utf-8") as stream:
+            stream.write(line)
+    except OSError:
+        pass
+
+
+def host_log_tail(provider, sid, limit=HOST_LOG_TAIL):
+    try:
+        lines = host_paths(provider, sid)["log"].read_text(encoding="utf-8").strip().splitlines()[-limit:]
+    except (OSError, UnicodeError):
+        return []
+    events = []
+    for line in lines:
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            events.append(value)
+    return events
+
+
+def host_backoff(provider, sid):
+    saved = host_read(host_paths(provider, sid)["backoff"])
+    if not isinstance(saved, dict) or type(saved.get("until")) not in (int, float):
+        return 0.0
+    return max(0.0, saved["until"] - time.time())
+
+
+def host_backoff_fail(provider, sid):
+    saved = host_read(host_paths(provider, sid)["backoff"]) or {}
+    previous = saved.get("delay") if type(saved.get("delay")) in (int, float) else 0.0
+    delay = next((step for step in HOST_BACKOFF_STEPS if step > previous), HOST_BACKOFF_STEPS[-1])
+    host_write(host_paths(provider, sid)["backoff"], dict(delay=delay, until=time.time() + delay))
+    return delay
+
+
+def host_backoff_clear(provider, sid):
+    try:
+        host_paths(provider, sid)["backoff"].unlink()
+    except OSError:
+        pass
+
+
+def host_request(provider, sid, request, timeout=HOST_DELIVERY_TIMEOUT):
+    import socket as module
+    client = module.socket(module.AF_UNIX, module.SOCK_STREAM)
+    client.settimeout(timeout)
+    try:
+        client.connect(str(host_paths(provider, sid)["socket"]))
+        client.sendall((json.dumps(request, separators=(",", ":")) + "\n").encode("utf-8"))
+        buffer = b""
+        while b"\n" not in buffer and len(buffer) <= 65536:
+            chunk = client.recv(65536)
+            if not chunk:
+                break
+            buffer += chunk
+        if not buffer.strip():
+            return dict(status="unavailable", reason="host_closed")
+        reply = json.loads(buffer.split(b"\n", 1)[0].decode("utf-8"))
+        return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
+    except (OSError, ValueError, UnicodeError):
+        return dict(status="unavailable", reason="host_unreachable")
+    finally:
+        client.close()
+
+
+def host_spawn(provider, sid, source):
+    bootstrap = ("import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();"
+                 "exec(compile(s,'<agent-host>','exec'),dict(__name__='__main__',READER_SOURCE=s))")
+    errors = host_paths(provider, sid)["errors"].open("ab")
+    try:
+        child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap, "--agent-host", provider, sid],
+                                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errors,
+                                 start_new_session=True)
+    finally:
+        errors.close()
+    try:
+        child.stdin.write(base64.b64encode(source.encode("utf-8")) + b"\n")
+        child.stdin.flush()
+    finally:
+        child.stdin.close()
+    HOST_CHILDREN[:] = [running for running in HOST_CHILDREN if running.poll() is None][-7:] + [child]
+    return child
+
+
+def host_start(provider, sid, source=None):
+    if not host_identity(provider, sid):
+        return dict(status="refused", reason="unsupported_provider")
+    if not host_enabled(provider, sid):
+        return dict(status="refused", reason="host_disabled")
+    if host_alive(provider, sid) and host_request(provider, sid, dict(op="ping"), timeout=2).get("status") == "ok":
+        return dict(status="already", reason="host_running", pid=host_owner(provider, sid)["pid"])
+    host_clear_stale(provider, sid)
+    child = host_spawn(provider, sid, source or globals().get("READER_SOURCE") or "")
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        reply = host_request(provider, sid, dict(op="ping"), timeout=2)
+        if reply.get("status") == "ok":
+            host_log(provider, sid, "externally_started")
+            return dict(status="started", pid=reply.get("pid"))
+        exited = child.poll()
+        if exited is not None:
+            host_clear_stale(provider, sid)
+            return dict(status="error", reason=HOST_EXIT_REASONS.get(exited, "host_exited"), code=exited)
+        time.sleep(0.2)
+    return dict(status="error", reason="host_timeout")
+
+
+def host_stop(provider, sid, force=False):
+    if not host_identity(provider, sid):
+        return dict(status="refused", reason="unsupported_provider")
+    owner = host_owner(provider, sid)
+    reply = host_request(provider, sid, dict(op="stop"), timeout=HOST_STOP_GRACE + 2)
+    pid = owner["pid"] if isinstance(owner, dict) and owner.get("owner") == "host" else None
+    if type(pid) is int and pid > 0 and (reply.get("status") != "ok" or host_alive(provider, sid)):
+        for _ in range(int(HOST_STOP_GRACE * 8)):
+            if not host_alive(provider, sid):
+                break
+            time.sleep(0.125)
+    if type(pid) is int and pid > 0 and host_alive(provider, sid):
+        try:
+            os.kill(pid, 9 if force else 15)
+        except OSError:
+            pid = None
+        for _ in range(int(HOST_STOP_GRACE * 8)):
+            if not host_alive(provider, sid):
+                break
+            time.sleep(0.125)
+    host_clear_stale(provider, sid)
+    return dict(status="stopped")
+
+
+def host_handover(provider, sid):
+    result = host_stop(provider, sid)
+    host_write(host_paths(provider, sid)["owner"], dict(owner="terminal", at=time.time()))
+    host_log(provider, sid, "handover", dict(previous=result.get("status")))
+    return dict(status="handover", previous=result.get("status"))
+
+
+def host_deliver(provider, sid, token, attempt, epoch, text):
+    request = dict(op="deliver", id=token, attempt=attempt, epoch=epoch, text=text)
+    reply = host_request(provider, sid, request) if host_owned(provider, sid) else dict(status="unavailable")
+    if reply.get("status") in ("unavailable", "busy") or reply.get("reason") == "host_unreachable":
+        if host_enabled(provider, sid) and host_start(provider, sid).get("status") in ("started", "already"):
+            reply = host_request(provider, sid, request)
+    return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
+
+
+def host_apply(provider, sid, tmux, facts):
+    from contextlib import closing
+    with closing(message_store_db(tmux)) as db, db:
+        db.execute("BEGIN IMMEDIATE")
+        chat = db.execute("SELECT epoch FROM message_chats WHERE provider=? AND sid=?", (provider, sid)).fetchone()
+        if not chat:
+            return False
+        saved = db.execute("SELECT state FROM connector_states WHERE provider=? AND sid=?", (provider, sid)).fetchone()
+        state = json.loads(saved[0]) if saved else {}
+        message_apply_connector(db, provider, sid, chat[0], dict(state=state, facts=facts))
+    return True
+
+
+def host_attempt(provider, sid, tmux, token, attempt, epoch, text, binding, outcome=None):
+    key = dict(provider=provider, sid=sid, id=token, attempt=attempt, epoch=epoch,
+               text_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest())
+    if outcome is None:
+        return attempt_prepare(tmux, provider, sid, key, binding)
+    attempt_finish(tmux, provider, sid, key, outcome)
+    return None
+
+
+def host_state_write(provider, sid, state):
+    host_write(host_paths(provider, sid)["state"], state)
+
+
+def host_transcript_exists(provider, sid):
+    try:
+        return conversation_path(provider, sid, host_cwd(provider, sid)) is not None
+    except (OSError, ValueError):
+        return False
+
+
+def host_agent_start(provider, sid):
+    command = host_command(provider, sid) + ["--print", "--input-format", "stream-json",
+                                            "--output-format", "stream-json", "--verbose"]
+    command += ["--resume", sid] if host_transcript_exists(provider, sid) else ["--session-id", sid]
+    return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                            cwd=host_cwd(provider, sid), start_new_session=True)
+
+
+def host_agent_stop(agent):
+    if agent is None:
+        return
+    try:
+        agent.stdin.close()
+    except (OSError, ValueError):
+        pass
+    try:
+        agent.wait(timeout=HOST_STOP_GRACE)
+    except subprocess.TimeoutExpired:
+        try:
+            agent.kill()
+            agent.wait(timeout=HOST_STOP_GRACE)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def host_written(state):
+    written = state.get("written")
+    if not isinstance(written, dict):
+        written = {}
+        state["written"] = written
+    return written
+
+
+def host_session_state(provider, sid):
+    state = host_read(host_paths(provider, sid)["state"])
+    return state if isinstance(state, dict) else {}
+
+
+def host_refuse(reason, **extra):
+    return dict(status="refused", reason=reason, **extra)
+
+
+def host_handle_request(provider, sid, tmux, session, request):
+    operation = request.get("op")
+    if operation == "ping":
+        inflight = session.get("inflight")
+        return dict(status="ok", pid=os.getpid(), sid=sid, tmux=tmux,
+                    inflight=inflight.get("id") if isinstance(inflight, dict) else None)
+    if operation == "stop":
+        session["stop"] = True
+        return dict(status="ok")
+    if operation != "deliver":
+        return dict(status="error", reason="invalid_op")
+    token, attempt, epoch, text = request.get("id"), request.get("attempt"), request.get("epoch"), request.get("text")
+    if not isinstance(text, str) or not text.strip() or "\x00" in text:
+        return host_refuse("invalid_text")
+    if (not isinstance(token, str) or re.fullmatch(r"[A-Za-z0-9_-]{16,80}", token) is None
+            or not isinstance(attempt, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", attempt)
+            or type(epoch) is not int):
+        return host_refuse("invalid_message")
+    written = host_written(session["state"])
+    seen = written.get(token)
+    if isinstance(seen, dict) and seen.get("epoch") == epoch:
+        return dict(status="duplicate", reason="already_written", attempt=seen.get("attempt"))
+    if isinstance(session.get("inflight"), dict):
+        return dict(status="busy", reason="turn_in_flight")
+    if tmux is None:
+        return host_refuse("no_chat")
+    binding = dict(v=1, mode="stream_json_user_line", host=os.getpid(), session=sid)
+    try:
+        claim = host_attempt(provider, sid, tmux, token, attempt, epoch, text, binding)
+    except (OSError, ValueError):
+        return dict(status="error", reason="attempt_prepare_failed")
+    if claim.get("status") == "existing":
+        stored = claim.get("binding") if isinstance(claim.get("binding"), dict) else binding
+        written[token] = dict(attempt=attempt, epoch=epoch, accepted=False, at=time.time(),
+                              mode=stored.get("mode"))
+        host_state_write(provider, sid, session["state"])
+        return dict(status="duplicate", reason="attempt_exists")
+    if claim.get("status") != "claimed":
+        return host_refuse("attempt_unavailable")
+    line = json.dumps(dict(type="user", message=dict(role="user", content=[dict(type="text", text=text)])),
+                      separators=(",", ":")) + "\n"
+    try:
+        session["agent"].stdin.write(line.encode("utf-8"))
+        session["agent"].stdin.flush()
+    except (OSError, ValueError):
+        try:
+            host_attempt(provider, sid, tmux, token, attempt, epoch, text, binding, "not_sent")
+        except (OSError, ValueError):
+            pass
+        return host_refuse("stdin_write_failed")
+    try:
+        host_attempt(provider, sid, tmux, token, attempt, epoch, text, binding, "sent")
+    except (OSError, ValueError):
+        pass
+    written[token] = dict(attempt=attempt, epoch=epoch, accepted=False, at=time.time(),
+                          mode="stream_json_user_line")
+    session["inflight"] = dict(id=token, attempt=attempt, epoch=epoch, at=time.time(), accepted=False)
+    session["state"]["inflight"] = session["inflight"]
+    host_state_write(provider, sid, session["state"])
+    host_log(provider, sid, "delivered", dict(id=token, attempt=attempt))
+    return dict(status="sent")
+
+
+def host_accept(provider, sid, tmux, session, event):
+    inflight = session.get("inflight")
+    if not isinstance(inflight, dict) or inflight.get("accepted"):
+        return
+    inflight["accepted"] = True
+    digest = hashlib.sha256(("host:" + sid + ":" + inflight["id"] + ":" + inflight["attempt"]).encode()).hexdigest()
+    fact = dict(kind="accepted", sid=sid, id=inflight["id"], attempt=inflight["attempt"],
+                event_id="host:accepted:" + digest, provenance="stream_json_turn_start")
+    applied = False
+    if tmux is not None:
+        try:
+            applied = host_apply(provider, sid, tmux, [fact])
+        except (OSError, ValueError):
+            applied = False
+    recorded = host_written(session["state"]).get(inflight["id"])
+    if isinstance(recorded, dict):
+        recorded["accepted"] = True
+    session["state"]["inflight"] = inflight
+    host_state_write(provider, sid, session["state"])
+    host_log(provider, sid, "accepted", dict(id=inflight["id"], attempt=inflight["attempt"],
+                                            verified=applied, source=event.get("type")))
+
+
+def host_agent_event(provider, sid, tmux, session, raw):
+    try:
+        event = json.loads(raw)
+    except (ValueError, UnicodeError):
+        return
+    if not isinstance(event, dict):
+        return
+    kind = event.get("type")
+    inflight = session.get("inflight")
+    if kind == "system" and event.get("subtype") == "init":
+        if isinstance(event.get("session_id"), str):
+            session["state"]["native_session"] = event["session_id"]
+        host_state_write(provider, sid, session["state"])
+        host_log(provider, sid, "init", dict(session=event.get("session_id")))
+        return
+    if kind == "assistant":
+        host_accept(provider, sid, tmux, session, event)
+        return
+    if kind == "result":
+        if isinstance(inflight, dict) and not inflight.get("accepted"):
+            host_accept(provider, sid, tmux, session, event)
+        session["state"]["result"] = dict(subtype=event.get("subtype"), at=time.time())
+        session["state"]["inflight"] = None
+        session["inflight"] = None
+        host_state_write(provider, sid, session["state"])
+        host_log(provider, sid, "turn_done", dict(id=inflight.get("id") if isinstance(inflight, dict) else None,
+                                                  subtype=event.get("subtype")))
+
+
+def host_agent_read(provider, sid, tmux, session, chunk):
+    if not chunk:
+        return False
+    session["buffer"] += chunk
+    while b"\n" in session["buffer"]:
+        raw, session["buffer"] = session["buffer"].split(b"\n", 1)
+        raw = raw.strip()
+        if raw:
+            host_agent_event(provider, sid, tmux, session, raw.decode("utf-8", "replace"))
+    if len(session["buffer"]) > HOST_LINE_LIMIT:
+        session["buffer"] = b""
+    return True
+
+
+def host_accept_client(provider, sid, tmux, session, server):
+    import socket as module
+    try:
+        connection, _ = server.accept()
+    except OSError:
+        return
+    reply = dict(status="error", reason="no_request")
+    with connection:
+        connection.settimeout(HOST_DELIVERY_TIMEOUT)
+        buffer = b""
+        try:
+            while b"\n" not in buffer and len(buffer) <= 65536:
+                chunk = connection.recv(65536)
+                if not chunk:
+                    break
+                buffer += chunk
+            if buffer.strip():
+                request = json.loads(buffer.split(b"\n", 1)[0].decode("utf-8"))
+                if isinstance(request, dict):
+                    reply = host_handle_request(provider, sid, tmux, session, request)
+        except (OSError, ValueError, UnicodeError):
+            reply = dict(status="error", reason="invalid_request")
+        try:
+            connection.sendall((json.dumps(reply, separators=(",", ":")) + "\n").encode("utf-8"))
+        except OSError:
+            pass
+
+
+def host_loop(provider, sid, tmux, session, server, agent):
+    import selectors
+    session.update(agent=agent, inflight=None, buffer=b"", stop=False, idle=time.time())
+    with selectors.DefaultSelector() as selector:
+        selector.register(server, selectors.EVENT_READ, "client")
+        selector.register(agent.stdout, selectors.EVENT_READ, "agent")
+        while not session["stop"]:
+            inflight = session.get("inflight")
+            if isinstance(inflight, dict) and time.time() - inflight.get("at", 0) > HOST_INFLIGHT_TIMEOUT:
+                session["inflight"] = None
+                session["state"]["inflight"] = None
+                host_state_write(provider, sid, session["state"])
+                host_log(provider, sid, "inflight_timeout", dict(id=inflight.get("id")))
+            if not isinstance(session.get("inflight"), dict) and time.time() - session["idle"] >= HOST_IDLE_SECONDS:
+                host_log(provider, sid, "idle_stop")
+                return
+            for key, _ in selector.select(1.0):
+                if key.data == "agent":
+                    try:
+                        chunk = agent.stdout.read1(65536)
+                    except (OSError, ValueError):
+                        return
+                    if not host_agent_read(provider, sid, tmux, session, chunk):
+                        host_log(provider, sid, "agent_closed")
+                        return
+                else:
+                    session["idle"] = time.time()
+                    host_accept_client(provider, sid, tmux, session, server)
+
+
+def host_main(provider, sid):
+    import socket as module
+    if not host_identity(provider, sid):
+        return 2
+    if not host_enabled(provider, sid):
+        return 3
+    tmux = host_chat_name(provider, sid)
+    lock = host_lock(provider, sid)
+    if lock is None:
+        return 1
+    paths = host_paths(provider, sid)
+    server = None
+    agent = None
+    try:
+        try:
+            paths["socket"].unlink()
+        except OSError:
+            pass
+        state = host_session_state(provider, sid)
+        state.update(dict(provider=provider, sid=sid, tmux=tmux, pid=os.getpid(), started=time.time()))
+        host_written(state)
+        host_write(paths["owner"], dict(owner="host", pid=os.getpid(), at=time.time(), tmux=tmux))
+        host_state_write(provider, sid, state)
+        host_log(provider, sid, "start", dict(tmux=tmux))
+        server = module.socket(module.AF_UNIX, module.SOCK_STREAM)
+        server.bind(str(paths["socket"]))
+        os.chmod(paths["socket"], 0o600)
+        server.listen(8)
+        agent = host_agent_start(provider, sid)
+        host_log(provider, sid, "agent_started", dict(pid=agent.pid))
+        host_loop(provider, sid, tmux, dict(state=state), server, agent)
+        return 0
+    except (OSError, ValueError) as error:
+        host_log(provider, sid, "host_error", dict(error=type(error).__name__))
+        return 4
+    finally:
+        host_agent_stop(agent)
+        if server is not None:
+            server.close()
+        try:
+            paths["socket"].unlink()
+        except OSError:
+            pass
+        owner = host_read(paths["owner"])
+        if isinstance(owner, dict) and owner.get("pid") == os.getpid():
+            try:
+                paths["owner"].unlink()
+            except OSError:
+                pass
+        stopped = host_session_state(provider, sid)
+        stopped["inflight"] = None
+        stopped["stopped"] = time.time()
+        host_write(paths["state"], stopped)
+        host_release(lock)
+        host_log(provider, sid, "stop")
+
+
+def host_status(provider, sid):
+    if not host_identity(provider, sid):
+        return dict(status="refused", reason="unsupported_provider")
+    config = host_config(provider, sid) or {}
+    owner = host_owner(provider, sid)
+    state = host_session_state(provider, sid)
+    written = state.get("written") if isinstance(state.get("written"), dict) else {}
+    inflight = state.get("inflight") if isinstance(state.get("inflight"), dict) else None
+    return dict(status="ok", enabled=host_enabled(provider, sid), provider=provider, sid=sid,
+                owner=owner.get("owner") if isinstance(owner, dict) else None,
+                pid=owner.get("pid") if isinstance(owner, dict) else None,
+                alive=host_alive(provider, sid), tmux=host_chat_name(provider, sid),
+                native_session=state.get("native_session"), inflight=inflight.get("id") if inflight else None,
+                accepted=inflight.get("accepted") if inflight else None, written=len(written),
+                backoff=round(host_backoff(provider, sid), 3), events=host_log_tail(provider, sid),
+                command=config.get("command") if isinstance(config.get("command"), list) else None)
+
+
+def host_cli(argv):
+    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover"):
+        return dict(status="error", reason="invalid_command")
+    command, rest = argv[0], argv[1:]
+    if len(rest) < 2:
+        return dict(status="error", reason="missing_identity")
+    provider, sid = rest[0], rest[1]
+    if not host_identity(provider, sid):
+        return dict(status="refused", reason="unsupported_provider")
+    tmux = rest[rest.index("--tmux") + 1] if "--tmux" in rest[:-1] else None
+    if tmux is not None and TMUX_NAME.fullmatch(tmux) is None:
+        return dict(status="refused", reason="invalid_chat")
+    paths = host_paths(provider, sid)
+    if command == "enable":
+        config = host_read(paths["config"]) or {}
+        config["enabled"] = True
+        if tmux is not None:
+            config["tmux"] = tmux
+        host_write(paths["config"], config)
+        host_log(provider, sid, "enabled", dict(tmux=config.get("tmux")))
+        return dict(status="enabled", sid=sid, tmux=config.get("tmux"))
+    if command == "disable":
+        host_stop(provider, sid)
+        try:
+            paths["config"].unlink()
+        except OSError:
+            pass
+        host_backoff_clear(provider, sid)
+        host_log(provider, sid, "disabled")
+        return dict(status="disabled", sid=sid)
+    if command == "start":
+        config = host_read(paths["config"]) or {}
+        if config.get("enabled") is True and tmux is not None and config.get("tmux") != tmux:
+            config["tmux"] = tmux
+            host_write(paths["config"], config)
+        return host_start(provider, sid)
+    if command == "stop":
+        return host_stop(provider, sid)
+    if command == "handover":
+        return host_handover(provider, sid)
+    return host_status(provider, sid)
+
+
+def host_dispatch_switch(provider, sid):
+    return provider == "claude" and host_enabled(provider, sid)
+
+
+def host_dispatch_start(provider, sid):
+    if host_backoff(provider, sid) > 0:
+        return dict(status="backoff")
+    if host_owned(provider, sid):
+        return dict(status="owned")
+    started = host_start(provider, sid)
+    return dict(status="owned" if started.get("status") in ("started", "already") else "start_failed",
+                reason=started.get("reason"))
+
+
 def message_store_request(q):
     import fcntl
     provider, sid, tmux = q.get('provider'), q.get('sid'), q.get('tmux')
@@ -2360,8 +3084,16 @@ def message_store_transaction(q):
                 row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row[0],)).fetchone())
                 seq = message_event(db, provider, sid, row)
                 return dict(epoch=epoch, seq=seq, message=row)
-            connector = message_connector(provider)
-            if connector is None or not callable(connector.get('submit')) or not callable(connector.get('capabilities')):
+            hosting = host_dispatch_switch(provider, sid)
+            if hosting:
+                ready = host_dispatch_start(provider, sid)
+                if ready['status'] != 'owned':
+                    if ready['status'] == 'start_failed':
+                        host_backoff_fail(provider, sid)
+                    host_log(provider, sid, 'dispatch_wait', dict(ready=ready['status'], reason=ready.get('reason')))
+                    return dict(epoch=epoch, seq=seq, message=None)
+            connector = None if hosting else message_connector(provider)
+            if not hosting and (connector is None or not callable(connector.get('submit')) or not callable(connector.get('capabilities'))):
                 db.execute("UPDATE shared_messages SET state='failed',receipt='connector_unavailable' WHERE id=? AND state='queued'", (row[0],))
                 row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row[0],)).fetchone())
                 seq = message_event(db, provider, sid, row)
@@ -2375,6 +3107,25 @@ def message_store_transaction(q):
             current = db.execute("SELECT state,epoch FROM shared_messages WHERE id=?", (row['id'],)).fetchone()
             bound = resolve_tmux_agent(provider, tmux, require_bound=True)
             if current != ('sent', epoch) or not bound or bound[0] != sid or Path(bound[1]) != Path(resolved[1]):
+                return dict(epoch=epoch, seq=seq, message=None)
+            if hosting:
+                db.commit()
+                reply = host_deliver(provider, sid, row['id'], row['attempt'], epoch, row['text'])
+                db.execute('BEGIN IMMEDIATE')
+                status = reply.get('status')
+                host_log(provider, sid, 'dispatch_delivered', dict(id=row['id'], status=status, reason=reply.get('reason')))
+                if status in ('sent', 'duplicate'):
+                    host_backoff_clear(provider, sid)
+                    return dict(epoch=epoch, seq=seq, message=None)
+                if status == 'refused':
+                    changed = db.execute("UPDATE shared_messages SET state='failed',deadline=NULL,receipt=? WHERE id=? AND attempt=? AND epoch=? AND state='sent'", ('host_' + str(reply.get('reason') or 'not_sent'), row['id'], row['attempt'], epoch)).rowcount
+                    if changed:
+                        message_event(db, provider, sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row['id'],)).fetchone()))
+                    return dict(epoch=epoch, seq=seq, message=None)
+                changed = db.execute("UPDATE shared_messages SET state='queued',deadline=NULL WHERE id=? AND attempt=? AND epoch=? AND state='sent'", (row['id'], row['attempt'], epoch)).rowcount
+                if changed:
+                    message_event(db, provider, sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row['id'],)).fetchone()))
+                host_backoff_fail(provider, sid)
                 return dict(epoch=epoch, seq=seq, message=None)
             context = dict(provider=provider, sid=sid, tmux=tmux, chat_id=tmux, transcript_path=str(bound[1]))
             if provider == 'codex':
@@ -3432,6 +4183,10 @@ elif __name__ == "__main__" and sys.argv[1:2] == ["--held-worker"]:
     held_queue_worker(sys.argv[2], sys.argv[3], Path(sys.argv[4]))
 elif __name__ == "__main__" and sys.argv[1:2] == ["--message-worker"]:
     message_worker(sys.argv[2], sys.argv[3], sys.argv[4])
+elif __name__ == "__main__" and sys.argv[1:2] == ["--agent-host"]:
+    sys.exit(host_main(sys.argv[2], sys.argv[3]))
+elif __name__ == "__main__" and sys.argv[1:2] == ["host"]:
+    print(json.dumps(host_cli(sys.argv[2:]), separators=(",", ":")))
 elif __name__ == "__main__" and sys.argv[1:] == ["--serve"]:
     serve(globals().get("READER_SOURCE"))
 elif __name__ == "__main__":
