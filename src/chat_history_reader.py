@@ -2492,21 +2492,42 @@ def host_request(provider, sid, request, timeout=HOST_DELIVERY_TIMEOUT):
         client.close()
 
 
-def host_spawn(provider, sid, source):
+def host_runtime_file():
+    name = sys.argv[0] if sys.argv else ""
+    if not name or name.startswith("-"):
+        return None
+    try:
+        path = Path(name).resolve()
+    except (OSError, ValueError):
+        return None
+    return str(path) if path.is_file() else None
+
+
+def host_spawn(provider, sid, source=None):
     bootstrap = ("import base64,sys;s=base64.b64decode(sys.stdin.buffer.readline()).decode();"
                  "exec(compile(s,'<agent-host>','exec'),dict(__name__='__main__',READER_SOURCE=s))")
+    source = source if isinstance(source, str) and source else globals().get("READER_SOURCE")
+    standalone = host_runtime_file() if not isinstance(source, str) or not source else None
+    if standalone is None and not isinstance(source, str):
+        return None
     errors = host_paths(provider, sid)["errors"].open("ab")
     try:
-        child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap, "--agent-host", provider, sid],
-                                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errors,
-                                 start_new_session=True)
+        if standalone is not None:
+            child = subprocess.Popen([sys.executable, "-u", standalone, "--agent-host", provider, sid],
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=errors,
+                                     start_new_session=True)
+        else:
+            child = subprocess.Popen([sys.executable, "-u", "-c", bootstrap, "--agent-host", provider, sid],
+                                     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errors,
+                                     start_new_session=True)
     finally:
         errors.close()
-    try:
-        child.stdin.write(base64.b64encode(source.encode("utf-8")) + b"\n")
-        child.stdin.flush()
-    finally:
-        child.stdin.close()
+    if standalone is None:
+        try:
+            child.stdin.write(base64.b64encode(source.encode("utf-8")) + b"\n")
+            child.stdin.flush()
+        finally:
+            child.stdin.close()
     HOST_CHILDREN[:] = [running for running in HOST_CHILDREN if running.poll() is None][-7:] + [child]
     return child
 
@@ -2519,7 +2540,9 @@ def host_start(provider, sid, source=None):
     if host_alive(provider, sid) and host_request(provider, sid, dict(op="ping"), timeout=2).get("status") == "ok":
         return dict(status="already", reason="host_running", pid=host_owner(provider, sid)["pid"])
     host_clear_stale(provider, sid)
-    child = host_spawn(provider, sid, source or globals().get("READER_SOURCE") or "")
+    child = host_spawn(provider, sid, source)
+    if child is None:
+        return dict(status="error", reason="host_launch_unavailable")
     deadline = time.time() + 20
     while time.time() < deadline:
         reply = host_request(provider, sid, dict(op="ping"), timeout=2)
@@ -4218,7 +4241,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 26
+RUNTIME_GENERATION = 27
 
 if __name__ == '__main__':
     import base64 as _base64

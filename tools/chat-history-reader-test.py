@@ -4265,6 +4265,19 @@ class AgentHostTest(unittest.TestCase):
         self.assertEqual(config['permission_mode'], 'acceptEdits')
         self.assertEqual(config['tmux'], self.tmux)
 
+    def test_host_starts_from_a_published_runtime_file(self):
+        self.enable()
+        self.seed()
+        published = self.home / ('runtime-' + hashlib.sha256(reader.READER_SOURCE.encode()).hexdigest() + '.py')
+        published.write_text(reader.READER_SOURCE)
+        result = subprocess.run([sys.executable, str(published), 'host', 'start', 'claude', self.sid],
+                                capture_output=True, text=True, env=dict(os.environ), timeout=180)
+        self.assertIn('"started"', result.stdout, result.stdout + result.stderr)
+        self.assertTrue(reader.host_owned(self.provider, self.sid))
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        self.assertEqual(self.user_lines(), [self.text])
+
     def test_host_cli_status_and_disable(self):
         self.enable()
         status = reader.host_cli(['status', self.provider, self.sid])
