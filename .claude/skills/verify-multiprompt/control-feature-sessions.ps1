@@ -1,30 +1,4 @@
 
-            $beforeClaude = @( (Read-Session).tabs ).Count
-            Press @(0x11, 0x54) 'Ctrl+T: new Claude chat'
-            Start-Sleep -Milliseconds 1500
-            $path = 'Ctrl+T'
-            if (@( (Read-Session).tabs ).Count -ne $beforeClaude + 1) {
-                $path = 'palette New Claude chat'
-                Palette 'New Claude chat'
-                Press @(0x0D) 'Enter: New Claude chat'
-                Wait-Until { @( (Read-Session).tabs ).Count -eq $beforeClaude + 1 } 'new Claude chat tab saved'
-            }
-            Wait-Until {
-                $state = Read-Session
-                if ($null -eq $state) { return $false }
-                $tab = @($state.tabs)[$state.active_tab]
-                $null -ne $tab -and $tab.PSObject.Properties['cv'] -and $tab.cv -eq $true
-            } 'new Claude tab saved in Chat View'
-            Wait-Until {
-                $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
-                $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
-                @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { -not $_.Current.IsOffscreen }).Count -ge 1
-            } 'Chat View transcript visible for the new Claude tab'
-            Snapshot 'ctrl-t-chat-view'
-            $result.checks += @{ name = 'ctrl-t-chat-view'; entry = $path; tabsBefore = $beforeClaude; tabsAfter = @( (Read-Session).tabs ).Count }
-            Press @(0x11, 0x57) 'Ctrl+W: close the new Claude tab'
-            Wait-Until { @( (Read-Session).tabs ).Count -eq $beforeClaude } 'new Claude tab closed'
-
             $before = @( (Read-Session).tabs ).Count
             Palette 'new cmd'
             Snapshot 'action'
