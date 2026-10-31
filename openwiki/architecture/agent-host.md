@@ -41,9 +41,11 @@ server runtime and every client.
 The delivery socket is `$TMPDIR/mp-agent-host-<uid>/<key>.sock`, owner-only. Its path stays
 under the 108-character limit a Unix socket path has, whatever the home directory looks like.
 
-## Per-chat switch (default off)
+## Per-chat switch
 
 - No config file, or `enabled` not `true`: the terminal path is unchanged.
+- The app writes this file when it starts a new Claude session, so new Claude
+  sessions are on the host; older chats stay on the terminal path.
 - The file also carries `command` (the agent executable, default `["claude"]`), `args`
   (extra CLI arguments), `tmux` (the chat's tmux name), `cwd` and `permission_mode`.
 - `permission_mode` must be one of the CLI's own modes (`acceptEdits`, `auto`,

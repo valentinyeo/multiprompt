@@ -1516,6 +1516,41 @@ test "workspace tmux program runs after shell startup and neutral fallback stays
     try std.testing.expect(buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/projects", "claude; exit") == null);
 }
 
+pub fn workspaceLaunchCommand(program: []const u8, session: []const u8, cwd: []const u8, host_sid: ?[]const u8,
+    host_out: *[1024]u8, command_out: *[512]u8) ?[]const u8
+{
+    const agent_host = @import("agent_host.zig");
+    if (host_sid) |sid| {
+        if (!agent_host.eligible(program)) return null;
+        return agent_host.launchCommand(host_out, session, cwd, sid);
+    }
+    return buildWorkspaceTmuxLaunchCmd(command_out, session, cwd, program);
+}
+
+test "IGSH-1266 a new Claude session spawns exactly the host launch command" {
+    var host_buf: [1024]u8 = undefined;
+    var command_buf: [512]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const spawned = workspaceLaunchCommand("claude", "term-abc", "~/projects", sid, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    var expected_buf: [1024]u8 = undefined;
+    const expected = @import("agent_host.zig").launchCommand(&expected_buf, "term-abc", "~/projects", sid) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings(expected, spawned);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "tmux attach -t term-abc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "send-keys") == null);
+
+    const codex = workspaceLaunchCommand("codex", "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, codex, "send-keys -t term-abc 'cd ~/projects && codex'") != null);
+    try std.testing.expect(workspaceLaunchCommand("codex", "term-abc", "~/projects", sid, &host_buf, &command_buf) == null);
+    try std.testing.expect(workspaceLaunchCommand("pi", "term-abc", "~/projects", sid, &host_buf, &command_buf) == null);
+
+    const neutral = workspaceLaunchCommand("", "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
+}
+
 pub fn spawnWorkspaceTmuxSession() bool {
     var host: u8 = 0;
     var cwd_buf: [256]u8 = undefined;
@@ -1537,10 +1572,7 @@ pub fn spawnWorkspaceTmuxSession() bool {
     const host_sid: ?[]const u8 = if (agent_host.eligible(program)) agent_host.mintSessionId(&sid_buf) else null;
     var cmd_buf: [512]u8 = undefined;
     var host_buf: [1024]u8 = undefined;
-    const launch_cmd = if (host_sid) |sid|
-        agent_host.launchCommand(&host_buf, session, cwd, sid) orelse return false
-    else
-        buildWorkspaceTmuxLaunchCmd(&cmd_buf, session, cwd, program) orelse return false;
+    const launch_cmd = workspaceLaunchCommand(program, session, cwd, host_sid, &host_buf, &cmd_buf) orelse return false;
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
     app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
     app_state.g_pending_tmux_host = host;

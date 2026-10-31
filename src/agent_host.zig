@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const ENABLED = false;
+pub const ENABLED = true;
 pub const READER = "~/.multiprompt-runtime/reader.py";
 
 pub fn eligible(program: []const u8) bool {
@@ -75,10 +75,14 @@ test "IGSH-1266 session ids are version four uuids" {
     try std.testing.expect(!safeSessionId("short"));
 }
 
-test "IGSH-1266 the app owned host start stays off by default" {
-    try std.testing.expect(!ENABLED);
-    try std.testing.expect(!eligible("claude"));
+test "IGSH-1266 new Claude sessions start on the app owned host" {
+    try std.testing.expect(ENABLED);
+    try std.testing.expect(eligible("claude"));
+    try std.testing.expect(eligible("claude-code"));
     try std.testing.expect(!eligible("codex"));
+    try std.testing.expect(!eligible("pi"));
+    try std.testing.expect(!eligible(""));
+    try std.testing.expect(!eligible("bash"));
 }
 
 test "IGSH-1266 host start types nothing into a pane and names the reader" {

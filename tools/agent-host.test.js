@@ -4,10 +4,12 @@ const test = require('node:test');
 
 const read = (file) => fs.readFileSync(file, 'utf8');
 
-test('IGSH-1266 the app owned Claude start is off by default and typing a command start stays for other programs', () => {
+test('IGSH-1266 new Claude sessions start on the app owned host and typing a command start stays for other programs', () => {
   const host = read('src/agent_host.zig');
-  assert.match(host, /pub const ENABLED = false;/);
-  assert.match(host, /pub fn eligible\(program: \[\]const u8\) bool \{\s*return ENABLED and/);
+  assert.match(host, /pub const ENABLED = true;/);
+  assert.match(host, /pub fn eligible\(program: \[\]const u8\) bool \{\s*return ENABLED and std\.mem\.startsWith\(u8, program, "claude"\);/);
+  assert.match(host, /try std\.testing\.expect\(!eligible\("codex"\)\);/);
+  assert.match(host, /try std\.testing\.expect\(!eligible\("pi"\)\);/);
 
   const palette = read('src/command_palette.zig');
   const start = palette.indexOf('pub fn spawnWorkspaceTmuxSession() bool {');
@@ -15,10 +17,18 @@ test('IGSH-1266 the app owned Claude start is off by default and typing a comman
   assert.ok(start >= 0 && end > start, 'spawnWorkspaceTmuxSession must exist');
   const body = palette.slice(start, end);
   assert.match(body, /if \(agent_host\.eligible\(program\)\) agent_host\.mintSessionId\(&sid_buf\) else null/);
-  assert.match(body, /agent_host\.launchCommand\(&host_buf, session, cwd, sid\)/);
-  assert.ok(body.indexOf('var host_buf: [1024]u8') < body.indexOf('agent_host.launchCommand'), 'the host buffer must outlive the command');
-  assert.match(body, /buildWorkspaceTmuxLaunchCmd\(&cmd_buf, session, cwd, program\)/);
+  assert.match(body, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse return false;/);
+  assert.ok(body.indexOf('var host_buf: [1024]u8') < body.indexOf('workspaceLaunchCommand'), 'the host buffer must outlive the command');
   assert.match(body, /claude_sid_len = @intCast\(sid_len\)/);
+
+  const command = palette.indexOf('pub fn workspaceLaunchCommand(');
+  const commandEnd = palette.indexOf('pub fn spawnWorkspaceTmuxSession() bool {');
+  assert.ok(command >= 0 && commandEnd > command, 'workspaceLaunchCommand must exist');
+  const choice = palette.slice(command, commandEnd);
+  assert.match(choice, /if \(host_sid\) \|sid\| \{\s*if \(!agent_host\.eligible\(program\)\) return null;\s*return agent_host\.launchCommand\(host_out, session, cwd, sid\);/);
+  assert.match(choice, /return buildWorkspaceTmuxLaunchCmd\(command_out, session, cwd, program\);/);
+  assert.match(choice, /try std\.testing\.expectEqualStrings\(expected, spawned\);/);
+  assert.match(choice, /try std\.testing\.expect\(workspaceLaunchCommand\("codex", "term-abc", "~\/projects", sid, &host_buf, &command_buf\) == null\);/);
 
   const codex = palette.indexOf('fn buildCodexTmuxLaunchCmd(');
   const codexEnd = palette.indexOf('fn buildCodexTmuxSessionName(');

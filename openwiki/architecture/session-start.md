@@ -230,15 +230,13 @@ protocol. Nothing is typed into a terminal.
 
 ### Switch
 
-Two gates, both default off:
-
-- `src/agent_host.zig` `ENABLED` decides whether the app starts a host at all.
+- `src/agent_host.zig` `ENABLED` is on. A program whose name starts with `claude`
+  starts on the app-owned host; every other program keeps the terminal start.
 - The per-chat `~/.local/state/multiprompt/agent-host/<key>.config.json`
-  `enabled` flag (written by `host enable`) decides whether `message_dispatch`
-  hands the row to the host instead of the connector.
-
-With `ENABLED` false, `eligible` is false for every program, so the start command
-and the delivery path stay exactly as described in "Today".
+  `enabled` flag decides whether `message_dispatch` hands the row to the host
+  instead of the connector. The start command writes it, so a new Claude session
+  is on. A chat with no such file — anything created before this change — keeps
+  the connector path.
 
 ### Scripts and the runtime bundle
 
