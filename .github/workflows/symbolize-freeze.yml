@@ -1,0 +1,96 @@
+name: Symbolize freeze reports
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to rebuild with symbols (for example v0.28.1139)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  symbols:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Install Zig 0.16.0
+        run: |
+          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
+          tar -xJf zig.tar.xz
+          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Build the release binary exactly as the release did
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tools/version-stamp.mjs build "$TAG"
+          zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dversion="${TAG#v}"
+          mkdir -p compare
+          cp zig-out/bin/multiprompt.exe compare/multiprompt-x64.exe
+          sha256sum compare/multiprompt-x64.exe | tee compare/local.sha256
+      - name: Compare with the published asset
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" --pattern SHA256SUMS.txt --dir compare --clobber
+          published=$(grep ' multiprompt-x64.exe$' compare/SHA256SUMS.txt | awk '{print $1}')
+          local=$(awk '{print $1}' compare/local.sha256)
+          echo "published=$published"
+          echo "local=$local"
+          if [ "$published" = "$local" ]; then
+            echo "SYMBOL_MATCH=identical" >> "$GITHUB_ENV"
+            echo "Local rebuild is byte identical to the published v${TAG#v} x64 binary"
+          else
+            echo "SYMBOL_MATCH=differs" >> "$GITHUB_ENV"
+            echo "::warning::Local rebuild differs from the published v${TAG#v} x64 binary; symbols still uploaded"
+          fi
+      - name: Build the symbolized twin
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          zig build -Dtarget=x86_64-windows-gnu -Drelease=true -Dsymbols -Dversion="${TAG#v}" --prefix zig-out-symbols
+          mkdir -p symbols
+          cp zig-out-symbols/bin/multiprompt.exe symbols/multiprompt-x64-symbols.exe
+      - name: Name the report frames
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          cat > /tmp/report-rvas.txt <<'EOF'
+          0x36796
+          0x3661B
+          0x1CAD86
+          0x48C830
+          0x39243
+          0x204A0
+          0x3A42B
+          0x20459
+          0x1CAFBF
+          0x1C9D14
+          0x205CC
+          0x391FC
+          0x39584
+          0x1C0000
+          0x29AAA
+          0x1C9C67
+          0x29EA2
+          EOF
+          mapfile -t RVAS < /tmp/report-rvas.txt
+          llvm-symbolizer --relative-address --functions=linkage --demangle \
+            --obj=symbols/multiprompt-x64-symbols.exe "${RVAS[@]}" | tee symbols/frames.txt
+          echo "match=$SYMBOL_MATCH" >> symbols/frames.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: freeze-symbols-${{ inputs.tag }}
+          path: symbols/*

@@ -121,10 +121,24 @@ jobs:
           mkdir dist
           cp zig-out/bin/multiprompt.exe dist/multiprompt-${{ matrix.arch }}.exe
           cp zig-out/bin/zigshell-bridge.exe dist/zigshell-bridge-${{ matrix.arch }}.exe
+      - name: Build the symbolized twin
+        continue-on-error: true
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          zig build -Dtarget=${{ matrix.target }} -Drelease=${{ needs.prepare.outputs.tag != '' }} -Dsymbols -Dversion="${TAG#v}" --prefix zig-out-debug
+          mkdir -p dist-symbols
+          cp zig-out-debug/bin/multiprompt.exe dist-symbols/multiprompt-${{ matrix.arch }}-symbols.exe
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: multiprompt-${{ matrix.arch }}
           path: dist/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: multiprompt-${{ matrix.arch }}-symbols
+          path: dist-symbols/*
+          if-no-files-found: warn
 
   launch:
     needs: [prepare, build]
@@ -197,6 +211,16 @@ jobs:
         env:
           MULTIPROMPT_RELEASE_SIGNING_KEY: ${{ secrets.MULTIPROMPT_RELEASE_SIGNING_KEY }}
         run: node tools/sign-release.mjs
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          name: multiprompt-x64-symbols
+          path: symbols
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        continue-on-error: true
+        with:
+          name: multiprompt-arm64-symbols
+          path: symbols
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -220,3 +244,16 @@ jobs:
           )
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$BUILT_SHA" \
             --latest="$latest" --title "multiprompt $TAG" --generate-notes
+      - name: Attach the symbolized twins for freeze reports
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          files=(symbols/*symbols.exe)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No symbolized twin was built; freeze reports stay unnamed"
+            exit 0
+          fi
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
