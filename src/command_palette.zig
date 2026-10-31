@@ -2922,6 +2922,18 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
         if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("pick repo choose repository folder repo", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PICK_REPO_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("set workspace folder declare workspace folder repo", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SET_FOLDER_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
             keywordsMatchAll("open session attach tmux list pick server host1 host2", app_state.g_search_buf[0..app_state.g_search_len]))
         {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_OPEN_SESSION_MENU_OFFSET;
