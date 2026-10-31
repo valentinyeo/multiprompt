@@ -1628,7 +1628,7 @@ pub var g_cap_msg_until: u64 = 0;
 pub var g_cap_msg_text: [128]u16 = std.mem.zeroes([128]u16);
 pub var g_cap_msg_len: usize = 0;
 
-const SpinMutex = struct {
+pub const SpinMutex = struct {
     state: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
 
     pub fn tryLock(self: *SpinMutex) bool {
@@ -2139,6 +2139,7 @@ pub var g_verbose_logging_known: bool = false;
 pub var g_verbose_logging_enabled: bool = false;
 
 pub var g_debug_log_mutex: SpinMutex = .{};
+pub var g_file_write_mutex: SpinMutex = .{};
 
 pub var g_pollshell_count: u64 = 0;
 

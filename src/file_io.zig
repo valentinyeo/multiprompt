@@ -115,6 +115,7 @@ pub fn win32MoveReplace(old_path: []const u8, new_path: []const u8) bool {
 }
 
 const GetCurrentThreadId = @import("win32.zig").GetCurrentThreadId;
+const Sleep = @import("win32.zig").Sleep;
 
 const MAX_PENDING_WRITES = 16;
 
@@ -124,12 +125,12 @@ const PendingWrite = struct {
     bytes: ?[]u8 = null,
 };
 
-var g_writer_mutex: std.Thread.Mutex = .{};
-var g_writer_ready: std.Thread.Condition = .{};
-var g_writer_drained: std.Thread.Condition = .{};
-var g_writer_thread: ?std.Thread = null;
-var g_writer_inline = false;
+var g_writer_thread_started = false;
 var g_writer_pending: [MAX_PENDING_WRITES]PendingWrite = [_]PendingWrite{.{}} ** MAX_PENDING_WRITES;
+
+fn writerGate() *const @import("app_state.zig").SpinMutex {
+    return &@import("app_state.zig").g_file_write_mutex;
+}
 
 fn uiThreadBusy() bool {
     const app_state = @import("app_state.zig");
@@ -149,24 +150,10 @@ fn pendingSlot(path: []const u8) ?usize {
     return free_slot;
 }
 
-fn queueWrite(path: []const u8, bytes: []const u8) bool {
-    if (path.len == 0 or path.len > 519) return false;
-    g_writer_mutex.lock();
-    defer g_writer_mutex.unlock();
-    const slot_index = pendingSlot(path) orelse return false;
-    const slot = &g_writer_pending[slot_index];
-    const copy = std.heap.page_allocator.dupe(u8, bytes) catch return false;
-    if (slot.bytes) |old_bytes| std.heap.page_allocator.free(old_bytes);
-    @memcpy(slot.path[0..path.len], path);
-    slot.path_len = path.len;
-    slot.bytes = copy;
-    if (g_writer_thread == null) {
-        g_writer_thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, writerLoop, .{}) catch {
-            g_writer_thread = null;
-            return false;
-        };
+fn queueEmptyLocked() bool {
+    for (&g_writer_pending) |*slot| {
+        if (slot.bytes != null) return false;
     }
-    g_writer_ready.signal();
     return true;
 }
 
@@ -174,57 +161,70 @@ fn writerLoop() void {
     while (true) {
         var path: [520]u8 = undefined;
         var path_len: usize = 0;
-        var bytes: ?[]u8 = null;
-        g_writer_mutex.lock();
-        while (true) {
-            var taken = false;
-            for (&g_writer_pending) |*slot| {
-                if (slot.bytes == null) continue;
-                @memcpy(path[0..slot.path_len], slot.path[0..slot.path_len]);
-                path_len = slot.path_len;
-                bytes = slot.bytes;
-                slot.bytes = null;
-                slot.path_len = 0;
-                taken = true;
-                break;
-            }
-            if (taken) break;
-            g_writer_ready.timedWait(&g_writer_mutex, 250 * std.time.ns_per_ms) catch {};
-        }
-        g_writer_mutex.unlock();
-        if (bytes) |payload| {
-            _ = writeFileAtomicSync(path[0..path_len], payload);
-            std.heap.page_allocator.free(payload);
-        }
-        g_writer_mutex.lock();
-        var empty = true;
+        var payload: ?[]u8 = null;
+        const gate = writerGate();
+        while (!gate.tryLock()) Sleep(1);
         for (&g_writer_pending) |*slot| {
-            if (slot.bytes != null) empty = false;
+            if (slot.bytes == null) continue;
+            @memcpy(path[0..slot.path_len], slot.path[0..slot.path_len]);
+            path_len = slot.path_len;
+            payload = slot.bytes;
+            slot.bytes = null;
+            slot.path_len = 0;
+            break;
         }
-        if (empty) g_writer_drained.broadcast();
-        g_writer_mutex.unlock();
+        gate.unlock();
+        if (payload) |bytes| {
+            _ = writeFileAtomicSync(path[0..path_len], bytes);
+            std.heap.page_allocator.free(bytes);
+        } else {
+            Sleep(20);
+        }
     }
 }
 
+fn startWriterOnce() void {
+    if (g_writer_thread_started) return;
+    g_writer_thread_started = true;
+    const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, writerLoop, .{}) catch {
+        g_writer_thread_started = false;
+        return;
+    };
+    thread.detach();
+}
+
+fn queueWrite(path: []const u8, bytes: []const u8) bool {
+    if (path.len == 0 or path.len > 519) return false;
+    startWriterOnce();
+    if (!g_writer_thread_started) return false;
+    const gate = writerGate();
+    while (!gate.tryLock()) Sleep(1);
+    defer gate.unlock();
+    const slot_index = pendingSlot(path) orelse return false;
+    const copy = std.heap.page_allocator.dupe(u8, bytes) catch return false;
+    const slot = &g_writer_pending[slot_index];
+    if (slot.bytes) |old_bytes| std.heap.page_allocator.free(old_bytes);
+    @memcpy(slot.path[0..path.len], path);
+    slot.path_len = path.len;
+    slot.bytes = copy;
+    return true;
+}
+
 pub fn flushPendingWrites() void {
-    g_writer_mutex.lock();
-    defer g_writer_mutex.unlock();
-    if (g_writer_thread == null) return;
+    if (!g_writer_thread_started) return;
+    const gate = writerGate();
     const deadline = std.time.milliTimestamp() + 2000;
-    while (true) {
-        var empty = true;
-        for (&g_writer_pending) |*slot| {
-            if (slot.bytes != null) empty = false;
-        }
+    while (std.time.milliTimestamp() < deadline) {
+        while (!gate.tryLock()) Sleep(1);
+        const empty = queueEmptyLocked();
+        gate.unlock();
         if (empty) return;
-        if (std.time.milliTimestamp() >= deadline) return;
-        g_writer_ready.signal();
-        g_writer_drained.timedWait(&g_writer_mutex, 50 * std.time.ns_per_ms) catch {};
+        Sleep(5);
     }
 }
 
 pub fn writeFileAtomicW(path: []const u8, bytes: []const u8) bool {
-    if (!g_writer_inline and bytes.len > 0 and uiThreadBusy()) {
+    if (bytes.len > 0 and uiThreadBusy()) {
         if (queueWrite(path, bytes)) return true;
     }
     return writeFileAtomicSync(path, bytes);
