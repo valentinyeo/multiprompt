@@ -2705,6 +2705,20 @@ test "Chat View echo confirmation survives CRLF, wrapping and a slash command" {
 
 pub const ISSUE_349_TMUX_SEND = true;
 
+pub const ChatSubmitPatch = struct { write_started: bool, state: chat_echo.OutboxState, retryable: bool };
+
+pub fn chatSubmitRetryPatch() ChatSubmitPatch {
+    return .{ .write_started = false, .state = .queued, .retryable = false };
+}
+
+test "IGSH-1266 a submit that never landed is typeable again on the next tick" {
+    const stuck = chat_echo.mayType(.not_sent, true, false, false);
+    try std.testing.expect(!stuck);
+    const patch = chatSubmitRetryPatch();
+    try std.testing.expect(chat_echo.mayType(patch.state, patch.write_started, false, false));
+    try std.testing.expect(!patch.retryable);
+}
+
 fn chatTmuxSendEligible(idx: u32) bool {
     if (!ISSUE_349_TMUX_SEND or idx >= app_state.shell_count) return false;
     const key = chatFileIdentityForShell(idx);
@@ -2765,6 +2779,7 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
     if (job.message_v1) {
         if (job.key.sid[0] == 0) {
             job.rejected = true;
+            @import("diagnostics.zig").debugLog("[chat] submit skipped: the tab has no session id yet");
             return;
         }
         var request_buf: [48]u8 = undefined;
@@ -2775,9 +2790,15 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
         defer response.deinit(a);
         if (!@import("chat_session.zig").chatHistoryPersistent(job.key.host, id, query, 65536, &response, &job.written)) {
             response.clearRetainingCapacity();
-            if (!@import("chat_session.zig").chatHistorySendForced(job.key.host, id, query, 65536, &response, &job.written)) return;
+            if (!@import("chat_session.zig").chatHistorySendForced(job.key.host, id, query, 65536, &response, &job.written)) {
+                @import("diagnostics.zig").debugLog("[chat] submit not sent: the chat channel is not up yet, will retry");
+                return;
+            }
         }
-        var parsed = json_reader.parse(a, response.items) catch return;
+        var parsed = json_reader.parse(a, response.items) catch {
+            @import("diagnostics.zig").debugLog("[chat] submit reply did not parse, will retry");
+            return;
+        };
         defer parsed.deinit();
         if (job.message_reset) {
             if (json_reader.field(parsed.value, "epoch") != .null) {
@@ -2792,7 +2813,11 @@ fn chatTmuxSendThread(job: *app_state.ChatTmuxSendJob) void {
         const ack_provider = json_reader.string(json_reader.field(message, "provider")) orelse return;
         const phase = json_reader.string(json_reader.field(message, "state")) orelse return;
         if (!std.mem.eql(u8, ack_id, token) or !std.mem.eql(u8, ack_sid, std.mem.sliceTo(&job.key.sid, 0)) or
-            !std.mem.eql(u8, ack_provider, if (job.key.codex) "codex" else "claude")) return;
+            !std.mem.eql(u8, ack_provider, if (job.key.codex) "codex" else "claude"))
+        {
+            @import("diagnostics.zig").debugLog("[chat] submit ack mismatch, will retry");
+            return;
+        }
         if (!std.mem.eql(u8, phase, "queued") and !std.mem.eql(u8, phase, "sent") and
             !std.mem.eql(u8, phase, "accepted") and !std.mem.eql(u8, phase, "started") and
             !std.mem.eql(u8, phase, "failed") and !std.mem.eql(u8, phase, "cancelled")) return;
@@ -3035,6 +3060,13 @@ fn chatTmuxSendFinish() void {
             entry.channel_pending = false;
             if (job.retry and job.message_state[0] != 0) entry.retry_nonce = 0;
             if (entry.message_phase[0] == 0 and entry.state == .sending) entry.state = if (job.message_state[0] != 0) .queued else .not_sent;
+            if (job.message_state[0] == 0) {
+                const patch = chatSubmitRetryPatch();
+                entry.write_started = patch.write_started;
+                entry.state = patch.state;
+                entry.retryable = patch.retryable;
+                @import("diagnostics.zig").debugLog("[chat] submit retry armed: the message is queued again");
+            }
             entry.channel_sent_ms = @intCast(GetTickCount64());
         }
         history.message_next_tick = 0;
