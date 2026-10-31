@@ -43,6 +43,7 @@ Full procedure and toolchain notes: [openwiki/operations/build-and-install.md](o
 | Do not bind PowerShell host-owned variables or name functions after aliases. | `tools/check-powershell-host-names.ps1` |
 | Keep palette, tab actions and shortcut documentation aligned. | `tools/palette-rows.test.js`, `tools/shortcuts-doc.test.js` |
 | Never hand-edit app versions; CI stamps versions. | `tools/version-stamp.mjs check` in `test.yml` |
+| Every reader edit raises `RUNTIME_GENERATION`. | `tools/check-runtime-generation.mjs` (test workflow) |
 | Keep code comment-free. | `tools/strip-comments.mjs --check` |
 | Bump the extension version when shipped extension files change. | `tools/check-extension-version.mjs` |
 | Never commit secrets or private information. | `secret-scan` in `.github/workflows/gitleaks.yml`; review for non-secret private information |

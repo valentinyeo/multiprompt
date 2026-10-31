@@ -45,6 +45,14 @@ jobs:
       - name: Check durable regression inputs
         if: (success() || failure()) && github.event_name == 'pull_request'
         run: node tools/check-regression-inputs.mjs origin/${{ github.base_ref }}
+      - name: Test the runtime generation guard
+        if: success() || failure()
+        run: node --test tools/check-runtime-generation.test.js
+      - name: Check the reader runtime generation
+        if: success() || failure()
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+        run: node tools/check-runtime-generation.mjs "${BASE}" HEAD
       - name: Test PowerShell host name checker
         if: success() || failure()
         shell: pwsh
