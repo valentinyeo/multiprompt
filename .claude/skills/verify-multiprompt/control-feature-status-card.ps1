@@ -121,10 +121,10 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Footer screenshot coordinates unavailable' }
             $footerTop = $origin.Y - $frame.Top + $client.Bottom - [int][Math]::Round(104 * $scale)
             $footer = @{ top = $footerTop; bottom = $origin.Y - $frame.Top + $client.Bottom; clientBottom = $origin.Y - $frame.Top + $client.Bottom }
-            for ($i = 0; $i -lt 12; $i++) { [VerifyNative]::WheelClient($script:window, [int](100 * $scale), [int](200 * $scale), -1200) }
+            for ($i = 0; $i -lt 12; $i++) { [VerifyNative]::WheelClient($script:window, [uint32]$process.Id, [int](100 * $scale), [int](200 * $scale), -1200) }
             Start-Sleep -Milliseconds 500
             Snapshot 'footer-bottom-a'
-            for ($i = 0; $i -lt 3; $i++) { [VerifyNative]::WheelClient($script:window, [int](100 * $scale), [int](200 * $scale), -1200) }
+            for ($i = 0; $i -lt 3; $i++) { [VerifyNative]::WheelClient($script:window, [uint32]$process.Id, [int](100 * $scale), [int](200 * $scale), -1200) }
             Start-Sleep -Milliseconds 500
             if ($UpdateFixtureRoot) {
                 Wait-Until {
@@ -197,18 +197,33 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             $hoverFocus = [VerifyNative]::GetFocusedWindow($script:window)
             $hoverResults = @()
             foreach ($column in @(45, 130, 215)) {
-                [VerifyNative]::MoveMouseOwnedRoot($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
-                [VerifyNative]::MoveMouseOwnedRoot($script:window, [int]($column * $scale), $pillY)
-                Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'hover opens usage card'
+                $hoverX = [int]($column * $scale)
+                $beforeHover = $null
+                $afterHover = $null
+                $hoverWaitStarted = $null
+                $hoverPhase = 'move-away'
+                try {
+                    $beforeHover = [VerifyNative]::ObserveUsageHover($script:window, [uint32]$process.Id, $hoverX, $pillY)
+                    [VerifyNative]::MoveMouseOwnedRoot($script:window, [uint32]$process.Id, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
+                    $beforeHover = [VerifyNative]::ObserveUsageHover($script:window, [uint32]$process.Id, $hoverX, $pillY)
+                    $hoverPhase = 'move-to-row'
+                    [VerifyNative]::MoveMouseOwnedRoot($script:window, [uint32]$process.Id, $hoverX, $pillY)
+                    $hoverPhase = 'observe-after-move'
+                    $afterHover = [VerifyNative]::ObserveUsageHover($script:window, [uint32]$process.Id, $hoverX, $pillY)
+                    $hoverPhase = 'wait-for-card'
+                    $hoverWaitStarted = [DateTime]::UtcNow.ToString('o')
+                    Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'hover opens usage card'
+                $hoverPhase = 'move-to-card'
                 $hoverMenu = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')
                 $during = [VerifyNative]::GetFocusedWindow($script:window)
                 if ($during -ne $hoverFocus) { throw 'Usage hover changed keyboard focus' }
                 [VerifyNative]::MoveMouseClient($hoverMenu, [int]($column * $scale), ($client.Bottom - [int](114 * $scale)), $true)
                 if (-not [VerifyNative]::IsWindowVisible($hoverMenu)) { throw 'Usage hover closed crossing the popup bridge' }
                 Snapshot ("footer-hover-$column")
+                $hoverPhase = 'live-console-probe'
                 if ($column -eq 45) {
                     $console = [VerifyNative]::GetForegroundWindow()
-                    if ([VerifyNative]::GetAncestor($console, 2) -ne $script:window -or [VerifyNative]::Class($console) -cne 'ConsoleWindowClass' -or -not [VerifyNative]::Title($console).EndsWith(('ZigShell-' + $targetId), [StringComparison]::Ordinal)) { throw 'Live hover requires the selected owned CMD console' }
+                    if ([VerifyNative]::GetAncestor($console, 3) -ne $script:window -or [VerifyNative]::Class($console) -cne 'ConsoleWindowClass' -or -not [VerifyNative]::Title($console).EndsWith(('ZigShell-' + $targetId), [StringComparison]::Ordinal)) { throw 'Live hover requires the selected owned CMD console' }
                     $consoleRect = New-Object VerifyNative+Rect
                     if (-not [VerifyNative]::GetWindowRect($console, [ref]$consoleRect)) { throw 'Owned console bounds unavailable' }
                     Snapshot 'hover-console-before'
@@ -237,10 +252,20 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
                         $result.liveHover = @{ console = $console.ToInt64(); selectedId = $targetId; changedPixels = $changed; area = @($x0, $y0, $x1, $y1); marker = 'LIVE HOVER 1190 OUTPUT'; hoverVisible = $true }
                     } finally { $beforeConsole.Dispose(); $afterConsole.Dispose() }
                 }
-                [VerifyNative]::MoveMouseOwnedRoot($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
+                $hoverPhase = 'move-away-from-card'
+                [VerifyNative]::MoveMouseOwnedRoot($script:window, [uint32]$process.Id, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
+                $hoverPhase = 'wait-for-close'
                 Wait-Until { -not [VerifyNative]::IsWindowVisible($hoverMenu) } 'usage hover closes on exit'
                 if ([VerifyNative]::GetFocusedWindow($script:window) -ne $hoverFocus) { throw 'Usage hover exit changed keyboard focus' }
                 $hoverResults += @{ x = $column; focus = $during.ToInt64(); bridge = $true; closed = $true }
+                } catch {
+                    $hoverFailure = $_
+                    try { $failedHover = [VerifyNative]::ObserveUsageHover($script:window, [uint32]$process.Id, $hoverX, $pillY) } catch { $failedHover = @{ error = $_.Exception.Message } }
+                    try {
+                        Save-Json @{ column = $column; phase = $hoverPhase; waitStartedUtc = $hoverWaitStarted; error = $hoverFailure.Exception.Message; expectedClass = 'MultiPromptUsageCard'; expectedTitle = 'AI usage this week'; before = $beforeHover; after = $afterHover; atFailure = $failedHover } 'footer-hover-observation.json'
+                    } catch { Write-Host "Hover observation save failed: $($_.Exception.Message)" }
+                    throw $hoverFailure
+                }
             }
             $result.hover = $hoverResults
             Record 'Real click: expand AI usage pill'

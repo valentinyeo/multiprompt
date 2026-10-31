@@ -167,6 +167,9 @@ public static class VerifyNative {
     }
     delegate bool EnumWindow(IntPtr hwnd, IntPtr data);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindow callback, IntPtr data);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumWindow callback, IntPtr data);
+    [DllImport("user32.dll")] static extern IntPtr GetParent(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool ScreenToClient(IntPtr hwnd, ref Point point);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr GetProp(IntPtr hwnd, string name);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
     public static List<IntPtr> OwnedPaneWindows(IntPtr owner) {
@@ -187,6 +190,47 @@ public static class VerifyNative {
             { "rootOwner", GetAncestor(hwnd, 3).ToInt64() },
             { "visible", IsWindowVisible(hwnd) }
         };
+    }
+    public static Dictionary<string, object> ObserveUsageHover(IntPtr owner, uint pid, int intendedX, int intendedY) {
+        uint actualPid;
+        GetWindowThreadProcessId(owner, out actualPid);
+        if (actualPid != pid || Class(owner) != "ZigShell" || GetAncestor(owner, 2) != owner || GetAncestor(owner, 3) != owner) throw new InvalidOperationException("Hover observation owner mismatch");
+        Point screen;
+        if (!GetCursorPos(out screen)) throw new InvalidOperationException("Cannot read hover pointer");
+        Point client = screen;
+        if (!ScreenToClient(owner, ref client)) throw new InvalidOperationException("Cannot map hover pointer");
+        IntPtr hit = WindowFromPoint(screen);
+        bool ownedHit = hit != IntPtr.Zero && GetAncestor(hit, 3) == owner;
+        IntPtr foreground = GetForegroundWindow();
+        bool ownedForeground = foreground != IntPtr.Zero && GetAncestor(foreground, 3) == owner;
+        var children = new List<Dictionary<string, object>>();
+        EnumChildWindows(owner, delegate(IntPtr hwnd, IntPtr data) {
+            if (Class(hwnd) != "MultiPromptUsageCard") return true;
+            var identity = WindowIdentity(hwnd);
+            Rect rectangle;
+            identity["parent"] = GetParent(hwnd).ToInt64();
+            identity["direct"] = GetParent(hwnd) == owner;
+            identity["rect"] = GetWindowRect(hwnd, out rectangle) ? new int[] { rectangle.Left, rectangle.Top, rectangle.Right, rectangle.Bottom } : null;
+            children.Add(identity);
+            return true;
+        }, IntPtr.Zero);
+        var result = new Dictionary<string, object> {
+            { "observedUtc", DateTime.UtcNow.ToString("o") }, { "main", WindowIdentity(owner) },
+            { "mainFocus", GetFocusedWindow(owner).ToInt64() }, { "foregroundHandle", foreground.ToInt64() },
+            { "foregroundOwned", ownedForeground }, { "foreground", ownedForeground ? WindowIdentity(foreground) : null },
+            { "intendedClient", new int[] { intendedX, intendedY } }, { "actualClient", new int[] { client.X, client.Y } },
+            { "actualScreen", new int[] { screen.X, screen.Y } }, { "hitOwned", ownedHit },
+            { "hitHandle", hit.ToInt64() }, { "hitRoot", GetAncestor(hit, 2).ToInt64() }, { "hitRootOwner", GetAncestor(hit, 3).ToInt64() },
+            { "hitWindow", ownedHit ? WindowIdentity(hit) : null }, { "usageChildren", children }
+        };
+        if (ownedHit) {
+            UIntPtr hitResult;
+            int packed = unchecked((screen.Y << 16) | (screen.X & 0xffff));
+            bool ok = SendMessageTimeout(hit, 0x0084, UIntPtr.Zero, new IntPtr(packed), 2, 500, out hitResult) != IntPtr.Zero;
+            result["hitTestResponded"] = ok;
+            result["hitTest"] = ok ? unchecked((int)hitResult.ToUInt64()) : (object)null;
+        }
+        return result;
     }
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
     public static List<Dictionary<string, object>> DesktopWindows() {
@@ -594,14 +638,20 @@ public static class VerifyNative {
             Thread.Sleep(15);
         }
     }
-    public static void MoveMouseOwnedRoot(IntPtr owner, int x, int y) {
+    public static void MoveMouseOwnedRoot(IntPtr owner, uint pid, int x, int y) {
+        uint actualPid;
+        GetWindowThreadProcessId(owner, out actualPid);
+        if (actualPid != pid || Class(owner) != "ZigShell" || GetAncestor(owner, 2) != owner || GetAncestor(owner, 3) != owner) throw new InvalidOperationException("Mouse owner mismatch");
         Point target = new Point { X = x, Y = y };
-        if (!ClientToScreen(owner, ref target) || GetAncestor(WindowFromPoint(target), 2) != owner || GetAncestor(GetForegroundWindow(), 2) != owner) throw new InvalidOperationException("Mouse target is outside the owned foreground window");
+        if (!ClientToScreen(owner, ref target) || GetAncestor(WindowFromPoint(target), 3) != owner || GetAncestor(GetForegroundWindow(), 3) != owner) throw new InvalidOperationException("Mouse target is outside the owned foreground window");
         MoveMouseClient(owner, x, y, false);
     }
-    public static void WheelClient(IntPtr hwnd, int x, int y, int delta) {
+    public static void WheelClient(IntPtr hwnd, uint pid, int x, int y, int delta) {
+        uint actualPid;
+        GetWindowThreadProcessId(hwnd, out actualPid);
+        if (actualPid != pid || Class(hwnd) != "ZigShell" || GetAncestor(hwnd, 2) != hwnd || GetAncestor(hwnd, 3) != hwnd) throw new InvalidOperationException("Wheel owner mismatch");
         Point point = new Point { X = x, Y = y };
-        if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd || GetAncestor(GetForegroundWindow(), 2) != hwnd) throw new InvalidOperationException("Wheel target is not the owned foreground sidebar");
+        if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd || GetAncestor(GetForegroundWindow(), 3) != hwnd) throw new InvalidOperationException("Wheel target is not the owned foreground sidebar");
         if (delta == 0 || delta % 120 != 0) throw new ArgumentOutOfRangeException("delta");
         MouseAt(point.X, point.Y, 0);
         Input input = new Input(); input.type = 0;
