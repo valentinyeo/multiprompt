@@ -59,6 +59,21 @@
             Press @(0x1B) 'Esc: clear the sub-list query'
             $result.checks += @{ name = 'new-session-rows'; empty = 'ctrl-k-empty.png'; shells = 'more-shells.png'; fallbackDown = (-not $shellsOpened); commands = 'harness workspace folder seeded' }
             Press @(0x1B) 'Esc: close More shells'
+            $tabRowsBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count
+            Doctor
+            Assert-Foreground
+            Record 'Right-click the tab row for tab actions'
+            [VerifyNative]::RightClickClient($script:window, 100, 127)
+            Wait-Until { @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count -gt $tabRowsBefore } 'tab actions palette opened'
+            Type-Text 'move chat'
+            Wait-Until {
+                $rows = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=9 ' })
+                $rows.Count -gt 0 -and $rows[-1] -match '\b7186\b'
+            } 'tab actions offer the move row'
+            $moveRows = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=9 ' })
+            $result.checks += @{ name = 'move-chat-row'; rows = $moveRows[-1]; shot = 'move-chat-row.png' }
+            Snapshot 'move-chat-row'
+            Press @(0x1B) 'Esc: close tab actions'
             Remove-Item -LiteralPath $commandsPath -Force
             $repoCommands = Join-Path $scratch 'roaming/ZigShell/commands.json'
             New-Item -ItemType Directory -Force -Path (Split-Path $repoCommands) | Out-Null

@@ -668,6 +668,17 @@ public static class VerifyNative {
         MouseAt(point.X, point.Y, 2);
         MouseAt(point.X, point.Y, 4);
     }
+    public static void RightClickClient(IntPtr hwnd, int x, int y) {
+        Point point = new Point { X = x, Y = y };
+        if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Tab row is not in the owned window");
+        if (!SetCursorPos(point.X, point.Y)) throw new InvalidOperationException("Cannot position mouse on the tab row");
+        foreach (uint flags in new uint[] { 8, 16 }) {
+            Input input = new Input(); input.type = 0;
+            input.data.mouse = new Mouse { flags = flags };
+            if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Mouse SendInput failed");
+            Thread.Sleep(35);
+        }
+    }
     public static void ClickClient(IntPtr hwnd, int x, int y) {
         Point point = new Point { X = x, Y = y };
         if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd) throw new InvalidOperationException("Pill is not in the owned window");
