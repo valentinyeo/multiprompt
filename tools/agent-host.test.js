@@ -39,8 +39,12 @@ test('IGSH-1266 the host start command starts the host and never types into a pa
   const host = read('src/agent_host.zig');
   const start = host.indexOf('pub fn launchCommand(');
   const body = host.slice(start, host.indexOf('test "IGSH-1266 session ids'));
-  assert.match(body, /python3 \{s\} host enable claude \{s\} --tmux \{s\} --cwd \{s\}/);
-  assert.match(body, /python3 \{s\} host start claude \{s\} --tmux \{s\} --cwd \{s\}/);
+  assert.match(body, /python3 \{s\} host enable claude \{s\} --tmux \{s\} --cwd \{s\}\{s\}/);
+  assert.match(body, /python3 \{s\} host start claude \{s\} --tmux \{s\} --cwd \{s\}\{s\}/);
+  assert.match(body, /const mode = " --permission-mode bypassPermissions";/);
+  assert.equal((body.match(/\{s\} --tmux \{s\} --cwd \{s\}\{s\}/g) || []).length, 2,
+    'both host commands must pass the permission mode the other Claude starts already use');
+  assert.equal((body.match(/, mode,/g) || []).length, 2, 'the mode must reach both host commands');
   assert.match(body, /tmux new-session -d -s \{s\} -c \{s\}/);
   assert.match(body, /tmux attach -t \{s\}/);
   assert.ok(!body.includes('send-keys'), 'the Claude start must not type into a pane');

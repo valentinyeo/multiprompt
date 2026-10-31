@@ -4256,6 +4256,17 @@ class AgentHostTest(unittest.TestCase):
         self.assertIn('--permission-mode', args)
         self.assertEqual(args[args.index('--permission-mode') + 1], 'plan')
 
+    def test_host_turn_runs_with_bypass_permissions_after_enable(self):
+        self.enable()
+        self.assertEqual(reader.host_cli(["enable", self.provider, self.sid, "--tmux", self.tmux,
+                                         "--permission-mode", "bypassPermissions"])["status"], "enabled")
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get("state") == "accepted")
+        args = self.agent_rows("start")[0]["args"]
+        self.assertIn("--permission-mode", args)
+        self.assertEqual(args[args.index("--permission-mode") + 1], "bypassPermissions")
+
     def test_host_cli_rejects_an_unknown_permission_mode(self):
         self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--permission-mode', 'yolo'])['reason'],
                          'invalid_permission_mode')
