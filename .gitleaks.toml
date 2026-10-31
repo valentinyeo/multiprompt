@@ -53,3 +53,16 @@ regexes = ['''(?m)^    "[A-Za-z0-9_./-]+": "[0-9a-f]{40}",?$''']
 description = "Cloudflare Access audience tag for the account Worker: public, it is inside every Access login token"
 regexTarget = "secret"
 regexes = ['''^e2fca0c44326c41a528793a61e5fc74433106fee478c8f39ace2dac9ea6a6036$''']
+
+[[allowlists]]
+description = "Placeholder tokens named token in the chat reader test fixtures are not credentials"
+ruleIDs = ["generic-api-key"]
+paths = ['''^tools/chat-history-reader-test\.py$''']
+regexTarget = "secret"
+regexes = ['''^legacy_fixture_[0-9]{4}$''']
+
+[[allowlists]]
+description = "The same placeholder fixtures as they first landed in one historical commit"
+ruleIDs = ["generic-api-key"]
+commits = ["b13bcf4943cc43c12ca6aa1c2a581e61ece77010"]
+paths = ['''^tools/chat-history-reader-test\.py$''']
