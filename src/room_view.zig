@@ -229,6 +229,19 @@ pub const View = struct {
         return true;
     }
 
+    pub fn resetScope(self: *View, empty: *const ViewModel) void {
+        self.retire();
+        self.selected_count = 0;
+        self.mode = .room;
+        self.scroll = 0;
+        self.presented_revision = 0;
+        self.picker = false;
+        self.model = empty;
+        _ = w.SetWindowTextW(self.composer, L(""));
+        self.clearHits();
+        self.layout();
+    }
+
     pub fn completeAction(self: *View, token_value: ActionToken, result: ActionResult) void {
         const pending = self.pending orelse return;
         if (!std.meta.eql(pending, token_value)) return;

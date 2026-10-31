@@ -281,9 +281,26 @@ class RoomStore:
             rooms = [dict(row) for row in self.db.execute('SELECT creation_seq, id, name, revision, seq FROM rooms WHERE creation_seq>? AND creation_seq<=? ORDER BY creation_seq LIMIT ?', (after, through, limit))]
             return {'rooms': rooms, 'through': through, 'next_after': rooms[-1]['creation_seq'] if rooms else after}
         if op == 'snapshot':
-            fields(r, ('op', 'room_id'))
+            metadata = 'metadata' in r
+            fields(r, ('op', 'room_id', 'metadata') if metadata else ('op', 'room_id'))
+            if metadata and r['metadata'] is not True:
+                fail('invalid_fields')
             room = dict(self.room(r['room_id']))
             room['members'] = self.members(room['id'])
+            if metadata:
+                row = self.db.execute("SELECT body FROM events WHERE room_id=? AND json_extract(body, '$.type') IN ('human', 'agent_reply') ORDER BY seq DESC LIMIT 1", (room['id'],)).fetchone()
+                room['preview'] = None
+                if row:
+                    event = json.loads(row['body'])
+                    author = None
+                    if event['type'] == 'agent_reply':
+                        member = self.db.execute('SELECT id, alias, display_name, host_uuid, provider, provider_sid, session_identity FROM members WHERE room_id=? AND id=?', (room['id'], event['member_id'])).fetchone()
+                        if member is None:
+                            fail('invalid_scope')
+                        author = dict(member)
+                    room['preview'] = {'seq': event['seq'], 'type': event['type'], 'text': event['text'][:256], 'member_id': event.get('member_id'), 'author': author}
+                if len(encoded({'ok': True, 'result': room}).encode('utf-8')) > 262144:
+                    fail('snapshot_too_large')
             return room
         if op == 'delivery_work':
             fields(r, ('op', 'room_id', 'delivery_id'))

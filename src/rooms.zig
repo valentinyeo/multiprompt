@@ -13,7 +13,7 @@ pub const Member = struct {
     session_identity: []const u8,
 };
 
-pub const RequestKind = enum { capabilities, catalog, snapshot, events, create, edit, status };
+pub const RequestKind = enum { capabilities, catalog, snapshot, catalog_metadata, events, create, edit, status };
 pub const Result = struct {
     kind: RequestKind,
     value: std.json.Parsed(std.json.Value),
@@ -117,6 +117,11 @@ pub const Controller = struct {
     pub fn snapshot(self: *Controller, room_id: []const u8) bool {
         if (!self.has_host_uuid) return false;
         return self.launch(.snapshot, .{ .op = "snapshot", .host_uuid = self.host_uuid[0..], .room_id = room_id });
+    }
+
+    pub fn catalogMetadata(self: *Controller, room_id: []const u8) bool {
+        if (!self.has_host_uuid) return false;
+        return self.launch(.catalog_metadata, .{ .op = "snapshot", .host_uuid = self.host_uuid[0..], .room_id = room_id, .metadata = true });
     }
 
     pub fn events(self: *Controller, room_id: []const u8, after: u64) bool {
