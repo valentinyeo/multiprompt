@@ -116,6 +116,7 @@ pub fn win32MoveReplace(old_path: []const u8, new_path: []const u8) bool {
 
 const GetCurrentThreadId = @import("win32.zig").GetCurrentThreadId;
 const Sleep = @import("win32.zig").Sleep;
+const GetTickCount64 = @import("win32.zig").GetTickCount64;
 
 const MAX_PENDING_WRITES = 16;
 
@@ -128,7 +129,7 @@ const PendingWrite = struct {
 var g_writer_thread_started = false;
 var g_writer_pending: [MAX_PENDING_WRITES]PendingWrite = [_]PendingWrite{.{}} ** MAX_PENDING_WRITES;
 
-fn writerGate() *const @import("app_state.zig").SpinMutex {
+fn writerGate() *@import("app_state.zig").SpinMutex {
     return &@import("app_state.zig").g_file_write_mutex;
 }
 
@@ -213,8 +214,8 @@ fn queueWrite(path: []const u8, bytes: []const u8) bool {
 pub fn flushPendingWrites() void {
     if (!g_writer_thread_started) return;
     const gate = writerGate();
-    const deadline = std.time.milliTimestamp() + 2000;
-    while (std.time.milliTimestamp() < deadline) {
+    const deadline = GetTickCount64() + 2000;
+    while (GetTickCount64() < deadline) {
         while (!gate.tryLock()) Sleep(1);
         const empty = queueEmptyLocked();
         gate.unlock();
