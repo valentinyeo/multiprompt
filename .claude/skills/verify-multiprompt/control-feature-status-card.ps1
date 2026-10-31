@@ -79,13 +79,39 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             Palette 'manual'
             Press @(0x0D) 'Enter: use manual tab order'
             Wait-Until { (Test-Path $logPath) -and (Get-Content $logPath -Raw).Substring($logStart) -match '\[confirm\].*target=6218' } 'manual order command selected'
+            $confirmedAt = [DateTime]::UtcNow
+            Press @(0x11, 0x09) 'Ctrl+Tab: refresh manual session export'
+            $inboxPath = Join-Path $scratch 'roaming/ZigShell/inbox-default.json'
             Wait-Until {
-                $s = Read-Inbox
-                $null -ne $s -and @($s.shells).Count -eq 16 -and @($s.shells | Where-Object { $_.sid -eq $s.active_shell_id -and $_.name -ceq 'Footer last row' }).Count -eq 1
-            } 'seeded last session selected' 60
+                if (-not (Test-Path $inboxPath) -or (Get-Item $inboxPath).LastWriteTimeUtc -le $confirmedAt) { return $false }
+                $saved = Read-Session
+                $live = Read-Inbox
+                if ($null -eq $saved -or $null -eq $live -or @($saved.tabs).Count -ne 16 -or @($live.shells).Count -ne 16) { return $false }
+                $savedIds = @($saved.tabs | ForEach-Object { [string]$_.shell_id })
+                $liveIds = @($live.shells | ForEach-Object { [string]$_.sid })
+                ($savedIds -join ',') -ceq ($liveIds -join ',')
+            } 'fresh inbox and saved manual order agree' 60
+            $manualExportAt = (Get-Item $inboxPath).LastWriteTimeUtc
+            $savedOrder = Read-Session
             $order = Read-Inbox
-            if (@($order.shells)[-1].name -cne 'Footer last row') { throw 'Selected session is not last in manual sidebar order' }
-            $result.rowIdentity = @{ activeShellId = $order.active_shell_id; selected = 'Footer last row'; order = @($order.shells | ForEach-Object { $_.name }); manualOrder = $true }
+            $target = @($savedOrder.tabs)[-1]
+            $targetId = [string]$target.shell_id
+            $targetName = [string]$target.name
+            if (-not $targetId -or -not $targetName -or @($order.shells | Where-Object { [string]$_.sid -ceq $targetId -and $_.name -ceq $targetName }).Count -ne 1) { throw 'Last manual session identity is ambiguous' }
+            $orderedIds = @($savedOrder.tabs | ForEach-Object { [string]$_.shell_id }) -join ','
+            Palette $targetName
+            $selectedAt = [DateTime]::UtcNow
+            Press @(0x0D) 'Enter: select last manual session'
+            Wait-Until {
+                if (-not (Test-Path $inboxPath) -or (Get-Item $inboxPath).LastWriteTimeUtc -le $selectedAt) { return $false }
+                $saved = Read-Session
+                $live = Read-Inbox
+                if ($null -eq $saved -or $null -eq $live -or @($saved.tabs).Count -ne 16 -or @($live.shells).Count -ne 16) { return $false }
+                $savedIds = @($saved.tabs | ForEach-Object { [string]$_.shell_id }) -join ','
+                $liveIds = @($live.shells | ForEach-Object { [string]$_.sid }) -join ','
+                $savedIds -ceq $orderedIds -and $liveIds -ceq $orderedIds -and [string]$saved.active_shell_id -ceq $targetId -and [string]$live.active_shell_id -ceq $targetId -and @($live.shells | Where-Object { [string]$_.sid -ceq $targetId -and $_.name -ceq $targetName }).Count -eq 1
+            } 'last manual session selected with stable order' 60
+            $result.rowIdentity = @{ activeShellId = $targetId; selected = $targetName; order = @($savedOrder.tabs | ForEach-Object { @{ id = [string]$_.shell_id; name = $_.name } }); manualOrder = $true; confirmationUtc = $confirmedAt.ToString('o'); manualExportUtc = $manualExportAt.ToString('o'); selectionUtc = $selectedAt.ToString('o'); selectionExportUtc = (Get-Item $inboxPath).LastWriteTimeUtc.ToString('o') }
             Doctor
             Assert-Foreground
             Record 'Mouse: move away from the sidebar status card'

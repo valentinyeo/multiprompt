@@ -118,10 +118,10 @@ try {
                 $stagedNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
                 Assert ($stagedNotes.version -ceq '9.10.0') 'Staged notes version mismatch'
                 $expectedNotes = @('Typing feels faster.', 'Chats keep your place.', 'Middle change.')
-                $current = @($stagedNotes.releases | Where-Object { $_.version -ceq '9.10.0' })
-                $middle = @($stagedNotes.releases | Where-Object { $_.version -ceq '9.9.0' })
-                Assert ($current.Count -eq 1 -and $middle.Count -eq 1) 'Staged note releases missing or duplicated'
-                $observedNotes = @($current[0].changes[0], $current[0].changes[1], $middle[0].changes[0])
+                $currentReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.10.0' })
+                $middleReleases = @(@($stagedNotes.releases) | Where-Object { $_.version -ceq '9.9.0' })
+                Assert ($currentReleases.Count -eq 1 -and $middleReleases.Count -eq 1) 'Staged note releases missing or duplicated'
+                $observedNotes = @($currentReleases[0].changes[0], $currentReleases[0].changes[1], $middleReleases[0].changes[0])
                 for ($i = 0; $i -lt $expectedNotes.Count; $i++) { Assert ($observedNotes[$i] -ceq $expectedNotes[$i]) 'Staged note order changed' }
                 Assert ((Get-FileHash "$cardExe.update/release-notes.json" -Algorithm SHA256).Hash -eq (Get-FileHash (Join-Path $script:releaseFolder 'release-notes.json') -Algorithm SHA256).Hash) 'Staged notes differ from the signed release'
                 $cardProcess.Refresh()
