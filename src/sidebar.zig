@@ -1669,11 +1669,6 @@ pub fn hitTestSidebar(mx: i32, logical_my: i32) HitTarget {
             };
         }
     }
-    const content_end: i32 = if (n == 0) 0 else (rows[n - 1].y + rowTotalHeight(rows[n - 1]));
-    const button_y = content_end + 4;
-    if (logical_my >= button_y and logical_my < button_y + BTN_H) {
-        return HitTarget{ .buttons = {} };
-    }
     return HitTarget{ .none = {} };
 }
 
@@ -1999,12 +1994,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
         const content_end_logical: i32 = if (row_count == 0) 0 else (rows_arr[row_count - 1].y + rowTotalHeight(rows_arr[row_count - 1]));
         const btns_y: i32 = content_end_logical + 4 - app_state.g_sidebar_scroll;
         if (!app_state.g_hide_sidebar) {
-            _ = SelectObject(hdc, font_subtitle);
-            _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(80, 80, 80) else RGB(180, 180, 180)));
-            var btn_rc = RECT{ .left = column.left + uiScaled(12), .top = btns_y, .right = column.right - uiScaled(8), .bottom = btns_y + BTN_H };
-            _ = DrawTextW(hdc, L("+"), -1, &btn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | (if (app_state.g_sidebar_collapsed) DT_CENTER else 0));
             _ = SelectObject(hdc, font_title);
-
             if (app_state.g_unread_only and !app_state.g_sidebar_collapsed) {
                 const uo_blue = customColorOr("attention", RGB(60, 120, 220));
                 _ = SelectObject(hdc, font_subtitle);

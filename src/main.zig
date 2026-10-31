@@ -2047,9 +2047,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             _ = SetCapture(hwnd);
                         }
                     },
-                    .buttons => {
-                        _ = PostMessageW(app_state.g_main_hwnd, WM_APP_NEW_TAB_DEFAULT, 0, 0);
-                    },
                     .none => {},
                 }
             }

@@ -101,10 +101,10 @@
             $result.checks += @{ name = 'sidebar-label-parity'; pixels = $labels }
             $sameStyle = [bool]$labels['sameStyle']
             $noArrow = [bool]$labels['noArrow']
-            $plusOnly = [bool]$labels['plusOnly']
+            $formerButtonRegionEmpty = [bool]$labels['formerButtonRegionEmpty']
             if ($sameStyle) { Write-Host 'sidebar-label same-style PASS' } else { Write-Host 'sidebar-label same-style FAIL' }
             if ($noArrow) { Write-Host 'sidebar-label no-arrow PASS' } else { Write-Host 'sidebar-label no-arrow FAIL' }
-            if ($plusOnly) { Write-Host 'sidebar-newtab plus-only PASS' } else { Write-Host 'sidebar-newtab plus-only FAIL' }
+            if ($formerButtonRegionEmpty) { Write-Host 'sidebar-former-button empty PASS' } else { Write-Host 'sidebar-former-button empty FAIL' }
             $clickToggle = $false
             try {
                 $beforeToggle = Read-Session
@@ -148,5 +148,5 @@
             }
             Snapshot 'after'
             if ($clickToggle) { Write-Host 'sidebar-headline click-toggle PASS' } else { Write-Host 'sidebar-headline click-toggle FAIL' }
-            if (-not $noFill -or -not $noRail -or -not $flushLeft -or -not $clickToggle -or -not $sameStyle -or -not $noArrow -or -not $plusOnly) { throw 'sidebar-headline assertions failed' }
+            if (-not $noFill -or -not $noRail -or -not $flushLeft -or -not $clickToggle -or -not $sameStyle -or -not $noArrow -or -not $formerButtonRegionEmpty) { throw 'sidebar-headline assertions failed' }
         

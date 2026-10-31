@@ -1023,22 +1023,22 @@ public static class GroupRailProof {
                     minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
                 }
             }
-            bool plusOnly = buttonInk >= 4 && maxX - minX + 1 <= S(24, dpi, scale) && maxY - minY + 1 <= S(24, dpi, scale);
+            bool formerButtonRegionEmpty = buttonInk == 0;
             proof["labelPresent"] = present;
             proof["noArrow"] = noArrow;
             proof["capitals"] = capitals;
             proof["mutedInk"] = mutedInk;
             proof["sameStyle"] = present && capitals && mutedInk && noArrow;
-            proof["plusOnly"] = plusOnly;
+            proof["formerButtonRegionEmpty"] = formerButtonRegionEmpty;
             proof["labelFirstInkX"] = firstInk;
             proof["headlineX"] = headlineX;
             proof["capRatio"] = capRatio;
             proof["labelInkPixels"] = inkPixels;
             proof["labelMutedPixels"] = mutedPixels;
             proof["labelRect"] = new int[] { clientLeft, sectionTop, right, sectionTop + sectionHeight };
-            proof["buttonRect"] = new int[] { clientLeft, buttonTop, clientLeft + S(sidebarWidth, dpi, scale), buttonTop + buttonHeight };
-            proof["buttonInkBox"] = buttonInk == 0 ? new int[0] : new int[] { minX, minY, maxX, maxY };
-            proof["buttonInkPixels"] = buttonInk;
+            proof["formerButtonScanRect"] = new int[] { clientLeft + S(2, dpi, scale), buttonTop, clientLeft + S(sidebarWidth, dpi, scale) - S(2, dpi, scale), buttonTop + buttonHeight };
+            proof["formerButtonInkBox"] = buttonInk == 0 ? new int[0] : new int[] { minX, minY, maxX, maxY };
+            proof["formerButtonInkPixels"] = buttonInk;
         }
         return proof;
     }

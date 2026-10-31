@@ -714,7 +714,6 @@ pub const HitTarget = union(enum) {
     header: u32,
     tab: u32,
     inbox: u32,
-    buttons: void,
 };
 
 pub const ClosedShell = struct {
