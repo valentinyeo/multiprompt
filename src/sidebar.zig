@@ -1403,6 +1403,14 @@ pub fn materializeDisplayOrder() void {
     }
 }
 
+fn groupHeaderHeight() i32 {
+    return if (app_state.g_sidebar_collapsed) GROUP_HEADER_H else uiScaled(42);
+}
+
+fn sectionHeaderHeight() i32 {
+    return if (app_state.g_sidebar_collapsed) SECTION_HEADER_H else uiScaled(42);
+}
+
 fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
@@ -1418,7 +1426,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
             if (!groupInCurrentWorkspace(gid)) continue;
             out[count] = .{ .kind = .header, .gidx = @intCast(gi), .shell_idx = 0, .y = y };
             count += 1;
-            y += GROUP_HEADER_H;
+            y += groupHeaderHeight();
             if (app_state.groups[gi].collapsed) continue;
             for (0..app_state.shell_count) |i| {
                 if (!tabInCurrentWorkspace(i) or tabGroupId(i) != gid or effPinnedTop(i)) continue;
@@ -1459,7 +1467,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
                 if (last_section == null or last_section.? != tier) {
                     out[count] = .{ .kind = .section, .gidx = 0, .shell_idx = 0, .section_tier = tier, .y = y };
                     count += 1;
-                    y += SECTION_HEADER_H;
+                    y += sectionHeaderHeight();
                     last_section = tier;
                 }
                 if (sidebarSectionCollapsed(tier)) continue;
@@ -1468,7 +1476,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
                 if (findGroupIdx(gid)) |gidx| {
                     out[count] = .{ .kind = .header, .gidx = gidx, .shell_idx = 0, .y = y };
                     count += 1;
-                    y += GROUP_HEADER_H;
+                    y += groupHeaderHeight();
                 }
             }
             prev_gid = gid;
@@ -1501,7 +1509,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
         if (!has_visible_member) continue;
         out[count] = .{ .kind = .header, .gidx = @intCast(gidx), .shell_idx = 0, .y = y };
         count += 1;
-        y += GROUP_HEADER_H;
+        y += groupHeaderHeight();
         if (app_state.groups[gidx].collapsed) continue;
         var member_tier_pass: i32 = @intFromEnum(SidebarTier.pinned);
         while (member_tier_pass >= @intFromEnum(SidebarTier.recent)) : (member_tier_pass -= 1) {
@@ -1532,7 +1540,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
             if (has_section_tabs) {
                 out[count] = .{ .kind = .section, .gidx = 0, .shell_idx = 0, .section_tier = want_tier, .y = y };
                 count += 1;
-                y += SECTION_HEADER_H;
+                y += sectionHeaderHeight();
                 if (sidebarSectionCollapsed(want_tier)) continue;
             }
         }
@@ -1594,8 +1602,8 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
 pub fn rowTotalHeight(row: Row) i32 {
     if (row.tile) return uiScaled(96);
     return switch (row.kind) {
-        .section => SECTION_HEADER_H,
-        .header => GROUP_HEADER_H,
+        .section => sectionHeaderHeight(),
+        .header => groupHeaderHeight(),
         .tab, .inbox => tabRowH(),
     };
 }
@@ -1682,17 +1690,11 @@ pub fn tabRowForShell(shell_idx: u32) ?Row {
     return null;
 }
 
-fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, height: i32, text: [*]const u16, len: i32) void {
-    _ = SelectObject(hdc, uiFontSubtitle());
-    const reader = @import("themes.zig").themeReaderDark();
-    _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else if (reader) tokens.ReaderHint else RGB(98, 102, 109)));
-    var rc = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.right - uiScaled(8), .bottom = y + height };
-    var upper: [128]u16 = undefined;
-    var n: usize = 0;
-    while (n < upper.len and (if (len < 0) text[n] != 0 else n < @as(usize, @intCast(len)))) : (n += 1) {
-        upper[n] = if (text[n] >= 'a' and text[n] <= 'z') text[n] - 32 else text[n];
-    }
-    _ = DrawTextW(hdc, &upper, @intCast(n), &rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, text: [*]const u16, len: i32) void {
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+    _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(138, 138, 138)));
+    var rc = RECT{ .left = column.left + uiScaled(12), .top = y + uiScaled(12), .right = column.right - uiScaled(8), .bottom = y + uiScaled(42) };
+    _ = DrawTextW(hdc, text, len, &rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 fn drawStarBadge(hdc: HANDLE, rect: RECT, avatar_size: i32, background: DWORD) void {
@@ -1733,32 +1735,32 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
             right = stamp.left - uiScaled(6);
         }
     }
-    const size = uiScaled(40);
-    const left = column.left + uiScaled(10);
+    const size = uiScaled(36);
+    const left = column.left + uiScaled(12);
     const top = y + @divTrunc(tabRowH() - size, 2);
     const avatar = @import("bot_avatar.zig");
     const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
     avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
     if (shell.favorite) {
         const background = if (index == app_state.active_shell) (if (LOOK_UNIFIED) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else themeConsoleBg()) else themeSidebarBg();
-        drawStarBadge(hdc, avatar_rect, 40, background);
+        drawStarBadge(hdc, avatar_rect, 36, background);
     }
     if (shell.needs_attention or shell.disconnected) {
         drawAttentionDot(hdc, if (shell.favorite) left + uiScaled(3) else left + size - uiScaled(3), top + size - uiScaled(3), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
     }
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
-    var name = RECT{ .left = column.left + uiScaled(60), .top = y + uiScaled(5), .right = right, .bottom = y + uiScaled(29) };
-    if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    var name = RECT{ .left = avatar_rect.right + uiScaled(10), .top = y + uiScaled(10), .right = right, .bottom = y + uiScaled(29) };
+    if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
     _ = SetTextColor(hdc, hint);
     var preview: [128]u16 = undefined;
     const len = std.unicode.utf8ToUtf16Le(&preview, shell.preview[0..shell.preview_len]) catch 0;
-    var line = RECT{ .left = name.left, .top = y + uiScaled(29), .right = right, .bottom = y + uiScaled(51) };
+    var line = RECT{ .left = name.left, .top = y + uiScaled(31), .right = right, .bottom = y + uiScaled(57) };
     if (chatDraftHasForShell(index)) {
-        _ = DrawTextW(hdc, L("DRAFT"), -1, &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        _ = DrawTextW(hdc, L("DRAFT"), -1, &line, DT_SINGLELINE | DT_NOPREFIX);
     } else if (len > 0) {
-        _ = DrawTextW(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = DrawTextW(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
 }
 
@@ -1902,7 +1904,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     .pinned => L("Pinned"),
                     .recent => L("Recents"),
                 };
-                drawSidebarLabel(hdc, column, y, SECTION_HEADER_H, section_label, -1);
+                drawSidebarLabel(hdc, column, y, section_label, -1);
                 _ = SelectObject(hdc, font_title);
                 continue;
             }
@@ -1919,9 +1921,9 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     _ = DrawTextW(hdc, chev, -1, &chev_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
                 } else {
                     if (app_state.groups[gidx].name_len > 0) {
-                        drawSidebarLabel(hdc, column, y, GROUP_HEADER_H, @ptrCast(&app_state.groups[gidx].name), @intCast(app_state.groups[gidx].name_len));
+                        drawSidebarLabel(hdc, column, y, @ptrCast(&app_state.groups[gidx].name), @intCast(app_state.groups[gidx].name_len));
                     } else {
-                        drawSidebarLabel(hdc, column, y, GROUP_HEADER_H, L("(unnamed group)"), -1);
+                        drawSidebarLabel(hdc, column, y, L("(unnamed group)"), -1);
                     }
                 }
                 continue;

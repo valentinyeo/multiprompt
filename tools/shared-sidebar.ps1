@@ -1,6 +1,7 @@
-param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof, [switch]$ChangelogLinks, [switch]$HighlightProof, [switch]$StarBadgeProof)
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof, [switch]$ChangelogLinks, [switch]$HighlightProof, [switch]$StarBadgeProof, [switch]$DensityProof)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($DensityProof -and ($MemoryProof -or $OrderProof -or $ChangelogProof -or $ChangelogLinks -or $HighlightProof -or $StarBadgeProof)) { throw 'Invalid proof modes' }
 if ($StarBadgeProof -and ($MemoryProof -or $OrderProof -or $ChangelogProof -or $ChangelogLinks -or $HighlightProof)) { throw 'Invalid proof modes' }
 if (($MemoryProof -and $OrderProof) -or ($ChangelogProof -and ($MemoryProof -or $OrderProof)) -or ($ChangelogLinks -and -not $ChangelogProof) -or ($HighlightProof -and ($MemoryProof -or $OrderProof -or $ChangelogProof -or $ChangelogLinks))) { throw 'Invalid proof modes' }
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
@@ -87,8 +88,8 @@ function Compare-Views([string]$Name) {
     [void](Wait-For 'return sidebar unchanged' { (Capture "$Name-return-sidebar") -eq $before })
 }
 
-if ($HighlightProof -or $StarBadgeProof) { Add-Type -Path "$PSScriptRoot/../.claude/skills/verify-multiprompt/title-bar-native.cs" }
-if ($MemoryProof -or $OrderProof -or $HighlightProof -or $StarBadgeProof) {
+if ($HighlightProof -or $StarBadgeProof -or $DensityProof) { Add-Type -Path "$PSScriptRoot/../.claude/skills/verify-multiprompt/title-bar-native.cs" }
+if ($MemoryProof -or $OrderProof -or $HighlightProof -or $StarBadgeProof -or $DensityProof) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -469,7 +470,7 @@ function Highlight-Frame([string]$Theme, [string]$Kind, [string]$Name, $Target) 
     $result.captureAttempts += $attempt
     if (-not $clientOk -or $null -eq $origin -or $width -ne 1920 -or $height -ne 1032 -or $dpi -ne 96 -or $origin.X -lt $desktop.Left -or $origin.Y -lt $desktop.Top -or ($origin.X + $width) -gt $desktop.Right -or ($origin.Y + $height) -gt $desktop.Bottom) { throw "Invalid client capture geometry: clientOk=$clientOk size=${width}x${height} origin=$($attempt.clientOrigin -join ',') originError=$originError dpi=$dpi desktop=$($attempt.desktop -join ',')" }
     if ($Kind -eq 'tile') { $fillX = $Target.x - 11; $fillY = $Target.y + 38; $ringX = $Target.x - 16; $ringY = $Target.y + 38 }
-    else { $fillX = $Target.x + 45; $fillY = $Target.y + 45; $ringX = $Target.x - 10; $ringY = $Target.y + 20 }
+    else { $fillX = $Target.x + $Target.size + 5; $fillY = $Target.y + $Target.size + 5; $ringX = $Target.x - $(if ($Target.size -eq 40) { 10 } else { 12 }); $ringY = $Target.y + [int]($Target.size / 2) }
     $bitmap = [Drawing.Bitmap]::new(1920, 1032)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try {
@@ -531,14 +532,14 @@ function Highlight-Journey {
         $found = @{}
         foreach ($m in [regex]::Matches((Get-Content "$settings/debug.log" -Raw), '\[bots\] face=\d+ color=\d+ rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
             $x=[int]$m.Groups[1].Value; $y=[int]$m.Groups[2].Value; $size=[int]$m.Groups[3].Value-$x
-            if ($size -eq 56 -or $size -eq 40) { $found["$x,$y,$size"] = @{x=$x; y=$y; size=$size} }
+            if ($size -eq 56 -or $size -eq 40 -or $size -eq 36) { $found["$x,$y,$size"] = @{x=$x; y=$y; size=$size} }
         }
-        $pins = @($found.Values | Where-Object { $_.size -eq 56 } | Sort-Object { [int]$_['x'] })
-        $rows = @($found.Values | Where-Object { $_.size -eq 40 } | Sort-Object { [int]$_['y'] })
+        $pins = @($found.Values | Where-Object { $_.size -eq 56 } | Sort-Object { [int]($_['x']) })
+        $rows = @($found.Values | Where-Object { $_.size -eq 40 -or $_.size -eq 36 } | Sort-Object { [int]($_['y']) })
         if ($pins.Count -eq 2 -and $rows.Count -eq 1) { return @{pins=$pins; row=$rows[0]} }
     } 60
     $result.geometry = @{source='native avatar layout; tile radius 16, row radius 12'; pins=$positions.pins; row=$positions.row; dpi=96; pinDeltaX=($positions.pins[1].x - $positions.pins[0].x); rowDeltaY=($positions.row.y - $positions.pins[0].y)}
-    if ($positions.pins[0].y -ne $positions.pins[1].y -or ($positions.pins[1].x - $positions.pins[0].x) -ne 92 -or ($positions.row.y - $positions.pins[0].y) -ne 105) { throw 'Unexpected Starred layout' }
+    if ($positions.pins[0].y -ne $positions.pins[1].y -or ($positions.pins[1].x - $positions.pins[0].x) -ne 92 -or ($positions.row.y - $positions.pins[0].y) -ne $(if ($positions.row.size -eq 36) { 107 } else { 105 })) { throw 'Unexpected Starred layout' }
     Highlight-Click $positions.row 'Third shell'
     Highlight-Click $positions.pins[0] 'First shell'
     Highlight-Click $positions.pins[1] 'Second shell'
@@ -556,6 +557,83 @@ function Highlight-Journey {
     }
     $result.passed = $true
 }
+function Density-Journey {
+    $result.limitations = @('Label case, font and spacing require visual review', 'Row crops include native pixels and nearest-neighbor 2x copies')
+    Highlight-Owned
+    $desktop = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    if ($desktop.Width -ne 1920 -or $desktop.Height -ne 1080 -or [SidebarDrag]::GetDpiForWindow($main) -ne 96) { throw 'Density proof requires 1920x1080 at 96 DPI' }
+    $positions = Wait-For 'one pinned and four normal avatars' {
+        $found = @{}
+        foreach ($m in [regex]::Matches((Get-Content "$settings/debug.log" -Raw), '\[bots\] face=\d+ color=\d+ rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
+            $x=[int]$m.Groups[1].Value; $y=[int]$m.Groups[2].Value; $size=[int]$m.Groups[3].Value-$x
+            if ($size -eq 36 -or $size -eq 56) { $found["$x,$y,$size"] = @{x=$x; y=$y; size=$size} }
+        }
+        $pins = @($found.Values | Where-Object { $_['size'] -eq 56 })
+        $rows = @($found.Values | Where-Object { $_['size'] -eq 36 } | Sort-Object { [int]($_['y']) })
+        if ($pins.Count -eq 1 -and $rows.Count -eq 4) { return @{pin=$pins[0]; rows=$rows} }
+    } 60
+    $rows = $positions.rows
+    if (($rows[1].y - $rows[0].y) -ne 58 -or ($rows[3].y - $rows[2].y) -ne 58 -or @($rows | Where-Object { $_['x'] -ne 20 }).Count) { throw 'Unexpected density geometry' }
+    $fixture = Session
+    if (@($fixture.tabs).Count -ne 5 -or @($fixture.groups | Where-Object { $_.name -ceq 'Managers' -or $_.name -ceq 'Other' }).Count -ne 2 -or $fixture.tabs[$fixture.active_tab].name -cne 'Manager one') { throw 'Density fixture changed' }
+    Focus
+    [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(900, 500)
+    $script:previousHash = ''
+    [void](Wait-For 'stable density paint' { $hash = Capture 'density-stability'; if ($hash -eq $script:previousHash) { return $true }; $script:previousHash = $hash; $false })
+    $client = [ChatDeliveryDesktop+Rect]::new()
+    $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
+    if (-not [ChatDeliveryDesktop]::GetClientRect($main, [ref]$client) -or ($client.Right - $client.Left) -ne 1920 -or ($client.Bottom - $client.Top) -ne 1032 -or $origin.X -lt $desktop.Left -or $origin.Y -lt $desktop.Top -or $origin.X + 1920 -gt $desktop.Right -or $origin.Y + 1032 -gt $desktop.Bottom) { throw 'Invalid density client capture geometry' }
+    $bitmap = [Drawing.Bitmap]::new(1920, 1032)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        Highlight-Owned
+        $graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, $bitmap.Size)
+        $bitmap.Save("$Output/density-client.png")
+        foreach ($entry in @(@('selected', $rows[0]), @('plain', $rows[1]))) {
+            $rect = [Drawing.Rectangle]::new(8, ($entry[1].y - 11), 291, 58)
+            $crop = $bitmap.Clone($rect, $bitmap.PixelFormat)
+            try {
+                $crop.Save("$Output/density-$($entry[0])-row.png")
+                $scaled = [Drawing.Bitmap]::new(($rect.Width * 2), ($rect.Height * 2))
+                $scaledGraphics = [Drawing.Graphics]::FromImage($scaled)
+                try {
+                    $scaledGraphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+                    $scaledGraphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::Half
+                    $scaledGraphics.CompositingMode = [Drawing.Drawing2D.CompositingMode]::SourceCopy
+                    $scaledGraphics.DrawImage($crop, [Drawing.Rectangle]::new(0, 0, $scaled.Width, $scaled.Height), 0, 0, $crop.Width, $crop.Height, [Drawing.GraphicsUnit]::Pixel)
+                    $scaled.Save("$Output/density-$($entry[0])-row-2x.png")
+                } finally { $scaledGraphics.Dispose(); $scaled.Dispose() }
+            } finally { $crop.Dispose() }
+        }
+        $yellow = @()
+        foreach ($row in $rows) {
+            $pixel = $bitmap.GetPixel(($row.x + $row.size + 1), ($row.y + $row.size - 4))
+            $yellow += ($pixel.R -ge 225 -and $pixel.G -ge 175 -and $pixel.G -le 210 -and $pixel.B -le 100)
+        }
+        if (-not $yellow[0] -or $yellow[1] -or -not $yellow[2] -or $yellow[3]) { throw 'Density favorite badges differ' }
+        $selectedFill = $bitmap.GetPixel(200, ($rows[0].y + 41))
+        $plainFill = $bitmap.GetPixel(200, ($rows[1].y + 41))
+        if ($selectedFill.R -ne 58 -or $selectedFill.G -ne 58 -or $selectedFill.B -ne 58 -or ($plainFill.R -eq 58 -and $plainFill.G -eq 58 -and $plainFill.B -eq 58)) { throw 'Initial row selection differs' }
+    } finally { $graphics.Dispose(); $bitmap.Dispose() }
+    Highlight-Owned
+    Focus
+    [ChatDeliveryDesktop]::PressClient($main, $app.Id, ($rows[1].x + 10), ($rows[1].y + 15))
+    [void](Wait-For 'other row selected' { $saved = Session; $saved.tabs[$saved.active_tab].name -ceq 'Manager two' })
+    [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(900, 500)
+    [void](Wait-For 'highlight moved' {
+        $probe = [Drawing.Bitmap]::new(1, 1); $g = [Drawing.Graphics]::FromImage($probe)
+        try { $g.CopyFromScreen(($origin.X + 200), ($origin.Y + $rows[1].y + 41), 0, 0, $probe.Size); $c = $probe.GetPixel(0, 0); $c.R -eq 58 -and $c.G -eq 58 -and $c.B -eq 58 } finally { $g.Dispose(); $probe.Dispose() }
+    })
+    $probe = [Drawing.Bitmap]::new(1, 1); $g = [Drawing.Graphics]::FromImage($probe)
+    try {
+        $g.CopyFromScreen(($origin.X + 200), ($origin.Y + $rows[0].y + 41), 0, 0, $probe.Size)
+        $c = $probe.GetPixel(0, 0)
+        if ($c.R -eq 58 -and $c.G -eq 58 -and $c.B -eq 58) { throw 'Previous row remains highlighted' }
+    } finally { $g.Dispose(); $probe.Dispose() }
+    $result.geometry = $positions; $result.badges = $yellow
+    $result.actions += @{input='mouse'; name='Manager two'; highlightMoved=$true}
+    $result.passed = $true
+}
 function StarBadge-Journey {
     $result.executable = @{sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; tag=$env:RELEASE_TAG; version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion}
     $result.limitations = @('Avatar positions use native debug layout; hover appearance requires human review', 'Badge pixels and input actions run independently of geometry tests')
@@ -571,10 +649,10 @@ function StarBadge-Journey {
         $found = @{}
         foreach ($m in [regex]::Matches((Get-Content "$settings/debug.log" -Raw), '\[bots\] face=\d+ color=\d+ rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
             $x=[int]$m.Groups[1].Value; $y=[int]$m.Groups[2].Value; $size=[int]$m.Groups[3].Value-$x
-            if ($size -eq 56 -or $size -eq 40) { $found["$x,$y,$size"] = @{x=$x; y=$y; size=$size} }
+            if ($size -eq 56 -or $size -eq 40 -or $size -eq 36) { $found["$x,$y,$size"] = @{x=$x; y=$y; size=$size} }
         }
         $pins = @($found.Values | Where-Object { $_.size -eq 56 })
-        $rows = @($found.Values | Where-Object { $_.size -eq 40 } | Sort-Object { [int]$_['y'] })
+        $rows = @($found.Values | Where-Object { $_.size -eq 40 -or $_.size -eq 36 } | Sort-Object { [int]($_['y']) })
         if ($pins.Count -eq 1 -and $rows.Count -eq 2) { return @{pin=$pins[0]; rows=$rows} }
     } 60
     $result.geometry = $positions
@@ -631,7 +709,7 @@ function StarBadge-Journey {
 $linkFixtureLoaded = $false
 $displayAttempted = $false
 try {
-    if ($HighlightProof -or $StarBadgeProof) { $displayAttempted = $true; [CaptionProof]::SetDpi(96) }
+    if ($HighlightProof -or $StarBadgeProof -or $DensityProof) { $displayAttempted = $true; [CaptionProof]::SetDpi(96) }
     New-Item -ItemType Directory -Force $settings, "$profile/local", "$profile/home" | Out-Null
     if ($ChangelogLinks) {
         $result.registryRestored = $false; $result.receipts = @()
@@ -643,7 +721,13 @@ try {
     $env:APPDATA = "$profile/roaming"; $env:LOCALAPPDATA = "$profile/local"; $env:USERPROFILE = "$profile/home"; $env:HOME = "$profile/home"
     $env:MULTIPROMPT_NO_LOGIN = '1'; $env:IGSH_246 = '0'; $env:ZIGSHELL_DEBUG = '1'
     $tabs = @('First shell', 'Second shell', 'Third shell') | ForEach-Object { @{kind='cmd'; name=$_; manual=$true; cv=$false; pid=0} }
-    if ($StarBadgeProof) {
+    if ($DensityProof) {
+        $tabs = @('Pinned shell', 'Manager one', 'Manager two', 'Other one', 'Other two') | ForEach-Object { @{kind='cmd'; name=$_; manual=$true; cv=$false; pid=0} }
+        $tabs[0].pinned_top = $true; $tabs[0].favorite = $true
+        $tabs[1].group_id = 17; $tabs[1].favorite = $true; $tabs[2].group_id = 17
+        $tabs[3].group_id = 18; $tabs[3].favorite = $true; $tabs[4].group_id = 18
+        Save @{active_tab=1; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=@($tabs); groups=@(@{id=17; name='Managers'}, @{id=18; name='Other'})} "$settings/session.json"
+    } elseif ($StarBadgeProof) {
         $tabs[0].favorite = $true; $tabs[0].pinned_top = $true
         $tabs[1].favorite = $true; $tabs[2].favorite = $false
         Save @{active_tab=0; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=@($tabs)} "$settings/session.json"
@@ -663,13 +747,13 @@ try {
     $job = [VerifyJob]::new()
     $app = $job.Start($Exe, $profile, "$Output/stdout.log", "$Output/stderr.log", '--no-window-restore')
     $main = Wait-For 'owned visible application' { $h = [ChatDeliveryDesktop]::Window($app.Id); if ($h -ne [IntPtr]::Zero) { $h } }
-    [void](Wait-For 'three restored sessions' { (Session).tabs.Count -eq 3 })
+    [void](Wait-For 'restored sessions' { (Session).tabs.Count -eq $(if ($DensityProof) { 5 } else { 3 }) })
     Focus
     [Windows.Forms.Cursor]::Position = [Drawing.Point]::new(900, 500)
-    [void](Wait-For 'three sidebar sessions published' {
+    [void](Wait-For 'sidebar sessions published' {
         if (-not (Test-Path "$settings/inbox-default.json")) { return $false }
         $inbox = Read-Json "$settings/inbox-default.json"
-        @($inbox.shells).Count -eq 3
+        @($inbox.shells).Count -eq $(if ($DensityProof) { 5 } else { 3 })
     })
     if ($ChangelogProof) {
         if (-not $ChangelogLinks) { $result.limitations = @('Screenshot requires human review; bitmap stability does not establish overlay contents', 'Bundled changelog is not published release-notes JSON') }
@@ -710,7 +794,7 @@ try {
             Receive-Link $result.audit.oldTicket '1048-keyboard'
         }
         $result.passed = $true
-    } elseif ($StarBadgeProof) { StarBadge-Journey } elseif ($HighlightProof) { Highlight-Journey } elseif ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
+    } elseif ($DensityProof) { Density-Journey } elseif ($StarBadgeProof) { StarBadge-Journey } elseif ($HighlightProof) { Highlight-Journey } elseif ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
     Toggle-View
     [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
     [void](Wait-For 'initial console poll' {
@@ -747,7 +831,7 @@ try {
     Write-Host $result.error
     if (Get-Variable main -ErrorAction SilentlyContinue) { Shot 'failure' }
 } finally {
-    if ($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof -or $StarBadgeProof) {
+    if ($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof -or $StarBadgeProof -or $DensityProof) {
         $result.scratchRemoved = $false
         $result.cleanupErrors = @()
         try {
@@ -785,7 +869,7 @@ try {
         } catch {
             $result.cleanupErrors += $_.Exception.Message
         } finally {
-            if ($HighlightProof -or $StarBadgeProof) {
+            if ($HighlightProof -or $StarBadgeProof -or $DensityProof) {
                 $result.displayRestored = $false
                 try { if ($displayAttempted) { [CaptionProof]::RestoreDpi() }; $result.displayRestored = $true } catch { $result.cleanupErrors += "Display restoration failed: $($_.Exception.Message)" }
             }
@@ -801,5 +885,5 @@ try {
         if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
     }
 }
-if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof -or $StarBadgeProof) -and -not $result.scratchRemoved) -or (($HighlightProof -or $StarBadgeProof) -and -not $result.displayRestored)) { throw 'Shared sidebar journey failed; see result.json' }
+if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof -or $StarBadgeProof -or $DensityProof) -and -not $result.scratchRemoved) -or (($HighlightProof -or $StarBadgeProof -or $DensityProof) -and -not $result.displayRestored)) { throw 'Shared sidebar journey failed; see result.json' }
 Write-Host 'SHARED_SIDEBAR_JOURNEY_OK'

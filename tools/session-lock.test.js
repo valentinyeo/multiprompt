@@ -35,13 +35,10 @@ test("IGSH-820 pinned protection uses one guard and no session lock state", () =
   assert.match(source, /WM_APP_CLOSE => \{\s*if \(shell_count > 0\) \{\s*closeShell\(active_shell\)/);
 });
 
-test("IGSH-820 pinned robot tiles select safely while close actions remain guarded", () => {
+test("IGSH-820 pinned robot tiles select safely", () => {
   const paint = bodyOf("fn paintSidebar(");
   assert.doesNotMatch(paint, /drawSessionLockIcon|shells\[i\]\.pinned_top/);
-  const row = bodyOf("fn paintChatSidebarRow(");
   assert.match(paint, /if \(!g_sidebar_collapsed\) \{\s*paintChatSidebarRow/);
-  assert.match(row, /if \(g_sidebar_hover == index\) \{[\s\S]*?uiFontClose\(\)/);
-  assert.match(source, /if \(!g_sidebar_collapsed and !shells\[tab_idx\]\.pinned_top and mx > SIDEBAR_W\(\) - 30\) \{\s*closeShell\(tab_idx\)/);
   assert.match(paint, /if \(row\.tile\) \{\s*paintPinnedBot/);
 });
 

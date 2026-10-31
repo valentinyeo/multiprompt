@@ -33,6 +33,11 @@ on:
         required: false
         type: boolean
         default: false
+      density_proof:
+        description: Capture approved sidebar density from a published release
+        required: false
+        type: boolean
+        default: false
       highlight_proof:
         description: Capture active Starred tile and row in both themes
         required: false
@@ -61,6 +66,11 @@ jobs:
           Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
           & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" test src/star_badge_geometry.zig
           if ($LASTEXITCODE -ne 0) { throw 'Badge geometry failed' }
+  source-contracts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: node --test tools/session-lock.test.js tools/chat-view-everywhere.test.js tools/palette-rows.test.js tools/shortcuts-doc.test.js tools/group-palette.test.js
   sidebar:
     runs-on: windows-latest
     timeout-minutes: 15
@@ -80,8 +90,10 @@ jobs:
           CHANGELOG_LINKS: ${{ inputs.changelog_links }}
           HIGHLIGHT_PROOF: ${{ inputs.highlight_proof }}
           STAR_BADGE_PROOF: ${{ inputs.star_badge_proof }}
+          DENSITY_PROOF: ${{ inputs.density_proof }}
         run: |
           New-Item -ItemType Directory -Force bin, evidence | Out-Null
+          if ($env:DENSITY_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true' -or $env:HIGHLIGHT_PROOF -eq 'true' -or $env:STAR_BADGE_PROOF -eq 'true')) { throw 'Density proof requires a published tag and excludes other proof modes' }
           if ($env:STAR_BADGE_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true' -or $env:HIGHLIGHT_PROOF -eq 'true')) { throw 'Star badge proof requires a published tag and excludes other proof modes' }
           if ($env:HIGHLIGHT_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true')) { throw 'Highlight proof requires a published tag and excludes other proof modes' }
           trap { if ($env:CHANGELOG_LINKS -eq 'true') { @{passed=$false; error='Link proof acquisition or audit failed'; cleanup=0; scratchRemoved=$true} | ConvertTo-Json | Set-Content evidence/result.json }; throw $_ }
@@ -124,9 +136,12 @@ jobs:
           CHANGELOG_LINKS: ${{ inputs.changelog_links }}
           HIGHLIGHT_PROOF: ${{ inputs.highlight_proof }}
           STAR_BADGE_PROOF: ${{ inputs.star_badge_proof }}
+          DENSITY_PROOF: ${{ inputs.density_proof }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          if ($env:STAR_BADGE_PROOF -eq 'true') {
+          if ($env:DENSITY_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -DensityProof
+          } elseif ($env:STAR_BADGE_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -StarBadgeProof
           } elseif ($env:HIGHLIGHT_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -HighlightProof

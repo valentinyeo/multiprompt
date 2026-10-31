@@ -366,8 +366,8 @@ pub fn uiFontBot(role: enum { name, preview, pinned }) HANDLE {
     const index = @intFromEnum(role);
     if (app_state.g_font_bot[index] == null) {
         const heights = [_]i32{ -14, -13, -12 };
-        const weights = [_]i32{ 600, 400, 500 };
-        app_state.g_font_bot[index] = CreateFontW(uiScaled(heights[index]), 0, 0, 0, weights[index], 0, 0, 0, 0, 0, 0, 4, 0, if (role == .pinned) L(@import("fonts.zig").UI_MEDIUM_FACE) else L(@import("fonts.zig").UI_FACE));
+        const weights = [_]i32{ 500, 400, 500 };
+        app_state.g_font_bot[index] = CreateFontW(uiScaled(heights[index]), 0, 0, 0, weights[index], 0, 0, 0, 0, 0, 0, 4, 0, if (role != .preview) L(@import("fonts.zig").UI_MEDIUM_FACE) else L(@import("fonts.zig").UI_FACE));
     }
     return app_state.g_font_bot[index] orelse @import("fonts.zig").controlFont();
 }
