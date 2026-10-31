@@ -142,7 +142,9 @@ python3 <reader> host handover <provider> <sid>
   without a live agent in a pane.
 - Not owned, switched off, or not Claude: the existing connector path runs unchanged and still
   needs the live agent in its pane.
-- Host unavailable, busy or timed out: the row returns to `queued` (same attempt, so a later
+- A chat that is mid-turn answers `busy`: the next message stays `queued` and is retried about once
+  a second, with no growing backoff, until the turn ends.
+- Host unavailable or timed out: the row returns to `queued` (same attempt, so a later
   retry is a `duplicate`, not a second send) and the per-chat backoff grows 250 ms, 500 ms,
   1 s, 2 s, 4 s, 8 s, 16 s, 30 s. Success clears it.
 - One chat's error never blocks another chat: the message worker is per chat, and the

@@ -4062,8 +4062,10 @@ class AgentHostTest(unittest.TestCase):
         db = reader.message_store_db(self.tmux)
         with db:
             db.execute("INSERT OR IGNORE INTO message_chats(provider,sid,epoch,seq) VALUES ('claude',?,0,0)", (self.sid,))
+            position = db.execute("SELECT COALESCE(MAX(position),0)+1 FROM shared_messages WHERE provider='claude' AND sid=?",
+                                  (self.sid,)).fetchone()[0]
             db.execute("INSERT OR REPLACE INTO shared_messages VALUES (?,?,?,?,?,'hostattempt0001','queued',NULL,NULL,0,?)",
-                       (token, 'claude', self.sid, text or self.text, 1, time.time()))
+                       (token, 'claude', self.sid, text or self.text, position, time.time()))
         db.close()
         return token
 
@@ -4152,6 +4154,18 @@ class AgentHostTest(unittest.TestCase):
         self.wait_for(lambda: len(self.host_events('delivered')) >= 1)
         time.sleep(1.0)
         self.assertEqual(self.user_lines(), [self.text])
+        self.assertEqual(len(self.host_events('delivered')), 1)
+
+    def test_host_busy_chat_keeps_the_next_message_queued(self):
+        self.enable(mode='silent')
+        self.seed(text='first prompt')
+        self.dispatch()
+        self.wait_for(lambda: self.user_lines() == ['first prompt'])
+        self.seed(token='host_fixture_message_02', text='second prompt')
+        self.dispatch()
+        self.assertEqual(self.message('host_fixture_message_02')['state'], 'queued')
+        self.assertEqual(reader.host_backoff(self.provider, self.sid), 0.0)
+        self.assertEqual(self.user_lines(), ['first prompt'])
         self.assertEqual(len(self.host_events('delivered')), 1)
 
     def test_host_lock_refuses_second_owner(self):

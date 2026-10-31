@@ -3122,7 +3122,8 @@ def message_store_transaction(q):
                 changed = db.execute("UPDATE shared_messages SET state='queued',deadline=NULL WHERE id=? AND attempt=? AND epoch=? AND state='sent'", (row['id'], row['attempt'], epoch)).rowcount
                 if changed:
                     message_event(db, provider, sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row['id'],)).fetchone()))
-                host_backoff_fail(provider, sid)
+                if status != 'busy':
+                    host_backoff_fail(provider, sid)
                 return dict(epoch=epoch, seq=seq, message=None)
             bound = resolve_tmux_agent(provider, tmux, require_bound=True)
             if current != ('sent', epoch) or not bound or bound[0] != sid or Path(bound[1]) != Path(resolved[1]):
