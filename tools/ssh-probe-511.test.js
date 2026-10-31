@@ -181,15 +181,16 @@ test('ISSUE-521 ended overlay and palette restart the same named host session ex
   const urlId = state.match(/SEARCH_TABCTX_CHAT_TAB_URL: usize = (\d+)/);
   if (urlId) assert.notEqual(startId[1], urlId[1]);
   assert.match(read('command_palette.zig'), /phase == \.ended/);
-  assert.match(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_START_SESSION/);
-  assert.match(read('sidebar.zig'), /result_idx == SEARCH_TABCTX_START_SESSION\) L\("Start new session"\)/);
+  assert.match(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_RECONNECT/);
+  assert.doesNotMatch(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_START_SESSION/);
+  assert.match(read('sidebar.zig'), /result_idx == SEARCH_TABCTX_RECONNECT\) L\("Reconnect"\)/);
   const main = read('main.zig');
   const start = main.indexOf('if (target == SEARCH_TABCTX_RECONNECT or target == SEARCH_TABCTX_START_SESSION)');
   assert.ok(start >= 0);
   const dispatch = main.slice(start, main.indexOf('} else if', start));
   assert.match(dispatch, /sshReconnectNow\(ti\)/);
-  assert.match(read('shortcuts.zig'), /Start new session/);
-  assert.match(fs.readFileSync(path.join(root, 'openwiki/operations/keyboard-shortcuts.md'), 'utf8'), /Start new session/);
+  assert.match(read('shortcuts.zig'), /Ctrl\+K \\u\{2192\} Reconnect/);
+  assert.match(fs.readFileSync(path.join(root, 'openwiki/operations/keyboard-shortcuts.md'), 'utf8'), /Reconnect/);
 });
 
 test('ISSUE-521 user palette reconnect closes the palette and shows the requested tab', () => {

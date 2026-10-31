@@ -86,6 +86,11 @@ const SEARCH_CUSTOMCMD_EDIT_OFFSET = @import("app_state.zig").SEARCH_CUSTOMCMD_E
 const SEARCH_CUSTOMCMD_RELOAD_OFFSET = @import("app_state.zig").SEARCH_CUSTOMCMD_RELOAD_OFFSET;
 const SEARCH_ARCHIVE_OFFSET = @import("app_state.zig").SEARCH_ARCHIVE_OFFSET;
 const SEARCH_REOPEN_OFFSET = @import("app_state.zig").SEARCH_REOPEN_OFFSET;
+const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
+const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
+const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
+const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
+const SEARCH_SHELLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SHELLS_MENU_OFFSET;
 const SEARCH_URLPICK_OFFSET = @import("app_state.zig").SEARCH_URLPICK_OFFSET;
 const SEARCH_CLOSETAB_OFFSET = @import("app_state.zig").SEARCH_CLOSETAB_OFFSET;
 const SEARCH_CLOSE_DISCONNECTED_OFFSET = @import("app_state.zig").SEARCH_CLOSE_DISCONNECTED_OFFSET;
@@ -432,8 +437,39 @@ fn paletteUsagePath(buf: *[512]u8) ?[]const u8 {
     return buf[0 .. appdata_len + rest.len];
 }
 
+const ShellRow = struct { target: usize, keywords: []const u8 };
+
+const SHELL_ROWS = [_]ShellRow{
+    .{ .target = SEARCH_NEW_OFFSET + 0, .keywords = "command prompt cmd shell new cmd shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 5, .keywords = "powershell pwsh shell new powershell" },
+    .{ .target = SEARCH_NEW_OFFSET + 6, .keywords = "bash shell new bash shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 7, .keywords = "git bash mintty shell new git bash shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 3, .keywords = "server 1 shell host1 de vps ssh new host1 vps shell" },
+    .{ .target = SEARCH_NEW_OFFSET + 4, .keywords = "server 2 shell host2 uk vps ssh new host2 vps shell" },
+    .{ .target = SEARCH_OPENALL_OFFSET, .keywords = "open all server sessions open all vps tmux sessions" },
+    .{ .target = SEARCH_OPENFOLDER_OFFSET, .keywords = "open sessions in this folder" },
+};
+
+fn newSessionRowOrder(target: usize) u16 {
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    for (rows, 0..) |row, i| {
+        if (row == target) return @intCast(i + 1);
+    }
+    return 0;
+}
+
+test "IGSH-1266 new session rows keep the approved order" {
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
+    try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
+    const labels = [_][]const u8{ "New Claude chat", "New Codex chat", "New Pi chat", "New terminal", "Open session...", "Reopen closed tab", "More shells..." };
+    for (rows, labels) |row, label| try std.testing.expectEqualStrings(label, palettePrimaryLabel(row) orelse "");
+    try std.testing.expect(!std.mem.eql(u8, palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse ""));
+}
+
 fn paletteTargetTracksUsage(target: usize) bool {
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return true;
+    if (newSessionRowOrder(target) != 0) return true;
     if (target == SEARCH_SNIPPET_MANAGE_OFFSET or
         target == SEARCH_SOUND_OFFSET or
         target == SEARCH_THEME_MENU_OFFSET or
@@ -550,10 +586,16 @@ pub fn recordPaletteUsage(target: usize) void {
 }
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
+    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) return "New Claude chat";
+    if (target == SEARCH_CODEX_TMUX_OFFSET) return "New Codex chat";
+    if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
+    if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
+    if (target == SEARCH_OPEN_SESSION_MENU_OFFSET) return "Open session...";
+    if (target == SEARCH_SHELLS_MENU_OFFSET) return "More shells...";
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET or target == SEARCH_TABCTX_CLOSE_DISCONNECTED) return "close all disconnected sessions";
     if (target == SEARCH_TABCTX_CHAT_ALLOW) return "chat view allow";
     if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
-    if (target == SEARCH_TABCTX_START_SESSION) return "start new session";
+    if (target == SEARCH_TABCTX_RECONNECT) return "Reconnect restart session reattach tab";
     if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
     if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
     if (target == SEARCH_TABCTX_CHAT_TAB_URL) return "chat view insert browser tab url link ctrl shift x";
@@ -571,7 +613,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
             SEARCH_TABCTX_WSMOVE => "move to workspace",
             SEARCH_TABCTX_GROUP_NEW => "add to new group",
             SEARCH_TABCTX_GROUP_REMOVE => "remove from group",
-            SEARCH_TABCTX_GROUP_NEW_TAB_IN => "new tab in group",
+            SEARCH_TABCTX_GROUP_NEW_TAB_IN => "new chat in this group",
             SEARCH_TABCTX_MOVE_NEW_WS => "move to new workspace",
             SEARCH_TABCTX_CLEAR_SEL => "clear tab selection",
             SEARCH_TABCTX_ARCHIVE => if (tab != null and tab.?.tmux_session_len > 0) "archive session" else "close session",
@@ -734,7 +776,12 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CUSTOMCMD_EDIT_OFFSET => "commands edit commands.json",
         SEARCH_CUSTOMCMD_RELOAD_OFFSET => "commands reload",
         SEARCH_ARCHIVE_OFFSET => "archive session",
-        SEARCH_REOPEN_OFFSET => "reopen closed tab",
+        SEARCH_REOPEN_OFFSET => "reopen closed tab restore undo",
+        SEARCH_NEW_CLAUDE_CHAT_OFFSET => "new claude chat session tab agent",
+        SEARCH_NEW_PI_CHAT_OFFSET => "new pi chat session",
+        SEARCH_NEW_TERMINAL_OFFSET => "new terminal shell plain",
+        SEARCH_OPEN_SESSION_MENU_OFFSET => "open session attach tmux list pick",
+        SEARCH_SHELLS_MENU_OFFSET => "more shells cmd command prompt powershell pwsh bash git bash server ssh",
         SEARCH_URLPICK_OFFSET => "open url from screen",
         SEARCH_CLOSETAB_OFFSET => "close tab",
         SEARCH_FAVORITE_OFFSET => "favorite: toggle star session",
@@ -1063,6 +1110,8 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
     if (paletteRowIsSession(target)) return 0;
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
+    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
+        target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET) return 0;
     if (target >= SEARCH_CUSTOMCMD_OFFSET and target < SEARCH_CUSTOMCMD_OFFSET + MAX_CUSTOM_CMDS) return 0;
     if (target >= SEARCH_ARCHIVED_OFFSET and target < SEARCH_ARCHIVED_OFFSET + 64) return 0;
     if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return 1;
@@ -1083,6 +1132,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
 
 const PaletteOrderRow = struct {
     target: usize,
+    order: u16,
     group: u8,
     command: bool,
     safe: bool,
@@ -1102,6 +1152,11 @@ fn paletteUsageOutranks(a: *const PaletteOrderRow, b: *const PaletteOrderRow) bo
 }
 
 fn paletteOrderOutranks(a: *const PaletteOrderRow, b: *const PaletteOrderRow) bool {
+    if (a.order != b.order) {
+        if (a.order == 0) return false;
+        if (b.order == 0) return true;
+        return a.order < b.order;
+    }
     if (a.safe != b.safe) return a.safe;
     return paletteUsageOutranks(a, b);
 }
@@ -1125,6 +1180,7 @@ fn groupEmptyPaletteResults(lead: usize) void {
         const command = !paletteRowIsSession(target);
         row.* = .{
             .target = target,
+            .order = newSessionRowOrder(target),
             .group = paletteGroupOf(target) orelse PALETTE_GROUP_SESSIONS,
             .command = command,
             .safe = !paletteTargetIsDestructive(target),
@@ -1710,6 +1766,53 @@ pub fn spawnCodexTmuxSession() bool {
     return ok;
 }
 
+pub fn spawnPiTmuxSession() bool {
+    var host: u8 = 0;
+    var cwd_buf: [256]u8 = undefined;
+    var cwd_len: u32 = 0;
+    if (!activeRemoteContextForCodexTmux(&host, &cwd_buf, &cwd_len)) return false;
+    const cwd = cwd_buf[0..@as(usize, @intCast(cwd_len))];
+    const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
+    if (!capacityAdmitNewAgent(host, workspace, "new Pi session")) return false;
+
+    var session_buf: [64]u8 = undefined;
+    const session = buildWorkspaceTmuxSessionName(&session_buf);
+    var cmd_buf: [512]u8 = undefined;
+    const launch_cmd = buildWorkspaceTmuxLaunchCmd(&cmd_buf, session, cwd, "pi") orelse return false;
+
+    @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
+    app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
+    app_state.g_pending_tmux_host = host;
+    const ok = spawnShellWithSession(.tmux, session, null, null);
+    app_state.g_pending_tmux_host = 0;
+    app_state.g_pending_tmux_cmd_len = 0;
+
+    if (ok and app_state.shell_count > 0) {
+        const ns: usize = app_state.shell_count - 1;
+        const ts_len = @min(session.len, app_state.shells[ns].tmux_session.len - 1);
+        @memcpy(app_state.shells[ns].tmux_session[0..ts_len], session[0..ts_len]);
+        app_state.shells[ns].tmux_session_len = @intCast(ts_len);
+        app_state.shells[ns].tmux_host = host;
+        app_state.shells[ns].ai_agent = 3;
+        setShellName(&app_state.shells[ns], "Pi");
+        app_state.shells[ns].name_source = .default;
+        const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
+        @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
+        app_state.shells[ns].cached_cwd_len = @intCast(n);
+        publishInboxState();
+        saveSession();
+    }
+
+    return ok;
+}
+
+test "IGSH-1266 a new Pi chat types pi in the workspace folder" {
+    var out: [512]u8 = undefined;
+    const launched = buildWorkspaceTmuxLaunchCmd(&out, "term-pi", "~/projects", "pi") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("tmux new-session -d -s term-pi -c ~/projects 2>/dev/null; tmux send-keys -t term-pi 'cd ~/projects && pi' Enter; tmux attach -t term-pi", launched);
+    try std.testing.expect(!@import("agent_host.zig").eligible("pi"));
+}
+
 fn clampSearchSelectionAndScroll() void {
     if (app_state.g_search_result_count == 0) {
         app_state.g_search_sel = 0;
@@ -2053,6 +2156,39 @@ pub fn updateSearchResults() void {
         return;
     }
 
+    if (app_state.g_search_shells_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        for (SHELL_ROWS) |row| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (!keywordsMatchAll(row.keywords, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = row.target;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
+    if (app_state.g_search_open_session_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SNIPPET_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        const attach_rows = [_]usize{ SEARCH_NEW_OFFSET + 1, SEARCH_NEW_OFFSET + 2 };
+        const attach_kw = [_][]const u8{ "server 1 host1 attach tmux session", "server 2 host2 attach tmux session" };
+        for (attach_rows, attach_kw) |row_target, row_kw| {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            if (!keywordsMatchAll(row_kw, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+            app_state.g_search_results[app_state.g_search_result_count] = row_target;
+            app_state.g_search_result_count += 1;
+        }
+        appendTmuxCacheRows();
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
     if (app_state.g_search_openall_host_mode) {
         app_state.g_search_result_count = 0;
         buildFilteredTmux();
@@ -2180,16 +2316,8 @@ pub fn updateSearchResults() void {
             const k = app_state.shells[ti].kind;
             if (k == .vps or k == .vps2 or k == .tmux) {
                 if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                    const ended = app_state.shells[ti].ssh_reconnect.phase == .ended;
-                    const label = if (ended) "Start new session" else "Reattach Tab";
-                    if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len]) or
-                        (!ended and asciiContainsQueryInsensitive("reconnect tab", app_state.g_search_buf[0..app_state.g_search_len])))
-                    {
-                        if (ended) {
-                            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_START_SESSION;
-                        } else {
-                            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_RECONNECT;
-                        }
+                    if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Reconnect", "restart session", "reattach tab", "reconnect tab" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_RECONNECT;
                         app_state.g_search_result_count += 1;
                     }
                 }
@@ -2393,7 +2521,7 @@ pub fn updateSearchResults() void {
             }
         } else if (tc_grouped) {
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("New tab in group", app_state.g_search_buf[0..app_state.g_search_len])) {
+                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "New chat in this group", "new tab in group", "new claude chat in group" }, app_state.g_search_buf[0..app_state.g_search_len])) {
                     app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GROUP_NEW_TAB_IN;
                     app_state.g_search_result_count += 1;
                 }
@@ -2501,84 +2629,51 @@ pub fn updateSearchResults() void {
         }
     }
 
-    const new_kw = [NUM_BUTTONS][]const u8{
-        "new cmd shell add session local",
-        "attach tmux host1 de session list pick",
-        "attach tmux host2 uk session list pick",
-        "new vps host1 de ssh session add shell",
-        "new vps host2 uk ssh session add shell",
-        "new powershell pwsh shell add session",
-        "new bash shell add session",
-        "new git bash mintty shell add session",
-    };
-    for (0..NUM_BUTTONS) |ki| {
-        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-        if (app_state.g_search_len == 0) {
-            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_OFFSET + ki;
-            app_state.g_search_result_count += 1;
-        } else {
-            const query = app_state.g_search_buf[0..app_state.g_search_len];
-            const kw = new_kw[ki];
-            var all_match = true;
-            var wstart: usize = 0;
-            var qp: usize = 0;
-            while (qp <= query.len) : (qp += 1) {
-                const at_end = (qp == query.len);
-                if (at_end or query[qp] == ' ') {
-                    if (qp > wstart) {
-                        const wlen = qp - wstart;
-                        var found = false;
-                        if (wlen <= kw.len) {
-                            var ksi: usize = 0;
-                            while (ksi + wlen <= kw.len) : (ksi += 1) {
-                                var ok = true;
-                                for (0..wlen) |j| {
-                                    const qc = u16ToLower(query[wstart + j]);
-                                    const kc = kw[ksi + j];
-                                    const lc: u16 = if (kc >= 'A' and kc <= 'Z') kc + 32 else kc;
-                                    if (qc != lc) {
-                                        ok = false;
-                                        break;
-                                    }
-                                }
-                                if (ok) {
-                                    found = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!found) {
-                            all_match = false;
-                            break;
-                        }
-                    }
-                    wstart = qp + 1;
-                }
-            }
-            if (all_match) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_OFFSET + ki;
-                app_state.g_search_result_count += 1;
-            }
-        }
-    }
-
     {
         var host: u8 = 0;
         var cwd_buf: [256]u8 = undefined;
         var cwd_len: u32 = 0;
-        if (activeRemoteContextForCodexTmux(&host, &cwd_buf, &cwd_len) and app_state.g_search_result_count < app_state.g_search_results.len) {
-            var show_codex_tmux = (app_state.g_search_len == 0);
-            if (!show_codex_tmux) {
-                const codex_labels = [_][]const u8{ "new codex tmux session", "new codex session", "new codec session", "new codecs session", "codex", "codec", "codecs", "openai codex", "ai agent", "new codex session in this folder" };
-                for (codex_labels) |label| {
-                    if (asciiContainsQueryInsensitive(label, app_state.g_search_buf[0..app_state.g_search_len])) {
-                        show_codex_tmux = true;
-                        break;
-                    }
-                }
-            }
-            if (show_codex_tmux) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CODEX_TMUX_OFFSET;
+        const remote_folder = activeRemoteContextForCodexTmux(&host, &cwd_buf, &cwd_len);
+        if (keywordsMatchAll("new claude chat session tab agent ctrl t", app_state.g_search_buf[0..app_state.g_search_len])) {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CLAUDE_CHAT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (remote_folder and app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new codex chat session openai codec codecs", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_CODEX_TMUX_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (remote_folder and app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new pi chat session", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_PI_CHAT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new terminal shell plain", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_TERMINAL_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("open session attach tmux list pick server host1 host2", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_OPEN_SESSION_MENU_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("more shells cmd command prompt powershell pwsh bash git bash vps server ssh", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_SHELLS_MENU_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_len > 0) {
+            for (SHELL_ROWS) |row| {
+                if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+                if (row.target >= SEARCH_OPENALL_OFFSET) continue;
+                if (!keywordsMatchAll(row.keywords, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+                app_state.g_search_results[app_state.g_search_result_count] = row.target;
                 app_state.g_search_result_count += 1;
             }
         }
@@ -3118,8 +3213,8 @@ pub fn updateSearchResults() void {
             }
         }
         if (app_state.shells[app_state.active_shell].ssh_reconnect.phase == .ended) {
-            if (app_state.g_search_len == 0 or asciiContainsQueryInsensitive("Start new session", app_state.g_search_buf[0..app_state.g_search_len])) {
-                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_START_SESSION;
+            if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Reconnect", "restart session", "reattach tab", "reconnect tab" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_RECONNECT;
                 app_state.g_search_result_count += 1;
             }
         } else if (show_reconnect) {
@@ -4350,50 +4445,7 @@ pub fn updateSearchResults() void {
         }
     }
 
-    buildFilteredTmux();
-    var ti: u32 = 0;
-    while (ti < app_state.g_inactive_filtered_count) : (ti += 1) {
-        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
-        const cache_idx = app_state.g_inactive_filtered[ti];
-        const sess = app_state.g_tmux_cache[cache_idx];
-        const sname = sess.name[0..sess.name_len];
-
-        if (app_state.g_search_len > 0) {
-            const query = app_state.g_search_buf[0..app_state.g_search_len];
-            var all_words_match = true;
-            var wstart: usize = 0;
-            var qp: usize = 0;
-            while (qp <= query.len) : (qp += 1) {
-                const at_end = (qp == query.len);
-                if (at_end or query[qp] == ' ') {
-                    if (qp > wstart) {
-                        const word = query[wstart..qp];
-                        var name_w: [64]u16 = undefined;
-                        for (sname, 0..) |c, ni| name_w[ni] = @intCast(c);
-                        const name_hit = u16ContainsInsensitive(name_w[0..sess.name_len], word);
-                        var title_hit = false;
-                        if (!name_hit and sess.title_len > 0) {
-                            var title_w: [80]u16 = undefined;
-                            for (sess.title[0..sess.title_len], 0..) |c, tci| title_w[tci] = @intCast(c);
-                            title_hit = u16ContainsInsensitive(title_w[0..sess.title_len], word);
-                        }
-                        const host_hit = !name_hit and !title_hit and tmuxHostMatchesQuery(sess.host, word);
-                        if (!name_hit and !title_hit and !host_hit) {
-                            all_words_match = false;
-                            break;
-                        }
-                    }
-                    wstart = qp + 1;
-                }
-            }
-            if (!all_words_match) continue;
-        }
-
-        if (tmuxCacheEntryAlreadyOpen(&sess)) continue;
-
-        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TMUX_OFFSET + cache_idx;
-        app_state.g_search_result_count += 1;
-    }
+    if (app_state.g_search_len > 0) appendTmuxCacheRows();
 
     if (app_state.g_inactive_filtered_count >= 1 and app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_openall = (app_state.g_search_len == 0);
@@ -4626,6 +4678,101 @@ fn labelsStartWithQuery(labels: []const []const u8, query: []const u16) bool {
         if (ok) return true;
     }
     return false;
+}
+
+fn keywordsMatchAll(keywords: []const u8, query: []const u16) bool {
+    if (query.len == 0) return true;
+    var wstart: usize = 0;
+    var qp: usize = 0;
+    while (qp <= query.len) : (qp += 1) {
+        const at_end = (qp == query.len);
+        if (at_end or query[qp] == ' ') {
+            if (qp > wstart) {
+                const wlen = qp - wstart;
+                var found = false;
+                if (wlen <= keywords.len) {
+                    var ksi: usize = 0;
+                    while (ksi + wlen <= keywords.len) : (ksi += 1) {
+                        var ok = true;
+                        for (0..wlen) |j| {
+                            const qc = u16ToLower(query[wstart + j]);
+                            const kc = keywords[ksi + j];
+                            const lc: u16 = if (kc >= 'A' and kc <= 'Z') kc + 32 else kc;
+                            if (qc != lc) {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if (ok) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!found) return false;
+            }
+            wstart = qp + 1;
+        }
+    }
+    return true;
+}
+
+test "IGSH-1266 old new-tab words still reach the rows" {
+    const words = [_]u16{ 'p', 'o', 'w', 'e', 'r', 's', 'h', 'e', 'l', 'l' };
+    try std.testing.expect(keywordsMatchAll("more shells cmd command prompt powershell pwsh bash", &words));
+    const more = [_]u16{ 'm', 'o', 'r', 'e' };
+    try std.testing.expect(keywordsMatchAll("more shells cmd command prompt powershell pwsh bash", &more));
+    const cmd = [_]u16{ 'c', 'm', 'd' };
+    try std.testing.expect(keywordsMatchAll("more shells cmd command prompt powershell pwsh bash", &cmd));
+    const nope = [_]u16{ 'z', 's', 'h' };
+    try std.testing.expect(!keywordsMatchAll("more shells cmd command prompt powershell pwsh bash", &nope));
+}
+
+fn appendTmuxCacheRows() void {
+    buildFilteredTmux();
+    var ti: u32 = 0;
+    while (ti < app_state.g_inactive_filtered_count) : (ti += 1) {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        const cache_idx = app_state.g_inactive_filtered[ti];
+        const sess = app_state.g_tmux_cache[cache_idx];
+        const sname = sess.name[0..sess.name_len];
+
+        if (app_state.g_search_len > 0) {
+            const query = app_state.g_search_buf[0..app_state.g_search_len];
+            var all_words_match = true;
+            var wstart: usize = 0;
+            var qp: usize = 0;
+            while (qp <= query.len) : (qp += 1) {
+                const at_end = (qp == query.len);
+                if (at_end or query[qp] == ' ') {
+                    if (qp > wstart) {
+                        const word = query[wstart..qp];
+                        var name_w: [64]u16 = undefined;
+                        for (sname, 0..) |c, ni| name_w[ni] = @intCast(c);
+                        const name_hit = u16ContainsInsensitive(name_w[0..sess.name_len], word);
+                        var title_hit = false;
+                        if (!name_hit and sess.title_len > 0) {
+                            var title_w: [80]u16 = undefined;
+                            for (sess.title[0..sess.title_len], 0..) |c, tci| title_w[tci] = @intCast(c);
+                            title_hit = u16ContainsInsensitive(title_w[0..sess.title_len], word);
+                        }
+                        const host_hit = !name_hit and !title_hit and tmuxHostMatchesQuery(sess.host, word);
+                        if (!name_hit and !title_hit and !host_hit) {
+                            all_words_match = false;
+                            break;
+                        }
+                    }
+                    wstart = qp + 1;
+                }
+            }
+            if (!all_words_match) continue;
+        }
+
+        if (tmuxCacheEntryAlreadyOpen(&sess)) continue;
+
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TMUX_OFFSET + cache_idx;
+        app_state.g_search_result_count += 1;
+    }
 }
 
 fn labelsMatchQuery(labels: []const []const u8, query: []const u16) bool {

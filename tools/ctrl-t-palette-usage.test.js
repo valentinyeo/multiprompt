@@ -204,21 +204,21 @@ test("all session rename entry points synchronize display surfaces without chang
     "multiprompt-launched Codex sessions must expose the durable thread name in their terminal title");
 });
 
-test("Ctrl+K spawn actions use normalized names without decorative plus prefixes", () => {
+test("Ctrl+K shell rows use readable names without decorative prefixes", () => {
   const paintStart = source.indexOf("if (g_search_active) {", source.indexOf("fn paintSidebar("));
   const paintEnd = source.indexOf("\nfn updateSearchResults(", paintStart);
   const paint = source.slice(paintStart, paintEnd);
   assert.doesNotMatch(paint, /L\("\+ /, "palette action names must not start with '+'");
   for (const label of [
-    "New CMD Shell",
-    "Attach Host 1 tmux Session",
-    "Attach Host 2 tmux Session",
-    "New Host 1 VPS Shell",
-    "New Host 2 VPS Shell",
-    "New PowerShell",
-    "New Bash Shell",
-    "New Git Bash Shell",
-    "New Codex Session in This Folder",
+    "Command Prompt",
+    "Server 1 tmux session",
+    "Server 2 tmux session",
+    "Server 1 shell",
+    "Server 2 shell",
+    "PowerShell",
+    "Bash",
+    "Git Bash",
+    "New Codex chat",
   ]) {
     assert.match(paint, new RegExp(label), `missing normalized palette label: ${label}`);
   }

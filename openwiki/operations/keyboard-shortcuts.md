@@ -170,7 +170,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl++ / Ctrl+- / Ctrl+0 | Terminal font only (Chat View text size when Chat View is active) |
 | Ctrl+K UI Size | App/sidebar only, layered over native monitor DPI |
 | Ctrl+Shift+R | Reattach active SSH/tmux tab |
-| Ctrl+K → Start new session | Restart an ended server session with the same name (also in tab actions) |
+| Ctrl+K → Reconnect | Restart an ended server session with the same name (also in tab actions) |
+| Ctrl+K -&gt; New chat in this group | Open a Claude chat in the tab's group straight away |
 | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) |
 | Ctrl+F in All Sessions | Reduce the list to matching sessions |
 | Space in All Sessions | Mark or unmark the selected unattached session |
@@ -211,6 +212,13 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+G | Show usage, servers, and app version. Cycle collapsed cards. |
 | Ctrl+K -&gt; Usage and servers / collapsed status cards | Show usage, servers, and app version. Cycle collapsed cards. |
 | Alt+T | New workspace tmux tab, Claude by default (optional configured program) |
+| Ctrl+T | New Claude chat in this workspace folder (also Alt+T outside the palette and the sidebar plus) |
+| Ctrl+K -&gt; New Claude chat | Open a Claude chat in this workspace folder; same as Ctrl+T and the sidebar plus |
+| Ctrl+K -&gt; New Codex chat | Open a Codex session in this workspace folder |
+| Ctrl+K -&gt; New Pi chat | Open a Pi session in this workspace folder |
+| Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
+| Ctrl+K -&gt; Open session... | Attach a server tmux session or any cached session on this host |
+| Ctrl+K -&gt; More shells... | Command Prompt, PowerShell, Bash, Git Bash, server shells, open all server sessions, sessions in this folder |
 | Ctrl+K Remind Me | Snooze active tmux/Claude tab via quick presets (or type a time) |
 | Ctrl+H | Remind Me: pick In 1, 2, 3, 6 or 12 hours, This evening, Tomorrow morning or evening, and more |
 | Alt+H | Remind Me: hide local tab, keep tmux running, return when due |

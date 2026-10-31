@@ -700,6 +700,11 @@ const SEARCH_VOICE_REPLAY_OFFSET = @import("app_state.zig").SEARCH_VOICE_REPLAY_
 const REMIND_PRESET_CUSTOM = @import("app_state.zig").REMIND_PRESET_CUSTOM;
 const REMIND_PRESET_COUNT = @import("app_state.zig").REMIND_PRESET_COUNT;
 const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFSET;
+const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
+const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
+const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
+const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
+const SEARCH_SHELLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SHELLS_MENU_OFFSET;
 const SEARCH_SNIPPETS_MENU_OFFSET = @import("app_state.zig").SEARCH_SNIPPETS_MENU_OFFSET;
 const SEARCH_SNIPPET_MANAGE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_MANAGE_OFFSET;
 const SEARCH_SNIPPET_CREATE_OFFSET = @import("app_state.zig").SEARCH_SNIPPET_CREATE_OFFSET;
@@ -895,6 +900,8 @@ const parseReminderDue = @import("reminders.zig").parseReminderDue;
 const spawnCustomCmd = @import("command_palette.zig").spawnCustomCmd;
 const spawnWorkspaceTmuxSession = @import("command_palette.zig").spawnWorkspaceTmuxSession;
 const spawnCodexTmuxSession = @import("command_palette.zig").spawnCodexTmuxSession;
+const spawnPiTmuxSession = @import("command_palette.zig").spawnPiTmuxSession;
+const spawnWorkspaceTerminalSession = @import("command_palette.zig").spawnWorkspaceTerminalSession;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
 const notifyTabCapReached = @import("console.zig").notifyTabCapReached;
 const spawnShellWithSession = @import("console.zig").spawnShellWithSession;
@@ -3765,6 +3772,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             debugLog("[usage-hover] close requested by palette");
             @import("usage_card.zig").close();
             app_state.g_search_snippet_mode = false;
+                    app_state.g_search_shells_mode = false;
+                    app_state.g_search_open_session_mode = false;
             app_state.g_search_snippet_manage_mode = false;
             app_state.g_focus_authorized_hwnd = null;
             app_state.g_focus_authorized_until = 0;
@@ -3893,6 +3902,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_SEARCH_CLOSE => {
             app_state.g_search_snippet_mode = false;
+                    app_state.g_search_shells_mode = false;
+                    app_state.g_search_open_session_mode = false;
             app_state.g_search_snippet_manage_mode = false;
             const was_from_inbox = app_state.g_search_from_inbox;
             app_state.g_search_from_inbox = false;
@@ -4894,6 +4905,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     app_state.g_search_active = false;
                     app_state.g_search_snippet_mode = false;
+                    app_state.g_search_shells_mode = false;
+                    app_state.g_search_open_session_mode = false;
                     app_state.g_search_snippet_manage_mode = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
@@ -5335,6 +5348,69 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     endActiveTmuxSession();
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    return 0;
+                }
+                if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = PostMessageW(hwnd, WM_APP_NEW_TAB_DEFAULT, 0, 0);
+                    return 0;
+                }
+                if (target == SEARCH_NEW_PI_CHAT_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    applySearchSpawnContext(hwnd);
+                    const spawned_pi = spawnPiTmuxSession();
+                    applyPendingGroup();
+                    if (!spawned_pi) showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    if (spawned_pi) {
+                        app_state.g_refocus_remaining = 4;
+                        _ = SetTimer(hwnd, TIMER_REFOCUS, 200, null);
+                    } else {
+                        _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    }
+                    return 0;
+                }
+                if (target == SEARCH_NEW_TERMINAL_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    const spawned_terminal = spawnWorkspaceTerminalSession();
+                    if (!spawned_terminal) showActiveShellAfterOverlay();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, if (spawned_terminal) 200 else 50, null);
+                    return 0;
+                }
+                if (target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET) {
+                    const open_session = target == SEARCH_OPEN_SESSION_MENU_OFFSET;
+                    app_state.g_search_open_session_mode = open_session;
+                    app_state.g_search_shells_mode = !open_session;
+                    app_state.g_search_snippet_mode = false;
+                    app_state.g_search_shells_mode = false;
+                    app_state.g_search_open_session_mode = false;
+                    app_state.g_search_snippet_manage_mode = false;
+                    app_state.g_search_workspace_mode = false;
+                    app_state.g_search_workspace_delete_mode = false;
+                    app_state.g_search_theme_mode = false;
+                    app_state.g_search_session_overview_mode = false;
+                    app_state.g_search_ws_sort_mode = false;
+                    app_state.g_search_ws_move_mode = false;
+                    app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
+                    app_state.g_search_openall_host_mode = false;
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 0;
+                    app_state.g_search_scroll = 0;
+                    updateSearchResults();
+                    if (app_state.g_search_result_count > 1) {
+                        app_state.g_search_sel = 1;
+                        keepSearchSelectionVisible();
+                    }
+                    _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
                 if (target == SEARCH_REOPEN_OFFSET) {
@@ -6323,17 +6399,25 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_TABCTX_GROUP_NEW_TAB_IN) {
-                    if (findShellById(app_state.g_tabctx_sid)) |ti| {
-                        app_state.g_pending_new_tab_group = @import("sidebar.zig").tabGroupId(ti);
-                    }
+                    app_state.g_pending_new_tab_group = if (findShellById(app_state.g_tabctx_sid)) |ti| @import("sidebar.zig").tabGroupId(ti) else 0;
+                    app_state.g_search_active = false;
                     app_state.g_search_tabctx_mode = false;
                     app_state.g_search_groupctx_mode = false;
                     app_state.g_tabctx_sid = 0;
+                    app_state.g_shell_focused = true;
                     app_state.g_search_len = 0;
                     app_state.g_search_sel = 0;
                     app_state.g_search_scroll = 0;
-                    updateSearchResults();
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    if (spawnWorkspaceTmuxSession()) {
+                        applyPendingGroup();
+                        app_state.g_refocus_remaining = 4;
+                    } else {
+                        app_state.g_pending_new_tab_group = 0;
+                    }
                     _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
                 }
                 if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or
@@ -8725,6 +8809,8 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
         .g_search_session_overview_mode = app_state.g_search_session_overview_mode,
         .g_search_openall_host_mode = app_state.g_search_openall_host_mode,
         .g_search_snippet_mode = app_state.g_search_snippet_mode,
+        .g_search_shells_mode = app_state.g_search_shells_mode,
+        .g_search_open_session_mode = app_state.g_search_open_session_mode,
         .g_search_theme_mode = app_state.g_search_theme_mode,
     };
     defer {
@@ -8763,6 +8849,8 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
         app_state.g_search_session_overview_mode = saved.g_search_session_overview_mode;
         app_state.g_search_openall_host_mode = saved.g_search_openall_host_mode;
         app_state.g_search_snippet_mode = saved.g_search_snippet_mode;
+        app_state.g_search_shells_mode = saved.g_search_shells_mode;
+        app_state.g_search_open_session_mode = saved.g_search_open_session_mode;
         app_state.g_search_theme_mode = saved.g_search_theme_mode;
     }
     const hwnd = w.CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 1000, 700, null, null, null, null) orelse return error.TestUnexpectedResult;
@@ -8794,6 +8882,8 @@ test "IGSH-836 palette keyboard survives stationary hover and real movement or c
     app_state.g_search_session_overview_mode = false;
     app_state.g_search_openall_host_mode = false;
     app_state.g_search_snippet_mode = false;
+                    app_state.g_search_shells_mode = false;
+                    app_state.g_search_open_session_mode = false;
     app_state.g_search_theme_mode = true;
     app_state.g_search_len = 0;
     app_state.g_search_sel = 0;
