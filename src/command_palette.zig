@@ -1859,7 +1859,7 @@ fn adoptHostThread(job: *AdoptHostJob) void {
     var written: ?*bool = null;
     _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, &written);
     if (std.mem.indexOf(u8, response.items, "\"start\":\"started\"") != null or std.mem.indexOf(u8, response.items, "\"status\":\"already\"") != null) {
-        if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOGGLE, 0, 0);
+        if (app_state.g_main_hwnd != null) _ = @import("win32.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_TOGGLE, 0, 0);
     } else {
         if (app_state.g_main_hwnd != null) showHeaderNoticeAscii("Move chat: the session did not move, see the tab", 5000, true);
     }
