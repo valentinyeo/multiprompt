@@ -1955,6 +1955,16 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
     return ok;
 }
 
+fn workspaceFolderForNewChat(out_host: *u8, out_path: *[256]u8, out_len: *u32) bool {
+    out_host.* = 0;
+    out_len.* = 0;
+    if (activeRemoteContextForCodexTmux(out_host, out_path, out_len)) return true;
+    var program_buf: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    if (!workspaceConfiguredTerminalFolder(activeWorkspaceSlot(), out_host, out_path, out_len, &program_buf, &program_len)) return false;
+    return remotePathSafeForShell(out_path[0..out_len.*]);
+}
+
 pub fn activeRemoteContextForCodexTmux(out_host: *u8, out_cwd: *[256]u8, out_cwd_len: *u32) bool {
     out_host.* = 0;
     out_cwd_len.* = 0;
@@ -1991,7 +2001,7 @@ pub fn spawnCodexTmuxSession() bool {
     var host: u8 = 0;
     var cwd_buf: [256]u8 = undefined;
     var cwd_len: u32 = 0;
-    if (!activeRemoteContextForCodexTmux(&host, &cwd_buf, &cwd_len)) return false;
+    if (!workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len)) return false;
     const cwd = cwd_buf[0..@as(usize, @intCast(cwd_len))];
     const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
     if (!capacityAdmitNewAgent(host, workspace, "new Codex session")) return false;
@@ -2031,7 +2041,7 @@ pub fn spawnPiTmuxSession() bool {
     var host: u8 = 0;
     var cwd_buf: [256]u8 = undefined;
     var cwd_len: u32 = 0;
-    if (!activeRemoteContextForCodexTmux(&host, &cwd_buf, &cwd_len)) return false;
+    if (!workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len)) return false;
     const cwd = cwd_buf[0..@as(usize, @intCast(cwd_len))];
     const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
     if (!capacityAdmitNewAgent(host, workspace, "new Pi session")) return false;
@@ -2911,7 +2921,7 @@ pub fn updateSearchResults() void {
         var host: u8 = 0;
         var cwd_buf: [256]u8 = undefined;
         var cwd_len: u32 = 0;
-        const remote_folder = activeRemoteContextForCodexTmux(&host, &cwd_buf, &cwd_len);
+        const remote_folder = workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len);
         if (keywordsMatchAll("new claude chat session tab agent ctrl t", app_state.g_search_buf[0..app_state.g_search_len])) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CLAUDE_CHAT_OFFSET;
             app_state.g_search_result_count += 1;

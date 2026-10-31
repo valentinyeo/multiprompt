@@ -4598,6 +4598,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const target = app_state.g_search_results[app_state.g_search_sel];
                 if (paletteRowIsHeader(target)) return 0;
                 recordPaletteUsage(target);
+                {
+                    var dbg_target: [96]u8 = undefined;
+                    debugLog(std.fmt.bufPrint(&dbg_target, "[palette] confirm target={d} count={d} sel={d}", .{ target, app_state.g_search_result_count, app_state.g_search_sel }) catch "[palette] confirm");
+                }
                 if (target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET) {
                     debugLog("[pick] open list");
                     pickRepoOpen(target == SEARCH_PICK_REPO_OFFSET, target == SEARCH_SET_FOLDER_OFFSET,
@@ -5449,6 +5453,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET) {
+                    debugLog("[palette] sub-list handler reached");
                     const open_session = target == SEARCH_OPEN_SESSION_MENU_OFFSET;
                     app_state.g_search_open_session_mode = open_session;
                     app_state.g_search_shells_mode = !open_session;
