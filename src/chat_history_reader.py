@@ -3247,6 +3247,8 @@ def message_store_transaction(q):
             resolved = resolve_tmux_agent(provider, tmux, require_bound=True)
             if resolved and resolved[0] == sid:
                 db.execute('INSERT OR REPLACE INTO message_locators VALUES (?,?,?)', (provider, sid, tmux))
+            elif provider == 'claude' and host_dispatch_switch(provider, sid) and host_chat_name(provider, sid) == tmux:
+                db.execute('INSERT OR REPLACE INTO message_locators VALUES (?,?,?)', (provider, sid, tmux))
             if provider == 'claude' and resolved and resolved[0] == sid and op in ('message_submit', 'message_reset'):
                 import_legacy_messages(db, sid, resolved[1], epoch)
                 seq = db.execute('SELECT seq FROM message_chats WHERE provider=? AND sid=?', (provider, sid)).fetchone()[0]
@@ -3555,11 +3557,21 @@ def message_worker(tmux, provider, sid):
                 try:
                     with closing(message_store_db(tmux)) as db:
                         locator = db.execute('SELECT tmux FROM message_locators WHERE provider=? AND sid=?', (provider, sid)).fetchone()
-                    if not locator:
+                    hosting = host_dispatch_switch(provider, sid)
+                    if locator:
+                        tmux = locator[0]
+                    elif hosting:
+                        tmux = host_chat_name(provider, sid)
+                        if tmux is None:
+                            host_log(provider, sid, 'worker_wait', dict(reason='chat_name_unset'))
+                            return
+                        host_log(provider, sid, 'worker_locator', dict(reason='host_chat_name', tmux=tmux))
+                    else:
+                        host_log(provider, sid, 'worker_stop', dict(reason='no_locator'))
                         return
-                    tmux = locator[0]
                     bound = resolve_tmux_agent(provider, tmux, require_bound=True)
-                    if (not bound or bound[0] != sid) and not host_dispatch_switch(provider, sid):
+                    if (not bound or bound[0] != sid) and not hosting:
+                        host_log(provider, sid, 'worker_stop', dict(reason='no_pane_agent'))
                         return
                     request['tmux'] = tmux
                     if superseded_engine():
@@ -4468,7 +4480,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 37
+RUNTIME_GENERATION = 38
 
 if __name__ == '__main__':
     import base64 as _base64

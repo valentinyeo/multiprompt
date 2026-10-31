@@ -4447,6 +4447,25 @@ class AdoptHostTest(unittest.TestCase):
         self.assertEqual(reader.host_cli(['adopt', 'claude', self.sid, '--tmux', 'bad name'])['reason'], 'invalid_chat')
 
 
+class HostWorkerDeliveryTest(AgentHostTest):
+    def test_a_hosted_chat_delivers_without_a_pane_agent_or_locator(self):
+        self.enable()
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("INSERT OR IGNORE INTO message_chats(provider,sid,epoch,seq) VALUES ('claude',?,0,0)", (self.sid,))
+        db.close()
+        request = dict(provider='claude', sid=self.sid, tmux=self.tmux, message_protocol=1,
+                       op='message_submit', message_id=self.token, text=self.text)
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            reader.message_store_request(request)
+
+        worker = threading.Thread(target=reader.message_worker, args=(self.tmux, 'claude', self.sid), daemon=True)
+        worker.start()
+        self.wait_for(lambda: (self.message() or {}).get('state') in ('accepted', 'started'))
+        self.assertEqual(self.user_lines(), [self.text])
+        worker.join(timeout=20)
+
+
 class EmptyHostedChatTest(unittest.TestCase):
     sid = 'empty-hosted-session'
     tmux = 'empty-hosted-chat'
