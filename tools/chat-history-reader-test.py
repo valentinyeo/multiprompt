@@ -3898,17 +3898,39 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
         self.assertEqual(sum('paste-buffer' in command for command in calls), 1)
         self.assertEqual(state['box'], '')
 
-    def test_mixed_or_user_draft_is_never_cleared(self):
-        for typed, box in (('app words', 'app words and my own words'), (None, 'only my own words')):
+    def test_terminal_text_is_set_aside_and_restored_after_send(self):
+        for typed, box in (('app words', 'app words and my own words'), (None, 'only my own words'), (None, '/potet')):
             with self.subTest(box=box):
                 state, calls, run = self.pane('')
                 if typed:
                     self.draft(typed, run)
                 state['box'] = box
                 result = self.send('a different message', run)
-                self.assertEqual((result['status'], result['reason']), ('not_sent', 'draft_present'))
+                self.assertEqual((result['status'], result['reason']), ('sent', None))
+                self.assertEqual(sum('paste-buffer' in command for command in calls), 1)
+                handoff = next(i for i, command in enumerate(calls) if 'paste-buffer' in command)
+                self.assertTrue(any('C-u' in command for command in calls[:handoff]))
                 self.assertEqual(state['box'], box)
-                self.assertFalse(any('paste-buffer' in command for command in calls))
+                record = reader.draft_record('fixture')
+                self.assertEqual((record.get('displaced'), record.get('restored')), ('', box))
+
+    def test_text_typed_while_clearing_still_blocks_send(self):
+        state, calls, run = self.pane('something new the person is typing')
+        with patch.object(reader, 'box_draft', return_value='/potet'):
+            result = self.send('a different message', run)
+        self.assertEqual((result['status'], result['reason']), ('not_sent', 'draft_present'))
+        self.assertFalse(any('paste-buffer' in command for command in calls))
+        self.assertEqual(reader.draft_record('fixture').get('displaced'), '/potet')
+
+    def test_old_message_worker_stops_when_a_newer_reader_is_active(self):
+        runtime = reader.HOME / '.multiprompt-runtime'
+        runtime.mkdir()
+        (runtime / 'active.json').write_text(json.dumps(dict(protocol=1, generation=24, sha256='b' * 64)))
+        with patch.dict(reader.__dict__, ENGINE_INFO=dict(protocol=1, generation=23, sha256='a' * 64)):
+            self.assertTrue(reader.superseded_engine())
+        with patch.dict(reader.__dict__, ENGINE_INFO=dict(protocol=1, generation=24, sha256='b' * 64)):
+            self.assertFalse(reader.superseded_engine())
+        self.assertFalse(reader.superseded_engine())
 
     def test_slow_redraw_still_clears_own_draft(self):
         state, calls, run = self.pane('')
@@ -3929,8 +3951,7 @@ class IGSH_1266_PreserveDraftHostTest(unittest.TestCase):
 
     def test_preserve_draft_handoff_boundaries(self):
         request = dict(tmux='fixture', sid='sid', text='synthetic prompt')
-        for draft, fail, expected in (('unfinished synthetic draft', False, 'not_sent'),
-                                      ('', False, 'sent'), ('', True, 'uncertain')):
+        for draft, fail, expected in (('', False, 'sent'), ('', True, 'uncertain')):
             with self.subTest(draft=draft, fail=fail):
                 def run(command, **kwargs):
                     if fail and 'paste-buffer' in command:

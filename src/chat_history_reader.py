@@ -2526,6 +2526,17 @@ def start_message_worker(q, source, only_if_work=False):
         child.stdin.close()
 
 
+def superseded_engine():
+    engine = globals().get('ENGINE_INFO')
+    if not isinstance(engine, dict):
+        return False
+    try:
+        active = json.loads((HOME / '.multiprompt-runtime' / 'active.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return False
+    return isinstance(active, dict) and active.get('sha256') not in (None, engine.get('sha256'))
+
+
 def message_worker(tmux, provider, sid):
     import fcntl
     import selectors
@@ -2550,6 +2561,8 @@ def message_worker(tmux, provider, sid):
                     if not bound or bound[0] != sid:
                         return
                     request['tmux'] = tmux
+                    if superseded_engine():
+                        return
                     message_poll(tmux, provider, sid)
                     message_store_request(dict(request, op='message_dispatch'))
                     with closing(message_store_db(tmux)) as db:
@@ -2985,6 +2998,18 @@ def late_draft_echo(tmux, text):
     return squashed(sent).startswith(squashed(text))
 
 
+def restore_displaced_draft(name, target, displaced):
+    try:
+        for _ in range(10):
+            time.sleep(0.2)
+            if box_is_empty(prompt_box_text(target)):
+                type_into_box(target, displaced, 0)
+                draft_note(name, displaced='', restored=displaced, restored_at=time.time())
+                return
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        pass
+
+
 def send_response_preserve_draft(q):
     import uuid
     name, sid, text = q.get('tmux'), q.get('sid'), q.get('text')
@@ -3007,17 +3032,21 @@ def send_response_preserve_draft(q):
             return dict(status='not_sent', reason='prompt_unavailable')
         typed = draft_record(name).get('typed')
         typed = typed if isinstance(typed, str) else ''
-        if draft and not own_draft(draft, text, typed):
-            return dict(status='not_sent', reason='draft_present')
+        displaced = draft if draft and not own_draft(draft, text, typed) else ''
+        if displaced:
+            draft_note(name, displaced=displaced, displaced_at=time.time())
+
+        def known(box):
+            return own_draft(box, text, typed) or bool(displaced) and squashed(box) in squashed(displaced)
         for wait in ((0, 0.3, 0.7) if draft or typed else ()):
             time.sleep(wait)
             box = prompt_box_text(target)
-            if box and not own_draft(box, text, typed):
+            if box and not known(box):
                 return dict(status='not_sent', reason='draft_present')
             if not box:
                 subprocess.run(['tmux', 'send-keys', '-t', target, 'C-u'], check=True, capture_output=True, timeout=5)
                 box = prompt_box_text(target)
-                if box and not own_draft(box, text, typed):
+                if box and not known(box):
                     return dict(status='not_sent', reason='draft_present')
             box, _ = clear_prompt_box(target, box)
             if box_is_empty(box):
@@ -3030,6 +3059,8 @@ def send_response_preserve_draft(q):
         except (OSError, subprocess.SubprocessError):
             return dict(status='uncertain', reason='handoff_interrupted')
         draft_note(name, typed='', sent=text, sent_at=time.time())
+        if displaced:
+            restore_displaced_draft(name, target, displaced)
         return dict(status='sent', reason=None)
     finally:
         try:
@@ -3419,7 +3450,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 23
+RUNTIME_GENERATION = 24
 
 if __name__ == '__main__':
     import fcntl
