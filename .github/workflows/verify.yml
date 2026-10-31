@@ -553,50 +553,6 @@ jobs:
           } else {
             Copy-Item tools/fixtures/IGSH-997/sample.json verify-bin/usage-pace-source.json
           }
-      - name: Build isolated footer update fixture
-        if: env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1' && env.RELEASE_TAG != ''
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $source = Join-Path $env:RUNNER_TEMP 'footer-tag-source'
-          $fixture = Join-Path $env:RUNNER_TEMP 'footer-update-fixtures'
-          $pristine = Join-Path $env:RUNNER_TEMP 'footer-tag-pristine'
-          $key = Join-Path $env:RUNNER_TEMP 'footer-test-key.der'
-          $commit = (git rev-parse "$env:RELEASE_TAG^{commit}").Trim()
-          if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') { throw 'Footer tag commit missing' }
-          New-Item -ItemType Directory -Force $source | Out-Null
-          git archive --format=tar "--output=$env:RUNNER_TEMP/footer-tag.tar" $env:RELEASE_TAG
-          if ($LASTEXITCODE -ne 0) { throw 'Footer tag archive failed' }
-          tar -xf "$env:RUNNER_TEMP/footer-tag.tar" -C $source
-          if ($LASTEXITCODE -ne 0) { throw 'Footer tag extraction failed' }
-          New-Item -ItemType Directory -Force $pristine | Out-Null
-          tar -xf "$env:RUNNER_TEMP/footer-tag.tar" -C $pristine
-          if ($LASTEXITCODE -ne 0) { throw 'Footer pristine extraction failed' }
-          Push-Location $source
-          try {
-            node tools/update-release-fixtures.mjs --prepare-key $key
-            if ($LASTEXITCODE -ne 0) { throw 'Footer test key preparation failed' }
-            $changes = @(git diff --no-index --name-only -- $pristine $source)
-            if ($LASTEXITCODE -ne 1 -or $changes.Count -ne 1 -or $changes[0] -notmatch 'src/release_signing_public_key\.txt$') { throw 'Footer tagged source differs beyond the test public key' }
-            $public = (Get-Content src/release_signing_public_key.txt -Raw).Trim()
-            $keyFingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Convert]::FromBase64String($public))).ToLowerInvariant()
-            $env:MULTIPROMPT_TEST_SIGNING_KEY = $key
-            zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=$env:VERIFY_VERSION" "-Drevision=$commit"
-            if ($LASTEXITCODE -ne 0) { throw 'Footer test-key build failed' }
-            & tools/update-release-fixtures.ps1 -Root $fixture
-            if ($LASTEXITCODE -ne 0) { throw 'Footer signed fixtures failed' }
-            $testExe = (Resolve-Path zig-out/bin/multiprompt.exe).Path
-            Copy-Item "$env:GITHUB_WORKSPACE/verify-bin/usage-ssh.exe" (Split-Path $testExe)
-            $testHash = (Get-FileHash $testExe -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($testHash -eq $env:VERIFY_SHA256) { throw 'Test-key executable unexpectedly matches published executable' }
-            @{ tag=$env:RELEASE_TAG; sourceCommit=$commit; publishedSha256=$env:VERIFY_SHA256; testKeySha256=$testHash; testTrustKeySha256=$keyFingerprint; sourceChange='src/release_signing_public_key.txt only'; published=$false } | ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE/evidence/footer-test-key-manifest.json"
-            "FOOTER_TEST_EXE=$testExe" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-            "FOOTER_FIXTURE_ROOT=$fixture" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
-          } finally {
-            Remove-Item Env:MULTIPROMPT_TEST_SIGNING_KEY -ErrorAction SilentlyContinue
-            Pop-Location
-            Remove-Item -LiteralPath $key -Force -ErrorAction SilentlyContinue
-          }
       - name: Check measured chat shape contracts
         if: env.FEATURE == 'chat-switch-speed'
         run: |
@@ -864,13 +820,69 @@ jobs:
               Copy-Item evidence/build.json "$directory/build.json"
               & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence $directory
             }
-            if ($env:FOOTER_TEST_EXE) {
-              $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json"
-              $testHash = (Get-FileHash $env:FOOTER_TEST_EXE -Algorithm SHA256).Hash.ToLowerInvariant()
-              & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe $env:FOOTER_TEST_EXE -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $testHash -Evidence "$pwd/evidence/footer-pending-test-key" -UpdateFixtureRoot $env:FOOTER_FIXTURE_ROOT
-            }
             Remove-Item Env:VERIFY_USAGE_PACE_FILE
           }
+      - name: Build isolated footer update fixture
+        if: success() && steps.desktop-driver.outcome == 'success' && env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1' && env.RELEASE_TAG != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:RUNNER_TEMP 'footer-tag-source'
+          $fixture = Join-Path $env:RUNNER_TEMP 'footer-update-fixtures'
+          $pristine = Join-Path $env:RUNNER_TEMP 'footer-tag-pristine'
+          $key = Join-Path $env:RUNNER_TEMP 'footer-test-key.der'
+          $commit = (git rev-parse "$env:RELEASE_TAG^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') { throw 'Footer tag commit missing' }
+          New-Item -ItemType Directory -Force $source | Out-Null
+          git archive --format=tar "--output=$env:RUNNER_TEMP/footer-tag.tar" $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw 'Footer tag archive failed' }
+          tar -xf "$env:RUNNER_TEMP/footer-tag.tar" -C $source
+          if ($LASTEXITCODE -ne 0) { throw 'Footer tag extraction failed' }
+          New-Item -ItemType Directory -Force $pristine | Out-Null
+          tar -xf "$env:RUNNER_TEMP/footer-tag.tar" -C $pristine
+          if ($LASTEXITCODE -ne 0) { throw 'Footer pristine extraction failed' }
+          Push-Location $source
+          try {
+            node tools/update-release-fixtures.mjs --prepare-key $key
+            if ($LASTEXITCODE -ne 0) { throw 'Footer test key preparation failed' }
+            $changes = @(git -C $env:RUNNER_TEMP diff --no-index --name-only -- footer-tag-pristine footer-tag-source)
+            $diffExit = $LASTEXITCODE
+            $normalized = @($changes | ForEach-Object { $_.Trim('"').Replace('\', '/') })
+            Write-Host "Footer source diff exit=$diffExit count=$($normalized.Count)"
+            foreach ($path in $normalized) { Write-Host "Footer source diff path=$path" }
+            $prefix = 'footer-tag-source/'
+            if ($diffExit -ne 1 -or $normalized.Count -ne 1 -or -not $normalized[0].StartsWith($prefix, [StringComparison]::Ordinal)) { throw 'Footer tagged source differs beyond the test public key' }
+            $relative = $normalized[0].Substring($prefix.Length)
+            if (-not [String]::Equals($relative, 'src/release_signing_public_key.txt', [StringComparison]::Ordinal)) { throw 'Footer tagged source differs beyond the test public key' }
+            if ((Get-FileHash (Join-Path $pristine $relative) -Algorithm SHA256).Hash -eq (Get-FileHash (Join-Path $source $relative) -Algorithm SHA256).Hash) { throw 'Footer test public key did not change' }
+            $public = (Get-Content src/release_signing_public_key.txt -Raw).Trim()
+            $keyFingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Convert]::FromBase64String($public))).ToLowerInvariant()
+            $env:MULTIPROMPT_TEST_SIGNING_KEY = $key
+            zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=$env:VERIFY_VERSION" "-Drevision=$commit"
+            if ($LASTEXITCODE -ne 0) { throw 'Footer test-key build failed' }
+            & tools/update-release-fixtures.ps1 -Root $fixture
+            if ($LASTEXITCODE -ne 0) { throw 'Footer signed fixtures failed' }
+            $testExe = (Resolve-Path zig-out/bin/multiprompt.exe).Path
+            Copy-Item "$env:GITHUB_WORKSPACE/verify-bin/usage-ssh.exe" (Split-Path $testExe)
+            $testHash = (Get-FileHash $testExe -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($testHash -eq $env:VERIFY_SHA256) { throw 'Test-key executable unexpectedly matches published executable' }
+            @{ tag=$env:RELEASE_TAG; sourceCommit=$commit; publishedSha256=$env:VERIFY_SHA256; testKeySha256=$testHash; testTrustKeySha256=$keyFingerprint; sourceChange='src/release_signing_public_key.txt only'; published=$false } | ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE/evidence/footer-test-key-manifest.json"
+            "FOOTER_TEST_EXE=$testExe" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+            "FOOTER_FIXTURE_ROOT=$fixture" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          } finally {
+            Remove-Item Env:MULTIPROMPT_TEST_SIGNING_KEY -ErrorAction SilentlyContinue
+            Pop-Location
+            Remove-Item -LiteralPath $key -Force -ErrorAction SilentlyContinue
+          }
+      - name: Capture pending footer with test-key fixture
+        if: success() && steps.desktop-driver.outcome == 'success' && env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1' && env.RELEASE_TAG != ''
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:FOOTER_TEST_EXE -or -not $env:FOOTER_FIXTURE_ROOT) { throw 'Footer test-key fixture missing' }
+          $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json"
+          $testHash = (Get-FileHash $env:FOOTER_TEST_EXE -Algorithm SHA256).Hash.ToLowerInvariant()
+          & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe $env:FOOTER_TEST_EXE -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $testHash -Evidence "$pwd/evidence/footer-pending-test-key" -UpdateFixtureRoot $env:FOOTER_FIXTURE_ROOT
       - name: Remove isolated footer fixture
         if: always() && env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1'
         shell: pwsh
