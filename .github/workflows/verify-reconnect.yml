@@ -8,14 +8,8 @@ on:
         required: true
         default: build
         type: string
-  pull_request:
-    paths:
-      - .github/workflows/verify-reconnect.yml
-      - tools/verify-reconnect/**
-      - tools/verify-reconnect.test.js
-      - src/ssh_reconnect.zig
-      - src/chat_send.zig
-      - src/console.zig
+  schedule:
+    - cron: '28 4 * * *'
 
 permissions:
   contents: read

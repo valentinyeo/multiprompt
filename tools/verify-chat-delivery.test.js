@@ -928,3 +928,31 @@ test('send-stays-gone evidence fails when a sent message comes back or a send is
   files.set(outboxFile, JSON.stringify({ queues: [{ messages: [{ t: `${sendTexts[11]}${sendTexts[13]}`, s: 0 }] }] }));
   assert.match(row().detail, /came back into the box and was sent again joined to the next message/);
 });
+
+test('IGSH-975 popup growth changes only the earlier provider event in its isolated fixture', async () => {
+  const { assertSourceGrowth } = await import('./chat-popup-growth-proof.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh975-growth-'));
+  const boundary = path.join(root, 'tools/verify-chat-delivery/boundary.py');
+  try {
+    const transcript = path.join(dir, 'home/transcript.jsonl');
+    const seed = { name: 'popup-growth', mode: 'busy', suggestion: 'neutral suggestion', fake: true, sid: 'fixture-sid', cwd: 'C:/verify/work', panePid: 4242, transcript, meta: path.join(dir, 'home/session.json'), procDir: path.join(dir, 'proc/4242') };
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(seed));
+    const shell = (...args) => execFileSync('python3', ['-I', '-X', 'utf8', boundary, 'shell', ...args], { env: { MP_VERIFY_STATE: dir, PATH: process.env.PATH }, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    const events = file => fs.readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
+    shell('init');
+    const before = events(transcript), stateBefore = JSON.parse(shell('show'));
+    shell('reaction-grow');
+    assertSourceGrowth(before, events(transcript));
+    assert.deepEqual(events(path.join(dir, 'reaction-before.jsonl')), before);
+    assert.deepEqual(events(path.join(dir, 'reaction-after.jsonl')), events(transcript));
+    assert.deepEqual(JSON.parse(shell('show')), stateBefore, 'growth changes neither editable input nor pending queue');
+    assert.equal(events(path.join(dir, 'growth.jsonl')).length, 1);
+    assert.equal(fs.existsSync(transcript.replace(/\.jsonl$/, '.growth-tmp')), false);
+    assert.throws(() => shell('reaction-grow'), error => /Expected an earlier reply without code/.test(error.stderr.toString()));
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ ...seed, name: 'reactions' }));
+    shell('init');
+    const original = fs.readFileSync(transcript, 'utf8');
+    assert.throws(() => shell('reaction-grow'), error => /Reply growth requires its own fixture/.test(error.stderr.toString()));
+    assert.equal(fs.readFileSync(transcript, 'utf8'), original, 'the original reaction journey stays untouched');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

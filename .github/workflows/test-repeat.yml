@@ -1,5 +1,5 @@
 name: Test repeat
-run-name: test-repeat ${{ inputs.test }} x${{ inputs.count }}
+run-name: test-repeat ${{ inputs.test || 'tools/bridge-profile-pipes.test.js' }} x${{ inputs.count || 10 }}
 
 on:
   workflow_dispatch:
@@ -14,6 +14,8 @@ on:
         required: true
         default: 10
         type: number
+  schedule:
+    - cron: '8 4 * * *'
 
 permissions:
   contents: read
@@ -34,8 +36,8 @@ jobs:
       - name: Validate inputs and create matrix
         id: matrix
         env:
-          TEST: ${{ inputs.test }}
-          COUNT: ${{ inputs.count }}
+          TEST: ${{ inputs.test || 'tools/bridge-profile-pipes.test.js' }}
+          COUNT: ${{ inputs.count || 10 }}
         run: |
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
@@ -85,7 +87,7 @@ jobs:
       - name: Run selected test
         if: inputs.test != 'IGSH-816 CLEAN'
         env:
-          TEST: ${{ inputs.test }}
+          TEST: ${{ inputs.test || 'tools/bridge-profile-pipes.test.js' }}
         shell: pwsh
         run: |
           $env:BRIDGE_EXE = Join-Path $env:GITHUB_WORKSPACE 'zig-out/bin/zigshell-bridge.exe'

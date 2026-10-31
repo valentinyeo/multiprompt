@@ -1,0 +1,17 @@
+name: Native runner sessions
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '4 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  runners:
+    if: github.event_name != 'pull_request' || github.head_ref != 'ceo/IGSH-1043'
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      hax_sessions_proof: true

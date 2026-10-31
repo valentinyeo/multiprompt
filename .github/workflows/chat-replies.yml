@@ -1,0 +1,23 @@
+name: Compact reply references
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '28 2 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_reply_proof: true
+      chat_reply_baseline: true
+      tag: v0.28.952
+  candidate:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_reply_proof: true
