@@ -1,7 +1,7 @@
-param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof)
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-if ($MemoryProof -and $OrderProof) { throw 'Proof modes are exclusive' }
+if (($MemoryProof -and $OrderProof) -or ($ChangelogProof -and ($MemoryProof -or $OrderProof))) { throw 'Proof modes are exclusive' }
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
 $Exe = (Resolve-Path $Exe).Path
 New-Item -ItemType Directory -Force $Output | Out-Null
@@ -433,7 +433,37 @@ try {
         $inbox = Read-Json "$settings/inbox-default.json"
         @($inbox.shells).Count -eq 3
     })
-    if ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
+    if ($ChangelogProof) {
+        $result.limitations = @('Screenshot requires human review; bitmap stability does not establish overlay contents', 'Bundled changelog is not published release-notes JSON')
+        $result.executable = @{path=$Exe; sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion}
+        if ([ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or -not $job.Contains($app)) { throw 'Window ownership mismatch' }
+        $logStart = (Get-Content "$settings/debug.log" -Raw).Length
+        Focus
+        [ChatDeliveryDesktop]::Chord(@(0x11, 0x4B))
+        $result.actions += 'Ctrl+K: open command palette'
+        [void](Wait-For 'palette initialized' { (Get-Content "$settings/debug.log" -Raw).Substring($logStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+        foreach ($key in @(0x43,0x48,0x41,0x4E,0x47,0x45,0x4C,0x4F,0x47)) { [ChatDeliveryDesktop]::Type($key) }
+        $result.actions += 'Type changelog (9 characters)'
+        [void](Wait-For 'changelog selected in palette' {
+            $trace = (Get-Content "$settings/debug.log" -Raw).Substring($logStart)
+            $lines = [regex]::Matches($trace, '\[palette\] ready chars=\d+ count=\d+ target=\d+')
+            $lines.Count -gt 0 -and $lines[$lines.Count - 1].Value -match '^\[palette\] ready chars=9 count=[1-9]\d* target=6241$'
+        })
+        Shot 'changelog-palette'
+        if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'App lost foreground before Enter' }
+        [ChatDeliveryDesktop]::Chord(@(0x0D))
+        $result.actions += 'Enter: open selected changelog'
+        Start-Sleep -Seconds 2
+        $script:previousHash = ''
+        [void](Wait-For 'stable full-screen frame after Enter' {
+            Shot 'changelog-first-page'
+            $hash = (Get-FileHash "$Output/changelog-first-page.png" -Algorithm SHA256).Hash
+            if ($hash -eq $script:previousHash) { return $true }
+            $script:previousHash = $hash
+            $false
+        } 30)
+        $result.passed = $true
+    } elseif ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
     Toggle-View
     [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
     [void](Wait-For 'initial console poll' {
@@ -472,7 +502,7 @@ try {
     Write-Host $result.error
     if (Get-Variable main -ErrorAction SilentlyContinue) { Shot 'failure' }
 } finally {
-    if ($MemoryProof -or $OrderProof) {
+    if ($MemoryProof -or $OrderProof -or $ChangelogProof) {
         $result.scratchRemoved = $false
         $result.cleanupErrors = @()
         try {
@@ -520,5 +550,5 @@ try {
         if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
     }
 }
-if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof) -and -not $result.scratchRemoved)) { throw 'Shared sidebar journey failed; see result.json' }
+if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof -or $ChangelogProof) -and -not $result.scratchRemoved)) { throw 'Shared sidebar journey failed; see result.json' }
 Write-Host 'SHARED_SIDEBAR_JOURNEY_OK'

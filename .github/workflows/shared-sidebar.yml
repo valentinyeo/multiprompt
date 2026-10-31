@@ -18,6 +18,11 @@ on:
         required: false
         type: boolean
         default: false
+      changelog_proof:
+        description: Capture the published native Changelog first page
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: '4 4 * * *'
 
@@ -44,7 +49,9 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           MEMORY_PROOF: ${{ inputs.memory_proof }}
           ORDER_PROOF: ${{ inputs.order_proof }}
+          CHANGELOG_PROOF: ${{ inputs.changelog_proof }}
         run: |
+          if ($env:CHANGELOG_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true')) { throw 'Changelog proof requires a published tag and excludes other proof modes' }
           if ($env:ORDER_PROOF -eq 'true' -and ($env:MEMORY_PROOF -eq 'true' -or -not $env:RELEASE_TAG)) { throw 'Order proof requires a published tag and excludes memory proof' }
           New-Item -ItemType Directory -Force bin, evidence | Out-Null
           if ($env:RELEASE_TAG) {
@@ -68,8 +75,11 @@ jobs:
         env:
           MEMORY_PROOF: ${{ inputs.memory_proof }}
           ORDER_PROOF: ${{ inputs.order_proof }}
+          CHANGELOG_PROOF: ${{ inputs.changelog_proof }}
         run: |
-          if ($env:MEMORY_PROOF -eq 'true') {
+          if ($env:CHANGELOG_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -ChangelogProof
+          } elseif ($env:MEMORY_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -MemoryProof
           } elseif ($env:ORDER_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -OrderProof
@@ -77,7 +87,7 @@ jobs:
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
           }
       - name: Reject the old published sidebar
-        if: inputs.tag == '' && !inputs.memory_proof && !inputs.order_proof
+        if: inputs.tag == '' && !inputs.memory_proof && !inputs.order_proof && !inputs.changelog_proof
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
