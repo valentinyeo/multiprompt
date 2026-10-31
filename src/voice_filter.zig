@@ -143,46 +143,173 @@ test "ordinary agent text stays visible and speakable" {
     }
 }
 
-pub const ReplyStep = enum { latest, previous, next };
+pub const ReplyStep = enum { latest, previous, next, advance };
 pub const ReplyRange = struct { start: usize, end: usize };
+pub const ReplyBlock = struct { boundary: bool = false, speakable: bool = false };
 
-pub fn selectReply(user_blocks: []const bool, cursor: ?usize, step: ReplyStep) ?ReplyRange {
-    var replies: [1200]ReplyRange = undefined;
-    var count: usize = 0;
+pub const ReadPressState = struct {
+    last: ?u32 = null,
+
+    pub fn press(self: *ReadPressState, time: u32) bool {
+        if (self.last) |last| {
+            const elapsed = time -% last;
+            if (elapsed > 0 and elapsed <= 400) {
+                self.last = null;
+                return true;
+            }
+        }
+        self.last = time;
+        return false;
+    }
+};
+
+pub fn selectMeaningfulReply(blocks: []const ReplyBlock, cursor: ?usize, step: ReplyStep) ?ReplyRange {
+    var latest: ?ReplyRange = null;
+    var previous: ?ReplyRange = null;
+    var current: ?ReplyRange = null;
+    var next: ?ReplyRange = null;
     var start: ?usize = null;
-    for (user_blocks, 0..) |user, i| {
-        if (user) {
+    var end: usize = 0;
+    for (0..blocks.len + 1) |i| {
+        if (i == blocks.len or blocks[i].boundary) {
             if (start) |s| {
-                if (count < replies.len) {
-                    replies[count] = .{ .start = s, .end = i };
-                    count += 1;
+                const range = ReplyRange{ .start = s, .end = end };
+                if (cursor) |c| {
+                    if (s == c) {
+                        current = range;
+                        previous = latest;
+                    } else if (current != null and next == null) next = range;
                 }
+                latest = range;
             }
             start = null;
-        } else if (start == null) start = i;
-    }
-    if (start) |s| {
-        if (count < replies.len) {
-            replies[count] = .{ .start = s, .end = user_blocks.len };
-            count += 1;
+        } else if (blocks[i].speakable) {
+            if (start == null) start = i;
+            end = i + 1;
         }
     }
-    if (count == 0) return null;
-    var selected = count - 1;
-    if (cursor) |block| {
-        for (replies[0..count], 0..) |reply, i| {
-            if (reply.start == block) {
-                selected = i;
-                break;
+    const newest = latest orelse return null;
+    return switch (step) {
+        .latest => newest,
+        .advance => if (current) |c| previous orelse c else newest,
+        .previous => if (current) |c| previous orelse c else blk: {
+            var last: ?ReplyRange = null;
+            var before: ?ReplyRange = null;
+            var first: ?usize = null;
+            var finish: usize = 0;
+            for (0..blocks.len + 1) |i| {
+                if (i == blocks.len or blocks[i].boundary) {
+                    if (first) |s| { before = last; last = .{ .start = s, .end = finish }; }
+                    first = null;
+                } else if (blocks[i].speakable) {
+                    if (first == null) first = i;
+                    finish = i + 1;
+                }
             }
-        }
+            break :blk before orelse newest;
+        },
+        .next => if (current) |c| next orelse c else newest,
+    };
+}
+
+pub fn queuePending(pending: *?ReplyStep, advances: *u16, step: ReplyStep) bool {
+    if (pending.* != null and step == .advance) {
+        advances.* +|= 1;
+        return false;
     }
-    switch (step) {
-        .latest => selected = count - 1,
-        .previous => selected -|= 1,
-        .next => selected = @min(count - 1, selected + 1),
+    pending.* = step;
+    advances.* = 0;
+    return true;
+}
+
+pub fn selectPending(blocks: []const ReplyBlock, cursor: ?usize, step: ReplyStep, advances: u16) ?ReplyRange {
+    var range = selectMeaningfulReply(blocks, cursor, step) orelse return null;
+    var remaining = advances;
+    while (remaining != 0) : (remaining -= 1) {
+        const older = selectMeaningfulReply(blocks, range.start, .advance) orelse break;
+        if (older.start == range.start) break;
+        range = older;
     }
-    return replies[selected];
+    return range;
+}
+
+test "separate pending advances retain press order" {
+    const blocks = [_]ReplyBlock{
+        .{ .boundary = true }, .{ .speakable = true },
+        .{ .boundary = true }, .{ .speakable = true },
+        .{ .boundary = true }, .{ .speakable = true },
+    };
+    var press: ReadPressState = .{};
+    var pending: ?ReplyStep = null;
+    var advances: u16 = 0;
+    for ([_]u32{ 1000, 2200, 3400 }, 0..) |time, i| {
+        try std.testing.expect(!press.press(time));
+        _ = queuePending(&pending, &advances, .advance);
+        const expected = [_]usize{ 5, 3, 1 };
+        try std.testing.expectEqual(expected[i], selectPending(&blocks, null, pending.?, advances).?.start);
+    }
+    _ = queuePending(&pending, &advances, .latest);
+    try std.testing.expectEqual(ReplyRange{ .start = 5, .end = 6 }, selectPending(&blocks, null, pending.?, advances).?);
+}
+
+fn selectReply(user_blocks: []const bool, cursor: ?usize, step: ReplyStep) ?ReplyRange {
+    const blocks = std.heap.page_allocator.alloc(ReplyBlock, user_blocks.len) catch return null;
+    defer std.heap.page_allocator.free(blocks);
+    for (user_blocks, 0..) |user, i| blocks[i] = .{ .boundary = user, .speakable = !user };
+    return selectMeaningfulReply(blocks, cursor, step);
+}
+
+test "manual press order and meaningful reply selection" {
+    const blocks = [_]ReplyBlock{
+        .{ .boundary = true }, .{ .speakable = true }, .{},
+        .{ .boundary = true }, .{}, .{ .boundary = true },
+        .{ .speakable = true }, .{}, .{ .speakable = true },
+    };
+    var press: ReadPressState = .{};
+    try std.testing.expect(!press.press(1000));
+    const newest = selectMeaningfulReply(&blocks, null, .advance).?;
+    try std.testing.expectEqual(ReplyRange{ .start = 6, .end = 9 }, newest);
+    try std.testing.expect(!press.press(1500));
+    const older = selectMeaningfulReply(&blocks, newest.start, .advance).?;
+    try std.testing.expectEqual(ReplyRange{ .start = 1, .end = 2 }, older);
+    try std.testing.expect(press.press(1600));
+    try std.testing.expect(!press.press(1700));
+    try std.testing.expectEqual(newest, selectMeaningfulReply(&blocks, null, .advance).?);
+}
+
+test "double stop leaves a later queued press independent" {
+    var press: ReadPressState = .{};
+    try std.testing.expect(!press.press(1000));
+    try std.testing.expect(press.press(1200));
+    try std.testing.expect(!press.press(2500));
+    try std.testing.expect(!press.press(3000));
+}
+
+test "double press uses wrapped physical event time" {
+    var press: ReadPressState = .{};
+    try std.testing.expect(!press.press(0xfffffff0));
+    try std.testing.expect(press.press(0x20));
+    try std.testing.expect(!press.press(0x40));
+}
+
+test "empty and tool-only turns do not become replies" {
+    const blocks = [_]ReplyBlock{
+        .{ .boundary = true }, .{}, .{ .boundary = true },
+        .{ .speakable = true }, .{}, .{ .speakable = true },
+        .{ .boundary = true }, .{},
+    };
+    try std.testing.expectEqual(ReplyRange{ .start = 3, .end = 6 }, selectMeaningfulReply(&blocks, null, .advance).?);
+    try std.testing.expectEqual(ReplyRange{ .start = 3, .end = 6 }, selectMeaningfulReply(&blocks, 3, .advance).?);
+    try std.testing.expect(selectMeaningfulReply(&[_]ReplyBlock{ .{ .boundary = true }, .{} }, null, .latest) == null);
+}
+
+test "meaningful selection includes replies past 1200" {
+    var blocks: [2602]ReplyBlock = @splat(.{});
+    for (0..1301) |i| {
+        blocks[i * 2].boundary = true;
+        blocks[i * 2 + 1].speakable = true;
+    }
+    try std.testing.expectEqual(ReplyRange{ .start = 2601, .end = 2602 }, selectMeaningfulReply(&blocks, null, .latest).?);
 }
 
 test "voice reply cursor skips prompts and groups prose with code" {

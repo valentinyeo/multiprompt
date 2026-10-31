@@ -1225,6 +1225,79 @@ pub var g_voice_speaking_shell_id: u32 = 0;
 pub var g_voice_cursor_shell_id: u32 = 0;
 pub var g_voice_cursor_latest_hash: u64 = 0;
 pub var g_voice_cursor_start: ?usize = null;
+pub const TIMER_VOICE_MANUAL: usize = 192;
+pub const VoiceAnchor = struct { message_id: u64, offset: u64, segment: u64 };
+pub const VoiceIdentity = struct { key: chat_transcript.Identity, agent: u8 };
+pub const VoiceTarget = struct { slot: u32, shell_id: u32, identity: ?VoiceIdentity };
+pub const VoiceTargetTracker = struct {
+    target: ?VoiceTarget = null,
+    previous: ?VoiceTarget = null,
+
+    pub fn observe(self: *VoiceTargetTracker, target: VoiceTarget) bool {
+        const changed = if (self.target) |old| !std.meta.eql(old, target) else false;
+        if (changed) self.previous = null;
+        self.target = target;
+        return changed;
+    }
+
+    pub fn adopt(self: *VoiceTargetTracker, target: VoiceTarget) void {
+        self.previous = self.target;
+        self.target = target;
+    }
+
+    pub fn accepts(self: VoiceTargetTracker, current: VoiceTarget, captured: VoiceTarget) bool {
+        return self.target != null and std.meta.eql(self.target.?, current) and
+            (std.meta.eql(current, captured) or (self.previous != null and std.meta.eql(self.previous.?, captured)));
+    }
+};
+test "voice target changes only for an actual switch" {
+    var tracker: VoiceTargetTracker = .{};
+    const first: VoiceTarget = .{ .slot = 0, .shell_id = 1, .identity = null };
+    const second: VoiceTarget = .{ .slot = 1, .shell_id = 2, .identity = null };
+    try std.testing.expect(!tracker.observe(first));
+    try std.testing.expect(!tracker.observe(first));
+    try std.testing.expect(tracker.observe(second));
+    try std.testing.expect(tracker.observe(first));
+}
+test "witnessed target alias survives stop until target changes" {
+    var tracker: VoiceTargetTracker = .{};
+    const unknown: VoiceTarget = .{ .slot = 0, .shell_id = 1, .identity = .{ .key = .{ .shell_id = 1 }, .agent = 1 } };
+    var resolved = unknown;
+    resolved.identity.?.key.sid[0] = 'a';
+    const other: VoiceTarget = .{ .slot = 1, .shell_id = 2, .identity = null };
+    try std.testing.expect(!tracker.observe(unknown));
+    var press: voice_filter.ReadPressState = .{};
+    try std.testing.expect(!press.press(1000));
+    tracker.adopt(resolved);
+    try std.testing.expect(tracker.accepts(resolved, unknown));
+    try std.testing.expect(press.press(1200));
+    try std.testing.expect(!tracker.observe(resolved));
+    try std.testing.expect(tracker.accepts(resolved, unknown));
+    try std.testing.expect(!press.press(2500));
+    try std.testing.expect(tracker.observe(other));
+    try std.testing.expect(tracker.observe(resolved));
+    try std.testing.expect(!tracker.accepts(resolved, unknown));
+}
+pub const VoicePressPacket = struct {
+    target: VoiceTarget,
+    epoch: u64,
+    time: u32,
+};
+pub var g_voice_manual_epoch = std.atomic.Value(u64).init(0);
+pub var g_voice_manual_target: VoiceTargetTracker = .{};
+pub var g_voice_manual_identity: ?VoiceIdentity = null;
+pub var g_voice_manual_generation: u64 = 0;
+pub var g_voice_manual_inode: u64 = 0;
+pub var g_voice_manual_baseline: i64 = 0;
+pub var g_voice_manual_cursor: ?VoiceAnchor = null;
+pub var g_voice_manual_latest: ?VoiceAnchor = null;
+pub var g_voice_manual_press: voice_filter.ReadPressState = .{};
+pub var g_voice_manual_pending: ?voice_filter.ReplyStep = null;
+pub var g_voice_manual_advances: u16 = 0;
+pub var g_voice_manual_needs_live: bool = false;
+pub var g_voice_manual_deadline: u64 = 0;
+pub var g_voice_manual_playing: bool = false;
+pub var g_voice_tts_fallback_generation: u64 = 0;
 pub var g_voice_highlight: ?voice_filter.ReplyRange = null;
 pub var g_voice_replay_only: bool = false;
 pub var g_voice_listening_active = std.atomic.Value(bool).init(false);

@@ -384,7 +384,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Ctrl+X then Ctrl+S in Chat View", .b = "Steers: sends the message into Claude now (Claude's Ctrl+X Ctrl+S)", .header = false },
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Auto / Burn Claude / Burn Codex", .b = "Choose which AI plan to use up now; Auto lets the ladder decide", .header = false },
     .{ .a = "Ctrl+K \u{2192} Token Ladder: Open Dashboard", .b = "Open the Token Ladder page with every plan's usage and reset clock in the browser pane", .header = false },
-    .{ .a = "Alt+V", .b = "Voice Mode on/off; talk over the agent, or press once to stop its voice and again to turn it off; works in the terminal and in Chat View", .header = false },
+    .{ .a = "Alt+V", .b = "Read replies. Press later for older. Double-press to stop.", .header = false },
     .{ .a = "Ctrl+K Voice: Always Listening On/Off", .b = "Keep the mic on to talk over replies, or return to taking turns", .header = false },
     .{ .a = "Ctrl+K \"Voice Speed: ...\"", .b = "How fast Voice Mode talks: 1x, 1.25x (default), 1.4x or 1.5x", .header = false },
     .{ .a = "Alt+R", .b = "Read the agent's last reply aloud again, right now, even with Voice Mode off", .header = false },
@@ -439,6 +439,26 @@ fn claimBrowserTogglePress(key_down: bool, event_time: u32, held: *bool, last_ev
     if (held.*) return false;
     held.* = true;
     return claimBrowserToggleEvent(event_time, last_event_time);
+}
+
+fn claimVoiceReadPress(down: bool, time: u32, held: *bool, last: *u32) bool {
+    if (!down) { held.* = false; return false; }
+    if (held.*) return false;
+    held.* = true;
+    if (time == last.*) return false;
+    last.* = time;
+    return true;
+}
+
+test "reply shortcut accepts edges but not holds or duplicates" {
+    var held = false;
+    var last: u32 = 0;
+    try std.testing.expect(claimVoiceReadPress(true, 100, &held, &last));
+    try std.testing.expect(!claimVoiceReadPress(true, 110, &held, &last));
+    try std.testing.expect(!claimVoiceReadPress(false, 120, &held, &last));
+    try std.testing.expect(!claimVoiceReadPress(true, 100, &held, &last));
+    try std.testing.expect(!claimVoiceReadPress(false, 130, &held, &last));
+    try std.testing.expect(claimVoiceReadPress(true, 140, &held, &last));
 }
 
 var chat_steer_chord_pending = false;
@@ -713,7 +733,7 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = claimBrowserTogglePress(false, kb.time, &app_state.g_chat_toggle_chord_held, &app_state.g_chat_toggle_last_event_time);
         }
         if (kb.vkCode == 0x56 and (wp == WM_KEYUP or wp == WM_SYSKEYUP)) {
-            _ = claimBrowserTogglePress(false, kb.time, &app_state.g_voice_toggle_chord_held, &app_state.g_voice_toggle_last_event_time);
+            _ = claimVoiceReadPress(false, kb.time, &app_state.g_voice_toggle_chord_held, &app_state.g_voice_toggle_last_event_time);
         }
         if ((kb.vkCode == 0xDB or kb.vkCode == 0xDD) and (wp == WM_KEYUP or wp == WM_SYSKEYUP)) {
             const step_idx: usize = if (kb.vkCode == 0xDB) 0 else 1;
@@ -902,18 +922,18 @@ pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_TOGGLE, 0, 0);
             return 1;
         }
-        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and kb.vkCode == 0x56 and foregroundIsOurs() and
+        if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and (kb.flags & 0x10) == 0 and !isCtrlDown() and !app_state.g_win_held and
+            (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) == 0 and kb.vkCode == 0x56 and foregroundIsOurs() and
             !app_state.g_search_active and !app_state.g_all_sessions_active and !app_state.g_inbox_active and !app_state.g_shortcuts_active and !app_state.g_changelog_active and !app_state.g_url_picker_active and app_state.g_edit_hwnd == null)
         {
-            if (!claimBrowserTogglePress(true, kb.time, &app_state.g_voice_toggle_chord_held, &app_state.g_voice_toggle_last_event_time)) return 1;
+            if (!claimVoiceReadPress(true, kb.time, &app_state.g_voice_toggle_chord_held, &app_state.g_voice_toggle_last_event_time)) return 1;
             app_state.g_sysmenu_pending = false;
             keybd_event(0xFF, 0, 0, 0);
             keybd_event(0xFF, 0, KEYEVENTF_KEYUP, 0);
-            if (app_state.g_voice_state == .speaking) {
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_VOICE_BARGE_IN, 0, 0);
-            } else {
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_VOICE_TOGGLE, 0, 0);
-            }
+            @import("voice.zig").voiceManualFrontChanged();
+            const packet = std.heap.page_allocator.create(app_state.VoicePressPacket) catch return 1;
+            packet.* = .{ .target = @import("chat_session.zig").chatVoiceTarget(), .epoch = app_state.g_voice_manual_epoch.load(.acquire), .time = kb.time };
+            if (PostMessageW(app_state.g_main_hwnd, WM_APP_VOICE_REPLAY, 1, @bitCast(@intFromPtr(packet))) == 0) std.heap.page_allocator.destroy(packet);
             return 1;
         }
         if (wp == WM_SYSKEYDOWN and (kb.flags & 0x20) != 0 and !isCtrlDown() and kb.vkCode == 0x52 and foregroundIsOurs() and

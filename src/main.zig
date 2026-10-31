@@ -1348,6 +1348,7 @@ pub fn sessionFrontSelected() void {
 }
 
 pub fn sessionFrontChanged() void {
+    @import("voice.zig").voiceManualFrontChanged();
     updateSessionFront(false);
 }
 
@@ -3597,6 +3598,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_CHAT_FILE_READY => {
             chatFileOnReady();
+            @import("voice.zig").voiceManualRetry();
+            @import("voice.zig").voiceManualHighlight();
             return 0;
         },
         WM_APP_CHAT_AC_READY => {
@@ -3653,6 +3656,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_VOICE_BARGE_IN => {
+            if (app_state.g_voice_manual_identity != null) {
+                @import("voice.zig").voiceManualStopExplicit();
+                return 0;
+            }
             if (app_state.g_voice_state == .speaking) {
                 dictationAudit("voice-stop", 1);
                 voiceStopSpeaking();
@@ -3669,7 +3676,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_VOICE_REPLAY => {
-            voiceReadReply(.latest);
+            if (wp == 1 and lp != 0) {
+                const packet: *app_state.VoicePressPacket = @ptrFromInt(@as(usize, @bitCast(lp)));
+                defer std.heap.page_allocator.destroy(packet);
+                @import("voice.zig").voiceManualPress(packet.*);
+            } else voiceReadReply(.latest);
             return 0;
         },
         WM_APP_VOICE_STEP => {
@@ -3684,7 +3695,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_VOICE_TTS_FALLBACK => {
-            if ((!app_state.g_voice_replay_only and !app_state.g_voice_mode_active) or app_state.g_voice_state != .speaking or app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != app_state.g_voice_tts_fallback_shell_id) return 0;
+            var fallback: [8192]u16 = undefined;
+            while (!app_state.g_voice_tts_mutex.tryLock()) Sleep(0);
+            const valid = app_state.g_voice_tts_fallback_generation == wp and app_state.g_voice_tts_generation.load(.acquire) == wp;
+            const fallback_len = if (valid) app_state.g_voice_tts_fallback_len else 0;
+            if (valid) {
+                @memcpy(fallback[0..fallback_len], app_state.g_voice_tts_fallback_text[0..fallback_len]);
+                app_state.g_voice_tts_fallback_generation = 0;
+                app_state.g_voice_tts_fetching.store(false, .release);
+            }
+            const fallback_shell = app_state.g_voice_tts_fallback_shell_id;
+            app_state.g_voice_tts_mutex.unlock();
+            if (!valid or (app_state.g_voice_manual_playing and !@import("voice.zig").voiceManualValid()) or
+                (!app_state.g_voice_replay_only and !app_state.g_voice_mode_active) or app_state.g_voice_state != .speaking or app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != fallback_shell) return 0;
             if (!app_state.g_voice_tts_fallback_shown.swap(true, .acq_rel)) {
                 showHeaderNoticeAscii("Deepgram voice unavailable, using Windows voice", 4000, true);
             }
@@ -3697,7 +3720,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_voice_state = .speaking;
             app_state.g_voice_tts_audio_started.store(true, .release);
             app_state.g_voice_tts_since.store(GetTickCount64(), .release);
-            voiceSpeak(app_state.g_voice_tts_fallback_text[0..app_state.g_voice_tts_fallback_len]);
+            voiceSpeak(fallback[0..fallback_len]);
             app_state.g_voice_tts_audible.store(true, .release);
             if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_VOICE_POLL, 150, null);
             invalidateChatHeader();
@@ -7335,6 +7358,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 @import("chat_find_ui.zig").tick();
                 return 0;
             }
+            if (wp == app_state.TIMER_VOICE_MANUAL) {
+                chatFileOnReady();
+                @import("voice.zig").voiceManualRetry();
+                return 0;
+            }
             if (wp == TIMER_CHAT_REFRESH) {
                 if (!app_state.g_chat_active or IsIconic(hwnd) != 0 or IsWindowVisible(hwnd) == 0) @import("chat_session.zig").chatHistoryStreamsKeep(0);
                 if (app_state.g_chat_browser_swap.shell_id != 0) return 0;
@@ -7343,6 +7371,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     chatFileOnReady();
                     if (app_state.g_chat_active) {
                         refreshChatTranscript(false);
+                        @import("voice.zig").voiceManualRetry();
+                        @import("voice.zig").voiceManualHighlight();
                         if (browserSlotReserved() != app_state.g_chat_layout_browser_reserved) {
                             layoutChatControls();
                             _ = InvalidateRect(hwnd, null, 0);
@@ -7424,6 +7454,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     app_state.g_voice_replay_only = false;
                     return 0;
                 }
+                if (app_state.g_voice_manual_playing and !@import("voice.zig").voiceManualValid()) {
+                    @import("voice.zig").voiceManualStop();
+                    return 0;
+                }
                 if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != app_state.g_voice_speaking_shell_id) {
                     dictationAudit("voice-stop", 2);
                     voiceStopSpeaking();
@@ -7435,6 +7469,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (!voiceIsSpeaking()) {
+                    app_state.g_voice_manual_playing = false;
                     dictationAudit("voice-tts-done", 0);
                     _ = KillTimer(hwnd, TIMER_VOICE_POLL);
                     app_state.g_voice_tts_audible.store(false, .release);

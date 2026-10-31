@@ -432,6 +432,90 @@ fn chatHistoryPrune(path: []const u8) void {
     }
 }
 
+pub const VoiceIdentity = app_state.VoiceIdentity;
+
+pub fn chatVoiceTarget() app_state.VoiceTarget {
+    return .{
+        .slot = app_state.active_shell,
+        .shell_id = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0,
+        .identity = chatVoiceIdentity(),
+    };
+}
+
+pub fn chatVoiceIdentity() ?VoiceIdentity {
+    if (app_state.active_shell >= app_state.shell_count) return null;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (shell.kind != .tmux or shell.shell_id == 0 or shell.claude_sid_len > shell.claude_sid.len or
+        shell.claude_cwd_len > shell.claude_cwd.len or shell.tmux_session_len >= 64) return null;
+    var key = chat_transcript.Identity.init(shell.shell_id, shell.tmux_host, shell.ai_agent == 2,
+        shell.claude_sid[0..shell.claude_sid_len], shell.claude_cwd[0..shell.claude_cwd_len]);
+    if (key.shell_id == 0) return null;
+    @memcpy(key.tmux[0..shell.tmux_session_len], shell.tmux_session[0..shell.tmux_session_len]);
+    if (key.sid[0] == 0 and key.tmux[0] == 0) return null;
+    return .{ .key = key, .agent = shell.ai_agent };
+}
+
+fn chatVoiceMatches(key: chat_transcript.Identity, entry: *const ChatHistoryEntry) bool {
+    return !entry.retired and key.shell_id == entry.key.shell_id and key.host == entry.key.host and
+        key.codex == entry.key.codex and std.mem.eql(u8, &key.tmux, &entry.key.tmux) and
+        std.mem.eql(u8, &key.cwd, &entry.key.cwd) and
+        (key.sid[0] == 0 or std.mem.eql(u8, &key.sid, &entry.key.sid));
+}
+
+test "voice source rejects permissive cross-session matches" {
+    const key = chat_transcript.Identity.initTmux(1, 2, false, "session", "/a");
+    var entry: ChatHistoryEntry = .{ .key = key };
+    try std.testing.expect(chatVoiceMatches(key, &entry));
+    entry.key.shell_id = 2;
+    try std.testing.expect(chat_history.sameSession(entry.key, key));
+    try std.testing.expect(!chatVoiceMatches(key, &entry));
+    entry.key = key;
+    entry.key.cwd[1] = 'b';
+    try std.testing.expect(!chatVoiceMatches(key, &entry));
+    entry.key = key;
+    entry.key.host = 3;
+    try std.testing.expect(!chatVoiceMatches(key, &entry));
+    entry.key = key;
+    entry.key.codex = true;
+    try std.testing.expect(!chatVoiceMatches(key, &entry));
+    entry.key = key;
+    entry.retired = true;
+    try std.testing.expect(!chatVoiceMatches(key, &entry));
+}
+
+fn chatVoiceRequestAllowed(key: chat_transcript.Identity, entries: []const *ChatHistoryEntry) bool {
+    for (entries) |entry| {
+        if (!entry.retired and chat_history.sameSession(entry.key, key)) return chatVoiceMatches(key, entry);
+    }
+    return true;
+}
+
+test "voice request allows a replacement SID but rejects a foreign match" {
+    var key = chat_transcript.Identity.init(1, 2, false, "new", "/a");
+    @memcpy(key.tmux[0..7], "session");
+    var old = ChatHistoryEntry{ .key = key };
+    old.key.sid = @splat(0);
+    @memcpy(old.key.sid[0..3], "old");
+    const entries = [_]*ChatHistoryEntry{&old};
+    try std.testing.expect(chatVoiceRequestAllowed(key, &entries));
+    old.key = key;
+    old.key.shell_id = 9;
+    try std.testing.expect(!chatVoiceRequestAllowed(key, &entries));
+}
+
+pub fn chatVoiceReplySource(key: chat_transcript.Identity, request: bool) ?*const ChatHistoryEntry {
+    if (!chatVoiceRequestAllowed(key, app_state.g_chat_histories.items)) return null;
+    if (request) chatFileRequestForDelivery(key, true);
+    var found: ?*const ChatHistoryEntry = null;
+    for (app_state.g_chat_histories.items) |entry| {
+        if (chatVoiceMatches(key, entry)) {
+            if (found != null) return null;
+            found = entry;
+        }
+    }
+    return found;
+}
+
 pub fn chatHistoryEntry(key: chat_transcript.Identity) ?*ChatHistoryEntry {
     if (key.shell_id == 0) return null;
     for (app_state.g_chat_histories.items) |entry| if (!entry.retired and chat_history.sameSession(entry.key, key)) return entry;

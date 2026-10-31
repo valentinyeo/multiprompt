@@ -636,12 +636,17 @@ fn voiceTtsQueuePcm(hw: HWAVEOUT, pcm: []u8, generation: u64) bool {
 }
 
 fn voiceTtsFallbackToSapi(fallback_text: []const u16, shell_id: u32, generation: u64) void {
+    while (!app_state.g_voice_tts_mutex.tryLock()) Sleep(0);
+    defer app_state.g_voice_tts_mutex.unlock();
     if (app_state.g_voice_tts_generation.load(.acquire) != generation) return;
+    app_state.g_voice_tts_fallback_generation = generation;
     const n = @min(fallback_text.len, app_state.g_voice_tts_fallback_text.len - 1);
     @memcpy(app_state.g_voice_tts_fallback_text[0..n], fallback_text[0..n]);
     app_state.g_voice_tts_fallback_len = n;
     app_state.g_voice_tts_fallback_shell_id = shell_id;
-    if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_VOICE_TTS_FALLBACK, 0, 0);
+    if (app_state.g_main_hwnd == null or PostMessageW(app_state.g_main_hwnd, WM_APP_VOICE_TTS_FALLBACK, @intCast(generation), 0) == 0) {
+        app_state.g_voice_tts_fallback_generation = 0;
+    }
 }
 
 fn voiceTtsWorkerThread(hw: HWAVEOUT, text_owned: []u8, fallback_owned: []u16, shell_id: u32, generation: u64) void {
@@ -649,7 +654,7 @@ fn voiceTtsWorkerThread(hw: HWAVEOUT, text_owned: []u8, fallback_owned: []u16, s
     defer std.heap.page_allocator.free(fallback_owned);
     defer {
         while (!app_state.g_voice_tts_mutex.tryLock()) Sleep(0);
-        if (app_state.g_voice_tts_generation.load(.acquire) == generation) app_state.g_voice_tts_fetching.store(false, .release);
+        if (app_state.g_voice_tts_generation.load(.acquire) == generation and app_state.g_voice_tts_fallback_generation != generation) app_state.g_voice_tts_fetching.store(false, .release);
         app_state.g_voice_tts_mutex.unlock();
     }
 
@@ -972,80 +977,327 @@ pub fn voiceOnTurnEnd(shell_id: u32) void {
     invalidateChatHeader();
 }
 
-pub fn voiceReadReply(step: voice_filter.ReplyStep) void {
-    if (app_state.active_shell >= app_state.shell_count) {
-        showHeaderNoticeAscii("No reply to read yet", 3000, true);
-        return;
+fn voiceAnchor(block: @import("chat_markdown.zig").Block) app_state.VoiceAnchor {
+    return .{ .message_id = block.message_id, .offset = if (block.message_id == 0) block.source_offset else 0, .segment = if (block.message_id == 0) block.segment else 0 };
+}
+
+pub fn voiceManualValid() bool {
+    const identity = app_state.g_voice_manual_identity orelse return false;
+    const current = @import("chat_session.zig").chatVoiceIdentity() orelse return false;
+    if (!std.meta.eql(identity, current)) return false;
+    if (app_state.g_voice_manual_playing) {
+        const entry = @import("chat_session.zig").chatVoiceReplySource(identity.key, false) orelse return false;
+        if (entry.generation != app_state.g_voice_manual_generation or entry.history.inode != app_state.g_voice_manual_inode or
+            !std.mem.eql(u8, &entry.key.sid, &identity.key.sid) or !std.mem.eql(u8, &entry.history.sid, &identity.key.sid)) return false;
     }
+    return true;
+}
+
+pub fn voiceManualStop() void {
+    voiceStopSpeaking();
+    app_state.g_voice_manual_identity = null;
+    app_state.g_voice_manual_generation = 0;
+    app_state.g_voice_manual_inode = 0;
+    app_state.g_voice_manual_cursor = null;
+    app_state.g_voice_manual_latest = null;
+    app_state.g_voice_manual_pending = null;
+    app_state.g_voice_manual_advances = 0;
+    app_state.g_voice_manual_needs_live = false;
+    app_state.g_voice_manual_press = .{};
+    app_state.g_voice_manual_playing = false;
+    app_state.g_voice_highlight = null;
+    app_state.g_voice_replay_only = false;
+    app_state.g_voice_state = if (app_state.g_voice_mode_active) .waiting else .idle;
+    if (app_state.g_main_hwnd != null) {
+        _ = KillTimer(app_state.g_main_hwnd, app_state.TIMER_VOICE_MANUAL);
+        _ = KillTimer(app_state.g_main_hwnd, TIMER_VOICE_POLL);
+    }
+    if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    invalidateChatHeader();
+}
+
+pub fn voiceManualStopExplicit() void {
+    voiceStopSpeaking();
+    if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, TIMER_VOICE_TURN_END);
+    app_state.g_voice_pending_turn_shell_id = 0;
+    app_state.g_voice_deferred_turn_shell_id = 0;
+    voiceManualStop();
+    if (!app_state.g_voice_mode_active or app_state.active_shell >= app_state.shell_count) return;
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
     voiceRefreshTranscriptCache(true);
-    var out: [8192]u16 = undefined;
-    const user_blocks = std.heap.page_allocator.alloc(bool, app_state.g_chat_block_count) catch return;
-    defer std.heap.page_allocator.free(user_blocks);
-    for (0..app_state.g_chat_block_count) |i| user_blocks[i] = app_state.g_chat_blocks[i].role == .user or app_state.g_chat_blocks[i].role == .injected;
-    var latest: [8192]u16 = undefined;
-    const latest_len = chatLatestAgentReply(&latest);
-    const latest_hash = if (latest_len == 0) @as(u64, 0) else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(latest[0..latest_len]));
-    if (app_state.g_voice_cursor_shell_id != shell_id or app_state.g_voice_cursor_latest_hash != latest_hash) {
-        app_state.g_voice_cursor_shell_id = shell_id;
-        app_state.g_voice_cursor_latest_hash = latest_hash;
-        app_state.g_voice_cursor_start = null;
+    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != shell_id or
+        app_state.g_chat_cache_shell_id != shell_id) return;
+    var reply: [8192]u16 = undefined;
+    const len = chatLatestAgentReply(&reply);
+    if (len == 0) return;
+    const hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(reply[0..len]));
+    app_state.shells[app_state.active_shell].voice_last_reply_hash = hash;
+    app_state.g_voice_fallback_last_hash = hash;
+    app_state.g_voice_fallback_stable_since = GetTickCount64();
+}
+
+fn voiceManualAdopt(target: app_state.VoiceTarget) bool {
+    if (app_state.g_voice_manual_pending == null) return false;
+    const old = app_state.g_voice_manual_identity orelse return false;
+    const previous = app_state.g_voice_manual_target.target orelse return false;
+    const current = target.identity orelse return false;
+    if (previous.slot != target.slot or previous.shell_id != target.shell_id or (old.key.sid[0] != 0 and old.agent != 0)) return false;
+    var expected = old;
+    if (expected.key.sid[0] == 0) expected.key.sid = current.key.sid;
+    if (expected.agent == 0) expected.agent = current.agent;
+    if (!std.meta.eql(expected, current) or current.key.sid[0] == 0 or current.agent == 0) return false;
+    const entry = @import("chat_session.zig").chatVoiceReplySource(old.key, false) orelse return false;
+    if (entry.generation != app_state.g_voice_manual_generation or !voiceSourceReady(entry, true, app_state.g_voice_manual_baseline) or
+        !std.mem.eql(u8, &current.key.sid, &entry.key.sid) or !std.mem.eql(u8, &current.key.sid, &entry.history.sid)) return false;
+    app_state.g_voice_manual_identity = current;
+    app_state.g_voice_manual_target.adopt(target);
+    return true;
+}
+
+pub fn voiceManualFrontChanged() void {
+    const target = @import("chat_session.zig").chatVoiceTarget();
+    if (voiceManualAdopt(target)) return;
+    if (app_state.g_voice_manual_target.observe(target)) {
+        _ = app_state.g_voice_manual_epoch.fetchAdd(1, .acq_rel);
+        if (app_state.g_voice_manual_identity != null or app_state.g_voice_manual_press.last != null) voiceManualStop();
     }
-    const range = voice_filter.selectReply(user_blocks[0..app_state.g_chat_block_count], app_state.g_voice_cursor_start, step) orelse {
+}
+
+pub fn voiceManualHighlight() void {
+    if (!app_state.g_voice_manual_playing) return;
+    app_state.g_voice_highlight = null;
+    if (!voiceManualValid() or !app_state.g_chat_active or !app_state.g_chat_blocks_from_file) return;
+    const identity = app_state.g_voice_manual_identity.?;
+    const entry = @import("chat_session.zig").chatVoiceReplySource(identity.key, false) orelse return;
+    if (app_state.g_chat_cache_shell_id != identity.key.shell_id or app_state.g_chat_cache_generation != entry.generation or
+        app_state.g_chat_last_hash != entry.history.revision) return;
+    const anchor = app_state.g_voice_manual_cursor orelse return;
+    const blocks = entry.history.blocks.items;
+    var start: ?usize = null;
+    var end: usize = 0;
+    for (blocks, 0..) |block, i| {
+        if (start == null) {
+            if ((block.role == .prose or block.role == .code) and std.meta.eql(anchor, voiceAnchor(block))) {
+                start = i;
+                end = i + 1;
+            }
+        } else {
+            if (block.role == .user or block.role == .injected) break;
+            if (block.role == .prose or block.role == .code) end = i + 1;
+        }
+    }
+    if (start) |s| {
+        if (end <= app_state.g_chat_block_count and end <= app_state.g_chat_layout_rects.len) app_state.g_voice_highlight = .{ .start = s, .end = end };
+    }
+    if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+}
+
+pub fn voiceManualPress(packet: app_state.VoicePressPacket) void {
+    if (packet.epoch != app_state.g_voice_manual_epoch.load(.acquire)) return;
+    const target = @import("chat_session.zig").chatVoiceTarget();
+    if (!app_state.g_voice_manual_target.accepts(target, packet.target)) return;
+    if (app_state.g_voice_manual_press.press(packet.time)) {
+        voiceManualStopExplicit();
+        return;
+    }
+    const identity = target.identity orelse {
+        showHeaderNoticeAscii("Reply unavailable", 3000, true);
+        return;
+    };
+    if (app_state.g_voice_manual_identity) |old| {
+        if (!std.meta.eql(old, identity)) voiceManualStop();
+    }
+    if (app_state.g_voice_manual_identity == null) {
+        app_state.g_voice_manual_identity = identity;
+        const entry = @import("chat_session.zig").chatVoiceReplySource(identity.key, false);
+        app_state.g_voice_manual_baseline = if (entry) |e| e.loaded_ms else 0;
+        app_state.g_voice_manual_generation = if (entry) |e| e.generation else 0;
+    }
+    voiceStopSpeaking();
+    app_state.g_voice_manual_playing = false;
+    app_state.g_voice_highlight = null;
+    voiceReadReply(.advance);
+}
+
+pub fn voiceReadReply(step: voice_filter.ReplyStep) void {
+    const identity = @import("chat_session.zig").chatVoiceIdentity() orelse {
         showHeaderNoticeAscii("No reply to read yet", 3000, true);
         return;
     };
-    if (step == .latest and latest_len == 0) {
-        showHeaderNoticeAscii("No reply to read yet", 3000, true);
+    if (app_state.g_voice_manual_identity == null) {
+        app_state.g_voice_manual_identity = identity;
+        const prior = @import("chat_session.zig").chatVoiceReplySource(identity.key, false);
+        app_state.g_voice_manual_baseline = if (prior) |e| e.loaded_ms else 0;
+        app_state.g_voice_manual_generation = if (prior) |e| e.generation else 0;
+    }
+    if (!voiceManualValid()) { voiceManualStop(); return; }
+    if (!voice_filter.queuePending(&app_state.g_voice_manual_pending, &app_state.g_voice_manual_advances, step)) return;
+    const prior = @import("chat_session.zig").chatVoiceReplySource(identity.key, false);
+    const now = GetTickCount64();
+    app_state.g_voice_manual_baseline = if (prior) |e| e.loaded_ms else 0;
+    app_state.g_voice_manual_needs_live = true;
+    if (prior) |e| {
+        if (e.loaded_ms > 0 and now -| @as(u64, @intCast(e.loaded_ms)) <= 750 and
+            !e.pending and !e.loading_disk and !e.staged and !e.resync and !e.history.restore_full and !e.history.more and
+            app_state.g_chat_active and app_state.g_chat_blocks_from_file and
+            app_state.g_chat_cache_shell_id == identity.key.shell_id and app_state.g_chat_cache_generation == e.generation and
+            app_state.g_chat_last_hash == e.history.revision) app_state.g_voice_manual_needs_live = false;
+    }
+    app_state.g_voice_manual_deadline = now + 5000;
+    if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, app_state.TIMER_VOICE_MANUAL, 150, null);
+    voiceManualRetry();
+}
+
+fn voiceSourceReady(entry: *const app_state.ChatHistoryEntry, needs_live: bool, baseline: i64) bool {
+    if (entry.history.rows.items.len == 0 or entry.history.inode == 0 or entry.loaded_ms <= 0 or
+        entry.resync or entry.history.restore_full or entry.history.more) return false;
+    if (entry.pending) return needs_live and entry.loaded_ms > baseline;
+    return !entry.loading_disk and !entry.staged and (!needs_live or entry.loaded_ms > baseline);
+}
+
+test "reply source requires complete live publication" {
+    var entry: app_state.ChatHistoryEntry = .{ .key = .{} };
+    var rows = [_]u8{'x'};
+    entry.history.rows.items = &rows;
+    entry.history.inode = 1;
+    try std.testing.expect(!voiceSourceReady(&entry, true, 0));
+    entry.loaded_ms = 20;
+    try std.testing.expect(!voiceSourceReady(&entry, true, 20));
+    try std.testing.expect(voiceSourceReady(&entry, true, 19));
+    entry.pending = true;
+    try std.testing.expect(!voiceSourceReady(&entry, false, 0));
+    try std.testing.expect(!voiceSourceReady(&entry, true, 20));
+    try std.testing.expect(voiceSourceReady(&entry, true, 19));
+    entry.pending = false;
+    entry.loading_disk = true;
+    try std.testing.expect(!voiceSourceReady(&entry, false, 0));
+    entry.loading_disk = false;
+    entry.staged = true;
+    try std.testing.expect(!voiceSourceReady(&entry, false, 0));
+    entry.staged = false;
+    entry.resync = true;
+    try std.testing.expect(!voiceSourceReady(&entry, false, 0));
+    entry.resync = false;
+    entry.history.more = true;
+    try std.testing.expect(!voiceSourceReady(&entry, false, 0));
+    entry.history.more = false;
+    entry.history.restore_full = true;
+    try std.testing.expect(!voiceSourceReady(&entry, false, 0));
+}
+
+pub fn voiceManualRetry() void {
+    const step = app_state.g_voice_manual_pending orelse return;
+    if (GetTickCount64() >= app_state.g_voice_manual_deadline) {
+        voiceManualStop();
+        showHeaderNoticeAscii("Reply unavailable", 3000, true);
         return;
     }
-    var n: usize = 0;
-    const buf = app_state.g_chat_capture[0..app_state.g_chat_last_len];
-    for (range.start..range.end) |i| {
-        const disp = chatBlockDisplayRange(buf, app_state.g_chat_blocks[i]);
-        if (disp.len == 0) continue;
-        if (n != 0) {
-            if (n + 2 > out.len) break;
-            out[n] = '\r';
-            out[n + 1] = '\n';
-            n += 2;
+    if (app_state.g_chat_browser_swap.shell_id != 0) return;
+    if (!voiceManualValid() and !voiceManualAdopt(@import("chat_session.zig").chatVoiceTarget())) {
+        voiceManualStop();
+        return;
+    }
+    const identity = app_state.g_voice_manual_identity.?;
+    const entry = @import("chat_session.zig").chatVoiceReplySource(identity.key, false);
+    if (entry) |e| {
+        if (app_state.g_voice_manual_generation != 0 and e.generation != app_state.g_voice_manual_generation) { voiceManualStop(); return; }
+    }
+    const ready = if (entry) |e| identity.key.sid[0] != 0 and identity.agent != 0 and
+        voiceSourceReady(e, app_state.g_voice_manual_needs_live, app_state.g_voice_manual_baseline) else false;
+    if (!ready) {
+        const requested = @import("chat_session.zig").chatVoiceReplySource(identity.key, true);
+        if (requested) |e| {
+            if (app_state.g_voice_manual_generation == 0) app_state.g_voice_manual_generation = e.generation;
+            if (e.generation != app_state.g_voice_manual_generation) { voiceManualStop(); return; }
         }
-        const size = @min(disp.len, out.len - n);
+        return;
+    }
+    const source = entry.?;
+    if (app_state.g_voice_manual_generation == 0) app_state.g_voice_manual_generation = source.generation;
+    if (source.generation != app_state.g_voice_manual_generation) { voiceManualStop(); return; }
+    const history = &source.history;
+    if (!std.mem.eql(u8, &identity.key.sid, &history.sid) or !std.mem.eql(u8, &identity.key.sid, &source.key.sid)) { voiceManualStop(); return; }
+    if (app_state.g_voice_manual_inode != 0 and app_state.g_voice_manual_inode != history.inode) { voiceManualStop(); return; }
+    app_state.g_voice_manual_inode = history.inode;
+    const facts = std.heap.page_allocator.alloc(voice_filter.ReplyBlock, history.blocks.items.len) catch return;
+    defer std.heap.page_allocator.free(facts);
+    const buf = history.text.items;
+    for (history.blocks.items, 0..) |block, i| {
+        facts[i] = .{ .boundary = block.role == .user or block.role == .injected };
+        if (block.role != .prose and block.role != .code) continue;
+        if (block.start > buf.len or block.len > buf.len - block.start) continue;
+        const disp = chatBlockDisplayRange(buf, block);
+        if (disp.start > buf.len or disp.len > buf.len - disp.start) continue;
+        facts[i].speakable = std.mem.trim(u16, buf[disp.start..][0..disp.len], &.{ ' ', '\t', '\r', '\n' }).len != 0;
+    }
+    const latest = voice_filter.selectMeaningfulReply(facts, null, .latest) orelse {
+        app_state.g_voice_manual_pending = null;
+        if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, app_state.TIMER_VOICE_MANUAL);
+        showHeaderNoticeAscii("No reply to read yet", 3000, true);
+        return;
+    };
+    const latest_anchor = voiceAnchor(history.blocks.items[latest.start]);
+    if (app_state.g_voice_manual_latest) |old| {
+        if (!std.meta.eql(old, latest_anchor)) app_state.g_voice_manual_cursor = null;
+    }
+    app_state.g_voice_manual_latest = latest_anchor;
+    var cursor: ?usize = null;
+    if (app_state.g_voice_manual_cursor) |anchor| {
+        for (history.blocks.items, 0..) |block, i| {
+            if (facts[i].speakable and std.meta.eql(anchor, voiceAnchor(block))) { cursor = i; break; }
+        }
+    }
+    const range = voice_filter.selectPending(facts, cursor, step, app_state.g_voice_manual_advances) orelse return;
+    var out: [8192]u16 = undefined;
+    var n: usize = 0;
+    for (range.start..range.end) |i| {
+        if (!facts[i].speakable) continue;
+        const disp = chatBlockDisplayRange(buf, history.blocks.items[i]);
+        if (n != 0) {
+            if (n + 2 >= out.len) break;
+            out[n] = '\r'; out[n + 1] = '\n'; n += 2;
+        }
+        var size = @min(disp.len, out.len - n);
+        if (size != 0 and size < disp.len and buf[disp.start + size - 1] >= 0xD800 and buf[disp.start + size - 1] <= 0xDBFF) size -= 1;
         @memcpy(out[n .. n + size], buf[disp.start .. disp.start + size]);
         n += size;
     }
     if (n == 0) return;
-    app_state.g_voice_cursor_start = range.start;
-    app_state.g_voice_highlight = range;
-    if (app_state.g_chat_active and app_state.g_chat_transcript_hwnd != null) {
+    app_state.g_voice_manual_pending = null;
+    app_state.g_voice_manual_advances = 0;
+    app_state.g_voice_manual_needs_live = false;
+    if (app_state.g_main_hwnd != null) _ = KillTimer(app_state.g_main_hwnd, app_state.TIMER_VOICE_MANUAL);
+    app_state.g_voice_manual_cursor = voiceAnchor(history.blocks.items[range.start]);
+    app_state.g_voice_cursor_latest_hash = 0;
+    app_state.g_voice_highlight = if (app_state.g_chat_active and app_state.g_chat_blocks_from_file and
+        app_state.g_chat_cache_shell_id == identity.key.shell_id and app_state.g_chat_cache_generation == source.generation and
+        app_state.g_chat_last_hash == history.revision and range.end <= app_state.g_chat_block_count and
+        range.end <= app_state.g_chat_layout_rects.len) range else null;
+    if (app_state.g_voice_highlight) |highlight| {
         var client: RECT = std.mem.zeroes(RECT);
         @import("chat_render.zig").chatViewClientRect(&client);
-        const top = app_state.g_chat_layout_rects[range.start].top;
-        const bottom = app_state.g_chat_layout_rects[range.end - 1].bottom;
+        const top = app_state.g_chat_layout_rects[highlight.start].top;
+        const bottom = app_state.g_chat_layout_rects[highlight.end - 1].bottom;
         const pad = app_state.g_chat_top_pad;
         if (top < app_state.g_chat_scroll_y + pad or bottom > app_state.g_chat_scroll_y + client.bottom - client.top) {
             app_state.g_chat_scroll_y = std.math.clamp(if (bottom - top <= client.bottom - client.top - pad) bottom - (client.bottom - client.top) else top - pad, chatMinScroll(), chatMaxScroll());
         }
-        _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
     }
-    dictationAudit("voice-replay", n);
-    if (latest_len != 0) app_state.shells[app_state.active_shell].voice_last_reply_hash = latest_hash;
-    if (app_state.g_voice_listening_active.load(.acquire)) {
-        app_state.g_dictation_recording.store(false, .release);
-        app_state.g_voice_legacy_discard = true;
+    if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
+    if (app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == identity.key.shell_id and
+        app_state.g_chat_cache_generation == source.generation and app_state.g_chat_last_hash == history.revision) {
+        var latest_text: [8192]u16 = undefined;
+        const latest_len = chatLatestAgentReply(&latest_text);
+        if (latest_len != 0) app_state.shells[app_state.active_shell].voice_last_reply_hash = std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(latest_text[0..latest_len]));
     }
-    app_state.g_voice_utt_open = @splat(.{});
-    app_state.g_voice_deferred_turn_shell_id = 0;
     app_state.g_voice_replay_only = true;
+    app_state.g_voice_manual_playing = true;
     app_state.g_voice_state = .speaking;
-    app_state.g_voice_speaking_shell_id = shell_id;
+    app_state.g_voice_speaking_shell_id = identity.key.shell_id;
     app_state.g_voice_last_activity_tick = GetTickCount64();
-    if (!voiceSpeakReply(out[0..n], shell_id)) {
-        app_state.g_voice_highlight = null;
-        app_state.g_voice_state = .idle;
-        app_state.g_voice_replay_only = false;
-        showHeaderNoticeAscii("Voice Mode: text-to-speech unavailable", 4000, true);
-        invalidateChatHeader();
+    if (!voiceSpeakReply(out[0..n], identity.key.shell_id)) {
+        voiceManualStop();
+        showHeaderNoticeAscii("Text-to-speech unavailable", 4000, true);
         return;
     }
     if (app_state.g_main_hwnd != null) _ = SetTimer(app_state.g_main_hwnd, TIMER_VOICE_POLL, 150, null);
