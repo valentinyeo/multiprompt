@@ -665,6 +665,7 @@ pub const WS_STRIP_LEFT: i32 = 8;
 pub const WS_NEW_PILL: u8 = 0xFF;
 pub var g_workspace_hover: ?u8 = null;
 pub var g_sidebar_hover: ?u32 = null;
+pub var g_room_hover: ?HitTarget = null;
 pub var g_inbox_button_hover: bool = false;
 pub var g_chat_stop_hover: bool = false;
 pub var g_chat_stop_shown: bool = false;
@@ -693,19 +694,21 @@ pub var groups: [MAX_GROUPS]TabGroup = undefined;
 pub var group_count: u32 = 0;
 pub var next_group_id: u32 = 1;
 
-const RowKind = enum { section, header, tab, inbox };
+const RowKind = enum { section, header, tab, inbox, room_header, room, room_new };
 pub const SidebarTier = enum(u1) { recent = 0, pinned = 1 };
 pub const Row = struct {
     kind: RowKind,
     gidx: u32,
     shell_idx: u32,
+    room_idx: u32 = 0,
     section_tier: SidebarTier = .recent,
     y: i32,
     x: i32 = 0,
     width: i32 = 0,
     tile: bool = false,
 };
-pub const MAX_ROWS: usize = MAX_SHELLS + INBOX_MAX_ROWS + MAX_GROUPS + 6;
+pub const MAX_SESSION_ROWS: usize = 2 * MAX_SHELLS + INBOX_MAX_ROWS + MAX_GROUPS + 6;
+pub const MAX_ROWS: usize = MAX_SESSION_ROWS + 4096 + 2;
 pub const SECTION_HEADER_H: i32 = 24;
 
 pub const HitTarget = union(enum) {
@@ -714,6 +717,9 @@ pub const HitTarget = union(enum) {
     header: u32,
     tab: u32,
     inbox: u32,
+    room_header: void,
+    room: struct { index: u32, generation: u64, id: [36]u8, store_uuid: [36]u8 },
+    room_new: void,
 };
 
 pub const ClosedShell = struct {

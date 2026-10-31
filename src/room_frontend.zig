@@ -87,6 +87,7 @@ var catalog_rows: std.ArrayList(CatalogRow) = .empty;
 var catalog_after: u64 = 0;
 var catalog_through: ?u64 = null;
 var catalog_complete = false;
+var catalog_store_uuid: ?[36]u8 = null;
 var catalog_generation: u64 = 0;
 var metadata_generation: u64 = 0;
 var metadata_cursor: usize = 0;
@@ -206,13 +207,40 @@ pub fn catalog() []const CatalogRow {
     return catalog_rows.items;
 }
 
+pub fn roomHit(index: usize) ?app_state.HitTarget {
+    const rows = catalog();
+    if (index >= rows.len) return null;
+    const store = catalog_store_uuid orelse return null;
+    if (rows[index].id.len != 36) return null;
+    var id: [36]u8 = undefined;
+    @memcpy(&id, rows[index].id);
+    return .{ .room = .{ .index = @intCast(index), .generation = catalog_generation, .id = id, .store_uuid = store } };
+}
+
+pub fn selectHit(hit: app_state.HitTarget) void {
+    if (hit != .room or hit.room.generation != catalog_generation) return;
+    const current = roomHit(hit.room.index) orelse return;
+    if (!std.mem.eql(u8, &current.room.id, &hit.room.id) or !std.mem.eql(u8, &current.room.store_uuid, &hit.room.store_uuid)) return;
+    var location = StoreLocation{ .account = @splat(0), .account_len = account_len, .store_uuid = hit.room.store_uuid };
+    @memcpy(location.account[0..account_len], account[0..account_len]);
+    select(.{ .store = location, .room_id = hit.room.id });
+}
+
+pub fn selectedRoom(id: []const u8) bool {
+    if (!isActive() or front != .selected) return false;
+    const store = catalog_store_uuid orelse return false;
+    return std.mem.eql(u8, &store, &front.selected.store.store_uuid) and std.mem.eql(u8, id, &front.selected.room_id);
+}
+
 // The row pointer lasts until catalog replacement; its metadata lasts until its next successful read.
 pub fn requestCatalogRow(id: []const u8) ?*const CatalogRow {
     if (catalog().len == 0) return null;
     for (catalog_rows.items) |*row| {
         if (!std.mem.eql(u8, row.id, id)) continue;
-        if (row.metadata_state == .idle) row.metadata_state = .queued;
-        if (controller) |*c| _ = scheduleMetadata(c);
+        if (row.metadata_state == .idle) {
+            row.metadata_state = .queued;
+            _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM, 250, null);
+        }
         return row;
     }
     return null;
@@ -232,6 +260,7 @@ fn clearCatalog() void {
     catalog_after = 0;
     catalog_through = null;
     catalog_complete = false;
+    catalog_store_uuid = null;
 }
 
 pub fn setAccount(id: ?[]const u8) void {
@@ -965,7 +994,7 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
 pub fn pollTimer(id: usize) bool {
     if (!enabled or id != TIMER_ROOM) return false;
     const c = if (controller) |*value| value else { _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
-    const completion = c.poll() orelse { if (!startSnapshot(c) and !pumpRefresh(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
+    const completion = c.poll() orelse { if (!startSnapshot(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
     if (completion == .pending) return true;
     const current_route = configuredRoute(route_slot);
     const current_key = if (current_route) |route| routeKey(route) else @as([64]u8, @splat(0));
@@ -1070,6 +1099,7 @@ pub fn pollTimer(id: usize) bool {
                     finishRefresh(c, false);
                     clearCatalog(); controller = null; _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true;
                 }
+                catalog_store_uuid = c.host_uuid;
                 catalog_complete = true;
                 finishRefresh(c, true);
                 if (created_selection) |selection| {

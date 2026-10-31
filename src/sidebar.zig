@@ -1426,12 +1426,13 @@ fn sectionHeaderHeight() i32 {
     return if (app_state.g_sidebar_collapsed) SECTION_HEADER_H else uiScaled(42);
 }
 
-fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
+fn layoutRowsInner(out: *[app_state.MAX_SESSION_ROWS]Row) u32 {
     var count: u32 = 0;
     var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
     if (app_state.g_starred_workspace) {
         for (0..app_state.shell_count) |i| {
             if (!tabInCurrentWorkspace(i) or !effPinnedTop(i)) continue;
+            if (count >= app_state.MAX_SESSION_ROWS) return count;
             out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
             count += 1;
             y += tabRowH();
@@ -1439,12 +1440,14 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
         for (0..app_state.group_count) |gi| {
             const gid = app_state.groups[gi].id;
             if (!groupInCurrentWorkspace(gid)) continue;
+            if (count >= app_state.MAX_SESSION_ROWS) return count;
             out[count] = .{ .kind = .header, .gidx = @intCast(gi), .shell_idx = 0, .y = y };
             count += 1;
             y += groupHeaderHeight();
             if (app_state.groups[gi].collapsed) continue;
             for (0..app_state.shell_count) |i| {
                 if (!tabInCurrentWorkspace(i) or tabGroupId(i) != gid or effPinnedTop(i)) continue;
+                if (count >= app_state.MAX_SESSION_ROWS) return count;
                 out[count] = .{ .kind = .tab, .gidx = @intCast(gi), .shell_idx = @intCast(i), .y = y };
                 count += 1;
                 y += tabRowH();
@@ -1452,6 +1455,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
         }
         for (0..app_state.shell_count) |i| {
             if (!@import("workspaces.zig").starredShellVisible(i) or tabGroupId(i) != 0 or effPinnedTop(i)) continue;
+            if (count >= app_state.MAX_SESSION_ROWS) return count;
             out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
             count += 1;
             y += tabRowH();
@@ -1459,6 +1463,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
         for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count], 0..) |row, i| {
             if (row.ws >= app_state.g_inbox_ws_count or app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) continue;
             if (!@import("workspace_view.zig").splitMatches(frequent.favorites_split, row.ws, row.favorite)) continue;
+            if (count >= app_state.MAX_SESSION_ROWS) return count;
             out[count] = .{ .kind = .inbox, .gidx = 0, .shell_idx = @intCast(i), .y = y };
             count += 1;
             y += tabRowH();
@@ -1480,6 +1485,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
             if (gid == 0 and show_section_headers) {
                 const tier = shellSidebarTier(i);
                 if (last_section == null or last_section.? != tier) {
+                    if (count >= app_state.MAX_SESSION_ROWS) return count;
                     out[count] = .{ .kind = .section, .gidx = 0, .shell_idx = 0, .section_tier = tier, .y = y };
                     count += 1;
                     y += sectionHeaderHeight();
@@ -1489,6 +1495,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
             }
             if (gid != prev_gid and gid != 0) {
                 if (findGroupIdx(gid)) |gidx| {
+                    if (count >= app_state.MAX_SESSION_ROWS) return count;
                     out[count] = .{ .kind = .header, .gidx = gidx, .shell_idx = 0, .y = y };
                     count += 1;
                     y += groupHeaderHeight();
@@ -1504,6 +1511,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
                 }
             }
             if (collapsed) continue;
+            if (count >= app_state.MAX_SESSION_ROWS) return count;
             out[count] = .{ .kind = .tab, .gidx = gidx_for_tab, .shell_idx = @intCast(i), .y = y };
             count += 1;
             y += tabRowH();
@@ -1522,6 +1530,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
             break;
         }
         if (!has_visible_member) continue;
+        if (count >= app_state.MAX_SESSION_ROWS) return count;
         out[count] = .{ .kind = .header, .gidx = @intCast(gidx), .shell_idx = 0, .y = y };
         count += 1;
         y += groupHeaderHeight();
@@ -1533,6 +1542,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
                 if (app_state.shells[i].group_id != gid) continue;
                 if (app_state.g_single_window and app_state.shells[i].workspace != app_state.g_active_workspace) continue;
                 if (!tabPassesUnreadFilter(i) or shellSidebarTier(i) != member_tier) continue;
+                if (count >= app_state.MAX_SESSION_ROWS) return count;
                 out[count] = .{ .kind = .tab, .gidx = @intCast(gidx), .shell_idx = @intCast(i), .y = y };
                 count += 1;
                 y += tabRowH();
@@ -1553,6 +1563,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
                 break;
             }
             if (has_section_tabs) {
+                if (count >= app_state.MAX_SESSION_ROWS) return count;
                 out[count] = .{ .kind = .section, .gidx = 0, .shell_idx = 0, .section_tier = want_tier, .y = y };
                 count += 1;
                 y += sectionHeaderHeight();
@@ -1563,6 +1574,7 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
             if (app_state.g_single_window and app_state.shells[i].workspace != app_state.g_active_workspace) continue;
             if (!tabPassesUnreadFilter(i)) continue;
             if (app_state.shells[i].group_id != 0 or shellSidebarTier(i) != want_tier) continue;
+            if (count >= app_state.MAX_SESSION_ROWS) return count;
             out[count] = .{ .kind = .tab, .gidx = 0, .shell_idx = @intCast(i), .y = y };
             count += 1;
             y += tabRowH();
@@ -1571,14 +1583,58 @@ fn layoutRowsInner(out: *[MAX_ROWS]Row) u32 {
     return count;
 }
 
+fn appendRoomRows(out: *[MAX_ROWS]Row, count: *u32, y: *i32) void {
+    const room = @import("room_frontend.zig");
+    if (!room.enabled) return;
+    if (count.* >= MAX_ROWS) return;
+    out[count.*] = .{ .kind = .room_header, .gidx = 0, .shell_idx = 0, .y = y.* };
+    count.* += 1;
+    y.* += sectionHeaderHeight();
+    const rows = room.catalog();
+    for (rows, 0..) |_, index| {
+        if (count.* + 1 >= MAX_ROWS) break;
+        out[count.*] = .{ .kind = .room, .gidx = 0, .shell_idx = 0, .room_idx = @intCast(index), .y = y.* };
+        count.* += 1;
+        y.* += tabRowH();
+    }
+    if (count.* < MAX_ROWS) {
+        out[count.*] = .{ .kind = .room_new, .gidx = 0, .shell_idx = 0, .y = y.* };
+        count.* += 1;
+        y.* += tabRowH();
+    }
+}
+
 pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
-    var rows: [MAX_ROWS]Row = undefined;
+    var rows: [app_state.MAX_SESSION_ROWS]Row = undefined;
     const count = layoutRowsInner(&rows);
-    if (count == 0 or app_state.g_sidebar_collapsed) {
+    if (!@import("room_frontend.zig").enabled and (count == 0 or app_state.g_sidebar_collapsed)) {
         @memcpy(out[0..count], rows[0..count]);
         return count;
     }
-    var y = rows[0].y;
+    var y: i32 = (if (LOOK_UNIFIED) @import("window_layout.zig").paneOuterMargin() else 0) + wsStripHeight() + @import("workspace_switcher.zig").headerHeight();
+    if (app_state.g_sidebar_collapsed) {
+        var n: u32 = 0;
+        for (rows[0..count]) |row| {
+            if (row.kind != .tab or !effPinnedTop(row.shell_idx)) continue;
+            if (n >= MAX_ROWS) break;
+            var next = row;
+            next.y = y;
+            out[n] = next;
+            n += 1;
+            y += rowTotalHeight(next);
+        }
+        appendRoomRows(out, &n, &y);
+        for (rows[0..count]) |row| {
+            if (row.kind == .tab and effPinnedTop(row.shell_idx)) continue;
+            if (n >= MAX_ROWS) break;
+            var next = row;
+            next.y = y;
+            out[n] = next;
+            n += 1;
+            y += rowTotalHeight(next);
+        }
+        return n;
+    }
     const width = uiScaled(88);
     const gap = uiScaled(4);
     const columns: u32 = @intCast(@max(1, @divTrunc(SIDEBAR_W() - uiScaled(16), width + gap)));
@@ -1602,9 +1658,11 @@ pub fn layoutRows(out: *[MAX_ROWS]Row) u32 {
         pinned += 1;
     }
     if (pinned > 0) y += @as(i32, @intCast((pinned + columns - 1) / columns)) * uiScaled(96) + uiScaled(8);
+    appendRoomRows(out, &n, &y);
     for (rows[0..count]) |row| {
         if (row.kind == .section and row.section_tier == .pinned and pinned > 0) continue;
         if (row.kind == .tab and effPinnedTop(row.shell_idx)) continue;
+        if (n >= MAX_ROWS) break;
         var next = row;
         next.y = y;
         out[n] = next;
@@ -1619,7 +1677,8 @@ pub fn rowTotalHeight(row: Row) i32 {
     return switch (row.kind) {
         .section => sectionHeaderHeight(),
         .header => groupHeaderHeight(),
-        .tab, .inbox => tabRowH(),
+        .room_header => sectionHeaderHeight(),
+        .tab, .inbox, .room, .room_new => tabRowH(),
     };
 }
 
@@ -1690,6 +1749,9 @@ pub fn hitTestSidebar(mx: i32, logical_my: i32) HitTarget {
                 .header => HitTarget{ .header = row.gidx },
                 .tab => HitTarget{ .tab = row.shell_idx },
                 .inbox => HitTarget{ .inbox = row.shell_idx },
+                .room_header => .{ .room_header = {} },
+                .room_new => .{ .room_new = {} },
+                .room => @import("room_frontend.zig").roomHit(row.room_idx) orelse .{ .none = {} },
             };
         }
     }
@@ -1840,7 +1902,7 @@ fn drawStarBadge(hdc: HANDLE, rect: RECT, avatar_size: i32, background: DWORD) v
 
 fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     const shell = &app_state.shells[index];
-    const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else if (index == app_state.active_shell) RGB(200, 200, 200) else RGB(138, 138, 138);
+    const hint = if (app_state.g_light_theme) RGB(105, 105, 105) else if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) RGB(200, 200, 200) else RGB(138, 138, 138);
     var right = column.right - uiScaled(12);
     if (app_state.g_sidebar_hover == index) {
         _ = SetTextColor(hdc, hint);
@@ -1867,7 +1929,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     }
     avatar.draw(hdc, avatar_rect, appearance);
     if (shell.favorite) {
-        const background = if (index == app_state.active_shell) (if (LOOK_UNIFIED) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else themeConsoleBg()) else themeSidebarBg();
+        const background = if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) (if (LOOK_UNIFIED) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else themeConsoleBg()) else themeSidebarBg();
         drawStarBadge(hdc, avatar_rect, 36, background);
     }
     if (shell.needs_attention or shell.disconnected) {
@@ -1894,7 +1956,7 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     const size = uiScaled(56);
     const left = row.x + @divTrunc(row.width - size, 2);
     const top = y + uiScaled(8);
-    if (row.shell_idx == app_state.active_shell) {
+    if (row.shell_idx == app_state.active_shell and !@import("room_frontend.zig").isActive()) {
         const brush = CreateSolidBrush(if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58));
         const pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(154, 154, 154) else RGB(138, 138, 138));
         const old_brush = SelectObject(hdc, brush);
@@ -1904,14 +1966,14 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
         _ = SelectObject(hdc, old_pen);
         _ = DeleteObject(brush);
         _ = DeleteObject(pen);
-    } else if (shell.selected) {
+    } else if (shell.selected and !@import("room_frontend.zig").isActive()) {
         @import("smooth.zig").fillRoundRect(hdc, .{ .left = row.x, .top = y, .right = row.x + row.width, .bottom = y + uiScaled(92) }, uiScaled(16), RGB(53, 53, 53));
     }
     const avatar = @import("bot_avatar.zig");
     const avatar_rect = RECT{ .left = left, .top = top, .right = left + size, .bottom = top + size };
     avatar.draw(hdc, avatar_rect, avatar.forShell(shell));
     if (shell.favorite) {
-        const background = if (row.shell_idx == app_state.active_shell) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else if (shell.selected) RGB(53, 53, 53) else themeSidebarBg();
+        const background = if (row.shell_idx == app_state.active_shell and !@import("room_frontend.zig").isActive()) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else if (shell.selected and !@import("room_frontend.zig").isActive()) RGB(53, 53, 53) else themeSidebarBg();
         drawStarBadge(hdc, avatar_rect, 56, background);
     }
     if (shell.needs_attention or shell.disconnected) drawAttentionDot(hdc, if (shell.favorite) left + uiScaled(4) else left + size - uiScaled(4), top + size - uiScaled(4), uiScaled(4), if (shell.disconnected) RGB(255, 145, 55) else RGB(137, 180, 248));
@@ -1919,6 +1981,69 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
     var name = RECT{ .left = row.x + uiScaled(4), .top = top + size + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
     if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+}
+
+fn paintRoomRow(hdc: HANDLE, column: RECT, y: i32, row: Row) void {
+    const room = @import("room_frontend.zig");
+    if (row.kind == .room_header) {
+        if (!app_state.g_sidebar_collapsed) drawSidebarLabel(hdc, column, y, L("Rooms"), -1);
+        return;
+    }
+    if (row.kind == .room_new) {
+        if (app_state.g_room_hover != null and app_state.g_room_hover.? == .room_new) @import("smooth.zig").fillRoundRect(hdc, .{ .left = column.left, .top = y, .right = column.right, .bottom = y + tabRowH() }, uiScaled(12), if (app_state.g_light_theme) RGB(230, 230, 230) else RGB(42, 42, 42));
+        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(80, 80, 80) else RGB(180, 180, 180));
+        var rect = RECT{ .left = column.left + uiScaled(12), .top = y, .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
+        _ = DrawTextW(hdc, if (app_state.g_sidebar_collapsed) L("+") else L("+  New room"), -1, &rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | (if (app_state.g_sidebar_collapsed) @as(u32, DT_CENTER) else 0));
+        return;
+    }
+    const rows = room.catalog();
+    if (row.room_idx >= rows.len) return;
+    const item = room.requestCatalogRow(rows[row.room_idx].id) orelse return;
+    const selected = room.selectedRoom(item.id);
+    const hover = if (room.roomHit(row.room_idx)) |hit| std.meta.eql(app_state.g_room_hover, @as(?HitTarget, hit)) else false;
+    if (selected or hover) @import("smooth.zig").fillRoundRect(hdc, .{ .left = column.left, .top = y + uiScaled(1), .right = column.right, .bottom = y + tabRowH() - uiScaled(1) }, uiScaled(12), if (selected) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else if (app_state.g_light_theme) RGB(230, 230, 230) else RGB(42, 42, 42));
+    const size = uiScaled(24);
+    const count = @min(item.members.len, if (app_state.g_sidebar_collapsed) @as(usize, 2) else 3);
+    for (item.members[0..count], 0..) |member, index| {
+        const x = column.left + uiScaled(8) + @as(i32, @intCast(index)) * uiScaled(14);
+        const top = y + @divTrunc(tabRowH() - size, 2);
+        @import("bot_avatar.zig").draw(hdc, .{ .left = x, .top = top, .right = x + size, .bottom = top + size }, member.appearance);
+    }
+    if (app_state.g_sidebar_collapsed) {
+        if (count == 0) {
+            var glyph = RECT{ .left = column.left, .top = y, .right = column.right, .bottom = y + tabRowH() };
+            _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(220, 220, 220));
+            _ = DrawTextW(hdc, L("R"), -1, &glyph, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        }
+        return;
+    }
+    const left = column.left + uiScaled(60);
+    var name: [256]u16 = undefined;
+    const len = std.unicode.utf8ToUtf16Le(&name, item.name) catch 0;
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
+    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
+    var name_rect = RECT{ .left = left, .top = y + uiScaled(6), .right = column.right - uiScaled(8), .bottom = y + uiScaled(30) };
+    if (len > 0) _ = DrawTextW(hdc, &name, @intCast(len), &name_rect, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(138, 138, 138));
+    var preview_rect = RECT{ .left = left, .top = y + uiScaled(31), .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
+    var subtitle: [512]u16 = undefined;
+    var used: usize = 0;
+    for (item.members[0..@min(item.members.len, 3)], 0..) |member, index| {
+        if (index > 0 and used + 2 <= subtitle.len) { subtitle[used] = ','; subtitle[used + 1] = ' '; used += 2; }
+        var n = @min(member.name.len, @min(@as(usize, 48), subtitle.len - used));
+        if (n < member.name.len and n > 0 and member.name[n - 1] >= 0xd800 and member.name[n - 1] <= 0xdbff) n -= 1;
+        @memcpy(subtitle[used..][0..n], member.name[0..n]);
+        used += n;
+    }
+    if (item.preview.len > 0 and used + 2 <= subtitle.len) {
+        if (used > 0) { subtitle[used] = ':'; subtitle[used + 1] = ' '; used += 2; }
+        var n = @min(item.preview.len, subtitle.len - used);
+        if (n < item.preview.len and n > 0 and item.preview[n - 1] >= 0xd800 and item.preview[n - 1] <= 0xdbff) n -= 1;
+        @memcpy(subtitle[used..][0..n], item.preview[0..n]);
+        used += n;
+    }
+    if (used > 0) _ = DrawTextW(hdc, &subtitle, @intCast(used), &preview_rect, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 pub fn paintSidebar(hdc: HANDLE) void {
@@ -2025,6 +2150,12 @@ pub fn paintSidebar(hdc: HANDLE) void {
         for (0..row_count) |ri| {
             const row = rows_arr[ri];
             const y: i32 = row.y - app_state.g_sidebar_scroll;
+            if (y + rowTotalHeight(row) <= 0 or y >= client_rc.bottom - sidebarStickyCardSpan()) continue;
+            if (row.kind == .room_header or row.kind == .room or row.kind == .room_new) {
+                paintRoomRow(hdc, column, y, row);
+                _ = SelectObject(hdc, font_title);
+                continue;
+            }
 
             if (row.kind == .section) {
                 const section_label: LPCWSTR = switch (row.section_tier) {
@@ -2074,7 +2205,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 continue;
             }
 
-            if (i == app_state.active_shell and LOOK_UNIFIED) {
+            if (i == app_state.active_shell and !@import("room_frontend.zig").isActive() and LOOK_UNIFIED) {
                 const hl_brush = CreateSolidBrush(if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58));
                 const hl_pen = CreatePen(0, 1, if (app_state.g_light_theme) RGB(154, 154, 154) else RGB(138, 138, 138));
                 const hl_radius: i32 = uiScaled(24);
@@ -2085,7 +2216,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 _ = SelectObject(hdc, op);
                 _ = DeleteObject(hl_brush);
                 _ = DeleteObject(hl_pen);
-            } else if (i == app_state.active_shell) {
+            } else if (i == app_state.active_shell and !@import("room_frontend.zig").isActive()) {
                 const act_color: DWORD = themeConsoleBg();
                 const sidebar_color: DWORD = sidebar_bg;
                 const pad: i32 = 4;
@@ -2106,7 +2237,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 _ = DeleteObject(act_pen);
             }
 
-            if (app_state.shells[i].selected) {
+            if (app_state.shells[i].selected and !@import("room_frontend.zig").isActive()) {
                 const sel_color: DWORD = customColorOr("accent", RGB(80, 150, 255));
                 const sel_pen = CreatePen(0, 2, sel_color);
                 if (sel_pen != null) {

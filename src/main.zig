@@ -2028,6 +2028,17 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const logical_my = my + app_state.g_sidebar_scroll;
                 const target = hitTestSidebar(mx, logical_my);
                 switch (target) {
+                    .room => {
+                        @import("room_frontend.zig").selectHit(target);
+                        _ = InvalidateRect(hwnd, null, 0);
+                        return 0;
+                    },
+                    .room_new => {
+                        @import("room_frontend.zig").openCreate();
+                        _ = InvalidateRect(hwnd, null, 0);
+                        return 0;
+                    },
+                    .room_header => return 0,
                     .inbox => |ri| {
                         if (@import("room_frontend.zig").isActive()) @import("inbox.zig").jumpToInboxRowByUser(ri) else jumpToInboxRow(ri);
                         return 0;
@@ -2214,6 +2225,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_sidebar_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
             }
+            if (app_state.g_room_hover != null) {
+                app_state.g_room_hover = null;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
             if (app_state.g_workspace_hover != null) {
                 app_state.g_workspace_hover = null;
                 _ = InvalidateRect(hwnd, null, 0);
@@ -2237,7 +2252,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_sidebar_hover = sidebar_hover;
                 _ = InvalidateRect(hwnd, null, 0);
             }
-            if (sidebar_hover != null) {
+            const room_hover: ?app_state.HitTarget = if (@import("room_frontend.zig").enabled and !app_state.g_hide_sidebar and !sidebarStickyCardHoverTest(GET_X(lp), GET_Y(lp)) and updateCardHit(GET_X(lp), GET_Y(lp)) == 0 and GET_X(lp) >= 0 and GET_X(lp) < SIDEBAR_W()) blk: {
+                const hit = hitTestSidebar(GET_X(lp), GET_Y(lp) + app_state.g_sidebar_scroll);
+                break :blk if (hit == .room or hit == .room_new) hit else null;
+            } else null;
+            if (!std.meta.eql(room_hover, app_state.g_room_hover)) {
+                app_state.g_room_hover = room_hover;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+            if (sidebar_hover != null or room_hover != null) {
                 var tracking = TRACKMOUSEEVENT{ .cbSize = @sizeOf(TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = hwnd, .dwHoverTime = 0 };
                 _ = TrackMouseEvent(&tracking);
             }
@@ -2658,7 +2681,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 !app_state.g_snippet_create_active and @import("workspace_switcher.zig").headerClick(mx, my)) return 0;
             const tth = threadTitleHeight();
             const tth_top = threadTitleTop();
-            if (tth > 0 and mx >= SIDEBAR_W() and my >= tth_top and my < tth_top + tth and app_state.active_shell < app_state.shell_count and
+            if (@import("room_frontend.zig").privateActionsAllowed() and tth > 0 and mx >= SIDEBAR_W() and my >= tth_top and my < tth_top + tth and app_state.active_shell < app_state.shell_count and
                 (!app_state.g_chat_active or (mx >= chatViewLayout().transcript.left and mx < chatViewLayout().transcript.right)))
             {
                 startThreadTitleRename();
