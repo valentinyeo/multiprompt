@@ -1040,6 +1040,11 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
     entry.result_missing = @splat(0);
     if (ok) {
         if (chat_history.missingReason(wire.items, id)) |reason| {
+            if (!key.codex and key.sid[0] != 0) {
+                debugLog("[chat] hosted chat has no transcript yet, keeping the composer");
+                entry.stalled = true;
+                return false;
+            }
             var log: [320]u8 = undefined;
             debugLog(std.fmt.bufPrint(&log, "[chat] transcript not reachable: {s}", .{reason}) catch "[chat] transcript not reachable");
             const len = std.unicode.utf8ToUtf16Le(entry.result_missing[0..255], chat_history.NOT_AVAILABLE_NOTE) catch 0;

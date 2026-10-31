@@ -1565,6 +1565,13 @@ def resolve_response_path(q, source=None, as_owner=False):
                 if delegated != missing_response(q, "session transcript not found"):
                     return agent, sid, None, delegated
 
+    if path is None and not denied and agent == "claude" and sid and host_dispatch_switch(agent, sid):
+        try:
+            existing = conversation_path(agent, sid, cwd)
+        except PermissionError:
+            existing = None
+        if existing is None:
+            return agent, sid, None, empty_history_response(q, sid, tmux)
     if path is None and tmux:
         try:
             resolved = (resolve_tmux_agent(agent, tmux, q["discovery_pid"])
@@ -1587,6 +1594,13 @@ def resolve_response_path(q, source=None, as_owner=False):
     if path is None:
         return agent, sid, None, delegated or missing_response(q, "permission denied" if denied else "session transcript not found")
     return agent, sid, path, None
+
+
+def empty_history_response(q, sid, tmux):
+    rid = q["id"]
+    probe = hashlib.sha256(("empty:" + sid).encode()).hexdigest()
+    header = f"@mp\t{rid}\thistory\tok\t{sid}\t0\t0\t0\t0\tclaude\t{tmux or '-'}\t0\t{probe}\tdelta\t0"
+    return "\n".join((header, END, ""))
 
 
 def search_positions(data, token, folds):

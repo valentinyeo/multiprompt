@@ -4327,6 +4327,48 @@ class AgentHostTest(unittest.TestCase):
         self.assertEqual(reader.host_cli(['status', 'codex', self.sid])['status'], 'refused')
 
 
+class EmptyHostedChatTest(unittest.TestCase):
+    sid = 'empty-hosted-session'
+    tmux = 'empty-hosted-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        patch.object(reader, 'resolve_tmux_agent', return_value=None).start()
+        self.query = dict(id=11, codex=False, sid=self.sid, tmux=self.tmux, cwd=str(self.home),
+                          cached_sid='', inode=0, offset=0)
+
+    def enable_host(self):
+        reader.host_write(reader.host_paths('claude', self.sid)['config'], dict(enabled=True, tmux=self.tmux))
+
+    def wire(self, **extra):
+        return reader.response(dict(self.query, **extra))
+
+    def test_a_hosted_chat_without_a_transcript_answers_an_empty_history(self):
+        self.enable_host()
+        wire = self.wire()
+        first = wire.splitlines()[0].split('\t')
+        self.assertEqual(first[:4], ['@mp', '11', 'history', 'ok'])
+        self.assertEqual(first[4], self.sid)
+        self.assertEqual(wire.splitlines()[-1], reader.END)
+
+    def test_a_new_hosted_chat_stays_empty_after_a_restart_query(self):
+        self.enable_host()
+        wire = self.wire(follow=True, live=True, cached_sid=self.sid, inode=0, offset=0)
+        first = wire.splitlines()[0].split('\t')
+        self.assertEqual(first[:4], ['@mp', '11', 'history', 'ok'])
+        self.assertEqual(first[4], self.sid)
+        self.assertNotIn('session transcript not found', wire)
+
+    def test_a_chat_without_the_host_switch_still_reports_a_missing_transcript(self):
+        wire = self.wire()
+        self.assertIn('session transcript not found', wire)
+        self.assertEqual(wire.splitlines()[0].split('\t')[3], 'missing')
+
+
 class AgentHostReviewTest(AgentHostTest):
     second = 'host_fixture_message_02'
 
