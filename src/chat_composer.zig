@@ -337,7 +337,7 @@ pub fn chatViewLayout() ChatViewLayout {
     const left = content.left;
     const right = left + content.width;
     const content_top = slot.top + threadTitleHeight();
-    const bottom = slot.bottom;
+    const bottom = @min(slot.bottom, rc.bottom);
     const send_size = uiScaled(32);
     const send_margin = @max(uiScaled(4), @divTrunc(chatComposerBaseCardH() - send_size, 2));
     const composer_card = RECT{
