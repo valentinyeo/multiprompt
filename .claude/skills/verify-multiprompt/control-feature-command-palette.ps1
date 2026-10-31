@@ -25,6 +25,17 @@
             Snapshot 'more-shells'
             Press @(0x1B) 'Esc: close More shells'
             $result.checks += @{ name = 'new-session-rows'; empty = 'ctrl-k-empty.png'; shells = 'more-shells.png' }
+            $pickTabsBefore = @((Read-Session).tabs).Count
+            Palette 'pick repo'
+            Snapshot 'pick-repo-row'
+            Press @(0x0D) 'Enter: Pick repo'
+            Snapshot 'pick-repo-list'
+            Press @(0x1B) 'Esc: leave Pick repo list'
+            Snapshot 'pick-repo-back'
+            Press @(0x1B) 'Esc: close command palette'
+            $pickTabsAfter = @((Read-Session).tabs).Count
+            if ($pickTabsAfter -ne $pickTabsBefore) { throw ('Pick repo changed the tab count: ' + $pickTabsBefore + ' -> ' + $pickTabsAfter) }
+            $result.checks += @{ name = 'pick-repo-list'; row = 'pick-repo-row.png'; list = 'pick-repo-list.png'; back = 'pick-repo-back.png'; tabsBefore = $pickTabsBefore; tabsAfter = $pickTabsAfter; escapeLeavesTabs = $true }
             Palette 'interface'
             Snapshot 'action'
             Press @(0x0D) 'Enter: UI Size: Increase'
