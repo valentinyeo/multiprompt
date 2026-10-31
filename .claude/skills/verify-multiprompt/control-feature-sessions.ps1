@@ -2,8 +2,8 @@
             $commandsPath = Join-Path $scratch 'roaming/ZigShell/commands.json'
             New-Item -ItemType Directory -Force -Path (Split-Path $commandsPath) | Out-Null
             $folder = '/tmp/multiprompt-harness-folder'
-            $names = @('Workspace 1', 'Workspace 2', 'Starred', 'Main', 'Software Factory', 'Verification')
-            $entries = @(foreach ($name in $names) { [ordered]@{ label = ('Harness folder ' + $name); kind = 'vps'; default = $true; workspace = $name; cwd = $folder } })
+            $names = @('Other', 'Workspace 1', 'Workspace 2', 'Starred', 'Main', 'Software Factory', 'Verification')
+            $entries = @(foreach ($name in $names) { [ordered]@{ label = ('Harness folder ' + $name); kind = 'vps'; folder_host = '0'; default = $true; workspace = $name; cwd = $folder } })
             $json = [ordered]@{ commands = $entries } | ConvertTo-Json -Depth 5
             [IO.File]::WriteAllText($commandsPath, $json, (New-Object Text.UTF8Encoding($false)))
             Start-Sleep -Milliseconds 500
