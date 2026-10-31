@@ -677,7 +677,7 @@ fn beginDiscovery(retry: bool) void {
                     var validate = rooms.Controller.init(0);
                     if (validate.bindHost(bytes)) { chosen = shell.tmux_host; pin_required = true; expected_pin = validate.host_uuid; }
                 };
-            };
+            }
         }
     }
     if (chosen == null and wanted == null) if (retained_selection) |intent| {
