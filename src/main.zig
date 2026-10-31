@@ -8227,6 +8227,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_app_closing) return 0;
             if (@import("archive.zig").anyPinnedSession() and !@import("console.zig").hasOtherZigShellWindows()) app_state.g_quit_all_in_progress = true;
             if (!app_state.g_quit_all_in_progress and @import("archive.zig").rejectPinnedCloseAll()) return 0;
+            if (!@import("room_frontend.zig").flushUi()) debugLog("Room UI flush failed on close");
             @import("workspaces.zig").captureWorkspaceFocus();
             app_state.g_app_closing = true;
             stopUpdateCardWatch();
@@ -8289,8 +8290,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             return 0;
         },
+        0x0011 => {
+            if (!@import("room_frontend.zig").flushUi()) debugLog("Room UI flush failed on logout query");
+            return 1;
+        },
         0x0016 => {
             if (wp != 0) {
+                _ = @import("room_frontend.zig").flushUi();
                 _ = @import("chat_session.zig").chatReadMark(false);
                 chatDraftFlush();
                 saveSession();

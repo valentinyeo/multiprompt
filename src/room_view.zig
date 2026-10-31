@@ -44,6 +44,7 @@ pub const Callbacks = struct {
     edit: *const fn (*anyopaque, ActionToken, []const u8, u64, []const u16, []const []const u8) ActionResult,
     submit: *const fn (*anyopaque, ActionToken, []const u8, u64, []const u16) ActionResult,
     restart: *const fn (*anyopaque, ActionToken, []const u8, []const u8) ActionResult,
+    draft_changed: ?*const fn (*anyopaque) void = null,
 };
 
 const StoredId = struct {
@@ -99,6 +100,7 @@ pub const View = struct {
     generation: u64 = 1,
     serial: u64 = 0,
     pending: ?ActionToken = null,
+    suppress_draft_change: bool = false,
     edit_revision: u64 = 0,
     presented_revision: u64 = 0,
     focus_target: usize = 0,
@@ -241,7 +243,9 @@ pub const View = struct {
         self.presented_revision = 0;
         self.picker = false;
         self.model = empty;
+        self.suppress_draft_change = true;
         _ = w.SetWindowTextW(self.composer, L(""));
+        self.suppress_draft_change = false;
         self.clearHits();
         self.layout();
     }
@@ -264,7 +268,10 @@ pub const View = struct {
         var bytes: [196608]u8 = undefined;
         const len = std.unicode.utf16LeToUtf8(&bytes, value) catch return false;
         if (len > 65536 or std.mem.indexOfScalar(u16, value, 0) != null) return false;
-        _ = w.SetWindowTextW(self.composer, value.ptr);
+        self.suppress_draft_change = true;
+        const changed = w.SetWindowTextW(self.composer, value.ptr) != 0;
+        self.suppress_draft_change = false;
+        if (!changed) return false;
         self.clearHits();
         self.invalidate();
         return true;
@@ -1000,6 +1007,7 @@ fn windowProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(
             if (source == view.composer and ((wp >> 16) & 0xffff) == 0x0300) {
                 var buffer: [65537]u16 = undefined;
                 view.picker = if (view.draft(&buffer)) |value| mentionStart(value) != null else false;
+                if (!view.suppress_draft_change) if (view.callbacks.draft_changed) |callback| callback(view.callbacks.context);
                 view.clearHits();
                 view.picker_index = 0;
             }

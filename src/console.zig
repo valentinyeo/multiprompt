@@ -2641,7 +2641,7 @@ pub fn paneGuardKeepUser(requested: u32) void {
 
 pub fn switchToShellByUser(idx: u32) void {
     const was_room = @import("room_frontend.zig").isActive() and idx < app_state.shell_count;
-    if (was_room) @import("room_frontend.zig").leaveForSession();
+    if (idx < app_state.shell_count) @import("room_frontend.zig").leaveForSession();
     switchToShell(idx);
     if (app_state.active_shell == idx) {
         @import("main.zig").sessionFrontSelected();

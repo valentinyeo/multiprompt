@@ -43,8 +43,10 @@ var applied_routes: [3]?@import("room_transport.zig").Route = @splat(null);
 var applied_keys: [3][32]u8 = @splat(@splat(0));
 const rooms = @import("rooms.zig");
 const journal = @import("room_journal.zig");
+const ui_store = @import("room_ui_store.zig");
 const file_io = @import("file_io.zig");
 const TIMER_ROOM: usize = 0xB312;
+const TIMER_ROOM_UI: usize = 0xB313;
 const Candidate = struct {
     sid: [40]u8 = undefined,
     sid_len: usize = 0,
@@ -150,6 +152,12 @@ var refresh_intents: std.ArrayList(RefreshIntent) = .empty;
 var conflict_refresh: ?struct { selection: u64, view_generation: u64 } = null;
 const Draft = struct { location: RoomLocation, text: [:0]u16 };
 var drafts: std.ArrayList(Draft) = .empty;
+var ui_ready = false;
+var scope_blocked = false;
+var ui_dirty = false;
+var restore_intent: ?RoomLocation = null;
+var restore_front = false;
+var restore_pending = false;
 
 fn sameLocation(left: RoomLocation, right: RoomLocation) bool {
     return left.store.account_len == right.store.account_len and left.store.account_len <= left.store.account.len and std.mem.eql(u8, left.store.account[0..left.store.account_len], right.store.account[0..right.store.account_len]) and std.mem.eql(u8, &left.store.store_uuid, &right.store.store_uuid) and std.mem.eql(u8, &left.room_id, &right.room_id);
@@ -161,6 +169,17 @@ fn saveDraft() bool {
     const buf = a.alloc(u16, 65537) catch return false;
     defer a.free(buf);
     const text = view.draft(buf) orelse return false;
+    const encoded = std.unicode.utf16LeToUtf8Alloc(a, text) catch return false;
+    defer a.free(encoded);
+    if (encoded.len > 65536 or std.mem.indexOfScalar(u8, encoded, 0) != null) return false;
+    if (text.len == 0) {
+        for (drafts.items, 0..) |entry, index| if (sameLocation(entry.location, front.selected)) {
+            a.free(entry.text);
+            _ = drafts.orderedRemove(index);
+            break;
+        };
+        return true;
+    }
     const copy = a.dupeZ(u16, text) catch return false;
     for (drafts.items) |*entry| if (sameLocation(entry.location, front.selected)) {
         a.free(entry.text);
@@ -180,6 +199,81 @@ fn clearDrafts() void {
     for (drafts.items) |entry| std.heap.page_allocator.free(entry.text);
     drafts.deinit(std.heap.page_allocator);
     drafts = .empty;
+}
+
+pub const RestoreIntent = struct { location: RoomLocation, was_selected_front: bool };
+
+pub fn uiStateReady() bool { return enabled and ui_ready and !scope_blocked; }
+
+pub fn loadedRestoreIntent() ?RestoreIntent {
+    if (!enabled or !ui_ready or !restore_pending) return null;
+    const location = restore_intent orelse return null;
+    return .{ .location = location, .was_selected_front = restore_front };
+}
+
+fn fromStored(location: ui_store.Location) RoomLocation {
+    var result = RoomLocation{ .store = .{ .account = @splat(0), .account_len = account_len, .store_uuid = undefined }, .room_id = undefined };
+    @memcpy(result.store.account[0..account_len], account[0..account_len]);
+    @memcpy(&result.store.store_uuid, location.store_uuid);
+    @memcpy(&result.room_id, location.room_id);
+    return result;
+}
+
+fn loadUiAccount() bool {
+    ui_ready = false;
+    ui_dirty = false;
+    restore_intent = null;
+    restore_front = false;
+    restore_pending = false;
+    if (account_len == 0) return true;
+    var entry = (ui_store.load(account[0..account_len]) catch return false) orelse { ui_ready = true; return true; };
+    defer entry.deinit();
+    const record = entry.record();
+    for (record.drafts) |draft| {
+        const wide_text = std.unicode.utf8ToUtf16LeAlloc(std.heap.page_allocator, draft.text) catch { clearDrafts(); return false; };
+        defer std.heap.page_allocator.free(wide_text);
+        const copy = std.heap.page_allocator.dupeZ(u16, wide_text) catch { clearDrafts(); return false; };
+        drafts.append(std.heap.page_allocator, .{ .location = fromStored(draft.location), .text = copy }) catch { std.heap.page_allocator.free(copy); clearDrafts(); return false; };
+    }
+    if (record.selected) |selection| {
+        restore_intent = fromStored(selection);
+        retained_selection = restore_intent;
+        restore_front = record.selected_front;
+        restore_pending = true;
+    }
+    ui_ready = true;
+    return true;
+}
+
+fn markUiDirty() void {
+    if (account_len == 0) return;
+    ui_dirty = true;
+    _ = w.SetTimer(app_state.g_main_hwnd, TIMER_ROOM_UI, 750, null);
+}
+
+pub fn flushUi() bool {
+    if (!enabled or account_len == 0 or !ui_dirty) return true;
+    if (!ui_ready or !saveDraft()) return false;
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const values = a.alloc(ui_store.Draft, drafts.items.len) catch return false;
+    for (drafts.items, 0..) |*entry, index| {
+        if (entry.location.store.account_len != account_len or !std.mem.eql(u8, entry.location.store.account[0..account_len], account[0..account_len])) return false;
+        values[index] = .{ .location = .{ .store_uuid = &entry.location.store.store_uuid, .room_id = &entry.location.room_id }, .text = std.unicode.utf16LeToUtf8Alloc(a, entry.text) catch return false };
+    }
+    const selection = retained_selection;
+    const selected: ?ui_store.Location = if (selection) |*value| .{ .store_uuid = &value.store.store_uuid, .room_id = &value.room_id } else null;
+    ui_store.save(account[0..account_len], .{ .version = 1, .account = account[0..account_len], .selected = selected, .selected_front = if (restore_pending) restore_front else front == .selected, .drafts = values }) catch return false;
+    ui_dirty = false;
+    _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_UI);
+    return true;
+}
+
+fn draftChanged(_: *anyopaque) void {
+    if (front != .selected) return;
+    markUiDirty();
+    _ = saveDraft();
 }
 
 fn freeOwned(value: *OwnedModel) void {
@@ -308,8 +402,22 @@ pub fn setAccount(id: ?[]const u8) void {
     const value = id orelse "";
     const valid = value.len > 0 and value.len <= account.len and std.mem.indexOfScalar(u8, value, 0) == null;
     const next = if (valid) value else "";
-    if (std.mem.eql(u8, account[0..account_len], next)) return;
+    if (std.mem.eql(u8, account[0..account_len], next)) {
+        if (scope_blocked and flushUi()) scope_blocked = false;
+        return;
+    }
+    if (!flushUi()) {
+        scope_blocked = true;
+        applied_routes = @splat(null);
+        applied_keys = @splat(@splat(0));
+        account_generation +%= 1;
+        if (created and shown) view.show(false);
+        shown = false;
+        return;
+    }
     leaveForOtherFront();
+    front = .hidden;
+    scope_blocked = false;
     applied_routes = @splat(null);
     applied_keys = @splat(@splat(0));
     retained_selection = null;
@@ -321,10 +429,11 @@ pub fn setAccount(id: ?[]const u8) void {
     account_len = next.len;
     @memcpy(account[0..account_len], next);
     account_generation +%= 1;
+    _ = loadUiAccount();
 }
 
 pub fn setAppliedLayout(bytes: []const u8) bool {
-    if (!enabled or account_len == 0) return false;
+    if (!enabled or scope_blocked or account_len == 0) return false;
     var parsed = @import("session_layout.zig").parse(std.heap.page_allocator, bytes) catch return false;
     defer parsed.deinit();
     const hosts = parsed.value.hosts orelse return false;
@@ -344,8 +453,14 @@ pub fn setAppliedLayout(bytes: []const u8) bool {
         const route = configuredRoute(route_slot);
         const key = if (route) |value| routeKey(value) else @as([64]u8, @splat(0));
         if (route == null or !std.mem.eql(u8, &key, &route_key)) {
-            clearDrafts();
+            if (!flushUi()) {
+                scope_blocked = true;
+                if (created and shown) view.show(false);
+                shown = false;
+                return false;
+            }
             clearModels();
+            if (created and front == .selected) restoreDraft(front.selected);
             clearCatalog();
             candidate_count = 0;
             account_generation +%= 1;
@@ -1032,7 +1147,13 @@ fn finishCommand(c: *rooms.Controller, completion: rooms.Completion, fresh: bool
 }
 
 pub fn pollTimer(id: usize) bool {
-    if (!enabled or id != TIMER_ROOM) return false;
+    if (!enabled) return false;
+    if (id == TIMER_ROOM_UI) {
+        _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_UI);
+        _ = flushUi();
+        return true;
+    }
+    if (id != TIMER_ROOM) return false;
     const c = if (controller) |*value| value else { _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
     const completion = c.poll() orelse { if (!startSnapshot(c) and !scheduleMetadata(c)) _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM); return true; };
     if (completion == .pending) return true;
@@ -1412,7 +1533,7 @@ fn restart(_: *anyopaque, _: room_view.ActionToken, _: []const u8, _: []const u8
 }
 
 pub fn isActive() bool {
-    return enabled and front != .hidden;
+    return enabled and !scope_blocked and front != .hidden;
 }
 pub fn privateActionsAllowed() bool {
     return !isActive();
@@ -1422,7 +1543,7 @@ pub fn isVisible() bool {
 }
 
 fn enter() bool {
-    if (!enabled or !created or app_state.g_account_locked) return false;
+    if (!enabled or !created or scope_blocked or !ui_ready or app_state.g_account_locked) return false;
     @import("chat_composer.zig").chatDraftFlush();
     const voice = @import("voice.zig");
     app_state.g_dictation_cancelled.store(true, .release);
@@ -1450,10 +1571,12 @@ pub fn editSelected() void {
 }
 
 pub fn openCreate() void {
-    if (!enter()) return;
+    if (!saveDraft() or !enter()) return;
+    restore_pending = false;
     selection_generation +%= 1;
     selection_waiting = false;
     front = .{ .create = null };
+    markUiDirty();
     _ = publishCreateCandidates();
     _ = w.SetWindowTextW(app_state.g_main_hwnd, std.unicode.utf8ToUtf16LeStringLiteral("Multi Bot"));
     resize(app_state.g_main_hwnd);
@@ -1495,8 +1618,10 @@ pub fn select(location: RoomLocation) void {
     if (!enter()) return;
     clearModels();
     retained_selection = location;
+    restore_pending = false;
     front = .{ .selected = location };
     restoreDraft(location);
+    markUiDirty();
     _ = w.SetWindowTextW(app_state.g_main_hwnd, std.unicode.utf8ToUtf16LeStringLiteral("Multi Bot"));
     resize(app_state.g_main_hwnd);
     syncVisibility();
@@ -1508,11 +1633,25 @@ pub fn select(location: RoomLocation) void {
 }
 
 pub fn leaveForSession() void {
-    if (!isActive()) return;
-    _ = saveDraft();
+    if (!isActive()) {
+        if (enabled and !scope_blocked and restore_pending) {
+            restore_pending = false;
+            restore_front = false;
+            markUiDirty();
+        }
+        return;
+    }
+    if (!saveDraft()) {
+        scope_blocked = true;
+        if (created and shown) view.show(false);
+        shown = false;
+        return;
+    }
+    restore_pending = false;
     selection_generation +%= 1;
     selection_waiting = false;
     front = .hidden;
+    markUiDirty();
     @import("workspaces.zig").updateMainWindowTitle();
     if (created and shown) view.show(false);
     shown = false;
@@ -1543,7 +1682,7 @@ pub fn restoreAfterOverlay() bool {
 
 pub fn init(parent: w.HANDLE) void {
     if (!enabled or created) return;
-    created = view.create(parent, &model, .{ .context = &context, .create = createRoom, .edit = editRoom, .submit = submit, .restart = restart });
+    created = view.create(parent, &model, .{ .context = &context, .create = createRoom, .edit = editRoom, .submit = submit, .restart = restart, .draft_changed = draftChanged });
 }
 pub fn resize(parent: w.HANDLE) void {
     if (!enabled or !created) return;
@@ -1557,11 +1696,13 @@ pub fn dpiChanged(dpi: u32) void {
 }
 pub fn deinit() void {
     if (!enabled) return;
+    _ = flushUi();
     front = .hidden;
     if (created) view.destroy();
     created = false;
     shown = false;
     _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM);
+    _ = w.KillTimer(app_state.g_main_hwnd, TIMER_ROOM_UI);
     if (controller) |*c| c.shutdown();
     controller = null;
     if (pending_command) |item| {
