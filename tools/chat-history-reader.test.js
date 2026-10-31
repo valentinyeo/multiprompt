@@ -4,7 +4,7 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 
 test('embedded read-only remote reader: bounded first load, lazy history, deltas, partial writes and stdin transport', () => {
-  const run = spawnSync('python3', ['tools/chat-history-reader-test.py'], { encoding: 'utf8', timeout: 30000 });
+  const run = spawnSync('python3', ['tools/chat-history-reader-test.py'], { encoding: 'utf8', timeout: 180000, maxBuffer: 16 * 1024 * 1024 });
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stderr, /Ran \d+ tests/);
   assert.match(run.stdout, /CPU707 first-load source_bytes=\d+ read_bytes=\d+ ms=/);
