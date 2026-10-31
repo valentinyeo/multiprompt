@@ -656,6 +656,7 @@ pub fn clearSearchBackdrop() void {
 }
 
 pub fn hideShellsForOverlay() void {
+    @import("room_frontend.zig").hideForOverlay();
     chatAcClose();
     closeWebView2();
     for (0..app_state.shell_count) |i| {
@@ -670,6 +671,7 @@ pub fn hideShellsForOverlay() void {
 }
 
 pub fn showActiveShellAfterOverlay() void {
+    if (@import("room_frontend.zig").restoreAfterOverlay()) return;
     if (app_state.g_all_sessions_active) return;
     if (app_state.g_search_from_inbox) {
         app_state.g_search_from_inbox = false;

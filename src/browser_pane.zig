@@ -3545,6 +3545,10 @@ fn sweepBrowserOrphans(now: u64) void {
 }
 
 pub fn updateBrowserVisibility() void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) {
+        hideAllBrowserChrome();
+        return;
+    }
     const timing_started = switch_timing.start();
     defer switch_timing.record(.browser_visible, timing_started);
     if (app_state.g_chat_browser_swap.shell_id != 0) return;

@@ -282,11 +282,13 @@ pub fn chatDictationSync() void {
 }
 
 pub fn chatDictationToggle() void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
     chat_dictation_engine_toggle();
     chatDictationSync();
 }
 
 pub fn chatSendOrFinishDictation() void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
     const dictated = app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len];
     const dictating = dictated.len > 0 and app_state.g_dictation_running.load(.acquire) and
         std.mem.eql(u8, dictated, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len]);
@@ -302,7 +304,7 @@ pub fn chatSendOrFinishDictation() void {
 }
 
 pub fn chatDictationSendFlush(queued: bool) void {
-    if (!queued) return;
+    if (!queued or !@import("room_frontend.zig").privateActionsAllowed()) return;
     const dictated = app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len];
     if (!std.mem.eql(u8, dictated, app_state.g_chat_draft_owner[0..app_state.g_chat_draft_owner_len])) return;
     @import("chat_send.zig").sendChatPrompt();
@@ -598,7 +600,7 @@ pub fn pointInRect(rc: RECT, x: i32, y: i32) bool {
 }
 
 pub fn chatViewOwnsInput() bool {
-    return app_state.g_chat_active and !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_shortcuts_active and
+    return @import("room_frontend.zig").privateActionsAllowed() and app_state.g_chat_active and !app_state.g_search_active and !app_state.g_inbox_active and !app_state.g_shortcuts_active and
         !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_all_sessions_active and !app_state.g_snippet_create_active;
 }
 
@@ -1409,6 +1411,7 @@ fn dropPendingEnterChar(hwnd: HANDLE) void {
 }
 
 fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (!@import("room_frontend.zig").privateActionsAllowed() and (msg == WM_KEYDOWN or msg == 0x0102 or msg == 0x0302 or msg == 0x0303 or msg == 0x0304)) return 0;
     const redraw = @import("chat_composer_text.zig").suspendNativePaint(hwnd, msg);
     defer @import("chat_composer_text.zig").resumeNativePaint(hwnd, msg, redraw);
     if (@import("fonts.zig").editMessage(hwnd, app_state.g_main_hwnd, msg, lp)) |result| return result;
@@ -1688,6 +1691,7 @@ fn shellConsoleVisibilityAllowed(is_active: bool, chat_active: bool, tab_wants_c
 }
 
 pub fn shellConsoleShouldBeVisible(idx: u32) bool {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return false;
     if (idx >= app_state.shell_count or app_state.shells[idx].hwnd == null or app_state.shells[idx].disconnected) return false;
     const tab_wants_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on);
     return shellConsoleVisibilityAllowed(

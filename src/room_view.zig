@@ -182,6 +182,15 @@ pub const View = struct {
         if (visible) self.layout();
     }
 
+    pub fn focus(self: *View) void {
+        self.setFocus(if (self.too_small) self.hwnd else if (self.mode == .room) self.composer else self.name_edit);
+    }
+
+    pub fn showUnavailable(self: *View) void {
+        self.result = .unsupported;
+        self.invalidate();
+    }
+
     pub fn setDpi(self: *View, dpi: u32) bool {
         if (dpi < 48 or dpi > 768) return false;
         const old_dpi = self.dpi;

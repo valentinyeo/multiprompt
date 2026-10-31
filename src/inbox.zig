@@ -1436,6 +1436,7 @@ pub fn paintInbox(hdc: HANDLE) void {
 }
 
 pub fn openInbox(hwnd: HANDLE) void {
+    @import("room_frontend.zig").leaveForOtherFront();
     if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
     if (app_state.g_search_active) {
         app_state.g_search_active = false;
@@ -1530,6 +1531,10 @@ pub fn jumpToInboxRow(ri: u32) void {
     jumpToInboxRowSelected(ri, false);
 }
 
+pub fn jumpToInboxRowByUser(ri: u32) void {
+    jumpToInboxRowSelected(ri, true);
+}
+
 fn jumpToInboxRowSelected(ri: u32, user: bool) void {
     const prev_jump = app_state.g_inbox_step_jump_active;
     app_state.g_inbox_step_jump_active = true;
@@ -1563,6 +1568,7 @@ fn jumpToInboxRowSelected(ri: u32, user: bool) void {
     } else {
         const target: HANDLE = @ptrFromInt(ws.hwnd);
         if (IsWindow(target) != 0) {
+            if (user) @import("room_frontend.zig").leaveForOtherFront();
             var tpid: DWORD = 0;
             _ = GetWindowThreadProcessId(target, &tpid);
             if (tpid != 0) _ = AllowSetForegroundWindow(tpid);
@@ -1586,7 +1592,7 @@ pub fn inboxStepJump(dir: i32) void {
     if (app_state.g_inbox_active) return;
     if (inboxNeighborFromActiveSnapshot(dir)) |ri| {
         armInboxStepContext(app_state.g_inbox_tab);
-        jumpToInboxRow(ri);
+        if (@import("room_frontend.zig").isActive()) jumpToInboxRowByUser(ri) else jumpToInboxRow(ri);
         return;
     }
     loadInboxModel();
@@ -1625,7 +1631,7 @@ pub fn inboxStepJump(dir: i32) void {
 
     const ri = inboxNthVisible(app_state.g_inbox_sel) orelse return;
     rememberInboxRow(ri);
-    jumpToInboxRow(ri);
+    if (@import("room_frontend.zig").isActive()) jumpToInboxRowByUser(ri) else jumpToInboxRow(ri);
 }
 
 pub fn refreshNextUnreadCache() void {
@@ -1649,7 +1655,7 @@ pub fn jumpToFirstUnreadThread() bool {
     for (0..app_state.g_inbox_row_count) |i| {
         if (!app_state.g_inbox_rows[i].att) continue;
         armInboxStepContext(app_state.g_inbox_tab);
-        jumpToInboxRow(@intCast(i));
+        if (@import("room_frontend.zig").isActive()) jumpToInboxRowByUser(@intCast(i)) else jumpToInboxRow(@intCast(i));
         return true;
     }
     return false;

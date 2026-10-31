@@ -194,6 +194,9 @@ pub fn close() void {
 
 fn activate(index: usize) void {
     close();
+    const was_room = @import("room_frontend.zig").isActive();
+    const was_current = current(index);
+    @import("room_frontend.zig").leaveForOtherFront();
     app_state.g_shell_focused = true;
     if (index == 0) {
         workspaces.switchToWorkspace(@import("workspace_view.zig").starred);
@@ -203,6 +206,7 @@ fn activate(index: usize) void {
         const entry = &entries[index - 1];
         if (workspaces.findWorkspace(entry.id[0..entry.id_len])) |wi| workspaces.openWorkspaceByIndex(wi);
     }
+    if (was_room and was_current) @import("rename.zig").showActiveShellAfterOverlay();
     _ = w.InvalidateRect(app_state.g_main_hwnd, null, 0);
     _ = w.SetTimer(app_state.g_main_hwnd, w.TIMER_REFOCUS, 50, null);
 }
@@ -259,7 +263,7 @@ pub fn key(vk: usize) bool {
     switch (vk) {
         0x1B => {
             close();
-            focus.focusActiveShell();
+            if (!@import("room_frontend.zig").restoreAfterOverlay()) focus.focusActiveShell();
         },
         0x26 => step(-1),
         0x28 => step(1),

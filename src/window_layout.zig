@@ -127,6 +127,13 @@ pub fn activePaneRects(client: RECT) PaneRects {
     return panes;
 }
 
+pub fn roomContentRect(client: RECT) RECT {
+    const pane = paneRects(client, SIDEBAR_W(), false, 500, 0).primary;
+    const inset = paneFocusInset();
+    const controls = @import("window_frame.zig").controlsRect(client.right);
+    return .{ .left = pane.left + inset, .top = @max(pane.top + inset, controls.bottom), .right = pane.right - inset, .bottom = pane.bottom - inset };
+}
+
 pub fn activePaneContentRect(client: RECT) RECT {
     const pane = activePaneRects(client).primary;
     const inset = paneFocusInset();
@@ -141,6 +148,11 @@ pub fn activePaneContentRect(client: RECT) RECT {
 }
 
 pub fn repositionActive() void {
+    if (@import("room_frontend.zig").isActive()) {
+        @import("room_frontend.zig").resize(app_state.g_main_hwnd);
+        hideAllBrowserChrome();
+        return;
+    }
     if (app_state.active_shell >= app_state.shell_count) return;
     if (app_state.g_main_hwnd == null) return;
     if (!shellConsoleShouldBeVisible(app_state.active_shell) and IsWindowVisible(app_state.shells[app_state.active_shell].hwnd) != 0) _ = ShowWindowAsync(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);

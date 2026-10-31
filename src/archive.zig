@@ -1874,6 +1874,7 @@ pub fn paintAllSessions(hdc: HANDLE) void {
 }
 
 pub fn openAllSessions(hwnd: HANDLE) void {
+    @import("room_frontend.zig").leaveForOtherFront();
     if (app_state.g_search_active) {
         app_state.g_search_active = false;
         app_state.g_browser_url_mode = false;

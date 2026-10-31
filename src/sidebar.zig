@@ -352,7 +352,6 @@ const paintAllSessions = @import("archive.zig").paintAllSessions;
 const sidebarContentH = @import("console.zig").sidebarContentH;
 const sidebarVisibleH = @import("console.zig").sidebarVisibleH;
 const clampSidebarScroll = @import("console.zig").clampSidebarScroll;
-const switchToShell = @import("console.zig").switchToShell;
 const workspaceDisplayName = @import("workspaces.zig").workspaceDisplayName;
 const recordShellDiagEvent = @import("workspaces.zig").recordShellDiagEvent;
 const foregroundIsOurs = @import("focus.zig").foregroundIsOurs;
@@ -643,7 +642,7 @@ pub fn hideActiveTabUntilAttention() void {
     if (@import("archive.zig").rejectPinnedSessionClose(idx)) return;
     if (app_state.shells[idx].inbox_archived and !app_state.shells[idx].needs_attention) {
         if (findNextVisibleTab(idx, 1) orelse findNextVisibleTab(idx, -1)) |nxt| {
-            switchToShell(nxt);
+            @import("console.zig").switchToShellByUser(nxt);
             showHeaderNoticeAscii("Moved to Waiting until next blue dot", 2500, false);
         } else {
             showHeaderNoticeAscii("No other visible tab", 3000, true);
@@ -672,14 +671,14 @@ pub fn hideActiveTabUntilAttention() void {
         saveSession();
         invalidateSidebar();
         showHeaderNoticeAscii("Moved to Waiting until next blue dot", 2500, false);
-        jumpToInboxRow(ri);
+        if (@import("room_frontend.zig").isActive()) @import("inbox.zig").jumpToInboxRowByUser(ri) else jumpToInboxRow(ri);
         return;
     }
 
     const next = findNextVisibleTab(idx, 1) orelse findNextVisibleTab(idx, -1);
     if (next) |nxt| {
         rememberInboxArchiveUndo(@intFromPtr(app_state.g_main_hwnd), app_state.shells[idx].shell_id, was_att);
-        switchToShell(nxt);
+        @import("console.zig").switchToShellByUser(nxt);
         showHeaderNoticeAscii("Moved to Waiting until next blue dot", 2500, false);
     } else {
         app_state.shells[idx].inbox_archived = false;

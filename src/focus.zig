@@ -356,6 +356,7 @@ pub fn activeShellHwndForFocusGuard() HANDLE {
     return if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].hwnd else null;
 }
 pub fn focusGuardActivationTarget() HANDLE {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return null;
     if (app_state.g_chat_active and app_state.g_chat_composer_hwnd != null) {
         const focused = GetFocus();
         return if (chatComposerFocusAllowed() and (focused == null or focused == app_state.g_main_hwnd)) app_state.g_chat_composer_hwnd else null;
@@ -799,6 +800,7 @@ fn focusActiveShellSoft() void {
 }
 
 fn focusActiveShellInner(use_alt_trick: bool) void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
     const focus_target = if (app_state.g_chat_active) app_state.g_chat_composer_hwnd else activeShellHwndForFocusGuard();
     if (!focusGuard(focus_target)) return;
     if (app_state.g_inbox_active) return;

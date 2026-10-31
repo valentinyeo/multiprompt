@@ -834,6 +834,7 @@ pub fn voiceStatusLabel() [*:0]const u16 {
 }
 
 pub fn insertTextIntoChatComposer(text: []const u16) void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
     if (app_state.g_chat_composer_hwnd == null or text.len == 0) return;
     var current: [16384]u16 = undefined;
     const current_len_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &current, @intCast(current.len));
@@ -1320,6 +1321,7 @@ fn voiceStopAll() void {
 }
 
 pub fn setVoiceModeActive(active: bool) void {
+    if (active and !@import("room_frontend.zig").privateActionsAllowed()) return;
     if (active == app_state.g_voice_mode_active) return;
     if (!active) {
         app_state.g_voice_mode_active = false;
@@ -1418,6 +1420,7 @@ pub fn voiceMicStop() void {
     _ = app_state.g_voice_mic_epoch.fetchAdd(1, .acq_rel);
 }
 pub fn voiceMicStart() void {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return;
     if (!app_state.g_voice_always_listen) return;
     voiceDuckingOptOut();
     app_state.g_voice_mic_start_pending = false;

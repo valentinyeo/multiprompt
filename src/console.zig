@@ -2640,8 +2640,13 @@ pub fn paneGuardKeepUser(requested: u32) void {
 }
 
 pub fn switchToShellByUser(idx: u32) void {
+    const was_room = @import("room_frontend.zig").isActive() and idx < app_state.shell_count;
+    if (was_room) @import("room_frontend.zig").leaveForSession();
     switchToShell(idx);
-    if (app_state.active_shell == idx) @import("main.zig").sessionFrontSelected();
+    if (app_state.active_shell == idx) {
+        @import("main.zig").sessionFrontSelected();
+        if (was_room) @import("rename.zig").showActiveShellAfterOverlay();
+    }
 }
 
 pub fn switchToShell(idx: u32) void {
@@ -2657,7 +2662,7 @@ pub fn switchToShell(idx: u32) void {
         }
     }
     const switch_started = GetTickCount64();
-    const defer_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
+    const defer_browser = @import("room_frontend.zig").privateActionsAllowed() and !app_state.g_all_sessions_active and idx < app_state.shell_count and
         chatViewShouldShowForTab(app_state.shells[idx].chat_view_on);
     const defer_native_browser = !app_state.g_all_sessions_active and idx < app_state.shell_count and
         app_state.shells[idx].browser_enabled and app_state.shells[idx].browser_native and
@@ -2759,7 +2764,9 @@ pub fn switchToShell(idx: u32) void {
         saveSession();
     }
     if (idx < app_state.shell_count) {
-        if (app_state.g_all_sessions_active) {
+        if (@import("room_frontend.zig").isActive()) {
+            repositionActive();
+        } else if (app_state.g_all_sessions_active) {
             hideShellsForOverlay();
             updateBrowserVisibility();
         } else {
@@ -2798,7 +2805,7 @@ pub fn switchToShell(idx: u32) void {
             }
         }
     }
-    if (idx < app_state.shell_count and idx != prev) {
+    if (@import("room_frontend.zig").privateActionsAllowed() and idx < app_state.shell_count and idx != prev) {
         for (&app_state.g_voice_deferred_text) |*pending| {
             if (pending.shell_id == app_state.shells[idx].shell_id and pending.len != 0) {
                 if (app_state.g_chat_active) {
