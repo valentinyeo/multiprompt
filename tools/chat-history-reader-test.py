@@ -4369,6 +4369,16 @@ class AgentHostReviewTest(AgentHostTest):
         self.dispatch()
         self.assertEqual(self.message()['state'], 'sent')
 
+    def test_a_host_chat_refuses_typing_into_its_pane(self):
+        self.enable()
+        with patch.object(reader, 'subprocess') as processes:
+            wire = reader.send_response(dict(id=4, tmux=self.tmux, text='rm -rf build'))
+            draft = reader.draft_response(dict(id=5, tmux=self.tmux, text='half typed line'))
+        processes.run.assert_not_called()
+        self.assertIn('\tsend\terror\thost_owns_chat\t', wire)
+        self.assertIn('\tdraft\terror\thost_owns_chat\t', draft)
+        self.assertEqual(reader.host_pane_claimed('another-chat'), False)
+
     def test_host_enable_records_the_chat_folder(self):
         folder = self.home / 'work'
         folder.mkdir()

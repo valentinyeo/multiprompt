@@ -2425,6 +2425,18 @@ def host_owned(provider, sid):
     return bool(owner) and owner["owner"] == "host" and host_alive(provider, sid)
 
 
+def host_pane_claimed(tmux):
+    try:
+        configs = list((HOME / ".local/state/multiprompt/agent-host").glob("*.config.json"))
+    except OSError:
+        return False
+    for path in configs:
+        config = host_read(path)
+        if isinstance(config, dict) and config.get("enabled") is True and config.get("tmux") == tmux:
+            return True
+    return False
+
+
 def host_handed_over(provider, sid):
     owner = host_owner(provider, sid)
     return bool(owner) and owner["owner"] == "terminal"
@@ -3727,6 +3739,8 @@ def send_response(q):
         reason = "invalid_tmux_name"
     elif not isinstance(text, str) or not text or "\x00" in text:
         reason = "invalid_text"
+    elif host_pane_claimed(name):
+        reason = "host_owns_chat"
     else:
         try:
             target = "=" + name + ":"
@@ -3902,6 +3916,8 @@ def draft_response(q):
         reason = "invalid_tmux_name"
     elif not isinstance(text, str) or "\x00" in text or len(text) > DRAFT_TEXT:
         reason = "invalid_text"
+    elif host_pane_claimed(name):
+        reason = "host_owns_chat"
     else:
         try:
             target = "=" + name + ":"
@@ -4278,7 +4294,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 28
+RUNTIME_GENERATION = 29
 
 if __name__ == '__main__':
     import base64 as _base64
