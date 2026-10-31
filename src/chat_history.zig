@@ -848,6 +848,15 @@ pub const NEW_CHAT_GRACE: usize = 3;
 
 pub const NOT_AVAILABLE_NOTE = "Chat not available for this session, use the shell view";
 
+pub fn noTranscriptYet(wire: []const u8) bool {
+    return std.mem.indexOf(u8, wire, "\"no_transcript\":true") != null;
+}
+
+test "IGSH-1266 a missing transcript is a new chat, not a load failure" {
+    try std.testing.expect(noTranscriptYet("@mp\t7\thistory\tok\tabc\t0\t0\t0\t0\tclaude\tterm-1\t0\tdeadbeef\tdelta\t0\n{\"role\":\"status\",\"no_transcript\":true}\n@@MP_END@@\n"));
+    try std.testing.expect(!noTranscriptYet("@mp\t7\thistory\tok\tabc\t0\t0\t0\t0\tclaude\tterm-1\t0\tdeadbeef\tdelta\t0\n{\"role\":\"status\",\"working\":true}\n@@MP_END@@\n"));
+}
+
 pub fn missingReason(wire: []const u8, id: u32) ?[]const u8 {
     var lines = std.mem.splitScalar(u8, wire, '\n');
     var fields = std.mem.splitScalar(u8, lines.next() orelse return null, '\t');

@@ -1600,7 +1600,8 @@ def empty_history_response(q, sid, tmux):
     rid = q["id"]
     probe = hashlib.sha256(("empty:" + sid).encode()).hexdigest()
     header = f"@mp\t{rid}\thistory\tok\t{sid}\t0\t0\t0\t0\tclaude\t{tmux or '-'}\t0\t{probe}\tdelta\t0"
-    return "\n".join((header, END, ""))
+    status = wire_row(dict(role="status", no_transcript=True))
+    return "\n".join((header, status, END, ""))
 
 
 def search_positions(data, token, folds):
@@ -4467,7 +4468,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 36
+RUNTIME_GENERATION = 37
 
 if __name__ == '__main__':
     import base64 as _base64

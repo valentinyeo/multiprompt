@@ -1065,6 +1065,14 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
     entry.stalled = false;
     entry.result_missing = @splat(0);
     if (ok) {
+        if (chat_history.noTranscriptYet(wire.items)) {
+            entry.failures = 0;
+            entry.missing_message = @splat(0);
+            entry.stalled = false;
+            debugLog("[chat] no transcript yet: this is a new chat");
+            ok = false;
+            return false;
+        }
         if (chat_history.missingReason(wire.items, id)) |reason| {
             if (!key.codex and key.sid[0] != 0) {
                 debugLog("[chat] hosted chat has no transcript yet, keeping the composer");
