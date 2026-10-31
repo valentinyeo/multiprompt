@@ -197,16 +197,47 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             $hoverFocus = [VerifyNative]::GetFocusedWindow($script:window)
             $hoverResults = @()
             foreach ($column in @(45, 130, 215)) {
-                [VerifyNative]::MoveMouseClient($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2), $false)
-                [VerifyNative]::MoveMouseClient($script:window, [int]($column * $scale), $pillY, $false)
+                [VerifyNative]::MoveMouseOwnedRoot($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
+                [VerifyNative]::MoveMouseOwnedRoot($script:window, [int]($column * $scale), $pillY)
                 Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'hover opens usage card'
                 $hoverMenu = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')
                 $during = [VerifyNative]::GetFocusedWindow($script:window)
                 if ($during -ne $hoverFocus) { throw 'Usage hover changed keyboard focus' }
-                [VerifyNative]::MoveMouseClient($hoverMenu, [int]($column * $scale), ($client.Bottom - [int](114 * $scale)), $false)
+                [VerifyNative]::MoveMouseClient($hoverMenu, [int]($column * $scale), ($client.Bottom - [int](114 * $scale)), $true)
                 if (-not [VerifyNative]::IsWindowVisible($hoverMenu)) { throw 'Usage hover closed crossing the popup bridge' }
                 Snapshot ("footer-hover-$column")
-                [VerifyNative]::MoveMouseClient($hoverMenu, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2), $false)
+                if ($column -eq 45) {
+                    $console = [VerifyNative]::GetForegroundWindow()
+                    if ([VerifyNative]::GetAncestor($console, 2) -ne $script:window -or [VerifyNative]::Class($console) -cne 'ConsoleWindowClass' -or -not [VerifyNative]::Title($console).EndsWith(('ZigShell-' + $targetId), [StringComparison]::Ordinal)) { throw 'Live hover requires the selected owned CMD console' }
+                    $consoleRect = New-Object VerifyNative+Rect
+                    if (-not [VerifyNative]::GetWindowRect($console, [ref]$consoleRect)) { throw 'Owned console bounds unavailable' }
+                    Snapshot 'hover-console-before'
+                    [VerifyNative]::Text('for /l %i in (1,1,24) do @echo LIVE HOVER 1190 OUTPUT 0123456789')
+                    [VerifyNative]::Chord(@(0x0D))
+                    if ([VerifyNative]::GetForegroundWindow() -ne $console -or -not [VerifyNative]::IsWindowVisible($hoverMenu)) { throw 'Typing changed console focus or dismissed hover' }
+                    Start-Sleep -Milliseconds 1000
+                    Snapshot 'hover-console-after'
+                    $beforeConsole = [Drawing.Bitmap]::FromFile((Join-Path $Evidence 'hover-console-before.png'))
+                    $afterConsole = [Drawing.Bitmap]::FromFile((Join-Path $Evidence 'hover-console-after.png'))
+                    try {
+                        $x0 = [Math]::Max($origin.X - $frame.Left + [int](320 * $scale), $consoleRect.Left - $frame.Left + 8)
+                        $x1 = [Math]::Min($beforeConsole.Width, $consoleRect.Right - $frame.Left - 8)
+                        $y0 = [Math]::Max(0, $consoleRect.Top - $frame.Top + 8)
+                        $y1 = [Math]::Min($beforeConsole.Height, $consoleRect.Bottom - $frame.Top - 8)
+                        if ($x1 -le $x0 -or $y1 -le $y0) { throw 'Visible console comparison area is empty' }
+                        $changed = 0
+                        for ($y = $y0; $y -lt $y1; $y++) {
+                            for ($x = $x0; $x -lt $x1; $x++) {
+                                $a = $beforeConsole.GetPixel($x, $y)
+                                $b = $afterConsole.GetPixel($x, $y)
+                                if ([Math]::Abs($a.R - $b.R) -gt 40 -or [Math]::Abs($a.G - $b.G) -gt 40 -or [Math]::Abs($a.B - $b.B) -gt 40) { $changed++ }
+                            }
+                        }
+                        if ($changed -lt 1500) { throw "Live console pixels did not change under hover: $changed" }
+                        $result.liveHover = @{ console = $console.ToInt64(); selectedId = $targetId; changedPixels = $changed; area = @($x0, $y0, $x1, $y1); marker = 'LIVE HOVER 1190 OUTPUT'; hoverVisible = $true }
+                    } finally { $beforeConsole.Dispose(); $afterConsole.Dispose() }
+                }
+                [VerifyNative]::MoveMouseOwnedRoot($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2))
                 Wait-Until { -not [VerifyNative]::IsWindowVisible($hoverMenu) } 'usage hover closes on exit'
                 if ([VerifyNative]::GetFocusedWindow($script:window) -ne $hoverFocus) { throw 'Usage hover exit changed keyboard focus' }
                 $hoverResults += @{ x = $column; focus = $during.ToInt64(); bridge = $true; closed = $true }

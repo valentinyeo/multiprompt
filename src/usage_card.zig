@@ -323,6 +323,22 @@ fn openMode(passive: bool) void {
     footer_focused = false;
     scroll = 0;
     _ = w.MoveWindow(window, 0, 0, bounds.right, bounds.bottom, 0);
+    if (passive) {
+        const card = geometry(bounds, anchor, snapshot.goal_count);
+        const row = @import("capacity.zig").sidebarUsageRowRect();
+        const region = w.CreateRectRgn(@min(card.left, row.left), card.top, @max(card.right, row.right), row.bottom) orelse {
+            close();
+            return;
+        };
+        if (w.SetWindowRgn(window, region, 0) == 0) {
+            _ = w.DeleteObject(region);
+            close();
+            return;
+        }
+    } else if (w.SetWindowRgn(window, null, 0) == 0) {
+        close();
+        return;
+    }
     _ = focus.SetWindowPos(window, w.HWND_TOP, 0, 0, 0, 0, w.SWP_NOMOVE | w.SWP_NOSIZE | w.SWP_NOACTIVATE | w.SWP_SHOWWINDOW);
     if (passive) {
         var tracking = w.TRACKMOUSEEVENT{ .cbSize = @sizeOf(w.TRACKMOUSEEVENT), .dwFlags = 2, .hwndTrack = window, .dwHoverTime = 0 };

@@ -594,6 +594,11 @@ public static class VerifyNative {
             Thread.Sleep(15);
         }
     }
+    public static void MoveMouseOwnedRoot(IntPtr owner, int x, int y) {
+        Point target = new Point { X = x, Y = y };
+        if (!ClientToScreen(owner, ref target) || GetAncestor(WindowFromPoint(target), 2) != owner || GetAncestor(GetForegroundWindow(), 2) != owner) throw new InvalidOperationException("Mouse target is outside the owned foreground window");
+        MoveMouseClient(owner, x, y, false);
+    }
     public static void WheelClient(IntPtr hwnd, int x, int y, int delta) {
         Point point = new Point { X = x, Y = y };
         if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd || GetAncestor(GetForegroundWindow(), 2) != hwnd) throw new InvalidOperationException("Wheel target is not the owned foreground sidebar");
