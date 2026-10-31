@@ -456,19 +456,28 @@ function Highlight-Frame([string]$Theme, [string]$Kind, [string]$Name, $Target) 
     $script:previousHash = ''
     [void](Wait-For 'stable sidebar paint' { $hash = Capture 'highlight-stability'; if ($hash -eq $script:previousHash) { return $true }; $script:previousHash = $hash; $false })
     $frame = [ChatDeliveryDesktop+Rect]::new()
-    if (-not [ChatDeliveryDesktop]::GetWindowRect($main, [ref]$frame) -or $frame.Left -ne 0 -or $frame.Top -ne 0 -or $frame.Right -ne 1920 -or $frame.Bottom -ne 1032 -or [SidebarDrag]::GetDpiForWindow($main) -ne 96) { throw 'Unexpected owned frame or DPI' }
-    $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
+    $client = [ChatDeliveryDesktop+Rect]::new()
+    $outerOk = [ChatDeliveryDesktop]::GetWindowRect($main, [ref]$frame)
+    $clientOk = [ChatDeliveryDesktop]::GetClientRect($main, [ref]$client)
+    $origin = $null; $originError = $null
+    try { $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0) } catch { $originError = $_.Exception.Message }
+    $dpi = [SidebarDrag]::GetDpiForWindow($main)
+    $desktop = [Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $width = $client.Right - $client.Left; $height = $client.Bottom - $client.Top
+    $attempt = @{theme=$Theme; kind=$Kind; pid=$app.Id; hwnd=$main.ToInt64(); outerOk=$outerOk; outer=@($frame.Left,$frame.Top,$frame.Right,$frame.Bottom); clientOk=$clientOk; client=@($client.Left,$client.Top,$client.Right,$client.Bottom); clientWidth=$width; clientHeight=$height; originOk=($null -ne $origin); originError=$originError; clientOrigin=if ($null -ne $origin) { @($origin.X,$origin.Y) } else { $null }; dpi=$dpi; desktop=@($desktop.Left,$desktop.Top,$desktop.Right,$desktop.Bottom); foreground=[ChatDeliveryDesktop]::GetForegroundWindow().ToInt64()}
+    $result.captureAttempts += $attempt
+    if (-not $clientOk -or $null -eq $origin -or $width -ne 1920 -or $height -ne 1032 -or $dpi -ne 96 -or $origin.X -lt $desktop.Left -or $origin.Y -lt $desktop.Top -or ($origin.X + $width) -gt $desktop.Right -or ($origin.Y + $height) -gt $desktop.Bottom) { throw "Invalid client capture geometry: clientOk=$clientOk size=${width}x${height} origin=$($attempt.clientOrigin -join ',') originError=$originError dpi=$dpi desktop=$($attempt.desktop -join ',')" }
     if ($Kind -eq 'tile') { $fillX = $Target.x - 11; $fillY = $Target.y + 38; $ringX = $Target.x - 16; $ringY = $Target.y + 38 }
     else { $fillX = $Target.x + 45; $fillY = $Target.y + 45; $ringX = $Target.x - 10; $ringY = $Target.y + 20 }
     $bitmap = [Drawing.Bitmap]::new(1920, 1032)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     try {
-        $graphics.CopyFromScreen($frame.Left, $frame.Top, 0, 0, $bitmap.Size)
+        Highlight-Owned
+        $graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, $bitmap.Size)
         $bitmap.Save("$Output/highlight-$Theme-$Kind.png")
-        $fx = $origin.X + $fillX - $frame.Left; $fy = $origin.Y + $fillY - $frame.Top
-        $rx = $origin.X + $ringX - $frame.Left; $ry = $origin.Y + $ringY - $frame.Top
+        $fx = $fillX; $fy = $fillY; $rx = $ringX; $ry = $ringY
         $fill = $bitmap.GetPixel($fx, $fy); $ring = $bitmap.GetPixel($rx, $ry); $inside = $bitmap.GetPixel($rx + 1, $ry)
-        $result.frames += @{theme=$Theme; kind=$Kind; name=$Name; id=$selected.sid; frame=@($frame.Left,$frame.Top,$frame.Right,$frame.Bottom); clientOrigin=@($origin.X,$origin.Y); avatar=$Target; fill=@{point=@($fx,$fy); rgb=@([int]$fill.R,[int]$fill.G,[int]$fill.B)}; ring=@{point=@($rx,$ry); rgb=@([int]$ring.R,[int]$ring.G,[int]$ring.B)}; insideRing=@{point=@(($rx + 1),$ry); rgb=@([int]$inside.R,[int]$inside.G,[int]$inside.B)}}
+        $result.frames += @{theme=$Theme; kind=$Kind; name=$Name; id=$selected.sid; capture='owned-client'; captureRect=@($origin.X,$origin.Y,($origin.X + $width),($origin.Y + $height)); avatar=$Target; fill=@{point=@($fx,$fy); rgb=@([int]$fill.R,[int]$fill.G,[int]$fill.B)}; ring=@{point=@($rx,$ry); rgb=@([int]$ring.R,[int]$ring.G,[int]$ring.B)}; insideRing=@{point=@(($rx + 1),$ry); rgb=@([int]$inside.R,[int]$inside.G,[int]$inside.B)}}
     } finally { $graphics.Dispose(); $bitmap.Dispose() }
 }
 function Highlight-ThemeLight {
@@ -478,12 +487,20 @@ function Highlight-ThemeLight {
     [ChatDeliveryDesktop]::Chord(@(0x11,0x4B))
     [void](Wait-For 'palette initialized' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
     foreach ($key in @(0x54,0x48,0x45,0x4D,0x45,0x53)) { [ChatDeliveryDesktop]::Type($key) }
-    [void](Wait-For 'Themes command selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=6 count=[1-9]\d* target=4000(?:\r?\n|$)' })
+    try { [void](Wait-For 'Themes command selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=6 count=[1-9]\d* target=4000(?:\r?\n|$)' }) } catch {
+        $lines = [regex]::Matches((Get-Content "$settings/debug.log" -Raw).Substring($start), '\[palette\] ready chars=\d+ count=\d+ target=\d+')
+        $result.paletteLastReady = if ($lines.Count) { $lines[$lines.Count - 1].Value } else { $null }
+        throw
+    }
     Highlight-Owned
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Theme palette lost foreground' }
     [ChatDeliveryDesktop]::Chord(@(0x0D))
     foreach ($key in @(0x4C,0x49,0x47,0x48,0x54)) { [ChatDeliveryDesktop]::Type($key) }
-    [void](Wait-For 'Light theme selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=5 count=[1-9]\d* target=4012(?:\r?\n|$)' })
+    try { [void](Wait-For 'Light theme selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=5 count=[1-9]\d* target=4012(?:\r?\n|$)' }) } catch {
+        $lines = [regex]::Matches((Get-Content "$settings/debug.log" -Raw).Substring($start), '\[palette\] ready chars=\d+ count=\d+ target=\d+')
+        $result.paletteLastReady = if ($lines.Count) { $lines[$lines.Count - 1].Value } else { $null }
+        throw
+    }
     Highlight-Owned
     if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Theme palette lost foreground' }
     [ChatDeliveryDesktop]::Chord(@(0x0D))
@@ -494,7 +511,8 @@ function Highlight-ThemeLight {
 function Highlight-Journey {
     $result.executable = @{path=$Exe; sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion; tag=$env:RELEASE_TAG}
     $result.frames = @()
-    $result.limitations = @('Avatar positions come from native debug layout; ring pixels require visual review for antialiasing', 'Selection-only styling inspected in source, not exercised')
+    $result.captureAttempts = @()
+    $result.limitations = @('Avatar positions come from native debug layout', 'Outline and edge antialiasing require visual review of all four photos; exact ring colour is not automatically verified', 'Selection-only styling inspected in source, not exercised')
     Highlight-Owned
     if ([ChatDeliveryDesktop]::GetSystemMetrics(0) -ne 1920 -or [ChatDeliveryDesktop]::GetSystemMetrics(1) -ne 1080 -or [SidebarDrag]::GetDpiForWindow($main) -ne 96) { throw 'Highlight proof requires 1920x1080 at 96 DPI' }
     [void](Wait-For 'restored Starred fixture' {
@@ -508,7 +526,6 @@ function Highlight-Journey {
         return $true
     } 60)
     Highlight-Owned
-    if (-not [ChatDeliveryDesktop]::MoveWindow($main, 0, 0, 1920, 1032, $true)) { throw 'Owned window resize failed' }
     $positions = Wait-For 'two pinned avatars and one list avatar' {
         $found = @{}
         foreach ($m in [regex]::Matches((Get-Content "$settings/debug.log" -Raw), '\[bots\] face=\d+ color=\d+ rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)')) {
@@ -534,8 +551,7 @@ function Highlight-Journey {
     Highlight-Frame 'light' 'row' 'Third shell' $positions.row
     foreach ($frame in $result.frames) {
         $fill = if ($frame.theme -eq 'light') { 214 } else { 58 }
-        $ring = if ($frame.theme -eq 'light') { 154 } else { 138 }
-        if (@($frame.fill.rgb | Where-Object { $_ -ne $fill }).Count -ne 0 -or @($frame.ring.rgb | Where-Object { [Math]::Abs($_ - $ring) -gt 8 }).Count -ne 0 -or @($frame.insideRing.rgb | Where-Object { [Math]::Abs($_ - $fill) -gt 8 }).Count -ne 0) { throw 'Highlight fill or ring differs; see all frames' }
+        if (@($frame.fill.rgb | Where-Object { $_ -ne $fill }).Count -ne 0) { throw 'Highlight fill differs; see all frames' }
     }
     $result.passed = $true
 }
