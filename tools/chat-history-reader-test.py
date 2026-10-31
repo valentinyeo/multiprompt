@@ -4314,6 +4314,53 @@ class AgentHostTest(unittest.TestCase):
             self.assertIsNone(reader.host_command(self.provider, self.sid))
             self.assertIsNone(reader.host_agent_start(self.provider, self.sid))
 
+    def test_message_worker_stops_when_nothing_is_left_to_deliver(self):
+        self.assertIsNotNone(getattr(reader, "MESSAGE_WORKER_IDLE_SECONDS", None),
+                             "a message worker must stop itself once its chat has nothing left to deliver")
+        self.enable()
+        token = self.seed()
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("UPDATE shared_messages SET state='accepted',deadline=NULL WHERE id=?", (token,))
+            db.execute("INSERT OR REPLACE INTO message_locators VALUES ('claude',?,?)", (self.sid, self.tmux))
+        db.close()
+        sources = {name: base64.b64encode((ROOT / "src/chat_connectors" / (name + ".py")).read_bytes()).decode()
+                   for name in ("claude", "codex")}
+        failures = []
+        previous_hook = threading.excepthook
+        threading.excepthook = lambda info: failures.append(repr(info.exc_value))
+        started = time.time()
+        try:
+            with patch.object(reader, "CONNECTOR_SOURCES", sources, create=True), \
+                    patch.object(reader, "MESSAGE_WORKER_IDLE_SECONDS", 2), \
+                    patch.object(reader, "resolve_tmux_agent", return_value=None):
+                worker = threading.Thread(target=reader.message_worker, args=(self.tmux, self.provider, self.sid), daemon=True)
+                worker.start()
+                worker.join(timeout=15)
+        finally:
+            threading.excepthook = previous_hook
+        elapsed = time.time() - started
+        self.assertFalse(worker.is_alive(), "a message worker outlived its chat")
+        self.assertEqual(failures, [], "the worker must leave through its idle check, not a crash")
+        self.assertGreaterEqual(elapsed, 1.5, "the worker must reach the idle check before it stops")
+
+    def test_host_reaps_an_agent_left_by_a_dead_host(self):
+        self.enable()
+        orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)",
+                                   "--print", "--session-id", self.sid])
+        self.addCleanup(lambda: orphan.poll() is None and orphan.kill())
+        decoy = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "--print"])
+        self.addCleanup(lambda: decoy.poll() is None and decoy.kill())
+        state = reader.host_session_state(self.provider, self.sid)
+        state["agent_pid"] = orphan.pid
+        reader.host_write(reader.host_paths(self.provider, self.sid)["state"], state)
+        self.assertTrue(reader.host_reap_agent(self.provider, self.sid), "a recorded agent of a dead host must be reaped")
+        orphan.wait(timeout=10)
+        self.assertIsNone(decoy.poll(), "the reaper must never touch a process from another chat")
+        state["agent_pid"] = decoy.pid
+        reader.host_write(reader.host_paths(self.provider, self.sid)["state"], state)
+        self.assertFalse(reader.host_reap_agent(self.provider, self.sid), "only this chat's headless agent may be killed")
+
     def test_host_cli_status_and_disable(self):
         self.enable()
         status = reader.host_cli(['status', self.provider, self.sid])

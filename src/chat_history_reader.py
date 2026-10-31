@@ -2262,6 +2262,7 @@ def import_legacy_messages(db, sid, transcript, epoch):
 
 
 HOST_PROVIDERS = ('claude',)
+MESSAGE_WORKER_IDLE_SECONDS = 120
 HOST_BINARY_NAMES = {'claude': 'claude'}
 HOST_BINARY_FOLDERS = ('~/.local/bin', '~/.claude/local', '~/.npm-global/bin', '~/.bun/bin')
 HOST_FOLDER = re.compile(r"[A-Za-z0-9_./~+-]{1,220}\Z")
@@ -2714,6 +2715,37 @@ def host_agent_start(provider, sid):
                             cwd=host_cwd(provider, sid), start_new_session=True)
 
 
+def host_agent_recorded_pid(provider, sid):
+    state = host_session_state(provider, sid)
+    pid = state.get("agent_pid")
+    return pid if type(pid) is int and pid > 0 else None
+
+
+def host_agent_orphan(provider, sid, pid):
+    if type(pid) is not int or pid <= 0 or pid == os.getpid():
+        return False
+    try:
+        with open("/proc/" + str(pid) + "/cmdline", "rb") as handle:
+            command = handle.read(8192).replace(b"\x00", b" ").decode("utf-8", "replace")
+    except OSError:
+        return False
+    return sid in command and "--print" in command
+
+
+def host_reap_agent(provider, sid):
+    pid = host_agent_recorded_pid(provider, sid)
+    if pid is None or not host_agent_orphan(provider, sid, pid):
+        return False
+    if host_owned(provider, sid):
+        return False
+    try:
+        os.kill(pid, 9)
+    except OSError:
+        pass
+    host_log(provider, sid, "agent_reaped", dict(pid=pid))
+    return True
+
+
 def host_agent_stop(agent):
     if agent is None:
         return
@@ -2949,6 +2981,7 @@ def host_main(provider, sid):
     server = None
     agent = None
     try:
+        host_reap_agent(provider, sid)
         try:
             paths["socket"].unlink()
         except OSError:
@@ -2968,6 +3001,8 @@ def host_main(provider, sid):
             host_log(provider, sid, "host_error", dict(error="agent_not_found", name=host_binary_name(provider)))
             return 5
         host_log(provider, sid, "agent_started", dict(pid=agent.pid))
+        state["agent_pid"] = agent.pid
+        host_state_write(provider, sid, state)
         host_loop(provider, sid, tmux, dict(state=state), server, agent)
         return 0
     except (OSError, ValueError) as error:
@@ -2989,6 +3024,7 @@ def host_main(provider, sid):
                 pass
         stopped = host_session_state(provider, sid)
         stopped["inflight"] = None
+        stopped.pop("agent_pid", None)
         stopped["stopped"] = time.time()
         host_write(paths["state"], stopped)
         host_release(lock)
@@ -3512,6 +3548,7 @@ def message_worker(tmux, provider, sid):
         except BlockingIOError:
             return
         request = dict(message_protocol=1, tmux=tmux, provider=provider, sid=sid)
+        idle_since = time.time()
         with selectors.DefaultSelector() as selector:
             while True:
                 try:
@@ -3530,8 +3567,13 @@ def message_worker(tmux, provider, sid):
                     message_store_request(dict(request, op='message_dispatch'))
                     with closing(message_store_db(tmux)) as db:
                         queued, deadline, observed = db.execute("SELECT SUM(state='queued'),MIN(CASE WHEN state='sent' THEN deadline END),SUM(state IN ('failed','accepted','started')) FROM shared_messages WHERE provider=? AND sid=?", (provider, sid)).fetchone()
-                    if not queued and deadline is None and (not observed or message_connector(provider) is None):
-                        return
+                    if not queued and deadline is None:
+                        if not observed or message_connector(provider) is None:
+                            return
+                        if time.time() - idle_since >= MESSAGE_WORKER_IDLE_SECONDS:
+                            return
+                    else:
+                        idle_since = time.time()
                     timeout = max(0.0, deadline - time.time()) if deadline is not None else 1.0
                     timeout = min(timeout, 1.0)
                     selector.select(timeout)
@@ -4425,7 +4467,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 35
+RUNTIME_GENERATION = 36
 
 if __name__ == '__main__':
     import base64 as _base64
