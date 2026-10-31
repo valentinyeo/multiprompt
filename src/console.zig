@@ -1806,6 +1806,8 @@ pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) 
 }
 
 pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[]const u8, startup_cmd: ?[]const u8) bool {
+    const pending_chat_view = app_state.g_pending_chat_view;
+    app_state.g_pending_chat_view = false;
     if (app_state.g_account_locked) return false;
     const background_workspace = app_state.g_pending_background_workspace;
     if (tmux_session) |session| {
@@ -2006,6 +2008,7 @@ pub fn spawnShellWithSession(kind: ShellKind, tmux_session: ?[]const u8, cwd: ?[
         app_state.shells[idx].tmux_identity_len = @intCast(identity.len);
     }
     setDefaultName(&app_state.shells[idx], kind, shell_id);
+    app_state.shells[idx].chat_view_on = pending_chat_view;
     if (background_workspace) |workspace| {
         app_state.shells[idx].workspace = workspace;
     } else if (app_state.g_single_window and !app_state.g_restoring) app_state.shells[idx].workspace = app_state.g_active_workspace;

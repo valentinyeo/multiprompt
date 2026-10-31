@@ -1835,6 +1835,10 @@ pub fn newTabOpensChatView(program: []const u8) bool {
 }
 
 test "IGSH-1266 a hosted Claude tab opens in Chat View and a neutral tab does not" {
+    try std.testing.expect(newTabChatViewBeforeSwitch("claude"));
+    try std.testing.expect(!newTabChatViewBeforeSwitch(""));
+    try std.testing.expect(!newTabChatViewBeforeSwitch("codex"));
+    try std.testing.expect(!newTabChatViewBeforeSwitch("pi"));
     try std.testing.expect(newTabOpensChatView("claude"));
     try std.testing.expect(newTabOpensChatView("claude-code"));
     try std.testing.expect(!newTabOpensChatView(""));
@@ -1844,6 +1848,10 @@ test "IGSH-1266 a hosted Claude tab opens in Chat View and a neutral tab does no
     try std.testing.expect(workspaceSessionProgram("", true).len > 0 and newTabOpensChatView(workspaceSessionProgram("", true)));
     try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
     try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
+}
+
+pub fn newTabChatViewBeforeSwitch(program: []const u8) bool {
+    return @import("agent_host.zig").eligible(program);
 }
 
 pub fn workspaceSessionProgram(configured: []const u8, with_agent: bool) []const u8 {
@@ -1915,7 +1923,9 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
     app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
     app_state.g_pending_tmux_host = host;
+    app_state.g_pending_chat_view = newTabChatViewBeforeSwitch(program);
     const ok = spawnShellWithSession(.tmux, session, null, null);
+    app_state.g_pending_chat_view = false;
     app_state.g_pending_tmux_host = 0;
     app_state.g_pending_tmux_cmd_len = 0;
 
@@ -1936,7 +1946,7 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
         @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
         app_state.shells[ns].cached_cwd_len = @intCast(n);
         publishInboxState();
-        if (hosted_claude) @import("chat_composer.zig").openChatView();
+        if (hosted_claude and app_state.active_shell == ns and !app_state.g_chat_active) @import("chat_composer.zig").openChatView();
         saveSession();
     }
     return ok;
