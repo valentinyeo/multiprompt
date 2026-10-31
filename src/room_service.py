@@ -173,7 +173,7 @@ class RoomStore:
             except BaseException:
                 self.db.execute('ROLLBACK')
                 raise
-        if op not in ('create', 'edit_members', 'post_human', 'agent_reply'):
+        if op not in ('create', 'edit_members', 'edit', 'post_human', 'agent_reply'):
             fail('unknown_op')
         identifier(request.get('command_id'))
         body = encoded(request)
@@ -205,14 +205,20 @@ class RoomStore:
             return {'event': event, 'deliveries': []}
         room = self.room(r.get('room_id'))
         room_id = room['id']
-        if op == 'edit_members':
-            fields(r, ('op', 'command_id', 'room_id', 'expected_revision', 'members'))
+        if op in ('edit_members', 'edit'):
+            fields(r, ('op', 'command_id', 'room_id', 'expected_revision', 'name', 'members') if op == 'edit' else ('op', 'command_id', 'room_id', 'expected_revision', 'members'))
             if number(r['expected_revision'], 1) != room['revision']:
                 fail('revision_conflict')
+            if op == 'edit':
+                text(r['name'], 256)
             self.replace_members(room_id, r['members'])
             revision = room['revision'] + 1
-            self.db.execute('UPDATE rooms SET revision=? WHERE id=?', (revision, room_id))
-            event = self.event(room_id, 'members_edited', {'revision': revision, 'members': self.members(room_id)})
+            if op == 'edit':
+                self.db.execute('UPDATE rooms SET name=?, revision=? WHERE id=?', (r['name'], revision, room_id))
+                event = self.event(room_id, 'room_edited', {'name': r['name'], 'revision': revision, 'members': self.members(room_id)})
+            else:
+                self.db.execute('UPDATE rooms SET revision=? WHERE id=?', (revision, room_id))
+                event = self.event(room_id, 'members_edited', {'revision': revision, 'members': self.members(room_id)})
             return {'event': event, 'deliveries': []}
         if op == 'post_human':
             fields(r, ('op', 'command_id', 'room_id', 'expected_revision', 'text', 'recipients'))

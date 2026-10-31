@@ -93,12 +93,12 @@ class RoomBridge:
             return {'provider': 'claude', 'sid': status['sid'], 'enabled': status['enabled'], 'owner': status.get('owner'), 'alive': status.get('alive')}
         if op in ('post_human', 'agent_reply', 'delivery_work'):
             fail('unsupported_remote_capability')
-        if op not in ('list', 'snapshot', 'events', 'deliveries', 'create', 'edit_members'):
+        if op not in ('list', 'snapshot', 'events', 'deliveries', 'create', 'edit_members', 'edit'):
             fail('unknown_op')
         if 'host_uuid' not in request or identifier(request['host_uuid']) != self.store.host_uuid:
             fail('different_host')
         command = {key: value for key, value in request.items() if key != 'host_uuid'}
-        if op in ('create', 'edit_members'):
+        if op in ('create', 'edit_members', 'edit'):
             members = command.get('members')
             if not isinstance(members, list) or len(members) > 64:
                 fail('invalid_members')
@@ -107,6 +107,11 @@ class RoomBridge:
             if existing is None:
                 self.store.validate_members(members)
                 for member in members:
+                    if member['provider'] == 'codex' and op == 'edit':
+                        previous = self.store.db.execute('SELECT host_uuid, provider, provider_sid, session_identity FROM members WHERE room_id=? AND alias=? AND active=1', (command.get('room_id'), member['alias'])).fetchone()
+                        if previous is None or any(previous[key] != member[key] for key in ('host_uuid', 'provider', 'provider_sid', 'session_identity')):
+                            fail('unsupported_provider')
+                        continue
                     if member['provider'] != 'claude':
                         fail('unsupported_provider')
                     status = host_status(member['provider_sid'])
