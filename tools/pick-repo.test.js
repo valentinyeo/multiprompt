@@ -59,3 +59,11 @@ test('IGSH-1266 Pick repo and Set workspace folder are painted, confirmed and do
   assert.match(read('openwiki/architecture/session-start.md'), /Pick repo/);
   assert.match(read('changelog.d/IGSH-1266-pick-repo.md'), /[A-Za-z]/);
 });
+
+test('IGSH-1266 saving the workspace folder tells the user', () => {
+  const main = read('src/main.zig');
+  assert.match(main, /const saving_folder = app_state\.g_search_pick_repo_folder_mode;/,
+    'the confirm must remember whether this pick saves the folder');
+  assert.match(main, /if \(saving_folder and picked\) showHeaderNoticeAscii\("Workspace folder saved; new tabs start there"/,
+    'saving the folder must confirm it on screen, not only in the file');
+});

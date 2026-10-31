@@ -4623,12 +4623,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     return 0;
                 }
                 if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
+                    const saving_folder = app_state.g_search_pick_repo_folder_mode;
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
                     clearSearchBackdrop();
                     const picked = pickRepoChoose(target);
                     applyPendingGroup();
                     showActiveShellAfterOverlay();
+                    if (saving_folder and picked) showHeaderNoticeAscii("Workspace folder saved; new tabs start there", 3000, false);
                     if (!picked) showHeaderNoticeAscii("Pick repo: nothing chosen", 3000, false);
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
