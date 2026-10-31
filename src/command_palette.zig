@@ -1551,7 +1551,45 @@ test "IGSH-1266 a new Claude session spawns exactly the host launch command" {
     try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
 }
 
+pub fn workspaceSessionProgram(configured: []const u8, with_agent: bool) []const u8 {
+    if (!with_agent) return "";
+    return if (configured.len > 0) configured else "claude";
+}
+
+test "IGSH-1266 a new tab starts Claude unless the workspace names a program" {
+    try std.testing.expectEqualStrings("claude", workspaceSessionProgram("", true));
+    try std.testing.expectEqualStrings("codex", workspaceSessionProgram("codex", true));
+    try std.testing.expectEqualStrings("", workspaceSessionProgram("", false));
+    try std.testing.expectEqualStrings("", workspaceSessionProgram("claude", false));
+
+    var host_buf: [1024]u8 = undefined;
+    var command_buf: [512]u8 = undefined;
+    var sid_buf: [36]u8 = undefined;
+    const randomness = [_]u8{0xff} ** 16;
+    const agent_host = @import("agent_host.zig");
+    const sid = agent_host.formatSessionId(&sid_buf, &randomness);
+    const spawned = workspaceLaunchCommand(workspaceSessionProgram("", true), "term-abc", "~/projects", sid, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    var expected_buf: [1024]u8 = undefined;
+    const expected = agent_host.launchCommand(&expected_buf, "term-abc", "~/projects", sid) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings(expected, spawned);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "send-keys") == null);
+
+    const neutral = workspaceLaunchCommand(workspaceSessionProgram("claude", false), "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
+}
+
 pub fn spawnWorkspaceTmuxSession() bool {
+    return spawnWorkspaceSession(true);
+}
+
+pub fn spawnWorkspaceTerminalSession() bool {
+    return spawnWorkspaceSession(false);
+}
+
+fn spawnWorkspaceSession(with_agent: bool) bool {
     var host: u8 = 0;
     var cwd_buf: [256]u8 = undefined;
     var cwd_len: u32 = 0;
@@ -1561,7 +1599,7 @@ pub fn spawnWorkspaceTmuxSession() bool {
     if (!workspaceConfiguredTerminalFolder(workspace, &host, &cwd_buf, &cwd_len, &program_buf, &program_len) and
         !workspacePrimaryRepo(&host, &cwd_buf, &cwd_len)) return false;
     const cwd = cwd_buf[0..cwd_len];
-    const program = program_buf[0..program_len];
+    const program = workspaceSessionProgram(program_buf[0..program_len], with_agent);
     if (program.len > 0 and commandCreatesAgentWorkload(program) and
         !capacityAdmitNewAgent(host, workspace, "new workspace session")) return false;
 

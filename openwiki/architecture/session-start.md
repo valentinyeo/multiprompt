@@ -32,6 +32,13 @@ falls back to `workspacePrimaryRepo` (the workspace's first repo). With neither,
 the app shows `Workspace folder unavailable` for 3 seconds and opens the palette
 instead of a tab.
 
+`workspaceSessionProgram` then picks the program: an explicit `alt_t` wins, and
+with no `alt_t` the tab starts `claude`, so a plain new tab is a Claude session
+on the app-owned host (`agent_host.eligible` is true and `launchCommand` runs).
+`spawnWorkspaceTerminalSession` is the same spawn with no program, kept for the
+neutral tab; `Ctrl+K` reaches a plain shell today through `New Host 1 VPS
+Shell`.
+
 Before anything is spawned, `capacityAdmitNewAgent` (from `src/capacity.zig`)
 may refuse a program that creates an agent workload. A refusal produces no tab.
 
