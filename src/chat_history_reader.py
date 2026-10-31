@@ -2242,6 +2242,7 @@ def import_legacy_messages(db, sid, transcript, epoch):
 
 
 HOST_PROVIDERS = ('claude',)
+HOST_PERMISSION_MODES = ('acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan')
 HOST_IDLE_SECONDS = 300
 HOST_DELIVERY_TIMEOUT = 15
 HOST_INFLIGHT_TIMEOUT = 900
@@ -2327,7 +2328,9 @@ def host_command(provider, sid):
     command = config.get("command")
     parts = command if isinstance(command, list) and command and all(isinstance(part, str) and part for part in command) else ["claude"]
     extra = config.get("args")
-    return parts + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
+    parts = parts + (extra if isinstance(extra, list) and all(isinstance(part, str) for part in extra) else [])
+    mode = config.get("permission_mode")
+    return parts + (["--permission-mode", mode] if mode in HOST_PERMISSION_MODES else [])
 
 
 def host_cwd(provider, sid):
@@ -2918,14 +2921,19 @@ def host_cli(argv):
     if not host_identity(provider, sid):
         return dict(status="refused", reason="unsupported_provider")
     tmux = rest[rest.index("--tmux") + 1] if "--tmux" in rest[:-1] else None
+    mode = rest[rest.index("--permission-mode") + 1] if "--permission-mode" in rest[:-1] else None
     if tmux is not None and TMUX_NAME.fullmatch(tmux) is None:
         return dict(status="refused", reason="invalid_chat")
+    if mode is not None and mode not in HOST_PERMISSION_MODES:
+        return dict(status="refused", reason="invalid_permission_mode")
     paths = host_paths(provider, sid)
     if command == "enable":
         config = host_read(paths["config"]) or {}
         config["enabled"] = True
         if tmux is not None:
             config["tmux"] = tmux
+        if mode is not None:
+            config["permission_mode"] = mode
         host_write(paths["config"], config)
         host_log(provider, sid, "enabled", dict(tmux=config.get("tmux")))
         return dict(status="enabled", sid=sid, tmux=config.get("tmux"))
@@ -2940,8 +2948,12 @@ def host_cli(argv):
         return dict(status="disabled", sid=sid)
     if command == "start":
         config = host_read(paths["config"]) or {}
-        if config.get("enabled") is True and tmux is not None and config.get("tmux") != tmux:
-            config["tmux"] = tmux
+        if config.get("enabled") is True and ((tmux is not None and config.get("tmux") != tmux)
+                                             or (mode is not None and config.get("permission_mode") != mode)):
+            if tmux is not None:
+                config["tmux"] = tmux
+            if mode is not None:
+                config["permission_mode"] = mode
             host_write(paths["config"], config)
         return host_start(provider, sid)
     if command == "stop":

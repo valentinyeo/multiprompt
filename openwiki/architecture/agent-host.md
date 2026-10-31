@@ -45,7 +45,10 @@ under the 108-character limit a Unix socket path has, whatever the home director
 
 - No config file, or `enabled` not `true`: the terminal path is unchanged.
 - The file also carries `command` (the agent executable, default `["claude"]`), `args`
-  (extra CLI arguments), `tmux` (the chat's tmux name) and `cwd`.
+  (extra CLI arguments), `tmux` (the chat's tmux name), `cwd` and `permission_mode`.
+- `permission_mode` must be one of the CLI's own modes (`acceptEdits`, `auto`,
+  `bypassPermissions`, `manual`, `dontAsk`, `plan`) and is passed as `--permission-mode <mode>`.
+  Without it the CLI keeps its own default, so a tool that would prompt is denied.
 - Tests point `command` at a fake executable.
 - Codex and Pi keep their own paths until their adapters exist.
 
@@ -114,10 +117,10 @@ one user line `reply with the word ok`:
 Run from the selected runtime file (`src/chat_history_reader.py`):
 
 ```
-python3 <reader> host start <provider> <sid> [--tmux NAME]
+python3 <reader> host start <provider> <sid> [--tmux NAME] [--permission-mode MODE]
 python3 <reader> host stop <provider> <sid>
 python3 <reader> host status <provider> <sid>
-python3 <reader> host enable <provider> <sid> [--tmux NAME]
+python3 <reader> host enable <provider> <sid> [--tmux NAME] [--permission-mode MODE]
 python3 <reader> host disable <provider> <sid>
 python3 <reader> host handover <provider> <sid>
 ```

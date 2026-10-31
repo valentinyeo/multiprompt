@@ -4247,6 +4247,24 @@ class AgentHostTest(unittest.TestCase):
         self.assertEqual(sid, self.sid)
         self.assertEqual(path, self.transcript)
 
+    def test_host_passes_the_configured_permission_mode(self):
+        self.enable(permission_mode='plan')
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        args = self.agent_rows('start')[0]['args']
+        self.assertIn('--permission-mode', args)
+        self.assertEqual(args[args.index('--permission-mode') + 1], 'plan')
+
+    def test_host_cli_rejects_an_unknown_permission_mode(self):
+        self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--permission-mode', 'yolo'])['reason'],
+                         'invalid_permission_mode')
+        self.assertEqual(reader.host_cli(['enable', self.provider, self.sid, '--tmux', self.tmux,
+                                         '--permission-mode', 'acceptEdits'])['status'], 'enabled')
+        config = reader.host_read(reader.host_paths(self.provider, self.sid)['config'])
+        self.assertEqual(config['permission_mode'], 'acceptEdits')
+        self.assertEqual(config['tmux'], self.tmux)
+
     def test_host_cli_status_and_disable(self):
         self.enable()
         status = reader.host_cli(['status', self.provider, self.sid])
