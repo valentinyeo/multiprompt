@@ -2341,7 +2341,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (app_state.drag_is_group) {
                     const dy = my - app_state.drag_start_y;
                     const ady: i32 = if (dy < 0) -dy else dy;
-                    if (ady < 6) return 0;
+                    if (ady < uiScaled(24)) return 0;
                     const now = GetTickCount64();
                     if (app_state.drag_last_swap_tick != 0 and now - app_state.drag_last_swap_tick < 120) return 0;
                     if (my < @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight()) return 0;
