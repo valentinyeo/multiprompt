@@ -4598,6 +4598,42 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const target = app_state.g_search_results[app_state.g_search_sel];
                 if (paletteRowIsHeader(target)) return 0;
                 recordPaletteUsage(target);
+                if (target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET) {
+                    debugLog("[pick] open list");
+                    pickRepoOpen(target == SEARCH_PICK_REPO_OFFSET, target == SEARCH_SET_FOLDER_OFFSET,
+                        workspaceHostForNewTab(activeWorkspaceSlot()));
+                    app_state.g_search_workspace_mode = false;
+                    app_state.g_search_theme_mode = false;
+                    app_state.g_search_openall_host_mode = false;
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 1;
+                    app_state.g_search_scroll = 0;
+                    requestRepoRefresh(app_state.g_search_pick_repo_host);
+                    updateSearchResults();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == SEARCH_PICK_REPO_BACK_OFFSET) {
+                    closePickRepo();
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 0;
+                    app_state.g_search_scroll = 0;
+                    updateSearchResults();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    const picked = pickRepoChoose(target);
+                    applyPendingGroup();
+                    showActiveShellAfterOverlay();
+                    if (!picked) showHeaderNoticeAscii("Pick repo: nothing chosen", 3000, false);
+                    _ = InvalidateRect(hwnd, null, 0);
+                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    return 0;
+                }
                 if (verboseLoggingEnabled()) {
                     var dbg_cf: [96]u8 = undefined;
                     debugLog(std.fmt.bufPrint(&dbg_cf, "[confirm] sel={d} count={d} target={d} (tabsort_auto={d} manual={d})", .{ app_state.g_search_sel, app_state.g_search_result_count, target, SEARCH_TABSORT_INBOX_OFFSET, SEARCH_TABSORT_MANUAL_OFFSET }) catch "[confirm fmt-err]");
@@ -6661,41 +6697,6 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     } else {
                         _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     }
-                    return 0;
-                }
-                if (target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET) {
-                    pickRepoOpen(target == SEARCH_PICK_REPO_OFFSET, target == SEARCH_SET_FOLDER_OFFSET,
-                        workspaceHostForNewTab(activeWorkspaceSlot()));
-                    app_state.g_search_workspace_mode = false;
-                    app_state.g_search_theme_mode = false;
-                    app_state.g_search_openall_host_mode = false;
-                    app_state.g_search_len = 0;
-                    app_state.g_search_sel = 1;
-                    app_state.g_search_scroll = 0;
-                    requestRepoRefresh(app_state.g_search_pick_repo_host);
-                    updateSearchResults();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    return 0;
-                }
-                if (target == SEARCH_PICK_REPO_BACK_OFFSET) {
-                    closePickRepo();
-                    app_state.g_search_len = 0;
-                    app_state.g_search_sel = 0;
-                    app_state.g_search_scroll = 0;
-                    updateSearchResults();
-                    _ = InvalidateRect(hwnd, null, 0);
-                    return 0;
-                }
-                if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
-                    app_state.g_search_active = false;
-                    app_state.g_shell_focused = true;
-                    clearSearchBackdrop();
-                    const picked = pickRepoChoose(target);
-                    applyPendingGroup();
-                    showActiveShellAfterOverlay();
-                    if (!picked) showHeaderNoticeAscii("Pick repo: nothing chosen", 3000, false);
-                    _ = InvalidateRect(hwnd, null, 0);
-                    _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;
                 }
                 if (target >= SEARCH_NEWWIN_OFFSET) {
