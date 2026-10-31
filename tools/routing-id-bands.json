@@ -88,5 +88,10 @@
     "name": "palette_header",
     "base": "SEARCH_PALETTE_HEADER_OFFSET",
     "size": "PALETTE_HEADER_COUNT"
+  },
+  {
+    "name": "pick_repo",
+    "base": "SEARCH_PICK_REPO_ROW_OFFSET",
+    "size": "MAX_REPO_ROWS"
   }
 ]

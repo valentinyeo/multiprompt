@@ -217,6 +217,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+K -&gt; New Codex chat | Open a Codex session in this workspace folder |
 | Ctrl+K -&gt; New Pi chat | Open a Pi session in this workspace folder |
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
+| Ctrl+K -&gt; Pick repo | Choose the repo this workspace starts new tabs in, when it has no folder yet |
+| Ctrl+K -&gt; Set workspace folder | Declare this workspace folder from the repo list; saved for next time |
 | Ctrl+K -&gt; Open session... | Attach a server tmux session or any cached session on this host |
 | Ctrl+K -&gt; More shells... | Command Prompt, PowerShell, Bash, Git Bash, server shells, open all server sessions, sessions in this folder |
 | Ctrl+K Remind Me | Snooze active tmux/Claude tab via quick presets (or type a time) |

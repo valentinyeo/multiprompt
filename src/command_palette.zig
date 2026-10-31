@@ -304,6 +304,13 @@ const buildSessionOverviewRows = @import("archive.zig").buildSessionOverviewRows
 const workspaceDisplayName = @import("workspaces.zig").workspaceDisplayName;
 const browserPaneActive = @import("browser_pane.zig").browserPaneActive;
 const activeShellHasShotUrlPane = @import("browser_pane.zig").activeShellHasShotUrlPane;
+const SEARCH_PICK_REPO_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_OFFSET;
+const SEARCH_SET_FOLDER_OFFSET = @import("app_state.zig").SEARCH_SET_FOLDER_OFFSET;
+const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_BACK_OFFSET;
+const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
+const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
+const RepoRow = @import("vps.zig").RepoRow;
+const repoRowsForHost = @import("vps.zig").repoRowsForHost;
 const SEARCH_CHAT_ATTACH_OFFSET = @import("app_state.zig").SEARCH_CHAT_ATTACH_OFFSET;
 const SEARCH_CHAT_DICTATION_OFFSET = @import("app_state.zig").SEARCH_CHAT_DICTATION_OFFSET;
 const chatOutboxCountForShell = @import("chat_send.zig").chatOutboxCountForShell;
@@ -400,6 +407,11 @@ fn loadCustomCommands() void {
         const ks = kind_buf[0..kind_len];
         c.kind = if (asciiEqualsCI(ks, "pwsh") or asciiEqualsCI(ks, "powershell")) .pwsh else if (asciiEqualsCI(ks, "vps") or asciiEqualsCI(ks, "de") or asciiEqualsCI(ks, "host1")) .vps else if (asciiEqualsCI(ks, "vps2") or asciiEqualsCI(ks, "uk") or asciiEqualsCI(ks, "host2")) .vps2 else .cmd;
         c.is_default = json_reader.boolTrue(obj, "default");
+        var folder_host_buf: [8]u8 = std.mem.zeroes([8]u8);
+        const folder_host_len = json_reader.copyString(obj, "folder_host", &folder_host_buf);
+        if (folder_host_len == 1 and folder_host_buf[0] >= '0' and folder_host_buf[0] <= '9') {
+            c.folder_host = folder_host_buf[0] - '0';
+        }
         if (c.alt_t_len > 0 and !altTProgramSafe(c.alt_t[0..c.alt_t_len])) {
             debugLog2("commands.json: entry rejected (unsafe alt_t): ", c.label[0..c.label_len]);
             continue;
@@ -448,10 +460,12 @@ const SHELL_ROWS = [_]ShellRow{
     .{ .target = SEARCH_NEW_OFFSET + 4, .keywords = "server 2 shell host2 uk vps ssh new host2 vps shell" },
     .{ .target = SEARCH_OPENALL_OFFSET, .keywords = "open all server sessions open all vps tmux sessions" },
     .{ .target = SEARCH_OPENFOLDER_OFFSET, .keywords = "open sessions in this folder" },
+    .{ .target = SEARCH_PICK_REPO_OFFSET, .keywords = "pick repo choose repository folder repo" },
+    .{ .target = SEARCH_SET_FOLDER_OFFSET, .keywords = "set workspace folder declare workspace folder repo" },
 };
 
 fn newSessionRowOrder(target: usize) u16 {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| {
         if (row == target) return @intCast(i + 1);
     }
@@ -459,10 +473,10 @@ fn newSessionRowOrder(target: usize) u16 {
 }
 
 test "IGSH-1266 new session rows keep the approved order" {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
     try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
-    const labels = [_][]const u8{ "New Claude chat", "New Codex chat", "New Pi chat", "New terminal", "Open session...", "Reopen closed tab", "More shells..." };
+    const labels = [_][]const u8{ "New Claude chat", "New Codex chat", "New Pi chat", "New terminal", "Pick repo...", "Set workspace folder...", "Open session...", "Reopen closed tab", "More shells..." };
     for (rows, labels) |row, label| try std.testing.expectEqualStrings(label, palettePrimaryLabel(row) orelse "");
     try std.testing.expect(!std.mem.eql(u8, palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse ""));
 }
@@ -470,6 +484,7 @@ test "IGSH-1266 new session rows keep the approved order" {
 fn paletteTargetTracksUsage(target: usize) bool {
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return true;
     if (newSessionRowOrder(target) != 0) return true;
+    if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) return true;
     if (target == SEARCH_SNIPPET_MANAGE_OFFSET or
         target == SEARCH_SOUND_OFFSET or
         target == SEARCH_THEME_MENU_OFFSET or
@@ -585,11 +600,30 @@ pub fn recordPaletteUsage(target: usize) void {
     savePaletteUsage();
 }
 
+var g_folder_row_label: [320]u8 = undefined;
+
+fn setFolderRowLabel() []const u8 {
+    var path_buf: [256]u8 = undefined;
+    var path_len: u32 = 0;
+    if (!workspaceFolderCurrent(activeWorkspaceSlot(), &path_buf, &path_len)) return "Set workspace folder...";
+    return std.fmt.bufPrint(&g_folder_row_label, "Set workspace folder...  ({s})", .{path_buf[0..path_len]}) catch "Set workspace folder...";
+}
+
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) return "New Claude chat";
     if (target == SEARCH_CODEX_TMUX_OFFSET) return "New Codex chat";
     if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
     if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
+    if (target == SEARCH_PICK_REPO_OFFSET) return "Pick repo...";
+    if (target == SEARCH_SET_FOLDER_OFFSET) return setFolderRowLabel();
+    if (target == SEARCH_PICK_REPO_BACK_OFFSET) return "back";
+    if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
+        var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+        const count = pickRepoFilteredRows(rows[0..]);
+        const idx = target - SEARCH_PICK_REPO_ROW_OFFSET;
+        if (idx >= count) return null;
+        return rows[idx].path[0..rows[idx].path_len];
+    }
     if (target == SEARCH_OPEN_SESSION_MENU_OFFSET) return "Open session...";
     if (target == SEARCH_SHELLS_MENU_OFFSET) return "More shells...";
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET or target == SEARCH_TABCTX_CLOSE_DISCONNECTED) return "close all disconnected sessions";
@@ -780,6 +814,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_NEW_CLAUDE_CHAT_OFFSET => "new claude chat session tab agent",
         SEARCH_NEW_PI_CHAT_OFFSET => "new pi chat session",
         SEARCH_NEW_TERMINAL_OFFSET => "new terminal shell plain",
+        SEARCH_PICK_REPO_OFFSET => "pick repo choose repository folder repo",
+        SEARCH_SET_FOLDER_OFFSET => "set workspace folder declare workspace folder repo",
         SEARCH_OPEN_SESSION_MENU_OFFSET => "open session attach tmux list pick",
         SEARCH_SHELLS_MENU_OFFSET => "more shells cmd command prompt powershell pwsh bash git bash server ssh",
         SEARCH_URLPICK_OFFSET => "open url from screen",
@@ -1111,7 +1147,9 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (paletteRowIsSession(target)) return 0;
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
     if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
-        target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET) return 0;
+        target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET or
+        target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET or target == SEARCH_PICK_REPO_BACK_OFFSET or
+        (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS)) return 0;
     if (target >= SEARCH_CUSTOMCMD_OFFSET and target < SEARCH_CUSTOMCMD_OFFSET + MAX_CUSTOM_CMDS) return 0;
     if (target >= SEARCH_ARCHIVED_OFFSET and target < SEARCH_ARCHIVED_OFFSET + 64) return 0;
     if (target >= SEARCH_WORKSPACE_OFFSET and target < SEARCH_WORKSPACE_OFFSET + MAX_WORKSPACES) return 1;
@@ -1420,23 +1458,212 @@ fn customCmdVisibleInWorkspace(idx: usize, ws: u8) bool {
     return asciiEqualsCI(ws_name, c.workspace[0..c.workspace_len]);
 }
 
-fn workspaceConfiguredTerminalFolder(ws: u8, out_host: *u8, out_path: *[256]u8, out_len: *u32, out_program: *[128]u8, out_program_len: *u32) bool {
-    loadCustomCommandsIfChanged();
+fn folderEntryIndexFor(ws_name: []const u8) ?usize {
+    var found: ?usize = null;
     var i: usize = 0;
     while (i < app_state.g_custom_cmds_count) : (i += 1) {
         const c = &app_state.g_custom_cmds[i];
-        if (!c.is_default or c.workspace_len == 0 or !customCmdVisibleInWorkspace(i, ws)) continue;
+        if (!c.is_default or c.workspace_len == 0 or c.cwd_len == 0) continue;
         if (c.kind != .vps and c.kind != .vps2) continue;
-        const cwd = c.cwd[0..c.cwd_len];
-        if (!remotePathSafeForShell(cwd) or cwd.len > out_path.len) continue;
-        @memcpy(out_path[0..cwd.len], cwd);
-        out_len.* = @intCast(cwd.len);
-        out_host.* = if (c.kind == .vps2) 1 else 0;
-        out_program_len.* = c.alt_t_len;
-        @memcpy(out_program[0..c.alt_t_len], c.alt_t[0..c.alt_t_len]);
-        return true;
+        if (!remotePathSafeForShell(c.cwd[0..c.cwd_len])) continue;
+        if (!asciiEqualsCI(ws_name, c.workspace[0..c.workspace_len])) continue;
+        found = i;
+    }
+    return found;
+}
+
+pub fn activeWorkspaceSlot() u8 {
+    return if (app_state.g_single_window) app_state.g_active_workspace else 0;
+}
+
+pub fn workspaceFolderCurrent(ws: u8, out: *[256]u8, out_len: *u32) bool {
+    loadCustomCommandsIfChanged();
+    var ws_buf: [32]u8 = undefined;
+    const ws_name = workspaceDisplayName(ws, &ws_buf);
+    const idx = folderEntryIndexFor(ws_name) orelse return false;
+    const c = &app_state.g_custom_cmds[idx];
+    if (c.cwd_len > out.len) return false;
+    @memcpy(out[0..c.cwd_len], c.cwd[0..c.cwd_len]);
+    out_len.* = @intCast(c.cwd_len);
+    return true;
+}
+
+fn workspaceConfiguredTerminalFolder(ws: u8, out_host: *u8, out_path: *[256]u8, out_len: *u32, out_program: *[128]u8, out_program_len: *u32) bool {
+    loadCustomCommandsIfChanged();
+    var ws_buf: [32]u8 = undefined;
+    const ws_name = workspaceDisplayName(ws, &ws_buf);
+    const idx = folderEntryIndexFor(ws_name) orelse return false;
+    const c = &app_state.g_custom_cmds[idx];
+    const cwd = c.cwd[0..c.cwd_len];
+    if (cwd.len > out_path.len) return false;
+    @memcpy(out_path[0..cwd.len], cwd);
+    out_len.* = @intCast(cwd.len);
+    out_host.* = if (c.folder_host != 0) c.folder_host else if (c.kind == .vps2) 1 else 0;
+    out_program_len.* = c.alt_t_len;
+    @memcpy(out_program[0..c.alt_t_len], c.alt_t[0..c.alt_t_len]);
+    return true;
+}
+
+fn repoPathMatchesQuery(path: []const u8, query: []const u16) bool {
+    if (query.len == 0) return true;
+    if (query.len > path.len) return false;
+    var start: usize = 0;
+    while (start + query.len <= path.len) : (start += 1) {
+        var matched = true;
+        for (query, 0..) |q, k| {
+            if (u16ToLower(q) != u16ToLower(@as(u16, path[start + k]))) {
+                matched = false;
+                break;
+            }
+        }
+        if (matched) return true;
     }
     return false;
+}
+
+pub fn pickRepoFilteredRows(out: []RepoRow) u32 {
+    var all: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+    const total = repoRowsForHost(app_state.g_search_pick_repo_host, all[0..]);
+    const query = app_state.g_search_buf[0..app_state.g_search_len];
+    var count: u32 = 0;
+    var i: u32 = 0;
+    while (i < total and count < out.len) : (i += 1) {
+        if (!repoPathMatchesQuery(all[i].path[0..all[i].path_len], query)) continue;
+        out[count] = all[i];
+        count += 1;
+    }
+    return count;
+}
+
+pub fn workspaceHostForNewTab(ws: u8) u8 {
+    for (0..app_state.shell_count) |i| {
+        const shell = &app_state.shells[i];
+        if (app_state.g_single_window and shell.workspace != ws) continue;
+        if (shell.tmux_session_len == 0) continue;
+        return shell.tmux_host;
+    }
+    return 0;
+}
+
+pub fn pickRepoOpen(with_agent: bool, for_folder: bool, host: u8) void {
+    app_state.g_search_snippet_mode = false;
+    app_state.g_search_shells_mode = false;
+    app_state.g_search_open_session_mode = false;
+    app_state.g_search_pick_repo_mode = true;
+    app_state.g_search_pick_repo_folder_mode = for_folder;
+    app_state.g_search_pick_repo_with_agent = with_agent;
+    app_state.g_search_pick_repo_host = host;
+}
+
+pub fn closePickRepo() void {
+    app_state.g_search_pick_repo_mode = false;
+    app_state.g_search_pick_repo_folder_mode = false;
+}
+
+fn appendJsonEscaped(out: []u8, pos: *usize, text: []const u8) bool {
+    for (text) |c| {
+        if (pos.* + 2 >= out.len) return false;
+        switch (c) {
+            '"', '\\' => {
+                out[pos.*] = '\\';
+                out[pos.* + 1] = c;
+                pos.* += 2;
+            },
+            else => {
+                out[pos.*] = c;
+                pos.* += 1;
+            },
+        }
+    }
+    return true;
+}
+
+fn appendJsonLiteral(out: []u8, pos: *usize, text: []const u8) bool {
+    if (pos.* + text.len > out.len) return false;
+    @memcpy(out[pos.* .. pos.* + text.len], text);
+    pos.* += text.len;
+    return true;
+}
+
+pub fn buildFolderEntry(out: []u8, host: u8, workspace: []const u8, path: []const u8) ?[]const u8 {
+    var pos: usize = 0;
+    var host_buf: [4]u8 = undefined;
+    const host_text = std.fmt.bufPrint(&host_buf, "{d}", .{host}) catch return null;
+    if (!appendJsonLiteral(out, &pos, "{\"label\":\"Folder\",\"kind\":\"vps\",\"folder_host\":\"")) return null;
+    if (!appendJsonLiteral(out, &pos, host_text)) return null;
+    if (!appendJsonLiteral(out, &pos, "\",\"cwd\":\"")) return null;
+    if (!appendJsonEscaped(out, &pos, path)) return null;
+    if (!appendJsonLiteral(out, &pos, "\",\"workspace\":\"")) return null;
+    if (!appendJsonEscaped(out, &pos, workspace)) return null;
+    if (!appendJsonLiteral(out, &pos, "\",\"default\":true}")) return null;
+    return out[0..pos];
+}
+
+pub fn insertCommandEntry(text: []const u8, entry: []const u8, out: []u8) ?[]const u8 {
+    const key = std.mem.indexOf(u8, text, "\"commands\"") orelse return null;
+    const close = std.mem.lastIndexOfScalar(u8, text, ']') orelse return null;
+    if (key > close) return null;
+    var last = close;
+    while (last > 0 and std.ascii.isWhitespace(text[last - 1])) : (last -= 1) {}
+    const needs_comma = last > 0 and text[last - 1] != '[';
+    const tail_len = text.len - close;
+    const head_len = close;
+    if (head_len + entry.len + tail_len + 2 > out.len) return null;
+    var pos: usize = 0;
+    @memcpy(out[pos .. pos + head_len], text[0..head_len]);
+    pos += head_len;
+    if (needs_comma) {
+        out[pos] = ',';
+        pos += 1;
+    }
+    @memcpy(out[pos .. pos + entry.len], entry);
+    pos += entry.len;
+    @memcpy(out[pos .. pos + tail_len], text[close..]);
+    pos += tail_len;
+    return out[0..pos];
+}
+
+fn saveWorkspaceFolder(host: u8, path: []const u8) bool {
+    ensureCommandsJsonStarter();
+    var path_buf: [512]u8 = undefined;
+    const file = getCommandsJsonPath(&path_buf) orelse return false;
+    const h = win32OpenRead(file) orelse return false;
+    var text_buf: [16384]u8 = undefined;
+    const n = win32ReadAll(h, &text_buf);
+    _ = CloseHandle(h);
+    if (n == 0 or n >= text_buf.len) return false;
+    var ws_buf: [32]u8 = undefined;
+    const ws_name = workspaceDisplayName(activeWorkspaceSlot(), &ws_buf);
+    var entry_buf: [512]u8 = undefined;
+    const entry = buildFolderEntry(&entry_buf, host, ws_name, path) orelse return false;
+    var out_buf: [18432]u8 = undefined;
+    const next = insertCommandEntry(text_buf[0..n], entry, &out_buf) orelse return false;
+    const wh = win32OpenWrite(file) orelse return false;
+    win32WriteAll(wh, next);
+    _ = CloseHandle(wh);
+    loadCustomCommands();
+    return true;
+}
+
+pub fn pickRepoChoose(target: usize) bool {
+    if (target < SEARCH_PICK_REPO_ROW_OFFSET or target >= SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) return false;
+    var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+    const count = pickRepoFilteredRows(rows[0..]);
+    const idx = target - SEARCH_PICK_REPO_ROW_OFFSET;
+    if (idx >= count) return false;
+    const path = rows[idx].path[0..rows[idx].path_len];
+    const host = rows[idx].host;
+    const for_folder = app_state.g_search_pick_repo_folder_mode;
+    const with_agent = app_state.g_search_pick_repo_with_agent;
+    closePickRepo();
+    if (for_folder) return saveWorkspaceFolder(host, path);
+    var program_buf: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    var cwd_buf: [256]u8 = undefined;
+    var cwd_len: u32 = 0;
+    var slot_host: u8 = 0;
+    if (workspaceConfiguredTerminalFolder(activeWorkspaceSlot(), &slot_host, &cwd_buf, &cwd_len, &program_buf, &program_len)) {}
+    return spawnWorkspaceSessionAt(host, path, program_buf[0..program_len], with_agent);
 }
 
 fn customCmdMatchesQuery(idx: usize, query: []const u16) bool {
@@ -1667,11 +1894,17 @@ fn spawnWorkspaceSession(with_agent: bool) bool {
     var cwd_len: u32 = 0;
     var program_buf: [128]u8 = undefined;
     var program_len: u32 = 0;
-    const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
-    if (!workspaceConfiguredTerminalFolder(workspace, &host, &cwd_buf, &cwd_len, &program_buf, &program_len) and
-        !workspacePrimaryRepo(&host, &cwd_buf, &cwd_len)) return false;
-    const cwd = cwd_buf[0..cwd_len];
-    const program = workspaceSessionProgram(program_buf[0..program_len], with_agent);
+    const workspace = activeWorkspaceSlot();
+    if (workspaceConfiguredTerminalFolder(workspace, &host, &cwd_buf, &cwd_len, &program_buf, &program_len)) {
+        return spawnWorkspaceSessionAt(host, cwd_buf[0..cwd_len], program_buf[0..program_len], with_agent);
+    }
+    pickRepoOpen(with_agent, false, workspaceHostForNewTab(workspace));
+    return false;
+}
+
+fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []const u8, with_agent: bool) bool {
+    const workspace = activeWorkspaceSlot();
+    const program = workspaceSessionProgram(configured_program, with_agent);
     if (program.len > 0 and commandCreatesAgentWorkload(program) and
         !capacityAdmitNewAgent(host, workspace, "new workspace session")) return false;
 
@@ -1981,6 +2214,23 @@ pub fn updateSearchResults() void {
         app_state.g_search_scroll = 0;
         return;
     }
+    if (app_state.g_search_pick_repo_mode) {
+        app_state.g_search_result_count = 0;
+        app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PICK_REPO_BACK_OFFSET;
+        app_state.g_search_result_count += 1;
+        var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+        const filtered = pickRepoFilteredRows(rows[0..]);
+        var i: u32 = 0;
+        while (i < filtered) : (i += 1) {
+            if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_PICK_REPO_ROW_OFFSET + i;
+            app_state.g_search_result_count += 1;
+        }
+        preferFirstFilteredResultAfterBack();
+        if (app_state.g_search_result_count > 0) keepSearchSelectionVisible();
+        return;
+    }
+
     if (app_state.g_search_remind_input_mode) {
         app_state.g_search_sel = 0;
         app_state.g_search_scroll = 0;
@@ -4877,4 +5127,89 @@ fn kindMatchesQuery(kind: ShellKind, query: []const u16) bool {
         if (qc != tc) return false;
     }
     return true;
+}
+
+test "IGSH-1266 declared folder wins and a later entry for the same workspace replaces it" {
+    app_state.g_custom_cmds_count = 0;
+    defer app_state.g_custom_cmds_count = 0;
+    var first = CustomCmd{};
+    first.is_default = true;
+    first.kind = .vps;
+    std.mem.copyForwards(u8, first.workspace[0..4], "main");
+    first.workspace_len = 4;
+    std.mem.copyForwards(u8, first.cwd[0..20], "/home/x/projects/old");
+    first.cwd_len = 20;
+    app_state.g_custom_cmds[0] = first;
+    const only = folderEntryIndexFor("main") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 0), only);
+    var second = CustomCmd{};
+    second.is_default = true;
+    second.kind = .vps;
+    second.folder_host = 1;
+    std.mem.copyForwards(u8, second.workspace[0..4], "main");
+    second.workspace_len = 4;
+    std.mem.copyForwards(u8, second.cwd[0..24], "/home/x/projects/repo-new");
+    second.cwd_len = 24;
+    app_state.g_custom_cmds[1] = second;
+    app_state.g_custom_cmds_count = 2;
+    const saved = folderEntryIndexFor("main") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(usize, 1), saved);
+    try std.testing.expect(folderEntryIndexFor("other") == null);
+    try std.testing.expect(folderEntryIndexFor("") == null);
+}
+
+test "IGSH-1266 no declared folder opens the pick repo list and spawns nothing" {
+    app_state.g_custom_cmds_count = 0;
+    defer closePickRepo();
+    try std.testing.expect(!spawnWorkspaceSession(false));
+    try std.testing.expect(app_state.g_search_pick_repo_mode);
+    try std.testing.expect(!app_state.g_search_pick_repo_folder_mode);
+    try std.testing.expectEqual(@as(u32, 0), app_state.shell_count);
+}
+
+test "IGSH-1266 Esc closes the pick repo list and starts no tab" {
+    pickRepoOpen(true, true, 0);
+    const before = app_state.shell_count;
+    closePickRepo();
+    try std.testing.expect(!app_state.g_search_pick_repo_mode);
+    try std.testing.expect(!app_state.g_search_pick_repo_folder_mode);
+    try std.testing.expectEqual(before, app_state.shell_count);
+}
+
+test "IGSH-1266 pick repo starts the session in the picked folder" {
+    var host_buf: [1024]u8 = undefined;
+    var command_buf: [512]u8 = undefined;
+    const picked = workspaceLaunchCommand("", "term-pick", "/home/x/projects/picked", null, &host_buf, &command_buf) orelse
+        return error.TestUnexpectedResult;
+    var neutral_buf: [512]u8 = undefined;
+    const neutral = buildWorkspaceTmuxLaunchCmd(&neutral_buf, "term-pick", "/home/x/projects/picked", "") orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, picked, "-c /home/x/projects/picked") != null);
+    try std.testing.expect(std.mem.indexOf(u8, neutral, "-c /home/x/projects/picked") != null);
+    try std.testing.expect(std.mem.startsWith(u8, picked, "tmux new-session -d -s term-pick"));
+}
+
+test "IGSH-1266 saved folder is written into commands.json so the next start uses it" {
+    var entry_buf: [512]u8 = undefined;
+    const entry = buildFolderEntry(&entry_buf, 1, "main", "/home/x/projects/picked") orelse return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("{\"label\":\"Folder\",\"kind\":\"vps\",\"folder_host\":\"1\",\"cwd\":\"/home/x/projects/picked\",\"workspace\":\"main\",\"default\":true}", entry);
+    var out_buf: [4096]u8 = undefined;
+    const empty = "{\n  \"commands\": [\n  ]\n}\n";
+    const with_one = insertCommandEntry(empty, entry, &out_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, with_one, "\"cwd\":\"/home/x/projects/picked\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, with_one, "[,") == null);
+    var second_buf: [8192]u8 = undefined;
+    var second_entry_buf: [512]u8 = undefined;
+    const other = buildFolderEntry(&second_entry_buf, 0, "other", "/home/x/projects/other") orelse return error.TestUnexpectedResult;
+    const with_two = insertCommandEntry(with_one, other, &second_buf) orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, with_two, "},{\"label\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, with_two, "/home/x/projects/other") != null);
+    try std.testing.expect(insertCommandEntry("no commands here", entry, &out_buf) == null);
+}
+
+test "IGSH-1266 pick repo typing filters paths case insensitively" {
+    const query = [_]u16{ 'M', 'U', 'L', 'T', 'I' };
+    try std.testing.expect(repoPathMatchesQuery("/home/x/projects/multiprompt", query[0..]));
+    try std.testing.expect(repoPathMatchesQuery("/home/x/projects/multiprompt", query[0..0]));
+    try std.testing.expect(!repoPathMatchesQuery("/home/x/projects/other", query[0..]));
 }

@@ -1118,6 +1118,129 @@ pub fn tmuxCacheEntryAlreadyOpen(entry: *const TmuxSessionEntry) bool {
     return false;
 }
 
+pub const RepoRow = struct {
+    host: u8 = 0,
+    path_len: u16 = 0,
+    path: [255]u8 = [_]u8{0} ** 255,
+};
+
+const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
+const REPO_LIST_SCRIPT = "for d in /home/*/projects/*/; do [ -d ${d}.git ] && echo ${d%/}; done 2>/dev/null | head -60";
+
+pub var g_repo_cache: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+pub var g_repo_cache_count: u32 = 0;
+pub var g_repo_cache_host: u8 = 0;
+pub var g_repo_cache_tick: u64 = 0;
+pub var g_repo_fetching: bool = false;
+
+fn repoPathSafe(path: []const u8) bool {
+    if (path.len == 0 or path.len > 255 or path[0] != '/') return false;
+    for (path) |c| {
+        const ok = std.ascii.isAlphanumeric(c) or c == '/' or c == '_' or c == '-' or c == '.' or c == '+' or c == '@';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+pub fn repoListAdd(host: u8, path: []const u8, out: []RepoRow, count: *u32) void {
+    const trimmed = std.mem.trim(u8, path, &[_]u8{ ' ', '\t', '\r', '\n' });
+    if (!repoPathSafe(trimmed)) return;
+    var i: u32 = 0;
+    while (i < count.*) : (i += 1) {
+        const row = &out[i];
+        if (row.host == host and std.mem.eql(u8, row.path[0..row.path_len], trimmed)) return;
+    }
+    if (count.* >= out.len) return;
+    const row = &out[count.*];
+    row.* = RepoRow{};
+    row.host = host;
+    @memcpy(row.path[0..trimmed.len], trimmed);
+    row.path_len = @intCast(trimmed.len);
+    count.* += 1;
+}
+
+pub fn parseRepoListing(host: u8, text: []const u8, out: []RepoRow) u32 {
+    var count: u32 = 0;
+    var start: usize = 0;
+    while (start < text.len) {
+        var end = start;
+        while (end < text.len and text[end] != '\n' and text[end] != '\r') : (end += 1) {}
+        repoListAdd(host, text[start..end], out, &count);
+        while (end < text.len and (text[end] == '\n' or text[end] == '\r')) : (end += 1) {}
+        start = end;
+    }
+    return count;
+}
+
+pub fn repoRowMatches(row: *const RepoRow, query: []const u8) bool {
+    const path = row.path[0..row.path_len];
+    if (query.len == 0) return true;
+    if (query.len > path.len) return false;
+    var i: usize = 0;
+    while (i + query.len <= path.len) : (i += 1) {
+        if (std.ascii.eqlIgnoreCase(path[i .. i + query.len], query)) return true;
+    }
+    return false;
+}
+
+pub fn repoRowsForHost(host: u8, out: []RepoRow) u32 {
+    var count: u32 = 0;
+    for (0..app_state.shell_count) |i| {
+        const shell = &app_state.shells[i];
+        if (shell.tmux_session_len == 0) continue;
+        const shell_host = tmuxHostForShell(shell) orelse continue;
+        if (shell_host != host) continue;
+        const raw = shellKnownRemotePath(shell, host) orelse continue;
+        repoListAdd(host, remoteRepoRoot(raw), out, &count);
+    }
+    if (g_repo_cache_host == host) {
+        var i: u32 = 0;
+        while (i < g_repo_cache_count) : (i += 1) {
+            const cached = &g_repo_cache[i];
+            repoListAdd(host, cached.path[0..cached.path_len], out, &count);
+        }
+    }
+    return count;
+}
+
+fn repoFetchCommand(host: u8, buf: *[2048]u8) ?[]const u8 {
+    var pos: usize = 0;
+    if (!appendSshExe(buf, &pos)) return null;
+    if (!appendAsciiBuf(buf, &pos, "-T -o BatchMode=yes -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -o ConnectTimeout=5 ")) return null;
+    if (!appendAsciiBuf(buf, &pos, tmuxSshTarget(host))) return null;
+    if (!appendAsciiBuf(buf, &pos, " \"" ++ REPO_LIST_SCRIPT ++ "\"")) return null;
+    if (pos == 0 or pos >= buf.len) return null;
+    return buf[0..pos];
+}
+
+fn repoFetchThread(host: u8) void {
+    crash_recorder.guardThread();
+    var command_buf: [2048]u8 = undefined;
+    var text_buf: [65536]u8 = undefined;
+    var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+    var count: u32 = 0;
+    if (repoFetchCommand(host, &command_buf)) |command| {
+        const total = sshOneShotCapture(command, &text_buf);
+        if (total > 0) count = parseRepoListing(host, text_buf[0..total], rows[0..]);
+    }
+    g_repo_cache = rows;
+    g_repo_cache_count = count;
+    g_repo_cache_host = host;
+    g_repo_cache_tick = GetTickCount64();
+    g_repo_fetching = false;
+    if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_TMUX_LIST_READY, 0, 0);
+}
+
+pub fn requestRepoRefresh(host: u8) void {
+    if (g_repo_fetching) return;
+    g_repo_fetching = true;
+    const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, repoFetchThread, .{host}) catch {
+        g_repo_fetching = false;
+        return;
+    };
+    thread.detach();
+}
+
 pub fn buildFilteredTmux() void {
     app_state.g_inactive_filtered_count = 0;
     var ti: u32 = 0;
@@ -1320,4 +1443,27 @@ test "hardening favicon lookup ignores shell characters in metadata" {
     pos = 0;
     try std.testing.expect(appendFaviconRemoteCommand(&shell, &command, &pos));
     try std.testing.expect(std.mem.indexOf(u16, command[0..pos], std.unicode.utf8ToUtf16LeStringLiteral("tmux display-message -p -t 'session-1'")) != null);
+}
+
+test "IGSH-1266 pick repo lists one repo per host path and drops unsafe lines" {
+    var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+    const listing = "/home/valentin/projects/multiprompt\r\n/home/valentin/projects/other\n\n/home/valentin/projects/multiprompt\nnot-a-path\n/home/valentin/projects/with space\n";
+    const count = parseRepoListing(0, listing, rows[0..]);
+    try std.testing.expectEqual(@as(u32, 2), count);
+    try std.testing.expectEqualStrings("/home/valentin/projects/multiprompt", rows[0].path[0..rows[0].path_len]);
+    try std.testing.expectEqualStrings("/home/valentin/projects/other", rows[1].path[0..rows[1].path_len]);
+    try std.testing.expectEqual(@as(u8, 0), rows[0].host);
+}
+
+test "IGSH-1266 pick repo typing filters by folder text and keeps every row on its host" {
+    var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+    var count: u32 = 0;
+    repoListAdd(0, "/home/valentin/projects/multiprompt", rows[0..], &count);
+    repoListAdd(3, "/home/inne/projects/usage", rows[0..], &count);
+    try std.testing.expectEqual(@as(u32, 2), count);
+    try std.testing.expect(repoRowMatches(&rows[0], ""));
+    try std.testing.expect(repoRowMatches(&rows[0], "PROJECTS/multi"));
+    try std.testing.expect(!repoRowMatches(&rows[0], "usage"));
+    try std.testing.expect(repoRowMatches(&rows[1], "usage"));
+    try std.testing.expectEqual(@as(u8, 3), rows[1].host);
 }

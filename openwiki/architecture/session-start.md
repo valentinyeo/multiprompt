@@ -245,6 +245,28 @@ protocol. Nothing is typed into a terminal.
   is on. A chat with no such file — anything created before this change — keeps
   the connector path.
 
+### Workspace folder and Pick repo
+
+A workspace starts new tabs in the folder it declares. With no declared folder the
+app does not guess: every new-session action opens a **Pick repo** list instead and
+starts nothing until the user picks.
+
+- The declared folder is a `commands.json` default entry for the workspace
+  (`default: true`, `workspace`, `cwd`, optional `folder_host`). The last matching
+  entry wins, so setting the folder again replaces an earlier choice.
+- `Ctrl+K` -> **Pick repo...** lists git repo roots on the workspace server: repo
+  roots of open tabs first, then repos one level under `~/projects`. Typing filters
+  the paths, Enter starts the session kind that asked for the pick (Claude, Codex,
+  Pi, terminal, Ctrl+T, Alt+T or the sidebar plus), Esc leaves the tab count
+  unchanged.
+- `Ctrl+K` -> **Set workspace folder...** lists the same repos and saves the pick as
+  the declared folder through the app, so nobody edits the file by hand. The row
+  shows the current folder when one is set.
+- The list paints from cache and refreshes in the background over the same one-shot
+  SSH path the tmux cache uses, so the palette never blocks.
+- Codex, Pi and every other program keep the typed terminal start once the folder is
+  known.
+
 ### Scripts and the runtime bundle
 
 `tools/mp-send <provider> <sid> <text>` is the script path for "put a message

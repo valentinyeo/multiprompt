@@ -313,6 +313,11 @@ const MAX_SESSION_OVERVIEW_SEARCH_ROWS = @import("app_state.zig").MAX_SESSION_OV
 const SEARCH_SESSION_OVERVIEW_ROW_OFFSET = @import("app_state.zig").SEARCH_SESSION_OVERVIEW_ROW_OFFSET;
 const SEARCH_SKILL_ROW_OFFSET = @import("app_state.zig").SEARCH_SKILL_ROW_OFFSET;
 const MAX_PALETTE_SKILLS = @import("app_state.zig").MAX_PALETTE_SKILLS;
+const SEARCH_PICK_REPO_BACK_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_BACK_OFFSET;
+const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_ROW_OFFSET;
+const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
+const RepoRow = @import("vps.zig").RepoRow;
+const pickRepoFilteredRows = @import("command_palette.zig").pickRepoFilteredRows;
 const MAX_SNIPPETS = @import("app_state.zig").MAX_SNIPPETS;
 const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
 const findMyWorkspaceSlot = @import("workspaces.zig").findMyWorkspaceSlot;
@@ -2283,6 +2288,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 L("Search groups for this session...")
             else if (app_state.g_search_skills_mode)
                 L("Search skills...")
+            else if (app_state.g_search_pick_repo_mode)
+                if (app_state.g_search_pick_repo_folder_mode) L("Set workspace folder...") else L("Pick a repo...")
             else if (app_state.g_search_openall_host_mode)
                 L("Choose a VPS...")
             else if (app_state.g_search_tabctx_mode)
@@ -2458,6 +2465,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_endtmux = result_idx == SEARCH_END_TMUX_OFFSET;
                     const is_reopen = result_idx == SEARCH_REOPEN_OFFSET;
                     const is_new_session_row = result_idx == SEARCH_NEW_CLAUDE_CHAT_OFFSET or result_idx == SEARCH_NEW_PI_CHAT_OFFSET or result_idx == SEARCH_NEW_TERMINAL_OFFSET or result_idx == SEARCH_OPEN_SESSION_MENU_OFFSET or result_idx == SEARCH_SHELLS_MENU_OFFSET;
+                    const is_pick_repo_row = result_idx >= SEARCH_PICK_REPO_ROW_OFFSET and result_idx < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS;
+                    const is_pick_repo_back = result_idx == SEARCH_PICK_REPO_BACK_OFFSET;
                     const is_urlpick = result_idx == SEARCH_URLPICK_OFFSET;
                     const is_closetab = result_idx == SEARCH_CLOSETAB_OFFSET;
                     const is_favorite = result_idx == SEARCH_FAVORITE_OFFSET;
@@ -3496,6 +3505,21 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ro_hint_rc = RECT{ .left = ox + overlay_w - 110, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Ctrl+Shift+T"), -1, &ro_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (is_pick_repo_back) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var prb_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L("Back"), -1, &prb_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                    } else if (is_pick_repo_row) {
+                        var repo_rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
+                        const repo_count = pickRepoFilteredRows(repo_rows[0..]);
+                        const repo_idx = result_idx - SEARCH_PICK_REPO_ROW_OFFSET;
+                        if (repo_idx < repo_count) {
+                            _ = SelectObject(hdc, palette_font);
+                            _ = SetTextColor(hdc, primary_color);
+                            var pr_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                            drawAscii(hdc, repo_rows[repo_idx].path[0..repo_rows[repo_idx].path_len], &pr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        }
                     } else if (is_new_session_row) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
