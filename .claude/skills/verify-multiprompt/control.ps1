@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
-    [Parameter(Mandatory=$true)][string]$Evidence
+    [Parameter(Mandatory=$true)][string]$Evidence,
+    [string]$UpdateFixtureRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -91,6 +92,24 @@ $script:scratchLinks = @()
 $result = [ordered]@{ feature = $Feature; status = 'failed'; version = $ExpectedVersion; sha256 = $ExpectedHash; checks = @(); offlineLogin = $true; cleanup = 'pending' }
 $original = @{}
 $originalFontSmoothing = $null
+$updateMutex = $null
+$updateMutexHeld = $false
+
+function Stage-FooterUpdate([string]$Target, [string]$Version, [string]$Root) {
+    . (Join-Path $PSScriptRoot '../../../src/update_release.ps1') -Mode Library
+    $folder = Join-Path $Root 'v9.10.0'
+    $release = [pscustomobject]@{
+        tag_name = 'v9.10.0'; draft = $false; prerelease = $false; author = @{ login = 'github-actions[bot]' }
+        assets = @(Get-ChildItem -LiteralPath $folder -File | Where-Object { $_.Name -ne 'wrong.sig' } | ForEach-Object { @{ name = $_.Name; browser_download_url = "https://github.com/valentinyeo/multiprompt/releases/download/v9.10.0/$($_.Name)" } })
+    }
+    function Invoke-RestMethod { param($Uri, $Headers, $TimeoutSec) return $release }
+    function Invoke-WebRequest {
+        param($Uri, $Headers, [switch]$UseBasicParsing, $TimeoutSec, $OutFile)
+        Copy-Item -LiteralPath (Join-Path $folder ([IO.Path]::GetFileName($Uri))) -Destination $OutFile -Force
+    }
+    if (-not (Save-Update $Target $Version 'x64')) { throw 'Signed local footer update was not staged' }
+    if (-not (Test-Path -LiteralPath "$Target.update/ready.txt")) { throw 'Signed local footer update marker missing' }
+}
 
 . (Join-Path $PSScriptRoot 'control-library.ps1')
 try {
@@ -291,6 +310,29 @@ try {
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $seedJson
         $result.seedBoundary = 'The harness writes the saved-tab file once before the first launch: three CMD tabs with names that carry no manual or semantic flag, all in one folder named GitHub. Nothing else is seeded and the app is never edited or driven through a setter.'
     }
+    if ($Feature -eq 'status-card') {
+        $tabs = @(1..16 | ForEach-Object { @{ kind = 'cmd'; name = if ($_ -eq 16) { 'Footer last row' } else { "Footer session $_" }; manual = $true; pid = 0 } })
+        $seed = @{ active_tab = 15; single_window = $false; chat_active = $false; tabs = $tabs }
+        [IO.File]::WriteAllText((Join-Path $usageRoot 'session.json'), ($seed | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        Save-Json $seed 'seed-session.json'
+    }
+    if ($UpdateFixtureRoot) {
+        if ($Feature -ne 'status-card') { throw 'Update fixture is only valid for status-card' }
+        $UpdateFixtureRoot = (Resolve-Path $UpdateFixtureRoot).Path
+        $copy = Join-Path $scratch 'footer-test/multiprompt.exe'
+        New-Item -ItemType Directory -Force (Split-Path $copy) | Out-Null
+        Copy-Item -LiteralPath $Exe -Destination $copy
+        $bridge = Join-Path (Split-Path $Exe) 'zigshell-bridge.exe'
+        if (Test-Path -LiteralPath $bridge) { Copy-Item -LiteralPath $bridge -Destination (Split-Path $copy) }
+        $Exe = $copy
+        $hash = [Security.Cryptography.SHA256]::Create()
+        try { $digest = $hash.ComputeHash([Text.Encoding]::Unicode.GetBytes($Exe.ToLowerInvariant())) } finally { $hash.Dispose() }
+        $mutexName = 'Local\MultipromptUpdate-' + ([BitConverter]::ToString($digest)).Replace('-', '')
+        $updateMutex = [Threading.Mutex]::new($false, $mutexName)
+        if (-not $updateMutex.WaitOne(15000)) { throw 'Could not isolate update checker' }
+        $updateMutexHeld = $true
+        $env:IGSH_246 = '1'
+    }
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
@@ -311,6 +353,10 @@ try {
         $state = Read-Inbox
         $script:window -ne [IntPtr]::Zero -and $null -ne $state -and @($state.shells).Count -gt 0
     } 'owned main window and initialized CMD session' 60
+    if ($UpdateFixtureRoot) {
+        Stage-FooterUpdate $Exe $ExpectedVersion $UpdateFixtureRoot
+        $result.updateFixture = @{ kind = 'tagged-source test-key executable; not the published binary'; staged = $true; restartClicked = $false }
+    }
     if ($Feature -in @('browser-pane-stuck', 'pane-layout', 'browser-pane-locked', 'browser-switch-speed', 'chat-switch-speed', 'chat-first-paint', 'browser-corners', 'window-controls')) {
         if ($Feature -notin @('browser-switch-speed', 'chat-switch-speed')) {
             $edge = Join-Path ${env:ProgramFiles(x86)} 'Microsoft/Edge/Application/msedge.exe'
@@ -504,6 +550,7 @@ try {
                     $beforeStop = $job.ReadAccounting()
                     $stopped = $job.Stop()
                     Save-Json @{ totalProcesses = $stopped.TotalProcesses; activeBeforeStop = $beforeStop.ActiveProcesses; activeAfterStop = $stopped.ActiveProcesses } 'process-tree.json'
+                    if ($stopped.ActiveProcesses -ne 0) { throw 'Owned job still has active processes' }
                     Record 'Cleanup: owned process tree stopped; job active process count is zero'
                 }
                 if ($null -ne $warmupJob) {
@@ -524,6 +571,7 @@ try {
                 $script:pinnedNotifyListeners = @()
                 if ($null -ne $script:uploadReceiver -and -not $script:uploadReceiver.HasExited) { $script:uploadReceiver.Kill() }
                 if (Test-Path $scratch) {
+                    if ($UpdateFixtureRoot) { Remove-Item -LiteralPath (Join-Path $scratch 'footer-test') -Recurse -Force -ErrorAction Stop }
                     Prepare-ScratchEvidence $scratch
                     $data = Join-Path $Evidence 'data'
                     New-Item -ItemType Directory -Force $data | Out-Null
@@ -556,6 +604,10 @@ try {
     if ($null -ne $job) { $job.Dispose() }
     if ($null -ne $process) { $process.Dispose() }
     if ($null -ne $usageCollector) { $usageCollector.Dispose() }
+    if ($null -ne $updateMutex) {
+        if ($updateMutexHeld) { $updateMutex.ReleaseMutex() }
+        $updateMutex.Dispose()
+    }
     foreach ($name in $original.Keys) { [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process') }
     if ($null -ne $originalFontSmoothing) { [VerifyNative]::FontSmoothing([bool]$originalFontSmoothing) }
     if ($Feature -in @('title-bar', 'window-controls') -and ('CaptionProof' -as [type])) {

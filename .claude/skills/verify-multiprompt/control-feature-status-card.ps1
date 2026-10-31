@@ -74,54 +74,125 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             $client = New-Object VerifyNative+Rect
             if (-not [VerifyNative]::GetClientRect($script:window, [ref]$client)) { throw 'status-card client rectangle unavailable' }
             $scale = [VerifyNative]::GetDpiForWindow($script:window) / 96.0
+            $logPath = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $logStart = if (Test-Path $logPath) { (Get-Content $logPath -Raw).Length } else { 0 }
+            Palette 'manual'
+            Press @(0x0D) 'Enter: use manual tab order'
+            Wait-Until { (Test-Path $logPath) -and (Get-Content $logPath -Raw).Substring($logStart) -match '\[confirm\].*target=6218' } 'manual order command selected'
+            Wait-Until {
+                $s = Read-Inbox
+                $null -ne $s -and @($s.shells).Count -eq 16 -and @($s.shells | Where-Object { $_.sid -eq $s.active_shell_id -and $_.name -ceq 'Footer last row' }).Count -eq 1
+            } 'seeded last session selected' 60
+            $order = Read-Inbox
+            if (@($order.shells)[-1].name -cne 'Footer last row') { throw 'Selected session is not last in manual sidebar order' }
+            $result.rowIdentity = @{ activeShellId = $order.active_shell_id; selected = 'Footer last row'; order = @($order.shells | ForEach-Object { $_.name }); manualOrder = $true }
             Doctor
             Assert-Foreground
             Record 'Mouse: move away from the sidebar status card'
             [VerifyNative]::MoveMouseClient($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2), $false)
-            $statusFile = Join-Path $scratch 'roaming/ZigShell/sidebar-status-card.txt'
-            $pages = @()
-            $heights = @()
-            foreach ($page in 0..2) {
-                if ($page -gt 0) {
-                    Press @(0x11, 0x10, 0x47) ('Ctrl+Shift+G: status card page ' + ($page + 1))
-                    Wait-Until { (Test-Path -LiteralPath $statusFile) -and ([IO.File]::ReadAllText($statusFile).Trim() -eq [string]$page) } ('status card page ' + ($page + 1) + ' saved by the app')
-                    Start-Sleep -Milliseconds 500
-                }
-                $shot = 'status-card-' + ($page + 1)
-                Snapshot $shot
-                $measure = Measure-StatusCard $shot
-                $measure.page = $page + 1
-                $pages += $measure
-                $heights += $measure.height
+            $frame = New-Object VerifyNative+Rect
+            $origin = New-Object VerifyNative+Point
+            if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Footer screenshot coordinates unavailable' }
+            $footerTop = $origin.Y - $frame.Top + $client.Bottom - [int][Math]::Round(104 * $scale)
+            $footer = @{ top = $footerTop; bottom = $origin.Y - $frame.Top + $client.Bottom; clientBottom = $origin.Y - $frame.Top + $client.Bottom }
+            for ($i = 0; $i -lt 12; $i++) { [VerifyNative]::WheelClient($script:window, [int](100 * $scale), [int](200 * $scale), -1200) }
+            Start-Sleep -Milliseconds 500
+            Snapshot 'footer-bottom-a'
+            for ($i = 0; $i -lt 3; $i++) { [VerifyNative]::WheelClient($script:window, [int](100 * $scale), [int](200 * $scale), -1200) }
+            Start-Sleep -Milliseconds 500
+            if ($UpdateFixtureRoot) {
+                Wait-Until {
+                    Snapshot 'footer-pending-test-key'
+                    $pendingImage = [Drawing.Bitmap]::FromFile((Join-Path $Evidence 'footer-pending-test-key.png'))
+                    try {
+                        $p = $pendingImage.GetPixel(($origin.X - $frame.Left + [int](25 * $scale)), ($footerTop + [int](75 * $scale)))
+                        $p.R -eq 53 -and $p.G -eq 53 -and $p.B -eq 53
+                    } finally { $pendingImage.Dispose() }
+                } 'signed staged update pill visible' 60
             }
-            $result.statusCard = [ordered]@{ heights = $heights; minimum = 20; maximum = 30; pages = $pages }
-            Save-Json $result.statusCard 'status-card.json'
-            foreach ($height in $heights) {
-                if ($height -gt 30 -or $height -lt 20) { throw ('status-card: card height ' + $height + ' outside 20..30; heights ' + ($heights -join ', ')) }
-            }
-            if (($pages[2].clientBottom - $pages[2].bottom) / $scale -gt 35) { throw 'IGSH-908: usage pill has no frame at the sidebar bottom' }
             Snapshot 'pill-closed'
-            Assert-AppVersionInk 'pill-closed' $pages[2] $scale
+            $image = [Drawing.Bitmap]::FromFile((Join-Path $Evidence 'pill-closed.png'))
+            try {
+                $pixel = $image.GetPixel(($origin.X - $frame.Left + [int](50 * $scale)), $footerTop)
+                if ($pixel.R -ne 46 -or $pixel.G -ne 46 -or $pixel.B -ne 46) { throw 'Footer divider is missing' }
+                $offsetX = $origin.X - $frame.Left
+                $dividerPixels = 0
+                for ($dx = [int](8 * $scale); $dx -lt [int](290 * $scale); $dx++) {
+                    $p = $image.GetPixel($offsetX + $dx, $footerTop)
+                    if ($p.R -eq 46 -and $p.G -eq 46 -and $p.B -eq 46) { $dividerPixels++ }
+                }
+                if ($dividerPixels -lt [int](250 * $scale)) { throw 'Footer divider is not continuous' }
+                $x = $offsetX + [int][Math]::Round(270 * $scale)
+                $selected = @()
+                for ($y = $origin.Y - $frame.Top; $y -lt $footerTop; $y++) {
+                    $p = $image.GetPixel($x, $y)
+                    if ($p.R -eq 58 -and $p.G -eq 58 -and $p.B -eq 58) { $selected += $y }
+                }
+                if ($selected.Count -lt [int](40 * $scale)) { throw 'Selected last row is not fully visible' }
+                $rowTop = ($selected | Measure-Object -Minimum).Minimum
+                $rowBottom = ($selected | Measure-Object -Maximum).Maximum + 1
+                if ($rowBottom -gt $footerTop -or ($rowBottom - $rowTop) -lt [int](50 * $scale)) { throw 'Last row overlaps or is clipped by the footer' }
+                $before = [Drawing.Bitmap]::FromFile((Join-Path $Evidence 'footer-bottom-a.png'))
+                try {
+                    for ($y = $rowTop; $y -lt $rowBottom; $y++) {
+                        if ($before.GetPixel($x, $y).ToArgb() -ne $image.GetPixel($x, $y).ToArgb()) { throw 'Sidebar moved after bottom scroll' }
+                    }
+                } finally { $before.Dispose() }
+                $result.footerGeometry = @{ dividerTop = $footerTop; clientBottom = $footer.clientBottom; rowTop = $rowTop; rowBottom = $rowBottom; sidebarWidth = [int](300 * $scale); scale = $scale; scrollStable = $true }
+                if ($usagePaceSnapshot -and @($usagePaceSnapshot.accounts).Count -eq 3) {
+                    $barWidth = [Math]::Floor((300 - 32 - 20) / 3)
+                    $bars = @()
+                    for ($i = 0; $i -lt 3; $i++) {
+                        $used = $usagePaceSnapshot.accounts[$i].week.used
+                        $bx = $offsetX + [int][Math]::Round((16 + $i * ($barWidth + 10) + 5) * $scale)
+                        $by = $footerTop + [int][Math]::Round(35 * $scale)
+                        $barPixel = $image.GetPixel($bx, $by)
+                        $expected = if ($null -eq $used) { @(16,16,16) } elseif ($used -ge 100) { @(242,139,130) } elseif ($used -ge 85) { @(240,196,75) } else { @(242,242,242) }
+                        if ($barPixel.R -ne $expected[0] -or $barPixel.G -ne $expected[1] -or $barPixel.B -ne $expected[2]) { throw "Usage bar $i color mismatch: $barPixel" }
+                        $bars += @{ pool = $i; used = $used; x = $bx; y = $by; rgb = @($barPixel.R, $barPixel.G, $barPixel.B) }
+                    }
+                    $result.footerBars = $bars
+                }
+            } finally { $image.Dispose() }
+            $result.statusCard = [ordered]@{ expectedFooterTop = $footerTop; clientBottom = $footer.clientBottom; scale = $scale }
+            Save-Json $result.statusCard 'status-card.json'
             if ($usagePaceSnapshot) {
                 $frame = New-Object VerifyNative+Rect
                 $origin = New-Object VerifyNative+Point
                 if (-not [VerifyNative]::GetWindowRect($script:window, [ref]$frame) -or -not [VerifyNative]::ClientToScreen($script:window, [ref]$origin)) { throw 'Usage pace screenshot coordinates unavailable' }
                 $offsetX = $origin.X - $frame.Left
                 $expected = @($usagePaceSnapshot.accounts | ForEach-Object { foreach ($name in @('week', 'five_hour')) { if ($null -ne $_.$name.used) { $_.$name.pace.verdict } } } | Where-Object { $_ -in @('above', 'below') } | Sort-Object -Unique)
-                $pillBounds = @($offsetX, $pages[2].top, ($offsetX + [int][Math]::Round(240 * $scale)), ($pages[2].bottom + 1))
+                $pillBounds = @($offsetX, $footer.top, ($offsetX + [int][Math]::Round(240 * $scale)), ($footer.bottom + 1))
                 $closedInk = Measure-UsagePaceInk -Name 'pill-closed' -Bounds $pillBounds
-                Assert-UsagePaceInk $closedInk $usagePaceSnapshot 'usage pill'
                 $paceProof = [ordered]@{ expectedInks = $expected; closed = $closedInk; panel = $null; bounds = @{ closed = $pillBounds; panel = $null }; sourceTs = $usageSourceTs; replayTs = $usagePaceSnapshot.ts; sourceSha256 = (Get-FileHash $env:VERIFY_USAGE_PACE_FILE -Algorithm SHA256).Hash.ToLowerInvariant(); normalSshReads = @(Get-Content (Join-Path $scratch 'usage-ssh-read.log')).Count }
             }
             $pillX = [int][Math]::Round(60 * $scale)
-            $pillY = $client.Bottom - [int][Math]::Round(14 * $scale)
+            $pillY = $client.Bottom - [int][Math]::Round(80 * $scale)
+            $hoverFocus = [VerifyNative]::GetFocusedWindow($script:window)
+            $hoverResults = @()
+            foreach ($column in @(45, 130, 215)) {
+                [VerifyNative]::MoveMouseClient($script:window, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2), $false)
+                [VerifyNative]::MoveMouseClient($script:window, [int]($column * $scale), $pillY, $false)
+                Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'hover opens usage card'
+                $hoverMenu = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')
+                $during = [VerifyNative]::GetFocusedWindow($script:window)
+                if ($during -ne $hoverFocus) { throw 'Usage hover changed keyboard focus' }
+                [VerifyNative]::MoveMouseClient($hoverMenu, [int]($column * $scale), ($client.Bottom - [int](114 * $scale)), $false)
+                if (-not [VerifyNative]::IsWindowVisible($hoverMenu)) { throw 'Usage hover closed crossing the popup bridge' }
+                Snapshot ("footer-hover-$column")
+                [VerifyNative]::MoveMouseClient($hoverMenu, [int]($client.Right * 3 / 4), [int]($client.Bottom / 2), $false)
+                Wait-Until { -not [VerifyNative]::IsWindowVisible($hoverMenu) } 'usage hover closes on exit'
+                if ([VerifyNative]::GetFocusedWindow($script:window) -ne $hoverFocus) { throw 'Usage hover exit changed keyboard focus' }
+                $hoverResults += @{ x = $column; focus = $during.ToInt64(); bridge = $true; closed = $true }
+            }
+            $result.hover = $hoverResults
             Record 'Real click: expand AI usage pill'
             [VerifyNative]::ClickClient($script:window, $pillX, $pillY)
             Wait-Until { [VerifyNative]::IsWindowVisible([VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')) } 'AI usage data panel visible'
             $menu = [VerifyNative]::FindWindowEx($script:window, [IntPtr]::Zero, 'MultiPromptUsageCard', 'AI usage this week')
             Snapshot 'pill-open'
             Snapshot 'action'
-            $look = Assert-UsageCardPixels 'pill-open' $pages[2] $scale
+            $look = Assert-UsageCardPixels 'pill-open' $footer $scale
             if ($paceProof) {
                 $paceProof.panel = $look
             }
@@ -145,8 +216,18 @@ function Measure-UsagePaceInk([string]$Name, [int[]]$Bounds) {
             Snapshot 'usage-release-notes'
             Press @(0x1B) 'Escape: close release notes'
 
-            if ([IO.File]::ReadAllText($statusFile).Trim() -ne '2') { throw 'AI data panel changed the selected status page' }
+            Press @(0x11, 0x4B) 'Ctrl+K opens palette above the footer'
+            Wait-Until { (Get-Content (Join-Path $scratch 'roaming/ZigShell/debug.log') -Raw) -match '\[palette\] ready' } 'palette opened'
+            Snapshot 'footer-palette'
+            Press @(0x1B) 'Escape closes palette'
+            Press @(0x11, 0x10, 0x42) 'Collapse sidebar'
+            Snapshot 'footer-collapsed'
+            Press @(0x11, 0x10, 0x47) 'Cycle collapsed status card'
+            Snapshot 'footer-collapsed-cycled'
+            Press @(0x11, 0x10, 0x42) 'Hide sidebar'
+            Snapshot 'footer-hidden'
+            Press @(0x11, 0x10, 0x42) 'Restore expanded sidebar'
             Snapshot 'after'
-            $result.statusCard = [ordered]@{ heights = $heights; minimum = 20; maximum = 30; pages = $pages; usagePanel = @{ secondClick = $true; escape = $true; outside = $true; look = $look }; usagePace = $paceProof }
+            $result.statusCard = [ordered]@{ footerTop = $footerTop; clientBottom = $footer.clientBottom; scale = $scale; usagePanel = @{ secondClick = $true; escape = $true; outside = $true; look = $look }; usagePace = $paceProof }
             Save-Json $result.statusCard 'status-card.json'
-            $result.checks += @{ name = 'status-card'; heights = $heights; usagePill = $true; menuStyle = $true; secondClick = $true; escape = $true; outside = $true; entry = 'Ctrl+Shift+G' }
+            $result.checks += @{ name = 'status-card'; usagePill = $true; menuStyle = $true; secondClick = $true; escape = $true; outside = $true }

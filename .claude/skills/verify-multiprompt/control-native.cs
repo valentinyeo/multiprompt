@@ -594,6 +594,15 @@ public static class VerifyNative {
             Thread.Sleep(15);
         }
     }
+    public static void WheelClient(IntPtr hwnd, int x, int y, int delta) {
+        Point point = new Point { X = x, Y = y };
+        if (!ClientToScreen(hwnd, ref point) || WindowFromPoint(point) != hwnd || GetAncestor(GetForegroundWindow(), 2) != hwnd) throw new InvalidOperationException("Wheel target is not the owned foreground sidebar");
+        if (delta == 0 || delta % 120 != 0) throw new ArgumentOutOfRangeException("delta");
+        MouseAt(point.X, point.Y, 0);
+        Input input = new Input(); input.type = 0;
+        input.data.mouse = new Mouse { data = unchecked((uint)delta), flags = 0x0800 };
+        if (SendInput(1, new Input[] { input }, Marshal.SizeOf(typeof(Input))) != 1) throw new InvalidOperationException("Sidebar wheel input failed");
+    }
     public static void ClickBrowserContent(IntPtr pane, IntPtr owner) {
         Rect rect;
         if (!GetClientRect(pane, out rect)) throw new InvalidOperationException("Browser client rectangle unavailable");

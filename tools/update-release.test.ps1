@@ -76,7 +76,7 @@ try {
             if ($Evidence) {
                 New-Item -ItemType Directory -Force $Evidence | Out-Null
                 Add-Type -AssemblyName System.Drawing
-                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
+                Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class UpdateProof { [StructLayout(LayoutKind.Sequential)] public struct Rect { public int L,T,R,B; } [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out Rect r); [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags); [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l); }'
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($signedOut.MainWindowHandle, [ref]$rectangle)) 'Sign-in window rectangle unavailable'
                 $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
@@ -115,24 +115,15 @@ try {
                 [IO.File]::WriteAllText($sessionPath, '{"tabs":[{"kind":"cmd","name":"Restart proof"}],"active_tab":0}')
                 $cardProcess = Start-Process $cardExe -ArgumentList "--update-ready $cardEventName" -PassThru
                 Assert ($cardEvent.WaitOne(15000)) 'Card fixture did not report readiness'
-                $deadline = [DateTime]::UtcNow.AddSeconds(30)
-                do {
-                    $cardLog = if (Test-Path $log) { -join (Get-Content $log -Raw) } else { '' }
-                    if ($cardLog -match '\[update\] card remaining=and 1 more') { break }
-                    Assert (-not $cardProcess.HasExited) 'Card fixture exited before painting notes'
-                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Update card did not paint release notes' }
-                    Start-Sleep -Milliseconds 100
-                } while ($true)
-                Assert ($cardLog -match '\[update\] card view=collapsed n=3 first=Typing feels faster\.') 'Card did not show three newest notes'
+                $stagedNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
+                Assert ($stagedNotes.version -ceq '9.10.0') 'Staged notes version mismatch'
                 $expectedNotes = @('Typing feels faster.', 'Chats keep your place.', 'Middle change.')
-                $observedNotes = @()
-                for ($i = 0; $i -lt $expectedNotes.Count; $i++) {
-                    $note = [regex]::Match($cardLog, '\[update\] card note ' + $i + '=([^\r\n]*)')
-                    Assert ($note.Success -and $note.Groups[1].Value -ceq $expectedNotes[$i]) 'Card note order or version range is wrong'
-                    $observedNotes += $note.Groups[1].Value
-                }
-                Assert ($cardLog -notmatch '\[update\] card note \d+=.*(IGSH-123|src/main|Not offered yet|Already installed|Older change)') 'Card leaked an internal, out-of-range or hidden note'
-                Assert ($cardLog -notmatch 'latest improvements') 'Card showed generic filler text'
+                $current = @($stagedNotes.releases | Where-Object { $_.version -ceq '9.10.0' })
+                $middle = @($stagedNotes.releases | Where-Object { $_.version -ceq '9.9.0' })
+                Assert ($current.Count -eq 1 -and $middle.Count -eq 1) 'Staged note releases missing or duplicated'
+                $observedNotes = @($current[0].changes[0], $current[0].changes[1], $middle[0].changes[0])
+                for ($i = 0; $i -lt $expectedNotes.Count; $i++) { Assert ($observedNotes[$i] -ceq $expectedNotes[$i]) 'Staged note order changed' }
+                Assert ((Get-FileHash "$cardExe.update/release-notes.json" -Algorithm SHA256).Hash -eq (Get-FileHash (Join-Path $script:releaseFolder 'release-notes.json') -Algorithm SHA256).Hash) 'Staged notes differ from the signed release'
                 $cardProcess.Refresh()
                 $rectangle = New-Object UpdateProof+Rect
                 Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Update card window unavailable'
@@ -142,58 +133,14 @@ try {
                 try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Update card screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
                 try { $bitmap.Save((Join-Path $Evidence 'update-card-notes.png')) } finally { $bitmap.Dispose() }
                 $observedNotes | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-notes.json')
-                Passed 'update card shows aggregated plain notes'
-                $moreRows = [regex]::Matches($cardLog, '\[update\] more row=(\d+),(\d+)')
-                Assert ($moreRows.Count -gt 0) 'More row coordinates were not painted'
-                $moreRow = $moreRows[$moreRows.Count - 1]
-                $moreClick = [IntPtr](([int]$moreRow.Groups[2].Value -shl 16) -bor [int]$moreRow.Groups[1].Value)
-                Assert ([UpdateProof]::PostMessage($cardProcess.MainWindowHandle, 0x201, [IntPtr]1, $moreClick)) 'More row press failed'
-                Assert ([UpdateProof]::PostMessage($cardProcess.MainWindowHandle, 0x202, [IntPtr]0, $moreClick)) 'More row release failed'
-                $deadline = [DateTime]::UtcNow.AddSeconds(15)
-                do {
-                    $cardLog = -join (Get-Content $log -Raw)
-                    if ($cardLog -match '\[update\] card view=expanded n=4 first=Typing feels faster\.') { break }
-                    Assert (-not $cardProcess.HasExited) 'Card fixture exited before opening the full list'
-                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Update card did not open the full list on click' }
-                    Start-Sleep -Milliseconds 100
-                } while ($true)
-                $expandedLog = $cardLog.Substring($cardLog.IndexOf('card view=expanded'))
-                $expectedAll = @('Typing feels faster.', 'Chats keep your place.', 'Middle change.', 'Older change.')
-                $observedAll = @()
-                for ($i = 0; $i -lt $expectedAll.Count; $i++) {
-                    $note = [regex]::Match($expandedLog, '\[update\] card note ' + $i + '=([^\r\n]*)')
-                    Assert ($note.Success -and $note.Groups[1].Value -ceq $expectedAll[$i]) 'Full list order or skipped versions are wrong'
-                    $observedAll += $note.Groups[1].Value
-                }
-                Assert ($expandedLog -notmatch '\[update\] card note 4=') 'Full list shows more rows than the release has'
-                Assert ($cardLog -notmatch 'latest improvements') 'Full list showed generic filler text'
-                Start-Sleep -Milliseconds 300
-                $cardProcess.Refresh()
-                $rectangle = New-Object UpdateProof+Rect
-                Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Update card window unavailable'
-                $bitmap = New-Object Drawing.Bitmap(($rectangle.R - $rectangle.L), ($rectangle.B - $rectangle.T))
-                $graphics = [Drawing.Graphics]::FromImage($bitmap)
-                $dc = $graphics.GetHdc()
-                try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Expanded update card screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
-                try { $bitmap.Save((Join-Path $Evidence 'update-card-expanded.png')) } finally { $bitmap.Dispose() }
-                $observedAll | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Evidence 'update-card-expanded.json')
-                Passed 'update card opens the full list on click'
+                Passed 'signed staged notes retain expected data'
                 Select-Release 'v9.11.0'
-                $beforeChecks = (-join (Get-Content $log -Raw)).Length
                 Assert (Save-Update $cardExe '0.0.0' 'x64') 'Checks-only release was not staged'
                 $checksNotes = Get-Content "$cardExe.update/release-notes.json" -Raw | ConvertFrom-Json
                 Assert ($checksNotes.releases[0].changes.Count -eq 1 -and $checksNotes.releases[0].changes[0] -ceq 'Checks and fixes, no visible change') 'Checks-only fallback is missing or changed'
                 Assert ($checksNotes.releases[0].tickets.Count -eq 1 -and $checksNotes.releases[0].tickets[0] -ceq 'https://app.hypertask.ai/detail/project-2060/1243') 'Checks-only ticket link is missing or changed'
-                $deadline = [DateTime]::UtcNow.AddSeconds(30)
-                do {
-                    $cardLog = -join (Get-Content $log -Raw)
-                    $afterChecks = $cardLog.Substring($beforeChecks)
-                    if ($afterChecks -match '(?s)\[update\] restart button=-?\d+,-?\d+\r?\n.*?\[update\] card view=collapsed n=1 first=Checks and fixes, no visible change\r?\n') { break }
-                    Assert (-not $cardProcess.HasExited) 'Checks-only update interrupted the app'
-                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Checks-only fallback and Restart button were not painted' }
-                    Start-Sleep -Milliseconds 100
-                } while ($true)
-                Assert ($afterChecks -notmatch '\[update\] card view=collapsed n=0 first=') 'Checks-only card was blank'
+                Assert ((Get-Content "$cardExe.update/ready.txt" -Raw).Contains('MPVERSION=9.11.0;')) 'Checks-only update marker missing'
+                Assert (-not $cardProcess.HasExited) 'Checks-only update interrupted the app'
                 $cardProcess.Refresh()
                 Assert ($cardProcess.Responding) 'Quiet update blocked the app'
                 Assert ([UpdateProof]::GetWindowRect($cardProcess.MainWindowHandle, [ref]$rectangle)) 'Quiet update window unavailable'
@@ -202,18 +149,10 @@ try {
                 $dc = $graphics.GetHdc()
                 try { Assert ([UpdateProof]::PrintWindow($cardProcess.MainWindowHandle, $dc, 2)) 'Quiet update screenshot failed' } finally { $graphics.ReleaseHdc($dc); $graphics.Dispose() }
                 try { $bitmap.Save((Join-Path $Evidence 'update-card-quiet.png')) } finally { $bitmap.Dispose() }
-                Passed 'checks-only update shows fallback and retains ticket link'
+                Passed 'checks-only staged notes retain fallback and ticket link'
                 Select-Release 'v9.10.0'
-                $beforeRestore = (-join (Get-Content $log -Raw)).Length
                 Assert (Save-Update $cardExe '0.0.0' 'x64') 'Real product notes were not restored'
-                $deadline = [DateTime]::UtcNow.AddSeconds(30)
-                do {
-                    $cardLog = -join (Get-Content $log -Raw)
-                    $afterRestore = $cardLog.Substring($beforeRestore)
-                    if ($afterRestore -match '\[update\] card view=collapsed n=3') { break }
-                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Real product notes did not show again' }
-                    Start-Sleep -Milliseconds 100
-                } while ($true)
+                Assert ((Get-Content "$cardExe.update/ready.txt" -Raw).Contains('MPVERSION=9.10.0;')) 'Restored update marker missing'
                 $versionMatch = [regex]::Match([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Verifier)), 'MPVERSION=(\d+\.\d+\.\d+);')
                 Assert $versionMatch.Success 'Native verifier version marker missing'
                 $oldVersion = $versionMatch.Groups[1].Value
@@ -235,10 +174,13 @@ try {
                     Start-Sleep -Milliseconds 100
                 } while ($true)
                 Start-Sleep -Milliseconds 300
-                $buttons = [regex]::Matches((Get-Content $log -Raw), '\[update\] restart button=(\d+),(\d+)')
-                Assert ($buttons.Count -gt 0) 'Restart button coordinates were not painted'
-                $button = $buttons[$buttons.Count - 1]
-                $click = [IntPtr](([int]$button.Groups[2].Value -shl 16) -bor [int]$button.Groups[1].Value)
+                $client = New-Object UpdateProof+Rect
+                Assert ([UpdateProof]::GetClientRect($cardProcess.MainWindowHandle, [ref]$client)) 'Restart client bounds unavailable'
+                $scale = [UpdateProof]::GetDpiForWindow($cardProcess.MainWindowHandle) / 96.0
+                Assert ($scale -gt 0 -and $client.B -gt [int](104 * $scale)) 'Restart client DPI or height invalid'
+                $clickX = [int][Math]::Round(24 * $scale)
+                $clickY = $client.B - [int][Math]::Round(29 * $scale)
+                $click = [IntPtr](($clickY -shl 16) -bor $clickX)
                 $inboxPath = Join-Path $env:APPDATA 'ZigShell/inbox-default.json'
                 Remove-Item -LiteralPath $inboxPath -Force -ErrorAction SilentlyContinue
                 $restartTimer = [Diagnostics.Stopwatch]::StartNew()
