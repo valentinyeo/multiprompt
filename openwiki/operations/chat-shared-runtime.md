@@ -21,7 +21,9 @@
 - Publishing syncs a temporary file.
 - An atomic rename publishes it.
 - Older launchers select the installed newer reader.
-- Equal generations with different hashes fail closed.
+- Equal generations with a different hash replace the stale selection with this
+  client's own source, so one missing bump cannot wedge every client.
+- Unsafe, corrupt or malformed selections still fail closed.
 - Unsafe files and corrupt readers fail closed.
 
 ## Requests

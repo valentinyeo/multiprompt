@@ -58,11 +58,17 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(result.stdout, '@mp\t9\thistory\tmissing\t-\t0\tsession transcript not found\n@@MP_NEW_END@@\n')
         self.assertEqual(json.loads(active.read_text()), newer)
 
-    def test_conflict_and_corruption_fail_closed(self):
+    def test_same_generation_different_source_replaces_the_stale_selection(self):
         first = self.info()
         conflict = SOURCE.replace('PAGE_BYTES = 350000', 'PAGE_BYTES = 350001', 1)
-        result = self.invoke(conflict)
-        self.assertIn('history\\terror', result.stdout)
+        replaced = self.info(conflict)
+        self.assertEqual(replaced['generation'], GENERATION)
+        self.assertNotEqual(replaced['sha256'], first['sha256'])
+        self.assertEqual(self.info(conflict), replaced)
+        self.assertEqual(self.info()['sha256'], first['sha256'])
+
+    def test_corruption_fails_closed(self):
+        first = self.info()
         path = Path(self.home.name) / '.multiprompt-runtime' / (first['sha256'] + '.py')
         path.write_text('corrupt')
         self.assertIn('history\\terror', self.invoke().stdout)

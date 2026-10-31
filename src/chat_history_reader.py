@@ -4425,7 +4425,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 34
+RUNTIME_GENERATION = 35
 
 if __name__ == '__main__':
     import base64 as _base64
@@ -4516,7 +4516,11 @@ if __name__ == '__main__':
                         return installed, active
                     if active['generation'] == generation:
                         if active['sha256'] != digest:
-                            raise ValueError('conflicting runtime generation')
+                            publish(digest + '.py', source)
+                            active = dict(protocol=1, generation=generation, sha256=digest)
+                            publish('active.json', _json.dumps(active, separators=(',', ':')).encode())
+                            publish_tools(source)
+                            return source, active
                         publish_tools(installed)
                         return installed, active
                 try:
