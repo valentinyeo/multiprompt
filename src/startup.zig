@@ -311,8 +311,15 @@ pub fn getInstanceName() []const u8 {
 }
 
 pub fn buildWindowTitle(buf: *[256]u16) LPCWSTR {
-    const title = "Multi Bot";
+    const title = if (IS_DEV) "Multibot DEV" else "Multi Bot";
     for (title, 0..) |c, i| buf[i] = c;
     buf[title.len] = 0;
     return @ptrCast(buf);
+}
+
+test "IGSH-1266 the dev build names itself in the title bar and taskbar" {
+    var buf: [256]u16 = undefined;
+    const wide = std.mem.span(buildWindowTitle(&buf));
+    const expected = if (IS_DEV) std.unicode.utf8ToUtf16LeStringLiteral("Multibot DEV") else std.unicode.utf8ToUtf16LeStringLiteral("Multi Bot");
+    try std.testing.expectEqualSlices(u16, std.mem.span(expected), wide);
 }

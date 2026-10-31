@@ -1,4 +1,5 @@
 const app_state = @import("app_state.zig");
+const IS_DEV = @import("main.zig").IS_DEV;
 const std = @import("std");
 const APP_VERSION = @import("main.zig").APP_VERSION;
 const update_release = @import("update_release.zig");
@@ -52,6 +53,7 @@ const uiScaled = @import("drawing.zig").uiScaled;
 const paintSidebarCardFrame = @import("capacity.zig").paintSidebarCardFrame;
 
 pub fn updateCardInit() void {
+    if (IS_DEV) return;
     const n = GetModuleFileNameW(null, &app_state.g_update_path, 520);
     if (n == 0 or n >= 520) return;
     app_state.g_update_path[n] = 0;
@@ -75,6 +77,7 @@ fn updateCardWatchThread(change: HANDLE, stop: HANDLE, hwnd: HANDLE) void {
 }
 
 pub fn startUpdateCardWatch() bool {
+    if (IS_DEV) return false;
     const path = app_state.g_update_path[0..app_state.g_update_path_len];
     const slash = std.mem.lastIndexOfScalar(u16, path, '\\') orelse return false;
     var directory: [520:0]u16 = @splat(0);
@@ -107,6 +110,7 @@ pub fn stopUpdateCardWatch() void {
 }
 
 pub fn updateCardVisible() bool {
+    if (IS_DEV) return false;
     if (app_state.g_update_ver_len == 0 or app_state.g_hide_sidebar or app_state.g_sidebar_collapsed or app_state.g_update_relaunching) return false;
     return app_state.g_update_dismissed_len == 0;
 }

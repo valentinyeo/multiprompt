@@ -3273,7 +3273,7 @@ pub fn updateSearchResults() void {
                 }
             }
         }
-        if (show_update) {
+        if (show_update and !@import("main.zig").IS_DEV) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_UPDATE_OFFSET;
             app_state.g_search_result_count += 1;
         }

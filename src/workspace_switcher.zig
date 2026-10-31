@@ -1,5 +1,6 @@
 const std = @import("std");
 const app_state = @import("app_state.zig");
+const IS_DEV = @import("main.zig").IS_DEV;
 const w = @import("win32.zig");
 const drawing = @import("drawing.zig");
 const startup = @import("startup.zig");
@@ -88,7 +89,9 @@ pub fn paintHeader(dc: w.HANDLE) void {
     var label = rc;
     label.left += scale(14);
     label.right -= scale(32);
-    drawName(dc, name, &label, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX | w.DT_END_ELLIPSIS);
+    var dev_buf: [48]u8 = undefined;
+    const shown = if (IS_DEV) (std.fmt.bufPrint(&dev_buf, "{s} DEV", .{name}) catch name) else name;
+    drawName(dc, shown, &label, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_NOPREFIX | w.DT_END_ELLIPSIS);
     _ = w.SetTextColor(dc, hintColor());
     var arrow = rc;
     arrow.left = arrow.right - scale(30);
