@@ -164,9 +164,21 @@ try {
                 $installedNotes.releases = @(@{ version = $newVersion; changes = @('Restart keeps your chats open.') }) + @($installedNotes.releases)
                 [IO.File]::WriteAllText("$cardExe.update/release-notes.json", ($installedNotes | ConvertTo-Json -Depth 8))
                 Remove-Item -LiteralPath "$cardExe.update/ready.txt" -Force
-                Move-Item -LiteralPath $cardExe -Destination "$Root/card.running.exe"
-                Copy-Item -LiteralPath $NativeUpdate -Destination $cardExe
                 $deadline = [DateTime]::UtcNow.AddSeconds(15)
+                do {
+                    if ((Test-Path -LiteralPath $log) -and (-join (Get-Content $log -Raw)).Contains('update-card: launch path stamp captured')) { break }
+                    if ([DateTime]::UtcNow -gt $deadline) { throw 'Update card did not capture its launch stamp' }
+                    Start-Sleep -Milliseconds 100
+                } while ($true)
+                Copy-Item -LiteralPath $NativeUpdate -Destination "$Root/card.next.exe"
+                Move-Item -LiteralPath $cardExe -Destination "$Root/card.running.exe"
+                Move-Item -LiteralPath "$Root/card.next.exe" -Destination $cardExe
+                $win32 = Get-Content "$PSScriptRoot/../src/win32.zig" -Raw
+                $appMessage = [regex]::Match($win32, 'pub const WM_APP: u32 = (0x[0-9a-fA-F]+);')
+                $updateMessage = [regex]::Match($win32, 'pub const WM_APP_UPDATE_CHANGED: u32 = WM_APP \+ (\d+);')
+                Assert ($appMessage.Success -and $updateMessage.Success) 'Update notification binding unavailable'
+                $message = [Convert]::ToUInt32($appMessage.Groups[1].Value.Substring(2), 16) + [uint32]$updateMessage.Groups[1].Value
+                Assert ([UpdateProof]::PostMessage($cardProcess.MainWindowHandle, $message, [IntPtr]::Zero, [IntPtr]::Zero)) 'Update notification failed'
                 do {
                     $cardLog = -join (Get-Content $log -Raw)
                     if ($cardLog.Contains('update-card: new version ready ' + $newVersion)) { break }
