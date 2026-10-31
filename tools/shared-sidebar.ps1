@@ -1,7 +1,7 @@
-param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof)
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof, [switch]$ChangelogLinks)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-if (($MemoryProof -and $OrderProof) -or ($ChangelogProof -and ($MemoryProof -or $OrderProof))) { throw 'Proof modes are exclusive' }
+if (($MemoryProof -and $OrderProof) -or ($ChangelogProof -and ($MemoryProof -or $OrderProof)) -or ($ChangelogLinks -and -not $ChangelogProof)) { throw 'Invalid proof modes' }
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows') { throw 'GitHub Windows only' }
 $Exe = (Resolve-Path $Exe).Path
 New-Item -ItemType Directory -Force $Output | Out-Null
@@ -407,8 +407,34 @@ function Order-Journey {
     $result.passed = $result.classification -eq 'none'
 }
 
+function Open-Changelog {
+    $logStart = (Get-Content "$settings/debug.log" -Raw).Length
+    Focus
+    [ChatDeliveryDesktop]::Chord(@(0x11, 0x4B))
+    $result.actions += 'Ctrl+K: open command palette'
+    [void](Wait-For 'palette initialized' { (Get-Content "$settings/debug.log" -Raw).Substring($logStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    foreach ($key in @(0x43,0x48,0x41,0x4E,0x47,0x45,0x4C,0x4F,0x47)) { [ChatDeliveryDesktop]::Type($key) }
+    $result.actions += 'Type changelog (9 characters)'
+    [void](Wait-For 'changelog selected in palette' {
+        $trace = (Get-Content "$settings/debug.log" -Raw).Substring($logStart)
+        $lines = [regex]::Matches($trace, '\[palette\] ready chars=\d+ count=\d+ target=\d+')
+        $lines.Count -gt 0 -and $lines[$lines.Count - 1].Value -match '^\[palette\] ready chars=9 count=[1-9]\d* target=6241$'
+    })
+    Shot 'changelog-palette'
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'App lost foreground before Enter' }
+    [ChatDeliveryDesktop]::Chord(@(0x0D))
+    $result.actions += 'Enter: open selected changelog'
+    Start-Sleep -Seconds 2
+}
+$linkFixtureLoaded = $false
 try {
     New-Item -ItemType Directory -Force $settings, "$profile/local", "$profile/home" | Out-Null
+    if ($ChangelogLinks) {
+        $result.registryRestored = $false; $result.receipts = @()
+        . "$PSScriptRoot/changelog-link-fixture.ps1"
+        $linkFixtureLoaded = $true
+        Start-LinkFixture
+    }
     $env:APPDATA = "$profile/roaming"; $env:LOCALAPPDATA = "$profile/local"; $env:USERPROFILE = "$profile/home"; $env:HOME = "$profile/home"
     $env:MULTIPROMPT_NO_LOGIN = '1'; $env:IGSH_246 = '0'; $env:ZIGSHELL_DEBUG = '1'
     $tabs = @('First shell', 'Second shell', 'Third shell') | ForEach-Object { @{kind='cmd'; name=$_; manual=$true; cv=$false; pid=0} }
@@ -434,26 +460,10 @@ try {
         @($inbox.shells).Count -eq 3
     })
     if ($ChangelogProof) {
-        $result.limitations = @('Screenshot requires human review; bitmap stability does not establish overlay contents', 'Bundled changelog is not published release-notes JSON')
+        if (-not $ChangelogLinks) { $result.limitations = @('Screenshot requires human review; bitmap stability does not establish overlay contents', 'Bundled changelog is not published release-notes JSON') }
         $result.executable = @{path=$Exe; sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion}
         if ([ChatDeliveryDesktop]::Owner($main) -ne $app.Id -or -not $job.Contains($app)) { throw 'Window ownership mismatch' }
-        $logStart = (Get-Content "$settings/debug.log" -Raw).Length
-        Focus
-        [ChatDeliveryDesktop]::Chord(@(0x11, 0x4B))
-        $result.actions += 'Ctrl+K: open command palette'
-        [void](Wait-For 'palette initialized' { (Get-Content "$settings/debug.log" -Raw).Substring($logStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
-        foreach ($key in @(0x43,0x48,0x41,0x4E,0x47,0x45,0x4C,0x4F,0x47)) { [ChatDeliveryDesktop]::Type($key) }
-        $result.actions += 'Type changelog (9 characters)'
-        [void](Wait-For 'changelog selected in palette' {
-            $trace = (Get-Content "$settings/debug.log" -Raw).Substring($logStart)
-            $lines = [regex]::Matches($trace, '\[palette\] ready chars=\d+ count=\d+ target=\d+')
-            $lines.Count -gt 0 -and $lines[$lines.Count - 1].Value -match '^\[palette\] ready chars=9 count=[1-9]\d* target=6241$'
-        })
-        Shot 'changelog-palette'
-        if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'App lost foreground before Enter' }
-        [ChatDeliveryDesktop]::Chord(@(0x0D))
-        $result.actions += 'Enter: open selected changelog'
-        Start-Sleep -Seconds 2
+        Open-Changelog
         $script:previousHash = ''
         [void](Wait-For 'stable full-screen frame after Enter' {
             Shot 'changelog-first-page'
@@ -462,6 +472,31 @@ try {
             $script:previousHash = $hash
             $false
         } 30)
+        if ($ChangelogLinks) {
+            $rect = [LinkFixtureNative+Rect]::new()
+            if (-not [LinkFixtureNative]::GetClientRect($main, [ref]$rect) -or $rect.Right -ne 1024 -or $rect.Bottom -ne 720 -or [LinkFixtureNative]::GetDpiForWindow($main) -ne 96) { throw 'Changelog click fixture requires 1024x720 client and 96 DPI' }
+            $result.geometry = @{clientWidth=$rect.Right; clientHeight=$rect.Bottom; dpi=96; x=869; y=126; source='calcChangelogLayout and observed first bullet'}
+            Prepare-LinkReceipt
+            Focus
+            if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main -or -not $job.Contains($app)) { throw 'Mouse target is not owned foreground' }
+            $result.actions += @{input='mouse'; x=869; y=126; target='current first bullet'}
+            [ChatDeliveryDesktop]::PressClient($main, $app.Id, 869, 126)
+            Receive-Link $result.audit.currentTicket 'current-mouse'
+            Open-Changelog
+            if ($result.audit.oldIndex -lt 1 -or $result.audit.oldIndex -gt 1000) { throw '1048 manifest index outside bounded journey' }
+            Focus
+            for ($i = 0; $i -lt $result.audit.oldIndex; $i++) {
+                if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main -or -not $job.Contains($app)) { throw 'Keyboard target is not owned foreground' }
+                [ChatDeliveryDesktop]::Chord(@(0x28)); Start-Sleep -Milliseconds 80
+            }
+            $result.actions += @{input='Down'; count=$result.audit.oldIndex; target='1048 manifest index hypothesis'}
+            Shot 'changelog-1048-selected'
+            Prepare-LinkReceipt
+            if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main -or -not $job.Contains($app)) { throw 'Enter target is not owned foreground' }
+            $result.actions += @{input='Enter'; target='1048 first ticket hypothesis'}
+            [ChatDeliveryDesktop]::Chord(@(0x0D))
+            Receive-Link $result.audit.oldTicket '1048-keyboard'
+        }
         $result.passed = $true
     } elseif ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
     Toggle-View
@@ -507,6 +542,7 @@ try {
         $result.cleanupErrors = @()
         try {
             $result.cleanup = 0
+            if ($linkFixtureLoaded -and $linkAck) { try { [void]$linkAck.Set() } catch { $result.cleanupErrors += 'Receiver acknowledgement failed' } }
             $cleanupKnown = $true
             foreach ($ownedJob in @($job, $nextJob)) {
                 if ($null -eq $ownedJob) { continue }
@@ -517,8 +553,9 @@ try {
                     $cleanupKnown = $false
                     $result.cleanup = 'unknown'
                     $result.cleanupErrors += $_.Exception.Message
-                } finally { $ownedJob.Dispose() }
+                } finally { try { $ownedJob.Dispose() } catch { $result.cleanupErrors += 'Owned job disposal failed' } }
             }
+            if ($linkFixtureLoaded) { try { Stop-LinkFixture } catch { $result.cleanupErrors += "Association restoration failed: $($_.Exception.Message)"; $result.registryRestored = $false } }
             foreach ($name in @('session.json', 'session.json.launch.json', 'debug.log', 'inbox-default.json')) {
                 try { if (Test-Path "$settings/$name") { Copy-Item "$settings/$name" "$Output/$name" } } catch { $result.cleanupErrors += $_.Exception.Message }
             }
@@ -539,7 +576,7 @@ try {
             $result.cleanupErrors += $_.Exception.Message
         } finally {
             try { $result.scratchRemoved = -not (Test-Path -LiteralPath $profile) } catch { $result.cleanupErrors += $_.Exception.Message }
-            if ($result.cleanupErrors.Count -gt 0) { $result.passed = $false }
+            if ($result.cleanupErrors.Count -gt 0 -or ($ChangelogLinks -and -not $result.registryRestored)) { $result.passed = $false }
             Save $result "$Output/result.json"
         }
     } else {

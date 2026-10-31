@@ -23,6 +23,11 @@ on:
         required: false
         type: boolean
         default: false
+      changelog_links:
+        description: Verify published Changelog native ticket dispatch
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: '4 4 * * *'
 
@@ -50,7 +55,11 @@ jobs:
           MEMORY_PROOF: ${{ inputs.memory_proof }}
           ORDER_PROOF: ${{ inputs.order_proof }}
           CHANGELOG_PROOF: ${{ inputs.changelog_proof }}
+          CHANGELOG_LINKS: ${{ inputs.changelog_links }}
         run: |
+          New-Item -ItemType Directory -Force bin, evidence | Out-Null
+          trap { if ($env:CHANGELOG_LINKS -eq 'true') { @{passed=$false; error='Link proof acquisition or audit failed'; cleanup=0; scratchRemoved=$true} | ConvertTo-Json | Set-Content evidence/result.json }; throw $_ }
+          if ($env:CHANGELOG_LINKS -eq 'true' -and $env:CHANGELOG_PROOF -ne 'true') { throw 'Changelog links requires changelog proof' }
           if ($env:CHANGELOG_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true')) { throw 'Changelog proof requires a published tag and excludes other proof modes' }
           if ($env:ORDER_PROOF -eq 'true' -and ($env:MEMORY_PROOF -eq 'true' -or -not $env:RELEASE_TAG)) { throw 'Order proof requires a published tag and excludes memory proof' }
           New-Item -ItemType Directory -Force bin, evidence | Out-Null
@@ -60,6 +69,14 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
             $line = @(Get-Content bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?multiprompt-x64\.exe$' })
             if ($line.Count -ne 1 -or (Get-FileHash bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne ($line[0] -split '\s+')[0].ToLower()) { throw 'Release checksum mismatch' }
+            if ($env:CHANGELOG_LINKS -eq 'true') {
+              gh release download $env:RELEASE_TAG --pattern release-notes.json --dir bin
+              if ($LASTEXITCODE -ne 0) { throw 'Release notes download failed' }
+              $notesLine = @(Get-Content bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?release-notes\.json$' })
+              if ($notesLine.Count -ne 1 -or (Get-FileHash bin/release-notes.json -Algorithm SHA256).Hash.ToLower() -ne ($notesLine[0] -split '\s+')[0].ToLower()) { throw 'Release notes checksum mismatch' }
+              node tools/changelog-link-audit.mjs bin/release-notes.json $env:RELEASE_TAG evidence/changelog-audit.json
+              if ($LASTEXITCODE -ne 0) { throw 'Release notes audit failed' }
+            }
             Move-Item bin/multiprompt-x64.exe bin/multiprompt.exe
           } else {
             Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
@@ -69,16 +86,19 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
             Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
           }
-          @{tag=$env:RELEASE_TAG; revision=(git rev-parse HEAD).Trim(); sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower(); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"} | ConvertTo-Json | Set-Content evidence/provenance.json
+          $provenance = @{tag=$env:RELEASE_TAG; revision=(git rev-parse HEAD).Trim(); sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower(); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"}
+          if ($env:CHANGELOG_LINKS -eq 'true') { $provenance.releaseNotesSha256 = (Get-FileHash bin/release-notes.json -Algorithm SHA256).Hash.ToLower() }
+          $provenance | ConvertTo-Json | Set-Content evidence/provenance.json
       - name: Native sidebar parity and actions
         shell: powershell
         env:
           MEMORY_PROOF: ${{ inputs.memory_proof }}
           ORDER_PROOF: ${{ inputs.order_proof }}
           CHANGELOG_PROOF: ${{ inputs.changelog_proof }}
+          CHANGELOG_LINKS: ${{ inputs.changelog_links }}
         run: |
           if ($env:CHANGELOG_PROOF -eq 'true') {
-            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -ChangelogProof
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -ChangelogProof -ChangelogLinks:($env:CHANGELOG_LINKS -eq 'true')
           } elseif ($env:MEMORY_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -MemoryProof
           } elseif ($env:ORDER_PROOF -eq 'true') {
