@@ -4207,6 +4207,22 @@ class AgentHostTest(unittest.TestCase):
         self.assertFalse(reader.host_owned(self.provider, self.sid))
         self.assertFalse(reader.host_paths(self.provider, self.sid)['socket'].exists())
 
+    def test_host_delivers_without_a_pane_bound_agent(self):
+        self.enable()
+        self.seed()
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            self.assertIsNone(self.dispatch()['message'])
+            self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        self.assertEqual(self.user_lines(), [self.text])
+
+    def test_disabled_host_chat_still_needs_the_live_agent(self):
+        self.seed()
+        with patch.object(reader, 'resolve_tmux_agent', return_value=None):
+            reply = self.dispatch()
+        self.assertEqual(reply['message']['state'], 'failed')
+        self.assertEqual(reply['message']['receipt'], 'session_unavailable')
+        self.assertEqual(self.user_lines(), [])
+
     def test_host_cli_status_and_disable(self):
         self.enable()
         status = reader.host_cli(['status', self.provider, self.sid])

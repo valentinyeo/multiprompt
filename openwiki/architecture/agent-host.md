@@ -136,7 +136,10 @@ python3 <reader> host handover <provider> <sid>
 - Owned chat: flip the row to `sent`, claim the attempt, hand it to the host, return.
   Acceptance arrives later from the host process, through the same fact application the
   connectors use, so clients need no new event types.
-- Not owned, switched off, or not Claude: the existing connector path runs unchanged.
+- A host chat needs no agent process inside the tmux pane; the host owns the session. The tmux
+  name is still the chat identity for the store and for the shell.
+- Not owned, switched off, or not Claude: the existing connector path runs unchanged and still
+  needs the live agent in its pane.
 - Host unavailable, busy or timed out: the row returns to `queued` (same attempt, so a later
   retry is a `duplicate`, not a second send) and the per-chat backoff grows 250 ms, 500 ms,
   1 s, 2 s, 4 s, 8 s, 16 s, 30 s. Success clears it.

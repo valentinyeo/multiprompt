@@ -3078,13 +3078,13 @@ def message_store_transaction(q):
             row = db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state='queued' AND epoch=? ORDER BY position LIMIT 1", (provider, sid, epoch)).fetchone()
             if not row:
                 return dict(epoch=epoch, seq=seq, message=None)
+            hosting = host_dispatch_switch(provider, sid)
             resolved = resolve_tmux_agent(provider, tmux, require_bound=True)
-            if not resolved or resolved[0] != sid:
+            if not hosting and (not resolved or resolved[0] != sid):
                 db.execute("UPDATE shared_messages SET state='failed',receipt='session_unavailable' WHERE id=? AND state='queued'", (row[0],))
                 row = message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row[0],)).fetchone())
                 seq = message_event(db, provider, sid, row)
                 return dict(epoch=epoch, seq=seq, message=row)
-            hosting = host_dispatch_switch(provider, sid)
             if hosting:
                 ready = host_dispatch_start(provider, sid)
                 if ready['status'] != 'owned':
@@ -3105,9 +3105,6 @@ def message_store_transaction(q):
             db.commit()
             db.execute('BEGIN IMMEDIATE')
             current = db.execute("SELECT state,epoch FROM shared_messages WHERE id=?", (row['id'],)).fetchone()
-            bound = resolve_tmux_agent(provider, tmux, require_bound=True)
-            if current != ('sent', epoch) or not bound or bound[0] != sid or Path(bound[1]) != Path(resolved[1]):
-                return dict(epoch=epoch, seq=seq, message=None)
             if hosting:
                 db.commit()
                 reply = host_deliver(provider, sid, row['id'], row['attempt'], epoch, row['text'])
@@ -3126,6 +3123,9 @@ def message_store_transaction(q):
                 if changed:
                     message_event(db, provider, sid, message_row(db.execute('SELECT * FROM shared_messages WHERE id=?', (row['id'],)).fetchone()))
                 host_backoff_fail(provider, sid)
+                return dict(epoch=epoch, seq=seq, message=None)
+            bound = resolve_tmux_agent(provider, tmux, require_bound=True)
+            if current != ('sent', epoch) or not bound or bound[0] != sid or Path(bound[1]) != Path(resolved[1]):
                 return dict(epoch=epoch, seq=seq, message=None)
             context = dict(provider=provider, sid=sid, tmux=tmux, chat_id=tmux, transcript_path=str(bound[1]))
             if provider == 'codex':
@@ -3309,7 +3309,7 @@ def message_worker(tmux, provider, sid):
                         return
                     tmux = locator[0]
                     bound = resolve_tmux_agent(provider, tmux, require_bound=True)
-                    if not bound or bound[0] != sid:
+                    if (not bound or bound[0] != sid) and not host_dispatch_switch(provider, sid):
                         return
                     request['tmux'] = tmux
                     if superseded_engine():
