@@ -737,13 +737,17 @@ fn chatHistoryChannelStart(host: u8, ch: *ChatHistoryChannel) bool {
 fn chatReaderBundle(allocator: std.mem.Allocator) ?[]u8 {
     const claude = @embedFile("chat_connectors/claude.py");
     const codex = @embedFile("chat_connectors/codex.py");
+    const mp_send = @embedFile("mp_send.py");
     const claude64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(claude.len)) catch return null;
     defer allocator.free(claude64);
     const codex64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(codex.len)) catch return null;
     defer allocator.free(codex64);
+    const mp_send64 = allocator.alloc(u8, std.base64.standard.Encoder.calcSize(mp_send.len)) catch return null;
+    defer allocator.free(mp_send64);
     _ = std.base64.standard.Encoder.encode(claude64, claude);
     _ = std.base64.standard.Encoder.encode(codex64, codex);
-    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\n{s}", .{ claude64, codex64, @embedFile("chat_history_reader.py") }) catch null;
+    _ = std.base64.standard.Encoder.encode(mp_send64, mp_send);
+    return std.fmt.allocPrint(allocator, "CONNECTOR_SOURCES = {{'claude':'{s}','codex':'{s}'}}\nMP_SEND_SOURCE = '{s}'\n{s}", .{ claude64, codex64, mp_send64, @embedFile("chat_history_reader.py") }) catch null;
 }
 
 pub fn chatHistoryPersistent(host: u8, id: u32, query: []const u8, wire_limit: usize, out: *std.ArrayList(u8), request_written: ?*bool) bool {

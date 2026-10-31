@@ -3450,9 +3450,10 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 24
+RUNTIME_GENERATION = 25
 
 if __name__ == '__main__':
+    import base64 as _base64
     import fcntl
     import hashlib as _hashlib
     import json as _json
@@ -3509,6 +3510,17 @@ if __name__ == '__main__':
                     finally:
                         if _os.path.exists(path):
                             _os.unlink(path)
+                def publish_tools(data):
+                    try:
+                        publish('reader.py', data)
+                    except OSError:
+                        pass
+                    mp_send_source = globals().get('MP_SEND_SOURCE')
+                    if isinstance(mp_send_source, str) and mp_send_source:
+                        try:
+                            publish('mp-send', _base64.b64decode(mp_send_source))
+                        except (ValueError, OSError):
+                            pass
                 missing = object()
                 try:
                     active = _json.loads(read('active.json', 4096))
@@ -3525,10 +3537,12 @@ if __name__ == '__main__':
                     if _hashlib.sha256(installed).hexdigest() != active['sha256']:
                         raise ValueError('corrupt runtime')
                     if active['generation'] > generation:
+                        publish_tools(installed)
                         return installed, active
                     if active['generation'] == generation:
                         if active['sha256'] != digest:
                             raise ValueError('conflicting runtime generation')
+                        publish_tools(installed)
                         return installed, active
                 try:
                     installed = read(digest + '.py', 4 * 1024 * 1024)
@@ -3539,6 +3553,7 @@ if __name__ == '__main__':
                         raise ValueError('corrupt runtime')
                 active = dict(protocol=1, generation=generation, sha256=digest)
                 publish('active.json', _json.dumps(active, separators=(',', ':')).encode())
+                publish_tools(source)
                 return source, active
             finally:
                 _os.close(lock)

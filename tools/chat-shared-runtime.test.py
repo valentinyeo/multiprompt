@@ -102,6 +102,17 @@ class RuntimeTest(unittest.TestCase):
             self.assertIn(json.loads(output)['engine_info']['generation'], (GENERATION, GENERATION + 1))
         self.assertEqual(self.info()['generation'], GENERATION + 1)
 
+    def test_mp_send_ships_inside_the_runtime(self):
+        body = "#!/usr/bin/env python3\nprint('mp-send')\n"
+        source = "MP_SEND_SOURCE = '%s'\n%s" % (base64.b64encode(body.encode()).decode(), SOURCE)
+        self.info(source)
+        published = Path(self.home.name) / '.multiprompt-runtime' / 'mp-send'
+        self.assertEqual(published.read_text(), body)
+
+    def test_mp_send_is_not_published_without_a_bundle(self):
+        self.info()
+        self.assertFalse((Path(self.home.name) / '.multiprompt-runtime' / 'mp-send').exists())
+
     def test_import_does_not_install(self):
         code = "import importlib.util,sys; s=importlib.util.spec_from_file_location('reader',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); assert m.READER_SOURCE"
         result = subprocess.run([sys.executable, '-c', code, str(ROOT / 'src/chat_history_reader.py')], env=self.env, capture_output=True, timeout=10)

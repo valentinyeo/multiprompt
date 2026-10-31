@@ -292,6 +292,11 @@ pub fn build(b: *std.Build) void {
     vps_test_step.dependOn(&pane_spacing_tests.step);
     const chat_reader_tests = b.addSystemCommand(&.{ "python3", "tools/chat-history-reader-test.py" });
     vps_test_step.dependOn(&chat_reader_tests.step);
+    const mp_send_tests = b.addSystemCommand(&.{ "python3", "tools/mp-send-test.py" });
+    vps_test_step.dependOn(&mp_send_tests.step);
+    const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js" });
+    test_step.dependOn(&agent_host_tests.step);
+    vps_test_step.dependOn(&agent_host_tests.step);
     const chat_settle_tests = b.addSystemCommand(&.{ "python3", "tools/chat-settle-test.py" });
     vps_test_step.dependOn(&chat_settle_tests.step);
     if (b.graph.host.result.os.tag != .windows) b.step("test", "Run Linux server tests").dependOn(vps_test_step);
