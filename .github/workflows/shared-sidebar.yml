@@ -1,0 +1,212 @@
+name: Shared sidebar
+run-name: shared sidebar ${{ inputs.tag || github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release to verify; empty builds this branch
+        required: false
+        type: string
+      memory_proof:
+        description: Run the bounded sidebar memory journey
+        required: false
+        type: boolean
+        default: false
+      order_proof:
+        description: Run the bounded sidebar order journey
+        required: false
+        type: boolean
+        default: false
+      changelog_proof:
+        description: Capture the published native Changelog first page
+        required: false
+        type: boolean
+        default: false
+      changelog_links:
+        description: Verify published Changelog native ticket dispatch
+        required: false
+        type: boolean
+        default: false
+      star_badge_proof:
+        description: Capture starred badges and verify hover and close actions
+        required: false
+        type: boolean
+        default: false
+      palette_avatar_proof:
+        description: Capture palette session avatars from a published release
+        required: false
+        type: boolean
+        default: false
+      density_proof:
+        description: Capture approved sidebar density from a published release
+        required: false
+        type: boolean
+        default: false
+      highlight_proof:
+        description: Capture active Starred tile and row in both themes
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: '4 4 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shared-sidebar-${{ github.ref }}-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  badge-geometry:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Test badge geometry
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
+          if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+          Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
+          & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" test src/star_badge_geometry.zig
+          if ($LASTEXITCODE -ne 0) { throw 'Badge geometry failed' }
+  source-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Zig 0.16.0
+        run: |
+          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
+          tar -xJf zig.tar.xz
+          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - run: node --test tools/session-lock.test.js tools/chat-view-everywhere.test.js tools/palette-rows.test.js tools/shortcuts-doc.test.js tools/group-palette.test.js
+        env:
+          ZIG: zig
+  sidebar:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Acquire application
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          MEMORY_PROOF: ${{ inputs.memory_proof }}
+          ORDER_PROOF: ${{ inputs.order_proof }}
+          CHANGELOG_PROOF: ${{ inputs.changelog_proof }}
+          CHANGELOG_LINKS: ${{ inputs.changelog_links }}
+          HIGHLIGHT_PROOF: ${{ inputs.highlight_proof }}
+          STAR_BADGE_PROOF: ${{ inputs.star_badge_proof }}
+          DENSITY_PROOF: ${{ inputs.density_proof }}
+          PALETTE_AVATAR_PROOF: ${{ inputs.palette_avatar_proof }}
+        run: |
+          New-Item -ItemType Directory -Force bin, evidence | Out-Null
+          if ($env:PALETTE_AVATAR_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true' -or $env:HIGHLIGHT_PROOF -eq 'true' -or $env:STAR_BADGE_PROOF -eq 'true' -or $env:DENSITY_PROOF -eq 'true')) { throw 'Palette avatar proof requires a published tag and excludes other proof modes' }
+          if ($env:DENSITY_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true' -or $env:HIGHLIGHT_PROOF -eq 'true' -or $env:STAR_BADGE_PROOF -eq 'true')) { throw 'Density proof requires a published tag and excludes other proof modes' }
+          if ($env:STAR_BADGE_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true' -or $env:HIGHLIGHT_PROOF -eq 'true')) { throw 'Star badge proof requires a published tag and excludes other proof modes' }
+          if ($env:HIGHLIGHT_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true')) { throw 'Highlight proof requires a published tag and excludes other proof modes' }
+          trap { if ($env:CHANGELOG_LINKS -eq 'true') { @{passed=$false; error='Link proof acquisition or audit failed'; cleanup=0; scratchRemoved=$true} | ConvertTo-Json | Set-Content evidence/result.json }; throw $_ }
+          if ($env:CHANGELOG_LINKS -eq 'true' -and $env:CHANGELOG_PROOF -ne 'true') { throw 'Changelog links requires changelog proof' }
+          if ($env:CHANGELOG_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true')) { throw 'Changelog proof requires a published tag and excludes other proof modes' }
+          if ($env:ORDER_PROOF -eq 'true' -and ($env:MEMORY_PROOF -eq 'true' -or -not $env:RELEASE_TAG)) { throw 'Order proof requires a published tag and excludes memory proof' }
+          New-Item -ItemType Directory -Force bin, evidence | Out-Null
+          if ($env:RELEASE_TAG) {
+            if ($env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release tag' }
+            gh release download $env:RELEASE_TAG --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt --dir bin
+            if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+            $line = @(Get-Content bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?multiprompt-x64\.exe$' })
+            if ($line.Count -ne 1 -or (Get-FileHash bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne ($line[0] -split '\s+')[0].ToLower()) { throw 'Release checksum mismatch' }
+            if ($env:CHANGELOG_LINKS -eq 'true') {
+              gh release download $env:RELEASE_TAG --pattern release-notes.json --dir bin
+              if ($LASTEXITCODE -ne 0) { throw 'Release notes download failed' }
+              $notesLine = @(Get-Content bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?release-notes\.json$' })
+              if ($notesLine.Count -ne 1 -or (Get-FileHash bin/release-notes.json -Algorithm SHA256).Hash.ToLower() -ne ($notesLine[0] -split '\s+')[0].ToLower()) { throw 'Release notes checksum mismatch' }
+              node tools/changelog-link-audit.mjs bin/release-notes.json $env:RELEASE_TAG evidence/changelog-audit.json
+              if ($LASTEXITCODE -ne 0) { throw 'Release notes audit failed' }
+            }
+            Move-Item bin/multiprompt-x64.exe bin/multiprompt.exe
+          } else {
+            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile "$env:RUNNER_TEMP/zig.zip"
+            if ((Get-FileHash "$env:RUNNER_TEMP/zig.zip" -Algorithm SHA256).Hash.ToLower() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
+            Expand-Archive "$env:RUNNER_TEMP/zig.zip" -DestinationPath $env:RUNNER_TEMP
+            & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" build
+            if ($LASTEXITCODE -ne 0) { throw 'Application build failed' }
+            Copy-Item zig-out/bin/multiprompt.exe bin/multiprompt.exe
+          }
+          $provenance = @{tag=$env:RELEASE_TAG; revision=(git rev-parse HEAD).Trim(); sha256=(Get-FileHash bin/multiprompt.exe -Algorithm SHA256).Hash.ToLower(); run_url="https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"}
+          if ($env:CHANGELOG_LINKS -eq 'true') { $provenance.releaseNotesSha256 = (Get-FileHash bin/release-notes.json -Algorithm SHA256).Hash.ToLower() }
+          $provenance | ConvertTo-Json | Set-Content evidence/provenance.json
+      - name: Native sidebar parity and actions
+        shell: powershell
+        env:
+          MEMORY_PROOF: ${{ inputs.memory_proof }}
+          ORDER_PROOF: ${{ inputs.order_proof }}
+          CHANGELOG_PROOF: ${{ inputs.changelog_proof }}
+          CHANGELOG_LINKS: ${{ inputs.changelog_links }}
+          HIGHLIGHT_PROOF: ${{ inputs.highlight_proof }}
+          STAR_BADGE_PROOF: ${{ inputs.star_badge_proof }}
+          DENSITY_PROOF: ${{ inputs.density_proof }}
+          PALETTE_AVATAR_PROOF: ${{ inputs.palette_avatar_proof }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if ($env:PALETTE_AVATAR_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -PaletteAvatarProof
+          } elseif ($env:DENSITY_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -DensityProof
+          } elseif ($env:STAR_BADGE_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -StarBadgeProof
+          } elseif ($env:HIGHLIGHT_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -HighlightProof
+          } elseif ($env:CHANGELOG_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -ChangelogProof -ChangelogLinks:($env:CHANGELOG_LINKS -eq 'true')
+          } elseif ($env:MEMORY_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -MemoryProof
+          } elseif ($env:ORDER_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -OrderProof
+          } else {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence"
+          }
+      - name: Capture old starred sidebar
+        if: always() && inputs.star_badge_proof
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v0.28.1098
+        run: |
+          New-Item -ItemType Directory -Force old-star-bin, evidence/old-star | Out-Null
+          gh release download $env:RELEASE_TAG --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt --dir old-star-bin
+          if ($LASTEXITCODE -ne 0) { throw 'Old release download failed' }
+          $line = @(Get-Content old-star-bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?multiprompt-x64\.exe$' })
+          if ($line.Count -ne 1 -or (Get-FileHash old-star-bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne ($line[0] -split '\s+')[0].ToLower()) { throw 'Old release checksum mismatch' }
+          try { ./tools/shared-sidebar.ps1 -Exe "$PWD/old-star-bin/multiprompt-x64.exe" -Output "$PWD/evidence/old-star" -StarBadgeProof } catch { Write-Host $_ }
+          $result = Get-Content evidence/old-star/result.json -Raw | ConvertFrom-Json
+          if ($result.passed -or $result.cleanup -ne 0 -or -not $result.scratchRemoved -or -not $result.displayRestored -or $result.error -cne 'Star badge pixels missing') { throw 'Old release did not fail the intended badge assertion' }
+      - name: Reject the old published sidebar
+        if: inputs.tag == '' && !inputs.memory_proof && !inputs.order_proof && !inputs.changelog_proof
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force old-bin, evidence/negative | Out-Null
+          gh release download v0.28.1001 --pattern multiprompt-x64.exe --pattern SHA256SUMS.txt --dir old-bin
+          if ($LASTEXITCODE -ne 0) { throw 'Negative-control download failed' }
+          $line = @(Get-Content old-bin/SHA256SUMS.txt | Where-Object { $_ -match '^[a-fA-F0-9]{64}\s+\*?multiprompt-x64\.exe$' })
+          if ($line.Count -ne 1 -or (Get-FileHash old-bin/multiprompt-x64.exe -Algorithm SHA256).Hash.ToLower() -ne ($line[0] -split '\s+')[0].ToLower()) { throw 'Negative-control checksum mismatch' }
+          try { & tools/shared-sidebar.ps1 -Exe "$PWD/old-bin/multiprompt-x64.exe" -Output "$PWD/evidence/negative" } catch { Write-Host $_ }
+          $result = Get-Content evidence/negative/result.json -Raw | ConvertFrom-Json
+          if ($result.passed -or $result.cleanup -ne 0 -or $result.error -cne 'Timed out: sidebar unchanged across shell and chat') { throw 'Old sidebar did not fail the intended pixel comparison' }
+          Write-Host 'OLD_SIDEBAR_REJECTED'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: shared-sidebar
+          path: evidence
+          if-no-files-found: error
+          retention-days: 14

@@ -174,6 +174,12 @@ pub fn build(b: *std.Build) void {
     run_clean_chat_tests.has_side_effects = true;
     b.step("test-clean-chat", "Run every CLEAN chat pixel test with visible results").dependOn(&run_clean_chat_tests.step);
 
+    const history_recovery_tests = b.addTest(.{
+        .root_module = exe.root_module,
+        .filters = &.{"IGSH-1029"},
+    });
+    b.step("test-chat-history-recovery", "Replay the interrupted chat history recovery").dependOn(&b.addRunArtifact(history_recovery_tests).step);
+
     const run_exe_tests = b.addRunArtifact(exe_tests);
     run_exe_tests.has_side_effects = b.option(bool, "render-proof", "Always rerun desktop tests to write Chat View render proof") orelse false;
     const main_test_step = b.step("test-main", "Run desktop module tests");

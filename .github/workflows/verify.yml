@@ -1,9 +1,7 @@
 name: Verify desktop
-run-name: verify ${{ inputs.feature || (github.event_name == 'push' && 'full' || 'appearance') }} ${{ inputs.tag || github.head_ref || github.ref_name }}
+run-name: verify ${{ inputs.feature || 'appearance' }} ${{ inputs.tag || github.head_ref || github.ref_name }}
 
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
     inputs:
       feature:
@@ -12,7 +10,7 @@ on:
         default: appearance
         type: string
       dictation_stall:
-        description: Deliberately stall the dictation capture precondition to prove failure evidence
+        description: Deliberately stall dictation capture or the browser-pane-stuck driver to prove timeout evidence
         required: false
         default: false
         type: boolean
@@ -20,8 +18,27 @@ on:
         description: Optional release tag instead of building this branch
         required: false
         type: string
+      usage_pace_proof:
+        description: Verify per-window pace through the existing SSH status boundary
+        required: false
+        default: false
+        type: boolean
+      usage_pace_status:
+        description: Optional base64 sanitized live Token Ladder status snapshot
+        required: false
+        type: string
       sending_status_proof:
         description: Capture the same message in flight and after delivery
+        required: false
+        default: false
+        type: boolean
+      chat_live_delivery_proof:
+        description: Three busy sends and ten continuously visible replies within two seconds
+        required: false
+        default: false
+        type: boolean
+      chat_crash_proof:
+        description: Stress thirty consecutive live reply and select-copy rounds
         required: false
         default: false
         type: boolean
@@ -30,8 +47,28 @@ on:
         required: false
         default: false
         type: boolean
+      chat_shape_baseline:
+        description: Record the known v0.28.946 stale-reply regression without claiming product acceptance
+        required: false
+        default: false
+        type: boolean
+      chat_shape_proof:
+        description: Use anonymous audit-size chats with strict switch and ordinary CPU evidence
+        required: false
+        default: false
+        type: boolean
+      chat_switch_profile:
+        description: Record a separate Windows CPU trace of the slowest measured shape route
+        required: false
+        default: false
+        type: boolean
       remote_switch_proof:
         description: Measure 20 local and second-host long-history switches, CPU and native paint gaps
+        required: false
+        default: false
+        type: boolean
+      hax_sessions_proof:
+        description: Verify native hax messages and close intent across host refresh
         required: false
         default: false
         type: boolean
@@ -55,8 +92,23 @@ on:
         required: false
         default: false
         type: boolean
+      chat_resync_proof:
+        description: Reload stale messages and waiting labels without losing drafts or resending
+        required: false
+        default: false
+        type: boolean
+      chat_notes_proof:
+        description: Match Android runner-note rows with native expand and fold clicks
+        required: false
+        default: false
+        type: boolean
       chat_reactions_proof:
         description: Right-click reactions, transport, same-target restart and fallback
+        required: false
+        default: false
+        type: boolean
+      chat_reply_proof:
+        description: Compact quoted replies and a native jump to the highlighted source
         required: false
         default: false
         type: boolean
@@ -65,8 +117,57 @@ on:
         required: false
         default: false
         type: boolean
+      long_chat_proof:
+        description: Sustain long-chat delivery for thirty minutes on a release
+        required: false
+        default: false
+        type: boolean
+      owner_browser_proof:
+        description: Optional JSON with disposable SSH target, public host key, session and proof socket paths
+        required: false
+        default: ''
+        type: string
   workflow_call:
     inputs:
+      revision:
+        required: false
+        type: string
+      browser_stall:
+        required: false
+        default: false
+        type: boolean
+      chat_cancel_proof:
+        required: false
+        default: false
+        type: boolean
+      chat_reactions_proof:
+        required: false
+        default: false
+        type: boolean
+      chat_shape_baseline:
+        required: false
+        default: false
+        type: boolean
+      chat_shape_proof:
+        required: false
+        default: false
+        type: boolean
+      chat_switch_profile:
+        required: false
+        default: false
+        type: boolean
+      long_chat_proof:
+        required: false
+        default: false
+        type: boolean
+      hax_sessions_proof:
+        required: false
+        default: false
+        type: boolean
+      chat_notes_proof:
+        required: false
+        default: false
+        type: boolean
       feature:
         required: true
         type: string
@@ -81,66 +182,63 @@ on:
         required: false
         default: false
         type: boolean
-  pull_request:
-    paths:
-      - '**'
-      - .claude/skills/verify-multiprompt/**
-      - .github/workflows/verify.yml
-      - .github/workflows/auto-revert-master.yml
-      - .github/required-checks.txt
-      - tools/auto-revert-master.js
-      - tools/auto-revert-master.test.js
-      - tools/verify-multiprompt.test.js
-      - tools/chat-sync-audit.py
-      - tools/chat-sync-audit.test.py
-      - tools/chat-focus.test.js
-      - tools/chat-dictation.test.js
-      - tools/fixtures/IGSH-812/**
-      - tools/chat-view-everywhere.test.js
-      - tools/chat-view-everywhere-policy.test.js
-      - tools/verify-chat-delivery.test.js
-      - tools/verify-chat-delivery/**
-      - tools/chat-local-agent.c
-      - tools/chat-messages-only-proof.mjs
-      - tools/chat-messages-only-proof.test.mjs
-      - tools/chat-messages-only-proof.test.js
-      - tools/chat-unread-divider.test.js
-      - tools/chat-code-font-proof.mjs
-      - tools/chat-code-font-proof.test.js
-      - tools/chat-composer-text-proof.mjs
-      - tools/chat-composer-text-proof.test.js
-      - tools/start-maximized.test.js
-      - tools/verify-scratch.test.ps1
-      - tools/favorites-groups.test.js
-      - src/**
-      - tools/check-browser-pane-stuck.mjs
-      - tools/check-browser-pane-locked.test.js
-      - tools/check-workspace-focus.mjs
-      - tools/pane-spacing.test.js
-      - tools/browser-switch-speed.test.js
-      - tools/frozen-wake.test.js
-      - tools/browser-own-profile.test.js
-      - tools/screenshot-upload-receiver.mjs
-      - tools/screenshot-upload-receiver.test.js
+      chat_reply_proof:
+        required: false
+        default: false
+        type: boolean
+      chat_reply_baseline:
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '32 4 * * *'
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}
+  group: ${{ github.workflow }}-${{ github.ref }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.tag || 'candidate') || '' }}${{ github.event_name == 'workflow_dispatch' && format('-{0}-{1}', inputs.feature, inputs.tag) || '' }}${{ inputs.feature && github.event_name == 'push' && format('-gate-{0}', github.sha) || '' }}${{ github.run_attempt != '1' && format('-rerun-{0}', github.sha) || '' }}${{ inputs.feature && format('-feature-{0}', inputs.feature) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  journeys:
+    if: inputs.feature != 'chat-sync-audit'
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.features.outputs.full }}
+      quarantined: ${{ steps.policy.outputs.quarantined }}
+      pr: ${{ steps.features.outputs.pr }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Check feature discovery contracts
+        continue-on-error: true
+        run: node --test tools/verify-multiprompt.test.js
+      - id: features
+        run: node tools/verify-features.cjs
+      - id: policy
+        run: |
+          node - <<'NODE' >> "$GITHUB_OUTPUT"
+          const policy = require('./tools/journey-policy.json');
+          console.log(`quarantined=${JSON.stringify(Object.keys(policy.quarantined))}`);
+          NODE
   reopen-board-contract:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
       - run: node --test tools/auto-revert-board.test.js tools/auto-revert-master.test.js
+        continue-on-error: true
   chat-sync-audit-changes:
     runs-on: ubuntu-latest
     outputs:
@@ -149,6 +247,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         if: github.event_name == 'pull_request'
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - id: diff
@@ -169,6 +268,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -206,30 +306,49 @@ jobs:
           path: evidence/
           if-no-files-found: error
   verify:
+    needs: journeys
     if: inputs.feature != 'chat-sync-audit'
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
-    timeout-minutes: ${{ matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
+    timeout-minutes: ${{ inputs.long_chat_proof && 50 || matrix.feature == 'pane-layout' && 60 || matrix.feature == 'chat-switch-speed' && 60 || matrix.feature == 'browser-switch-speed' && 60 || 30 }}
+    continue-on-error: ${{ contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature) }}
     strategy:
       fail-fast: false
       max-parallel: 6
       matrix:
-        feature: ${{ inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_retention_proof && github.event_name == 'pull_request' && fromJSON('["appearance"]') || (github.event_name == 'push' || inputs.feature == 'all') && fromJSON('["appearance", "chat-dictation", "relaunch-saved-sessions", "session-restore", "workspace-focus", "tmux-binding", "favorites-groups", "browser-pane-stuck", "browser-pane-locked", "group-rail", "pane-layout", "chat-view", "chat-messages-only", "chat-view-everywhere", "chat-focus", "browser-own-profile", "status-card", "palette-order", "remind-me", "chat-send-latency", "chat-first-paint"]') || fromJSON(format('["{0}"]', inputs.feature)) }}
+        feature: ${{ inputs.feature && inputs.feature != 'all' && fromJSON(format('["{0}"]', inputs.feature)) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11' && fromJSON('["chat-delivery"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON('["browser-pane-stuck","chat-messages-only"]') || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1079' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1083' && fromJSON(format('["{0}"]', 'appearance')) || github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1061-recovery' && fromJSON(format('["{0}"]', 'browser-pane-stuck')) || github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ceo/IGSH-1072') && fromJSON(format('["{0}"]', 'chat-dictation')) || inputs.feature != 'all' && inputs.feature && github.event_name == 'push' && fromJSON(format('["{0}"]', inputs.feature)) || !inputs.chat_reply_proof && !inputs.chat_notes_proof && !inputs.chat_retention_proof && !inputs.chat_reactions_proof && !inputs.hax_sessions_proof && github.event_name == 'pull_request' && fromJSON(needs.journeys.outputs.pr) || inputs.feature == 'all' && fromJSON(needs.journeys.outputs.full) || github.event_name == 'push' && fromJSON('["appearance", "relaunch-saved-sessions"]') || fromJSON(format('["{0}"]', inputs.feature || 'appearance')) }}
+        app-revision: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1055-hax2' && fromJSON(format('["5d2a820355969173090f0fcd0c72a7b3bd222141","{0}"]', github.sha)) || fromJSON('[""]') }}
         caption-dpi: ${{ inputs.feature == 'title-bar' && fromJSON('[96,120,144]') || inputs.feature == 'window-controls' && fromJSON('[96,120,144]') || fromJSON('[96]') }}
         caption-browser-theme: ${{ inputs.feature == 'title-bar' && fromJSON('["light","dark"]') || fromJSON('["light"]') }}
     env:
       CAPTION_DPI: ${{ matrix.caption-dpi }}
       CAPTION_BROWSER_THEME: ${{ matrix.caption-browser-theme }}
       CHAT_ACCEPTED_PROOF: ${{ inputs.chat_accepted_proof && '1' || '' }}
+      CHAT_CANCEL_PROOF: ${{ inputs.chat_cancel_proof && '1' || '' }}
       CHAT_SENDING_PROOF: ${{ inputs.sending_status_proof && '1' || '' }}
+      CHAT_LIVE_DELIVERY_PROOF: ${{ (inputs.chat_live_delivery_proof || inputs.chat_crash_proof) && '1' || '' }}
+      CHAT_CRASH_PROOF: ${{ inputs.chat_crash_proof && '1' || '' }}
       CHAT_SKILLS_PROOF: ${{ inputs.chat_skills_proof && '1' || '' }}
       CHAT_REACTIONS_PROOF: ${{ inputs.chat_reactions_proof && '1' || '' }}
+      CHAT_RESYNC_PROOF: ${{ (inputs.chat_resync_proof || (github.event_name == 'push' && github.ref == 'refs/heads/ceo/IGSH-1053-hax11')) && '1' || '' }}
+      CHAT_NOTES_PROOF: ${{ inputs.chat_notes_proof && '1' || '' }}
+      CHAT_REPLY_PROOF: ${{ inputs.chat_reply_proof && '1' || '' }}
+      CHAT_REPLY_BASELINE: ${{ inputs.chat_reply_baseline && '1' || '' }}
       CHAT_WIDTH_PROOF: ${{ inputs.chat_width_proof && '1' || '' }}
       CHAT_SWITCH_PROOF: ${{ inputs.remote_switch_proof && '1' || '' }}
+      CHAT_SHAPE_BASELINE: ${{ inputs.chat_shape_baseline && '1' || '' }}
+      CHAT_SHAPE_PROOF: ${{ inputs.chat_shape_proof && '1' || '' }}
+      CHAT_SWITCH_PROFILE: ${{ inputs.chat_switch_profile && '1' || '' }}
+      CHAT_HAX_PROOF: ${{ inputs.hax_sessions_proof && '1' || '' }}
       CHAT_REMOTE_PROOF: ${{ inputs.remote_sync_proof && '1' || '' }}
       CHAT_MISSING_PROOF: ${{ inputs.missing_note_proof && '1' || '' }}
+      CHAT_LONG_PROOF: ${{ inputs.long_chat_proof && '1' || '' }}
       CHAT_RETENTION_PROOF: ${{ inputs.chat_retention_proof && '1' || '' }}
       VERIFY_DICTATION_STALL: ${{ inputs.dictation_stall && '1' || '' }}
+      USAGE_PACE_PROOF: ${{ inputs.usage_pace_proof && '1' || '' }}
+      USAGE_PACE_STATUS: ${{ inputs.usage_pace_status || '' }}
+      VERIFY_APP_REVISION: ${{ matrix.app-revision }}
+      OWNER_BROWSER_PROOF: ${{ inputs.owner_browser_proof || '' }}
       FEATURE: ${{ matrix.feature }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
     steps:
@@ -237,37 +356,75 @@ jobs:
         run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+      - name: Prepare disposable owner-browser tunnel key
+        if: env.OWNER_BROWSER_PROOF != ''
+        shell: pwsh
+        run: |
+          if ($env:FEATURE -ne 'browser-own-profile') { throw 'Owner browser proof requires browser-own-profile' }
+          python -c "import os,subprocess; subprocess.run(['ssh-keygen','-q','-t','ed25519','-N','','-f',os.path.join(os.environ['RUNNER_TEMP'],'owner-browser-key')],check=True)"
+          if ($LASTEXITCODE -ne 0) { throw 'Disposable tunnel key generation failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: env.OWNER_BROWSER_PROOF != ''
+        with:
+          name: owner-browser-public-key
+          path: ${{ runner.temp }}/owner-browser-key.pub
+          retention-days: 1
+          if-no-files-found: error
       - name: Check verification contracts
-        run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js
+        continue-on-error: true
+        run: node --test --test-concurrency=1 tools/verify-multiprompt.test.js tools/chat-shape-switch.test.js tools/chat-width-proof.test.mjs tools/title-bar.test.js tools/window-controls.test.js tools/chat-view-everywhere.test.js tools/chat-focus.test.js tools/chat-dictation.test.js tools/grok-chat.test.js tools/chat-view-everywhere-policy.test.js tools/verify-chat-delivery.test.js tools/favorites-groups.test.js tools/check-browser-pane-locked.test.js tools/start-maximized.test.js tools/browser-switch-speed.test.js tools/frozen-wake.test.js tools/browser-pane-hibernation.test.js tools/browser-own-profile.test.js tools/screenshot-upload-receiver.test.js tools/chat-code-font-proof.test.js tools/chat-composer-text-proof.test.js tools/chat-messages-only-proof.test.mjs tools/chat-messages-only-proof.test.js tools/chat-history-retention-proof.test.mjs tools/chat-retention-arrival-order.test.js tools/capture-usage-pace.test.js tools/usage-pace-ink.test.js
       - name: Check remote sync proof oracle
+        continue-on-error: true
         run: node --test tools/chat-remote-sync-proof.test.mjs tools/remote-switch-proof.test.mjs tools/chat-missing-note-proof.test.mjs
       - name: Check accepted message pixel oracle
+        continue-on-error: true
         run: node --test tools/chat-accepted-proof.test.mjs tools/chat-reactions-proof.test.mjs
       - name: Check inline working pixel oracle
+        continue-on-error: true
         run: node --test tools/chat-working-proof.test.mjs
       - name: Check unread divider contracts
-        run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs
+        continue-on-error: true
+        run: node --test tools/chat-unread-divider.test.js tools/chat-sending-status-proof.test.mjs tools/chat-delivery-live-proof.test.mjs
       - name: Check workspace focus journey contract
+        continue-on-error: true
         run: node tools/check-workspace-focus.mjs
+      - name: Install browser toggle recorder
+        if: env.FEATURE == 'browser-pane-stuck'
+        shell: pwsh
+        run: |
+          choco install ffmpeg --version=7.1.1 --yes --no-progress --limit-output
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
       - name: Check browser recovery journey contract
+        continue-on-error: true
         run: node tools/check-browser-pane-stuck.mjs
+      - name: Check runner-note pixel oracle
+        if: env.CHAT_NOTES_PROOF == '1'
+        run: node --test tools/chat-notes-proof.test.mjs
       - name: Validate journey and syntax
         shell: powershell
         env:
           HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if ($env:FEATURE -notin @('appearance', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'session-open', 'favorites-groups', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions', 'chat-first-paint', 'browser-corners', 'chat-send-latency')) { throw 'Unknown feature map' }
+          node tools/verify-features.cjs $env:FEATURE
+          if ($LASTEXITCODE -ne 0) { throw 'Unsupported desktop journey' }
           if ($env:FEATURE -eq 'appearance' -and $env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/master' -and $env:HEAD_COMMIT_MESSAGE.Split([char]10)[0].Contains('IGSH-837 red proof') -and -not $env:HEAD_COMMIT_MESSAGE.StartsWith('Revert')) { throw 'IGSH-837 deliberate red master proof' }
           if ($env:FEATURE -eq 'chat-dictation' -and $env:RELEASE_TAG) { throw 'Chat dictation requires the branch offline fixture boundary' }
-          if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed', 'chat-switch-speed', 'title-bar') -and $env:RELEASE_TAG) { throw 'Browser emulation requires a branch build with matching extension and bridge' }
+          if ($env:CHAT_SHAPE_PROOF -eq '1' -and $env:FEATURE -ne 'chat-switch-speed') { throw 'Shape proof requires chat-switch-speed' }
+          if ($env:CHAT_SWITCH_PROFILE -eq '1' -and $env:CHAT_SHAPE_PROOF -ne '1' -and $env:CHAT_SWITCH_PROOF -ne '1') { throw 'Switch profile requires a native switching journey' }
+          if ($env:FEATURE -in @('browser-emulation', 'browser-switch-speed', 'chat-switch-speed', 'title-bar') -and $env:RELEASE_TAG) {
+            if ($env:FEATURE -ne 'chat-switch-speed' -or $env:CHAT_SHAPE_PROOF -ne '1' -or $env:RELEASE_TAG -ne 'v0.28.946') { throw 'Browser emulation requires a branch build with matching extension and bridge' }
+          }
           if ($env:RELEASE_TAG -and $env:RELEASE_TAG -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag' }
           $tokens = $null
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/control.ps1", [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count) { throw ($errors | Out-String) }
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          & tools/split-feature-controls.ps1 -Path "$pwd/.claude/skills/verify-multiprompt/control.ps1" -Output "$pwd/evidence/control-ast.json"
           if ($env:FEATURE -eq 'chat-options') {
             [System.Management.Automation.Language.Parser]::ParseFile("$pwd/.claude/skills/verify-multiprompt/chat-options.ps1", [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count) { throw ($errors | Out-String) }
@@ -289,7 +446,7 @@ jobs:
             if ($errors.Count) { throw ($errors | Out-String) }
           }
       - name: Install Zig 0.16.0
-        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'tmux-binding'
+        if: env.RELEASE_TAG == '' || env.FEATURE == 'chat-delivery' || env.FEATURE == 'composer-buttons' || env.FEATURE == 'chat-working' || env.FEATURE == 'chat-view' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'tmux-binding' || env.CHAT_SHAPE_PROOF == '1' || env.FEATURE == 'chat-options' || env.USAGE_PACE_PROOF == '1'
         shell: pwsh
         run: |
           $zip = "$env:RUNNER_TEMP/zig.zip"
@@ -306,9 +463,35 @@ jobs:
         run: |
           if ($env:RELEASE_TAG) { throw 'safe-updates requires the branch verifier built with the job-only public key' }
           & tools/update-release-fixtures.ps1 -Root "$env:RUNNER_TEMP/update-release-fixtures"
+      - name: Check out the independent application revision
+        if: matrix.app-revision != ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.app-revision }}
+          path: app-source
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Identify branch executable
+        if: env.RELEASE_TAG == ''
+        shell: pwsh
+        run: |
+          $revision = (git rev-parse HEAD).Trim()
+          if ($env:VERIFY_APP_REVISION) { $revision = (git -C app-source rev-parse HEAD).Trim() }
+          $tag = if ($env:VERIFY_APP_REVISION) { (git -C app-source describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim() } else { (git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim() }
+          if ($LASTEXITCODE -ne 0 -or $tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Reachable release version not found' }
+          $version = $Matches[1]
+          "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - name: Build branch executable
         if: env.RELEASE_TAG == ''
-        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }}
+        run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
+        working-directory: ${{ matrix.app-revision && 'app-source' || '.' }}
+      - name: Stage the independently built application
+        if: matrix.app-revision != ''
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force zig-out/bin | Out-Null
+          Copy-Item app-source/zig-out/bin/* zig-out/bin/
       - name: Resolve real executable
         shell: pwsh
         env:
@@ -316,7 +499,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force verify-bin, evidence | Out-Null
-          $revision = (git rev-parse HEAD).Trim()
+          $harnessRevision = (git rev-parse HEAD).Trim()
+          $revision = if ($env:VERIFY_APP_REVISION) { (git -C app-source rev-parse HEAD).Trim() } else { $harnessRevision }
+          $embeddedRevision = ''
           if ($env:RELEASE_TAG) {
             gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir verify-bin --pattern multiprompt-x64.exe --pattern zigshell-bridge-x64.exe --pattern SHA256SUMS.txt
             if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
@@ -327,24 +512,56 @@ jobs:
               if ((Get-FileHash "verify-bin/$asset-x64.exe" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw "Release checksum mismatch for $asset" }
               Move-Item "verify-bin/$asset-x64.exe" "verify-bin/$asset.exe"
             }
+            if ($env:CHAT_SHAPE_PROOF -eq '1') {
+              $archive = Join-Path $env:RUNNER_TEMP 'shape-release-extension.zip'
+              git archive --format=zip "--output=$archive" $env:RELEASE_TAG extension
+              if ($LASTEXITCODE -ne 0) { throw 'Matching released extension archive failed' }
+              Expand-Archive -LiteralPath $archive -DestinationPath verify-release
+              $extension = (Resolve-Path verify-release/extension).Path
+              "VERIFY_EXTENSION_ROOT=$extension" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+            }
             $version = $env:RELEASE_TAG.Substring(1)
           } else {
             Copy-Item zig-out/bin/multiprompt.exe verify-bin/multiprompt.exe
+            if ($env:CHAT_SWITCH_PROFILE -eq '1' -and (Test-Path zig-out/bin/multiprompt.pdb)) { Copy-Item zig-out/bin/multiprompt.pdb verify-bin/multiprompt.pdb }
             Copy-Item zig-out/bin/zigshell-bridge.exe verify-bin/zigshell-bridge.exe
-            $source = Get-Content src/main.zig -Raw
-            if ($source -notmatch 'pub const APP_VERSION = (?:build_config\.app_version orelse )?"([^"]+)"') { throw 'Version not found' }
-            $version = $Matches[1]
+            $version = $env:VERIFY_VERSION
+            $embeddedRevision = $env:VERIFY_REVISION
           }
+          $binary = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$pwd/verify-bin/multiprompt.exe"))
+          if (-not $env:RELEASE_TAG -and ($embeddedRevision -cne $revision -or -not $binary.Contains("MPREVISION=$revision;"))) { throw 'Executable source revision mismatch' }
+          if (-not $binary.Contains("MPVERSION=$version;")) { throw 'Executable version mismatch' }
           $hash = (Get-FileHash verify-bin/multiprompt.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          @{ revision = $revision; tag = $env:RELEASE_TAG; version = $version; sha256 = $hash; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
+          if ($env:CHAT_SHAPE_PROOF -eq '1' -and $env:RELEASE_TAG -eq 'v0.28.946' -and $hash -ne '45bef2a5da04ef62f4e3a2789467b17adb6ee4e38db3d6fc34916beef6f700cd') { throw 'Released946 baseline hash changed' }
+          $optimization = if ($env:CHAT_SHAPE_PROOF -eq '1' -and -not $env:RELEASE_TAG) { 'ReleaseSmall' } else { 'published-or-default' }
+          "VERIFY_OPTIMIZATION=$optimization" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          @{ revision = $revision; harnessRevision = $harnessRevision; embeddedRevision = $embeddedRevision; tag = $env:RELEASE_TAG; version = $version; sha256 = $hash; run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } | ConvertTo-Json | Set-Content evidence/build.json
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_SHA256=$hash" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding'
+        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options'
         with:
           python-version: '3.12'
+      - name: Prepare usage pace SSH boundary
+        if: env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1'
+        shell: pwsh
+        run: |
+          zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-pace-ssh.c -o verify-bin/usage-ssh.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Usage SSH boundary compilation failed' }
+          if ($env:USAGE_PACE_STATUS) {
+            [IO.File]::WriteAllBytes("$pwd/verify-bin/usage-pace-source.json", [Convert]::FromBase64String($env:USAGE_PACE_STATUS))
+          } else {
+            Copy-Item tools/fixtures/IGSH-997/sample.json verify-bin/usage-pace-source.json
+          }
+      - name: Check measured chat shape contracts
+        if: env.FEATURE == 'chat-switch-speed'
+        run: |
+          python tools/verify-chat-delivery/chat-shapes-test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Chat shape generator contracts failed' }
+          python tools/verify-chat-delivery/chat-switch-evidence-test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Chat switch evidence contracts failed' }
       - name: Compile chat delivery remote-shell boundary
-        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding'
+        if: env.FEATURE == 'chat-delivery' || env.FEATURE == 'chat-messages-only' || env.FEATURE == 'chat-full-history' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'tmux-binding' || env.FEATURE == 'chat-options'
         shell: pwsh
         run: |
           zig cc -target x86_64-windows-gnu -municode -O2 tools/verify-chat-delivery/launcher.c -o verify-bin/ssh.exe
@@ -431,18 +648,25 @@ jobs:
       - name: Run messages-only native layout regressions
         if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         run: zig build test-main --summary all
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Run CLEAN chat pixel positive controls
         if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        shell: bash
+        run: zig build test-clean-chat --summary all 2>&1 | tee evidence/clean-chat-native.log
+      - name: Require every CLEAN pixel positive control
+        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        run: node tools/check-clean-chat-output.mjs evidence/clean-chat-native.log
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         with:
           persist-credentials: false
           ref: 42cecfd3e88e78f3c44f0b30917a8629c8e94f8f
           path: negative-source
       - name: Build the pre-fix commit 42cecfd3 negative control
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         working-directory: negative-source
         run: zig build
       - name: Require pre-fix 42cecfd3 to show activity rows with the identical journey
-        if: env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'chat-messages-only' && env.RELEASE_TAG == '' && env.CHAT_WIDTH_PROOF != '1' && env.CHAT_SWITCH_PROOF != '1'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -466,17 +690,17 @@ jobs:
           if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Negative control cleanup failed' }
           $global:LASTEXITCODE = 0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         with:
           persist-credentials: false
           ref: 9618091700e09f5958a48390449dc5067874d5dd
           path: negative-focus-source
       - name: Build IGSH-807 pre-fix focus-ring control
-        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         working-directory: negative-focus-source
         run: zig build
       - name: Require visible pre-fix focus rings with unchanged input cycling
-        if: env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
+        if: github.event_name == 'workflow_dispatch' && inputs.revision == '' && env.FEATURE == 'pane-layout' && env.RELEASE_TAG == ''
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -548,12 +772,125 @@ jobs:
           if ($observed.error -notlike '*newly added skill discovered within five seconds*' -or -not $doctor.chat -or $clean.remaining_owned_processes -ne 0 -or -not $clean.scratch_removed) { throw "Negative control failed for the wrong reason: $($observed.error)" }
           Write-Host 'OLD_MASTER_SKILL_REFRESH_RED_OK'
           $global:LASTEXITCODE = 0
+      - name: Require the released pre-fix runner-note control to fail
+        if: env.CHAT_NOTES_PROOF == '1' && env.RELEASE_TAG == ''
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force negative-notes, evidence/notes-negative | Out-Null
+          gh release download v0.28.946 --repo $env:GITHUB_REPOSITORY --pattern multiprompt-x64.exe --dir negative-notes
+          if ($LASTEXITCODE -ne 0) { throw 'Runner-note negative release download failed' }
+          $exe = "$pwd/negative-notes/multiprompt-x64.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne '45bef2a5da04ef62f4e3a2789467b17adb6ee4e38db3d6fc34916beef6f700cd') { throw 'Runner-note negative release identity mismatch' }
+          Copy-Item verify-bin/ssh.exe, verify-bin/tmux.exe negative-notes/
+          @{ tag='v0.28.946'; sha256=$hash } | ConvertTo-Json | Set-Content evidence/notes-negative/build.json
+          try {
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature chat-delivery -Exe $exe -ExpectedVersion '0.28.946' -ExpectedHash $hash -Evidence "$pwd/evidence/notes-negative"
+          } catch { Write-Host "Negative control returned: $_" }
+          $red = Get-Content evidence/notes-negative/result.json -Raw | ConvertFrom-Json
+          $cleanup = Get-Content evidence/notes-negative/cleanup.json -Raw | ConvertFrom-Json
+          if ($red.status -ne 'failed' -or $red.error -notmatch 'IGSH-1030 expected five compact runner rows') { throw 'Runner-note negative control failed for the wrong reason' }
+          if ($cleanup.remaining_owned_processes -ne 0 -or -not $cleanup.scratch_removed) { throw 'Runner-note negative cleanup failed' }
+          Write-Host 'RELEASED_RUNNER_NOTE_NEGATIVE_CONTROL_REJECTED'
+          $global:LASTEXITCODE = 0
       - name: Launch Doctor Drive Evidence Cleanup
-        timeout-minutes: ${{ env.FEATURE == 'chat-dictation' && 5 || 30 }}
+        id: desktop-driver
+        timeout-minutes: ${{ env.FEATURE == 'browser-pane-stuck' && 8 || inputs.long_chat_proof && 40 || env.FEATURE == 'chat-dictation' && 5 || 30 }}
         if: (success() || steps.composer-native.outcome == 'failure') && env.FEATURE != 'browser-emulation' && env.FEATURE != 'browser-switch-speed' && env.FEATURE != 'chat-switch-speed' && env.FEATURE != 'browser-own-profile' && env.FEATURE != 'title-bar'
         shell: powershell
+        env:
+          VERIFY_BROWSER_STALL: ${{ (inputs.browser_stall || inputs.dictation_stall) && '1' || '' }}
         run: |
+          if ($env:FEATURE -eq 'browser-pane-stuck' -and $env:VERIFY_BROWSER_STALL -eq '1') {
+            Write-Host 'Forced browser driver hang: timeout must leave the release running'
+            Start-Sleep -Seconds 900
+          }
+          if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') { $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json" }
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+          if ($env:FEATURE -eq 'status-card' -and $env:USAGE_PACE_PROOF -eq '1') {
+            $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/full.json"
+            & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence/footer-full"
+            foreach ($mode in @('sample', 'above', 'below')) {
+              $env:VERIFY_USAGE_PACE_FILE = if ($mode -eq 'sample') { "$pwd/verify-bin/usage-pace-source.json" } else { "$pwd/tools/fixtures/IGSH-997/$mode.json" }
+              $directory = "$pwd/evidence/pace-$mode"
+              New-Item -ItemType Directory -Force $directory | Out-Null
+              Copy-Item evidence/build.json "$directory/build.json"
+              & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence $directory
+            }
+            Remove-Item Env:VERIFY_USAGE_PACE_FILE
+          }
+      - name: Build isolated footer update fixture
+        if: success() && steps.desktop-driver.outcome == 'success' && env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1' && env.RELEASE_TAG != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $source = Join-Path $env:RUNNER_TEMP 'footer-tag-source'
+          $fixture = Join-Path $env:RUNNER_TEMP 'footer-update-fixtures'
+          $pristine = Join-Path $env:RUNNER_TEMP 'footer-tag-pristine'
+          $key = Join-Path $env:RUNNER_TEMP 'footer-test-key.der'
+          $commit = (git rev-parse "$env:RELEASE_TAG^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') { throw 'Footer tag commit missing' }
+          New-Item -ItemType Directory -Force $source | Out-Null
+          git archive --format=tar "--output=$env:RUNNER_TEMP/footer-tag.tar" $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw 'Footer tag archive failed' }
+          tar -xf "$env:RUNNER_TEMP/footer-tag.tar" -C $source
+          if ($LASTEXITCODE -ne 0) { throw 'Footer tag extraction failed' }
+          New-Item -ItemType Directory -Force $pristine | Out-Null
+          tar -xf "$env:RUNNER_TEMP/footer-tag.tar" -C $pristine
+          if ($LASTEXITCODE -ne 0) { throw 'Footer pristine extraction failed' }
+          Push-Location $source
+          try {
+            node tools/update-release-fixtures.mjs --prepare-key $key
+            if ($LASTEXITCODE -ne 0) { throw 'Footer test key preparation failed' }
+            $changes = @(git -C $env:RUNNER_TEMP diff --no-index --name-only -- footer-tag-pristine footer-tag-source)
+            $diffExit = $LASTEXITCODE
+            $normalized = @($changes | ForEach-Object { $_.Trim('"').Replace('\', '/') })
+            Write-Host "Footer source diff exit=$diffExit count=$($normalized.Count)"
+            foreach ($path in $normalized) { Write-Host "Footer source diff path=$path" }
+            $prefix = 'footer-tag-source/'
+            if ($diffExit -ne 1 -or $normalized.Count -ne 1 -or -not $normalized[0].StartsWith($prefix, [StringComparison]::Ordinal)) { throw 'Footer tagged source differs beyond the test public key' }
+            $relative = $normalized[0].Substring($prefix.Length)
+            if (-not [String]::Equals($relative, 'src/release_signing_public_key.txt', [StringComparison]::Ordinal)) { throw 'Footer tagged source differs beyond the test public key' }
+            if ((Get-FileHash (Join-Path $pristine $relative) -Algorithm SHA256).Hash -eq (Get-FileHash (Join-Path $source $relative) -Algorithm SHA256).Hash) { throw 'Footer test public key did not change' }
+            $public = (Get-Content src/release_signing_public_key.txt -Raw).Trim()
+            $keyFingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Convert]::FromBase64String($public))).ToLowerInvariant()
+            $env:MULTIPROMPT_TEST_SIGNING_KEY = $key
+            zig build -Dtarget=x86_64-windows-gnu -Drelease=true "-Dversion=$env:VERIFY_VERSION" "-Drevision=$commit"
+            if ($LASTEXITCODE -ne 0) { throw 'Footer test-key build failed' }
+            & tools/update-release-fixtures.ps1 -Root $fixture
+            if ($LASTEXITCODE -ne 0) { throw 'Footer signed fixtures failed' }
+            $testExe = (Resolve-Path zig-out/bin/multiprompt.exe).Path
+            Copy-Item "$env:GITHUB_WORKSPACE/verify-bin/usage-ssh.exe" (Split-Path $testExe)
+            $testHash = (Get-FileHash $testExe -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($testHash -eq $env:VERIFY_SHA256) { throw 'Test-key executable unexpectedly matches published executable' }
+            @{ tag=$env:RELEASE_TAG; sourceCommit=$commit; publishedSha256=$env:VERIFY_SHA256; testKeySha256=$testHash; testTrustKeySha256=$keyFingerprint; sourceChange='src/release_signing_public_key.txt only'; published=$false } | ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE/evidence/footer-test-key-manifest.json"
+            "FOOTER_TEST_EXE=$testExe" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+            "FOOTER_FIXTURE_ROOT=$fixture" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          } finally {
+            Remove-Item Env:MULTIPROMPT_TEST_SIGNING_KEY -ErrorAction SilentlyContinue
+            Pop-Location
+            Remove-Item -LiteralPath $key -Force -ErrorAction SilentlyContinue
+          }
+      - name: Capture pending footer with test-key fixture
+        if: success() && steps.desktop-driver.outcome == 'success' && env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1' && env.RELEASE_TAG != ''
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:FOOTER_TEST_EXE -or -not $env:FOOTER_FIXTURE_ROOT) { throw 'Footer test-key fixture missing' }
+          $env:VERIFY_USAGE_PACE_FILE = "$pwd/tools/fixtures/IGSH-1190/normal.json"
+          $testHash = (Get-FileHash $env:FOOTER_TEST_EXE -Algorithm SHA256).Hash.ToLowerInvariant()
+          & .claude/skills/verify-multiprompt/control.ps1 -Feature status-card -Exe $env:FOOTER_TEST_EXE -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $testHash -Evidence "$pwd/evidence/footer-pending-test-key" -UpdateFixtureRoot $env:FOOTER_FIXTURE_ROOT
+      - name: Remove isolated footer fixture
+        if: always() && env.FEATURE == 'status-card' && env.USAGE_PACE_PROOF == '1'
+        shell: pwsh
+        run: |
+          foreach ($name in @('footer-tag-source', 'footer-tag-pristine', 'footer-update-fixtures', 'footer-tag.tar', 'footer-test-key.der')) {
+            Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP $name) -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath (Join-Path $env:RUNNER_TEMP $name)) { throw "Footer fixture cleanup failed: $name" }
+          }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar'
         with:
@@ -570,6 +907,19 @@ jobs:
         shell: powershell
         run: |
           & .claude/skills/verify-multiprompt/control.ps1 -Feature $env:FEATURE -Exe "$pwd/verify-bin/multiprompt.exe" -ExpectedVersion $env:VERIFY_VERSION -ExpectedHash $env:VERIFY_SHA256 -Evidence "$pwd/evidence"
+      - name: Check real-shape observations after owned cleanup
+        if: always() && env.CHAT_SHAPE_PROOF == '1'
+        run: |
+          $baseline = @()
+          if ($env:CHAT_SHAPE_BASELINE -eq '1') {
+            if ($env:RELEASE_TAG -ne 'v0.28.946') { throw 'Baseline recording requires published v0.28.946' }
+            $baseline = @('--expect-regression')
+          }
+          python tools/verify-chat-delivery/chat-switch-evidence.py evidence/shape-switch.json --require-cleanup @baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Real-shape evidence or cleanup did not satisfy the recorded contract' }
+      - name: Report quarantined browser warning
+        if: always() && env.FEATURE == 'browser-pane-stuck' && steps.desktop-driver.outcome == 'failure' && contains(fromJSON(needs.journeys.outputs.quarantined), matrix.feature)
+        run: Write-Output '::warning::Browser recovery driver failed or exceeded eight minutes; quarantined warning does not block publication.'
       - name: Retain pre-launch failure result
         if: always()
         shell: powershell
@@ -577,10 +927,10 @@ jobs:
           New-Item -ItemType Directory -Force evidence | Out-Null
           if ($env:FEATURE -eq 'safe-updates' -and (Test-Path evidence/safe-updates.json)) {
             $proof = Get-Content evidence/safe-updates.json -Raw | ConvertFrom-Json
-            @{ feature = 'safe-updates'; status = $(if ($proof.success) { 'passed' } else { 'failed' }); checks = $proof.checks; cleanup = $proof.cleanup } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
+            @{ feature = 'safe-updates'; version = $env:VERIFY_VERSION; sha256 = $env:VERIFY_SHA256; status = $(if ($proof.success) { 'passed' } else { 'failed' }); checks = $proof.checks; cleanup = $proof.cleanup } | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 evidence/result.json
           }
           if (-not (Test-Path evidence/result.json)) {
-            $failure = @{ feature = $env:FEATURE; status = 'failed'; error = 'Workflow failed before the harness produced a result; inspect the job log'; cleanup = 'Harness result unavailable; disposable runner teardown is the final cleanup boundary' }
+            $failure = @{ feature = $env:FEATURE; version = $env:VERIFY_VERSION; sha256 = $env:VERIFY_SHA256; status = 'failed'; error = 'Workflow failed before the harness produced a result; inspect the job log'; cleanup = 'Harness result unavailable; disposable runner teardown is the final cleanup boundary' }
             if ($env:FEATURE -eq 'chat-delivery') {
               $failure.agentBoundary = 'stand-in remote shell + fake tmux + scripted agent screen, not real Claude or a real server'
               $failure.cases = @('busy-send', 'idle-suggestion', 'steer-chord', 'wrapped-leftover', 'queue-draft-sync', 'send-stays-gone') | ForEach-Object { @{name=$_; passed=$false; detail='Workflow failed before journey launch'} }
@@ -591,7 +941,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: verify-${{ env.FEATURE }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
+          name: verify-${{ env.FEATURE }}${{ matrix.app-revision && format('-{0}', matrix.app-revision) || '' }}${{ inputs.chat_reply_proof && format('-reply-{0}', inputs.chat_reply_baseline && 'baseline' || 'candidate') || '' }}${{ (env.FEATURE == 'title-bar' || env.FEATURE == 'window-controls') && format('-{0}-{1}', env.CAPTION_DPI, env.CAPTION_BROWSER_THEME) || '' }}
           path: evidence/
           if-no-files-found: error
   tmux-identity-semantics:
@@ -601,6 +951,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:

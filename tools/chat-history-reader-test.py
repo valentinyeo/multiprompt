@@ -1508,6 +1508,79 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertLess(elapsed, 0.3)
         print(f'stale-cursor source_bytes={size} behind_bytes={behind} ms={elapsed * 1000:.1f} read_bytes={read_bytes}')
 
+    def test_igsh1029_oversized_tool_record_does_not_skip_the_delta(self):
+        self.write(self.event('Previously cached fixture post'))
+        self.read()
+        cached_offset = self.query['offset']
+        empty = self.tool_result('')
+        overhead = len((json.dumps(empty) + '\n').encode())
+        giant = self.tool_result('x' * (595494 - overhead))
+        raw = (json.dumps(giant) + '\n').encode()
+        self.assertEqual(len(raw), 595494)
+        self.assertGreater(len(raw), reader.SCAN_BYTES)
+        with self.path.open('ab') as output:
+            output.write(raw)
+            output.write((json.dumps(self.event('Fixture post after the large tool result')) + '\n').encode())
+        self.query['no_jump'] = True
+        fields, rows = self.read()
+        self.assertEqual(fields[13], 'delta')
+        self.assertEqual(int(fields[5]), cached_offset)
+        self.assertGreater(int(fields[6]), cached_offset)
+        observed = list(rows)
+        while fields[8] == '1':
+            before = self.query['offset']
+            fields, rows = self.read()
+            self.assertEqual(fields[13], 'delta')
+            self.assertEqual(int(fields[5]), before)
+            self.assertGreater(int(fields[6]), before)
+            observed.extend(rows)
+        self.assertIn('Fixture post after the large tool result', [row.get('text') for row in observed])
+        self.assertEqual(self.query['offset'], self.path.stat().st_size)
+
+    def test_igsh1029_incomplete_oversized_record_keeps_the_committed_cursor(self):
+        self.write(self.event('Cached fixture post'))
+        self.read()
+        cached_offset = self.query['offset']
+        raw = json.dumps(self.tool_result('x' * 595494)).encode()
+        with self.path.open('ab') as output:
+            output.write(raw)
+        self.query['no_jump'] = True
+        fields, rows = self.read()
+        self.assertEqual(fields[13], 'delta')
+        self.assertEqual(int(fields[5]), cached_offset)
+        self.assertEqual(int(fields[6]), cached_offset)
+        self.assertEqual(fields[8], '0')
+        with self.path.open('ab') as output:
+            output.write(b'\n')
+            output.write((json.dumps(self.event('Fixture reply after completed record')) + '\n').encode())
+        observed = []
+        while self.query['offset'] < self.path.stat().st_size:
+            before = self.query['offset']
+            fields, rows = self.read()
+            self.assertEqual(fields[13], 'delta')
+            self.assertEqual(int(fields[5]), before)
+            self.assertGreater(int(fields[6]), before)
+            observed.extend(rows)
+        self.assertIn('Fixture reply after completed record', [row.get('text') for row in observed])
+
+    def test_igsh1029_oversized_conversation_record_is_not_discarded(self):
+        self.write(self.event('Cached fixture post'))
+        self.read()
+        expected = 'Large fixture reply ' + 'x' * 595494 + ' complete'
+        with self.path.open('ab') as output:
+            output.write((json.dumps(self.event(expected)) + '\n').encode())
+            output.write((json.dumps(self.event('Following fixture post')) + '\n').encode())
+        self.query['no_jump'] = True
+        observed = []
+        while self.query['offset'] < self.path.stat().st_size:
+            before = self.query['offset']
+            fields, rows = self.read()
+            self.assertEqual(fields[13], 'delta')
+            self.assertEqual(int(fields[5]), before)
+            self.assertGreater(int(fields[6]), before)
+            observed.extend(rows)
+        self.assertEqual([row['text'] for row in observed if row['role'] == 'assistant'], [expected, 'Following fixture post'])
+
     def test_stale_cursor_switch_off_preserves_delta(self):
         self.write(self.event('cached'))
         self.read()

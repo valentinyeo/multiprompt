@@ -1,0 +1,16 @@
+name: Reaction reply journey
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '48 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  reactions:
+    uses: ./.github/workflows/verify.yml
+    with:
+      feature: chat-delivery
+      chat_reactions_proof: true

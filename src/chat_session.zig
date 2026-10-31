@@ -931,9 +931,8 @@ pub fn chatFileOnReady() void {
                 entry.history.newMessages(history)
             else
                 0;
-            const before = if (entry.stalled) 0 else if (disk or history.start < entry.history.start or
-                (entry.before == 0 and (history.start != entry.history.start or history.inode != entry.history.inode or
-                    !std.mem.eql(u8, &history.sid, &entry.history.sid)))) history.start else 0;
+            const before = if (entry.stalled) 0 else if (disk or history.start != entry.history.start or
+                history.inode != entry.history.inode or !std.mem.eql(u8, &history.sid, &entry.history.sid)) history.start else 0;
             if (entry.unchanged) {
                 entry.history.changed_from = entry.history.blocks.items.len;
                 entry.history.updateCursor(history);
@@ -1515,6 +1514,74 @@ test "IGSH-720 unconfirmed delivery blocks draft pull but not fast history polli
     try app_state.g_chat_outbox.append(std.testing.allocator, entry);
     try std.testing.expect(chatDeliveryPending(720, true));
     try std.testing.expect(!chatDeliveryPending(720, false));
+}
+
+test "IGSH-1029 renewed tail recovers the 16:49 to 22:28 gap without dropping its old-page request" {
+    const a = std.heap.page_allocator;
+    const saved = .{
+        .histories = app_state.g_chat_histories,
+        .count = app_state.shell_count,
+        .active = app_state.active_shell,
+        .chat = app_state.g_chat_active,
+        .hwnd = app_state.g_main_hwnd,
+        .fetch_busy = app_state.g_chat_fetch_busy,
+        .swap = app_state.g_chat_browser_swap,
+    };
+    app_state.g_chat_histories = .empty;
+    app_state.shell_count = 0;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = false;
+    app_state.g_main_hwnd = null;
+    app_state.g_chat_fetch_busy = false;
+    app_state.g_chat_browser_swap = .{};
+    defer {
+        if (app_state.g_chat_histories.items.len > 0) {
+            const entry = app_state.g_chat_histories.items[0];
+            if (entry.result) |*result| result.deinit(a);
+            entry.result = null;
+            chatHistoryForget(102901);
+        }
+        app_state.g_chat_histories.deinit(a);
+        app_state.g_chat_histories = saved.histories;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.active;
+        app_state.g_chat_active = saved.chat;
+        app_state.g_main_hwnd = saved.hwnd;
+        app_state.g_chat_fetch_busy = saved.fetch_busy;
+        app_state.g_chat_browser_swap = saved.swap;
+    }
+    const key = chat_transcript.Identity.initTmux(102901, 0, false, "incident", "");
+    const entry = chatHistoryEntry(key) orelse return error.OutOfMemory;
+    const earlier = "{\"role\":\"user\",\"id\":\"earlier\",\"timestamp\":\"2026-10-26T16:49:34.000Z\",\"text\":\"Earlier fixture post\",\"offset\":174990000,\"end\":174991176}\n";
+    const latest = "{\"role\":\"assistant\",\"id\":\"latest\",\"timestamp\":\"2026-10-26T22:28:27.000Z\",\"text\":\"Latest fixture post\",\"offset\":194209388,\"end\":194210113}\n";
+    try entry.history.apply(a, "@mp\t1\thistory\tok\tsid\t171097181\t175008999\t9\t0\tclaude\tincident\t0\t\ttail\t171097181\n" ++ earlier ++ "@@MP_END@@\n", 1, key);
+    entry.before = 171097181;
+    entry.result = try entry.history.clone(a);
+    try entry.result.?.apply(a, "@mp\t2\thistory\tok\tsid\t194209388\t195813983\t9\t0\tclaude\tincident\t0\t\ttail\t194209388\n" ++ latest ++ "@@MP_END@@\n", 2, key);
+    entry.ready.store(true, .release);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 194209388), entry.before);
+    try std.testing.expectEqual(@as(usize, 2), entry.history.blocks.items.len);
+    var older: std.ArrayList(u8) = .empty;
+    defer older.deinit(a);
+    try older.appendSlice(a, "@mp\t3\thistory\tok\tsid\t0\t194209388\t9\t0\tclaude\tincident\t0\t\tolder\t0\n" ++ earlier);
+    for (0..204) |i| {
+        var row: [256]u8 = undefined;
+        const offset = 175100000 + i * 90000;
+        try older.appendSlice(a, try std.fmt.bufPrint(&row, "{{\"role\":\"assistant\",\"id\":\"gap-{d}\",\"timestamp\":\"2026-10-26T18:00:00.000Z\",\"text\":\"Recovered fixture post {d}\",\"offset\":{d},\"end\":{d}}}\n", .{ i, i, offset, offset + 100 }));
+    }
+    try older.appendSlice(a, "@@MP_END@@\n");
+    entry.result = try entry.history.clone(a);
+    try entry.result.?.apply(a, older.items, 3, key);
+    entry.prepended = true;
+    entry.ready.store(true, .release);
+    chatFileOnReady();
+    try std.testing.expectEqual(@as(u64, 0), entry.before);
+    try std.testing.expectEqual(@as(usize, 206), entry.history.blocks.items.len);
+    const first = entry.history.blocks.items[0];
+    const last = entry.history.blocks.items[205];
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Earlier fixture post"), entry.history.text.items[first.start..][0..first.len]);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Latest fixture post"), entry.history.text.items[last.start..][0..last.len]);
 }
 
 test "IGSH-436 switching tabs retains separate table layouts and forget releases them" {
