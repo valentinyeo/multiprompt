@@ -4223,6 +4223,16 @@ class AgentHostTest(unittest.TestCase):
         self.assertEqual(reply['message']['receipt'], 'session_unavailable')
         self.assertEqual(self.user_lines(), [])
 
+    def test_host_chat_history_resolves_without_a_live_agent(self):
+        self.enable()
+        self.transcript.write_text(json.dumps(dict(type="user", uuid="u1", message=dict(role="user", content="hello host"))) + "\n")
+        query = dict(id=1, codex=False, sid=self.sid, tmux=self.tmux, cwd=str(self.home), follow=True)
+        with patch.object(reader, "resolve_tmux_agent", return_value=None):
+            agent, sid, path, wire = reader.resolve_response_path(query)
+        self.assertIsNone(wire)
+        self.assertEqual(sid, self.sid)
+        self.assertEqual(path, self.transcript)
+
     def test_host_cli_status_and_disable(self):
         self.enable()
         status = reader.host_cli(['status', self.provider, self.sid])

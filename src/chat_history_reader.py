@@ -1573,7 +1573,7 @@ def resolve_response_path(q, source=None, as_owner=False):
         if path is None and follow and q["sid"]:
             try:
                 pinned = conversation_path(agent, q["sid"], cwd)
-                if pinned is not None and hax_session_header(pinned):
+                if pinned is not None and (hax_session_header(pinned) or host_dispatch_switch(agent, q["sid"])):
                     sid, path = q["sid"], pinned
             except PermissionError:
                 denied = True

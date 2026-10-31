@@ -138,6 +138,8 @@ python3 <reader> host handover <provider> <sid>
   connectors use, so clients need no new event types.
 - A host chat needs no agent process inside the tmux pane; the host owns the session. The tmux
   name is still the chat identity for the store and for the shell.
+- History loads from the session id when the chat is switched on, so the transcript shows
+  without a live agent in a pane.
 - Not owned, switched off, or not Claude: the existing connector path runs unchanged and still
   needs the live agent in its pane.
 - Host unavailable, busy or timed out: the row returns to `queued` (same attempt, so a later
