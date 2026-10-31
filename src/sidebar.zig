@@ -318,6 +318,10 @@ const SEARCH_PICK_REPO_ROW_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_RO
 const MAX_REPO_ROWS = @import("app_state.zig").MAX_REPO_ROWS;
 const RepoRow = @import("vps.zig").RepoRow;
 const pickRepoFilteredRows = @import("command_palette.zig").pickRepoFilteredRows;
+const workspaceFolderCurrent = @import("command_palette.zig").workspaceFolderCurrent;
+const activeWorkspaceSlot = @import("command_palette.zig").activeWorkspaceSlot;
+const SEARCH_PICK_REPO_OFFSET = @import("app_state.zig").SEARCH_PICK_REPO_OFFSET;
+const SEARCH_SET_FOLDER_OFFSET = @import("app_state.zig").SEARCH_SET_FOLDER_OFFSET;
 const MAX_SNIPPETS = @import("app_state.zig").MAX_SNIPPETS;
 const MAX_WORKSPACES = @import("app_state.zig").MAX_WORKSPACES;
 const findMyWorkspaceSlot = @import("workspaces.zig").findMyWorkspaceSlot;
@@ -3519,6 +3523,23 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SetTextColor(hdc, primary_color);
                             var pr_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                             drawAscii(hdc, repo_rows[repo_idx].path[0..repo_rows[repo_idx].path_len], &pr_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                        }
+                    } else if (result_idx == SEARCH_PICK_REPO_OFFSET or result_idx == SEARCH_SET_FOLDER_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var pr_row_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
+                        if (result_idx == SEARCH_PICK_REPO_OFFSET) {
+                            _ = paletteDrawText(hdc, L("Pick repo\u{2026}"), -1, &pr_row_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        } else {
+                            var folder_buf: [256]u8 = undefined;
+                            var folder_len: u32 = 0;
+                            if (workspaceFolderCurrent(activeWorkspaceSlot(), &folder_buf, &folder_len)) {
+                                var folder_label: [320]u8 = undefined;
+                                const label = std.fmt.bufPrint(&folder_label, "Set workspace folder\u{2026}  ({s})", .{folder_buf[0..folder_len]}) catch "Set workspace folder";
+                                drawAscii(hdc, label, &pr_row_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            } else {
+                                _ = paletteDrawText(hdc, L("Set workspace folder\u{2026}"), -1, &pr_row_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                            }
                         }
                     } else if (is_new_session_row) {
                         _ = SelectObject(hdc, palette_font);

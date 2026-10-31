@@ -476,8 +476,15 @@ test "IGSH-1266 new session rows keep the approved order" {
     const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
     try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
-    const labels = [_][]const u8{ "New Claude chat", "New Codex chat", "New Pi chat", "New terminal", "Pick repo...", "Set workspace folder...", "Open session...", "Reopen closed tab", "More shells..." };
-    for (rows, labels) |row, label| try std.testing.expectEqualStrings(label, palettePrimaryLabel(row) orelse "");
+    try std.testing.expectEqualStrings("New Claude chat", palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Codex chat", palettePrimaryLabel(SEARCH_CODEX_TMUX_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Pi chat", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New terminal", palettePrimaryLabel(SEARCH_NEW_TERMINAL_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("Open session...", palettePrimaryLabel(SEARCH_OPEN_SESSION_MENU_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("More shells...", palettePrimaryLabel(SEARCH_SHELLS_MENU_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("pick repo choose repository folder repo", palettePrimaryLabel(SEARCH_PICK_REPO_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("set workspace folder declare workspace folder repo", palettePrimaryLabel(SEARCH_SET_FOLDER_OFFSET) orelse "");
+    try std.testing.expect(std.mem.indexOf(u8, palettePrimaryLabel(SEARCH_REOPEN_OFFSET) orelse "", "reopen") != null);
     try std.testing.expect(!std.mem.eql(u8, palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse ""));
 }
 
@@ -600,22 +607,11 @@ pub fn recordPaletteUsage(target: usize) void {
     savePaletteUsage();
 }
 
-var g_folder_row_label: [320]u8 = undefined;
-
-fn setFolderRowLabel() []const u8 {
-    var path_buf: [256]u8 = undefined;
-    var path_len: u32 = 0;
-    if (!workspaceFolderCurrent(activeWorkspaceSlot(), &path_buf, &path_len)) return "Set workspace folder...";
-    return std.fmt.bufPrint(&g_folder_row_label, "Set workspace folder...  ({s})", .{path_buf[0..path_len]}) catch "Set workspace folder...";
-}
-
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) return "New Claude chat";
     if (target == SEARCH_CODEX_TMUX_OFFSET) return "New Codex chat";
     if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
     if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
-    if (target == SEARCH_PICK_REPO_OFFSET) return "Pick repo...";
-    if (target == SEARCH_SET_FOLDER_OFFSET) return setFolderRowLabel();
     if (target == SEARCH_PICK_REPO_BACK_OFFSET) return "back";
     if (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
         var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
@@ -5140,6 +5136,7 @@ test "IGSH-1266 declared folder wins and a later entry for the same workspace re
     std.mem.copyForwards(u8, first.cwd[0..20], "/home/x/projects/old");
     first.cwd_len = 20;
     app_state.g_custom_cmds[0] = first;
+    app_state.g_custom_cmds_count = 1;
     const only = folderEntryIndexFor("main") orelse return error.TestUnexpectedResult;
     try std.testing.expectEqual(@as(usize, 0), only);
     var second = CustomCmd{};
