@@ -229,6 +229,10 @@ pub const View = struct {
         return true;
     }
 
+    pub fn refreshEditRevision(self: *View) void {
+        if (self.mode == .edit and self.pending == null) self.edit_revision = self.model.revision;
+    }
+
     pub fn resetScope(self: *View, empty: *const ViewModel) void {
         self.retire();
         self.selected_count = 0;

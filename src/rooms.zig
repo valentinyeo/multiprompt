@@ -45,6 +45,7 @@ pub const Controller = struct {
     has_host_uuid: bool = false,
     job: ?*transport.Job = null,
     kind: RequestKind = .capabilities,
+    journal_lock: ?@import("room_journal.zig").Lock = null,
 
     pub fn init(host: u8) Controller {
         return .{ .host = host };
@@ -81,9 +82,15 @@ pub const Controller = struct {
     }
 
     fn launch(self: *Controller, kind: RequestKind, value: anytype) bool {
+        const request = std.json.Stringify.valueAlloc(allocator, value, .{}) catch return false;
+        defer allocator.free(request);
+        return self.launchBytes(kind, request);
+    }
+
+    fn launchBytes(self: *Controller, kind: RequestKind, bytes: []const u8) bool {
         if (!self.has_account or self.job != null) return false;
         const route = self.route orelse return false;
-        const request = std.json.Stringify.valueAlloc(allocator, value, .{}) catch return false;
+        const request = allocator.dupe(u8, bytes) catch return false;
         const output = allocator.alloc(u8, 262145) catch {
             allocator.free(request);
             return false;
@@ -103,6 +110,21 @@ pub const Controller = struct {
         self.kind = kind;
         self.job = job;
         return true;
+    }
+
+    pub fn launchPrepared(self: *Controller, kind: @import("room_journal.zig").Kind, command_id: []const u8, room_id: []const u8, revision: u64) !void {
+        const journal = @import("room_journal.zig");
+        if (!self.has_account or !self.has_host_uuid or self.route == null or self.job != null) return error.InvalidScope;
+        const scope = journal.Scope{ .account_digest = self.account_digest, .store_uuid = self.host_uuid };
+        var guard = try journal.lock(scope);
+        errdefer guard.deinit();
+        var entry = (try journal.load(scope)) orelse return error.NotFound;
+        defer entry.deinit();
+        const record = entry.record();
+        if (record.kind != kind or record.revision != revision or !std.mem.eql(u8, record.command_id, command_id) or !std.mem.eql(u8, record.room_id, room_id) or (record.state != .prepared and record.state != .uncertain)) return error.WrongCommand;
+        try journal.updateLocked(&guard, command_id, .uncertain, "");
+        if (!self.launchBytes(if (kind == .create) .create else .edit, record.request)) return error.LaunchRefused;
+        self.journal_lock = guard;
     }
 
     pub fn capabilities(self: *Controller) bool {
@@ -134,14 +156,29 @@ pub const Controller = struct {
         return self.launch(.status, .{ .op = "status", .host_uuid = self.host_uuid[0..], .sid = sid });
     }
 
-    pub fn create(self: *Controller, command_id: []const u8, name: []const u8, members: []const Member) bool {
-        if (!self.has_host_uuid) return false;
-        return self.launch(.create, .{ .op = "create", .host_uuid = self.host_uuid[0..], .command_id = command_id, .name = name, .members = members });
+    fn launchTypedPrepared(self: *Controller, kind: @import("room_journal.zig").Kind, command_id: []const u8, room_id: []const u8, revision: u64, value: anytype) bool {
+        const journal = @import("room_journal.zig");
+        if (!self.has_account or !self.has_host_uuid) return false;
+        const bytes = std.json.Stringify.valueAlloc(allocator, value, .{}) catch return false;
+        defer allocator.free(bytes);
+        const scope = journal.Scope{ .account_digest = self.account_digest, .store_uuid = self.host_uuid };
+        var guard = journal.lock(scope) catch return false;
+        defer guard.deinit();
+        var entry = (journal.load(scope) catch return false) orelse return false;
+        defer entry.deinit();
+        if (!std.mem.eql(u8, entry.record().request, bytes)) return false;
+        self.launchPrepared(kind, command_id, room_id, revision) catch return false;
+        return true;
     }
 
-    pub fn edit(self: *Controller, command_id: []const u8, room_id: []const u8, revision: u64, members: []const Member) bool {
+    pub fn create(self: *Controller, command_id: []const u8, name: []const u8, members: []const Member) bool {
         if (!self.has_host_uuid) return false;
-        return self.launch(.edit, .{ .op = "edit_members", .host_uuid = self.host_uuid[0..], .command_id = command_id, .room_id = room_id, .expected_revision = revision, .members = members });
+        return self.launchTypedPrepared(.create, command_id, "", 0, .{ .op = "create", .host_uuid = self.host_uuid[0..], .command_id = command_id, .name = name, .members = members });
+    }
+
+    pub fn edit(self: *Controller, command_id: []const u8, room_id: []const u8, revision: u64, name: []const u8, members: []const Member) bool {
+        if (!self.has_host_uuid) return false;
+        return self.launchTypedPrepared(.edit, command_id, room_id, revision, .{ .op = "edit", .host_uuid = self.host_uuid[0..], .command_id = command_id, .room_id = room_id, .expected_revision = revision, .name = name, .members = members });
     }
 
     pub fn submit(_: *Controller) room_view.ActionResult {
@@ -160,6 +197,8 @@ pub const Controller = struct {
         allocator.free(job.output);
         allocator.destroy(job);
         self.job = null;
+        if (self.journal_lock) |*guard| guard.deinit();
+        self.journal_lock = null;
     }
 
     pub fn poll(self: *Controller) ?Completion {
@@ -171,6 +210,8 @@ pub const Controller = struct {
             allocator.free(job.output);
             allocator.destroy(job);
             self.job = null;
+            if (self.journal_lock) |*guard| guard.deinit();
+            self.journal_lock = null;
         }
         const mutation = self.kind == .create or self.kind == .edit;
         if (!job.success) return .{ .failed = .{ .kind = self.kind, .reason = if (job.cancelled.load(.acquire)) .cancelled else if (job.timed_out) .timeout else .transport, .outcome_unknown = mutation } };
