@@ -4894,7 +4894,8 @@ pub fn chatPaintTranscriptContent(mem_dc: HANDLE, w: i32, h: i32, paint: RECT) v
         if (app_state.g_chat_block_count == 0) {
             const entry = chatHistoryEntry(chatFileIdentity());
             const missing_note = if (entry) |e| e.missing_message[0] != 0 else false;
-            const failed_load = if (entry) |e| e.failures > 0 else false;
+            const brand_new_chat = if (entry) |e| (e.key.sid[0] != 0 and e.history.blocks.items.len == 0 and e.loaded_ms == 0 and e.failures < chat_history.NEW_CHAT_GRACE) else false;
+            const failed_load = if (entry) |e| (e.failures > 0 and !brand_new_chat) else false;
             const paint_note = g_working_rect == null or missing_note or failed_load;
             if (paint_note and missing_note and !g_note_logged and verboseLoggingEnabled()) debugLog("[chat] note shown: " ++ chat_history.NOT_AVAILABLE_NOTE);
             g_note_logged = paint_note and missing_note;

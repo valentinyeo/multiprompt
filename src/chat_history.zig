@@ -844,6 +844,8 @@ pub fn scrollAfterLayout(content_h: i32, viewport_h: i32, old_y: i32, follow_bot
 }
 
 pub const MISSING_RETRY_MS: u64 = 60_000;
+pub const NEW_CHAT_GRACE: usize = 3;
+
 pub const NOT_AVAILABLE_NOTE = "Chat not available for this session, use the shell view";
 
 pub fn missingReason(wire: []const u8, id: u32) ?[]const u8 {
