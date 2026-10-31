@@ -1,6 +1,7 @@
-param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof, [switch]$ChangelogLinks, [switch]$HighlightProof, [switch]$StarBadgeProof, [switch]$DensityProof)
+param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Output, [switch]$MemoryProof, [switch]$OrderProof, [switch]$ChangelogProof, [switch]$ChangelogLinks, [switch]$HighlightProof, [switch]$StarBadgeProof, [switch]$DensityProof, [switch]$PaletteAvatarProof)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PaletteAvatarProof -and ($MemoryProof -or $OrderProof -or $ChangelogProof -or $ChangelogLinks -or $HighlightProof -or $StarBadgeProof -or $DensityProof)) { throw 'Invalid proof modes' }
 if ($DensityProof -and ($MemoryProof -or $OrderProof -or $ChangelogProof -or $ChangelogLinks -or $HighlightProof -or $StarBadgeProof)) { throw 'Invalid proof modes' }
 if ($StarBadgeProof -and ($MemoryProof -or $OrderProof -or $ChangelogProof -or $ChangelogLinks -or $HighlightProof)) { throw 'Invalid proof modes' }
 if (($MemoryProof -and $OrderProof) -or ($ChangelogProof -and ($MemoryProof -or $OrderProof)) -or ($ChangelogLinks -and -not $ChangelogProof) -or ($HighlightProof -and ($MemoryProof -or $OrderProof -or $ChangelogProof -or $ChangelogLinks))) { throw 'Invalid proof modes' }
@@ -88,8 +89,8 @@ function Compare-Views([string]$Name) {
     [void](Wait-For 'return sidebar unchanged' { (Capture "$Name-return-sidebar") -eq $before })
 }
 
-if ($HighlightProof -or $StarBadgeProof -or $DensityProof) { Add-Type -Path "$PSScriptRoot/../.claude/skills/verify-multiprompt/title-bar-native.cs" }
-if ($MemoryProof -or $OrderProof -or $HighlightProof -or $StarBadgeProof -or $DensityProof) {
+if ($HighlightProof -or $StarBadgeProof -or $DensityProof -or $PaletteAvatarProof) { Add-Type -Path "$PSScriptRoot/../.claude/skills/verify-multiprompt/title-bar-native.cs" }
+if ($MemoryProof -or $OrderProof -or $HighlightProof -or $StarBadgeProof -or $DensityProof -or $PaletteAvatarProof) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -706,10 +707,119 @@ function StarBadge-Journey {
     $result.actions += @{input='Ctrl+K Close Tab'; count=@((Session).tabs).Count}
     $result.passed = $true
 }
+function PaletteAvatar-Journey {
+    $result.executable = @{sha256=(Get-FileHash $Exe -Algorithm SHA256).Hash; tag=$env:RELEASE_TAG; version=[Diagnostics.FileVersionInfo]::GetVersionInfo($Exe).FileVersion}
+    $result.limitations = @('Photos require visual review of labels, keycaps and command text.', 'Inactive and saved sessions need separate service-free fixtures.', 'All Sessions requires a populated overview cache.')
+    Highlight-Owned
+    if ([SidebarDrag]::GetDpiForWindow($main) -ne 96) { throw 'Palette proof requires 96 DPI' }
+    $fixture = Session
+    if (@($fixture.tabs).Count -ne 3 -or $fixture.tabs[0].name -cne 'CMD Star' -or $fixture.tabs[1].name -cne 'CMD Plain' -or -not (Flag $fixture.tabs[0] 'favorite') -or (Flag $fixture.tabs[1] 'favorite')) { throw 'Palette fixture changed' }
+    $sidebar = Wait-For 'sidebar avatar identities' {
+        $found = @{}
+        foreach ($m in [regex]::Matches((Get-Content "$settings/debug.log" -Raw), '\[sidebar-avatar\] target=(\d+) face=(\d+) color=(\d+)')) {
+            $found[$m.Groups[1].Value] = @{face=[int]$m.Groups[2].Value; color=[int]$m.Groups[3].Value}
+        }
+        if ($found.ContainsKey('0') -and $found.ContainsKey('1')) { return $found }
+    } 60
+    Focus
+    Highlight-Owned
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Palette lost foreground' }
+    $start = (Get-Content "$settings/debug.log" -Raw).Length
+    [ChatDeliveryDesktop]::Chord(@(0x11,0x4B))
+    [void](Wait-For 'empty palette and recent avatars' {
+        $trace = (Get-Content "$settings/debug.log" -Raw).Substring($start)
+        $trace -match '\[palette\] ready chars=0 count=\d+ target=\d+' -and $trace -match '\[palette-avatar\] target=0 ' -and $trace -match '\[palette-avatar\] target=1 ' -and $trace -match '\[palette-row\] target=2000 session=0 '
+    })
+    Highlight-Owned
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Palette capture lost foreground' }
+    Shot 'palette-recent'
+    $trace = (Get-Content "$settings/debug.log" -Raw).Substring($start)
+    $result.recentRows = @([regex]::Matches($trace, '\[palette\] rows chars=0[^\r\n]*') | ForEach-Object { $_.Value })
+    foreach ($key in @(0x43,0x4D)) { [ChatDeliveryDesktop]::Type($key) }
+    $mixedStart = (Get-Content "$settings/debug.log" -Raw).Length
+    [ChatDeliveryDesktop]::Type(0x44)
+    [void](Wait-For 'mixed CMD search' {
+        $trace = (Get-Content "$settings/debug.log" -Raw).Substring($start)
+        $trace -match '\[palette\] ready chars=3 count=[1-9]\d* target=\d+' -and $trace -match '\[palette\] rows chars=3[^\r\n]*\b2000\b'
+    })
+    [void](Wait-For 'mixed palette paint' {
+        $trace = (Get-Content "$settings/debug.log" -Raw).Substring($mixedStart)
+        $trace -match '\[palette-avatar\] target=0 ' -and $trace -match '\[palette-avatar\] target=1 ' -and $trace -match '\[palette-row\] target=2000 session=0 '
+    })
+    $trace = (Get-Content "$settings/debug.log" -Raw).Substring($mixedStart)
+    $result.mixedRows = @([regex]::Matches($trace, '\[palette\] rows chars=3[^\r\n]*') | ForEach-Object { $_.Value })
+    $matchesAvatar = @([regex]::Matches($trace, '\[palette-avatar\] target=(0|1) face=(\d+) color=(\d+) favorite=(\d+) rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)'))
+    $avatars = @{}
+    foreach ($m in $matchesAvatar) {
+        $avatars[$m.Groups[1].Value] = @{face=[int]$m.Groups[2].Value; color=[int]$m.Groups[3].Value; favorite=[int]$m.Groups[4].Value; x=[int]$m.Groups[5].Value; y=[int]$m.Groups[6].Value; right=[int]$m.Groups[7].Value; bottom=[int]$m.Groups[8].Value}
+    }
+    foreach ($id in @('0','1')) {
+        if (-not $avatars.ContainsKey($id) -or $avatars[$id].face -ne $sidebar[$id].face -or $avatars[$id].color -ne $sidebar[$id].color -or ($avatars[$id].right - $avatars[$id].x) -ne 24 -or ($avatars[$id].bottom - $avatars[$id].y) -ne 24 -or $avatars[$id].favorite -ne $(if ($id -eq '0') { 1 } else { 0 })) { throw 'Palette avatar identity or geometry differs' }
+    }
+    $rows = @{}
+    foreach ($m in [regex]::Matches($trace, '\[palette-row\] target=(0|1|2000) session=(\d+) left=(-?\d+) top=(-?\d+) height=(\d+) text=(-?\d+)')) {
+        $rows[$m.Groups[1].Value] = @{session=[int]$m.Groups[2].Value; left=[int]$m.Groups[3].Value; top=[int]$m.Groups[4].Value; height=[int]$m.Groups[5].Value; text=[int]$m.Groups[6].Value}
+    }
+    foreach ($id in @('0','1')) {
+        $row = $rows[$id]; $avatar = $avatars[$id]
+        if ($row.session -ne 1 -or $row.height -ne 39 -or ($row.text - $row.left) -ne 44 -or ($avatar.x - $row.left) -ne 10 -or ($avatar.y - $row.top) -ne 7) { throw 'Palette session row geometry differs' }
+    }
+    if ($rows['2000'].session -ne 0 -or ($rows['2000'].text - $rows['2000'].left) -ne 14) { throw 'New CMD is not a plain command row' }
+    Highlight-Owned
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Mixed capture lost foreground' }
+    Shot 'palette-mixed-cmd'
+    $origin = [ChatDeliveryDesktop]::ScreenPoint($main, 0, 0)
+    $bitmap = [Drawing.Bitmap]::new("$Output/palette-mixed-cmd.png")
+    try {
+        $yellow = @()
+        foreach ($id in @('0','1')) {
+            $avatar = $avatars[$id]
+            $pixel = $bitmap.GetPixel(($origin.X + $avatar.right + 1), ($origin.Y + $avatar.bottom - 4))
+            $yellow += ($pixel.R -ge 225 -and $pixel.G -ge 175 -and $pixel.G -le 210 -and $pixel.B -le 100)
+        }
+        if (-not $yellow[0] -or $yellow[1]) { throw 'Palette favorite badge pixels differ' }
+        $command = $rows['2000']
+        $blank = $bitmap.GetPixel(($origin.X + $command.left + 10), ($origin.Y + $command.top + 19))
+        if ($blank.R -ne $blank.G -or $blank.G -ne $blank.B -or ($blank.R -ne 24 -and $blank.R -ne 53)) { throw 'Command icon area is not plain' }
+        $commandText = $false
+        for ($y = $command.top; $y -lt $command.top + $command.height; $y++) {
+            for ($x = $command.text; $x -lt $command.text + 120; $x++) {
+                $pixel = $bitmap.GetPixel(($origin.X + $x), ($origin.Y + $y))
+                if ($pixel.R -eq 200 -and $pixel.G -eq 200 -and $pixel.B -eq 200) { $commandText = $true; break }
+            }
+            if ($commandText) { break }
+        }
+        if (-not $commandText) { throw 'Command text color missing' }
+    } finally { $bitmap.Dispose() }
+    $result.geometry = @{sidebar=$sidebar; avatars=$avatars; rows=$rows; yellow=$yellow; commandText=$commandText}
+    Focus
+    for ($i = 0; $i -lt 3; $i++) { [ChatDeliveryDesktop]::Chord(@(0x08)) }
+    foreach ($key in @(0x43,0x4D,0x44,0x20,0x50,0x4C,0x41,0x49,0x4E)) { [ChatDeliveryDesktop]::Type($key) }
+    [void](Wait-For 'plain session selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=9 count=[1-9]\d* target=1(?:\r?\n|$)' })
+    Highlight-Owned
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'Session selection lost foreground' }
+    [ChatDeliveryDesktop]::Chord(@(0x0D))
+    [void](Wait-For 'existing session opened' { $s = Session; @($s.tabs).Count -eq 3 -and $s.tabs[$s.active_tab].name -ceq 'CMD Plain' })
+    $result.actions += 'Search and open existing CMD Plain'
+    Focus
+    Highlight-Owned
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'New CMD palette lost foreground' }
+    $commandStart = (Get-Content "$settings/debug.log" -Raw).Length
+    [ChatDeliveryDesktop]::Chord(@(0x11,0x4B))
+    [void](Wait-For 'New CMD palette opened' { (Get-Content "$settings/debug.log" -Raw).Substring($commandStart) -match '\[palette\] ready chars=0 count=\d+ target=\d+' })
+    foreach ($key in @(0x4E,0x45,0x57,0x20,0x43,0x4D,0x44)) { [ChatDeliveryDesktop]::Type($key) }
+    [void](Wait-For 'New CMD selected' { (Get-Content "$settings/debug.log" -Raw).Substring($start) -match '\[palette\] ready chars=7 count=[1-9]\d* target=2000(?:\r?\n|$)' })
+    Highlight-Owned
+    if ([ChatDeliveryDesktop]::GetForegroundWindow() -ne $main) { throw 'New CMD selection lost foreground' }
+    [ChatDeliveryDesktop]::Chord(@(0x0D))
+    [void](Wait-For 'New CMD creates session' { @((Session).tabs).Count -eq 4 })
+    $result.actions += 'New CMD creates one session'
+    $result.passed = $true
+}
 $linkFixtureLoaded = $false
 $displayAttempted = $false
 try {
-    if ($HighlightProof -or $StarBadgeProof -or $DensityProof) { $displayAttempted = $true; [CaptionProof]::SetDpi(96) }
+    if ($HighlightProof -or $StarBadgeProof -or $DensityProof -or $PaletteAvatarProof) { $displayAttempted = $true; [CaptionProof]::SetDpi(96) }
     New-Item -ItemType Directory -Force $settings, "$profile/local", "$profile/home" | Out-Null
     if ($ChangelogLinks) {
         $result.registryRestored = $false; $result.receipts = @()
@@ -721,7 +831,12 @@ try {
     $env:APPDATA = "$profile/roaming"; $env:LOCALAPPDATA = "$profile/local"; $env:USERPROFILE = "$profile/home"; $env:HOME = "$profile/home"
     $env:MULTIPROMPT_NO_LOGIN = '1'; $env:IGSH_246 = '0'; $env:ZIGSHELL_DEBUG = '1'
     $tabs = @('First shell', 'Second shell', 'Third shell') | ForEach-Object { @{kind='cmd'; name=$_; manual=$true; cv=$false; pid=0} }
-    if ($DensityProof) {
+    if ($PaletteAvatarProof) {
+        $tabs = @('CMD Star', 'CMD Plain', 'Other shell') | ForEach-Object { @{kind='cmd'; name=$_; manual=$true; cv=$false; pid=0} }
+        $tabs[0].favorite = $true; $tabs[0].lv = 100; $tabs[1].lv = 200
+        Save @{active_tab=2; single_window=$false; chat_active=$false; amoled_theme=$true; tabs=@($tabs)} "$settings/session.json"
+        [IO.File]::WriteAllText("$settings/palette-usage.tsv", "2000`t9`t100`n", [Text.UTF8Encoding]::new($false))
+    } elseif ($DensityProof) {
         $tabs = @('Pinned shell', 'Manager one', 'Manager two', 'Other one', 'Other two') | ForEach-Object { @{kind='cmd'; name=$_; manual=$true; cv=$false; pid=0} }
         $tabs[0].pinned_top = $true; $tabs[0].favorite = $true
         $tabs[1].group_id = 17; $tabs[1].favorite = $true; $tabs[2].group_id = 17
@@ -794,7 +909,7 @@ try {
             Receive-Link $result.audit.oldTicket '1048-keyboard'
         }
         $result.passed = $true
-    } elseif ($DensityProof) { Density-Journey } elseif ($StarBadgeProof) { StarBadge-Journey } elseif ($HighlightProof) { Highlight-Journey } elseif ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
+    } elseif ($PaletteAvatarProof) { PaletteAvatar-Journey } elseif ($DensityProof) { Density-Journey } elseif ($StarBadgeProof) { StarBadge-Journey } elseif ($HighlightProof) { Highlight-Journey } elseif ($MemoryProof) { Memory-Journey } elseif ($OrderProof) { Order-Journey } else {
     Toggle-View
     [void](Wait-For 'initial Chat View' { [ChatDeliveryDesktop]::Composer($main) -ne [IntPtr]::Zero -and (Chat-On) })
     [void](Wait-For 'initial console poll' {
@@ -831,7 +946,7 @@ try {
     Write-Host $result.error
     if (Get-Variable main -ErrorAction SilentlyContinue) { Shot 'failure' }
 } finally {
-    if ($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof -or $StarBadgeProof -or $DensityProof) {
+    if ($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof -or $StarBadgeProof -or $DensityProof -or $PaletteAvatarProof) {
         $result.scratchRemoved = $false
         $result.cleanupErrors = @()
         try {
@@ -869,7 +984,7 @@ try {
         } catch {
             $result.cleanupErrors += $_.Exception.Message
         } finally {
-            if ($HighlightProof -or $StarBadgeProof -or $DensityProof) {
+            if ($HighlightProof -or $StarBadgeProof -or $DensityProof -or $PaletteAvatarProof) {
                 $result.displayRestored = $false
                 try { if ($displayAttempted) { [CaptionProof]::RestoreDpi() }; $result.displayRestored = $true } catch { $result.cleanupErrors += "Display restoration failed: $($_.Exception.Message)" }
             }
@@ -885,5 +1000,5 @@ try {
         if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
     }
 }
-if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof -or $StarBadgeProof -or $DensityProof) -and -not $result.scratchRemoved) -or (($HighlightProof -or $StarBadgeProof -or $DensityProof) -and -not $result.displayRestored)) { throw 'Shared sidebar journey failed; see result.json' }
+if (-not $result.passed -or $result.cleanup -ne 0 -or (($MemoryProof -or $OrderProof -or $ChangelogProof -or $HighlightProof -or $StarBadgeProof -or $DensityProof -or $PaletteAvatarProof) -and -not $result.scratchRemoved) -or (($HighlightProof -or $StarBadgeProof -or $DensityProof -or $PaletteAvatarProof) -and -not $result.displayRestored)) { throw 'Shared sidebar journey failed; see result.json' }
 Write-Host 'SHARED_SIDEBAR_JOURNEY_OK'

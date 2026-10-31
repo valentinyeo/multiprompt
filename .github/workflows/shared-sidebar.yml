@@ -33,6 +33,11 @@ on:
         required: false
         type: boolean
         default: false
+      palette_avatar_proof:
+        description: Capture palette session avatars from a published release
+        required: false
+        type: boolean
+        default: false
       density_proof:
         description: Capture approved sidebar density from a published release
         required: false
@@ -67,10 +72,19 @@ jobs:
           & "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0/zig.exe" test src/star_badge_geometry.zig
           if ($LASTEXITCODE -ne 0) { throw 'Badge geometry failed' }
   source-contracts:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Zig 0.16.0
+        run: |
+          curl -sSfL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz -o zig.tar.xz
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  zig.tar.xz" | sha256sum -c -
+          tar -xJf zig.tar.xz
+          echo "$PWD/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
       - run: node --test tools/session-lock.test.js tools/chat-view-everywhere.test.js tools/palette-rows.test.js tools/shortcuts-doc.test.js tools/group-palette.test.js
+        env:
+          ZIG: zig
   sidebar:
     runs-on: windows-latest
     timeout-minutes: 15
@@ -91,8 +105,10 @@ jobs:
           HIGHLIGHT_PROOF: ${{ inputs.highlight_proof }}
           STAR_BADGE_PROOF: ${{ inputs.star_badge_proof }}
           DENSITY_PROOF: ${{ inputs.density_proof }}
+          PALETTE_AVATAR_PROOF: ${{ inputs.palette_avatar_proof }}
         run: |
           New-Item -ItemType Directory -Force bin, evidence | Out-Null
+          if ($env:PALETTE_AVATAR_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true' -or $env:HIGHLIGHT_PROOF -eq 'true' -or $env:STAR_BADGE_PROOF -eq 'true' -or $env:DENSITY_PROOF -eq 'true')) { throw 'Palette avatar proof requires a published tag and excludes other proof modes' }
           if ($env:DENSITY_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true' -or $env:HIGHLIGHT_PROOF -eq 'true' -or $env:STAR_BADGE_PROOF -eq 'true')) { throw 'Density proof requires a published tag and excludes other proof modes' }
           if ($env:STAR_BADGE_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true' -or $env:HIGHLIGHT_PROOF -eq 'true')) { throw 'Star badge proof requires a published tag and excludes other proof modes' }
           if ($env:HIGHLIGHT_PROOF -eq 'true' -and (-not $env:RELEASE_TAG -or $env:MEMORY_PROOF -eq 'true' -or $env:ORDER_PROOF -eq 'true' -or $env:CHANGELOG_PROOF -eq 'true' -or $env:CHANGELOG_LINKS -eq 'true')) { throw 'Highlight proof requires a published tag and excludes other proof modes' }
@@ -137,9 +153,12 @@ jobs:
           HIGHLIGHT_PROOF: ${{ inputs.highlight_proof }}
           STAR_BADGE_PROOF: ${{ inputs.star_badge_proof }}
           DENSITY_PROOF: ${{ inputs.density_proof }}
+          PALETTE_AVATAR_PROOF: ${{ inputs.palette_avatar_proof }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          if ($env:DENSITY_PROOF -eq 'true') {
+          if ($env:PALETTE_AVATAR_PROOF -eq 'true') {
+            ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -PaletteAvatarProof
+          } elseif ($env:DENSITY_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -DensityProof
           } elseif ($env:STAR_BADGE_PROOF -eq 'true') {
             ./tools/shared-sidebar.ps1 -Exe "$PWD/bin/multiprompt.exe" -Output "$PWD/evidence" -StarBadgeProof

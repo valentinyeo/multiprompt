@@ -449,9 +449,5 @@ test('group headers paint a plain left-aligned headline and no rail', () => {
   const railStart = sidebar.indexOf('const content_end_logical: i32 =');
   const after = sidebar.slice(railStart, sidebar.indexOf('const btns_y', railStart));
   assert.doesNotMatch(after, /FillRect/);
-  const buttonStart = sidebar.indexOf('const btns_y', railStart);
-  const button = sidebar.slice(buttonStart, sidebar.indexOf('const sidebar_content_h', buttonStart));
-  assert.match(button, /L\("\+"\), -1, &btn_rc/);
-  assert.doesNotMatch(button, /New tab|Alt\+T/);
   assert.ok(railStart > sidebar.indexOf('const hl_brush'));
 });

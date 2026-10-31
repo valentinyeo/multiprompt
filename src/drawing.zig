@@ -268,7 +268,7 @@ pub fn uiUnscaled(px: i32) i32 {
 }
 
 pub fn searchRowH() i32 {
-    return uiScaled(40);
+    return uiScaled(39);
 }
 pub fn searchInputH() i32 {
     const recent = app_state.g_search_len == 0 and app_state.g_search_result_count > 0 and app_state.g_search_results[0] < app_state.MAX_SHELLS;

@@ -1335,6 +1335,8 @@ pub fn buildSessionOverviewRows() void {
             if (sessionOverviewAdd(.reminder, 0, @intCast(marker_idx), tab.tmux_host, json_reader.utf8(tab.name[0..tab.name_len], &name_utf8), tab.tmux_session[0..tab.tmux_session_len], marker.workspace_name[0..marker.workspace_name_len], marker.created_at, 0, false, slot)) {
                 const row = &app_state.g_session_overview_rows.items[app_state.g_session_overview_rows.items.len - 1];
                 row.snapshot_order = @intCast(order);
+                row.snapshot_name_len = copyAsciiField(&row.snapshot_name, json_reader.utf8(tab.name[0..tab.name_len], &name_utf8));
+                row.snapshot_favorite = tab.favorite;
                 if (tab.tmux_session_len > 0) row.ram_mb = tmuxSessionRamMb(tab.tmux_host, tab.tmux_session[0..tab.tmux_session_len], 0);
             }
         }
@@ -2279,9 +2281,9 @@ pub fn handleAllSessionsKey(hwnd: HANDLE, wp: WPARAM) void {
 
 fn tmuxCacheRepoRoot(host: u8, name: []const u8) []const u8 {
     var ti: u32 = 0;
-    while (ti < app_state.g_tmux_cache_count) : (ti += 1) {
+    while (ti < app_state.g_tmux_cache_count and ti < app_state.g_tmux_cache.len) : (ti += 1) {
         const e = &app_state.g_tmux_cache[ti];
-        if (e.host != host or e.path_len == 0) continue;
+        if (e.host != host or e.path_len == 0 or e.path_len > e.path.len or e.name_len > e.name.len) continue;
         if (std.ascii.eqlIgnoreCase(e.name[0..e.name_len], name)) return remoteRepoRoot(e.path[0..e.path_len]);
     }
     return "";
@@ -2312,7 +2314,8 @@ fn ensureOtherWorkspace() u8 {
     return slot;
 }
 
-fn resolveOverviewSpawnWorkspace(row: *const SessionOverviewRow) u8 {
+pub fn overviewSpawnWorkspaceSlot(row: *const SessionOverviewRow) ?u8 {
+    if (row.session_len > row.session.len) return null;
     const root = tmuxCacheRepoRoot(row.host, row.session[0..row.session_len]);
     if (root.len > 0) {
         var ws: u8 = 0;
@@ -2320,7 +2323,11 @@ fn resolveOverviewSpawnWorkspace(row: *const SessionOverviewRow) u8 {
             if (workspaceHostsRepo(ws, row.host, root)) return ws;
         }
     }
-    return ensureOtherWorkspace();
+    return otherPillSlot();
+}
+
+fn resolveOverviewSpawnWorkspace(row: *const SessionOverviewRow) u8 {
+    return overviewSpawnWorkspaceSlot(row) orelse ensureOtherWorkspace();
 }
 
 fn localTmuxSessionAlreadyOpen(host: u8, session: []const u8) bool {

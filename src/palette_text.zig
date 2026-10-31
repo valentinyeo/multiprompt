@@ -66,7 +66,6 @@ pub fn draw(dc: w.HANDLE, text: [*]const u16, count: i32, rc: *w.RECT, flags: u3
     }
     var out: [256]u16 = undefined;
     const label = sentence(original, &out);
-    _ = w.SetTextColor(dc, if (app_state.g_light_theme) 0x202020 else 0xf2f2f2);
     return w.DrawTextW(dc, label.ptr, @intCast(label.len), rc, flags | w.DT_END_ELLIPSIS);
 }
 
