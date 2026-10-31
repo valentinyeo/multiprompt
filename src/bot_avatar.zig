@@ -26,7 +26,7 @@ pub fn forShell(shell: *const state.Shell) Appearance {
     return appearance;
 }
 
-pub const colors = [_]u32{ 0xA9C29A, 0xC98F72, 0xD4BE94, 0x93A9C4, 0xB7A6D6, 0xD9A0A8, 0x9DD3C4 };
+pub const colors = [_]u32{ 0x95DE69, 0xFF6F28, 0xFFC455, 0x5A9AE9, 0x9F6CFC, 0xFF667B, 0x5EFED1 };
 const grey: u32 = 0x9A9A9A;
 const visor: u32 = 0x121212;
 const eyes: u32 = 0xF2F2F2;

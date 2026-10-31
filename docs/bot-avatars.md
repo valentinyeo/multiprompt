@@ -14,13 +14,13 @@ Palette order:
 
 | Index | Color | Hex |
 |---|---|---|
-| 0 | Sage | `#A9C29A` |
-| 1 | Clay | `#C98F72` |
-| 2 | Sand | `#D4BE94` |
-| 3 | Mist | `#93A9C4` |
-| 4 | Lilac | `#B7A6D6` |
-| 5 | Rose | `#D9A0A8` |
-| 6 | Mint | `#9DD3C4` |
+| 0 | Sage | `#95DE69` |
+| 1 | Clay | `#FF6F28` |
+| 2 | Sand | `#FFC455` |
+| 3 | Mist | `#5A9AE9` |
+| 4 | Lilac | `#9F6CFC` |
+| 5 | Rose | `#FF667B` |
+| 6 | Mint | `#5EFED1` |
 
 White and grey are never palette choices. Eyes and hardware retain their existing colors.
 
