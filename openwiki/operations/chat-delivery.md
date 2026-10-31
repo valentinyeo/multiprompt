@@ -1,5 +1,10 @@
 # Chat View delivery (ISSUE-349, v0.28.716)
 
+New Claude sessions are delivered by the app-owned host: the runtime owns the session and speaks the
+Claude CLI's stream-json protocol, so nothing is typed into a terminal ([agent
+host](../architecture/agent-host.md)). Everything below describes the terminal connector path, which
+still serves chats started before this change and every Codex and Pi chat.
+
 VPS tmux tabs use the existing persistent SSH reader with a JSON `send` request.
 `ISSUE_349_TMUX_SEND` in `src/chat_send.zig` controls this path. Sending runs on a
 worker, sharing the reader's 15-second request budget. Hidden consoles, tab locks
