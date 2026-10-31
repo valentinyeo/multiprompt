@@ -517,19 +517,8 @@ fn logChatButtons(layout: @import("app_state.zig").ChatViewLayout) void {
     debugLog(std.fmt.bufPrint(&log, "[chat] composer card {d},{d},{d},{d} size={d}", .{ card.left, card.top, card.right, card.bottom, send.right - send.left }) catch "");
     var frame: RECT = std.mem.zeroes(RECT);
     if (app_state.g_main_hwnd != null) _ = @import("win32.zig").GetClientRect(app_state.g_main_hwnd, &frame);
-    var slot_l: i32 = 0;
-    var slot_t: i32 = 0;
-    var slot_r: i32 = 0;
-    var slot_b: i32 = 0;
-    {
-        var f: RECT = frame;
-        const pane = @import("window_layout.zig").activePaneContentRect(f);
-        slot_l = pane.left;
-        slot_t = pane.top;
-        slot_r = pane.right;
-        slot_b = pane.bottom;
-    }
-    debugLog(std.fmt.bufPrint(&log, "[chat] layout rc {d},{d},{d},{d} slot {d},{d},{d},{d} dpi={d}", .{ frame.left, frame.top, frame.right, frame.bottom, slot_l, slot_t, slot_r, slot_b, @import("console.zig").mainWindowDpi() }) catch "");
+    const pane = activePaneContentRect(frame);
+    debugLog(std.fmt.bufPrint(&log, "[chat] layout rc {d},{d},{d},{d} slot {d},{d},{d},{d} dpi={d}", .{ frame.left, frame.top, frame.right, frame.bottom, pane.left, pane.top, pane.right, pane.bottom, @import("console.zig").mainWindowDpi() }) catch "");
     for ([_]struct { name: []const u8, rect: RECT }{ .{ .name = "attach", .rect = layout.attach_btn }, .{ .name = "mic", .rect = layout.mic_btn } }) |button| {
         const rect = button.rect;
         debugLog(std.fmt.bufPrint(&log, "[chat] {s} rect {d},{d},{d},{d}", .{ button.name, rect.left, rect.top, rect.right, rect.bottom }) catch "");
