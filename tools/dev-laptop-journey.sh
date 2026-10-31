@@ -4,6 +4,8 @@ set -u
 readonly DEV_NAME='multiprompt-dev'
 evidence="${DEV_RIG_EVIDENCE:-./dev-rig-evidence}"
 
+readonly HWND_CS='using System; using System.Text; using System.Runtime.InteropServices; public class MpDevF { public delegate bool Proc(IntPtr h, IntPtr l); [DllImport("user32.dll")] public static extern bool EnumWindows(Proc p, IntPtr l); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n); [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h); public static IntPtr Found = IntPtr.Zero; public static string Find(uint want) { EnumWindows((h, l) => { uint pid; GetWindowThreadProcessId(h, out pid); var c = new StringBuilder(64); GetClassName(h, c, 64); if (pid == want && IsWindowVisible(h) && c.ToString() == "ZigShell") { Found = h; return false; } return true; }, IntPtr.Zero); return Found.ToString(); } }'
+readonly FG_CS='using System; using System.Runtime.InteropServices; public class MpDevG { [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] static extern uint GetCurrentThreadId(); [DllImport("user32.dll", SetLastError=true)] static extern bool AttachThreadInput(uint from, uint to, bool attach); [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h); [DllImport("user32.dll")] static extern IntPtr SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(uint pid); [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int c); [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra); public static uint ForegroundPid() { uint p; GetWindowThreadProcessId(GetForegroundWindow(), out p); return p; } public static void Focus(IntPtr hwnd) { uint pid; uint fgThread = GetWindowThreadProcessId(GetForegroundWindow(), out pid); uint cur = GetCurrentThreadId(); uint targetPid; uint targetThread = GetWindowThreadProcessId(hwnd, out targetPid); bool a = fgThread != 0 && fgThread != cur && AttachThreadInput(cur, fgThread, true); bool b = targetThread != 0 && targetThread != cur && targetThread != fgThread && AttachThreadInput(cur, targetThread, true); keybd_event(0x12, 0, 0, UIntPtr.Zero); try { AllowSetForegroundWindow(targetPid); BringWindowToTop(hwnd); ShowWindow(hwnd, 3); SetForegroundWindow(hwnd); } finally { keybd_event(0x12, 0, 2, UIntPtr.Zero); if (b) AttachThreadInput(cur, targetThread, false); if (a) AttachThreadInput(cur, fgThread, false); } } }'
 hc() { lh shell "$1" --timeout "${2:-30}"; }
 
 dev_pid() {
@@ -11,20 +13,7 @@ dev_pid() {
 }
 
 dev_hwnd() {
-    hc "\$d = @'
-using System; using System.Text; using System.Runtime.InteropServices;
-public class MpF {
-  public delegate bool Proc(IntPtr h, IntPtr l);
-  [DllImport(\"user32.dll\")] public static extern bool EnumWindows(Proc p, IntPtr l);
-  [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
-  [DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr h);
-  public static IntPtr Found = IntPtr.Zero;
-  public static string Do(uint want) {
-    EnumWindows((h, l) => { uint pid; GetWindowThreadProcessId(h, out pid); if (pid == want && IsWindowVisible(h)) { Found = h; return false; } return true; }, IntPtr.Zero);
-    return Found.ToString();
-  }
-}
-'@; Add-Type -TypeDefinition \$d; \$p = Get-Process -Name '$DEV_NAME' -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not \$p) { '0' } else { [MpF]::Do(\$p.Id) }" 30 | tr -d '\r\n'
+    hc "\$d = '$HWND_CS'; Add-Type -TypeDefinition \$d; \$p = (Get-Process -Name '$DEV_NAME' -ErrorAction SilentlyContinue | Select-Object -First 1).Id; if (-not \$p) { '0' } else { [MpDevF]::Find(\$p) }" 30 | tr -d '\r\n'
 }
 
 foreground_is_dev() {
@@ -86,9 +75,7 @@ focus_dev() {
     local h
     h=$(dev_hwnd)
     [[ -z $h || $h == 0 ]] && { echo "dev window missing" >&2; return 1; }
-    hc "\$d = @'
-$FOREGROUND_CS
-'@; Add-Type -TypeDefinition \$d; \$h = [IntPtr]$h; [MpFg]::ShowWindow(\$h, 3) | Out-Null; [MpFg]::BringToForeground(\$h); Start-Sleep -Milliseconds 400; 'fg=' + [MpFg]::ForegroundPid()" 45 | tail -1
+    hc "\$d = '$FG_CS'; Add-Type -TypeDefinition \$d; [MpDevG]::Focus([IntPtr]$h); Start-Sleep -Milliseconds 350; 'fg=' + [MpDevG]::ForegroundPid()" 45 | tail -1
 }
 
 shot() {

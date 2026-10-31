@@ -23,6 +23,7 @@ USAGE
 }
 
 lh_shell() { lh shell "$1" --timeout "${2:-30}"; }
+hc() { lh shell "$1" --timeout "${2:-30}"; }
 
 windows_path() { printf '%s' "$1" | sed 's#\\#/#g'; }
 
@@ -71,16 +72,11 @@ place_window() {
     local dir
     dir=$(dev_dir)
     lh_shell "\$dir = '$dir'; \$exe = Join-Path \$dir '$DEV_EXE'; if (-not (Get-Process -Name 'multiprompt-dev' -ErrorAction SilentlyContinue)) { Start-Process -FilePath \$exe -WorkingDirectory \$dir }; Start-Sleep -Seconds 3; 'started'" 60
-    lh_shell "\$d = @'
-using System;
-using System.Runtime.InteropServices;
-public class MpWindow {
-    [DllImport(\"user32.dll\")] public static extern IntPtr FindWindow(string cls, string title);
-    [DllImport(\"user32.dll\")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
-    [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int cmd);
-    [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr h);
-}
-'@; Add-Type -TypeDefinition \$d; \$h = [MpWindow]::FindWindow('MultipromptDevWindow', \$null); if (\$h -eq [IntPtr]::Zero) { 'window-missing' } else { [MpWindow]::ShowWindow(\$h, 3) | Out-Null; [MpWindow]::SetWindowPos(\$h, [IntPtr]::Zero, -2560, -493, 2048, 1280, 0x0040) | Out-Null; [MpWindow]::SetForegroundWindow(\$h) | Out-Null; 'placed ' + \$h }" 45
+    local pid h
+    pid=$(hc "(Get-Process -Name 'multiprompt-dev' -ErrorAction SilentlyContinue | Select-Object -First 1).Id" 20 | tr -d '\r\n')
+    if [[ -z $pid ]]; then echo 'dev-not-running' >&2; return 1; fi
+    local place_cs='using System; using System.Text; using System.Runtime.InteropServices; public class MpPlace { public delegate bool Proc(IntPtr h, IntPtr l); [DllImport("user32.dll")] public static extern bool EnumWindows(Proc p, IntPtr l); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern int GetClassName(IntPtr h, StringBuilder s, int n); [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h); [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r); [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f); public struct RECT { public int Left, Top, Right, Bottom; } public static IntPtr Found = IntPtr.Zero; public static string Do(uint want) { EnumWindows((h, l) => { uint pid; GetWindowThreadProcessId(h, out pid); var c = new StringBuilder(64); GetClassName(h, c, 64); if (pid == want && IsWindowVisible(h) && c.ToString() == "ZigShell") { Found = h; return false; } return true; }, IntPtr.Zero); if (Found == IntPtr.Zero) return "window-missing"; SetWindowPos(Found, IntPtr.Zero, -2560, -493, 2048, 1280, 0x0040); RECT r; GetWindowRect(Found, out r); return "placed " + Found + " rect=" + r.Left + "," + r.Top + "," + (r.Right - r.Left) + "x" + (r.Bottom - r.Top); } }'
+    hc "\$d = '$place_cs'; Add-Type -TypeDefinition \$d; [MpPlace]::Do($pid)" 45 | tail -1
 }
 
 shot() {
