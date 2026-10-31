@@ -644,13 +644,14 @@ pub const History = struct {
         const oldest = if (mode != null) std.fmt.parseInt(u64, fields.next() orelse return error.InvalidHistory, 10) catch return error.InvalidHistory else self.start;
         if (!std.mem.eql(u8, mode_text, "tail") and !std.mem.eql(u8, mode_text, "delta") and !std.mem.eql(u8, mode_text, "older")) return error.InvalidHistory;
         if (probe.len != 0 and probe.len != 64) return error.InvalidHistory;
-        if (sid.len == 0 or sid.len >= self.sid.len or end < base or inode == 0 or fields.next() != null or
+        const empty_answer = inode == 0 and base == 0 and end == 0 and !std.mem.eql(u8, mode_text, "older");
+        if (sid.len == 0 or sid.len >= self.sid.len or end < base or (inode == 0 and !empty_answer) or fields.next() != null or
             (!std.mem.eql(u8, more, "0") and !std.mem.eql(u8, more, "1")) or
             !std.mem.eql(u8, agent, if (key.codex) "codex" else "claude") or
             !std.mem.eql(u8, tmux, if (key.tmux[0] != 0) std.mem.sliceTo(&key.tmux, 0) else "-")) return error.InvalidHistory;
         if (key.tmux[0] == 0 and key.sid[0] != 0 and !std.mem.eql(u8, sid, std.mem.sliceTo(&key.sid, 0))) return error.InvalidHistory;
-        const append = std.mem.eql(u8, mode_text, "delta");
-        const prepend = std.mem.eql(u8, mode_text, "older");
+        const append = !empty_answer and std.mem.eql(u8, mode_text, "delta");
+        const prepend = !empty_answer and std.mem.eql(u8, mode_text, "older");
         if ((append or prepend) and (inode != self.inode or !std.mem.eql(u8, sid, std.mem.sliceTo(&self.sid, 0)) or
             (if (prepend) end != self.start or oldest != base else base != self.offset))) return error.InvalidHistory;
         if (oldest > base) return error.InvalidHistory;
@@ -675,6 +676,7 @@ pub const History = struct {
         }
         if (!ended) return error.InvalidHistory;
         while (lines.next()) |line| if (line.len != 0) return error.InvalidHistory;
+        if (empty_answer and next.rows.items.len != 0) return error.InvalidHistory;
         if (prepend and oldest == self.start) {
             next.deinit(a);
             return;
@@ -1089,6 +1091,33 @@ test "reset pages rebuild offscreen until complete and clone retains pagination"
     try std.testing.expect(clone.more and clone.restore_full);
     try h.apply(a, "@mp\t3\thistory\tok\tsid\t50\t100\t10\t0\tclaude\tterm-1\n@@MP_END@@\n", 3, key);
     try std.testing.expect(!h.more and !h.restore_full);
+}
+
+test "IGSH-1266 an empty hosted answer opens the chat and the first tail answer fills it" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(8548, 0, false, "term-620b0b7", "");
+    const probe = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    var h: History = .{};
+    defer h.deinit(a);
+    const empty = "@mp\t1\thistory\tok\t4975cf70-a9f5-4a8e-a949-1a7be9a80457\t0\t0\t0\t0\tclaude\tterm-620b0b7\t0\t" ++ probe ++ "\tdelta\t0\n@@MP_END@@\n";
+    try h.apply(a, empty, 1, key);
+    try std.testing.expectEqual(@as(usize, 0), h.rows.items.len);
+    try std.testing.expectEqual(@as(u64, 0), h.inode);
+    const tail = "@mp\t2\thistory\tok\t4975cf70-a9f5-4a8e-a949-1a7be9a80457\t0\t220\t4242\t0\tclaude\tterm-620b0b7\t1700000000000\t" ++ probe ++ "\ttail\t0\n" ++ row ++ "@@MP_END@@\n";
+    try h.apply(a, tail, 2, key);
+    try std.testing.expectEqual(@as(u64, 4242), h.inode);
+    try std.testing.expect(h.rows.items.len > 0);
+}
+
+test "IGSH-1266 an inode zero answer with rows or a cursor mode stays invalid" {
+    const a = std.testing.allocator;
+    const key = transcript.Identity.initTmux(8548, 0, false, "term-620b0b7", "");
+    const probe = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    var h: History = .{};
+    defer h.deinit(a);
+    try std.testing.expectError(error.InvalidHistory, h.apply(a, "@mp\t1\thistory\tok\tsid\t0\t0\t0\t0\tclaude\tterm-620b0b7\t0\t" ++ probe ++ "\tdelta\t0\n" ++ row ++ "@@MP_END@@\n", 1, key));
+    try std.testing.expectError(error.InvalidHistory, h.apply(a, "@mp\t2\thistory\tok\tsid\t0\t9\t0\t0\tclaude\tterm-620b0b7\t0\t" ++ probe ++ "\ttail\t0\n@@MP_END@@\n", 2, key));
+    try std.testing.expectError(error.InvalidHistory, h.apply(a, "@mp\t3\thistory\tok\tsid\t0\t0\t0\t0\tclaude\tterm-620b0b7\t0\t" ++ probe ++ "\tolder\t0\n@@MP_END@@\n", 3, key));
 }
 
 test "complete user fragments classify injections without transforming mixed messages or replies" {
