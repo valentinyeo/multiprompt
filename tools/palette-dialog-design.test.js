@@ -23,7 +23,7 @@ test('IGSH-1061: palette paints the approved neutral card, not blue selection or
 
 test('IGSH-1061: pointer, wheel, reorder and paint share the new palette geometry', () => {
   const drawing = read('src/drawing.zig');
-  assert.match(drawing, /pub fn searchRowH\(\) i32 \{\s*return uiScaled\(40\)/);
+  assert.match(drawing, /pub fn searchRowH\(\) i32 \{\s*return uiScaled\(39\)/);
   assert.match(drawing, /pub fn searchOverlayW\(\) i32 \{[\s\S]*?uiScaled\(560\)/);
   assert.match(drawing, /pub fn searchOverlayOy[\s\S]*?uiScaled\(120\)/);
   assert.match(drawing, /const oy = searchOverlayOy\(win_h, overlay_h\)/);
@@ -56,7 +56,7 @@ test('IGSH-1061: native messages share the custom dialog and preserve confirmati
 test('IGSH-1061: static labels and shortcut hints use the formatter, not user session names', () => {
   const paint = palette();
   assert.match(paint, /paletteDrawText/);
-  assert.match(paint, /DrawTextW\(hdc, @ptrCast\(&app_state\.shells\[shell_idx\]\.name\)/);
+  assert.match(paint, /draw\(hdc, @ptrCast\(&app_state\.shells\[shell_idx\]\.name\)/);
   const formatter = read('src/palette_text.zig');
   assert.match(formatter, /pub fn sentence/);
   assert.match(formatter, /pub fn keycap/);

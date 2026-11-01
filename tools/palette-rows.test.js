@@ -25,9 +25,9 @@ function uniqueOffsets(values) {
 
 function comparisons(text, variable, values) {
   const found = new Set();
-  const comparison = new RegExp(`\\b${variable}\\s*(?:==|>=|<=|>|<)\\s*(SEARCH_\\w+_OFFSET)\\b`, 'g');
+  const comparison = new RegExp(`\\b${variable}\\s*(?:==|>=|<=|>|<)\\s*(?:app_state\\.)?(SEARCH_\\w+_OFFSET)\\b`, 'g');
   for (const [, name] of text.matchAll(comparison)) found.add(name);
-  const range = new RegExp(`\\b${variable}\\s*(>=|>)\\s*(SEARCH_\\w+_OFFSET)\\s+and\\s+${variable}\\s*(<=|<)\\s*(SEARCH_\\w+_OFFSET)\\b(?!\\s*\\+)`, 'g');
+  const range = new RegExp(`\\b${variable}\\s*(>=|>)\\s*(?:app_state\\.)?(SEARCH_\\w+_OFFSET)\\s+and\\s+${variable}\\s*(<=|<)\\s*(?:app_state\\.)?(SEARCH_\\w+_OFFSET)\\b(?!\\s*\\+)`, 'g');
   for (const [, lowerOp, lower, upperOp, upper] of text.matchAll(range)) {
     for (const [name, value] of values) {
       if ((lowerOp === '>=' ? value >= values.get(lower) : value > values.get(lower)) &&
@@ -125,7 +125,8 @@ test('ISSUE-265 Stop is painted, searchable and dispatched for the exact context
   assert.match(state, /pub const SEARCH_TABCTX_CHAT_STOP: usize = 7119;/);
   assert.match(palette, /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_CHAT_STOP/);
   assert.match(palette, /target == SEARCH_TABCTX_CHAT_STOP\) return "chat view stop the agent interrupt escape"/);
-  assert.match(sidebar, /result_idx == SEARCH_TABCTX_CHAT_STOP\) L\("Chat View: Stop the agent"\)/);
+  assert.match(sidebar, /result_idx == SEARCH_TABCTX_CHAT_STOP\) L\(ui_words\.tab_context_chat_stop_agent\)/);
+  assert.match(read('src/ui_words.zon'), /\.tab_context_chat_stop_agent = "Chat View: Stop the agent"/);
   assert.match(confirm, /target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE\) or target == SEARCH_TABCTX_CHAT_STOP or/);
   assert.match(confirm, /target == SEARCH_TABCTX_CHAT_STOP\) \{\s*_ = @import\("chat_send.zig"\).chatStopAgent\(ti\)/);
 });
@@ -150,7 +151,7 @@ test('ISSUE-266 permission actions have all three surfaces and exact context dis
     assert.match(confirm, new RegExp(`target == SEARCH_TABCTX_CHAT_${tag}\\) \\{\\s*_ = @import\\("chat_send.zig"\\).chatPermissionAnswer\\(ti, \\.${action}\\)`));
     assert.ok(shortcuts.includes(`Alt+${key} in Chat View`));
   }
-  assert.match(main, /WM_APP_CHAT_PERMISSION => \{\s*if \(wp < 3\) _ = @import\("chat_send.zig"\).chatPermissionAnswer/);
+  assert.match(main, /WM_APP_CHAT_PERMISSION => \{\s*(?:if \(!@import\("room_frontend\.zig"\)\.privateActionsAllowed\(\)\) return 0;\s*)?if \(wp < 3\) _ = @import\("chat_send\.zig"\)\.chatPermissionAnswer/);
   assert.match(shortcuts, /kb.vkCode == 0x59 or kb.vkCode == 0x4F or kb.vkCode == 0x44/);
 });
 
