@@ -21,7 +21,7 @@ test('IGSH-1266 a first hosted message survives a reconnecting channel', () => {
   const submit = send.slice(send.indexOf('fn chatTmuxSendThread('), send.indexOf('fn chatMessageReduce('));
   assert.ok(submit.includes('chatHistoryPersistent(job.key.host, id, query, 65536, &response, &job.written)'),
     'the submit still runs on the persistent channel first');
-  assert.match(submit, /if \(!@import\("chat_session\.zig"\)\.chatHistoryPersistent\(job\.key\.host, id, query, 65536, &response, &job\.written\)\) \{\s*response\.clearRetainingCapacity\(\);\s*if \(!@import\("chat_session\.zig"\)\.chatHistorySendForced\(job\.key\.host, id, query, 65536, &response, &job\.written\)\) return;\s*\}/,
+  assert.match(submit, /if \(!@import\("chat_session\.zig"\)\.chatHistoryPersistent\(job\.key\.host, id, query, 65536, &response, &job\.written\)\) \{\s*response\.clearRetainingCapacity\(\);\s*if \(!@import\("chat_session\.zig"\)\.chatHistorySendForced\(job\.key\.host, id, query, 65536, &response, &job\.written\)\) \{[^}]*return;\s*\}\s*\}/,
     'a message typed while the channel reconnects must be submitted over a forced fresh channel instead of being dropped');
   const session = read('src/chat_session.zig');
   assert.match(session, /pub fn chatHistorySendForced\(host: u8, id: u32, query: \[\]const u8, wire_limit: usize, out: \*std\.ArrayList\(u8\), request_written: \?\*bool\) bool \{/,

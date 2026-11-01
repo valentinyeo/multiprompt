@@ -95,22 +95,6 @@ $originalFontSmoothing = $null
 $updateMutex = $null
 $updateMutexHeld = $false
 
-function Stage-FooterUpdate([string]$Target, [string]$Version, [string]$Root) {
-    . (Join-Path $PSScriptRoot '../../../src/update_release.ps1') -Mode Library
-    $folder = Join-Path $Root 'v9.10.0'
-    $release = [pscustomobject]@{
-        tag_name = 'v9.10.0'; draft = $false; prerelease = $false; author = @{ login = 'github-actions[bot]' }
-        assets = @(Get-ChildItem -LiteralPath $folder -File | Where-Object { $_.Name -ne 'wrong.sig' } | ForEach-Object { @{ name = $_.Name; browser_download_url = "https://github.com/valentinyeo/multiprompt/releases/download/v9.10.0/$($_.Name)" } })
-    }
-    function Invoke-RestMethod { param($Uri, $Headers, $TimeoutSec) return $release }
-    function Invoke-WebRequest {
-        param($Uri, $Headers, [switch]$UseBasicParsing, $TimeoutSec, $OutFile)
-        Copy-Item -LiteralPath (Join-Path $folder ([IO.Path]::GetFileName($Uri))) -Destination $OutFile -Force
-    }
-    if (-not (Save-Update $Target $Version 'x64')) { throw 'Signed local footer update was not staged' }
-    if (-not (Test-Path -LiteralPath "$Target.update/ready.txt")) { throw 'Signed local footer update marker missing' }
-}
-
 . (Join-Path $PSScriptRoot 'control-library.ps1')
 try {
     if ($Feature -in @('title-bar', 'window-controls')) {

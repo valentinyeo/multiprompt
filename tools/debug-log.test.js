@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
-const start = source.indexOf('fn debugLog(');
+const start = source.indexOf('fn writeLogLine(');
 const logger = source.slice(start, source.indexOf('\n}', start) + 2);
 const lineStart = source.indexOf('fn buildDebugLine(');
 const lineBuilder = source.slice(lineStart, source.indexOf('\n}', lineStart) + 2);
@@ -60,7 +60,7 @@ fn writer() void {
     while (!go.load(.acquire)) std.atomic.spinLoopHint();
     for (0..100) |_| {
         _ = attempts.fetchAdd(1, .monotonic);
-        debugLog("paint record");
+        writeLogLine("paint record");
     }
 }
 test "concurrent exclusive appends retain every paint record" {

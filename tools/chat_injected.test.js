@@ -6,6 +6,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
+function declaration(name) {
+  const start = source.indexOf(`const ${name} = struct {`);
+  assert.ok(start >= 0, name);
+  return source.slice(start, source.indexOf('\n};', start) + 3);
+}
 function body(name) {
   const start = source.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
@@ -25,7 +30,10 @@ const chat_transcript = @import("chat_transcript.zig");
 const chat_echo = @import("chat_echo.zig");
 const chat_reply = @import("chat_reply.zig");
 const chat_diff = @import("chat_diff.zig");
+const chat_reaction = @import("chat_reaction.zig");
+const link_detect = @import("link_detect.zig");
 const ChatBlock = chat_markdown.Block;
+${declaration('ChatDisplay')}
 const HANDLE = usize;
 var clean_chat: bool = false;
 var active_shell: usize = 0;
@@ -247,8 +255,8 @@ test "ISSUE-263 production tool geometry painting folding hit testing and open-a
 function runHarness(oldColor = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh299-'));
   try {
-    copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig', 'chat_reply.zig'], dir);
-    let functions = [...['chatReplyLineHeight', 'chatPaintReplyLine'].filter(name => source.includes(`fn ${name}(`)), 'chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatMeasureBlockRect', 'chatPaintTime', 'chatNoteBodyRect', 'chatPaintBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'].map(body).join('\n');
+    copyZig(['chat_markdown.zig', 'chat_style.zig', 'chat_transcript.zig', 'chat_echo.zig', 'chat_diff.zig', 'chat_reply.zig', 'chat_reaction.zig', 'link_detect.zig'], dir);
+    let functions = [...['chatReplyLineHeight', 'chatPaintReplyLine'].filter(name => source.includes(`fn ${name}(`)), 'chatUserBubbleColor', 'chatAgentBubbleColor', 'chatInjectedBubbleColor', 'chatDisplayForBlock', 'chatMeasureBlockRect', 'chatMeasureProjectedBlockRect', 'chatPaintTime', 'chatNoteBodyRect', 'chatPaintBlock', 'chatPaintProjectedBlock', 'chatStatusRowRect', 'chatToolAt', 'chatTranscriptBlockAtPoint', 'chatToggleAllTools'].map(body).join('\n');
     if (oldColor) functions = functions.replace('chat_style.bubbleColors(themeConsoleBg()).user', 'chat_style.bubbleColors(themeConsoleBg()).agent');
     fs.writeFileSync(path.join(dir, 'test.zig'), (prelude + functions + acceptance).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'production'], { encoding: 'utf8', timeout: 60000 });
@@ -269,5 +277,6 @@ test('inbox preview and unread are not transcript-user driven; hit tests and voi
   assert.doesNotMatch(body('captureShellPreview'), /g_chat_blocks|chat_transcript|\.role/);
   assert.match(body('publishInboxStateNow'), /shells\[i\]\.needs_attention/);
   assert.doesNotMatch(body('publishInboxStateNow'), /g_chat_blocks|chat_transcript|\.role/);
-  for (const name of ['chatTranscriptCharAt', 'chatTranscriptLinkAt', 'chatFlowBlock', 'voiceReadReply', 'chatLatestAgentReply']) assert.match(body(name), /\.injected/);
+  for (const name of ['chatTranscriptCharAt', 'chatTranscriptLinkAt', 'chatFlowBlock', 'chatLatestAgentReply']) assert.match(body(name), /\.injected/);
+  assert.match(source.slice(source.indexOf('fn voiceManualRetry('), source.indexOf('fn voiceManualStop', source.indexOf('fn voiceManualRetry('))), /\.injected/, 'spoken replies stop at an injected reply boundary');
 });

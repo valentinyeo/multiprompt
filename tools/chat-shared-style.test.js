@@ -17,7 +17,7 @@ test('chat sidebar shows approved robots and previews, retaining unread and hove
   assert.match(row, /needs_attention[^]*?RGB\(137, 180, 248\)/);
   assert.match(row, /g_sidebar_hover == index/);
   assert.match(row, /if \(app_state\.g_sidebar_hover == index\)[^]*?inboxRelTime/);
-  assert.match(row, /if \(app_state\.g_sidebar_hover == index\)[^]*?00d7/);
+  assert.doesNotMatch(row, /00d7/);
   assert.match(row, /avatar\.draw/);
   assert.match(row, /shell\.preview/);
   assert.match(row, /chatDraftHasForShell/);
@@ -84,7 +84,7 @@ test('composer separates attachment from its pill and paints the approved send s
 test('sidebar labels and selection appearance ignore the content view', () => {
   assert.doesNotMatch(body(sidebar, 'fn drawSidebarLabel('), /g_chat_active/);
   const paint = body(sidebar, 'pub fn paintSidebar(');
-  const selection = paint.slice(paint.indexOf('if (i == app_state.active_shell'), paint.indexOf('if (app_state.shells[i].selected)'));
+  const selection = paint.slice(paint.indexOf('if (i == app_state.active_shell'), paint.indexOf('if (app_state.shells[i].selected'));
   assert.ok(selection.length > 0);
   assert.doesNotMatch(selection, /g_chat_active/);
   assert.doesNotMatch(paint, /const fav_size: i32|const base_text_left: i32/);

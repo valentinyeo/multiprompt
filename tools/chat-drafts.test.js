@@ -36,6 +36,7 @@ const switch_timing = struct {
     fn record(_: Step, _: i64) void {}
 };
 var g_chat_active = true;
+var dictation_private_capture = false;
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;

@@ -18,8 +18,12 @@ test("Token Ladder feeds the usage panel from Host 2 in the background", () => {
 });
 
 test("Token Ladder commands exist on all three surfaces", () => {
+  for (const label of ["global_ladder_auto", "global_ladder_claude", "global_ladder_codex", "global_ladder_dashboard"]) {
+    assert.ok(source.includes(`ui_words.${label}`), `palette row ${label}`);
+  }
+  const words = fs.readFileSync(path.join(root, "src", "ui_words.zon"), "utf8");
   for (const label of ["Token Ladder: Auto", "Token Ladder: Burn Claude", "Token Ladder: Burn Codex", "Token Ladder: Open Dashboard"]) {
-    assert.ok(source.includes(`L("${label}")`), `palette row ${label}`);
+    assert.ok(words.includes(`"${label}"`), `word table ${label}`);
   }
   assert.match(source, /Ctrl\+K \\u\{2192\} Token Ladder: Auto \/ Burn Claude \/ Burn Codex/);
   assert.match(source, /Ctrl\+K \\u\{2192\} Token Ladder: Open Dashboard/);

@@ -36,10 +36,19 @@ var g_chat_verify_echo_id: u64 = 0;
 var g_chat_verify_shell_id: u32 = 11;
 var shell_count: u32 = 2;
 var active_shell: u32 = 0;
-const Shell = struct { shell_id: u32, pid: u32 };
+const ShellKind = enum { tmux, cmd, vps, vps2, local, ssh };
+const Shell = struct { shell_id: u32, pid: u32, kind: ShellKind = .cmd, ai_agent: u8 = 0, host: u8 = 0, codex: bool = false, sid: [40]u8 = @splat(0), tmux: [64]u8 = @splat(0) };
 var shells = [_]Shell{ .{ .shell_id = 11, .pid = 123 }, .{ .shell_id = 22, .pid = 456 } };
+const ChatPendingReset = struct { key: @TypeOf(shells[0]) = .{ .shell_id = 0, .pid = 0 }, nonce: u64 = 0, request_nonce: u64 = 0 };
+var g_chat_pending_reset: ?ChatPendingReset = null;
+var g_chat_reset_next: u64 = 0;
+fn chatResetSameChat(_: @TypeOf(shells[0]), _: @TypeOf(shells[0])) bool { return false; }
+fn chatPendingResetDropIfStale() bool { return false; }
+fn chatPendingResetStart(_: u32) void {}
+fn armChatOutboxTimerIfNeeded() void {}
+fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
 var g_chat_active = true;
-const Entry = struct { key: Shell, cache_cancelled: std.atomic.Value(bool) = .init(false), disk_loaded: bool = false };
+const Entry = struct { key: Shell, cache_cancelled: std.atomic.Value(bool) = .init(false), disk_loaded: bool = false, generation: u64 = 0, message_generation: u64 = 0, message_epoch: u64 = 0 };
 var old_entry = Entry{ .key = .{ .shell_id = 11, .pid = 0 } };
 var new_entry = Entry{ .key = .{ .shell_id = 11, .pid = 0 } };
 var entries = [_]*Entry{&old_entry};
@@ -124,7 +133,7 @@ test('executed production reset clears all phases only for its tab, preserves dr
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh307-reset-'));
   try {
     copyZig(['chat_echo.zig'], dir);
-    const names = ['chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxClearIn', 'chatOutboxEnqueueInState', 'chatOutboxDropForKey', 'chatResetForShell'];
+    const names = ['chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxClearIn', 'chatOutboxEnqueueInState', 'chatOutboxEnqueueInStateLimit', 'chatOutboxDropForKey', 'chatResetForShell', 'chatResetLocalForShell'];
     fs.writeFileSync(path.join(dir, 'test.zig'), (harness + declaration('ChatOutboxEntry') + names.map(body).join('\n') + acceptance).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'test.zig'), '--test-filter', 'reset:'], { encoding: 'utf8', timeout: 60000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -149,6 +158,8 @@ test('reset has all command surfaces and rejects obsolete cache writes/results',
   assert.match(body('chatFileOnReady'), /if \(!disk and !history.more\) entry.loaded_ms/);
   assert.match(body('chatFileOnReady'), /else if \(!has_messages\) entry.history.start else 0/);
   const loadOutbox = body('loadChatOutbox');
-  assert.match(loadOutbox, /const version = json_reader\.uintDefault\(parsed\.value, "version", 0\);\s+if \(version != 1 and version != 2\) return;\s+_ = chatOutboxPurgeOrphans\(\);\s+_ = saveChatOutbox\(\);/);
+  assert.match(loadOutbox, /const version = json_reader\.uintDefault\(parsed\.value, "version", 0\);\s+if \(version != 1 and version != 2\) return;/);
+  const afterVersion = loadOutbox.slice(loadOutbox.indexOf('if (version != 1 and version != 2) return;'));
+  assert.ok(afterVersion.indexOf('chatOutboxPurgeOrphans()') < afterVersion.indexOf('saveChatOutbox()'), 'purge orphans runs before the single save');
   assert.equal(loadOutbox.match(/saveChatOutbox\(/g)?.length, 1);
 });

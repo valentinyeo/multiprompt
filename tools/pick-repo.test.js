@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
+const { readChangelogEntry } = require('./changelog-entry');
+
 const read = (file) => fs.readFileSync(file, 'utf8');
 const { readChangelogEntry } = require('./changelog-entry');
 

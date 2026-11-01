@@ -65,7 +65,7 @@ test("inbox publish debounces bursts into one write via a dedicated timer", () =
 });
 
 test("window title stays fixed during power changes", () => {
-  assert.match(app, /const title = "Multi Bot"/);
+  assert.match(app, /const title = if \(IS_DEV\) "Multibot DEV" else "Multi Bot";/);
 });
 
 test("persistent per-host VPS channel falls back to the one-shot path on any failure", () => {
@@ -129,7 +129,7 @@ test("Ctrl+K exposes Power Saver: Auto / Always / Off with the active mode tagge
   assert.match(app, /const SEARCH_POWER_ALWAYS_OFFSET: usize = 6338;/);
   assert.match(app, /const SEARCH_POWER_OFF_OFFSET: usize = 6339;/);
   assert.match(app, /SEARCH_POWER_AUTO_OFFSET => "power saver auto",/);
-  assert.match(app, /L\("Power Saver: Auto"\) else if \(is_power_always\) L\("Power Saver: Always"\) else L\("Power Saver: Off"\)/);
+  assert.match(app, /L\(ui_words\.global_power_auto\) else if \(is_power_always\) L\(ui_words\.global_power_always\) else L\(ui_words\.global_power_off\)/);
   assert.match(
     app,
     /const pw_current = \(is_power_auto and g_power_profile == \.auto\) or \(is_power_always and g_power_profile == \.always\) or \(is_power_off and g_power_profile == \.off\);/

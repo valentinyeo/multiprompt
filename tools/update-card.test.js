@@ -67,7 +67,9 @@ test('a pinned session on the last window takes the quit-all close path, no pin 
   const close = main.slice(main.indexOf('WM_CLOSE => {\n            if (g_app_closing)'), main.indexOf('WM_CLOSE: session saved'));
   assert.equal((close.match(/g_quit_all_in_progress = true/g) || []).length, 1, 'only the pinned last-window branch may switch to the quit-all path');
   assert.match(close, /g_current_workspace_restore = g_quit_all_in_progress;[^]*?gcDefaultNamedWindowOnClose\(\);/);
-  assert.match(fnBody('fn closeShell('), /rejectPinnedSessionClose/);
+  const closeShell = fnBody('fn closeShell(');
+  assert.match(closeShell, /shells\[idx\]\.pinned_top = false;\s*shells\[idx\]\.starred_pinned_top = false;\s*closeShellRemember\(idx, true\);/, 'a pinned session closes directly, unpinning itself first (IGSH-1287)');
+  assert.doesNotMatch(closeShell, /rejectPinnedSessionClose/);
   assert.match(fnBody('fn archiveTabAt('), /rejectPinnedSessionClose/);
   assert.match(fnBody('fn closeMyWorkspaceSlot('), /rejectPinnedWorkspaceClose/);
 });

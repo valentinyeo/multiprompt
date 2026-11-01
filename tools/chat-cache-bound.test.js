@@ -123,6 +123,11 @@ const ChatHistoryStream = struct {
 };
 fn chatHistoryStreamsKeep(_: u32) void {}
 fn chatHistoryStreamStop(_: *ChatHistoryEntry) void {}
+fn chatActiveTabWantsChat() bool { return true; }
+fn chatFetchWanted(chat_active: bool) bool { return chat_active; }
+fn chatLiveWanted(_: chat_transcript.Identity) bool { return false; }
+fn chatLiveStreamEnsure(_: chat_transcript.Identity) void {}
+fn chatLiveStreamStop() void {}
 fn chatHistoryStreamStart(_: chat_transcript.Identity, _: u32, _: chat_history.History) ?*ChatHistoryStream { @panic("foreground reservation must precede stream start"); }
 fn chatBenchEnabled() bool { return false; }
 fn SetEvent(_: HANDLE) i32 { return 1; }
@@ -159,8 +164,8 @@ test "local cache bypasses busy remote worker and foreground reservation" {
     chatFileRequest(key);
     try std.testing.expectEqual(@as(u32, 1), g_chat_file_request_id);
     cached_entry.pending = false; cached_entry.disk_loaded = true;
-    chatFileRequest(key);
-    try std.testing.expect(!cached_entry.pending); // recent input still defers remote IO
+    chatFileRequest(chat_transcript.Identity.init(2, 0, false, "other", ""));
+    try std.testing.expect(!cached_entry.pending); // a background tab still defers remote IO on recent input
 }
 test "local cache bypasses background stream creation while remote work is busy" {
     cached_entry = .{ .disk_loaded = true };
