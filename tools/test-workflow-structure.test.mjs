@@ -65,7 +65,7 @@ test('routing checks reject the removed dependency, missing history, classifier 
     ["        if: steps.paths.outputs.heavy == 'true'", '        if: true'],
   ]) {
     assert.ok(workflow.includes(before));
-    assert.throws(() => verifyRouting(workflow.replace(before, after)), assert.AssertionError);
+    assert.throws(() => verifyRouting(workflow.replaceAll(before, after)), assert.AssertionError);
   }
 });
 

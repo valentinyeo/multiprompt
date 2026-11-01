@@ -80,7 +80,7 @@ test('ISSUE-543 startup returns to input-priority timers before waiting on any c
 test('IGSH-522 phased startup persists the initial session after consoles finish and saving is unblocked', () => {
   const verify = (timer, initialize) => {
     assert.match(timer, /if \(app_state\.g_app_closing or initializeDeferred\(hwnd\)\) \{\s*_ = KillTimer\(hwnd, launch_cache\.TIMER_STARTUP\);\s*launch_cache\.pending = false;\s*saveSession\(\);\s*launch_cache\.changed\(\);/);
-    assert.ok(initialize.indexOf('startup_inflight.load(.acquire) != 0) return false') < initialize.indexOf('.done => return true'));
+    assert.ok(initialize.indexOf('startup_inflight.load(.acquire) != 0) return false') < initialize.indexOf('.done =>'));
     assert.match(initialize, /startup_inflight\.load\(\.acquire\) != 0\) return false/);
   };
   const main = read('src/main.zig');
@@ -118,7 +118,7 @@ test('ISSUE-543 account validation stays optimistic and cannot reconcile over ca
   assert.match(bootstrap, /g_account_locked = false/);
   assert.match(bootstrap, /startAccountJob\(\.\{ \.kind = \.startup \}\)/);
   assert.doesNotMatch(bootstrap, /readDpapiFile|accountResumeJob|WaitFor|Sleep\(/);
-  assert.match(body(account, 'layoutSyncWorker'), /accountResumeJob\(\.startup\)/);
+  assert.match(body(account, 'startAccountJob'), /submitted = accountResumeJob\(\.startup\)/);
   const reply = body(account, 'handleLayoutReply');
   assert.match(reply, /!reply\.unauthorized and !reply\.signed_out and !reply\.cancelled and \(reply\.job\.kind == \.startup/);
   assert.ok(reply.indexOf('startup_reply = lp') < reply.indexOf('applyServerLayout'));
@@ -236,7 +236,9 @@ const reviewCases = [
   ['account SSH discovery resolves before startup and cannot publish an unresolved empty list', read => {
     const source = read('src/account_desktop.zig');
     const worker = body(source, 'layoutSyncWorker');
-    assert.ok(worker.indexOf('resolveSshPath(false)') >= 0 && worker.indexOf('resolveSshPath(false)') < worker.indexOf('accountResumeJob(.startup)'));
+    assert.ok(worker.indexOf('resolveSshPath(false)') >= 0 && worker.indexOf('resolveSshPath(false)') < worker.indexOf('accountRequest(job, reply)'));
+    const submit = body(source, 'startAccountJob');
+    assert.ok(submit.indexOf('submitted = accountResumeJob(.startup)') < submit.indexOf('std.Thread.spawn(.{}, layoutSyncWorker'));
     const discovery = body(source, 'accountSyncHosts');
     assert.match(discovery, /appendSshExe\(&ssh_buf, &ssh_len\)\) return error\.SshUnavailable/);
     assert.match(discovery, /const output = try accountSshOutput/);
