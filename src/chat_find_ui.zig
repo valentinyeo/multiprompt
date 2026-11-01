@@ -280,6 +280,11 @@ fn jump() void {
         if (block.role == .tool and block.detail_len > 0) text_end = @max(text_end, block.detail_start + block.detail_len);
     }
     rebuildRanges();
+    if (projectedHit(hit) and app_state.g_chat_find_ranges[app_state.g_chat_find_selected] == null) {
+        app_state.g_chat_find_jump = false;
+        invalidate();
+        return;
+    }
     const position = if (app_state.g_chat_find_ranges[app_state.g_chat_find_selected]) |range| range.start else model.snippetPosition(hit, app_state.g_chat_capture[0..app_state.g_chat_last_len], text_start, text_end);
     for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |*block, i| {
         if (!model.contains(block.*, hit)) continue;
@@ -322,6 +327,15 @@ fn jump() void {
 
 extern "kernel32" fn FindNLSStringEx([*:0]const u16, u32, [*]const u16, i32, [*]const u16, i32, *i32, ?*anyopaque, ?*anyopaque, isize) callconv(win32.WINAPI) i32;
 
+fn projectedHit(hit: model.Hit) bool {
+    for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |block, i| {
+        if (block.role != .user or !model.contains(block, hit)) continue;
+        const display = render.chatDisplayForIndex(i) orelse return true;
+        if (display.source_map != null) return true;
+    }
+    return false;
+}
+
 fn rebuildRanges() void {
     const result = app_state.g_chat_find_result orelse return;
     const hash = app_state.g_chat_last_hash ^ @as(u64, app_state.g_chat_find_id) << 32;
@@ -348,6 +362,28 @@ fn rebuildRanges() void {
                 }
                 if (app_state.g_chat_find_ranges[i] == null) app_state.g_chat_find_ranges[i] = regions[0];
                 break;
+            }
+            continue;
+        }
+        if (projectedHit(hit)) {
+            for (app_state.g_chat_blocks[0..app_state.g_chat_block_count], 0..) |block, index| {
+                if (!model.contains(block, hit)) continue;
+                const display = render.chatDisplayForIndex(index) orelse continue;
+                var start: usize = if (block.role == .user) (if (display.reply_ref) |ref| ref.body_start else 0) else 0;
+                while (start < display.text.len) {
+                    var length: i32 = 0;
+                    const at = FindNLSStringEx(L(""), 0x00400001, display.text[start..].ptr, @intCast(display.text.len - start), &app_state.g_chat_find_query, @intCast(app_state.g_chat_find_len), &length, null, null, 0);
+                    if (at < 0 or length <= 0) break;
+                    const lo = start + @as(usize, @intCast(at));
+                    const hi = lo + @as(usize, @intCast(length));
+                    const range = display.sourceRange(lo, hi);
+                    if (range.end - range.start == hi - lo) {
+                        app_state.g_chat_find_ranges[i] = .{ .start = range.start, .end = range.end };
+                        break;
+                    }
+                    start = lo + 1;
+                }
+                if (app_state.g_chat_find_ranges[i] != null) break;
             }
             continue;
         }
@@ -422,6 +458,7 @@ pub fn paintMatch(hdc: win32.HANDLE, block: app_state.ChatBlock, rect: win32.REC
     var matched = false;
     for (result.hits, 0..) |hit, i| {
         if (model.contains(block, hit)) {
+            if (app_state.g_chat_find_ranges[i] == null and projectedHit(hit)) continue;
             if (app_state.g_chat_find_ranges[i]) |range| {
                 const body = range.start < block.start + block.len and range.end > block.start;
                 const detail = block.role == .tool and range.start < block.detail_start + block.detail_len and range.end > block.detail_start;

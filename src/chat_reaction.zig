@@ -1,5 +1,6 @@
 const std = @import("std");
 const md = @import("chat_markdown.zig");
+const reply = @import("chat_reply.zig");
 
 pub const Emoji = enum(u2) {
     like,
@@ -20,7 +21,21 @@ pub const Emoji = enum(u2) {
 };
 
 pub const Reaction = struct { emoji: Emoji, reference: u64, quote: []const u16 };
-pub const Pending = struct { id: u64, text: []const u16 };
+pub const Pending = struct { id: u64, text: []const u16, allow_mixed: bool = false };
+
+pub const Projection = struct {
+    text: []u16,
+    source: []usize,
+
+    fn deinit(self: Projection, a: std.mem.Allocator) void {
+        a.free(self.text);
+        a.free(self.source);
+    }
+};
+
+const ProjectedBlock = struct { index: usize, projection: Projection };
+const ProjectedPending = struct { id: u64, projection: Projection };
+const Range = struct { start: usize, end: usize };
 
 pub fn reference(id: []const u8) u64 {
     return if (id.len == 0) 0 else std.hash.Fnv1a_64.hash(id);
@@ -113,6 +128,8 @@ pub const View = struct {
     hidden: std.ArrayList(bool) = .empty,
     badges: std.ArrayList(u8) = .empty,
     pending: std.ArrayList(u64) = .empty,
+    projections: std.ArrayList(ProjectedBlock) = .empty,
+    pending_projections: std.ArrayList(ProjectedPending) = .empty,
     hash: u64 = 0,
     context: u64 = 0,
 
@@ -120,6 +137,10 @@ pub const View = struct {
         self.hidden.deinit(a);
         self.badges.deinit(a);
         self.pending.deinit(a);
+        for (self.projections.items) |item| item.projection.deinit(a);
+        self.projections.deinit(a);
+        for (self.pending_projections.items) |item| item.projection.deinit(a);
+        self.pending_projections.deinit(a);
         self.* = .{};
     }
 
@@ -138,6 +159,91 @@ pub const View = struct {
         return target.last;
     }
 
+    const Match = struct { range: Range, target: usize, emoji: Emoji };
+
+    fn project(self: *View, a: std.mem.Allocator, body: []const u16, scan_start: usize, targets: *const std.AutoHashMap(u64, Target), blocks: []const md.Block, text: []const u16, before: usize) !?Projection {
+        var matches: std.ArrayList(Match) = .empty;
+        defer matches.deinit(a);
+        const start = @min(scan_start, body.len);
+        const displayed = body[start..];
+        const body_start = start + if (reply.reference(displayed)) |ref| ref.body_start else @as(usize, 0);
+        var pos = body_start;
+        var fence: u16 = 0;
+        var fence_len: usize = 0;
+        while (pos < body.len) {
+            const line_start = pos;
+            while (pos < body.len and body[pos] != '\r' and body[pos] != '\n') : (pos += 1) {}
+            const line_end = pos;
+            if (pos < body.len and body[pos] == '\r') pos += 1;
+            if (pos < body.len and body[pos] == '\n') pos += 1;
+            const line = body[line_start..line_end];
+            var indent: usize = 0;
+            while (indent < line.len and line[indent] == ' ') : (indent += 1) {}
+            if (indent <= 3 and line.len - indent >= 3 and (line[indent] == '`' or line[indent] == '~') and line[indent + 1] == line[indent] and line[indent + 2] == line[indent]) {
+                var end = indent;
+                while (end < line.len and line[end] == line[indent]) : (end += 1) {}
+                if (fence == 0) {
+                    fence = line[indent];
+                    fence_len = end - indent;
+                } else if (fence == line[indent] and end - indent >= fence_len) {
+                    var trailing = end;
+                    while (trailing < line.len and (line[trailing] == ' ' or line[trailing] == '\t')) : (trailing += 1) {}
+                    if (trailing == line.len) fence = 0;
+                }
+                continue;
+            }
+            if (fence != 0 or indent >= 4 or (line.len > 0 and line[0] == '\t')) continue;
+            const reaction = parse(line) orelse continue;
+            const target = try resolve(a, reaction, targets, blocks, text, before) orelse continue;
+            var remove_start = line_start;
+            if (line_end == body.len and line_start > body_start) {
+                if (body[remove_start - 1] == '\n') remove_start -= 1;
+                if (remove_start > body_start and body[remove_start - 1] == '\r') remove_start -= 1;
+            }
+            try matches.append(a, .{ .range = .{ .start = remove_start, .end = pos }, .target = target, .emoji = reaction.emoji });
+        }
+        if (matches.items.len == 0) return null;
+        var visible: usize = 0;
+        var cursor: usize = 0;
+        for (matches.items) |match| {
+            const from = @max(cursor, match.range.start);
+            visible += from - cursor;
+            cursor = @max(cursor, match.range.end);
+        }
+        visible += body.len - cursor;
+        const projected = try a.alloc(u16, visible);
+        errdefer a.free(projected);
+        const source = try a.alloc(usize, visible);
+        errdefer a.free(source);
+        cursor = 0;
+        var out: usize = 0;
+        for (matches.items) |match| {
+            while (cursor < match.range.start) : (cursor += 1) {
+                projected[out] = body[cursor];
+                source[out] = cursor;
+                out += 1;
+            }
+            cursor = @max(cursor, match.range.end);
+        }
+        while (cursor < body.len) : (cursor += 1) {
+            projected[out] = body[cursor];
+            source[out] = cursor;
+            out += 1;
+        }
+        for (matches.items) |match| self.badges.items[match.target] |= match.emoji.bit();
+        return .{ .text = projected, .source = source };
+    }
+
+    pub fn projected(self: *const View, index: usize) ?*const Projection {
+        for (self.projections.items) |*item| if (item.index == index) return &item.projection;
+        return null;
+    }
+
+    pub fn projectedPending(self: *const View, id: u64) ?*const Projection {
+        for (self.pending_projections.items) |*item| if (item.id == id) return &item.projection;
+        return null;
+    }
+
     fn hideReplies(self: *View, blocks: []const md.Block, from: usize) void {
         var end = from;
         var count: usize = 0;
@@ -153,6 +259,14 @@ pub const View = struct {
     }
 
     pub fn build(self: *View, a: std.mem.Allocator, blocks: []const md.Block, text: []const u16, pending: []const Pending) !bool {
+        return self.buildDisplayed(a, blocks, text, pending, null);
+    }
+
+    pub fn buildDisplayed(self: *View, a: std.mem.Allocator, blocks: []const md.Block, text: []const u16, pending: []const Pending, display_starts: ?[]const usize) !bool {
+        for (self.projections.items) |item| item.projection.deinit(a);
+        self.projections.clearRetainingCapacity();
+        for (self.pending_projections.items) |item| item.projection.deinit(a);
+        self.pending_projections.clearRetainingCapacity();
         try self.hidden.resize(a, blocks.len);
         try self.badges.resize(a, blocks.len);
         @memset(self.hidden.items, false);
@@ -170,17 +284,61 @@ pub const View = struct {
         }
         for (blocks, 0..) |block, i| {
             if (block.role != .user) continue;
-            const reaction = parse(text[block.start..][0..block.len]) orelse continue;
-            const target = try resolve(a, reaction, &targets, blocks, text, i) orelse continue;
-            self.hidden.items[i] = true;
-            self.badges.items[target] |= reaction.emoji.bit();
-            self.hideReplies(blocks, i + 1);
+            const body = text[block.start..][0..block.len];
+            if (parse(body)) |reaction| {
+                if (try resolve(a, reaction, &targets, blocks, text, i)) |target| {
+                    self.hidden.items[i] = true;
+                    self.badges.items[target] |= reaction.emoji.bit();
+                    self.hideReplies(blocks, i + 1);
+                    continue;
+                }
+            }
+            const start = if (display_starts) |starts| @min(starts[i] -| block.start, body.len) else 0;
+            const projection = try self.project(a, body, start, &targets, blocks, text, i) orelse continue;
+            var content = false;
+            for (projection.text, projection.source) |unit, source| {
+                if (source >= start and !whitespace(unit)) {
+                    content = true;
+                    break;
+                }
+            }
+            if (!content) {
+                projection.deinit(a);
+                self.hidden.items[i] = true;
+                self.hideReplies(blocks, i + 1);
+            } else {
+                self.projections.append(a, .{ .index = i, .projection = projection }) catch |err| {
+                    projection.deinit(a);
+                    return err;
+                };
+            }
         }
         for (pending) |item| {
-            const reaction = parse(item.text) orelse continue;
-            const target = try resolve(a, reaction, &targets, blocks, text, blocks.len) orelse continue;
-            try self.pending.append(a, item.id);
-            self.badges.items[target] |= reaction.emoji.bit();
+            if (parse(item.text)) |reaction| {
+                if (try resolve(a, reaction, &targets, blocks, text, blocks.len)) |target| {
+                    try self.pending.append(a, item.id);
+                    self.badges.items[target] |= reaction.emoji.bit();
+                    continue;
+                }
+            }
+            if (!item.allow_mixed) continue;
+            const projection = try self.project(a, item.text, 0, &targets, blocks, text, blocks.len) orelse continue;
+            var content = false;
+            for (projection.text) |unit| {
+                if (!whitespace(unit)) {
+                    content = true;
+                    break;
+                }
+            }
+            if (!content) {
+                projection.deinit(a);
+                try self.pending.append(a, item.id);
+                continue;
+            }
+            self.pending_projections.append(a, .{ .id = item.id, .projection = projection }) catch |err| {
+                projection.deinit(a);
+                return err;
+            };
         }
         var hash = std.hash.Wyhash.init(0);
         for (self.hidden.items, 0..) |hidden, index| {
@@ -194,6 +352,18 @@ pub const View = struct {
             hash.update(&.{mask_value});
         }
         hash.update(std.mem.sliceAsBytes(self.pending.items));
+        for (self.projections.items) |item| {
+            hash.update(std.mem.asBytes(&self.context));
+            hash.update(std.mem.asBytes(&item.index));
+            hash.update(std.mem.sliceAsBytes(item.projection.text));
+            hash.update(std.mem.sliceAsBytes(item.projection.source));
+        }
+        for (self.pending_projections.items) |item| {
+            hash.update(std.mem.asBytes(&self.context));
+            hash.update(std.mem.asBytes(&item.id));
+            hash.update(std.mem.sliceAsBytes(item.projection.text));
+            hash.update(std.mem.sliceAsBytes(item.projection.source));
+        }
         const next = hash.final();
         const changed = next != self.hash;
         self.hash = next;
@@ -219,6 +389,103 @@ pub const View = struct {
         return std.mem.indexOfScalar(u64, self.pending.items, id) != null;
     }
 };
+
+test "IGSH-1132 projection keeps words and original source coordinates" {
+    const a = std.testing.allocator;
+    const words = std.unicode.utf8ToUtf16LeStringLiteral("Answer");
+    const id = reference("target");
+    var line_buffer: [256]u16 = undefined;
+    const line = format(.like, id, words, &line_buffer).?;
+    const prefix = std.unicode.utf8ToUtf16LeStringLiteral("Before\r\n");
+    const suffix = std.unicode.utf8ToUtf16LeStringLiteral("\r\nAfter");
+    const body = try std.mem.concat(a, u16, &.{ prefix, line, suffix });
+    defer a.free(body);
+    const blocks = [_]md.Block{.{ .start = 0, .len = words.len, .role = .prose, .message_id = 1, .reaction_reference = id }};
+    var targets = std.AutoHashMap(u64, View.Target).init(a);
+    defer targets.deinit();
+    try targets.put(id, .{ .first = 0, .last = 0, .message_id = 1 });
+    var view: View = .{};
+    defer view.deinit(a);
+    try view.badges.resize(a, 1);
+    view.badges.items[0] = 0;
+    const projection = (try view.project(a, body, 0, &targets, &blocks, words, 1)).?;
+    defer projection.deinit(a);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Before\r\nAfter"), projection.text);
+    try std.testing.expectEqual(prefix.len + line.len + 2, projection.source[prefix.len]);
+    try std.testing.expectEqual(Emoji.like.bit(), view.mask(0));
+    try std.testing.expectEqualSlices(u16, line, body[prefix.len..][0..line.len]);
+    const fenced = try std.mem.concat(a, u16, &.{ std.unicode.utf8ToUtf16LeStringLiteral("  ```\n"), line, std.unicode.utf8ToUtf16LeStringLiteral("\n  ```\n"), line });
+    defer a.free(fenced);
+    const kept = (try view.project(a, fenced, 0, &targets, &blocks, words, 1)).?;
+    defer kept.deinit(a);
+    const expected = try std.mem.concat(a, u16, &.{ std.unicode.utf8ToUtf16LeStringLiteral("  ```\n"), line, std.unicode.utf8ToUtf16LeStringLiteral("\n  ```") });
+    defer a.free(expected);
+    try std.testing.expectEqualSlices(u16, expected, kept.text);
+    const wrapped = try std.mem.concat(a, u16, &.{ std.unicode.utf8ToUtf16LeStringLiteral("> "), line, std.unicode.utf8ToUtf16LeStringLiteral("\r\n\r\nWords\r\n"), line });
+    defer a.free(wrapped);
+    const projected_reply = (try view.project(a, wrapped, 0, &targets, &blocks, words, 1)).?;
+    defer projected_reply.deinit(a);
+    const expected_reply = try std.mem.concat(a, u16, &.{ std.unicode.utf8ToUtf16LeStringLiteral("> "), line, std.unicode.utf8ToUtf16LeStringLiteral("\r\n\r\nWords") });
+    defer a.free(expected_reply);
+    try std.testing.expectEqualSlices(u16, expected_reply, projected_reply.text);
+    try std.testing.expect(reply.reference(projected_reply.text) != null);
+}
+
+test "IGSH-1132 build preserves mixed answers and confirms pending eligibility" {
+    const a = std.testing.allocator;
+    const words = std.unicode.utf8ToUtf16LeStringLiteral("Answer");
+    const id = reference("target");
+    var line_buffer: [256]u16 = undefined;
+    const line = format(.heart, id, words, &line_buffer).?;
+    const before = std.unicode.utf8ToUtf16LeStringLiteral("Hello\n");
+    const after = std.unicode.utf8ToUtf16LeStringLiteral("\nWorld");
+    const body = try std.mem.concat(a, u16, &.{ before, line, after });
+    defer a.free(body);
+    const capture = try std.mem.concat(a, u16, &.{ words, body, words });
+    defer a.free(capture);
+    const blocks = [_]md.Block{
+        .{ .start = 0, .len = words.len, .role = .prose, .message_id = 1, .reaction_reference = id },
+        .{ .start = words.len, .len = body.len, .role = .user },
+        .{ .start = words.len + body.len, .len = words.len, .role = .prose, .first = true },
+    };
+    var view: View = .{};
+    defer view.deinit(a);
+    _ = try view.build(a, &blocks, capture, &.{.{ .id = 1, .text = body }});
+    try std.testing.expect(!view.hides(1));
+    try std.testing.expect(!view.hides(2));
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Hello\nWorld"), view.projected(1).?.text);
+    try std.testing.expect(view.projectedPending(1) == null);
+    try std.testing.expectEqual(Emoji.heart.bit(), view.mask(0));
+    _ = try view.build(a, &blocks, capture, &.{.{ .id = 1, .text = body, .allow_mixed = true }});
+    try std.testing.expect(view.projectedPending(1) != null);
+    try std.testing.expect(!view.hidesPending(1));
+    _ = try view.build(a, &blocks, capture, &.{.{ .id = 1, .text = body }});
+    try std.testing.expect(view.projectedPending(1) == null);
+    const only = try std.mem.concat(a, u16, &.{ line, std.unicode.utf8ToUtf16LeStringLiteral("\r\n"), line });
+    defer a.free(only);
+    _ = try view.build(a, &blocks, capture, &.{.{ .id = 2, .text = only, .allow_mixed = true }});
+    try std.testing.expect(view.hidesPending(2));
+    try std.testing.expect(view.projectedPending(2) == null);
+    var invalid_buffer: [256]u16 = undefined;
+    const invalid = format(.like, id, std.unicode.utf8ToUtf16LeStringLiteral("Wrong quote"), &invalid_buffer).?;
+    const mixed = try std.mem.concat(a, u16, &.{ before, line, after, std.unicode.utf8ToUtf16LeStringLiteral("\n"), invalid });
+    defer a.free(mixed);
+    const mixed_capture = try std.mem.concat(a, u16, &.{ words, mixed, words });
+    defer a.free(mixed_capture);
+    const mixed_blocks = [_]md.Block{
+        blocks[0],
+        .{ .start = words.len, .len = mixed.len, .role = .user },
+        .{ .start = words.len + mixed.len, .len = words.len, .role = .prose, .first = true },
+    };
+    _ = try view.build(a, &mixed_blocks, mixed_capture, &.{.{ .id = 3, .text = mixed }});
+    const expected = try std.mem.concat(a, u16, &.{ before, std.unicode.utf8ToUtf16LeStringLiteral("World\n"), invalid });
+    defer a.free(expected);
+    try std.testing.expectEqualSlices(u16, expected, view.projected(1).?.text);
+    try std.testing.expectEqualSlices(u16, mixed, mixed_capture[words.len..][0..mixed.len]);
+    try std.testing.expect(!view.hides(2));
+    try std.testing.expect(view.projectedPending(3) == null);
+    try std.testing.expect(!view.hidesPending(3));
+}
 
 test "IGSH-975 wire format preserves quote and stable provider identity for all reactions" {
     try std.testing.expectEqual(@as(u64, 0xa430d84680aabd0b), reference("hello"));
