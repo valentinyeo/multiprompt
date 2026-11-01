@@ -886,6 +886,25 @@ pub fn chatLiveWrite(line: []const u8) bool {
         WriteFile(stream.channel.input, "\n", 1, &written, null) != 0 and written == 1;
 }
 
+fn chatLiveSyncQuestion() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const shell_id = app_state.shells[app_state.active_shell].shell_id;
+    if (shell_id == 0) return;
+    const live = @import("chat_live.zig");
+    if (!live.attached(shell_id)) return;
+    const entry = chatHistoryEntry(chatFileIdentity()) orelse return;
+    var prompt: @import("chat_options.zig").Prompt = .{};
+    if (live.questionPrompt(shell_id, &prompt)) {
+        if (entry.history.status.question.identity == prompt.identity) return;
+        entry.history.status.question = prompt;
+        app_state.shells[app_state.active_shell].chat_question_identity = prompt.identity;
+        return;
+    }
+    if (entry.history.status.question.count == 0 or live.questionsOpen(shell_id)) return;
+    entry.history.status.question = .{};
+    app_state.shells[app_state.active_shell].chat_question_identity = 0;
+}
+
 fn chatLiveSyncCard() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
@@ -1535,6 +1554,7 @@ fn chatEnsureTranscriptCapacity(text_len: usize, block_count: usize) bool {
 fn refreshChatBlockCache(force: bool) bool {
     if (app_state.active_shell >= app_state.shell_count) return false;
     chatLiveSyncCard();
+    chatLiveSyncQuestion();
     const key = chatFileIdentity();
     chatFileRequest(key);
     const entry = if (app_state.g_chat_active) chatHistoryEntry(key) else null;

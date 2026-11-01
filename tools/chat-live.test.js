@@ -80,3 +80,14 @@ test('D2 escape on a live approval cancels it instead of typing into a pane', ()
   assert.match(send, /pub fn chatStopAgent\(shell_index: u32\) bool \{[\s\S]{0,200}if \(chatLiveCancelApproval\(shell_index\)\) return true;/);
   assert.match(send, /live\.approvalReplyLine\(std\.heap\.page_allocator, shell_id, std\.mem\.sliceTo\(&key\.sid, 0\), request\[0\.\.len\], \.cancel\)/);
 });
+
+test('D3 a live question shows the existing pills and answers one question at a time', () => {
+  const session = read('src/chat_session.zig');
+  assert.match(session, /live\.questionPrompt\(shell_id, &prompt\)/);
+  assert.match(session, /entry\.history\.status\.question = prompt;/);
+  const send = read('src/chat_send.zig');
+  assert.match(send, /live\.answerQuestion\(shell_id, index, /);
+  assert.match(send, /live\.questionAnswerLine\(shell_id, std\.heap\.page_allocator\)/);
+  const render = read('src/chat_render.zig');
+  assert.match(render, /chatChoiceDigitKey\(wp\)/);
+});

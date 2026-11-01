@@ -420,6 +420,12 @@ pub fn sendChatPrompt() void {
         return;
     }
     var send_text: []const u16 = chatPromptNormalizeLineEndings(text_buf[0..text_len]);
+    if (chatLiveQuestionText(send_text)) {
+        _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+        app_state.g_chat_draft_dirty = true;
+        chatDraftFlush();
+        return;
+    }
     if (chatSendQuestionText(send_text)) return;
     var composed_utf8: ?[]u8 = null;
     defer if (composed_utf8) |bytes| std.heap.page_allocator.free(bytes);
@@ -3482,8 +3488,78 @@ pub fn chatQuestionOtherFinish(shell_index: u32) void {
     shell.chat_question_other = false;
 }
 
+fn chatLiveAnswerLabels(group: *const @import("chat_options.zig").Group, digit: u8, selected: u32, out: []u8) ?usize {
+    var len: usize = 0;
+    const submit = digit == 0x0D;
+    if (group.multi_select and submit) {
+        for (0..group.count) |index| {
+            if (selected & (@as(u32, 1) << @intCast(index)) == 0) continue;
+            if (len > 0) {
+                if (len + 2 > out.len) return null;
+                @memcpy(out[len..][0..2], ", ");
+                len += 2;
+            }
+            const written = std.unicode.utf16LeToUtf8(out[len..], group.options[index].titleSlice()) catch return null;
+            len += written;
+        }
+        return if (len > 0) len else null;
+    }
+    if (digit < '1' or digit >= '1' + group.count) return null;
+    const written = std.unicode.utf16LeToUtf8(out, group.options[digit - '1'].titleSlice()) catch return null;
+    return written;
+}
+
+fn chatLiveQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_hash: u64) bool {
+    if (shell_index >= app_state.shell_count) return false;
+    const live = @import("chat_live.zig");
+    const shell_id = app_state.shells[shell_index].shell_id;
+    var prompt: @import("chat_options.zig").Prompt = .{};
+    if (!live.questionPrompt(shell_id, &prompt)) return false;
+    const index = app_state.shells[shell_index].chat_question_index;
+    if (index >= prompt.count or prompt.groups[index].hash() != question_hash) return false;
+    const group = &prompt.groups[index];
+    if (digit == group.other) return true;
+    var buffer: [512]u8 = undefined;
+    const len = chatLiveAnswerLabels(group, digit, selected, &buffer) orelse return false;
+    if (!live.answerQuestion(shell_id, index, buffer[0..len])) return false;
+    chatQuestionAdvance(shell_index, index, prompt.count);
+    if (live.questionAnswerLine(shell_id, std.heap.page_allocator)) |line| {
+        if (!chatLiveReply(line)) return false;
+    }
+    debugLog("[chat] question answered live");
+    return true;
+}
+
+fn chatQuestionAdvance(shell_index: u32, index: usize, count: usize) void {
+    if (shell_index >= app_state.shell_count or index + 1 >= count) return;
+    app_state.shells[shell_index].chat_question_index = index + 1;
+    app_state.shells[shell_index].chat_question_selected = 0;
+    app_state.g_chat_layout_dirty = true;
+    app_state.g_chat_layout_reuse = 0;
+}
+
+fn chatLiveQuestionText(text: []const u16) bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    const shell_index = app_state.active_shell;
+    if (!app_state.shells[shell_index].chat_question_other) return false;
+    const live = @import("chat_live.zig");
+    const shell_id = app_state.shells[shell_index].shell_id;
+    var prompt: @import("chat_options.zig").Prompt = .{};
+    if (!live.questionPrompt(shell_id, &prompt)) return false;
+    var buffer: [1024]u8 = undefined;
+    const len = std.unicode.utf16LeToUtf8(&buffer, text) catch return false;
+    const index = app_state.shells[shell_index].chat_question_index;
+    if (!live.answerQuestion(shell_id, index, buffer[0..len])) return false;
+    chatQuestionAdvance(shell_index, index, prompt.count);
+    if (live.questionAnswerLine(shell_id, std.heap.page_allocator)) |line| _ = chatLiveReply(line);
+    app_state.shells[shell_index].chat_question_other = false;
+    app_state.shells[shell_index].chat_question_other_sent = false;
+    return true;
+}
+
 pub fn chatQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_hash: u64) bool {
     if (!app_state.g_chat_active or shell_index != app_state.active_shell or shell_index >= app_state.shell_count) return false;
+    if (chatLiveQuestionAnswer(shell_index, digit, selected, question_hash)) return true;
     var scratch: [2]u16 = undefined;
     if (@import("chat_capture.zig").captureChatTranscript(shell_index, &scratch, true) == null) return false;
     const shell = &app_state.shells[shell_index];

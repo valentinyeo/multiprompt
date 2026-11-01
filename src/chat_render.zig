@@ -1952,6 +1952,15 @@ fn chatChoiceAt(x: i32, y: i32) ?usize {
     return null;
 }
 
+fn chatChoiceDigitKey(wp: usize) bool {
+    if (wp < '1' or wp > '9') return false;
+    if (!g_choice.present or !g_choice.live) return false;
+    const index = wp - '1';
+    if (index >= g_choice.group.count) return false;
+    chatChoiceClick(index);
+    return true;
+}
+
 fn chatChoiceClick(index: usize) void {
     const group = &g_choice.group;
     const shell = &app_state.shells[app_state.active_shell];
@@ -5590,6 +5599,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 chatCopyLatestCode();
                 return 0;
             }
+            if (chatChoiceDigitKey(wp)) return 0;
             if (chatPaletteToggleKeyDown(wp)) {
                 postPaletteToggle();
                 return 0;

@@ -8,6 +8,7 @@ pub const MAX_ITEMS: usize = 96;
 pub const MAX_ID: usize = 96;
 pub const MAX_LABEL: usize = 192;
 pub const MAX_TEXT: usize = 48 * 1024;
+pub const MAX_ANSWER: usize = MAX_LABEL;
 pub const MAX_PAGE: usize = 512 * 1024;
 
 pub const ItemKind = enum { text, thinking, tool, plan };
@@ -81,6 +82,10 @@ pub const Live = struct {
     items: std.ArrayList(Item) = .empty,
     request: Request = .{},
     prompt: chat_options.Prompt = .{},
+    questions: [chat_options.MAX_QUESTIONS][MAX_LABEL]u8 = @splat(@splat(0)),
+    question_lens: [chat_options.MAX_QUESTIONS]usize = @splat(0),
+    answers: [chat_options.MAX_QUESTIONS][MAX_ANSWER]u8 = @splat(@splat(0)),
+    answer_lens: [chat_options.MAX_QUESTIONS]usize = @splat(0),
 
     pub fn sidSlice(self: *const Live) []const u8 {
         return self.sid[0..self.sid_len];
@@ -95,6 +100,8 @@ pub const Live = struct {
         self.ended = .ok;
         self.request = .{};
         self.prompt = .{};
+        self.question_lens = @splat(0);
+        self.answer_lens = @splat(0);
         self.card_dismissed = false;
         self.touch();
     }
@@ -197,6 +204,20 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
     } else if (std.mem.eql(u8, kind, "question.request")) {
         self.request.openWith(.question, strOf(payload, "request_id"), strOf(payload, "tool"));
         self.prompt = promptOf(payload);
+        self.answer_lens = @splat(0);
+        self.question_lens = @splat(0);
+        if (fieldOf(payload, "questions")) |questions_value| {
+            const rows = switch (questions_value) {
+                .array => |array| array.items,
+                else => &.{},
+            };
+            for (rows, 0..) |row, index| {
+                if (index >= chat_options.MAX_QUESTIONS) break;
+                const text = strOf(row, "question");
+                self.question_lens[index] = @min(text.len, self.questions[index].len);
+                @memcpy(self.questions[index][0..self.question_lens[index]], text[0..self.question_lens[index]]);
+            }
+        }
     } else if (std.mem.eql(u8, kind, "plan.proposed")) {
         const request_id = strOf(payload, "request_id");
         self.request.openWith(.plan, request_id, strOf(payload, "title"));
@@ -212,7 +233,11 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
             self.request.open = false;
             self.card_dismissed = true;
         }
-        if (std.mem.eql(u8, kind, "question.resolved")) self.prompt = .{};
+        if (std.mem.eql(u8, kind, "question.resolved")) {
+            self.prompt = .{};
+            self.answer_lens = @splat(0);
+            self.question_lens = @splat(0);
+        }
     } else if (std.mem.eql(u8, kind, "turn.ended")) {
         self.state = .idle;
         self.ended = statusOf(strOf(payload, "status"));
@@ -547,11 +572,9 @@ pub fn approvalMenu(shell_id: u32, out: *chat_permission.PermissionMenu) bool {
         var menu: chat_permission.PermissionMenu = .{};
         const texts = [_][]const u8{ "Approve", "Always allow this session", "Decline" };
         for (texts, 0..) |value, index| {
-            const units = std.unicode.utf8ToUtf16LeStringLiteral(value);
-            if (units.len > menu.options[index].text.len) return false;
+            const units = std.unicode.utf8ToUtf16Le(&menu.options[index].text, value) catch return false;
             menu.options[index].number = @intCast('1' + index);
-            @memcpy(menu.options[index].text[0..units.len], units);
-            menu.options[index].len = units.len;
+            menu.options[index].len = units;
         }
         menu.count = texts.len;
         menu.allow = '1';
@@ -615,6 +638,75 @@ pub fn questionPrompt(shell_id: u32, out: *chat_options.Prompt) bool {
     return false;
 }
 
+pub fn attached(shell_id: u32) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (live.used and live.shell_id == shell_id) return true;
+    }
+    return false;
+}
+
+fn answersComplete(live: *const Live) bool {
+    if (!live.request.open or live.request.kind != .question or live.prompt.count == 0) return false;
+    for (0..live.prompt.count) |index| {
+        if (live.answer_lens[index] == 0) return false;
+    }
+    return true;
+}
+
+pub fn answerQuestion(shell_id: u32, index: usize, text: []const u8) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (!live.used or live.shell_id != shell_id) continue;
+        if (!live.request.open or live.request.kind != .question or index >= live.prompt.count) return false;
+        live.answer_lens[index] = @min(text.len, live.answers[index].len);
+        @memcpy(live.answers[index][0..live.answer_lens[index]], text[0..live.answer_lens[index]]);
+        live.touch();
+        return true;
+    }
+    return false;
+}
+
+pub fn answersDone(shell_id: u32) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (live.used and live.shell_id == shell_id) return answersComplete(live);
+    }
+    return false;
+}
+
+pub fn questionAnswerLine(shell_id: u32, a: std.mem.Allocator) ?[]u8 {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (!live.used or live.shell_id != shell_id) continue;
+        if (!answersComplete(live)) return null;
+        var pairs: [chat_options.MAX_QUESTIONS]Answer = undefined;
+        for (0..live.prompt.count) |index| {
+            pairs[index] = .{
+                .question = live.questions[index][0..live.question_lens[index]],
+                .answer = live.answers[index][0..live.answer_lens[index]],
+            };
+        }
+        return questionReplyLine(a, shell_id, live.sidSlice(), live.request.idSlice(), pairs[0..live.prompt.count], false) catch null;
+    }
+    return null;
+}
+
+pub fn dismissedQuestionLine(shell_id: u32, a: std.mem.Allocator) ?[]u8 {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (!live.used or live.shell_id != shell_id) continue;
+        if (!live.request.open or live.request.kind != .question) return null;
+        return questionReplyLine(a, shell_id, live.sidSlice(), live.request.idSlice(), &.{}, true) catch null;
+    }
+    return null;
+}
+
 pub fn questionsOpen(shell_id: u32) bool {
     mutex.lock();
     defer mutex.unlock();
@@ -631,6 +723,30 @@ pub fn planOpen(shell_id: u32) bool {
         if (live.used and live.shell_id == shell_id) return live.request.open and live.request.kind == .plan;
     }
     return false;
+}
+
+test "D3 answers are stored per question and only a full set builds the reply" {
+    defer release(77);
+    _ = begin(77, 0, "11111111-2222-3333-4444-666666666666");
+    const a = std.testing.allocator;
+    const sid = "11111111-2222-3333-4444-666666666666";
+    try std.testing.expect(applyPage(77, sid, "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"question.request\",\"payload\":{\"request_id\":\"req_5\",\"questions\":[" ++
+        "{\"question\":\"Which colour?\",\"options\":[{\"label\":\"Lime\"},{\"label\":\"Orange\"}]}," ++
+        "{\"question\":\"Which devices?\",\"multiSelect\":true,\"options\":[{\"label\":\"Desktop\"},{\"label\":\"Phone\"}]}]}}]}}"));
+    try std.testing.expect(questionAnswerLine(77, a) == null);
+    try std.testing.expect(answerQuestion(77, 0, "Lime"));
+    try std.testing.expect(questionAnswerLine(77, a) == null);
+    try std.testing.expect(answerQuestion(77, 1, "Desktop, Phone"));
+    try std.testing.expect(answersDone(77));
+    const line = questionAnswerLine(77, a).?;
+    defer a.free(line);
+    try std.testing.expectEqualStrings(
+        "{\"id\":77,\"op\":\"question_reply\",\"provider\":\"claude\",\"sid\":\"11111111-2222-3333-4444-666666666666\",\"request_id\":\"req_5\",\"answers\":{\"Which colour?\":\"Lime\",\"Which devices?\":\"Desktop, Phone\"},\"dismissed\":false}",
+        line,
+    );
+    try std.testing.expect(applyPage(77, sid, "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"question.resolved\",\"payload\":{\"request_id\":\"req_5\",\"answers\":{},\"dismissed\":false}}}]}}"));
+    try std.testing.expect(questionAnswerLine(77, a) == null);
+    try std.testing.expect(!questionsOpen(77));
 }
 
 test "D1 a text delta replaces the accumulated text instead of appending" {
@@ -692,7 +808,7 @@ test "D1 thinking and text deltas keep their arrival order" {
     try std.testing.expectEqual(ItemKind.text, live.items.items[1].kind);
     var text: [128]u16 = @splat(0);
     var blocks: [8]chat_markdown.Block = undefined;
-    const tail = live.tailInto(&text, 40, &blocks);
+    const tail = tailInto(&live, &text, 40, &blocks);
     try std.testing.expectEqual(@as(usize, 2), tail.blocks);
     try std.testing.expectEqual(@as(usize, 40), blocks[0].start);
     try std.testing.expectEqual(chat_markdown.Role.tool, blocks[0].role);
@@ -781,7 +897,7 @@ test "D4 a proposed plan renders as an assistant block behind a plan ready line"
     try std.testing.expectEqual(RequestKind.plan, live.request.kind);
     var text: [256]u16 = @splat(0);
     var blocks: [4]chat_markdown.Block = undefined;
-    const tail = live.tailInto(&text, 0, &blocks);
+    const tail = tailInto(&live, &text, 0, &blocks);
     try std.testing.expectEqual(@as(usize, 1), tail.blocks);
     try std.testing.expectEqual(chat_markdown.Role.prose, blocks[0].role);
     const body = text[blocks[0].start..][0..blocks[0].len];
