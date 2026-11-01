@@ -781,6 +781,11 @@ fn chatLiveStreamEnsure(key: chat_transcript.Identity) void {
     g_chat_live_stream = stream;
 }
 
+fn chatLiveLog(stage: []const u8, shell_id: u32, amount: usize, flag: u8) void {
+    var buf: [128]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&buf, "[chat-live] {s} shell={d} n={d} f={d}", .{ stage, shell_id, amount, flag }) catch return);
+}
+
 fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) void {
     const a = std.heap.page_allocator;
     defer chatLiveStreamRelease(stream);
@@ -791,24 +796,36 @@ fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) 
     const started = !stream.cancelled.load(.acquire) and chatHistoryChannelStart(key.host, &stream.channel);
     if (stream.cancelled.load(.acquire) and stream.channel.process != null) _ = TerminateProcess(stream.channel.process, 0);
     stream.mutex.unlock();
+    chatLiveLog("start", stream.shell_id, after, @intFromBool(started));
     if (!started or stream.cancelled.load(.acquire)) return;
     const line = @import("chat_live.zig").subscribeLine(a, stream.shell_id, sid, after) catch return;
     defer a.free(line);
     var written: DWORD = 0;
     if (WriteFile(stream.channel.input, line.ptr, @intCast(line.len), &written, null) == 0 or written != line.len or
-        WriteFile(stream.channel.input, "\n", 1, &written, null) == 0 or written != 1) return;
+        WriteFile(stream.channel.input, "\n", 1, &written, null) == 0 or written != 1)
+    {
+        chatLiveLog("write-failed", stream.shell_id, after, 0);
+        return;
+    }
     var frame: std.ArrayList(u8) = .empty;
     defer frame.deinit(a);
     var chunk: [65536]u8 = undefined;
     while (!stream.cancelled.load(.acquire)) {
         while (std.mem.indexOfScalar(u8, frame.items, '\n') == null) {
             var n: DWORD = 0;
-            if (ReadFile(stream.channel.output, &chunk, chunk.len, &n, null) == 0 or n == 0) return;
-            if (frame.items.len + n > @import("chat_live.zig").MAX_PAGE + 4096) return;
+            if (ReadFile(stream.channel.output, &chunk, chunk.len, &n, null) == 0 or n == 0) {
+                chatLiveLog("read-ended", stream.shell_id, frame.items.len, 0);
+                return;
+            }
+            if (frame.items.len + n > @import("chat_live.zig").MAX_PAGE + 4096) {
+                chatLiveLog("page-too-big", stream.shell_id, frame.items.len + n, 0);
+                return;
+            }
             frame.appendSlice(a, chunk[0..n]) catch return;
         }
         const end = std.mem.indexOfScalar(u8, frame.items, '\n').?;
         const changed = @import("chat_live.zig").applyPage(stream.shell_id, sid, frame.items[0..end]);
+        chatLiveLog("page", stream.shell_id, end, @intFromBool(changed));
         std.mem.copyForwards(u8, frame.items[0..], frame.items[end + 1 ..]);
         frame.items.len -= end + 1;
         if (changed and app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
