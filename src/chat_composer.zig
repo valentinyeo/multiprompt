@@ -2237,10 +2237,7 @@ pub fn toggleChatView() void {
     const shell = &app_state.shells[app_state.active_shell];
     shell.chat_view_on = app_state.g_chat_active;
     @import("chat_view.zig").toggle(shell);
-    const moving = @import("command_palette.zig").startMoveChat(app_state.active_shell, if (shell.chat_view_on) 0 else 1);
-    if (!moving) {
-        if (shell.chat_view_on) openChatView() else closeChatView();
-    }
+    if (shell.chat_view_on) openChatView() else closeChatView();
     saveSession();
 }
 
