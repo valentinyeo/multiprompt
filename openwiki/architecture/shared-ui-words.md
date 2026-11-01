@@ -73,6 +73,10 @@ Some plain labels also name debug events.
 Reaction labels keep the existing React wording.
 Their menu captions use Like, Dislike, or Heart.
 Choose keys by role, not suffix.
+Palette keys hold the full visible caption.
+Clipping depends on the available screen width.
+Some palette captions bypass sentence-case drawing.
+Those keys preserve their exact displayed case.
 
 Native class names are not word-list labels.
 Examples include `BUTTON` and `EDIT`.
@@ -83,6 +87,7 @@ User-provided names and dynamic values are not labels.
 ## Coverage ledger
 
 The list covers Settings and selected menus.
+It also covers selected palette captions.
 It does not cover the whole application.
 
 | Surface | Current status |
@@ -91,7 +96,8 @@ It does not cover the whole application.
 | Settings painted captions and font sizes | Catalogued. |
 | Settings theme names and theme popup | Catalogued. Version and workspace names remain dynamic. Graphical indicators remain presentation. |
 | Edit and message menus `src/fonts.zig` | Catalogued. Native and plain variants keep separate IDs. |
-| `src/sidebar.zig`, `src/palette_text.zig`, `src/command_palette.zig` | Not migrated. Keep sentence-case drawing and shortcut hints. |
+| Main palette navigation and settings `src/sidebar.zig` | Selected captions catalogued. Other palette actions remain. |
+| Other sidebar menus and palette contexts | Not migrated. Keep sentence-case drawing and shortcut hints. |
 | Usage menu `src/telemetry_panel.zig` | Inventory incomplete. Classify dynamic values and static labels. |
 | `src/inbox.zig`, `src/archive.zig`, `src/workspaces.zig`, `src/browser_pane.zig` | Inventory incomplete. Inspect every button and menu. Include conditional states. |
 | `src/account_desktop.zig`, `src/update_card.zig`, `src/reminders.zig` | Inventory incomplete. Inspect every button and menu. Include conditional states. |
@@ -100,9 +106,12 @@ It does not cover the whole application.
 | Android buttons, menus, dialogs and accessibility | Not inventoried or migrated here. Android's owner must establish complete coverage. |
 
 The same feature owner should continue.
-Migrate palette and sidebar next.
+Migrate remaining palette and sidebar captions next.
 Then inventory remaining desktop screens in bounded batches.
-Wait for each approved green release.
+Commit each component separately.
+Keep draft changes local during release repairs.
+Push only after the build recovers.
+Verify published changes before calling them complete.
 
 Missing-label checks must catch literal bypasses.
 They must also catch missing IDs.

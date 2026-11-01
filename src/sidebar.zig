@@ -2,6 +2,7 @@ const SEARCH_SETTINGS_OFFSET = @import("app_state.zig").SEARCH_SETTINGS_OFFSET;
 const frequent = @import("frequent.zig");
 const app_state = @import("app_state.zig");
 const std = @import("std");
+const ui_words = @import("ui_words.zon");
 const tokens = @import("design_tokens.zig");
 const archive_rules = @import("archive_rules.zig");
 const attention_rules = @import("attention_rules.zig");
@@ -2732,7 +2733,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var som_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 110, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Show All Sessions..."), -1, &som_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_show_all_sessions), -1, &som_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var som_hint_rc = RECT{ .left = ox + overlay_w - 110, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2755,7 +2756,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var av_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Archived Sessions"), -1, &av_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_archived_sessions), -1, &av_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var av_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2764,7 +2765,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var snm_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, if (is_snippet_manage) L("Manage Snippets") else L("Use Snippets..."), -1, &snm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, if (is_snippet_manage) L(ui_words.palette_manage_snippets) else L(ui_words.palette_use_snippets), -1, &snm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var snm_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2773,7 +2774,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var snb_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Back"), -1, &snb_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_back), -1, &snb_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var snb_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2782,7 +2783,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var snc_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Create Snippet"), -1, &snc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_create_snippet), -1, &snc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var snc_hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2806,19 +2807,19 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var af_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
-                        const af_label = if (app_state.g_favicon_fetching) L("Add Favicon (fetching...)") else L("Add Favicon from VPS");
+                        const af_label = if (app_state.g_favicon_fetching) L(ui_words.palette_add_favicon_fetching) else L(ui_words.palette_add_favicon);
                         _ = DrawTextW(hdc, af_label, -1, &af_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_mobile_toggle) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
-                        const mob_label = if (app_state.g_mobile_mode) L("Mobile Latency Mode: On") else L("Mobile Latency Mode: Off");
+                        const mob_label = if (app_state.g_mobile_mode) L(ui_words.palette_mobile_latency_on) else L(ui_words.palette_mobile_latency_off);
                         var mob_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, mob_label, -1, &mob_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_workspace_back) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var back_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("← Back"), -1, &back_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_workspace_back), -1, &back_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var back_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2827,7 +2828,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var wm_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Open Workspace…"), -1, &wm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_open_workspace), -1, &wm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var wm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2836,7 +2837,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var dm_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Delete Workspace…"), -1, &dm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_delete_workspace), -1, &dm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var dm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2845,7 +2846,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var q_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Quit Multi Bot"), -1, &q_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_quit), -1, &q_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var q_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2864,7 +2865,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                 "Restart to update (no update ready)";
                             drawAscii(hdc, ut, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         } else {
-                            _ = paletteDrawText(hdc, L("Restart Multi Bot"), -1, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                            _ = paletteDrawText(hdc, L(ui_words.palette_restart), -1, &rs_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         }
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
@@ -2875,7 +2876,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var fw_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (fw_on) L("Full-Width: ON") else L("Full-Width: OFF"), -1, &fw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (fw_on) L(ui_words.palette_full_width_on) else L(ui_words.palette_full_width_off), -1, &fw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var fw_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2884,7 +2885,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var sc_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Keyboard Shortcuts"), -1, &sc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_keyboard_shortcuts), -1, &sc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sc_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2893,7 +2894,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var cl_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Changelog"), -1, &cl_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_changelog), -1, &cl_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var cl_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2902,7 +2903,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var cw_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Close Workspace"), -1, &cw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_close_workspace), -1, &cw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(230, 210, 210) else RGB(140, 100, 100));
                         var cw_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2911,7 +2912,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var rc_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Reconnect"), -1, &rc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_reconnect), -1, &rc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var rc_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2920,7 +2921,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var sw_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if (app_state.g_single_window) L("Single-Window Mode: ON") else L("Single-Window Mode: OFF"), -1, &sw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if (app_state.g_single_window) L(ui_words.palette_single_window_on) else L(ui_words.palette_single_window_off), -1, &sw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sw_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2929,7 +2930,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var ih_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Install Blue Dot Hook"), -1, &ih_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_install_hook), -1, &ih_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var ih_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2938,39 +2939,39 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var setting_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).frequent) L("Show Frequent split: ON") else L("Show Frequent split: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).frequent) L(ui_words.palette_show_frequent_on) else L(ui_words.palette_show_frequent_off), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_FREQUENT_FIRST_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var setting_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).frequent_first) L("Frequent as first tab: ON") else L("Frequent as first tab: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).frequent_first) L(ui_words.palette_frequent_first_on) else L(ui_words.palette_frequent_first_off), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_SHOW_FAVORITES_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var setting_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).favorites) L("Show Favorites split: ON") else L("Show Favorites split: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).favorites) L(ui_words.palette_show_favorites_on) else L(ui_words.palette_show_favorites_off), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_SHOW_ALL_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var setting_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).all) L("Show All split: ON") else L("Show All split: OFF"), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = DrawTextW(hdc, if ((app_state.g_layout_settings orelse frequent.Settings{}).all) L(ui_words.palette_show_all_split_on) else L(ui_words.palette_show_all_split_off), -1, &setting_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_INBOX_FREQUENT_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var frequent_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Inbox: Frequent"), -1, &frequent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_inbox_frequent), -1, &frequent_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_STARRED_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var starred_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Go to Starred workspace"), -1, &starred_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_go_starred_workspace), -1, &starred_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         var hint_rc = RECT{ .left = ox + overlay_w - 90, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Alt+1"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_goinbox) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var gi_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Go to Inbox"), -1, &gi_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_go_inbox), -1, &gi_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var gi_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -2979,7 +2980,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var sm_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Sort Workspaces…"), -1, &sm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_sort_workspaces), -1, &sm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var sm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -4220,7 +4221,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var rw_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 140, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Rename Workspace"), -1, &rw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_rename_workspace), -1, &rw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var rw_hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -4249,7 +4250,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var nw_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
-                        const newwin_label = if (is_createws) L("Create Workspace") else if (app_state.g_search_workspace_mode) L("New Workspace") else L("New Window");
+                        const newwin_label = if (is_createws) L(ui_words.palette_create_workspace) else if (app_state.g_search_workspace_mode) L(ui_words.palette_new_workspace) else L(ui_words.palette_new_window);
                         _ = DrawTextW(hdc, newwin_label, -1, &nw_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         if (!is_createws) {
                             _ = SelectObject(hdc, palette_hint_font);
@@ -4275,7 +4276,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var back_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Back"), -1, &back_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_back), -1, &back_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var back_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -4284,7 +4285,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var settings_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Settings"), -1, &settings_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.settings_title), -1, &settings_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         var hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("Ctrl+,"), -1, &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
@@ -4292,7 +4293,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var theme_menu_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Themes..."), -1, &theme_menu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_themes), -1, &theme_menu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         const current_theme = if (app_state.g_system_theme) (if (app_state.g_light_theme) L("System Light") else L("System Dark")) else if (app_state.g_multiprompt_theme) L("Multi Bot") else if (app_state.g_dev_theme_active) L("Dev Blue") else if (app_state.g_light_theme) L("Light") else if (app_state.g_edge_gray_theme) L("Edge Grey") else if (app_state.g_mid_theme) L("Mid") else if (app_state.g_amoled_theme) L("AMOLED") else L("Dark");
@@ -4313,15 +4314,15 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         };
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else if (theme_current) customColorOr("accent", if (app_state.g_light_theme) RGB(30, 90, 180) else RGB(100, 160, 240)) else customColorOr("text_inactive", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(180, 180, 180)));
                         const theme_choice_label = switch (result_idx) {
-                            SEARCH_THEME_SYSTEM_OFFSET => L("System"),
-                            SEARCH_THEME_DARK_OFFSET => L("Dark"),
-                            SEARCH_THEME_MID_OFFSET => L("Mid"),
-                            SEARCH_THEME_LIGHT_OFFSET => L("Light"),
-                            SEARCH_THEME_AMOLED_OFFSET => L("AMOLED"),
-                            SEARCH_THEME_EDGE_GRAY_OFFSET => L("Edge Grey"),
-                            SEARCH_THEME_DEV_BLUE_OFFSET => L("Dev Blue"),
-                            SEARCH_THEME_MULTIPROMPT_OFFSET => L("Multi Bot"),
-                            else => L("Theme"),
+                            SEARCH_THEME_SYSTEM_OFFSET => L(ui_words.settings_theme_system),
+                            SEARCH_THEME_DARK_OFFSET => L(ui_words.settings_theme_dark),
+                            SEARCH_THEME_MID_OFFSET => L(ui_words.settings_theme_mid),
+                            SEARCH_THEME_LIGHT_OFFSET => L(ui_words.settings_theme_light),
+                            SEARCH_THEME_AMOLED_OFFSET => L(ui_words.settings_theme_amoled),
+                            SEARCH_THEME_EDGE_GRAY_OFFSET => L(ui_words.palette_theme_edge_grey),
+                            SEARCH_THEME_DEV_BLUE_OFFSET => L(ui_words.palette_theme_dev_blue),
+                            SEARCH_THEME_MULTIPROMPT_OFFSET => L(ui_words.settings_theme_multi_bot),
+                            else => L(ui_words.settings_theme),
                         };
                         var theme_choice_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, theme_choice_label, -1, &theme_choice_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
@@ -4335,7 +4336,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var edit_theme_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Edit Dev Theme JSON"), -1, &edit_theme_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_edit_dev_theme), -1, &edit_theme_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 190, 220) else customColorOr("hint", RGB(100, 100, 110)));
                         var edit_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -4344,7 +4345,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var reload_theme_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Reload Dev Theme"), -1, &reload_theme_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_reload_dev_theme), -1, &reload_theme_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 190, 220) else customColorOr("hint", RGB(100, 100, 110)));
                         var reload_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
