@@ -40,6 +40,7 @@ pub const Response = struct {
     hosts_supported: bool = false,
     removal_supported: bool = false,
     colors_supported: bool = false,
+    appearance_supported: bool = false,
     pub fn deinit(self: Response) void {
         std.crypto.secureZero(u8, self.bytes);
         a.free(self.bytes);
@@ -50,6 +51,9 @@ pub fn layoutSupportsHosts(headers: []const u8) bool {
 }
 pub fn layoutSupportsColors(headers: []const u8) bool {
     return layoutSupports(headers, "workspace_color");
+}
+pub fn layoutSupportsAppearance(headers: []const u8) bool {
+    return layoutSupports(headers, "bot_appearance");
 }
 pub fn layoutSupportsRemoval(headers: []const u8) bool {
     return layoutSupports(headers, "host_removal");
@@ -67,6 +71,9 @@ fn layoutSupports(headers: []const u8, feature: []const u8) bool {
     return false;
 }
 pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []const u8) !Response {
+    return requestWithLayoutFeatures(method, path, token, body, true, true);
+}
+pub fn requestWithLayoutFeatures(method: []const u8, path: []const u8, token: []const u8, body: []const u8, colors: bool, appearance: bool) !Response {
     const session = WinHttpOpen(L("multiprompt-account"), 0, null, null, 0) orelse return error.Network;
     defer _ = WinHttpCloseHandle(session);
     _ = WinHttpSetTimeouts(session, 5000, 5000, 5000, 5000);
@@ -80,7 +87,7 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
     defer _ = WinHttpCloseHandle(req);
     const disable_redirects: u32 = 2;
     _ = WinHttpSetOption(req, 63, &disable_redirects, @sizeOf(u32));
-    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color\r\n" else "" });
+    const headers = try std.fmt.allocPrint(a, "Content-Type: application/json\r\nAccept: application/json\r\n{s}{s}{s}{s}{s}{s}{s}", .{ if (token.len > 0) "Authorization: Bearer " else "", token, if (token.len > 0) "\r\n" else "", if (std.mem.eql(u8, path, "/v1/layout")) "X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal" else "", if (std.mem.eql(u8, path, "/v1/layout") and colors) ",workspace_color" else "", if (std.mem.eql(u8, path, "/v1/layout") and appearance) ",bot_appearance" else "", if (std.mem.eql(u8, path, "/v1/layout")) "\r\n" else "" });
     defer a.free(headers);
     const hw = try std.unicode.utf8ToUtf16LeAllocZ(a, headers);
     defer a.free(hw);
@@ -91,6 +98,7 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
     var hosts_supported = false;
     var removal_supported = false;
     var colors_supported = false;
+    var appearance_supported = false;
     var header_buf: [8192]u16 = @splat(0);
     size = @sizeOf(@TypeOf(header_buf));
     if (WinHttpQueryHeaders(req, 22, null, &header_buf, &size, null) != 0) {
@@ -99,6 +107,7 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
         hosts_supported = layoutSupportsHosts(raw);
         removal_supported = layoutSupportsRemoval(raw);
         colors_supported = layoutSupportsColors(raw);
+        appearance_supported = layoutSupportsAppearance(raw);
     }
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
@@ -107,7 +116,7 @@ pub fn request(method: []const u8, path: []const u8, token: []const u8, body: []
     while (GetTickCount64() < deadline) {
         var n: u32 = 0;
         if (WinHttpReadData(req, &chunk, chunk.len, &n) == 0) return error.Network;
-        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported, .removal_supported = removal_supported, .colors_supported = colors_supported };
+        if (n == 0) return .{ .status = status, .bytes = try out.toOwnedSlice(a), .hosts_supported = hosts_supported, .removal_supported = removal_supported, .colors_supported = colors_supported, .appearance_supported = appearance_supported };
         if (out.items.len + n >= 1024 * 1024) return error.TooLarge;
         try out.appendSlice(a, chunk[0..n]);
     }

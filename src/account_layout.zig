@@ -20,6 +20,7 @@ pub fn equal(a: Layout, b: Layout) bool {
 pub fn publishNeeded(local: Layout, base: Layout, synced: Layout) bool {
     if (!equalWithin(local, base, std.math.maxInt(u64))) return true;
     for (local.tabs) |tab| {
+        if (find(synced.tabs, tab) == null and find(base.tabs, tab) != null) continue;
         const known = if (find(synced.tabs, tab)) |i| synced.tabs[i].visits else null;
         if (!eq(u64, tab.visits orelse &.{}, known orelse &.{})) return true;
         const input = tab.input orelse 0;
@@ -37,7 +38,7 @@ fn equalWithin(a: Layout, b: Layout, used_slack: u64) bool {
     if (!std.meta.eql(a.settings orelse layout.Settings{}, b.settings orelse layout.Settings{})) return false;
     if (a.workspaces.len != b.workspaces.len or a.tabs.len != b.tabs.len) return false;
     for (a.workspaces, b.workspaces) |x, y| if (!eq(u8, x.name, y.name) or x.color != y.color) return false;
-    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or (x.favorite orelse false) != (y.favorite orelse false) or (x.muted orelse false) != (y.muted orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
+    for (a.tabs, b.tabs) |x, y| if (!layout.sameTab(x, y) or !eq(u8, x.name, y.name) or x.manual != y.manual or x.face != y.face or x.color != y.color or (x.favorite orelse false) != (y.favorite orelse false) or (x.muted orelse false) != (y.muted orelse false) or @max(x.used orelse 0, y.used orelse 0) - @min(x.used orelse 0, y.used orelse 0) > used_slack or @max(x.input orelse 0, y.input orelse 0) - @min(x.input orelse 0, y.input orelse 0) > used_slack or !eq(u64, x.visits orelse &.{}, y.visits orelse &.{}) or !eq(u8, x.workspace, y.workspace)) return false;
     return true;
 }
 
@@ -81,6 +82,30 @@ pub fn withoutColors(a: Allocator, target: Layout) !Layout {
     const workspaces = try a.dupe(layout.Workspace, target.workspaces);
     for (workspaces) |*workspace| workspace.color = null;
     result.workspaces = workspaces;
+    return result;
+}
+
+pub fn appearanceFrom(a: Allocator, target: Layout, source: Layout) !Layout {
+    var result = target;
+    const tabs = try a.dupe(Tab, target.tabs);
+    for (tabs) |*tab| {
+        if (find(source.tabs, tab.*)) |i| {
+            tab.face = source.tabs[i].face;
+            tab.color = source.tabs[i].color;
+        }
+    }
+    result.tabs = tabs;
+    return result;
+}
+
+pub fn withoutAppearance(a: Allocator, target: Layout) !Layout {
+    var result = target;
+    const tabs = try a.dupe(Tab, target.tabs);
+    for (tabs) |*tab| {
+        tab.face = null;
+        tab.color = null;
+    }
+    result.tabs = tabs;
     return result;
 }
 
@@ -245,6 +270,16 @@ pub fn prepareCache(a: Allocator, cache: []const u8, remote: Layout) ![]u8 {
         try normalized.object.put(a, "tmux_host", .{ .integer = t.tmux_host });
         try normalized.object.put(a, "workspace", .{ .integer = @intCast(workspaceIndex(ws.items, t.workspace).?) });
         try normalized.object.put(a, "manual", .{ .bool = t.manual });
+        if (t.face) |face| {
+            try normalized.object.put(a, "face", .{ .integer = face });
+        } else {
+            _ = normalized.object.swapRemove("face");
+        }
+        if (t.color) |color| {
+            try normalized.object.put(a, "color", .{ .integer = color });
+        } else {
+            _ = normalized.object.swapRemove("color");
+        }
         if (t.favorite) |favorite| try normalized.object.put(a, "favorite", .{ .bool = favorite });
         if (t.muted) |muted| try normalized.object.put(a, "muted", .{ .bool = muted });
         const cached_used = record.object.get("used");

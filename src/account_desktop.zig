@@ -197,6 +197,8 @@ pub fn captureSessionLayout(a: std.mem.Allocator, include_local: bool) !session_
             .manual = shell.name_source == .manual,
             .favorite = shell.favorite,
             .muted = shell.muted,
+            .face = shell.face,
+            .color = shell.color,
             .used = if (shell.last_used != 0) shell.last_used else null,
             .input = if (shell.input != 0) shell.input else null,
             .visits = if (shell.visits.optional()) |values| try a.dupe(u64, values) else null,
@@ -221,6 +223,17 @@ var g_account_keys_cache: struct {
 var g_account_key_prompt_active = false;
 var g_account_pending_device_keys: ?[]u8 = null;
 var startup_reply: LPARAM = 0;
+const appearance_intent = @import("appearance_intent.zig");
+const PendingLayout = struct {
+    base: ?session_layout.Layout = null,
+    edited: ?session_layout.Layout = null,
+    appearance: []const appearance_intent.Intent = &.{},
+};
+var g_appearance: ?[]appearance_intent.Intent = null;
+var g_after_submit: std.ArrayList(appearance_intent.Touch) = .empty;
+var g_tracking = false;
+var g_pending_loaded = false;
+var g_pending_bytes: ?[]u8 = null;
 
 fn accountJobFree(job: AccountJob) void {
     const a = std.heap.page_allocator;
@@ -228,6 +241,13 @@ fn accountJobFree(job: AccountJob) void {
     if (job.edited) |b| a.free(b);
     if (job.device) |b| a.free(b);
     if (job.credential) |b| freeSecret(b);
+    if (job.appearance) |intents| appearance_intent.free(a, intents);
+}
+fn accountResetAppearanceTracking() void {
+    const a = std.heap.page_allocator;
+    for (g_after_submit.items) |touch| a.free(touch.tmux_session);
+    g_after_submit.clearRetainingCapacity();
+    g_tracking = false;
 }
 pub fn startAccountJob(job: AccountJob) void {
     if (app_state.g_account_busy or app_state.g_account_bypass) {
@@ -238,13 +258,37 @@ pub fn startAccountJob(job: AccountJob) void {
         accountJobFree(job);
         return;
     }
+    var submitted = job;
+    const layout_job = switch (job.kind) { .startup, .login, .pull, .push, .remove_host => true, else => false };
+    if (layout_job) {
+        accountLoadPending() catch {
+            accountJobFree(job);
+            showHeaderNoticeAscii("Could not load pending sync changes", 4000, true);
+            return;
+        };
+        if (job.kind == .startup and job.base == null and job.edited == null) {
+            submitted = accountResumeJob(.startup) catch {
+                accountJobFree(job);
+                showHeaderNoticeAscii("Could not load pending sync changes", 4000, true);
+                return;
+            };
+        }
+        submitted.appearance = appearance_intent.clone(std.heap.page_allocator, g_appearance orelse &.{}) catch {
+            accountJobFree(submitted);
+            showHeaderNoticeAscii("Could not save pending sync changes", 4000, true);
+            return;
+        };
+        accountResetAppearanceTracking();
+        g_tracking = true;
+    }
     app_state.g_account_busy = true;
     app_state.g_account_login_active = job.kind == .login;
     app_state.g_account_cancel.store(false, .release);
-    const thread = std.Thread.spawn(.{}, layoutSyncWorker, .{job}) catch {
+    const thread = std.Thread.spawn(.{}, layoutSyncWorker, .{submitted}) catch {
         app_state.g_account_busy = false;
         app_state.g_account_login_active = false;
-        accountJobFree(job);
+        accountResetAppearanceTracking();
+        accountJobFree(submitted);
         app_state.g_account_status = "Could not start sign-in. Press Enter to retry.";
         return;
     };
@@ -277,29 +321,32 @@ pub fn publishSessionLayout() void {
     const local = accountCapturePush(arena.allocator(), base.value) catch return;
     const synced = session_layout.parse(arena.allocator(), app_state.g_account_base orelse return) catch return;
     defer synced.deinit();
-    const needs_publish = account_layout.publishNeeded(local, base.value, synced.value);
-    if (!needs_publish) {
+    accountLoadPending() catch return;
+    const intents = g_appearance orelse return;
+    accountWritePending(.{ .base = base.value, .edited = local, .appearance = intents }) catch {
+        showHeaderNoticeAscii("Could not save pending sync changes", 4000, true);
+        return;
+    };
+    var plain_local = account_layout.withoutAppearance(arena.allocator(), local) catch return;
+    var plain_base = account_layout.withoutAppearance(arena.allocator(), base.value) catch return;
+    var plain_synced = account_layout.withoutAppearance(arena.allocator(), synced.value) catch return;
+    if (!app_state.g_account_colors_supported) {
+        plain_local = account_layout.withoutColors(arena.allocator(), plain_local) catch return;
+        plain_base = account_layout.withoutColors(arena.allocator(), plain_base) catch return;
+        plain_synced = account_layout.withoutColors(arena.allocator(), plain_synced) catch return;
+    }
+    var eligible = false;
+    if (app_state.g_account_appearance_supported) {
+        for (local.tabs) |tab| {
+            for (intents) |intent| {
+                if (appearance_intent.same(tab.tmux_host, tab.tmux_session, intent)) eligible = true;
+            }
+        }
+    }
+    if (!eligible and !account_layout.publishNeeded(plain_local, plain_base, plain_synced)) {
         app_state.g_account_dirty_at = 0;
         _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
-        accountDeletePending();
         return;
-    }
-    const pending = std.json.Stringify.valueAlloc(arena.allocator(), .{ .base = base.value, .edited = local }, .{ .emit_null_optional_fields = false }) catch return;
-    var path_buf: [512]u8 = undefined;
-    if (layoutPendingPath(&path_buf)) |path| {
-        if (!writeFileAtomicW(path, pending)) {
-            showHeaderNoticeAscii("Could not save pending sync changes", 4000, true);
-            return;
-        }
-    }
-    if (!app_state.g_account_colors_supported) {
-        const plain_local = account_layout.withoutColors(arena.allocator(), local) catch return;
-        const plain_base = account_layout.withoutColors(arena.allocator(), base.value) catch return;
-        if (!account_layout.publishNeeded(plain_local, plain_base, synced.value)) {
-            app_state.g_account_dirty_at = 0;
-            _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
-            return;
-        }
     }
     app_state.g_account_dirty_at = GetTickCount64();
     if (!app_state.g_account_retry.notified and !app_state.g_account_reauth) _ = SetTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE, 2000, null);
@@ -307,7 +354,11 @@ pub fn publishSessionLayout() void {
 pub fn pullSessionLayout() void {
     if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_busy or app_state.g_account_reauth or !app_state.g_account_retry.ready(GetTickCount64())) return;
     if (app_state.g_account_base == null) {
-        startAccountJob(accountResumeJob(.startup));
+        const job = accountResumeJob(.startup) catch {
+            showHeaderNoticeAscii("Could not load pending sync changes", 4000, true);
+            return;
+        };
+        startAccountJob(job);
         return;
     }
     if (app_state.g_account_dirty_at != 0) {
@@ -381,28 +432,275 @@ fn layoutPendingPath(buf: *[512]u8) ?[]const u8 {
     const name = @import("session.zig").channelFileName(&name_buf, "account-layout-pending.json", IS_DEV) orelse return null;
     return syncAuthPath(buf, name);
 }
-fn accountDeletePending() void {
-    var buf: [512]u8 = undefined;
-    if (layoutPendingPath(&buf)) |path| {
-        var wide: [600]u16 = undefined;
-        if (win32WidePath(&wide, path)) |wp| _ = DeleteFileW(wp.ptr);
+fn accountWritePending(value: PendingLayout) !void {
+    const w = @import("win32.zig");
+    try appearance_intent.validate(value.appearance);
+    if ((value.base == null) != (value.edited == null)) return error.Storage;
+    if (value.base) |base| {
+        const checked = try session_layout.encode(std.heap.page_allocator, base);
+        std.heap.page_allocator.free(checked);
     }
+    if (value.edited) |edited| {
+        const checked = try session_layout.encode(std.heap.page_allocator, edited);
+        std.heap.page_allocator.free(checked);
+    }
+    const bytes = try std.json.Stringify.valueAlloc(std.heap.page_allocator, value, .{ .emit_null_optional_fields = false });
+    errdefer std.heap.page_allocator.free(bytes);
+    if (bytes.len >= 3 * session_layout.max_bytes) return error.Storage;
+    if (g_pending_bytes) |old| {
+        if (std.mem.eql(u8, old, bytes)) {
+            std.heap.page_allocator.free(bytes);
+            return;
+        }
+    }
+    var path_buf: [512]u8 = undefined;
+    const path = layoutPendingPath(&path_buf) orelse return error.Storage;
+    var tmp_buf: [520]u8 = undefined;
+    const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return error.Storage;
+    var tmp_wide: [520]u16 = undefined;
+    var path_wide: [520]u16 = undefined;
+    const tmp_w = win32WidePath(&tmp_wide, tmp) orelse return error.Storage;
+    const path_w = win32WidePath(&path_wide, path) orelse return error.Storage;
+    const file = w.CreateFileW(tmp_w.ptr, w.GENERIC_WRITE, 0, null, w.CREATE_ALWAYS, w.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == w.INVALID_HANDLE_VALUE_PTR) return error.Storage;
+    var total: usize = 0;
+    while (total < bytes.len) {
+        var written: DWORD = 0;
+        if (w.WriteFile(file, bytes[total..].ptr, @intCast(bytes.len - total), &written, null) == 0 or written == 0) {
+            _ = CloseHandle(file);
+            return error.Storage;
+        }
+        total += written;
+    }
+    const flushed = w.FlushFileBuffers(file);
+    const closed = CloseHandle(file);
+    if (flushed == 0 or closed == 0) return error.Storage;
+    if (w.MoveFileExW(tmp_w.ptr, path_w.ptr, w.MOVEFILE_REPLACE_EXISTING | w.MOVEFILE_WRITE_THROUGH) == 0) return error.Storage;
+    if (g_pending_bytes) |old| std.heap.page_allocator.free(old);
+    g_pending_bytes = bytes;
 }
-fn accountResumeJob(kind: AccountJobKind) AccountJob {
+
+fn accountReadPending(path: []const u8) ![]u8 {
+    const w = @import("win32.zig");
+    var wide_buf: [520]u16 = undefined;
+    const wide = win32WidePath(&wide_buf, path) orelse return error.Storage;
+    const file = w.CreateFileW(wide.ptr, w.GENERIC_READ, w.FILE_SHARE_READ, null, w.OPEN_EXISTING, w.FILE_ATTRIBUTE_NORMAL, null);
+    if (file == w.INVALID_HANDLE_VALUE_PTR) return error.Storage;
+    defer _ = CloseHandle(file);
+    const a = std.heap.page_allocator;
+    var bytes: std.ArrayList(u8) = .empty;
+    errdefer bytes.deinit(a);
+    var chunk: [4096]u8 = undefined;
+    while (true) {
+        var count: DWORD = 0;
+        if (w.ReadFile(file, &chunk, chunk.len, &count, null) == 0) return error.Storage;
+        if (count == 0) break;
+        if (bytes.items.len + count > 3 * session_layout.max_bytes) return error.Storage;
+        try bytes.appendSlice(a, chunk[0..count]);
+    }
+    if (bytes.items.len == 0) return error.Storage;
+    return try bytes.toOwnedSlice(a);
+}
+
+fn accountLoadPending() !void {
+    if (g_pending_loaded) return;
+    const a = std.heap.page_allocator;
+    var path_buf: [512]u8 = undefined;
+    const path = layoutPendingPath(&path_buf) orelse return error.Storage;
+    var wide_buf: [520]u16 = undefined;
+    const wide = win32WidePath(&wide_buf, path) orelse return error.Storage;
+    if (GetFileAttributesW(wide.ptr) == 0xffffffff) {
+        const reason = @import("win32.zig").GetLastError();
+        if (reason != 2 and reason != 3) return error.Storage;
+        g_appearance = try appearance_intent.clone(a, &.{});
+        g_pending_loaded = true;
+        return;
+    }
+    const bytes = try accountReadPending(path);
+    errdefer a.free(bytes);
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const parsed = try std.json.parseFromSlice(PendingLayout, alloc, bytes, .{ .allocate = .alloc_always });
+    defer parsed.deinit();
+    const raw = try std.json.parseFromSlice(std.json.Value, alloc, bytes, .{});
+    defer raw.deinit();
+    if (raw.value != .object or (parsed.value.base == null) != (parsed.value.edited == null)) return error.Storage;
+    var pending = parsed.value;
+    for ([_][]const u8{ "base", "edited" }) |key| {
+        if (raw.value.object.get(key)) |snapshot| {
+            if (snapshot == .null) continue;
+            const encoded = try std.json.Stringify.valueAlloc(alloc, snapshot, .{});
+            if (encoded.len >= session_layout.max_bytes) return error.InvalidLayout;
+            const checked = try session_layout.parse(alloc, encoded);
+            checked.deinit();
+        }
+    }
+    var migrated: std.ArrayList(appearance_intent.Intent) = .empty;
+    if (!raw.value.object.contains("appearance")) {
+        if (pending.base) |base| {
+            const edited = pending.edited.?;
+            for (edited.tabs) |tab| {
+                const index = account_layout.find(base.tabs, tab) orelse continue;
+                const previous = base.tabs[index];
+                var mask: u8 = 0;
+                if (tab.face != previous.face) mask |= appearance_intent.face_bit;
+                if (tab.color != previous.color) mask |= appearance_intent.color_bit;
+                if (mask == 0) continue;
+                const name = try alloc.dupe(u8, tab.tmux_session);
+                _ = std.ascii.lowerString(name, name);
+                try migrated.append(alloc, .{ .tmux_host = tab.tmux_host, .tmux_session = name, .touched = mask, .face = tab.face, .color = tab.color });
+            }
+        }
+        pending.appearance = migrated.items;
+    }
+    try appearance_intent.validate(pending.appearance);
+    const owned = try appearance_intent.clone(a, pending.appearance);
+    errdefer appearance_intent.free(a, owned);
+    if (!raw.value.object.contains("appearance")) {
+        try accountWritePending(pending);
+        a.free(bytes);
+    } else {
+        g_pending_bytes = bytes;
+    }
+    g_appearance = owned;
+    g_pending_loaded = true;
+}
+
+pub fn appearancePendingMask(host: u8, session: []const u8) !u8 {
+    if (app_state.g_account_bypass or session.len == 0) return 0;
+    try accountLoadPending();
+    for (g_appearance orelse &.{}) |intent| {
+        if (appearance_intent.same(host, session, intent)) return intent.touched;
+    }
+    return 0;
+}
+
+pub fn applyPendingAppearance(idx: u32) void {
+    if (app_state.g_account_bypass or idx >= app_state.shell_count) return;
+    accountLoadPending() catch return;
+    const shell = &app_state.shells[idx];
+    if (shell.tmux_session_len == 0) return;
+    const session = shell.tmux_session[0..shell.tmux_session_len];
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    var buf: [512]u8 = undefined;
-    const path = layoutPendingPath(&buf) orelse return .{ .kind = kind };
-    const bytes = readFileAllocWin32(path, session_layout.max_bytes) orelse return .{ .kind = kind };
-    defer std.heap.page_allocator.free(bytes);
-    const Pending = struct { base: session_layout.Layout, edited: session_layout.Layout };
-    const parsed = std.json.parseFromSlice(Pending, arena.allocator(), bytes, .{}) catch return .{ .kind = kind };
-    defer parsed.deinit();
-    const base = session_layout.encode(std.heap.page_allocator, parsed.value.base) catch return .{ .kind = kind };
-    const edited = session_layout.encode(std.heap.page_allocator, parsed.value.edited) catch {
-        std.heap.page_allocator.free(base);
-        return .{ .kind = kind };
+    if (g_pending_bytes) |bytes| {
+        const pending = std.json.parseFromSlice(PendingLayout, arena.allocator(), bytes, .{ .allocate = .alloc_always }) catch return;
+        defer pending.deinit();
+        if (pending.value.edited) |edited| {
+            for (edited.tabs) |tab| {
+                if (!tmux_identity.same(tab.tmux_host, tab.tmux_session, shell.tmux_host, session)) continue;
+                shell.face = tab.face;
+                shell.color = tab.color;
+                break;
+            }
+        }
+    }
+    for (g_appearance orelse &.{}) |intent| {
+        if (!appearance_intent.same(shell.tmux_host, session, intent)) continue;
+        if (intent.touched & appearance_intent.face_bit != 0) shell.face = intent.face;
+        if (intent.touched & appearance_intent.color_bit != 0) shell.color = intent.color;
+        break;
+    }
+}
+
+pub fn accountSetAppearance(shell_id: u32, edit: app_state.AppearanceEdit) !void {
+    if ((@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored) or app_state.g_account_locked or app_state.g_restoring or app_state.g_account_applying) return error.Unavailable;
+    const idx = @import("inbox.zig").findShellById(shell_id) orelse return error.Unavailable;
+    const shell = &app_state.shells[idx];
+    const bit: u8 = switch (edit) {
+        .face => |face| blk: { if (face != null and face.? >= 20) return error.InvalidAppearance; break :blk appearance_intent.face_bit; },
+        .color => |color| blk: { if (color != null and color.? >= 7) return error.InvalidAppearance; break :blk appearance_intent.color_bit; },
     };
+    if (app_state.g_account_bypass or shell.kind != .tmux or shell.tmux_session_len == 0) {
+        switch (edit) {
+            .face => |face| shell.face = face,
+            .color => |color| shell.color = color,
+        };
+        @import("launch_cache.zig").changed();
+        var path_buf: [512]u8 = undefined;
+        if (getSessionPath(&path_buf)) |path| {
+            _ = @import("session.zig").saveSessionTo(path, null);
+        }
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+        return;
+    }
+    try accountLoadPending();
+    const a = std.heap.page_allocator;
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var pending = PendingLayout{};
+    if (g_pending_bytes) |bytes| {
+        const parsed = try std.json.parseFromSlice(PendingLayout, alloc, bytes, .{ .allocate = .alloc_always });
+        pending = parsed.value;
+    }
+    var staged: std.ArrayList(appearance_intent.Intent) = .empty;
+    try staged.appendSlice(alloc, g_appearance orelse &.{});
+    const session = shell.tmux_session[0..shell.tmux_session_len];
+    var found: ?usize = null;
+    for (staged.items, 0..) |intent, i| {
+        if (appearance_intent.same(shell.tmux_host, session, intent)) { found = i; break; }
+    }
+    if (found == null) {
+        const name = try alloc.dupe(u8, session);
+        _ = std.ascii.lowerString(name, name);
+        try staged.append(alloc, .{ .tmux_host = shell.tmux_host, .tmux_session = name, .touched = bit });
+        found = staged.items.len - 1;
+    }
+    const intent = &staged.items[found.?];
+    intent.touched |= bit;
+    switch (edit) { .face => |face| intent.face = face, .color => |color| intent.color = color };
+    try appearance_intent.validate(staged.items);
+    const owned = try appearance_intent.clone(a, staged.items);
+    errdefer appearance_intent.free(a, owned);
+    var next_touches: std.ArrayList(appearance_intent.Touch) = .empty;
+    errdefer {
+        for (next_touches.items) |touch| a.free(touch.tmux_session);
+        next_touches.deinit(a);
+    }
+    for (g_after_submit.items) |touch| {
+        const name = try a.dupe(u8, touch.tmux_session);
+        next_touches.append(a, .{ .tmux_host = touch.tmux_host, .tmux_session = name, .touched = touch.touched }) catch |err| { a.free(name); return err; };
+    }
+    if (g_tracking) {
+        var touch_found = false;
+        for (next_touches.items) |*touch| {
+            if (touch.tmux_host == shell.tmux_host and std.ascii.eqlIgnoreCase(touch.tmux_session, session)) {
+                touch.touched |= bit;
+                touch_found = true;
+                break;
+            }
+        }
+        if (!touch_found) {
+            const name = try a.dupe(u8, intent.tmux_session);
+            next_touches.append(a, .{ .tmux_host = shell.tmux_host, .tmux_session = name, .touched = bit }) catch |err| { a.free(name); return err; };
+        }
+    }
+    pending.appearance = owned;
+    try accountWritePending(pending);
+    if (g_appearance) |old| appearance_intent.free(a, old);
+    g_appearance = owned;
+    for (g_after_submit.items) |touch| a.free(touch.tmux_session);
+    g_after_submit.deinit(a);
+    g_after_submit = next_touches;
+    switch (edit) { .face => |face| shell.face = face, .color => |color| shell.color = color };
+    saveSession();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+}
+
+fn accountResumeJob(kind: AccountJobKind) !AccountJob {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    try accountLoadPending();
+    const bytes = g_pending_bytes orelse return .{ .kind = kind };
+    const parsed = try std.json.parseFromSlice(PendingLayout, arena.allocator(), bytes, .{});
+    defer parsed.deinit();
+    const base_value = parsed.value.base orelse return .{ .kind = kind };
+    const edited_value = parsed.value.edited orelse return error.Storage;
+    const base = try session_layout.encode(std.heap.page_allocator, base_value);
+    errdefer std.heap.page_allocator.free(base);
+    const edited = try session_layout.encode(std.heap.page_allocator, edited_value);
     return .{ .kind = kind, .base = base, .edited = edited };
 }
 fn accountDeleteToken() void {
@@ -441,6 +739,9 @@ pub fn accountSignOut() void {
         return;
     }
     saveSession();
+    accountResetAppearanceTracking();
+    app_state.g_account_colors_supported = false;
+    app_state.g_account_appearance_supported = false;
     const credential = readDpapiFile("account-device.dat", 16384);
     accountDeleteToken();
     app_state.g_account_has_token = false;
@@ -451,10 +752,18 @@ pub fn accountSignIn() void {
     if (app_state.g_account_busy) return;
     if (app_state.g_account_has_token and !app_state.g_account_reauth) {
         app_state.g_account_status = "Retrying account service...";
-        startAccountJob(accountResumeJob(.startup));
+        const job = accountResumeJob(.startup) catch {
+            showHeaderNoticeAscii("Could not load pending sync changes", 4000, true);
+            return;
+        };
+        startAccountJob(job);
     } else {
         app_state.g_account_status = "Complete sign-in in your browser. Esc cancels.";
-        startAccountJob(accountResumeJob(.login));
+        const job = accountResumeJob(.login) catch {
+            showHeaderNoticeAscii("Could not load pending sync changes", 4000, true);
+            return;
+        };
+        startAccountJob(job);
     }
     _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
 }
@@ -871,8 +1180,8 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
     defer remote.deinit();
     if (remote.status == 401) reply.unauthorized = true;
     if (remote.status != 200) return error.Network;
-    const colors_supported = remote.colors_supported;
-    reply.colors_supported = colors_supported;
+    reply.colors_supported = remote.colors_supported;
+    reply.appearance_supported = remote.appearance_supported;
     var arena = std.heap.ArenaAllocator.init(a);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -909,6 +1218,7 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         } else |_| {}
     }
     var synced_hosts = hosts;
+    var appearance_confirmable = remote.appearance_supported;
     var attempts: usize = 0;
     while (attempts < 3) : (attempts += 1) {
         if (job.kind == .remove_host and !remote.removal_supported) return error.RemovalUnsupported;
@@ -921,8 +1231,10 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             defer base.deinit();
             const edited = try session_layout.parse(alloc, job.edited.?);
             defer edited.deinit();
-            rebased = try account_layout.rebase(alloc, base.value, edited.value, server.value);
+            const known = if (remote.appearance_supported) server.value else try account_layout.appearanceFrom(alloc, server.value, base.value);
+            rebased = try account_layout.rebase(alloc, base.value, edited.value, known);
         }
+        rebased = try appearance_intent.overlay(alloc, rebased, job.appearance orelse &.{});
         removed = try account_hosts.mergeRemoved(alloc, removed, rebased.removed_hosts orelse &.{});
         if (g_account_hosts_cache.arena) |*cache_arena| {
             for (removed) |slot| {
@@ -939,19 +1251,35 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
             if (merged.conflict) debugLog("account-sync: host address conflict, keeping local field");
         }
         synced_hosts = merged_hosts;
-        if (!colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
+        if (!remote.colors_supported) rebased = try account_layout.withoutColors(alloc, rebased);
+        if (!remote.appearance_supported) rebased = try account_layout.withoutAppearance(alloc, rebased);
         if (account_layout.equal(server.value, rebased) and !(remote.hosts_supported and hosts_ready and account_hosts.needsPublish(synced_hosts, server.value.hosts orelse &.{}))) break;
         const publish_hosts = if (hosts_ready) synced_hosts else server.value.hosts;
         rebased.hosts = if (remote.hosts_supported) try account_hosts.withoutRemoved(alloc, publish_hosts orelse &.{}, removed) else null;
         const body = try std.json.Stringify.valueAlloc(alloc, .{ .base_revision = server.value.revision, .layout = rebased }, .{ .emit_null_optional_fields = false });
-        const put = try account_client.request("PUT", "/v1/layout", access, body);
+        const sent_appearance = remote.appearance_supported;
+        const sent_colors = remote.colors_supported;
+        const put = try account_client.requestWithLayoutFeatures("PUT", "/v1/layout", access, body, sent_colors, sent_appearance);
         remote.deinit();
         remote = put;
+        appearance_confirmable = sent_appearance and remote.appearance_supported and remote.status == 200;
+        if (((remote.appearance_supported and !sent_appearance) or (remote.colors_supported and !sent_colors)) and (remote.status == 200 or remote.status == 409)) {
+            const refreshed = try account_client.request("GET", "/v1/layout", access, "");
+            remote.deinit();
+            remote = refreshed;
+            if (remote.status == 401) reply.unauthorized = true;
+            if (remote.status != 200) return error.Network;
+            appearance_confirmable = remote.appearance_supported;
+            if (attempts + 1 >= 3) return error.Conflict;
+            continue;
+        }
         if (remote.status == 200) break;
         if (remote.status == 401) reply.unauthorized = true;
         if (remote.status != 409) return error.Network;
     }
     if (remote.status != 200) return error.Conflict;
+    reply.colors_supported = remote.colors_supported;
+    reply.appearance_supported = remote.appearance_supported;
     const final_json = try accountReadLayout(alloc, remote.bytes);
     const final_layout = try session_layout.parse(alloc, final_json);
     defer final_layout.deinit();
@@ -973,13 +1301,14 @@ fn accountRequest(job: AccountJob, reply: *LayoutReply) !void {
         }
     }
     reply.bytes = try a.dupe(u8, try accountReadLayout(alloc, remote.bytes));
+    reply.appearance_confirmable = appearance_confirmable;
     accountSyncDeviceKeys(access, job, reply) catch {
         accountDeviceKeyError(reply, "Could not update device approvals. Check your connection and SSH key pair, then try Account: Approve devices again.");
     };
 }
 fn layoutSyncWorker(submitted: AccountJob) void {
     _ = @import("console.zig").resolveSshPath(false);
-    const job = if (submitted.kind == .startup and submitted.base == null and submitted.edited == null) accountResumeJob(.startup) else submitted;
+    const job = submitted;
     const a = std.heap.page_allocator;
     const reply = a.create(LayoutReply) catch {
         accountJobFree(job);
@@ -1007,7 +1336,7 @@ fn layoutSyncWorker(submitted: AccountJob) void {
         a.destroy(reply);
     }
 }
-fn accountPrepareRestore(json: []const u8, preserve_cached_colors: bool) !void {
+fn accountPrepareRestore(out: std.mem.Allocator, json: []const u8, preserve_cached_colors: bool, preserve_cached_appearance: bool) ![]u8 {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -1039,8 +1368,41 @@ fn accountPrepareRestore(json: []const u8, preserve_cached_colors: bool) !void {
             };
         }
     };
-    const cache = try account_layout.restoreCache(a, valid, restored) orelse return;
+    if (preserve_cached_appearance) {
+        if (valid) |bytes| {
+            const cached = std.json.parseFromSlice(std.json.Value, a, bytes, .{}) catch null;
+            if (cached) |parsed| {
+                defer parsed.deinit();
+                if (parsed.value == .object) {
+                    if (parsed.value.object.get("tabs")) |cached_tabs| {
+                        if (cached_tabs == .array) {
+                            const tabs = try a.dupe(session_layout.Tab, restored.tabs);
+                            for (tabs) |*tab| {
+                                for (cached_tabs.array.items) |record| {
+                                    if (record != .object) continue;
+                                    const session = record.object.get("tmux_session") orelse continue;
+                                    const host = record.object.get("tmux_host") orelse std.json.Value{ .integer = 0 };
+                                    if (session != .string or host != .integer or host.integer != tab.tmux_host or !std.ascii.eqlIgnoreCase(session.string, tab.tmux_session)) continue;
+                                    const face = @import("json_reader.zig").uintDefault(record, "face", 20);
+                                    const color = @import("json_reader.zig").uintDefault(record, "color", 7);
+                                    tab.face = if (face < 20) @intCast(face) else null;
+                                    tab.color = if (color < 7) @intCast(color) else null;
+                                    break;
+                                }
+                            }
+                            restored.tabs = tabs;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    restored = try appearance_intent.overlay(a, restored, g_appearance orelse &.{});
+    const cache = try account_layout.restoreCache(a, valid, restored) orelse return error.LayoutCapacity;
+    const normalized = try session_layout.encode(out, restored);
+    errdefer out.free(normalized);
     if (!writeFileAtomicW(path, cache)) return error.Storage;
+    return normalized;
 }
 pub fn applyServerLayout(json: []const u8) !void {
     const was_starred = app_state.g_starred_workspace;
@@ -1168,6 +1530,8 @@ pub fn applyServerLayout(json: []const u8) !void {
             shell.sync_owned = true;
             shell.name_len = @intCast(try std.unicode.utf8ToUtf16Le(&shell.name, tab.name));
             shell.name_source = if (tab.manual) .manual else .semantic;
+            shell.face = tab.face;
+            shell.color = tab.color;
             if (tab.favorite) |favorite| shell.favorite = favorite;
             if (tab.muted) |muted| {
                 shell.muted = muted;
@@ -1309,6 +1673,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             return;
         }
     }
+    defer accountResetAppearanceTracking();
     app_state.g_account_busy = false;
     app_state.g_account_login_active = false;
     if (lp == 0) {
@@ -1385,11 +1750,25 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     const server = session_layout.parse(alloc, bytes) catch return;
     defer server.deinit();
     app_state.g_account_colors_supported = reply.colors_supported;
+    app_state.g_account_appearance_supported = reply.appearance_supported;
     var to_apply = bytes;
     if (!reply.colors_supported and reply.job.edited != null) {
         const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
         defer edited.deinit();
         to_apply = session_layout.encode(alloc, account_layout.colorsFrom(alloc, server.value, edited.value) catch return) catch return;
+    }
+    if (!reply.appearance_supported and reply.job.edited != null) {
+        const edited = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer edited.deinit();
+        const current_apply = session_layout.parse(alloc, to_apply) catch return;
+        defer current_apply.deinit();
+        to_apply = session_layout.encode(alloc, account_layout.appearanceFrom(alloc, current_apply.value, edited.value) catch return) catch return;
+    }
+    if (!reply.appearance_supported and reply.job.edited == null and !app_state.g_account_bootstrapping) {
+        const current_apply = session_layout.parse(alloc, to_apply) catch return;
+        defer current_apply.deinit();
+        const current = captureSessionLayout(alloc, false) catch return;
+        to_apply = session_layout.encode(alloc, account_layout.appearanceFrom(alloc, current_apply.value, current) catch return) catch return;
     }
     var local_ack: ?[]u8 = null;
     if (!app_state.g_account_bootstrapping and reply.job.edited != null) {
@@ -1402,18 +1781,92 @@ pub fn handleLayoutReply(lp: LPARAM) void {
         for (sent.value.tabs, 0..) |tab, i| ownership[i] = account_layout.find(previous.value.tabs, tab) != null or account_layout.find(server.value.tabs, tab) != null;
         var ack = account_layout.apply(alloc, sent.value, ownership[0..sent.value.tabs.len], server.value, MAX_LWS, MAX_SHELLS) catch return;
         if (!reply.colors_supported) ack = account_layout.withoutColors(alloc, ack) catch return;
+        if (!reply.appearance_supported and reply.job.base != null) {
+            const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+            defer old_base.deinit();
+            ack = account_layout.appearanceFrom(alloc, ack, old_base.value) catch return;
+        }
         local_ack = session_layout.encode(alloc, ack) catch return;
         const current = accountCapturePush(alloc, sent.value) catch return;
-        const apply_remote = if (reply.colors_supported) server.value else account_layout.colorsFrom(alloc, server.value, sent.value) catch return;
+        var apply_remote = if (reply.colors_supported) server.value else account_layout.colorsFrom(alloc, server.value, sent.value) catch return;
+        if (!reply.appearance_supported) apply_remote = account_layout.appearanceFrom(alloc, apply_remote, sent.value) catch return;
         const rebased = account_layout.rebase(alloc, sent.value, current, apply_remote) catch return;
         to_apply = session_layout.encode(alloc, rebased) catch return;
     }
-    var room_prepare_ok = true;
+    if (app_state.g_account_bootstrapping and !reply.appearance_supported and reply.job.base != null) {
+        const old_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+        defer old_base.deinit();
+        const ack = account_layout.appearanceFrom(alloc, server.value, old_base.value) catch return;
+        local_ack = session_layout.encode(alloc, ack) catch return;
+    }
+    if (!app_state.g_account_bootstrapping and reply.job.edited == null) {
+        if (app_state.g_account_local_base) |baseline_bytes| {
+            const baseline = session_layout.parse(alloc, baseline_bytes) catch return;
+            defer baseline.deinit();
+            const current = accountCapturePush(alloc, baseline.value) catch return;
+            const remote = session_layout.parse(alloc, to_apply) catch return;
+            defer remote.deinit();
+            const owned = alloc.alloc(bool, baseline.value.tabs.len) catch return;
+            for (baseline.value.tabs, 0..) |tab, bi| {
+                owned[bi] = false;
+                for (app_state.shells[0..app_state.shell_count]) |shell| {
+                    if (tmux_identity.same(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len], tab.tmux_host, tab.tmux_session)) {
+                        owned[bi] = shell.sync_owned;
+                        break;
+                    }
+                }
+            }
+            var ack = account_layout.apply(alloc, baseline.value, owned, remote.value, MAX_LWS, MAX_SHELLS) catch return;
+            var ack_tabs: std.ArrayList(session_layout.Tab) = .empty;
+            var promoted: std.ArrayList(session_layout.Tab) = .empty;
+            for (ack.tabs) |tab| {
+                var promote = false;
+                if (account_layout.find(server.value.tabs, tab) == null) {
+                    if (account_layout.find(baseline.value.tabs, tab)) |bi| {
+                        if (account_layout.find(current.tabs, tab)) |ci| {
+                            const old = baseline.value.tabs[bi];
+                            const now = current.tabs[ci];
+                            promote = !std.mem.eql(u8, old.name, now.name) or old.manual != now.manual or old.favorite != now.favorite or old.muted != now.muted or !std.mem.eql(u8, old.workspace, now.workspace);
+                            for (baseline.value.tabs, 0..) |other, oi| {
+                                const current_other = account_layout.find(current.tabs, other) orelse continue;
+                                if ((oi < bi and current_other > ci) or (oi > bi and current_other < ci)) {
+                                    promote = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    for (g_appearance orelse &.{}) |intent| {
+                        if (appearance_intent.same(tab.tmux_host, tab.tmux_session, intent)) promote = true;
+                    }
+                }
+                if (promote) {
+                    promoted.append(alloc, tab) catch return;
+                } else {
+                    ack_tabs.append(alloc, tab) catch return;
+                }
+            }
+            var base_tabs: std.ArrayList(session_layout.Tab) = .empty;
+            for (baseline.value.tabs) |tab| {
+                if (account_layout.find(promoted.items, tab) == null) base_tabs.append(alloc, tab) catch return;
+            }
+            var rebase_base = baseline.value;
+            rebase_base.tabs = base_tabs.items;
+            const rebased = account_layout.rebase(alloc, rebase_base, current, remote.value) catch return;
+            to_apply = session_layout.encode(alloc, rebased) catch return;
+            ack.tabs = ack_tabs.items;
+            local_ack = session_layout.encode(alloc, ack) catch return;
+        }
+    }
+    const target_before_intents = session_layout.parse(alloc, to_apply) catch return;
+    defer target_before_intents.deinit();
+    const target_with_intents = appearance_intent.overlay(alloc, target_before_intents.value, g_appearance orelse &.{}) catch return;
+    to_apply = session_layout.encode(alloc, target_with_intents) catch return;
     if (app_state.g_account_bootstrapping) {
-        accountPrepareRestore(to_apply, !reply.colors_supported and reply.job.edited == null) catch {
-            room_prepare_ok = false;
+        to_apply = accountPrepareRestore(alloc, to_apply, !reply.colors_supported and reply.job.edited == null, !reply.appearance_supported and reply.job.edited == null) catch {
             app_state.g_account_status = "Could not reconcile saved layout. Local cache kept.";
             _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
+            return;
         };
     } else {
         app_state.g_account_locked = false;
@@ -1423,7 +1876,77 @@ pub fn handleLayoutReply(lp: LPARAM) void {
             return;
         };
     }
-    if (reply.colors_supported and (app_state.g_account_bootstrapping or reply.job.base != null)) accountDeletePending();
+    const final_target = session_layout.parse(alloc, to_apply) catch return;
+    defer final_target.deinit();
+    var remaining: std.ArrayList(appearance_intent.Intent) = .empty;
+    remaining.appendSlice(alloc, g_appearance orelse &.{}) catch return;
+    if (reply.appearance_confirmable and !reply.cancelled) {
+        for (reply.job.appearance orelse &.{}) |submitted| {
+            var remote_tab: ?session_layout.Tab = null;
+            for (server.value.tabs) |tab| {
+                if (appearance_intent.same(tab.tmux_host, tab.tmux_session, submitted)) { remote_tab = tab; break; }
+            }
+            const confirmed = remote_tab orelse continue;
+            var survives = false;
+            for (final_target.value.tabs) |tab| {
+                if (appearance_intent.same(tab.tmux_host, tab.tmux_session, submitted)) { survives = true; break; }
+            }
+            if (!survives) continue;
+            var later: u8 = 0;
+            for (g_after_submit.items) |touch| {
+                if (touch.tmux_host == submitted.tmux_host and std.ascii.eqlIgnoreCase(touch.tmux_session, submitted.tmux_session)) later |= touch.touched;
+            }
+            for (remaining.items) |*intent| {
+                if (!appearance_intent.same(submitted.tmux_host, submitted.tmux_session, intent.*)) continue;
+                if (submitted.touched & appearance_intent.face_bit != 0 and later & appearance_intent.face_bit == 0 and confirmed.face == submitted.face) intent.touched &= ~appearance_intent.face_bit;
+                if (submitted.touched & appearance_intent.color_bit != 0 and later & appearance_intent.color_bit == 0 and confirmed.color == submitted.color) intent.touched &= ~appearance_intent.color_bit;
+                break;
+            }
+        }
+    }
+    if (reply.job.base != null and reply.job.edited != null) {
+        const sent_base = session_layout.parse(alloc, reply.job.base.?) catch return;
+        defer sent_base.deinit();
+        const sent_edit = session_layout.parse(alloc, reply.job.edited.?) catch return;
+        defer sent_edit.deinit();
+        for (app_state.g_account_closed[0..app_state.g_account_closed_count]) |closed| {
+            const probe = session_layout.Tab{ .name = "", .tmux_session = closed.session[0..closed.len], .tmux_host = closed.host, .workspace = "" };
+            if (account_layout.find(sent_base.value.tabs, probe) == null or account_layout.find(sent_edit.value.tabs, probe) != null) continue;
+            if (account_layout.find(server.value.tabs, probe) != null or account_layout.find(final_target.value.tabs, probe) != null) continue;
+            var alive = false;
+            for (app_state.shells[0..app_state.shell_count]) |shell| {
+                if (tmux_identity.same(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len], probe.tmux_host, probe.tmux_session)) {
+                    alive = true;
+                    break;
+                }
+            }
+            if (alive) continue;
+            for (remaining.items) |*intent| {
+                if (appearance_intent.same(probe.tmux_host, probe.tmux_session, intent.*)) intent.touched = 0;
+            }
+        }
+    }
+    var remaining_index: usize = 0;
+    while (remaining_index < remaining.items.len) {
+        if (remaining.items[remaining_index].touched == 0) {
+            _ = remaining.orderedRemove(remaining_index);
+        } else {
+            remaining_index += 1;
+        }
+    }
+    const owned_remaining = appearance_intent.clone(a, remaining.items) catch return;
+    var installed_remaining = false;
+    defer if (!installed_remaining) appearance_intent.free(a, owned_remaining);
+    const ack_parsed = if (local_ack) |ack| session_layout.parse(alloc, ack) catch return else session_layout.parse(alloc, bytes) catch return;
+    defer ack_parsed.deinit();
+    const edited_now = if (app_state.g_account_bootstrapping) final_target.value else accountCapturePush(alloc, ack_parsed.value) catch return;
+    accountWritePending(.{ .base = ack_parsed.value, .edited = edited_now, .appearance = owned_remaining }) catch {
+        showHeaderNoticeAscii("Could not save pending sync changes", 4000, true);
+        return;
+    };
+    if (g_appearance) |old| appearance_intent.free(a, old);
+    g_appearance = owned_remaining;
+    installed_remaining = true;
     var keep_closed: usize = 0;
     for (app_state.g_account_closed[0..app_state.g_account_closed_count]) |c| {
         const probe = session_layout.Tab{ .name = "", .tmux_session = c.session[0..c.len], .tmux_host = c.host, .workspace = "" };
@@ -1438,7 +1961,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     _ = KillTimer(app_state.g_main_hwnd, TIMER_ACCOUNT_SAVE);
     if (app_state.g_account_base) |old| a.free(old);
     app_state.g_account_base = a.dupe(u8, bytes) catch return;
-    if (room_prepare_ok and @import("room_frontend.zig").enabled) {
+    if (@import("room_frontend.zig").enabled) {
         room_layout_applied = @import("room_frontend.zig").applyAccountLayout(reply.account_id, to_apply);
     }
     for (app_state.shells[0..app_state.shell_count]) |*shell| {
@@ -1451,14 +1974,8 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     app_state.g_account_locked = false;
     @import("room_frontend.zig").accountReady();
     if (app_state.g_account_local_base) |old| a.free(old);
-    app_state.g_account_local_base = if (local_ack) |ack| a.dupe(u8, ack) catch null else null;
-    if (!app_state.g_account_bootstrapping) {
-        if (app_state.g_account_local_base == null) {
-            const current = captureSessionLayout(alloc, false) catch return;
-            app_state.g_account_local_base = session_layout.encode(a, current) catch null;
-        }
-        publishSessionLayout();
-    }
+    app_state.g_account_local_base = session_layout.encode(a, ack_parsed.value) catch null;
+    if (!app_state.g_account_bootstrapping) publishSessionLayout();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
 }
 pub fn paintAccountLock(hwnd: HANDLE) void {

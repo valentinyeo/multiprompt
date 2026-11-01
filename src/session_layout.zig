@@ -18,6 +18,8 @@ pub const Tab = struct {
     used: ?u64 = null,
     input: ?u64 = null,
     visits: ?[]const u64 = null,
+    face: ?u8 = null,
+    color: ?u8 = null,
     tmux_session: []const u8,
     tmux_host: u8,
     workspace: []const u8,
@@ -90,6 +92,12 @@ pub fn validate(layout: Layout) !void {
     for (layout.tabs, 0..) |tab, i| {
         if (!std.mem.eql(u8, tab.kind, "tmux") or tab.tmux_host > 2 or !validText(tab.name, 64) or
             tab.tmux_session.len == 0 or tab.tmux_session.len > 63) return error.InvalidLayout;
+        if (tab.face) |face| {
+            if (face >= 20) return error.InvalidLayout;
+        }
+        if (tab.color) |color| {
+            if (color >= 7) return error.InvalidLayout;
+        }
         if (tab.used) |used| if (used > 9_007_199_254_740_991) return error.InvalidLayout;
         if (tab.input) |input| if (input > 9_007_199_254_740_991) return error.InvalidLayout;
         if (tab.visits) |visits| {
@@ -118,6 +126,14 @@ pub fn parse(a: Allocator, json: []const u8) !std.json.Parsed(Layout) {
     if (parsed.value.settings == null and value.value.object.contains("settings")) return error.InvalidLayout;
     for (value.value.object.get("workspaces").?.array.items) |workspace| {
         if (workspace.object.get("color")) |color| {
+            if (color != .integer or color.integer < 0 or color.integer >= 7) return error.InvalidLayout;
+        }
+    }
+    for (value.value.object.get("tabs").?.array.items) |tab| {
+        if (tab.object.get("face")) |face| {
+            if (face != .integer or face.integer < 0 or face.integer >= 20) return error.InvalidLayout;
+        }
+        if (tab.object.get("color")) |color| {
             if (color != .integer or color.integer < 0 or color.integer >= 7) return error.InvalidLayout;
         }
     }

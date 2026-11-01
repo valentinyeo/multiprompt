@@ -2429,6 +2429,13 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         if (!@import("launch_cache.zig").pending) app_state.g_tmux_closed.restored = true;
         const closing = &app_state.shells[idx];
         app_state.g_tmux_closed.close(std.heap.page_allocator, closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len]) catch debugLog("Could not remember closed tmux session");
+        for (app_state.g_tmux_closed.entries.items) |*entry| {
+            if (@import("tmux_identity.zig").same(entry.host, entry.name[0..entry.len], closing.tmux_host, closing.tmux_session[0..closing.tmux_session_len])) {
+                entry.face = closing.face;
+                entry.color = closing.color;
+                break;
+            }
+        }
     }
     chatOutboxDropForShell(idx);
     _ = parkMainWindowBeforeActiveShellRemoval(idx);
@@ -2480,6 +2487,8 @@ pub fn closeShellRemember(idx: u32, remember_closed: bool) void {
         entry.group = if (findGroupIdx(app_state.shells[idx].group_id)) |gi| app_state.groups[gi] else null;
         entry.starred_group = if (findGroupIdx(app_state.shells[idx].starred_group_id)) |gi| app_state.groups[gi] else null;
         entry.favorite = app_state.shells[idx].favorite;
+        entry.face = app_state.shells[idx].face;
+        entry.color = app_state.shells[idx].color;
         app_state.g_closed_history[app_state.g_closed_count] = entry;
         app_state.g_closed_count += 1;
     }

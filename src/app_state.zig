@@ -217,6 +217,13 @@ pub const TabTransfer = extern struct {
     tmux_identity_len: u32 = 0,
 };
 
+pub const AppearanceTabTransfer = extern struct {
+    legacy: TabTransfer,
+    face: u8,
+    color: u8,
+    pending_mask: u8,
+};
+
 pub const ShellKind = enum(u3) { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 
 pub const ShellActivity = enum(u2) { idle, active };
@@ -273,6 +280,8 @@ pub const Shell = struct {
     pinned_top: bool = false,
     starred_pinned_top: bool = false,
     favorite: bool = false,
+    face: ?u8 = null,
+    color: ?u8 = null,
     last_used: u64 = 0,
     input: u64 = 0,
     visits: @import("frequent.zig").Visits = .{},
@@ -739,6 +748,8 @@ pub const ClosedShell = struct {
     group: ?TabGroup = null,
     starred_group: ?TabGroup = null,
     favorite: bool = false,
+    face: ?u8 = null,
+    color: ?u8 = null,
     tmux_host: u8 = 0,
 };
 pub const MAX_CLOSED_HISTORY = 10;
@@ -977,6 +988,9 @@ pub var g_search_group_move_mode: bool = false;
 pub var g_groupmove_tab_sid: u32 = 0;
 pub var g_search_skills_mode: bool = false;
 pub var g_search_tabctx_mode: bool = false;
+pub const BotLookMode = enum { none, face, color };
+pub var g_bot_look_mode: BotLookMode = .none;
+pub var g_bot_look_sid: u32 = 0;
 pub var g_search_groupctx_mode: bool = false;
 pub var g_groupctx_gid: u32 = 0;
 pub const SEARCH_GROUPCTX_BASE: usize = 10000;
@@ -1556,6 +1570,12 @@ pub const SEARCH_TABCTX_CHAT_ALWAYS: usize = 7181;
 pub const SEARCH_TABCTX_CHAT_DENY: usize = 7182;
 pub const SEARCH_TABCTX_CHAT_TAB_URL: usize = 7183;
 pub const SEARCH_TABCTX_ADOPT_HOST: usize = 7186;
+pub const SEARCH_TABCTX_BOT_FACE: usize = 7187;
+pub const SEARCH_TABCTX_BOT_COLOR: usize = 7188;
+pub const SEARCH_BOT_FACE_OFFSET: usize = 7140;
+pub const BOT_FACE_COUNT: usize = 21;
+pub const SEARCH_BOT_COLOR_OFFSET: usize = 7161;
+pub const BOT_COLOR_COUNT: usize = 8;
 pub const SEARCH_TABCTX_START_SESSION: usize = 7184;
 pub const SEARCH_TABCTX_GROUP_ADD_OFFSET: usize = 7120;
 pub const SEARCH_MOBILE_OFFSET: usize = 8000;
@@ -1853,6 +1873,8 @@ pub var g_adopt_name_source: NameSource = .default;
 pub var g_adopt_muted: bool = false;
 pub var g_adopt_pinned_top: bool = false;
 pub var g_adopt_favorite: bool = false;
+pub var g_adopt_face: ?u8 = null;
+pub var g_adopt_color: ?u8 = null;
 pub var g_adopt_last_used: u64 = 0;
 pub var g_adopt_input: u64 = 0;
 pub var g_adopt_visits: @import("frequent.zig").Visits = .{};
@@ -2168,6 +2190,7 @@ pub var g_account_applying = false;
 pub var g_account_base: ?[]u8 = null;
 pub var g_account_local_base: ?[]u8 = null;
 pub var g_account_colors_supported = false;
+pub var g_account_appearance_supported = false;
 pub var g_account_dirty_at: u64 = 0;
 pub var g_account_status: []const u8 = "Sign in to Multi Bot to open your workspaces.";
 pub const TIMER_ACCOUNT: usize = 170;
@@ -2176,8 +2199,11 @@ pub const TIMER_CHAT_DICTATION: usize = 191;
 pub const TIMER_UPDATE_CHECK: usize = 172;
 pub const TIMER_ACCOUNT_SAVE: usize = 171;
 pub const AccountJobKind = enum { startup, login, pull, push, devices, revoke, signout, device_keys, decide_keys, remove_host };
-pub const AccountJob = struct { kind: AccountJobKind, slot: ?u8 = null, base: ?[]u8 = null, edited: ?[]u8 = null, device: ?[]u8 = null, credential: ?[]u8 = null };
-pub const LayoutReply = struct { colors_supported: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
+pub const AppearanceEdit = @import("appearance_intent.zig").Edit;
+pub const AppearanceIntent = @import("appearance_intent.zig").Intent;
+pub const AppearanceTouch = @import("appearance_intent.zig").Touch;
+pub const AccountJob = struct { kind: AccountJobKind, slot: ?u8 = null, base: ?[]u8 = null, edited: ?[]u8 = null, device: ?[]u8 = null, credential: ?[]u8 = null, appearance: ?[]AppearanceIntent = null };
+pub const LayoutReply = struct { colors_supported: bool = false, appearance_supported: bool = false, appearance_confirmable: bool = false, job: AccountJob, bytes: ?[]u8 = null, account_id: ?[]u8 = null, unauthorized: bool = false, signed_out: bool = false, has_token: bool = false, cancelled: bool = false, device_keys: ?[]u8 = null, key_error: ?[]u8 = null };
 pub const AccountClosed = struct { host: u8 = 0, len: u8 = 0, session: [64]u8 = undefined };
 pub var g_account_closed: [MAX_SHELLS]AccountClosed = undefined;
 pub var g_account_closed_count: usize = 0;
@@ -2207,6 +2233,8 @@ pub const SavedTab = struct {
     starred_pinned_top: bool = false,
     inbox_excluded: bool = false,
     favorite: bool = false,
+    face: ?u8 = null,
+    color: ?u8 = null,
     last_used: u64 = 0,
     input: u64 = 0,
     visits: @import("frequent.zig").Visits = .{},

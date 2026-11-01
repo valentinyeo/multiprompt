@@ -97,6 +97,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - F2: Rename active tab
 - Double-click tab: Rename tab
 - Right-click tab: Open the Ctrl+K palette in TAB-CONTEXT mode (v0.28.240 — the native menu is gone): Reconnect (remote tabs), Archive Session (tmux tabs, v0.28.249, one-pick = confirmed), Favorite/Unfavorite (Alt+S), Mute/Unmute (a muted session is hidden from the Inbox on every device, stays in its workspace tab, and the mute syncs through the account layout), Keep Alive (cmd/pwsh), Move to Workspace… (links into the wsmove submenu, targets the right-clicked tab), group commands (add to new/existing group, remove, new tab in group), Clear tab selection. Actions target the CLICKED tab (captured by shell_id), not the active one; with a Ctrl+click selection the selection-wide variants show and moves apply to the whole set. Esc closes; Backspace on empty query = back to the normal palette.
+- Ctrl+K, right-click tab, or the chat three-dot menu: choose Bot face or Bot color, then a named option or Auto. Account-backed tmux choices are shared through the account layout.
 - No dedicated shortcut — Close all disconnected sessions: use Ctrl+K or right-click a tab. Choose the counted action. Pinned and unpinned disconnected sessions close. Live sessions stay open.
 - No dedicated shortcut — Session ETA: when an agent hook reports a time estimate for the in-flight request, the sidebar row shows a countdown ("12m", "1h 20m", amber "+4m" once overdue) and a thin progress line, Chat View's header shows "ETA 12m, done about 14:27", and Inbox rows show the same countdown. No hook wired up yet -> nothing shows. Ctrl+K → "ETA Countdown Numbers: On/Off" and "ETA Progress Line: On/Off" toggle each independently (both default on); Ctrl+K → "Estimate Accuracy" opens a read-only summary of how each agent's estimates compare to actual time taken, computed from `%APPDATA%\ZigShell\eta-log.jsonl`. Esc closes.
 
@@ -238,6 +239,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Click tier heading | Collapse / expand ungrouped Pinned or Recents |
 | Right-click group / Ctrl+K | Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs |
 | Right-click tab | Tab actions palette (pin / reattach / mute / close / move / group) |
+| Ctrl+K / right-click tab → Bot face / Bot color | Choose a bot look or Auto; shared choices sync with your account |
 | Ctrl+F in Chat View | Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |
 | End / Ctrl+K "Chat View: Scroll to newest message" | Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch |
 | Double-click empty space | Switch between Chat View and the shell (without selecting text) |

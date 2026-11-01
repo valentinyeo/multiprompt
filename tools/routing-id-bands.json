@@ -45,6 +45,16 @@
     "size": "MAX_GROUPS"
   },
   {
+    "name": "bot_face_choices",
+    "base": "SEARCH_BOT_FACE_OFFSET",
+    "size": "BOT_FACE_COUNT"
+  },
+  {
+    "name": "bot_color_choices",
+    "base": "SEARCH_BOT_COLOR_OFFSET",
+    "size": "BOT_COLOR_COUNT"
+  },
+  {
     "name": "custom_command",
     "base": "SEARCH_CUSTOMCMD_OFFSET",
     "size": "MAX_CUSTOM_CMDS"

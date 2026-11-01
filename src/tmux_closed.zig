@@ -6,6 +6,8 @@ pub const Entry = struct {
     host: u8,
     name: [64]u8 = @splat(0),
     len: usize,
+    face: ?u8 = null,
+    color: ?u8 = null,
 
     pub fn jsonStringify(self: Entry, json: anytype) !void {
         try json.beginObject();
@@ -13,6 +15,14 @@ pub const Entry = struct {
         try json.write(self.host);
         try json.objectField("session");
         try json.write(self.name[0..self.len]);
+        if (self.face) |face| {
+            try json.objectField("face");
+            try json.write(face);
+        }
+        if (self.color) |color| {
+            try json.objectField("color");
+            try json.write(color);
+        }
         try json.endObject();
     }
 };
@@ -56,7 +66,16 @@ pub const Closed = struct {
             for (session.string) |c| {
                 if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_' and c != '.' and c != ':') continue :records;
             }
-            try self.close(a, @intCast(slot), session.string);
+            if (!self.contains(@intCast(slot), session.string)) {
+                try self.close(a, @intCast(slot), session.string);
+                if (session.string.len > 0) {
+                    const entry = &self.entries.items[self.entries.items.len - 1];
+                    const face = json_reader.uintDefault(item, "face", 20);
+                    const color = json_reader.uintDefault(item, "color", 7);
+                    entry.face = if (face < 20) @intCast(face) else null;
+                    entry.color = if (color < 7) @intCast(color) else null;
+                }
+            }
         }
     }
 };

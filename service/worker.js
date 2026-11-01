@@ -16,6 +16,10 @@ function layoutResponse(request, value, status = 200) {
     if (!layoutFeature(request, 'used')) delete visible.used;
     if (!layoutFeature(request, 'visits')) delete visible.visits;
     if (!layoutFeature(request, 'input')) delete visible.input;
+    if (!layoutFeature(request, 'bot_appearance')) {
+      delete visible.face;
+      delete visible.color;
+    }
     return visible;
   }) } };
   if (value.layout && !layoutFeature(request, 'workspace_color')) value.layout.workspaces = value.layout.workspaces.map(({ color, ...workspace }) => workspace);
@@ -23,7 +27,7 @@ function layoutResponse(request, value, status = 200) {
   if (value.layout && !layoutFeature(request, 'hosts')) delete value.layout.hosts;
   if (value.layout && !layoutFeature(request, 'host_removal')) delete value.layout.removed_hosts;
   const response = json(value, status);
-  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color');
+  response.headers.set('X-Layout-Features', 'favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color,bot_appearance');
   return response;
 }
 export function validateLayout(x) {
@@ -53,8 +57,8 @@ export function validateLayout(x) {
   }
   for (const t of x.tabs) {
     const id = `${t?.tmux_host}:${String(t?.tmux_session).toLowerCase()}`;
-    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input'].filter(key => Object.hasOwn(t || {}, key));
-    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
+    const optional = ['manual', 'favorite', 'muted', 'used', 'visits', 'input', 'face', 'color'].filter(key => Object.hasOwn(t || {}, key));
+    if (!keys(t, ['kind', 'name', 'tmux_session', 'tmux_host', 'workspace', ...optional]) || optional.some(key => key === 'visits' ? !Array.isArray(t.visits) || t.visits.length > 8 || t.visits.some((v, i) => !Number.isSafeInteger(v) || v < 0 || (i > 0 && v <= t.visits[i - 1])) : (key === 'face' || key === 'color') ? !Number.isInteger(t[key]) || t[key] < 0 || t[key] >= (key === 'face' ? 20 : 7) : (key === 'used' || key === 'input') ? !Number.isSafeInteger(t[key]) || t[key] < 0 : typeof t[key] !== 'boolean') || t.kind !== 'tmux' || !text(t.name, 64) ||
         !Number.isInteger(t.tmux_host) || t.tmux_host < 0 || t.tmux_host > 2 || typeof t.tmux_session !== 'string' || !/^[A-Za-z0-9_-]{1,63}$/.test(t.tmux_session) || !ws.has(t.workspace) || ids.has(id)) fail(400, 'invalid_tab');
     ids.add(id);
   }
@@ -357,6 +361,12 @@ export default {
         const stored = new Map((previousLayout?.tabs || []).map(tab => [`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`, tab]));
         for (const tab of layout.tabs) {
           const previous = stored.get(`${tab.tmux_host}:${tab.tmux_session.toLowerCase()}`);
+          if (!layoutFeature(req, 'bot_appearance')) {
+            for (const field of ['face', 'color']) {
+              if (previous?.[field] !== undefined) tab[field] = previous[field];
+              else delete tab[field];
+            }
+          }
           if (!layoutFeature(req, 'favorite')) {
             if (typeof previous?.favorite === 'boolean') tab.favorite = previous.favorite;
             else delete tab.favorite;

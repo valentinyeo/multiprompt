@@ -2008,6 +2008,16 @@ pub fn detachTabToNewWindow(idx: u32) void {
     cmd_buf[pos] = ' ';
     pos += 1;
 
+    cmd_buf[pos] = 'f';
+    pos += 1;
+    writeNum(&cmd_buf, &pos, shell.face orelse 20);
+    cmd_buf[pos] = ' ';
+    pos += 1;
+    cmd_buf[pos] = 'c';
+    pos += 1;
+    writeNum(&cmd_buf, &pos, shell.color orelse 7);
+    cmd_buf[pos] = ' ';
+    pos += 1;
     cmd_buf[pos] = '"';
     pos += 1;
     for (0..shell.name_len) |ni| {
@@ -2117,6 +2127,8 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     if (idx >= app_state.shell_count) return false;
     const shell = app_state.shells[idx];
     if (shell.hwnd == null) return false;
+    const pending_mask = @import("account_desktop.zig").appearancePendingMask(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len]) catch return false;
+    if (pending_mask != 0) return false;
 
     _ = SetParent(shell.hwnd, null);
     _ = ShowWindow(shell.hwnd, SW_HIDE);
@@ -2188,10 +2200,15 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
         }
     }
 
+    var appearance_transfer: app_state.AppearanceTabTransfer = std.mem.zeroes(app_state.AppearanceTabTransfer);
+    appearance_transfer.legacy = transfer;
+    appearance_transfer.face = shell.face orelse 20;
+    appearance_transfer.color = shell.color orelse 7;
+    const extended = shell.face != null or shell.color != null;
     var cds: COPYDATASTRUCT = .{
         .dwData = COPYDATA_TAB_TRANSFER,
-        .cbData = @sizeOf(TabTransfer),
-        .lpData = @ptrCast(&transfer),
+        .cbData = if (extended) @sizeOf(app_state.AppearanceTabTransfer) else @sizeOf(TabTransfer),
+        .lpData = if (extended) @ptrCast(&appearance_transfer) else @ptrCast(&transfer),
     };
     var copy_result: usize = 0;
     const sent = SendMessageTimeoutW(target_hwnd, WM_COPYDATA, @intFromPtr(app_state.g_main_hwnd), @bitCast(@intFromPtr(&cds)), SMTO_ABORTIFHUNG, 2000, &copy_result);
@@ -2289,6 +2306,9 @@ pub fn reopenLastClosedShell() void {
     defer app_state.g_pending_tmux_identity = previous_identity;
     if (spawnShellWithSession(entry.kind, ts, cwd, null)) {
         app_state.shells[app_state.shell_count - 1].favorite = entry.favorite;
+        app_state.shells[app_state.shell_count - 1].face = entry.face;
+        app_state.shells[app_state.shell_count - 1].color = entry.color;
+        @import("account_desktop.zig").applyPendingAppearance(app_state.shell_count - 1);
         if (entry.group) |saved| app_state.shells[app_state.shell_count - 1].group_id = restoreSessionGroup(saved, app_state.shells[app_state.shell_count - 1].workspace, false);
         if (entry.starred_group) |saved| app_state.shells[app_state.shell_count - 1].starred_group_id = restoreSessionGroup(saved, app_state.shells[app_state.shell_count - 1].workspace, true);
         app_state.g_closed_count -= 1;
@@ -2298,7 +2318,7 @@ pub fn reopenLastClosedShell() void {
             app_state.shells[new_idx].name_len = entry.name_len;
             app_state.shells[new_idx].name_source = if (entry.was_manual) .manual else .semantic;
         }
-        if (entry.group != null or entry.starred_group != null or entry.favorite) saveSession();
+        if (entry.group != null or entry.starred_group != null or entry.favorite or entry.face != null or entry.color != null) saveSession();
     }
 }
 
@@ -3789,6 +3809,14 @@ fn exportSlotSessionFile(slot: u8) bool {
             @memcpy(json_buf[pos .. pos + ff.len], ff);
             pos += ff.len;
         }
+        if (app_state.shells[i].face) |face| {
+            const field = std.fmt.bufPrint(json_buf[pos..], ",\"face\":{d}", .{face}) catch return false;
+            pos += field.len;
+        }
+        if (app_state.shells[i].color) |color| {
+            const field = std.fmt.bufPrint(json_buf[pos..], ",\"color\":{d}", .{color}) catch return false;
+            pos += field.len;
+        }
         if (app_state.shells[i].starred_group_id != 0) {
             const key = ",\"starred_group_id\":";
             @memcpy(json_buf[pos .. pos + key.len], key);
@@ -4365,6 +4393,9 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.shells[idx].starred_pinned_top = tabs[t].starred_pinned_top;
             app_state.shells[idx].inbox_excluded = tabs[t].inbox_excluded;
             app_state.shells[idx].favorite = tabs[t].favorite;
+            app_state.shells[idx].face = tabs[t].face;
+            app_state.shells[idx].color = tabs[t].color;
+            @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
             app_state.shells[idx].last_used = tabs[t].last_used;
             app_state.shells[idx].input = tabs[t].input;
             app_state.shells[idx].visits = tabs[t].visits;

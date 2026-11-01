@@ -3614,6 +3614,20 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_MORE_MENU_ACTION => {
             if (!@import("room_frontend.zig").privateActionsAllowed() and wp != @intFromEnum(more_menu.Item.history)) return 0;
+            if (wp == @intFromEnum(more_menu.Item.bot_face) or wp == @intFromEnum(more_menu.Item.bot_color)) {
+                if (lp <= 0 or lp > std.math.maxInt(u32)) return 0;
+                const target_idx = findShellById(@intCast(lp)) orelse return 0;
+                if (!@import("bot_look.zig").eligible(target_idx)) return 0;
+                openTabContextPalette(hwnd, target_idx);
+                app_state.g_bot_look_sid = app_state.shells[target_idx].shell_id;
+                app_state.g_bot_look_mode = if (wp == @intFromEnum(more_menu.Item.bot_face)) .face else .color;
+                app_state.g_search_len = 0;
+                app_state.g_search_sel = 1;
+                app_state.g_search_scroll = 0;
+                updateSearchResults();
+                _ = InvalidateRect(hwnd, null, 0);
+                return 0;
+            }
             if (app_state.active_shell >= app_state.shell_count) return 0;
             const shell = app_state.active_shell;
             const tmux = app_state.shells[shell].tmux_session_len > 0;
@@ -3989,6 +4003,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
             app_state.g_search_tabctx_mode = false;
+            app_state.g_bot_look_mode = .none;
+            app_state.g_bot_look_sid = 0;
             app_state.g_search_groupctx_mode = false;
             app_state.g_search_openall_host_mode = false;
             app_state.g_tabctx_sid = 0;
@@ -4052,6 +4068,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
             app_state.g_search_tabctx_mode = false;
+            app_state.g_bot_look_mode = .none;
+            app_state.g_bot_look_sid = 0;
             app_state.g_search_groupctx_mode = false;
             app_state.g_search_openall_host_mode = false;
             app_state.g_search_pick_repo_mode = false;
@@ -4426,6 +4444,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_search_scroll = 0;
                 updateSearchResults();
                 _ = InvalidateRect(hwnd, null, 0);
+            } else if (app_state.g_bot_look_mode != .none) {
+                app_state.g_bot_look_mode = .none;
+                app_state.g_bot_look_sid = 0;
+                app_state.g_search_len = 0;
+                app_state.g_search_sel = 0;
+                app_state.g_search_scroll = 0;
+                updateSearchResults();
+                _ = InvalidateRect(hwnd, null, 0);
             } else if (app_state.g_search_tabctx_mode) {
                 app_state.g_search_tabctx_mode = false;
                 app_state.g_search_groupctx_mode = false;
@@ -4711,6 +4737,54 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_search_active and app_state.g_search_result_count > 0) {
                 const target = app_state.g_search_results[app_state.g_search_sel];
                 if (paletteRowIsHeader(target)) return 0;
+                if (app_state.g_bot_look_mode != .none and target == SEARCH_TABCTX_BACK) {
+                    app_state.g_bot_look_mode = .none;
+                    app_state.g_bot_look_sid = 0;
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 0;
+                    app_state.g_search_scroll = 0;
+                    updateSearchResults();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (target == app_state.SEARCH_TABCTX_BOT_FACE or target == app_state.SEARCH_TABCTX_BOT_COLOR) {
+                    const idx = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
+                    if (idx) |shell_idx| {
+                        if (@import("bot_look.zig").eligible(shell_idx)) {
+                            app_state.g_bot_look_sid = app_state.shells[shell_idx].shell_id;
+                            app_state.g_bot_look_mode = if (target == app_state.SEARCH_TABCTX_BOT_FACE) .face else .color;
+                            app_state.g_search_len = 0;
+                            app_state.g_search_sel = 1;
+                            app_state.g_search_scroll = 0;
+                            updateSearchResults();
+                            _ = InvalidateRect(hwnd, null, 0);
+                        }
+                    }
+                    return 0;
+                }
+                if (app_state.g_bot_look_mode != .none and
+                    ((target >= app_state.SEARCH_BOT_FACE_OFFSET and target < app_state.SEARCH_BOT_FACE_OFFSET + app_state.BOT_FACE_COUNT) or
+                    (target >= app_state.SEARCH_BOT_COLOR_OFFSET and target < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT))) {
+                    const idx = findShellById(app_state.g_bot_look_sid);
+                    if (idx) |shell_idx| {
+                        if (@import("bot_look.zig").eligible(shell_idx)) {
+                            const face = app_state.g_bot_look_mode == .face;
+                            const offset = if (face) app_state.SEARCH_BOT_FACE_OFFSET else app_state.SEARCH_BOT_COLOR_OFFSET;
+                            if (target >= offset and target < offset + (if (face) app_state.BOT_FACE_COUNT else app_state.BOT_COLOR_COUNT)) {
+                                const choice = target - offset;
+                                const value: ?u8 = if (choice == 0) null else @intCast(choice - 1);
+                                const edit: app_state.AppearanceEdit = if (face) .{ .face = value } else .{ .color = value };
+                                @import("account_desktop.zig").accountSetAppearance(app_state.g_bot_look_sid, edit) catch {
+                                    showHeaderNoticeAscii(@import("ui_words.zon").bot_look_save_error, 4000, true);
+                                    return 0;
+                                };
+                            }
+                        }
+                    }
+                    _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+                    _ = InvalidateRect(hwnd, null, 1);
+                    return 0;
+                }
                 if (@import("room_frontend.zig").isActive() and !app_state.g_search_theme_mode and !@import("command_palette.zig").roomPaletteAllowed(target)) return 0;
                 if (@import("room_frontend.zig").enabled and target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS) {
                     const hit = @import("room_frontend.zig").paletteRoomHit(target - app_state.SEARCH_ROOM_ROW_OFFSET) orelse return 0;
@@ -8153,9 +8227,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_COPYDATA => {
             const cds_ptr: ?*const COPYDATASTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
             if (cds_ptr) |cds| {
-                if (cds.dwData == COPYDATA_TAB_TRANSFER and cds.cbData == @sizeOf(TabTransfer)) {
+                if (cds.dwData == COPYDATA_TAB_TRANSFER and (cds.cbData == @sizeOf(TabTransfer) or cds.cbData == @sizeOf(app_state.AppearanceTabTransfer))) {
                     if (cds.lpData) |data_ptr| {
                         const transfer: *const TabTransfer = @ptrCast(@alignCast(data_ptr));
+                        const appearance: ?*const app_state.AppearanceTabTransfer = if (cds.cbData == @sizeOf(app_state.AppearanceTabTransfer)) @ptrCast(@alignCast(data_ptr)) else null;
+                        if (appearance) |extended| {
+                            if (extended.face > 20 or extended.color > 7 or extended.pending_mask != 0) return 0;
+                        }
                         if (transfer.tmux_identity_len > 63) return 0;
                         if (transfer.tmux_len > 0 and transfer.tmux_len <= 63) {
                             if (findLocalTmuxTab(transfer.tmux_host, transfer.tmux[0..transfer.tmux_len])) |existing| {
@@ -8190,6 +8268,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             new_shell.pinned_top = transfer.pinned_top != 0;
                             new_shell.starred_pinned_top = transfer.starred_pinned_top != 0;
                             new_shell.favorite = transfer.favorite != 0;
+                            if (appearance) |extended| {
+                                new_shell.face = if (extended.face < 20) extended.face else null;
+                                new_shell.color = if (extended.color < 7) extended.color else null;
+                            }
                             new_shell.last_used = transfer.last_used;
                             new_shell.input = transfer.input;
                             new_shell.visits = transfer.visits;
@@ -8251,6 +8333,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             app_state.shells[app_state.shell_count] = new_shell;
                             registerShellExitWait(app_state.shell_count);
                             app_state.shell_count += 1;
+                            if (appearance == null) @import("account_desktop.zig").applyPendingAppearance(app_state.shell_count - 1);
                             @import("chat_send.zig").armSshReconnectTimerIfNeeded();
                             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
                                 _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
@@ -8801,6 +8884,8 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                 new_shell.muted = app_state.g_adopt_muted;
                 new_shell.pinned_top = app_state.g_adopt_pinned_top;
                 new_shell.favorite = app_state.g_adopt_favorite;
+                new_shell.face = app_state.g_adopt_face;
+                new_shell.color = app_state.g_adopt_color;
                 new_shell.last_used = app_state.g_adopt_last_used;
                 new_shell.input = app_state.g_adopt_input;
                 new_shell.visits = app_state.g_adopt_visits;
@@ -8862,6 +8947,16 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .chat => {
             launch_cache.tabs_restored = true;
+            for (0..app_state.shell_count) |idx| {
+                @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
+            }
+            if (!app_state.g_account_bypass and app_state.g_account_local_base == null) {
+                var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+                defer arena.deinit();
+                if (captureSessionLayout(arena.allocator(), false)) |current| {
+                    app_state.g_account_local_base = session_layout.encode(std.heap.page_allocator, current) catch null;
+                } else |_| {}
+            }
             launch_cache.bindRestoredChat();
             @import("chat_composer.zig").applySessionView();
             sessionFrontChanged();
@@ -8916,12 +9011,11 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             }
         },
         .account_base => {
-            if (!app_state.g_account_bypass) {
+            if (!app_state.g_account_bypass and app_state.g_account_local_base == null) {
                 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
                 defer arena.deinit();
                 if (captureSessionLayout(arena.allocator(), false)) |current| {
-                    const base = if (app_state.g_account_colors_supported) current else @import("account_layout.zig").withoutColors(arena.allocator(), current) catch current;
-                    app_state.g_account_local_base = session_layout.encode(std.heap.page_allocator, base) catch null;
+                    app_state.g_account_local_base = session_layout.encode(std.heap.page_allocator, current) catch null;
                     if (!app_state.g_account_colors_supported) @import("account_desktop.zig").publishSessionLayout();
                 } else |_| {}
             }

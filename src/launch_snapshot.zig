@@ -16,6 +16,8 @@ pub const Row = struct {
     pinned: bool = false,
     starred_pinned_top: bool = false,
     favorite: bool = false,
+    face: ?u8 = null,
+    color: ?u8 = null,
     muted: bool = false,
     unread: bool = false,
     last_active: u64 = 0,
@@ -70,6 +72,12 @@ fn valid(s: Snapshot) bool {
     var active = false;
     for (s.rows, 0..) |row, i| {
         if (row.id == 0 or row.name.len > 63 or row.tmux_session.len > 63 or row.kind > 6 or row.workspace >= 9 or row.browser_split > 1000) return false;
+        if (row.face) |face| {
+            if (face >= 20) return false;
+        }
+        if (row.color) |color| {
+            if (color >= 7) return false;
+        }
         for (s.rows[0..i]) |previous| if (previous.id == row.id) return false;
         if (row.id == s.active) active = true;
     }

@@ -386,6 +386,14 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             @memcpy(json_buf[pos .. pos + ff.len], ff);
             pos += ff.len;
         }
+        if (app_state.shells[i].face) |face| {
+            const field = std.fmt.bufPrint(json_buf[pos..], ",\"face\":{d}", .{face}) catch return false;
+            pos += field.len;
+        }
+        if (app_state.shells[i].color) |color| {
+            const field = std.fmt.bufPrint(json_buf[pos..], ",\"color\":{d}", .{color}) catch return false;
+            pos += field.len;
+        }
         if (app_state.shells[i].starred_group_id != 0) {
             const key = ",\"starred_group_id\":";
             @memcpy(json_buf[pos .. pos + key.len], key);
@@ -987,6 +995,8 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     shell.starred_pinned_top = tab.starred_pinned_top;
     shell.inbox_excluded = tab.inbox_excluded;
     shell.favorite = tab.favorite;
+    shell.face = tab.face;
+    shell.color = tab.color;
     shell.last_used = tab.last_used;
     shell.input = tab.input;
     shell.visits = tab.visits;
@@ -1024,6 +1034,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     }
     app_state.shells[idx] = shell;
     app_state.shell_count += 1;
+    @import("account_desktop.zig").applyPendingAppearance(idx);
     restoreBrowserStateFromSavedTab(idx, tab);
     @import("chat_send.zig").sshDisconnect(idx, "restore-spawn-failed");
     var name_utf8: [192]u8 = undefined;
@@ -1464,6 +1475,9 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     app_state.shells[idx].starred_pinned_top = tabs[t].starred_pinned_top;
     app_state.shells[idx].inbox_excluded = tabs[t].inbox_excluded;
     app_state.shells[idx].favorite = tabs[t].favorite;
+    app_state.shells[idx].face = tabs[t].face;
+    app_state.shells[idx].color = tabs[t].color;
+    @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
     app_state.shells[idx].last_used = tabs[t].last_used;
     app_state.shells[idx].input = tabs[t].input;
     app_state.shells[idx].visits = tabs[t].visits;
@@ -1681,6 +1695,8 @@ pub fn restoreSession() u32 {
                 .tmux_session = entry.name,
                 .tmux_session_len = @intCast(entry.len),
                 .tmux_host = entry.host,
+                .face = entry.face,
+                .color = entry.color,
                 .cached_cwd = @splat(0),
                 .cached_cwd_len = 0,
                 .was_manual = true,

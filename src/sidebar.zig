@@ -2426,6 +2426,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 if (app_state.g_search_pick_repo_folder_mode) L("Set workspace folder...") else L("Pick a repo...")
             else if (app_state.g_search_openall_host_mode)
                 L("Choose a VPS...")
+            else if (app_state.g_bot_look_mode == .face)
+                L(ui_words.bot_face)
+            else if (app_state.g_bot_look_mode == .color)
+                L(ui_words.bot_color)
             else if (app_state.g_search_tabctx_mode)
                 L("Tab actions...")
             else if (app_state.g_search_open_session_mode)
@@ -4164,6 +4168,26 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             }
                             var cc_hint_rc = RECT{ .left = ox + overlay_w - 110, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                             _ = DrawTextW(hdc, @ptrCast(&cc_hint), @intCast(chl), &cc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        }
+                    } else if (result_idx == app_state.SEARCH_TABCTX_BOT_FACE or result_idx == app_state.SEARCH_TABCTX_BOT_COLOR or
+                        (result_idx >= app_state.SEARCH_BOT_FACE_OFFSET and result_idx < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT)) {
+                        const face_choice = result_idx >= app_state.SEARCH_BOT_FACE_OFFSET and result_idx < app_state.SEARCH_BOT_FACE_OFFSET + app_state.BOT_FACE_COUNT;
+                        const color_choice = result_idx >= app_state.SEARCH_BOT_COLOR_OFFSET and result_idx < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT;
+                        const label: []const u8 = if (face_choice) @import("bot_look.zig").faces[result_idx - app_state.SEARCH_BOT_FACE_OFFSET] else if (color_choice) @import("bot_look.zig").colors[result_idx - app_state.SEARCH_BOT_COLOR_OFFSET] else if (result_idx == app_state.SEARCH_TABCTX_BOT_FACE) ui_words.bot_face else ui_words.bot_color;
+                        var wide: [96]u16 = undefined;
+                        const len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var look_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        _ = DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &look_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        if ((face_choice or color_choice) and findShellById(app_state.g_bot_look_sid) != null) {
+                            const shell = &app_state.shells[findShellById(app_state.g_bot_look_sid).?];
+                            const chosen = if (face_choice) shell.face else shell.color;
+                            const index = if (face_choice) result_idx - app_state.SEARCH_BOT_FACE_OFFSET else result_idx - app_state.SEARCH_BOT_COLOR_OFFSET;
+                            if ((index == 0 and chosen == null) or (index > 0 and chosen != null and chosen.? == index - 1)) {
+                                var mark_rc = RECT{ .left = ox + overlay_w - 60, .top = ry, .right = ox + overlay_w - 16, .bottom = ry + row_h };
+                                _ = DrawTextW(hdc, L("✓"), -1, &mark_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                            }
                         }
                     } else if (is_tabctx) {
                         _ = SelectObject(hdc, palette_font);

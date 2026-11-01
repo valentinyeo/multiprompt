@@ -353,6 +353,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Click tier heading", .b = "Collapse / expand ungrouped Pinned or Recents", .header = false },
     .{ .a = "Right-click group / Ctrl+K", .b = "Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs", .header = false },
     .{ .a = "Right-click tab", .b = "Tab actions palette (pin / reattach / mute / close / move / group)", .header = false },
+    .{ .a = "Ctrl+K / right-click tab → Bot face / Bot color", .b = "Choose a bot look or Auto; shared choices sync with your account", .header = false },
     .{ .a = "Ctrl+F in Chat View", .b = "Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes", .header = false },
     .{ .a = "End / Ctrl+K \"Chat View: Scroll to newest message\"", .b = "Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch", .header = false },
     .{ .a = "Double-click empty space", .b = "Switch between Chat View and the shell (without selecting text)", .header = false },

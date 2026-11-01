@@ -108,6 +108,8 @@ pub fn restore() void {
         shell.pinned_top = row.pinned;
         shell.starred_pinned_top = row.starred_pinned_top;
         shell.favorite = row.favorite;
+        shell.face = row.face;
+        shell.color = row.color;
         shell.muted = row.muted;
         shell.needs_attention = row.unread;
         shell.last_active = row.last_active;
@@ -271,6 +273,8 @@ pub fn save() void {
         .pinned = shell.pinned_top,
         .starred_pinned_top = shell.starred_pinned_top,
         .favorite = shell.favorite,
+        .face = shell.face,
+        .color = shell.color,
         .muted = shell.muted,
         .unread = shell.needs_attention,
         .last_active = shell.last_active,

@@ -14,13 +14,14 @@ const RGB = startup.RGB;
 const L = startup.L;
 const uiScaled = drawing.uiScaled;
 
-pub const Item = enum(usize) { approve, stop, terminal, rename, history, resync, waiting, remind, archive, model, end_session, remove };
+pub const Item = enum(usize) { approve, stop, terminal, rename, history, resync, waiting, remind, archive, model, end_session, remove, bot_face, bot_color };
 const ITEM_COUNT = std.meta.tags(Item).len;
 const CARD_COUNT = 5;
 
 pub const State = struct {
     enabled: [ITEM_COUNT]bool = @splat(true),
     hover: ?Item = null,
+    target_sid: u32 = 0,
     model: [128]u16 = @splat(0),
     model_len: usize = 0,
 };
@@ -70,6 +71,8 @@ fn label(item: Item) []const u8 {
         .model => "Model",
         .end_session => "End session",
         .remove => "Remove from list",
+        .bot_face => @import("ui_words.zon").bot_face,
+        .bot_color => @import("ui_words.zon").bot_color,
     };
 }
 
@@ -94,9 +97,13 @@ pub fn geometry(bounds: RECT, anchor: RECT) Geometry {
     const width = @min(uiScaled(264), bounds.right - bounds.left - uiScaled(16));
     const right = @min(anchor.right, bounds.right - uiScaled(8));
     const left = @max(bounds.left + uiScaled(8), right - width);
-    const panel_top = anchor.bottom + uiScaled(8);
-    const spare = bounds.bottom - uiScaled(8) - panel_top - 2 * pad - top_h - 4 * gap;
-    const row_h = std.math.clamp(@divTrunc(spare, 9), uiScaled(24), uiScaled(38));
+    const fixed_height = 2 * pad + top_h + 4 * gap;
+    const minimum_top = bounds.top + uiScaled(8);
+    const preferred_top = anchor.bottom + uiScaled(8);
+    const compact_top = bounds.bottom - uiScaled(8) - fixed_height - 11 * uiScaled(20);
+    const panel_top = @max(minimum_top, @min(preferred_top, compact_top));
+    const spare = bounds.bottom - uiScaled(8) - panel_top - fixed_height;
+    const row_h = @min(uiScaled(38), @max(1, @divTrunc(spare, 11)));
     const inner_l = left + pad;
     const inner_r = right - pad;
     var g: Geometry = std.mem.zeroes(Geometry);
@@ -109,7 +116,7 @@ pub fn geometry(bounds: RECT, anchor: RECT) Geometry {
     }
     y += top_h + gap;
     const groups = [_][]const Item{
-        &.{ .rename, .history, .resync },
+        &.{ .rename, .history, .resync, .bot_face, .bot_color },
         &.{ .waiting, .remind, .archive },
         &.{.model},
         &.{ .end_session, .remove },
@@ -237,6 +244,10 @@ pub fn snapshot(state: *State) void {
     state.* = .{};
     const idx = app_state.active_shell;
     const tmux = idx < app_state.shell_count and app_state.shells[idx].tmux_session_len > 0;
+    state.target_sid = if (idx < app_state.shell_count) app_state.shells[idx].shell_id else 0;
+    const look_allowed = idx < app_state.shell_count and @import("bot_look.zig").eligible(idx);
+    state.enabled[@intFromEnum(Item.bot_face)] = look_allowed;
+    state.enabled[@intFromEnum(Item.bot_color)] = look_allowed;
     state.enabled[@intFromEnum(Item.approve)] = window_layout.chatPermissionVisible();
     state.enabled[@intFromEnum(Item.stop)] = window_layout.chatStopVisible();
     state.enabled[@intFromEnum(Item.remind)] = tmux;
@@ -320,8 +331,9 @@ pub fn close() void {
 
 fn activate(item: Item) void {
     if (!g_state.enabled[@intFromEnum(item)]) return;
+    const target_sid = g_state.target_sid;
     close();
-    _ = focus.PostMessageW(app_state.g_main_hwnd, w.WM_APP_MORE_MENU_ACTION, @intFromEnum(item), 0);
+    _ = focus.PostMessageW(app_state.g_main_hwnd, w.WM_APP_MORE_MENU_ACTION, @intFromEnum(item), if (item == .bot_face or item == .bot_color) @intCast(target_sid) else 0);
 }
 
 fn step(direction: i32) void {

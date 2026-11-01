@@ -21,8 +21,9 @@ pub fn forShell(shell: *const state.Shell) Appearance {
         break :blk name[0..n];
     };
     var appearance = Appearance.forSession(session);
+    appearance.face = shell.face orelse appearance.face;
     const workspace = if (shell.workspace < state.g_lws_count) shell.workspace else 0;
-    appearance.color = @import("session_layout.zig").workspaceColor(workspace, state.g_ws_colors[workspace]);
+    appearance.color = shell.color orelse @import("session_layout.zig").workspaceColor(workspace, state.g_ws_colors[workspace]);
     return appearance;
 }
 
