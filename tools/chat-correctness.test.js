@@ -34,7 +34,13 @@ const CONSOLE_SCREEN_BUFFER_INFO = struct {
     dwCursorPosition: Coord = .{ .y = 1 },
     srWindow: struct { bottom: i16 = 1 } = .{},
 };
-const Shell = struct { shell_id: u32 = 1, pid: u32 = 1, kind: ShellKind = .tmux, activity: enum { idle, active } = .idle };
+const Shell = struct { shell_id: u32 = 1, pid: u32 = 1, kind: ShellKind = .tmux, ai_agent: u8 = 0, activity: enum { idle, active } = .idle };
+const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
+fn chatFileIdentityForShell(_: u32) chat_transcript.Identity { return .{}; }
+fn chatMessageGoesToHost(_: ShellKind, _: u8) bool { return false; }
+fn chatSendRoute(_: ShellKind, _: u8, _: bool) ChatSendRoute { return .terminal_send; }
+fn chatLogSendPath(_: u32, _: ?*const anyopaque, _: ChatSendRoute, _: []const u8) void {}
+fn chatUpgradeToHostMessage(_: u32, _: *ChatOutboxEntry) bool { return true; }
 var shells = [_]Shell{.{}};
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;
@@ -49,7 +55,7 @@ var g_chat_raw: [4000]u16 = undefined;
 const TIMER_CHAT_SEND_VERIFY = 33;
 const CHAT_SEND_VERIFY_DELAYS_MS = [_]u32{ 700, 1200, 2000, 3000, 4000, 5000 };
 const Entry = struct {
-    id: u64 = 1, state: ChatEchoState = .queued, write_started: bool = false,
+    id: u64 = 1, state: ChatEchoState = .queued, write_started: bool = false, message_v1: bool = false,
     expires_ms: i64 = 0,
     anchor: chat_echo.Anchor = .{}, sent_tick_ms: i64 = 0, left_box_ms: u64 = 0, delivery_watch: chat_echo.DeliveryWatch = .{},
 };
@@ -113,7 +119,7 @@ fn pasteTextToShellDirectEx(_: u32, _: []const u16, _: bool) bool { writes += 1;
 fn sendLocalChatPrompt(_: u32, _: []const u16) bool { unreachable; }
 var g_chat_tmux_send_job: ?*anyopaque = null;
 fn chatTmuxSendEligible(_: u32) bool { return false; }
-fn chatTmuxSendStart(_: u32, _: []const u16, _: u64, _: bool) bool { unreachable; }
+fn chatTmuxSendStart(_: u32, _: []const u16, _: u64, _: bool, _: bool, _: bool) bool { unreachable; }
 `;
 const acceptance = `
 test "correctness identity: first production allocation supports history, browser exchange and screenshot ownership" {
