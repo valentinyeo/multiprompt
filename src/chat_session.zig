@@ -79,6 +79,7 @@ const ecoqosReevaluateAll = @import("power.zig").ecoqosReevaluateAll;
 const armBrowserVisibilitySettle = @import("browser_pane.zig").armBrowserVisibilitySettle;
 const ChatBlock = @import("app_state.zig").ChatBlock;
 const CHAT_MAX_BLOCKS = @import("app_state.zig").CHAT_MAX_BLOCKS;
+const CHAT_LIVE_TEXT_ROOM = 1 << 17;
 const win32WidePath = @import("file_io.zig").win32WidePath;
 const win32OpenRead = @import("file_io.zig").win32OpenRead;
 const win32ReadAll = @import("file_io.zig").win32ReadAll;
@@ -1622,16 +1623,14 @@ fn refreshChatBlockCache(force: bool) bool {
             if (block.role == .injected and block.note_open) open_notes.put(@import("chat_transcript.zig").noteKey(block, app_state.g_chat_capture[0..app_state.g_chat_last_len]), {}) catch {};
         }
     }
-    if (!chatEnsureTranscriptCapacity(len, count)) return false;
+    var live_blocks: [16]ChatBlock = undefined;
+    if (!chatEnsureTranscriptCapacity(len + CHAT_LIVE_TEXT_ROOM, count + live_blocks.len)) return false;
     const source = if (from_file) entry.?.history.text.items else app_state.g_chat_screen[0..len];
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
     const live_revision = @import("chat_live.zig").revision(shell_id);
     const hash = (if (from_file) entry.?.history.revision else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source))) ^ (live_revision *% 0x9E3779B97F4A7C15);
     const generation = if (from_file) entry.?.generation else 0;
-    var live_blocks: [16]ChatBlock = undefined;
-    const live_room = @min(live_blocks.len, CHAT_MAX_BLOCKS -| count);
-    var live_tail = @import("chat_live.zig").Tail{};
-    if (len < app_state.g_chat_capture.len) live_tail = @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, live_blocks[0..live_room]);
+    const live_tail = @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, &live_blocks);
     const total = len + live_tail.text_len;
     if (!force and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and total == app_state.g_chat_last_len and hash == app_state.g_chat_last_hash and generation == app_state.g_chat_cache_generation) return false;
     app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation and hash == app_state.g_chat_last_hash +% 1) @min(app_state.g_chat_layout_reuse, entry.?.history.changed_from) else 0;
@@ -1680,7 +1679,7 @@ fn refreshChatBlockCache(force: bool) bool {
         @memcpy(app_state.g_chat_blocks[0..screen_count], screen_blocks[0..screen_count]);
         chatApplyDisplayGlyphs(app_state.g_chat_capture[0..len], screen_blocks[0..screen_count]);
     }
-    if (live_tail.blocks > 0 and app_state.g_chat_block_count + live_tail.blocks <= CHAT_MAX_BLOCKS) {
+    if (live_tail.blocks > 0) {
         @memcpy(app_state.g_chat_blocks[app_state.g_chat_block_count..][0..live_tail.blocks], live_blocks[0..live_tail.blocks]);
         app_state.g_chat_block_count += live_tail.blocks;
     }
