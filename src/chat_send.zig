@@ -2711,10 +2711,10 @@ test "IGSH-1415 a host message stops its own bubble once the transcript has it" 
     var blocks: [8]ChatBlock = undefined;
     const n = chatClassifyBlocks(buf, &blocks);
     const text = std.unicode.utf8ToUtf16LeStringLiteral("wich effort?");
-    const anchor = chat_echo.Anchor{ .user_count = 2, .counted = true };
+    const anchor = chat_echo.Anchor{ .user_count = 1, .counted = true };
     try std.testing.expectEqual(@as(?usize, 2), try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, true));
     try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, false)) == null);
-    try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, .{ .user_count = 3, .counted = true }, false, text, true)) == null);
+    try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, .{ .user_count = 2, .counted = true }, false, text, true)) == null);
 }
 
 test "Chat View echo matches only user blocks after the baseline" {
