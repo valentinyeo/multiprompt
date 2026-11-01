@@ -182,8 +182,12 @@ extern "C" int mp_draw_color_positioned(HDC dc, const wchar_t *text, unsigned le
     bool found = false;
     for (unsigned at = 0; at < length;) {
         unsigned end = clusterEnd(text, length, at);
-        if (end != at) { found = true; break; }
-        scalar(text, length, at);
+        if (end == at) { scalar(text, length, at); continue; }
+        found = true;
+        for (unsigned part = at; part < end;) {
+            if (scalar(text, end, part) == 0x200d && (part == end || !emoji(scalar(text, end, part)))) return -1;
+        }
+        at = end;
     }
     if (!found) return 0;
     if (GetMapMode(dc) != MM_TEXT || length > INT_MAX || clip->left == INT_MIN || clip->top == INT_MIN) return -1;
