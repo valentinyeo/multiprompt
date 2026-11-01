@@ -63,7 +63,8 @@ pub fn attachCommand(buf: []u8, session: []const u8, identity: []const u8, creat
         try writer.writeByte(' ');
         const session_id = identity[(std.mem.lastIndexOfScalar(u8, identity, ':') orelse unreachable) + 1 ..];
         var attach: [96]u8 = undefined;
-        try quote(&writer, try std.fmt.bufPrint(&attach, "attach-session {s}-t '{s}'", .{ if (hidden) "-f ignore-size " else "", session_id }));
+        const flag: []const u8 = if (hidden) "-f ignore-size " else "";
+        try quote(&writer, try std.fmt.bufPrint(&attach, "attach-session {s}-t '{s}'", .{ flag, session_id }));
         try writer.writeByte(' ');
         try quote(&writer, "display-message -p 'Saved terminal session changed; refusing to attach.'");
     }
