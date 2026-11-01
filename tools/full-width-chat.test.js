@@ -177,7 +177,8 @@ test('ISSUE-440 executes the production toggle without resetting the Chat View c
 });
 
 test('ISSUE-440 palette, restoration and terminal return retain the same independent view and width state', () => {
-  const palette = source.slice(source.indexOf('if (target == SEARCH_FULLWIDTH_OFFSET)'), source.indexOf('if (target == SEARCH_HIDESIDEBAR_OFFSET)'));
+  const confirmAt = source.indexOf('WM_APP_SEARCH_CONFIRM => {');
+  const palette = source.slice(source.indexOf('if (target == SEARCH_FULLWIDTH_OFFSET)', confirmAt), source.indexOf('if (target == SEARCH_HIDESIDEBAR_OFFSET)', confirmAt));
   assert.match(palette, /showActiveShellAfterOverlay\(\);[^]*WM_APP_TOGGLE_FULLWIDTH/);
   assert.doesNotMatch(palette, /closeChatView|toggleChatView|chat_view_lock\s*=/);
   const restore = body(source, 'restoreBrowserStateFromSavedTab');

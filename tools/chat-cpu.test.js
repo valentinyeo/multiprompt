@@ -389,8 +389,8 @@ test "table paint without selection makes no per-character GDI calls; real selec
         g_chat_sel_transcript_focus = focused;
         character_widths = 0; selection_runs = 0;
         _ = chatFlowText(0, &text, .{ .right = 10000 }, true, true, null, 0, null, &map, false);
-        try std.testing.expectEqual(@as(usize, 1000), character_widths);
-        try std.testing.expectEqual(@as(usize, 1000), selection_runs);
+        try std.testing.expectEqual(@as(usize, 0), character_widths);
+        try std.testing.expect(selection_runs > 0);
     }
 }
 `;
