@@ -388,6 +388,7 @@ test "group band covers popup actions, scoped target, search and workspace desti
 }
 test('extracted production group default, migration, explicit colors and palette dispatch', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-palette-'));
+  require('./fixtures/inline-stubs').writeAll(dir);
   try {
     copyZig(['json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'voice_filter.zig'], dir);
     const file = path.join(dir, 'test.zig');

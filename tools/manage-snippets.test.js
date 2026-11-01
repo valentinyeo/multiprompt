@@ -20,7 +20,8 @@ function body(source, name) {
 test('Manage Snippets is searchable, rendered, and Enter deletes instead of pasting', () => {
   const palette = read('command_palette.zig');
   assert.match(palette, /"manage snippets", "delete snippet", "remove snippet"/);
-  assert.match(read('sidebar.zig'), /L\("Manage Snippets"\)/);
+  assert.match(read('sidebar.zig'), /L\(ui_words\.palette_manage_snippets\)/);
+  assert.match(read('ui_words.zon'), /\.palette_manage_snippets = "Manage snippets"/);
   assert.match(main, /if \(target == SEARCH_SNIPPET_MANAGE_OFFSET\) \{\s*_ = SendMessageW\(hwnd, WM_APP_SNIPPETS_OPEN, 0, 0\);\s*app_state\.g_search_snippet_manage_mode = true/);
   const action = main.slice(main.indexOf('const sn_idx = target - SEARCH_SNIPPET_OFFSET;', main.indexOf('if (target == SEARCH_SNIPPET_CREATE_OFFSET)')));
   assert.match(action, /if \(app_state.g_search_snippet_manage_mode\) \{\s*_ = SendMessageW\(hwnd, WM_APP_SNIPPET_DELETE, 0, 0\);\s*return 0;/);
@@ -28,7 +29,8 @@ test('Manage Snippets is searchable, rendered, and Enter deletes instead of past
   const close = main.slice(main.indexOf('        WM_APP_SEARCH_CLOSE =>'), main.indexOf('        WM_APP_SEARCH_CLOSE =>') + 6000);
   assert.match(close, /g_search_snippet_delete_confirm = null/);
   assert.match(close, /g_search_snippet_manage_mode = false/);
-  const open = main.slice(main.indexOf('        WM_APP_SEARCH_OPEN =>'), main.indexOf('        WM_APP_SEARCH_OPEN =>') + 350);
+  const openStart = main.indexOf('        WM_APP_SEARCH_OPEN =>');
+  const open = main.slice(openStart, openStart + main.slice(openStart + 1).search(/\n        (?:WM_APP_|0x)/));
   assert.match(open, /g_search_snippet_mode = false/);
   assert.match(open, /g_search_snippet_manage_mode = false/);
 });

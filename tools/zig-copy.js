@@ -1,15 +1,18 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const masked = /\/\/[^\r\n]*|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|@import\s*\(\s*"([^"\r\n]+)"\s*\)/g;
+
+function importedNames(source) {
+  return [...source.matchAll(masked)].filter(match => match[1]).map(match => match[1]);
+}
+
 function imports(source) {
-  return [...source.matchAll(/\/\/[^\r\n]*|"(?:\\.|[^"\\])*"|@import\s*\(\s*"([^"\r\n]+\.zig)"\s*\)/g)]
-    .filter(match => match[1]).map(match => match[1]);
+  return importedNames(source).filter(name => name.endsWith('.zig'));
 }
 
 function dataImports(source) {
-  return [...source.matchAll(/\/\/[^\r\n]*|"(?:\\.|[^"\\])*"|@import\s*\(\s*"([^"\r\n]+)"\s*\)/g)]
-    .filter(match => match[1] && !match[1].endsWith('.zig') && match[1].includes('.'))
-    .map(match => match[1]);
+  return importedNames(source).filter(name => !name.endsWith('.zig') && name.includes('.'));
 }
 
 function copyZig(roots, dest, srcDir = path.join(__dirname, '../src')) {
@@ -64,4 +67,4 @@ function handWrittenLists(jsSource) {
   return snippets;
 }
 
-module.exports = { copyZig, imports, handWrittenLists };
+module.exports = { copyZig, imports, dataImports, handWrittenLists };

@@ -13,7 +13,7 @@ function body(name) {
 }
 function runHarness(control = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh421-capture-'));
-  require('./zig-stubs').writeRoomFrontend(dir);
+  require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   try {
     copyZig(['chat_markdown.zig', 'link_detect.zig', 'voice_filter.zig'], dir);
     let functions = ['chatLineIsToolDetail', 'chatLineIsFence', 'chatFlushBlock', 'chatClassifyBlocks', 'chatIsRuleGlyph', 'chatLineIsTitledRule', 'chatLineLooksLikeTitledRule', 'chatLineLooksLikeComposerRule', 'chatLineIsDivider', 'chatLineHasActivityMarker', 'chatListMarkerLen', 'chatLineStartsStructuredBlock', 'chatJoinedRowsNeedSpace', 'chatReflowTranscript', 'chatWideStartsWithAscii', 'chatWideContainsAscii', 'chatLineHasComposerFooter', 'chatTranscriptWithoutComposer', 'chatDisplayGlyph', 'chatApplyDisplayGlyphs', 'chatConsoleTableRows'].map(body).join('\n');

@@ -75,7 +75,7 @@ test('Favorites split follows Frequent and ALL by default and shares configured 
 });
 
 test('keyboard, palette, context, F1 and wiki expose the same favorite action', () => {
-  for (const literal of ['WM_APP_FAVORITE_TOGGLE', 'SEARCH_FAVORITE_OFFSET', 'SEARCH_TABCTX_FAVORITE', 'L("Favorite: Toggle")', 'L("Unfavorite")', 'L("on  Alt+S")', 'L("off  Alt+S")', 'toggleFavorite(ti);', '.a = "Alt+S", .b = "Favorite or unfavorite this session"']) assert.ok(source.includes(literal), literal);
+  for (const literal of ['WM_APP_FAVORITE_TOGGLE', 'SEARCH_FAVORITE_OFFSET', 'SEARCH_TABCTX_FAVORITE', 'L("Favorite: Toggle")', 'L(ui_words.tab_context_unfavorite)', 'L(ui_words.tab_context_favorite)', 'L("on  Alt+S")', 'L("off  Alt+S")', 'toggleFavorite(ti);', '.a = "Alt+S", .b = "Favorite or unfavorite this session"']) assert.ok(source.includes(literal), literal);
   assert.match(source, /target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE/);
   const hook = between('fn keyboardHookProc(', 'fn pointOverActiveShell(');
   assert.ok(hook.indexOf("kb.vkCode == 0x53 and foregroundIsOurs()") < hook.indexOf('if (g_browser_focus_mode and activeBrowserSurfaceHasForegroundFocus())'));
@@ -123,7 +123,7 @@ test('IGSH-457 Starred uses shared live membership and digit mapping on every na
   assert.match(inbox, /pub fn jumpToInboxRow\(ri: u32\) void/);
   assert.match(workspaces, /const SetTimer = @import\("win32.zig"\).SetTimer;/);
   assert.match(read('src/win32.zig'), /pub extern "user32" fn SetTimer\(/);
-  assert.match(sidebar, /L\("Go to Starred workspace"\)/);
+  assert.match(sidebar, /L\(ui_words\.palette_go_starred_workspace\)/);
   assert.match(sidebar, /No starred sessions\. Press Alt\+S on a session to star it\./);
 });
 
@@ -181,6 +181,7 @@ const Row = struct { kind: enum { header, tab, inbox }, gidx: u32, shell_idx: u3
 const InboxRow = struct { ws: u32, favorite: bool };
 pub var local_favorite = true;
 pub const app_state = struct {
+    const MAX_SESSION_ROWS = 8;
     var g_starred_workspace = true;
     var g_single_window = true;
     var g_active_workspace: u8 = 0;
@@ -194,6 +195,8 @@ pub const app_state = struct {
     var g_inbox_row_count: u32 = 3;
     var g_inbox_rows = [_]InboxRow{ .{ .ws = 0, .favorite = true }, .{ .ws = 1, .favorite = true }, .{ .ws = 1, .favorite = false } };
 };
+fn groupHeaderHeight() i32 { return GROUP_HEADER_H; }
+fn sectionHeaderHeight() i32 { return GROUP_HEADER_H; }
 fn wsStripHeight() i32 { return 40; }
 fn tabRowH() i32 { return 32; }
 ${production}

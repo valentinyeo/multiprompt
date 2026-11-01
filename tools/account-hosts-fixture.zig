@@ -126,7 +126,12 @@ fn accountDeviceKeyError(_: *LayoutReply, _: []const u8) void {
 }
 const account_client = struct {
     const Response = @import("account_client.zig").Response;
-    fn request(method: []const u8, path: []const u8, _: []const u8, body: []const u8) !Response {
+    fn request(method: []const u8, path: []const u8, token: []const u8, body: []const u8) !Response {
+        return requestWithLayoutFeatures(method, path, token, body, true, true);
+    }
+    fn requestWithLayoutFeatures(method: []const u8, path: []const u8, _: []const u8, body: []const u8, colors: bool, appearance: bool) !Response {
+        _ = colors;
+        _ = appearance;
         std.debug.assert(std.mem.eql(u8, path, "/v1/layout"));
         var status: u32 = 200;
         if (std.mem.eql(u8, method, "PUT")) {

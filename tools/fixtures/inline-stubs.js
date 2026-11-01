@@ -52,4 +52,8 @@ function writeRoomFrontend(dir) {
   fs.writeFileSync(path.join(dir, 'room_frontend.zig'), roomFrontend);
 }
 
-module.exports = { roomFrontend, writeRoomFrontend };
+function writeAll(dir) {
+  writeRoomFrontend(dir);
+}
+
+module.exports = { roomFrontend, writeRoomFrontend, writeAll };

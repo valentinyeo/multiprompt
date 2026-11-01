@@ -63,6 +63,7 @@ fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 ` + fs.readFileSync(path.join(__dirname, 'screenshot-caret-fixture.zig'), 'utf8');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'screenshot-caret-'));
+  require('./fixtures/inline-stubs').writeAll(dir);
   try {
     const file = path.join(dir, 'test.zig');
     const run = (body) => {

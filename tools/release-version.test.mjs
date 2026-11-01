@@ -147,7 +147,7 @@ test('master release builds both architectures, launches, scans and publishes th
   assert.match(workflow, /run: \.\/tools\/release-launch\.ps1 -Exe release-bin\/multiprompt-x64.exe/);
   assert.match(workflow, /gitleaks:\n    uses: \.\/\.github\/workflows\/gitleaks.yml/);
   assert.match(workflow, /release:\n    needs: \[prepare, build, launch, gitleaks\]/);
-  assert.match(workflow, /concurrency:\n      group: release-publication\n      cancel-in-progress: false/);
+  assert.match(workflow, /^concurrency:\n  group: release-publication\n  cancel-in-progress: false$/m);
   assert.match(workflow, /GH_TOKEN: \$\{\{ github.token \}\}/);
   const build = fs.readFileSync(path.join(root, 'build.zig'), 'utf8');
   assert.match(build, /"tools\/version-stamp.test.mjs", "tools\/release-version.test.mjs"/);

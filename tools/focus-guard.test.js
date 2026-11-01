@@ -28,6 +28,7 @@ test('every native activation API uses the central guard; raw bypass are rejecte
 
 test('executed production Zig guard authorizes input, blocks automation, and restores the exact typing surface', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'focus-guard-zig-'));
+  require('./fixtures/inline-stubs').writeAll(dir);
   try {
     const start = source.indexOf('const FocusNative = struct {');
     const nativeEnd = source.indexOf('\n};', start) + 3;

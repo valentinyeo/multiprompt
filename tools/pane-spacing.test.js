@@ -461,7 +461,7 @@ test "all production pane consumers share outer margins and gaps" {
 }
 test('extracted production pane rectangles have equal spacing at 1920x1032', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-spacing-'));
-  require('./zig-stubs').writeRoomFrontend(dir);
+  require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   try {
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
@@ -515,7 +515,7 @@ test('overlay backdrop uses the current primary pane rather than old margins', (
 
 test('IGSH-886 selected session background is visible neutral gray in built-in themes', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sidebar-gray-'));
-  require('./zig-stubs').writeRoomFrontend(dir);
+  require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   try {
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, `const std = @import("std");

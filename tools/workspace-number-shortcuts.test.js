@@ -34,9 +34,10 @@ test('number shortcuts activate sidebar sessions in displayed order, including r
   assert.doesNotMatch(hook.slice(post - 180, post), /tab_idx < shell_count/,
     'remote Starred rows must not be capped by the local shell count');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-numbers-'));
-  require('./zig-stubs').writeRoomFrontend(dir);
+  require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const code = `const std = @import("std");
+fn jumpToInboxRowByUser(_: u32) void {}
 const Row = struct { kind: enum { tab, inbox, header, section }, shell_idx: u32 = 0 };
 const MAX_ROWS = 16;
 var visible: []const Row = &.{};
@@ -51,7 +52,7 @@ fn requestShellRefocus(_: u32, _: u32) void {}
 fn switchToShellByUser(idx: u32) void { selected = idx; }
 fn jumpToInboxRow(idx: u32) void { remote = idx; }
 ${selector}
-${handler.replaceAll('@import("console.zig").', '')}
+${handler.replaceAll('@import("console.zig").', '').replaceAll('@import("inbox.zig").jumpToInboxRowByUser', 'jumpToInboxRowByUser')}
 test "manual, auto, grouped, pinned and Starred display order" {
     const layouts = [_][]const Row{
         &.{.{.kind=.section}, .{.kind=.tab,.shell_idx=7}, .{.kind=.tab,.shell_idx=2}, .{.kind=.header}, .{.kind=.tab,.shell_idx=5}},

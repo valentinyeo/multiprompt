@@ -205,9 +205,9 @@ test('IGSH-612 empty Ctrl+K groups rows and keeps selection off headers', () => 
 
 test('IGSH-1081 Reconnect is named consistently in Ctrl+K and tab actions', () => {
   const globalRow = sidebar.slice(sidebar.indexOf('} else if (is_reconnect) {'), sidebar.indexOf('} else if (is_singlewin) {'));
-  assert.match(globalRow, /L\("Reconnect"\)/);
+  assert.match(globalRow, /L\(ui_words\.palette_reconnect\)/);
   const contextRow = sidebar.slice(sidebar.indexOf('const tc_label:'), sidebar.indexOf('const tc_shortcut:'));
-  assert.match(contextRow, /L\("Reconnect"\)/);
+  assert.match(contextRow, /L\(ui_words\.palette_reconnect\)/);
   assert.ok(!contextRow.includes('Start new session'), 'an ended server session uses the same Reconnect row');
   assert.match(palette, /SEARCH_RECONNECT_OFFSET => "reattach tab"/);
   assert.match(palette, /SEARCH_TABCTX_RECONNECT => "reattach tab"/);

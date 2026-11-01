@@ -21,7 +21,7 @@ function body(text, name) {
 }
 function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
-  require('./zig-stubs').writeRoomFrontend(dir);
+  require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig', 'chat_reaction.zig', 'chat_transcript.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn known(_: []const u16) bool { return false; }\npub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
