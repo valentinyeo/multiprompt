@@ -2811,6 +2811,7 @@ pub const ChatHistoryEntry = struct {
     message_synced: bool = false,
     message_v1_owned: bool = false,
     message_next_tick: u64 = 0,
+    message_retry_step: u8 = 0,
     history: chat_history.History = .{},
     backfill: chat_history.Backfill = .{},
     staged: bool = false,

@@ -84,6 +84,14 @@ pub fn getSessionAuditPathForWorkspace(buf: *[512]u8, id: []const u8) ?[]const u
 
 pub fn debugLog(msg: []const u8) void {
     if (!verboseLoggingEnabled() and !std.mem.startsWith(u8, msg, "[consolefont] ") and !std.mem.startsWith(u8, msg, "[focus-trace] ")) return;
+    writeLogLine(msg);
+}
+
+pub fn syncLog(msg: []const u8) void {
+    writeLogLine(msg);
+}
+
+fn writeLogLine(msg: []const u8) void {
     while (!app_state.g_debug_log_mutex.tryLock()) Sleep(1);
     defer app_state.g_debug_log_mutex.unlock();
     var path_buf: [512]u8 = undefined;

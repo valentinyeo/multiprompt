@@ -50,6 +50,7 @@ const send_latency = @import("send_latency.zig");
 const saveSession = @import("session.zig").saveSession;
 const appendJsonEscapedWide = @import("snippets.zig").appendJsonEscapedWide;
 const showHeaderNoticeAscii = @import("console.zig").showHeaderNoticeAscii;
+const syncLog = @import("diagnostics.zig").syncLog;
 const respawnShellInPlace = @import("console.zig").respawnShellInPlace;
 const markSshTabDisconnected = @import("console.zig").markSshTabDisconnected;
 const fetchTmuxSessions = @import("vps.zig").fetchTmuxSessions;
@@ -196,6 +197,23 @@ test "Chat View send: verify delay schedule grows then ends" {
     try std.testing.expectEqual(@as(?u32, 1200), chatSendVerifyDelayMs(1));
     try std.testing.expectEqual(@as(?u32, 5000), chatSendVerifyDelayMs(5));
     try std.testing.expectEqual(@as(?u32, null), chatSendVerifyDelayMs(6));
+}
+
+test "Chat View sync: a failed message poll backs off quietly and stops at one minute" {
+    try std.testing.expectEqual(@as(u64, 3000), chatMessageSyncRetryDelayMs(0));
+    try std.testing.expectEqual(@as(u64, 6000), chatMessageSyncRetryDelayMs(1));
+    try std.testing.expectEqual(@as(u64, 12000), chatMessageSyncRetryDelayMs(2));
+    try std.testing.expectEqual(@as(u64, 24000), chatMessageSyncRetryDelayMs(3));
+    try std.testing.expectEqual(@as(u64, 48000), chatMessageSyncRetryDelayMs(4));
+    try std.testing.expectEqual(@as(u64, 60000), chatMessageSyncRetryDelayMs(5));
+    try std.testing.expectEqual(@as(u64, 60000), chatMessageSyncRetryDelayMs(200));
+    var previous: u64 = 0;
+    var step: u8 = 0;
+    while (step < 5) : (step += 1) {
+        const delay = chatMessageSyncRetryDelayMs(step);
+        try std.testing.expect(delay > previous);
+        previous = delay;
+    }
 }
 
 test "Chat View send: ssh/tmux waits longer for the paste marker" {
@@ -3026,6 +3044,14 @@ fn chatMessageSyncStart(idx: u32) void {
     thread.detach();
 }
 
+const CHAT_MESSAGE_SYNC_POLL_MS: u64 = 3000;
+const CHAT_MESSAGE_SYNC_RETRY_CAP_MS: u64 = 60_000;
+
+fn chatMessageSyncRetryDelayMs(retry_step: u8) u64 {
+    const shift: u6 = @intCast(@min(retry_step, 5));
+    return @min(CHAT_MESSAGE_SYNC_POLL_MS << shift, CHAT_MESSAGE_SYNC_RETRY_CAP_MS);
+}
+
 fn chatMessageSyncFinish() void {
     const job = app_state.g_chat_message_sync_job orelse return;
     if (!job.finished.load(.acquire)) return;
@@ -3036,13 +3062,16 @@ fn chatMessageSyncFinish() void {
     const history = chatHistoryEntry(current) orelse return;
     if (history.generation != job.instance or history.message_generation != job.generation) return;
     if (!job.ok) {
-        showHeaderNoticeAscii("Chat sync interrupted. Retrying", 3000, true);
+        if (history.message_retry_step == 0) syncLog("chat-sync: message poll failed; retrying quietly");
+        history.message_retry_step +|= 1;
+        history.message_next_tick = GetTickCount64() + chatMessageSyncRetryDelayMs(history.message_retry_step);
         if (!job.synced and job.snapshot[0] != 0) {
             history.message_snapshot = @splat(0);
             history.message_cursor = 0;
         }
         return;
     }
+    history.message_retry_step = 0;
     var parsed = json_reader.parse(std.heap.page_allocator, job.response.items) catch return;
     defer parsed.deinit();
     const epoch = json_reader.uintDefault(parsed.value, "epoch", 0);

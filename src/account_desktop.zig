@@ -129,6 +129,7 @@ const ensureWorkspaceSlotId = @import("workspaces.zig").ensureWorkspaceSlotId;
 const syncInProcessWorkspacesToRegistry = @import("workspaces.zig").syncInProcessWorkspacesToRegistry;
 const debugLog = @import("diagnostics.zig").debugLog;
 const debugLog2 = @import("diagnostics.zig").debugLog2;
+const syncLog = @import("diagnostics.zig").syncLog;
 const logSessionAuditAlways = @import("diagnostics.zig").logSessionAuditAlways;
 const saveSession = @import("session.zig").saveSession;
 const TIMER_ACCOUNT = @import("app_state.zig").TIMER_ACCOUNT;
@@ -234,6 +235,15 @@ var g_after_submit: std.ArrayList(appearance_intent.Touch) = .empty;
 var g_tracking = false;
 var g_pending_loaded = false;
 var g_pending_bytes: ?[]u8 = null;
+var g_pending_write_mutex: app_state.SpinMutex = .{};
+var g_sync_log_at: u64 = 0;
+
+fn syncLogThrottled(msg: []const u8) void {
+    const now = GetTickCount64();
+    if (g_sync_log_at != 0 and now -% g_sync_log_at < 60_000) return;
+    g_sync_log_at = now;
+    syncLog(msg);
+}
 
 fn accountJobFree(job: AccountJob) void {
     const a = std.heap.page_allocator;
@@ -263,19 +273,19 @@ pub fn startAccountJob(job: AccountJob) void {
     if (layout_job) {
         accountLoadPending() catch {
             accountJobFree(job);
-            showHeaderNoticeAscii("Could not load pending sync changes", 4000, true);
+            syncLog("account-sync: pending layout load failed before job start");
             return;
         };
         if (job.kind == .startup and job.base == null and job.edited == null) {
             submitted = accountResumeJob(.startup) catch {
                 accountJobFree(job);
-                showHeaderNoticeAscii("Could not load pending sync changes", 4000, true);
+                syncLog("account-sync: pending layout resume failed before job start");
                 return;
             };
         }
         submitted.appearance = appearance_intent.clone(std.heap.page_allocator, g_appearance orelse &.{}) catch {
             accountJobFree(submitted);
-            showHeaderNoticeAscii("Could not save pending sync changes", 4000, true);
+            syncLog("account-sync: pending appearance clone failed before job start");
             return;
         };
         accountResetAppearanceTracking();
@@ -324,7 +334,7 @@ pub fn publishSessionLayout() void {
     accountLoadPending() catch return;
     const intents = g_appearance orelse return;
     accountWritePending(.{ .base = base.value, .edited = local, .appearance = intents }) catch {
-        showHeaderNoticeAscii("Could not save pending sync changes", 4000, true);
+        syncLogThrottled("account-sync: pending layout write failed");
         return;
     };
     var plain_local = account_layout.withoutAppearance(arena.allocator(), local) catch return;
@@ -355,7 +365,7 @@ pub fn pullSessionLayout() void {
     if (app_state.g_account_locked or app_state.g_account_bypass or app_state.g_account_busy or app_state.g_account_reauth or !app_state.g_account_retry.ready(GetTickCount64())) return;
     if (app_state.g_account_base == null) {
         const job = accountResumeJob(.startup) catch {
-            showHeaderNoticeAscii("Could not load pending sync changes", 4000, true);
+            syncLog("account-sync: pending layout resume failed on pull");
             return;
         };
         startAccountJob(job);
@@ -433,6 +443,12 @@ fn layoutPendingPath(buf: *[512]u8) ?[]const u8 {
     return syncAuthPath(buf, name);
 }
 fn accountWritePending(value: PendingLayout) !void {
+    while (!g_pending_write_mutex.tryLock()) Sleep(1);
+    defer g_pending_write_mutex.unlock();
+    return accountWritePendingLocked(value);
+}
+
+fn accountWritePendingLocked(value: PendingLayout) !void {
     const w = @import("win32.zig");
     try appearance_intent.validate(value.appearance);
     if ((value.base == null) != (value.edited == null)) return error.Storage;
@@ -753,14 +769,14 @@ pub fn accountSignIn() void {
     if (app_state.g_account_has_token and !app_state.g_account_reauth) {
         app_state.g_account_status = "Retrying account service...";
         const job = accountResumeJob(.startup) catch {
-            showHeaderNoticeAscii("Could not load pending sync changes", 4000, true);
+            syncLog("account-sync: pending layout resume failed on sign-in retry");
             return;
         };
         startAccountJob(job);
     } else {
         app_state.g_account_status = "Complete sign-in in your browser. Esc cancels.";
         const job = accountResumeJob(.login) catch {
-            showHeaderNoticeAscii("Could not load pending sync changes", 4000, true);
+            syncLog("account-sync: pending layout resume failed on sign-in");
             return;
         };
         startAccountJob(job);
@@ -784,7 +800,7 @@ fn accountSyncFailed(has_token: bool) void {
         .sign_in => app_state.g_account_status = "Sign in to Multi Bot to open your workspaces.",
         .retry => app_state.g_account_status = "Cannot reach account service. Sync will retry.",
     }
-    if (notify and !app_state.g_account_locked) showHeaderNoticeAscii("Sync failed; local changes kept for retry", 4000, true);
+    if (notify) syncLog("account-sync: sync failed, local changes kept for retry");
     _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
 }
 fn accountReadLayout(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
@@ -1941,7 +1957,7 @@ pub fn handleLayoutReply(lp: LPARAM) void {
     defer ack_parsed.deinit();
     const edited_now = if (app_state.g_account_bootstrapping) final_target.value else accountCapturePush(alloc, ack_parsed.value) catch return;
     accountWritePending(.{ .base = ack_parsed.value, .edited = edited_now, .appearance = owned_remaining }) catch {
-        showHeaderNoticeAscii("Could not save pending sync changes", 4000, true);
+        syncLogThrottled("account-sync: pending layout write failed after apply");
         return;
     };
     if (g_appearance) |old| appearance_intent.free(a, old);
