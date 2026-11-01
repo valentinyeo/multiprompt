@@ -79,6 +79,7 @@ Some palette captions bypass sentence-case drawing.
 Those keys preserve their exact displayed case.
 Some context keys are text fragments.
 They precede dynamic group or workspace names.
+The unread prefix precedes a dynamic name.
 Their trailing spaces are significant.
 Android must treat them as fragments.
 
@@ -101,6 +102,7 @@ It does not cover the whole application.
 | Settings theme names and theme popup | Catalogued. Version and workspace names remain dynamic. Graphical indicators remain presentation. |
 | Edit and message menus `src/fonts.zig` | Catalogued. Native and plain variants keep separate IDs. |
 | Main palette navigation and settings `src/sidebar.zig` | Selected captions catalogued. Other palette actions remain. |
+| Global display, voice and command palette actions | Selected captions and hints catalogued. Dynamic values remain. |
 | Tab, group and move palette contexts | Selected captions and fragments catalogued. |
 | Group color names `src/app_state.zig` | Not migrated. Eight names remain separate. |
 | Other sidebar menus and palette contexts | Not migrated. Keep sentence-case drawing and shortcut hints. |
