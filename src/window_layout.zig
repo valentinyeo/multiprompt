@@ -348,14 +348,8 @@ pub fn chatWorkingIndicatorH() i32 {
     return if (chatPermissionVisible()) uiScaled(36) else 0;
 }
 
-pub fn chatLiveWorking() bool {
-    if (!app_state.g_chat_active or app_state.active_shell >= app_state.shell_count) return false;
-    return @import("chat_live.zig").running(app_state.shells[app_state.active_shell].shell_id);
-}
-
 pub fn chatWorkingIndicatorText() []const u16 {
     if (app_state.g_chat_screen_status_len > 0) return app_state.g_chat_working_text[0..app_state.g_chat_screen_status_len];
-    if (chatLiveWorking()) return &CHAT_WORKING_GENERIC;
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].activity == .active) return &CHAT_WORKING_GENERIC;
     return &.{};
 }
@@ -364,14 +358,14 @@ pub fn chatWorkingTimesPoll() void {
     if (!app_state.ISSUE_265_WORKING_BAR) return;
     const now = @import("win32.zig").GetTickCount64();
     for (app_state.shells[0..app_state.shell_count], 0..) |*shell, i| {
-        const working = shell.activity == .active or shell.console_working or (app_state.g_chat_active and i == app_state.active_shell and (app_state.g_chat_screen_working or app_state.g_chat_screen_status_len > 0 or chatLiveWorking()));
+        const working = shell.activity == .active or shell.console_working or (app_state.g_chat_active and i == app_state.active_shell and (app_state.g_chat_screen_working or app_state.g_chat_screen_status_len > 0));
         shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, working, now);
     }
 }
 
 pub fn chatWorkingBarVisible() bool {
     return app_state.ISSUE_265_WORKING_BAR and app_state.g_chat_active and app_state.active_shell < app_state.shell_count and
-        (app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working or app_state.g_chat_screen_status_len > 0 or chatLiveWorking());
+        (app_state.shells[app_state.active_shell].activity == .active or app_state.g_chat_screen_working or app_state.g_chat_screen_status_len > 0);
 }
 
 pub fn chatStopVisible() bool {

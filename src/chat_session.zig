@@ -930,6 +930,17 @@ fn chatLiveSyncQuestion() void {
 var g_chat_live_card_request: [96]u8 = @splat(0);
 var g_chat_live_card_len: usize = 0;
 
+fn chatLiveSyncWorking() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const shell = &app_state.shells[app_state.active_shell];
+    if (shell.shell_id == 0) return;
+    const live = @import("chat_live.zig");
+    if (!live.attached(shell.shell_id)) return;
+    const working = live.running(shell.shell_id);
+    app_state.g_chat_screen_working = working;
+    shell.working_since_ms = @import("chat_working.zig").workingSince(shell.working_since_ms, working, GetTickCount64());
+}
+
 fn chatLiveSyncCard() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
@@ -1598,6 +1609,7 @@ fn refreshChatBlockCache(force: bool) bool {
     if (app_state.active_shell >= app_state.shell_count) return false;
     chatLiveSyncCard();
     chatLiveSyncQuestion();
+    chatLiveSyncWorking();
     const key = chatFileIdentity();
     chatFileRequest(key);
     const entry = if (app_state.g_chat_active) chatHistoryEntry(key) else null;

@@ -50,11 +50,13 @@ test('D1 the live tail renders inside the same transcript buffer the view reads'
   assert.match(session, /app_state\.g_chat_block_count \+= live_tail\.blocks;/);
 });
 
-test('D1 working dots follow the live turn, not the screen', () => {
+test('D1 working dots follow the live turn through the working the bar already reads', () => {
+  const session = read('src/chat_session.zig');
+  assert.match(session, /const working = live\.running\(shell\.shell_id\);/);
+  assert.match(session, /app_state\.g_chat_screen_working = working;/);
+  assert.match(session, /shell\.working_since_ms = @import\("chat_working\.zig"\)\.workingSince\(shell\.working_since_ms, working, GetTickCount64\(\)\);/);
   const layout = read('src/window_layout.zig');
-  assert.match(layout, /pub fn chatLiveWorking\(\) bool/);
-  assert.match(layout, /@import\("chat_live\.zig"\)\.running\(app_state\.shells\[app_state\.active_shell\]\.shell_id\)/);
-  assert.match(layout, /app_state\.g_chat_screen_status_len > 0 or chatLiveWorking\(\)\);/);
+  assert.match(layout, /app_state\.g_chat_screen_working or app_state\.g_chat_screen_status_len > 0\);/);
 });
 
 test('D2 a live approval fills the existing permission card and clears when it resolves', () => {
@@ -109,7 +111,7 @@ test('D5 stop on a live turn interrupts it and the turn ends interrupted', () =>
   assert.match(send, /live\.interruptLine\(std\.heap\.page_allocator, shell_id/);
   assert.match(send, /if \(chatLiveCancelApproval\(shell_index\)\) return true;\s*\n\s*if \(chatLiveInterrupt\(shell_index\)\) return true;/);
   const live = read('src/chat_live.zig');
-  assert.match(live, /std\.mem\.eql\(u8, kind, "turn\.ended"\)\) \{\s*\n\s*self\.state = \.idle;\s*\n\s*self\.ended = statusOf\(strOf\(payload, "status"\)\);/);
+  assert.match(live, /std\.mem\.eql\(u8, kind, "turn\.ended"\)\) \{\s*\n(?:\s*self\.held = self\.state == \.running;\s*\n)?\s*self\.state = \.idle;\s*\n\s*self\.ended = statusOf\(strOf\(payload, "status"\)\);/);
 });
 
 test('D6 a single newline inside a paragraph is a line break, not a space', () => {
