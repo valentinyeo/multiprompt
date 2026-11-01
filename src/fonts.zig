@@ -1,5 +1,6 @@
 const std = @import("std");
 const w = @import("win32.zig");
+const ui_words = @import("ui_words.zon");
 const L = std.unicode.utf8ToUtf16LeStringLiteral;
 
 pub const UI_FACE = "IBM Plex Sans";
@@ -144,12 +145,12 @@ pub fn editMessage(hwnd: w.HANDLE, owner: w.HANDLE, msg: w.UINT, lp: w.LPARAM) ?
     const writable = w.GetWindowLongPtrW(hwnd, -16) & 0x0800 == 0;
     const password = w.GetWindowLongPtrW(hwnd, -16) & 0x0020 != 0;
     const actions = .{
-        .{ "&Undo", 0x0304, writable and w.SendMessageW(hwnd, 0x00c6, 0, 0) != 0 },
-        .{ "Cu&t", 0x0300, writable and selected and !password },
-        .{ "&Copy", 0x0301, selected and !password },
-        .{ "&Paste", 0x0302, writable and w.IsClipboardFormatAvailable(13) != 0 },
-        .{ "&Delete", 0x0303, writable and selected },
-        .{ "Select &All", 0x00b1, w.GetWindowTextLengthW(hwnd) > 0 },
+        .{ ui_words.edit_undo_menu, 0x0304, writable and w.SendMessageW(hwnd, 0x00c6, 0, 0) != 0 },
+        .{ ui_words.edit_cut_menu, 0x0300, writable and selected and !password },
+        .{ ui_words.action_copy_menu, 0x0301, selected and !password },
+        .{ ui_words.edit_paste_menu, 0x0302, writable and w.IsClipboardFormatAvailable(13) != 0 },
+        .{ ui_words.edit_delete_menu, 0x0303, writable and selected },
+        .{ ui_words.edit_select_all_menu, 0x00b1, w.GetWindowTextLengthW(hwnd) > 0 },
     };
     inline for (actions, 0..) |action, i| {
         if (i == 1 or i == 5) _ = w.AppendMenuW(menu, 0x0800, 0, null);
@@ -174,31 +175,31 @@ pub const MessageMenuItem = enum(u32) {
 
     pub fn label(self: MessageMenuItem) []const u8 {
         return switch (self) {
-            .reply => "Reply",
-            .copy => "Copy",
-            .copy_link => "Copy link",
-            .copy_request_id => "Copy request ID",
-            .send_again => "Send again",
-            .remove => "Remove",
-            .cancel_queued => "Cancel message",
-            .reaction_like => "React 👍",
-            .reaction_dislike => "React 👎",
-            .reaction_heart => "React ❤️",
+            .reply => ui_words.message_reply_label,
+            .copy => ui_words.message_copy_label,
+            .copy_link => ui_words.message_copy_link_label,
+            .copy_request_id => ui_words.message_copy_request_id_label,
+            .send_again => ui_words.message_send_again_label,
+            .remove => ui_words.message_remove_label,
+            .cancel_queued => ui_words.message_cancel_queued_label,
+            .reaction_like => ui_words.message_reaction_like_label,
+            .reaction_dislike => ui_words.message_reaction_dislike_label,
+            .reaction_heart => ui_words.message_reaction_heart_label,
         };
     }
 
     pub fn text(self: MessageMenuItem) w.LPCWSTR {
         return switch (self) {
-            .reply => L("&Reply"),
-            .copy => L("&Copy"),
-            .copy_link => L("Copy &link"),
-            .copy_request_id => L("Copy request &ID"),
-            .send_again => L("&Send again"),
-            .remove => L("Re&move"),
-            .cancel_queued => L("Ca&ncel message"),
-            .reaction_like => L("👍 Like"),
-            .reaction_dislike => L("👎 Dislike"),
-            .reaction_heart => L("❤️ Heart"),
+            .reply => L(ui_words.message_reply_menu),
+            .copy => L(ui_words.action_copy_menu),
+            .copy_link => L(ui_words.message_copy_link_menu),
+            .copy_request_id => L(ui_words.message_copy_request_id_menu),
+            .send_again => L(ui_words.message_send_again_menu),
+            .remove => L(ui_words.message_remove_menu),
+            .cancel_queued => L(ui_words.message_cancel_queued_menu),
+            .reaction_like => L(ui_words.message_reaction_like_menu),
+            .reaction_dislike => L(ui_words.message_reaction_dislike_menu),
+            .reaction_heart => L(ui_words.message_reaction_heart_menu),
         };
     }
 

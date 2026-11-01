@@ -10,7 +10,7 @@ Desktop imports the record directly.
 
 `shared/ui_words.json` distributes the derived flat JSON.
 Never edit that JSON independently.
-The first snapshot was manually transcribed.
+This snapshot was manually transcribed.
 The exporter was not run for it.
 It is **UNVERIFIED** until CI Boss compares bytes.
 CI Boss must run the exporter first.
@@ -69,6 +69,10 @@ Also separate ellipses, spacing, emoji and wording variants.
 Preserve Win32 `&` accelerators and shortcut hints exactly.
 Provide separate plain and native-menu variants when needed.
 Do not strip markers or change appearance.
+Some plain labels also name debug events.
+Reaction labels keep the existing React wording.
+Their menu captions use Like, Dislike, or Heart.
+Choose keys by role, not suffix.
 
 Native class names are not word-list labels.
 Examples include `BUTTON` and `EDIT`.
@@ -78,7 +82,7 @@ User-provided names and dynamic values are not labels.
 
 ## Coverage ledger
 
-This unit migrates static Settings captions only.
+The list covers Settings and selected menus.
 It does not cover the whole application.
 
 | Surface | Current status |
@@ -86,7 +90,7 @@ It does not cover the whole application.
 | Settings `src/settings_panel.zig` controls and key dialog | Catalogued. Includes Cancel, Save, title and save error. |
 | Settings painted captions and font sizes | Catalogued. |
 | Settings theme names and theme popup | Catalogued. Version and workspace names remain dynamic. Graphical indicators remain presentation. |
-| Edit and message menus `src/fonts.zig` | Not migrated. Native mnemonic and plain variants need separate IDs. |
+| Edit and message menus `src/fonts.zig` | Catalogued. Native and plain variants keep separate IDs. |
 | `src/sidebar.zig`, `src/palette_text.zig`, `src/command_palette.zig` | Not migrated. Keep sentence-case drawing and shortcut hints. |
 | Usage menu `src/telemetry_panel.zig` | Inventory incomplete. Classify dynamic values and static labels. |
 | `src/inbox.zig`, `src/archive.zig`, `src/workspaces.zig`, `src/browser_pane.zig` | Inventory incomplete. Inspect every button and menu. Include conditional states. |
@@ -96,8 +100,7 @@ It does not cover the whole application.
 | Android buttons, menus, dialogs and accessibility | Not inventoried or migrated here. Android's owner must establish complete coverage. |
 
 The same feature owner should continue.
-Migrate edit and message menus next.
-Then migrate palette and sidebar.
+Migrate palette and sidebar next.
 Then inventory remaining desktop screens in bounded batches.
 Wait for each approved green release.
 
