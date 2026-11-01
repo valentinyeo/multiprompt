@@ -262,7 +262,7 @@ test "v2 fixture production paint puts beta alpha gamma on screen and gamma at g
 function runHarness(mutate = x => x) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-frequent-'));
   try {
-    copyZig(['frequent.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'session_layout.zig', 'workspace_view.zig'], dir);
+    copyZig(['frequent.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'session_layout.zig', 'workspace_view.zig', 'dwrite_text.zig'], dir);
     fs.mkdirSync(path.join(dir, 'fixtures'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixture.json'));
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixtures/issue-415-frequent.json'));
