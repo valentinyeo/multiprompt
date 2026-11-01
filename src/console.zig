@@ -2774,8 +2774,11 @@ pub fn switchToShell(idx: u32) void {
             updateBrowserVisibility();
         } else {
             const want_chat = chatViewShouldShowForTab(app_state.shells[idx].chat_view_on);
-            if (want_chat != app_state.g_chat_active) {
-                if (want_chat) openChatView() else closeChatView();
+            const move = @import("chat_composer.zig").chatViewMove(want_chat, app_state.g_chat_active, @import("chat_composer.zig").chatViewWindowUp());
+            if (move == .open) {
+                openChatView();
+            } else if (move == .close) {
+                closeChatView();
             } else if (app_state.g_chat_active) {
                 {
                     const timing_started = switch_timing.start();
@@ -3015,8 +3018,11 @@ pub fn finishStartupShell(job: *StartupShell) void {
         return;
     }
     if (idx == app_state.active_shell) {
-        _ = showShellConsole(idx, SW_SHOW, "startup-shell-ready");
-        repositionActive();
+        if (!app_state.g_restoring) @import("chat_composer.zig").applySessionView();
+        if (!app_state.g_chat_active) {
+            _ = showShellConsole(idx, SW_SHOW, "startup-shell-ready");
+            repositionActive();
+        }
     }
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }

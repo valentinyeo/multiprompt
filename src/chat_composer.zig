@@ -1737,7 +1737,10 @@ test "console visibility rejects chat, saved chat before restore, inactive tabs 
 }
 
 pub fn openChatView() void {
-    if (app_state.g_main_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
+    if (app_state.g_main_hwnd == null or app_state.active_shell >= app_state.shell_count) {
+        debugLog("[view] open skipped: no frame or no active tab");
+        return;
+    }
     if (app_state.g_chat_browser_swap.shell_id == 0) {
         app_state.g_chat_switch_started = GetTickCount64();
         app_state.g_chat_switch_content_sid = app_state.shells[app_state.active_shell].shell_id;
@@ -1758,6 +1761,7 @@ pub fn openChatView() void {
     app_state.g_chat_active = true;
     if (!ensureChatControls()) {
         app_state.g_chat_active = false;
+        debugLog("[view] open failed: chat controls missing");
         showHeaderNoticeAscii("Chat View could not create its controls", 3500, true);
         return;
     }
@@ -2220,13 +2224,43 @@ pub fn toggleChatView() void {
     saveSession();
 }
 
+pub const ChatViewMove = enum { open, close, keep };
+
+pub fn chatViewMove(wanted: bool, active: bool, window_up: bool) ChatViewMove {
+    if (wanted) return if (active and window_up) .keep else .open;
+    return if (active) .close else .keep;
+}
+
+pub fn chatViewWindowUp() bool {
+    if (app_state.g_chat_transcript_hwnd == null or app_state.g_chat_composer_hwnd == null) return false;
+    if (IsWindowVisible(app_state.g_chat_transcript_hwnd) == 0) return false;
+    var rc: RECT = std.mem.zeroes(RECT);
+    if (GetWindowRect(app_state.g_chat_transcript_hwnd, &rc) == 0) return false;
+    return rc.right > rc.left and rc.bottom > rc.top;
+}
+
 pub fn applySessionView() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell = &app_state.shells[app_state.active_shell];
-    const want_chat = chatViewShouldShowForTab(shell.chat_view_on);
-    if (want_chat != app_state.g_chat_active) {
-        if (want_chat) openChatView() else closeChatView();
+    switch (chatViewMove(chatViewShouldShowForTab(shell.chat_view_on), app_state.g_chat_active, chatViewWindowUp())) {
+        .open => openChatView(),
+        .close => closeChatView(),
+        .keep => {},
     }
+}
+
+test "IGSH-1266 a chat view that wants to show opens whenever its window is not really up" {
+    const legacy_move = struct {
+        fn move(wanted: bool, active: bool) bool {
+            return wanted != active;
+        }
+    }.move;
+    try std.testing.expect(!legacy_move(true, true));
+    try std.testing.expectEqual(ChatViewMove.open, chatViewMove(true, true, false));
+    try std.testing.expectEqual(ChatViewMove.open, chatViewMove(true, false, false));
+    try std.testing.expectEqual(ChatViewMove.keep, chatViewMove(true, true, true));
+    try std.testing.expectEqual(ChatViewMove.keep, chatViewMove(false, false, false));
+    try std.testing.expectEqual(ChatViewMove.close, chatViewMove(false, true, false));
 }
 
 pub fn invalidateChatHeader() void {
