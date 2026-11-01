@@ -63,7 +63,10 @@ install_build() {
     done
     echo "uploaded $index chunk(s)"
     lh_shell "\$dir = '$dir'; \$files = Get-ChildItem \$dir -Filter 'chunk.*.b64' | Sort-Object { [int](\$_.Name -replace '\\D','') }; \$b64 = (\$files | ForEach-Object { (Get-Content \$_.FullName -Raw).Trim() }) -join ''; [IO.File]::WriteAllBytes((Join-Path \$dir 'multiprompt-dev.new.exe'), [Convert]::FromBase64String(\$b64)); \$files | Remove-Item -Force; (Get-Item (Join-Path \$dir 'multiprompt-dev.new.exe')).Length" 120
-    lh_shell "\$dir = '$dir'; Get-Process -Name 'multiprompt-dev' -ErrorAction SilentlyContinue | Where-Object { \$_.Path -and \$_.Path.StartsWith(\$dir) } | ForEach-Object { \$_.Kill(); \$_.WaitForExit(5000) }; Move-Item -Force (Join-Path \$dir 'multiprompt-dev.new.exe') (Join-Path \$dir '$DEV_EXE'); 'stopped-and-replaced'" 60
+    local swapped
+    swapped=$(lh_shell "\$dir = '$dir'; Get-Process -Name 'multiprompt-dev' -ErrorAction SilentlyContinue | Where-Object { \$_.Path -and \$_.Path.StartsWith(\$dir) } | ForEach-Object { \$_.Kill(); \$_.WaitForExit(5000) }; \$exe = Join-Path \$dir '$DEV_EXE'; if (Test-Path \$exe) { Move-Item -Force \$exe (Join-Path \$dir ('multiprompt-dev.old-' + [DateTime]::UtcNow.Ticks + '.exe')) }; Move-Item (Join-Path \$dir 'multiprompt-dev.new.exe') \$exe; Get-ChildItem \$dir -Filter 'multiprompt-dev.old-*.exe' | Remove-Item -Force -ErrorAction SilentlyContinue; 'installed-sha=' + (Get-FileHash \$exe -Algorithm SHA256).Hash.ToLower()" 60)
+    echo "$swapped"
+    grep -q "installed-sha=$sha" <<<"$swapped" || { echo "laptop exe does not match run $run" >&2; exit 1; }
     rm -rf "$dir"
     echo "installed run $run"
 }
