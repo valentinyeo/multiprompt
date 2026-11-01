@@ -5173,9 +5173,9 @@ class HostControlTest(HostEventStreamTest):
         self.assertEqual(self.events('question.resolved')[0]['payload'],
                          dict(request_id='req-2', answers={}, dismissed=True))
 
-    def test_a_plan_is_captured_then_denied_and_the_mode_is_restored(self):
+    def test_approving_a_plan_lets_the_same_turn_run_it(self):
         self.session['state']['mode'] = 'plan'
-        self.session['state']['plan_before'] = 'default'
+        self.session['state']['plan_before'] = 'acceptEdits'
         self.feed(dict(type='control_request', request_id='req-3', request=dict(
             subtype='can_use_tool', tool_name='ExitPlanMode', display_name='ExitPlanMode', tool_use_id='toolu_plan',
             input=dict(plan='## Plan\n1. List the folder'), requires_user_interaction=True)))
@@ -5185,11 +5185,12 @@ class HostControlTest(HostEventStreamTest):
         self.reply(op='plan_reply', request_id='req-3', action='implement')
         written = self.writes()
         self.assertEqual(written[0]['response']['response'],
-                         dict(behavior='deny', message=reader.HOST_PLAN_STOP_MESSAGE, toolUseID='toolu_plan',
-                              decisionClassification='user_reject'))
-        self.assertEqual(written[1]['type'], 'control_request')
-        self.assertEqual(written[1]['request'], dict(subtype='set_permission_mode', mode='default'))
+                         dict(behavior='allow', updatedInput=dict(plan='## Plan\n1. List the folder'), toolUseID='toolu_plan',
+                              decisionClassification='user_temporary'))
+        self.assertEqual(len(written), 1, 'an allowed exit leaves plan mode, so no separate mode write is needed')
         self.assertEqual(self.events('plan.resolved')[0]['payload'], dict(request_id='req-3', action='implement'))
+        self.assertEqual(self.session['state']['mode'], 'acceptEdits')
+        self.assertNotIn('plan_before', self.session['state'])
 
     def test_plan_feedback_is_the_deny_message(self):
         self.session['state']['mode'] = 'plan'
@@ -5198,9 +5199,14 @@ class HostControlTest(HostEventStreamTest):
             subtype='can_use_tool', tool_name='ExitPlanMode', display_name='ExitPlanMode', tool_use_id='toolu_plan',
             input=dict(plan='## Plan'), requires_user_interaction=True)))
         self.reply(op='plan_reply', request_id='req-3', action='feedback', feedback='Also cover the empty folder.')
-        self.assertEqual(self.writes()[0]['response']['response']['message'], 'Also cover the empty folder.')
+        written = self.writes()
+        self.assertEqual(written[0]['response']['response']['message'], 'Also cover the empty folder.')
+        self.assertEqual(written[0]['response']['response']['behavior'], 'deny')
+        self.assertEqual(len(written), 1, 'feedback must leave the session in plan mode to revise the plan')
         self.assertEqual(self.events('plan.resolved')[0]['payload'],
                          dict(request_id='req-3', action='feedback', feedback='Also cover the empty folder.'))
+        self.assertEqual(self.session['state']['mode'], 'plan')
+        self.assertEqual(self.session['state']['plan_before'], 'acceptEdits')
 
     def test_a_cancelled_request_is_resolved_and_never_answered(self):
         request_id = self.approval()
@@ -5299,7 +5305,7 @@ class AgentHostControlTest(AgentHostStreamTest):
         self.assertEqual(decision['updatedInput']['answers'], {'Which database should I target?': 'SQLite'})
         self.assertEqual(decision['updatedInput']['questions'][0]['header'], 'Database')
 
-    def test_a_plan_answer_captures_the_markdown_then_restores_the_mode(self):
+    def test_a_plan_answer_is_allowed_so_the_turn_implements_it(self):
         self.enable(permission_mode='plan')
         os.environ['FAKE_CLAUDE_MODE'] = 'exitplan'
         self.seed()
@@ -5312,8 +5318,9 @@ class AgentHostControlTest(AgentHostStreamTest):
         self.assertEqual(self.events('plan.resolved')[0]['payload'],
                          dict(request_id=proposed[0]['payload']['request_id'], action='implement'))
         decision = self.agent_rows('decision')[0]['decision']
-        self.assertEqual(decision['behavior'], 'deny')
-        self.assertEqual(decision['message'], reader.HOST_PLAN_STOP_MESSAGE)
+        self.assertEqual(decision['behavior'], 'allow')
+        self.assertEqual(decision['updatedInput']['plan'], '## Plan\n1. List the folder')
+        self.assertNotIn('message', decision)
         self.assertEqual(reader.host_session_state(self.provider, self.sid)['mode'], 'plan')
 
     def test_a_parked_request_holds_the_host_open_past_the_idle_timer(self):

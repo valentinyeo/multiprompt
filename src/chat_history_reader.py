@@ -3218,19 +3218,32 @@ def host_answer(provider, sid, tmux, session, request):
         if kind != "plan" or action not in ("implement", "feedback"):
             return host_refuse("invalid_action")
         feedback = request.get("feedback") if isinstance(request.get("feedback"), str) else ""
-        response = dict(behavior="deny", toolUseID=tool_use_id, decisionClassification="user_reject",
-                        message=feedback.strip() or HOST_PLAN_STOP_MESSAGE)
         payload = dict(request_id=request_id, action=action)
-        if feedback.strip():
-            payload["feedback"] = feedback
+        if action == "implement":
+            response = dict(behavior="allow", updatedInput=dict(body.get("input") or {}), toolUseID=tool_use_id,
+                            decisionClassification="user_temporary")
+        else:
+            response = dict(behavior="deny", toolUseID=tool_use_id, decisionClassification="user_reject",
+                            message=feedback.strip() or HOST_PLAN_STOP_MESSAGE)
+            if feedback.strip():
+                payload["feedback"] = feedback
     del session["parked"][request_id]
     parked["signal"].set()
     host_control_response(session, request_id, response)
     host_resolved(provider, sid, tmux, session, parked, payload)
-    if operation == "plan_reply":
-        host_set_mode(provider, sid, session, session["state"].get("plan_before") or "default")
+    if operation == "plan_reply" and request.get("action") == "implement":
+        host_plan_settled(provider, sid, session)
     host_log(provider, sid, "control_answer", dict(request_id=request_id, kind=kind, decision=request.get("decision") or request.get("action")))
     return dict(status="ok")
+
+
+def host_plan_settled(provider, sid, session):
+    before = session["state"].pop("plan_before", None)
+    if before in HOST_PERMISSION_MODES:
+        session["state"]["mode"] = before
+    else:
+        session["state"].pop("mode", None)
+    host_state_write(provider, sid, session["state"])
 
 
 def host_refuse(reason, **extra):
@@ -5085,7 +5098,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 44
+RUNTIME_GENERATION = 45
 
 if __name__ == '__main__':
     import base64 as _base64
