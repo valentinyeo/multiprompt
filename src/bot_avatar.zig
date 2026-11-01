@@ -15,13 +15,17 @@ pub const Appearance = struct {
 };
 
 pub fn forShell(shell: *const state.Shell) Appearance {
+    return forShellWithFace(shell, shell.face);
+}
+
+pub fn forShellWithFace(shell: *const state.Shell, face: ?u8) Appearance {
     var name: [256]u8 = undefined;
     const session = if (shell.tmux_session_len > 0) shell.tmux_session[0..shell.tmux_session_len] else blk: {
         const n = std.unicode.utf16LeToUtf8(&name, shell.name[0..shell.name_len]) catch 0;
         break :blk name[0..n];
     };
     var appearance = Appearance.forSession(session);
-    appearance.face = shell.face orelse appearance.face;
+    appearance.face = face orelse appearance.face;
     const workspace = if (shell.workspace < state.g_lws_count) shell.workspace else 0;
     appearance.color = shell.color orelse @import("session_layout.zig").workspaceColor(workspace, state.g_ws_colors[workspace]);
     return appearance;
