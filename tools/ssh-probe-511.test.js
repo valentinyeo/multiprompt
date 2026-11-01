@@ -171,7 +171,8 @@ test('ISSUE-521 ended overlay and palette restart the same named host session ex
   const cmd = body('makeCmdLine', read('console.zig'));
   assert.match(cmd, /tmux_identity\.zig"\)\.attachCommand\(&attach_buf, tmux_session\.\?, tmux_identity, new_session, app_state\.g_pending_tmux_hidden\)/);
   const attach = body('attachCommand', read('tmux_identity.zig'));
-  assert.match(attach, /if \(create\) "tmux new-session -A -s " else "tmux attach -t "/);
+  assert.match(attach, /try writer\.writeAll\(if \(create\) "tmux new-session -A " else "tmux attach "\);/);
+  assert.match(attach, /if \(hidden\) try writer\.writeAll\("-f ignore-size "\);/);
   assert.match(attach, /try quote\(&writer,/);
   assert.match(body('sshReconnectNow', send), /if \(was_ended\) shell\.tmux_identity_len = 0/);
   assert.match(body('respawnShellInPlace', read('console.zig')), /saved_ssh_reconnect\.create_session/);
@@ -183,7 +184,8 @@ test('ISSUE-521 ended overlay and palette restart the same named host session ex
   assert.match(read('command_palette.zig'), /phase == \.ended/);
   assert.match(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_RECONNECT/);
   assert.doesNotMatch(read('command_palette.zig'), /g_search_results\[app_state.g_search_result_count\] = SEARCH_TABCTX_START_SESSION/);
-  assert.match(read('sidebar.zig'), /result_idx == SEARCH_TABCTX_RECONNECT\) L\("Reconnect"\)/);
+  assert.match(read('sidebar.zig'), /result_idx == SEARCH_TABCTX_RECONNECT\) L\(ui_words\.palette_reconnect\)/);
+  assert.ok(read('ui_words.zon').includes('.palette_reconnect = "Reconnect"'));
   const main = read('main.zig');
   const start = main.indexOf('if (target == SEARCH_TABCTX_RECONNECT or target == SEARCH_TABCTX_START_SESSION)');
   assert.ok(start >= 0);

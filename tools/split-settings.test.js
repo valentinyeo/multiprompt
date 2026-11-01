@@ -141,7 +141,9 @@ test('ISSUE-423 settings use the account feature and existing debounced save pat
   const desktop = read('src/account_desktop.zig');
   const layout = read('src/account_layout.zig');
   const audit = (client, desktop, session) => {
-    assert.ok(client.includes('X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color\\r\\n'));
+    assert.ok(client.includes('X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal'));
+    assert.ok(client.includes('",workspace_color"'));
+    assert.ok(client.includes('",bot_appearance"'));
     assert.match(desktop, /return \.\{ \.settings = app_state.g_layout_settings,/);
     assert.match(desktop, /app_state.g_layout_settings = desired.settings;/);
     assert.match(desktop, /TIMER_ACCOUNT_SAVE, 2000/);
@@ -153,9 +155,16 @@ test('ISSUE-423 settings use the account feature and existing debounced save pat
   assert.throws(() => audit(client, desktop.replace('.settings = app_state.g_layout_settings,', ''), session));
   assert.throws(() => audit(client, desktop, session.replace('if (saveSessionTo(path, null)) publishSessionLayout();', '')));
   assert.match(layout, /\.settings = edited.settings/);
-  for (const label of ['Show Frequent split', 'Frequent as first tab', 'Show Favorites split', 'Show All split']) {
+  const words = read('src/ui_words.zon'), sidebar = read('src/sidebar.zig');
+  for (const [label, word] of [
+    ['Show Frequent split', 'palette_show_frequent_on'],
+    ['Frequent as first tab', 'palette_frequent_first_on'],
+    ['Show Favorites split', 'palette_show_favorites_on'],
+    ['Show All split', 'palette_show_all_split_on'],
+  ]) {
     assert.ok(read('src/shortcuts.zig').includes(`Ctrl+K -> ${label}`));
     assert.ok(read('openwiki/operations/keyboard-shortcuts.md').includes(label));
-    assert.ok(read('src/sidebar.zig').includes(`L("${label}: ON")`));
+    assert.ok(words.includes(`.${word} = "${label}: ON"`), word);
+    assert.ok(sidebar.includes(`L(ui_words.${word})`), word);
   }
 });

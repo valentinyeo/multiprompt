@@ -82,14 +82,15 @@ fn accountPush() void { pushes += 1; }
 fn findShellById(sid: u32) ?u32 { for (shells[0..shell_count], 0..) |shell, i| { if (sid == shell.shell_id) return @intCast(i); } return null; }
 fn inboxFilterMatches(_: *const InboxRow) bool { return true; }
 const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+const HANDLE = ?*anyopaque;
 var g_inbox_sel: u32 = 0;
 var g_multiprompt_theme = false;
 var g_light_theme = false;
 var g_eta_numbers_on = false;
 var g_eta_progress_on = false;
-const hdc: usize = 0;
-const font_title: usize = 0;
-const font_subtitle: usize = 0;
+const hdc: HANDLE = null;
+const font_title: HANDLE = null;
+const font_subtitle: HANDLE = null;
 const fg_bright: u32 = 0;
 const fg_dim: u32 = 0;
 const blue: u32 = 0;
@@ -104,15 +105,15 @@ var drawn_count: usize = 0;
 fn uiScaled(n: i32) i32 { return n; }
 fn RGB(_: u8, _: u8, _: u8) u32 { return 0; }
 fn customColorOr(_: []const u8, n: u32) u32 { return n; }
-fn CreateSolidBrush(_: u32) usize { return 0; }
-fn FillRect(_: usize, _: *RECT, _: usize) i32 { return 1; }
-fn DeleteObject(_: usize) i32 { return 1; }
-fn SelectObject(_: usize, _: usize) usize { return 0; }
-fn SetTextColor(_: usize, _: u32) u32 { return 0; }
-fn drawAttentionDot(_: usize, _: i32, _: i32, _: i32, _: u32) void {}
-fn drawAgentIcon(_: usize, _: *RECT, _: u8, _: bool) void {}
+fn CreateSolidBrush(_: u32) HANDLE { return null; }
+fn FillRect(_: HANDLE, _: *RECT, _: HANDLE) i32 { return 1; }
+fn DeleteObject(_: HANDLE) i32 { return 1; }
+fn SelectObject(_: HANDLE, _: HANDLE) HANDLE { return null; }
+fn SetTextColor(_: HANDLE, _: u32) u32 { return 0; }
+fn drawAttentionDot(_: HANDLE, _: i32, _: i32, _: i32, _: u32) void {}
+fn drawAgentIcon(_: HANDLE, _: *RECT, _: u8, _: bool) void {}
 fn asciiToU16(s: []const u8, out: []u16) usize { for (s, 0..) |c, i| out[i] = c; return s.len; }
-fn DrawTextW(_: usize, text: [*]const u16, len: i32, rc: *RECT, _: u32) i32 {
+fn DrawTextW(_: HANDLE, text: [*]const u16, len: i32, rc: *RECT, _: u32) i32 {
     if (rc.left == 44 and rc.right == 400) {
         drawn_names[drawn_count] = .{0} ** 64;
         @memcpy(drawn_names[drawn_count][0..@intCast(len)], text[0..@intCast(len)]);
@@ -131,7 +132,7 @@ fn etaElapsedMs(_: u64, _: i64) u64 { return 0; }
   between('const SavedTab = struct', 'const ISSUE_347_KEEP_FULL_WIDTH') +
   between('const InboxRow = struct', 'var g_session_save_pending') +
   normalize(between('fn stampSessionUse(', 'fn inboxPublishesShell(')) +
-  normalize(between('pub fn sessionFrontSelected(', 'fn wndProc(', read('src/main.zig'))) +
+  normalize(between('pub fn sessionFrontSelected(', 'fn resetSidebarDrag(', read('src/main.zig'))) +
   between('fn inboxFrequent(', 'fn loadInboxModel(') +
   between('const favoriteSplitMatches =', 'fn toggleFavorite(') +
   between('fn inboxRowVisible(', 'test "cached inbox navigation') +

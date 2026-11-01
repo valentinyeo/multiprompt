@@ -13,6 +13,12 @@ function body(name) {
   return source.slice(start, source.indexOf('\n}', start) + 2);
 }
 
+function typeBody(name) {
+  const start = source.indexOf(`const ${name} = struct {`);
+  assert.ok(start >= 0, name);
+  return source.slice(start, source.indexOf('\n};', start) + 3);
+}
+
 function fileBody(file, name) {
   const text = fs.readFileSync(path.join(__dirname, '../src', file), 'utf8');
   const start = text.indexOf(`fn ${name}(`);
@@ -330,8 +336,8 @@ test "IGSH-403 click preserves Unicode in a detected transcript link" {
 });
 
 test('ISSUE-404 Copy All does not silently truncate a long loaded conversation', (t) => {
-  const production = ['chatReceivedBlocks', 'chatSelRange', 'chatSelectionClear', 'chatSelectionDisplay', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyCapacity', 'chatCopyTextAlloc', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection', 'chatCopyBlockToClipboard'].map(body).join('\n')
-    .replaceAll('std.heap.page_allocator', 'copy_allocator');
+  const production = ['chatReceivedBlocks', 'chatSelRange', 'chatSelectionClear', 'chatSelectionDisplay', 'chatSelectAll', 'chatCopyPlainText', 'chatCopyRichText', 'chatCopyBlockText', 'chatCopyCapacity', 'chatCopyTextAlloc', 'chatCopyTextToClipboard', 'chatSelectionToClipboard', 'chatCopySelection', 'chatCopyBlockToClipboard', 'chatDisplayForBlock', 'chatDisplayForIndex'].map(body).join('\n')
+    .replaceAll('std.heap.page_allocator', 'copy_allocator') + '\n' + typeBody('ChatDisplay') + '\n' + typeBody('ChatSelectionDisplay');
   const run = execute(t, 'render-copy', String.raw`
 const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -342,7 +348,11 @@ fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const chat_hit = @import("chat_hit.zig");
 const chat_markdown = @import("chat_markdown.zig");
+const chat_reply = @import("chat_reply.zig");
+const chat_reaction = @import("chat_reaction.zig");
+const link_detect = @import("link_detect.zig");
 const ChatBlock = chat_markdown.Block;
+var g_reaction_view: chat_reaction.View = .{};
 var copy_allocator = std.testing.allocator;
 var chat_received_parses: usize = 0;
 var g_chat_received: chat_markdown.BlockCache = .{};
@@ -351,7 +361,7 @@ var g_chat_last_len: usize = g_chat_capture.len;
 var g_chat_block_count: usize = 1;
 var g_chat_echo_layout_count: usize = 0;
 var g_chat_echo_layout_ids: [1]u64 = .{0};
-var g_chat_outbox: struct { items: []const struct { text: []const u16 } } = .{ .items = &.{} };
+var g_chat_outbox: struct { items: []const struct { text: []const u16, id: u64 = 0 } } = .{ .items = &.{} };
 fn chatOutboxIndexById(_: u64) ?usize { return null; }
 var g_chat_blocks: [2]ChatBlock = .{.{ .start = 0, .len = 262200, .role = .user, .markdown = true }, .{ .start = 0, .len = 0, .role = .user }};
 var g_chat_sel_active = false;
@@ -444,7 +454,7 @@ test "IGSH-404 long copy preserves every UTF-16 unit and handles failure honestl
     try std.testing.expect(!notice_error);
     try std.testing.expectEqualStrings("Nothing selected", notice[0..notice_len]);
 }
-`, ['chat_markdown.zig', 'chat_hit.zig'], 'IGSH-404');
+`, ['chat_markdown.zig', 'chat_hit.zig', 'chat_reply.zig', 'chat_reaction.zig', 'link_detect.zig'], 'IGSH-404');
   assert.equal(run.status, 0, run.stdout + run.stderr);
 });
 
@@ -949,6 +959,6 @@ test "question progress repaint is active-session and answer specific" {
     chatPermissionCaptureRows(0, 2, 4, 2);
     try std.testing.expectEqual(@as(usize, 1), repaints);
 }
-`, ['chat_permission.zig'], 'question progress repaint', ['-fno-llvm', '-fno-lld']);
+`, ['chat_permission.zig', 'chat_live.zig'], 'question progress repaint', ['-fno-llvm', '-fno-lld']);
   assert.equal(result.status, 0, JSON.stringify(result));
 });
