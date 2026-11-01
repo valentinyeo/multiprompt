@@ -121,3 +121,9 @@ test('D6 a single newline inside a paragraph is a line break, not a space', () =
   assert.match(branch.slice(0, 400), /x = 0;\s*\n\s*y \+= line_h;/);
   assert.doesNotMatch(rich, /text\[pos\] == '\\n' or text\[pos\] == ' '/);
 });
+
+test('IGSH-1266 the console status scan keeps a running live turn working so Esc and Stop reach it', () => {
+  const capture = read('src/chat_capture.zig');
+  assert.match(capture, /app_state\.g_chat_screen_working = working_visible or @import\("chat_live\.zig"\)\.running\(app_state\.shells\[shell_index\]\.shell_id\);/);
+  assert.doesNotMatch(capture, /app_state\.g_chat_screen_working = working_visible;/);
+});

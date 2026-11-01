@@ -1106,7 +1106,7 @@ fn chatCaptureStatus(shell_index: u32, width: usize, chars_read: DWORD, rows: us
                 if (chatLinePairIndicatesInProgressTool(wline, wnext)) working_visible = true;
             }
         }
-        app_state.g_chat_screen_working = working_visible;
+        app_state.g_chat_screen_working = working_visible or @import("chat_live.zig").running(app_state.shells[shell_index].shell_id);
         app_state.g_chat_screen_status_len = status_len;
         @import("window_layout.zig").chatWorkingTimesPoll();
     }
