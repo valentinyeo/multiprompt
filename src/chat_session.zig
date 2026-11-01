@@ -1397,10 +1397,23 @@ fn chatFileFetchThread(entry: *ChatHistoryEntry, key: chat_transcript.Identity, 
     if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
 }
 
+var g_chat_live_seen_revision: u64 = 0;
+
 pub fn chatFileOnReady() void {
     if (app_state.g_chat_browser_swap.shell_id != 0) return;
     const key = chatCacheIdentity();
     var active_changed = false;
+    if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count) {
+        const live = @import("chat_live.zig");
+        const live_shell = app_state.shells[app_state.active_shell].shell_id;
+        const live_revision = live.revision(live_shell);
+        if (live_revision != g_chat_live_seen_revision) {
+            g_chat_live_seen_revision = live_revision;
+            active_changed = true;
+            @import("window_layout.zig").chatWorkingIndicatorSync();
+            if (live.held(live_shell)) chatFileRequest(key);
+        }
+    }
     var read_ready: ?bool = null;
     var i: usize = 0;
     while (i < app_state.g_chat_histories.items.len) {
@@ -1427,6 +1440,7 @@ pub fn chatFileOnReady() void {
         entry.loading_disk = false;
         if (entry.result) |history| {
             const belongs_to_active = chat_history.sameSession(key, entry.key);
+            if (belongs_to_active and !disk) @import("chat_live.zig").historyCaughtUp(entry.key.shell_id);
             if (entry.staged) {
                 entry.before = 0;
                 entry.result = null;

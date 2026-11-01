@@ -79,6 +79,7 @@ pub const Live = struct {
     ended: ItemStatus = .ok,
     revision: u64 = 0,
     card_dismissed: bool = false,
+    held: bool = false,
     items: std.ArrayList(Item) = .empty,
     request: Request = .{},
     prompt: chat_options.Prompt = .{},
@@ -94,6 +95,7 @@ pub const Live = struct {
     pub fn clear(self: *Live, a: std.mem.Allocator) void {
         for (self.items.items) |*item| item.text.deinit(a);
         self.items.clearRetainingCapacity();
+        self.held = false;
         self.after = 0;
         self.turn_len = 0;
         self.state = .idle;
@@ -179,6 +181,9 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
     const turn = strOf(event, "turn");
     var changed = true;
     if (std.mem.eql(u8, kind, "turn.started")) {
+        for (self.items.items) |*item| item.text.deinit(a);
+        self.items.clearRetainingCapacity();
+        self.held = false;
         self.state = .running;
         self.turn_len = @min(turn.len, self.turn.len);
         @memcpy(self.turn[0..self.turn_len], turn[0..self.turn_len]);
@@ -239,6 +244,7 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
             self.question_lens = @splat(0);
         }
     } else if (std.mem.eql(u8, kind, "turn.ended")) {
+        self.held = self.state == .running;
         self.state = .idle;
         self.ended = statusOf(strOf(payload, "status"));
     } else if (std.mem.eql(u8, kind, "host.status")) {
@@ -570,9 +576,29 @@ pub fn tailFor(shell_id: u32, text: []u16, offset: usize, blocks: []chat_markdow
     mutex.lock();
     defer mutex.unlock();
     for (&slots) |*live| {
-        if (live.used and live.shell_id == shell_id) return tailInto(live, text, offset, blocks);
+        if (live.used and live.shell_id == shell_id) return if (live.state == .running or live.held) tailInto(live, text, offset, blocks) else .{};
     }
     return .{};
+}
+
+pub fn held(shell_id: u32) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (live.used and live.shell_id == shell_id) return live.held;
+    }
+    return false;
+}
+
+pub fn historyCaughtUp(shell_id: u32) void {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (live.used and live.shell_id == shell_id and live.held) {
+            live.held = false;
+            live.touch();
+        }
+    }
 }
 
 pub fn approvalMenu(shell_id: u32, out: *chat_permission.PermissionMenu) bool {
@@ -1028,6 +1054,33 @@ test "D5 the interrupt op asks the host to stop the turn without killing it" {
     const line = try interruptLine(a, 92, "sid-1");
     defer a.free(line);
     try std.testing.expectEqualStrings("{\"id\":92,\"op\":\"interrupt\",\"provider\":\"claude\",\"sid\":\"sid-1\"}", line);
+}
+
+test "IGSH-1266 a new turn drops the last turn so the live tail shows only the running reply" {
+    const sid = "11111111-2222-3333-4444-666666666666";
+    _ = begin(98, 0, sid);
+    defer release(98);
+    const old_turn = "{\"result\":{\"events\":[" ++
+        "{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t-1\",\"payload\":{}}}," ++
+        "{\"seq\":2,\"event\":{\"kind\":\"text.done\",\"turn\":\"t-1\",\"item\":\"a:text:0\",\"payload\":{\"text\":\"Old reply\"}}}," ++
+        "{\"seq\":3,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t-1\",\"payload\":{\"status\":\"completed\"}}}" ++
+        "]}}";
+    try std.testing.expect(applyPage(98, sid, old_turn));
+    var text: [128]u16 = @splat(0);
+    var blocks: [4]chat_markdown.Block = undefined;
+    try std.testing.expect(held(98));
+    try std.testing.expectEqual(@as(usize, 1), tailFor(98, &text, 0, &blocks).blocks);
+    historyCaughtUp(98);
+    try std.testing.expectEqual(@as(usize, 0), tailFor(98, &text, 0, &blocks).blocks);
+    const new_turn = "{\"result\":{\"events\":[" ++
+        "{\"seq\":4,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t-2\",\"payload\":{}}}," ++
+        "{\"seq\":5,\"event\":{\"kind\":\"text.delta\",\"turn\":\"t-2\",\"item\":\"b:text:0\",\"payload\":{\"text\":\"New\"}}}" ++
+        "]}}";
+    try std.testing.expect(applyPage(98, sid, new_turn));
+    try std.testing.expect(running(98));
+    const tail = tailFor(98, &text, 0, &blocks);
+    try std.testing.expectEqual(@as(usize, 1), tail.blocks);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("New"), text[0..tail.text_len]);
 }
 
 fn parse(a: std.mem.Allocator, json: []const u8) !std.json.Value {
