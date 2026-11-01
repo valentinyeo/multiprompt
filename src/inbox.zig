@@ -171,6 +171,42 @@ fn inboxSubtitle(shell: *const Shell, out: *[64]u8) u32 {
         }
         return @intCast(n);
     }
+    const wide_len: usize = shell.inbox_cwd_len;
+    if (wide_len > 0 and wide_len <= shell.inbox_cwd.len and shell.cached_cwd_len == @min(wide_len, 511)) {
+        const wide = shell.inbox_cwd[0..wide_len];
+        var matches = true;
+        for (wide[0..@min(wide_len, 511)], 0..) |unit, i| {
+            if (@as(u8, @truncate(unit)) != shell.cached_cwd[i]) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) {
+            var i: usize = 0;
+            var n: usize = 0;
+            while (i < wide.len) {
+                const unit = wide[i];
+                var count: usize = 1;
+                var bytes: [4]u8 = undefined;
+                const byte_count: usize = if (unit < 32 or unit == 127 or std.unicode.utf16IsLowSurrogate(unit)) blk: {
+                    bytes[0] = '?';
+                    break :blk 1;
+                } else if (std.unicode.utf16IsHighSurrogate(unit)) blk: {
+                    if (i + 1 >= wide.len or !std.unicode.utf16IsLowSurrogate(wide[i + 1])) {
+                        bytes[0] = '?';
+                        break :blk 1;
+                    }
+                    count = 2;
+                    break :blk std.unicode.utf16LeToUtf8(&bytes, wide[i..][0..count]) catch unreachable;
+                } else std.unicode.utf16LeToUtf8(&bytes, wide[i..][0..1]) catch unreachable;
+                if (byte_count > out.len - n) break;
+                @memcpy(out[n..][0..byte_count], bytes[0..byte_count]);
+                n += byte_count;
+                i += count;
+            }
+            return @intCast(n);
+        }
+    }
     if (shell.cached_cwd_len > 0) {
         const cl = @min(@as(usize, shell.cached_cwd_len), out.len);
         for (0..cl) |i| {
@@ -180,6 +216,39 @@ fn inboxSubtitle(shell: *const Shell, out: *[64]u8) u32 {
         return @intCast(cl);
     }
     return 0;
+}
+
+test "Inbox cwd preserves Unicode and safely falls back" {
+    var shell = app_state.empty_shell;
+    const cwd = std.unicode.utf8ToUtf16LeStringLiteral("C:\\work\\café😀\\x");
+    @memcpy(shell.inbox_cwd[0..cwd.len], cwd);
+    shell.inbox_cwd_len = cwd.len;
+    for (cwd, 0..) |unit, i| shell.cached_cwd[i] = @truncate(unit);
+    shell.cached_cwd_len = cwd.len;
+    var out: [64]u8 = undefined;
+    var len = inboxSubtitle(&shell, &out);
+    try std.testing.expectEqualStrings("C:\\work\\café😀\\x", out[0..len]);
+    try std.testing.expectEqual(@as(u8, 0xe9), shell.cached_cwd[11]);
+    shell.cached_cwd[0] = 'D';
+    len = inboxSubtitle(&shell, &out);
+    try std.testing.expectEqualStrings("D:\\work\\caf?=?\\x", out[0..len]);
+
+    @memset(shell.inbox_cwd[0..63], 'a');
+    shell.inbox_cwd[63] = 0xd83d;
+    shell.inbox_cwd[64] = 0xde00;
+    shell.inbox_cwd_len = 65;
+    for (shell.inbox_cwd[0..65], 0..) |unit, i| shell.cached_cwd[i] = @truncate(unit);
+    shell.cached_cwd_len = 65;
+    len = inboxSubtitle(&shell, &out);
+    try std.testing.expectEqual(@as(u32, 63), len);
+    try std.testing.expectEqualSlices(u8, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", out[0..len]);
+    shell.inbox_cwd[63] = 0xd800;
+    shell.inbox_cwd[64] = 'b';
+    shell.cached_cwd[63] = 0;
+    shell.cached_cwd[64] = 'b';
+    len = inboxSubtitle(&shell, &out);
+    try std.testing.expectEqual(@as(u32, 64), len);
+    try std.testing.expectEqual(@as(u8, '?'), out[63]);
 }
 
 fn getInboxStatePath(buf: *[512]u8, id: []const u8) ?[]const u8 {

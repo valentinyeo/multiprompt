@@ -293,6 +293,8 @@ pub const Shell = struct {
     chat_todo_scroll: i32 = 0,
     cached_cwd: [512]u8,
     cached_cwd_len: u32,
+    inbox_cwd: [512]u16 = @splat(0),
+    inbox_cwd_len: u32 = 0,
     ram_mb: u32,
     tmux_detect_streak: u32,
     claude_session: bool,

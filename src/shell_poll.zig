@@ -2110,6 +2110,8 @@ pub fn pollShellNames() void {
                     app_state.shells[i].cached_cwd[ci] = @intCast(vps_full[ci] & 0xFF);
                 }
                 app_state.shells[i].cached_cwd_len = @intCast(cwd_copy);
+                @memcpy(app_state.shells[i].inbox_cwd[0..vps_full.len], vps_full);
+                app_state.shells[i].inbox_cwd_len = @intCast(vps_full.len);
                 continue;
             }
         }
@@ -2127,6 +2129,8 @@ pub fn pollShellNames() void {
                     app_state.shells[i].cached_cwd[ci] = @intCast(cwd[ci] & 0xFF);
                 }
                 app_state.shells[i].cached_cwd_len = @intCast(cwd_len);
+                @memcpy(app_state.shells[i].inbox_cwd[0..cwd.len], cwd);
+                app_state.shells[i].inbox_cwd_len = @intCast(cwd.len);
                 got_cwd = true;
             } else if (claude_child_pid != null) {
                 if (readProcessCwd(app_state.shells[i].pid, &cwd_buf)) |cwd| {
@@ -2138,10 +2142,14 @@ pub fn pollShellNames() void {
                         app_state.shells[i].cached_cwd[ci] = @intCast(cwd[ci] & 0xFF);
                     }
                     app_state.shells[i].cached_cwd_len = @intCast(cwd_len);
+                    @memcpy(app_state.shells[i].inbox_cwd[0..cwd.len], cwd);
+                    app_state.shells[i].inbox_cwd_len = @intCast(cwd.len);
                     got_cwd = true;
                 }
             }
         }
+
+        if (!got_cwd) app_state.shells[i].inbox_cwd_len = 0;
 
         if (!got_cwd and !app_state.shells[i].restored_name_hold) {
             if (titleLooksLikePath(title)) {
