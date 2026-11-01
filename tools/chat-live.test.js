@@ -128,6 +128,14 @@ test('IGSH-1266 the console status scan keeps a running live turn working so Esc
   assert.doesNotMatch(capture, /app_state\.g_chat_screen_working = working_visible;/);
 });
 
+test('IGSH-1266 the console permission scan leaves a live approval card alone', () => {
+  const capture = read('src/chat_capture.zig');
+  const scan = capture.slice(capture.indexOf('pub fn chatPermissionCaptureRows('), capture.indexOf('fn chatConsoleTableRows('));
+  const guard = scan.indexOf('@import("chat_live.zig").attached(app_state.shells[shell_index].shell_id)) return;');
+  assert.ok(guard > 0, 'live guard');
+  assert.ok(guard < scan.indexOf('app_state.g_chat_permission = menu orelse'), 'guard before overwrite');
+});
+
 test('IGSH-1266 a full host event page fits the client page cap even when every character is escaped', () => {
   const reader = read('src/chat_history_reader.py');
   const bytes = reader.match(/^HOST_EVENTS_BYTES = (\d+) \* (\d+)$/m);

@@ -1000,6 +1000,7 @@ fn chatPermissionSendFailedApply() void {
 pub fn chatPermissionCaptureRows(shell_index: u32, width: usize, chars_read: DWORD, rows: usize) void {
     chatPermissionSendFailedApply();
     if (shell_index != app_state.active_shell) return;
+    if (@import("chat_live.zig").attached(app_state.shells[shell_index].shell_id)) return;
     if (app_state.g_chat_active and app_state.shells[shell_index].chat_question_other_sent) {
         _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_IMAGE_READY, 0, 0);
     }
