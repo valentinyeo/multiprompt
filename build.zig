@@ -730,6 +730,9 @@ pub fn build(b: *std.Build) void {
     const chat_view_console_visibility_tests = b.addSystemCommand(&.{ "node", "--test", "tools/chat-view-console-visibility.test.js", "tools/chat-view-console-return.test.js", "tools/full-width-chat.test.js" });
     chat_view_console_visibility_tests.setEnvironmentVariable("ZIG", b.graph.zig_exe);
     test_step.dependOn(&chat_view_console_visibility_tests.step);
+    const chat_view_decision_tests = b.addSystemCommand(&.{ "node", "--test", "tools/qa5-chat-view.test.js" });
+    test_step.dependOn(&chat_view_decision_tests.step);
+    vps_test_step.dependOn(&chat_view_decision_tests.step);
     const zsb_interaction_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-interaction.test.js", "tools/zsb-recovery.test.js" });
     test_step.dependOn(&zsb_interaction_tests.step);
     const zsb_deadline_tests = b.addSystemCommand(&.{ "node", "--test", "tools/zsb-deadline.test.js" });

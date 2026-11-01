@@ -17,7 +17,6 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -2089,29 +2088,6 @@ def message_event(db, provider, sid, message, emit=True):
     return seq
 
 
-def message_events_rows(db, provider, sid, after):
-    events, size = [], 0
-    for seq, body in db.execute('SELECT seq,body FROM message_events WHERE provider=? AND sid=? AND seq>? ORDER BY seq LIMIT ?',
-                                (provider, sid, after, HOST_EVENTS_PAGE)):
-        if events and size + len(body.encode()) > HOST_EVENTS_BYTES:
-            break
-        events.append(dict(seq=seq, event=json.loads(body)))
-        size += len(body.encode())
-    return dict(events=events, next_after=events[-1]['seq'] if events else after)
-
-
-def message_events_page(provider, sid, after):
-    from contextlib import closing
-    path = message_store_path()
-    if not path.is_file():
-        return dict(events=[], next_after=after)
-    try:
-        with closing(sqlite3.connect(path, timeout=2)) as db:
-            return message_events_rows(db, provider, sid, after)
-    except sqlite3.Error:
-        return dict(events=[], next_after=after)
-
-
 def message_row(row):
     return dict(zip(('id', 'provider', 'sid', 'text', 'position', 'attempt', 'state', 'deadline', 'receipt', 'epoch', 'created'), row))
 
@@ -2298,13 +2274,6 @@ HOST_INFLIGHT_TIMEOUT = 900
 HOST_STOP_GRACE = 5.0
 HOST_LINE_LIMIT = 4 * 1024 * 1024
 HOST_LOG_TAIL = 6
-HOST_EVENT_VERSION = 1
-HOST_COALESCE_SECONDS = 0.05
-HOST_EVENT_TEXT_LIMIT = 8192
-HOST_EVENTS_PAGE = 256
-HOST_EVENTS_BYTES = 512 * 1024
-HOST_PLAN_STOP_MESSAGE = ("The client captured your proposed plan. Stop here and wait for the user's feedback "
-                          "or implementation request in a later turn.")
 HOST_BACKOFF_STEPS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0)
 HOST_EXIT_REASONS = {1: "owner_busy", 2: "unsupported_provider", 3: "host_disabled", 4: "host_error", 5: "agent_not_found"}
 HOST_CHILDREN = []
@@ -2741,8 +2710,7 @@ def host_agent_start(provider, sid):
     if base is None:
         return None
     command = base + ["--print", "--input-format", "stream-json",
-                                            "--output-format", "stream-json", "--verbose",
-                                            "--include-partial-messages", "--permission-prompt-tool", "stdio"]
+                                            "--output-format", "stream-json", "--verbose"]
     command += ["--resume", sid] if host_transcript_exists(provider, sid) else ["--session-id", sid]
     return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             cwd=host_cwd(provider, sid), start_new_session=True)
@@ -2809,211 +2777,6 @@ def host_session_state(provider, sid):
     return state if isinstance(state, dict) else {}
 
 
-def host_session_reset(session, agent=None):
-    session.update(agent=agent, inflight=None, buffer=b"", stop=False, idle=time.time(), pending={}, parked={},
-                   messages={}, current={}, sends=[], turn=None, interrupted=False)
-
-
-def host_db(provider, sid, tmux, session):
-    db = session.get("db")
-    if db is None:
-        db = message_store_db(tmux)
-        with db:
-            db.execute('INSERT OR IGNORE INTO message_chats(provider,sid) VALUES (?,?)', (provider, sid))
-        session["db"] = db
-    return db
-
-
-def host_event_text(value, limit=HOST_EVENT_TEXT_LIMIT):
-    text = value if isinstance(value, str) else ""
-    return text if len(text) <= limit else text[:limit]
-
-
-def host_event(provider, sid, tmux, session, kind, payload=None, item=None):
-    message = dict(v=HOST_EVENT_VERSION, sid=sid, turn=session.get("turn"), kind=kind,
-                   at=int(time.time() * 1000), item=item, payload=payload if isinstance(payload, dict) else {})
-    try:
-        with host_db(provider, sid, tmux, session) as db:
-            message_event(db, provider, sid, message)
-    except (OSError, ValueError, sqlite3.Error):
-        host_log(provider, sid, "event_failed", dict(kind=kind))
-
-
-def host_stream_message(session, message_id):
-    messages = session["messages"]
-    entry = messages.get(message_id)
-    if entry is None:
-        entry = messages[message_id] = dict(text=0, thinking=0, blocks=[], index={})
-    return entry
-
-
-def host_stream_block(session, message_id, kind, index=None):
-    entry = host_stream_message(session, message_id)
-    if isinstance(index, int) and index in entry["index"]:
-        return entry["index"][index]
-    count = entry[kind]
-    entry[kind] = count + 1
-    block = dict(kind=kind, item=message_id + ":" + kind + ":" + str(count), text="", done=False)
-    entry["blocks"].append(block)
-    if isinstance(index, int):
-        entry["index"][index] = block
-    return block
-
-
-def host_stream_open_block(entry, kind):
-    return next((block for block in entry["blocks"] if block["kind"] == kind and not block["done"]), None)
-
-
-def host_delta(session, block, text):
-    block["text"] += text
-    pending = session["pending"]
-    if block["item"] not in pending:
-        pending[block["item"]] = dict(block=block, due=time.time() + HOST_COALESCE_SECONDS)
-
-
-def host_flush(provider, sid, tmux, session, now=None):
-    now = time.time() if now is None else now
-    pending = session["pending"]
-    for item, entry in list(pending.items()):
-        if entry["due"] > now:
-            continue
-        del pending[item]
-        block = entry["block"]
-        if block["done"]:
-            continue
-        host_event(provider, sid, tmux, session, block["kind"] + ".delta",
-                   dict(text=block["text"], done=False), item)
-    return bool(pending)
-
-
-def host_flush_timeout(session):
-    pending = session["pending"]
-    if not pending:
-        return 1.0
-    return max(0.0, min(1.0, min(entry["due"] for entry in pending.values()) - time.time()))
-
-
-def host_complete(provider, sid, tmux, session, block, text=None):
-    block["done"] = True
-    session["pending"].pop(block["item"], None)
-    final = block["text"] if not isinstance(text, str) else text
-    block["text"] = final
-    host_event(provider, sid, tmux, session, block["kind"] + ".done", dict(text=final), block["item"])
-
-
-def host_stream_event(provider, sid, tmux, session, event):
-    body = event.get("event") if isinstance(event.get("event"), dict) else {}
-    subtype = body.get("type")
-    parent = event.get("parent_tool_use_id")
-    thread = str(parent)
-    if subtype == "message_start":
-        message = body.get("message") if isinstance(body.get("message"), dict) else {}
-        if isinstance(message.get("id"), str):
-            session["current"][thread] = message["id"]
-            host_stream_message(session, message["id"])
-        return
-    if subtype == "message_stop":
-        for message_id in list(session["messages"]):
-            entry = session["messages"][message_id]
-            if all(block["done"] for block in entry["blocks"]):
-                session["messages"].pop(message_id)
-        return
-    if not isinstance(body.get("index"), int):
-        return
-    message_id = session["current"].get(thread)
-    if not isinstance(message_id, str):
-        return
-    if subtype == "content_block_start":
-        block = body.get("content_block") if isinstance(body.get("content_block"), dict) else {}
-        if block.get("type") in ("text", "thinking"):
-            host_stream_block(session, message_id, block["type"], body["index"])
-        return
-    if subtype != "content_block_delta":
-        return
-    delta = body.get("delta") if isinstance(body.get("delta"), dict) else {}
-    kind = {"text_delta": "text", "thinking_delta": "thinking"}.get(delta.get("type"))
-    if kind is None or parent is not None:
-        return
-    text = delta.get("text") if kind == "text" else delta.get("thinking")
-    if isinstance(text, str) and text:
-        host_delta(session, host_stream_block(session, message_id, kind, body["index"]), text)
-
-
-def host_assistant_event(provider, sid, tmux, session, event):
-    message = event.get("message") if isinstance(event.get("message"), dict) else {}
-    message_id = message.get("id")
-    parent = event.get("parent_tool_use_id")
-    if not isinstance(message_id, str) or not isinstance(message.get("content"), list):
-        return
-    session["current"][str(parent)] = message_id
-    entry = host_stream_message(session, message_id)
-    for block in message["content"]:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") == "tool_use" and isinstance(block.get("id"), str):
-            host_event(provider, sid, tmux, session, "item.started",
-                       dict(type="tool_call", tool=block.get("name"), input=block.get("input") or {},
-                            title=block.get("name"), display_name=block.get("name")), block["id"])
-        elif block.get("type") in ("text", "thinking") and parent is None:
-            kind = block["type"]
-            opened = host_stream_open_block(entry, kind) or host_stream_block(session, message_id, kind)
-            text = block.get("text") if kind == "text" else block.get("thinking")
-            host_complete(provider, sid, tmux, session, opened, text if isinstance(text, str) else None)
-
-
-def host_tool_output(content):
-    if isinstance(content, str):
-        return host_event_text(content)
-    if not isinstance(content, list):
-        return ""
-    parts = [block.get("text") for block in content
-             if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)]
-    return host_event_text("\n".join(parts))
-
-
-def host_bind_uuid(provider, sid, tmux, session, event):
-    names = [event.get("user_message_uuid")]
-    listed = event.get("user_message_uuids")
-    names.extend(listed if isinstance(listed, list) else [])
-    uuids = [name for name in names if isinstance(name, str) and name]
-    sends = [entry for entry in session["sends"] if not entry.get("uuid")]
-    if not uuids or not sends:
-        return
-    sends[-1]["uuid"] = uuids
-    host_turn_started(provider, sid, tmux, session, sends[-1])
-
-
-def host_turn_started(provider, sid, tmux, session, entry):
-    host_event(provider, sid, tmux, session, "turn.started",
-               dict(message_id=entry["id"], text_sha256=entry["sha256"], uuids=list(entry.get("uuid") or [])))
-
-
-def host_user_event(provider, sid, tmux, session, event):
-    message = event.get("message") if isinstance(event.get("message"), dict) else {}
-    for block in message.get("content") if isinstance(message.get("content"), list) else []:
-        if isinstance(block, dict) and block.get("type") == "tool_result" and isinstance(block.get("tool_use_id"), str):
-            failed = bool(block.get("is_error"))
-            host_event(provider, sid, tmux, session, "item.done",
-                       dict(status="failed" if failed else "completed", output=host_tool_output(block.get("content")),
-                            is_error=failed), block["tool_use_id"])
-    host_bind_uuid(provider, sid, tmux, session, event)
-
-
-def host_stream_finish(provider, sid, tmux, session):
-    for message_id in list(session["messages"]):
-        for block in session["messages"].pop(message_id)["blocks"]:
-            if not block["done"]:
-                host_complete(provider, sid, tmux, session, block)
-
-
-def host_turn_status(session, event):
-    if session.get("interrupted"):
-        return "interrupted"
-    if event.get("subtype") == "success" and not event.get("is_error"):
-        return "completed"
-    return "failed"
-
-
 def host_refuse(reason, **extra):
     return dict(status="refused", reason=reason, **extra)
 
@@ -3074,14 +2837,7 @@ def host_handle_request(provider, sid, tmux, session, request):
         pass
     written[token] = dict(attempt=attempt, epoch=epoch, accepted=False, at=time.time(),
                           mode="stream_json_user_line")
-    session["state"]["turns"] = session["state"].get("turns", 0) + 1
-    session["turn"] = "t-" + str(session["state"]["turns"])
-    entry = dict(id=token, attempt=attempt, epoch=epoch, at=time.time(), accepted=False, turn=session["turn"],
-                 sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(), uuid=None)
-    session["sends"].append(entry)
-    if not isinstance(session.get("inflight"), dict):
-        session["inflight"] = entry
-    host_turn_started(provider, sid, tmux, session, entry)
+    session["inflight"] = dict(id=token, attempt=attempt, epoch=epoch, at=time.time(), accepted=False)
     session["state"]["inflight"] = session["inflight"]
     host_state_write(provider, sid, session["state"])
     host_log(provider, sid, "delivered", dict(id=token, attempt=attempt))
@@ -3089,28 +2845,26 @@ def host_handle_request(provider, sid, tmux, session, request):
 
 
 def host_accept(provider, sid, tmux, session, event):
-    sends = [entry for entry in session.get("sends") or [] if not entry.get("accepted")]
-    if not sends:
+    inflight = session.get("inflight")
+    if not isinstance(inflight, dict) or inflight.get("accepted"):
         return
-    written = host_written(session["state"])
-    for entry in sends:
-        entry["accepted"] = True
-        digest = hashlib.sha256(("host:" + sid + ":" + entry["id"] + ":" + entry["attempt"]).encode()).hexdigest()
-        fact = dict(kind="accepted", sid=sid, id=entry["id"], attempt=entry["attempt"],
-                    event_id="host:accepted:" + digest, provenance="stream_json_turn_start")
-        applied = False
-        if tmux is not None:
-            try:
-                applied = host_apply(provider, sid, tmux, [fact])
-            except (OSError, ValueError):
-                applied = False
-        recorded = written.get(entry["id"])
-        if isinstance(recorded, dict):
-            recorded["accepted"] = True
-        host_log(provider, sid, "accepted", dict(id=entry["id"], attempt=entry["attempt"],
-                                                verified=applied, source=event.get("type")))
-    session["state"]["inflight"] = session.get("inflight")
+    inflight["accepted"] = True
+    digest = hashlib.sha256(("host:" + sid + ":" + inflight["id"] + ":" + inflight["attempt"]).encode()).hexdigest()
+    fact = dict(kind="accepted", sid=sid, id=inflight["id"], attempt=inflight["attempt"],
+                event_id="host:accepted:" + digest, provenance="stream_json_turn_start")
+    applied = False
+    if tmux is not None:
+        try:
+            applied = host_apply(provider, sid, tmux, [fact])
+        except (OSError, ValueError):
+            applied = False
+    recorded = host_written(session["state"]).get(inflight["id"])
+    if isinstance(recorded, dict):
+        recorded["accepted"] = True
+    session["state"]["inflight"] = inflight
     host_state_write(provider, sid, session["state"])
+    host_log(provider, sid, "accepted", dict(id=inflight["id"], attempt=inflight["attempt"],
+                                            verified=applied, source=event.get("type")))
 
 
 def host_agent_event(provider, sid, tmux, session, raw):
@@ -3122,41 +2876,21 @@ def host_agent_event(provider, sid, tmux, session, raw):
         return
     kind = event.get("type")
     inflight = session.get("inflight")
-    if kind == "system":
-        if event.get("subtype") == "init":
-            if isinstance(event.get("session_id"), str):
-                session["state"]["native_session"] = event["session_id"]
-            host_state_write(provider, sid, session["state"])
-            host_log(provider, sid, "init", dict(session=event.get("session_id")))
-            host_event(provider, sid, tmux, session, "host.status", dict(state="ready"))
-        elif event.get("subtype") == "permission_denied" and isinstance(event.get("tool_use_id"), str):
-            host_event(provider, sid, tmux, session, "item.done",
-                       dict(status="failed", output=str(event.get("tool_name") or ""), is_error=True),
-                       event["tool_use_id"])
-        return
-    if kind == "stream_event":
-        host_stream_event(provider, sid, tmux, session, event)
+    if kind == "system" and event.get("subtype") == "init":
+        if isinstance(event.get("session_id"), str):
+            session["state"]["native_session"] = event["session_id"]
+        host_state_write(provider, sid, session["state"])
+        host_log(provider, sid, "init", dict(session=event.get("session_id")))
         return
     if kind == "assistant":
         host_accept(provider, sid, tmux, session, event)
-        host_assistant_event(provider, sid, tmux, session, event)
-        return
-    if kind == "user":
-        host_user_event(provider, sid, tmux, session, event)
         return
     if kind == "result":
         if isinstance(inflight, dict) and not inflight.get("accepted"):
             host_accept(provider, sid, tmux, session, event)
         session["state"]["result"] = dict(subtype=event.get("subtype"), at=time.time())
-        host_stream_finish(provider, sid, tmux, session)
-        host_event(provider, sid, tmux, session, "turn.ended",
-                   dict(status=host_turn_status(session, event), stop_reason=event.get("stop_reason"),
-                        cost_usd=event.get("total_cost_usd"), usage=event.get("usage") or {}))
         session["state"]["inflight"] = None
         session["inflight"] = None
-        session["sends"] = []
-        session["turn"] = None
-        session["interrupted"] = False
         host_state_write(provider, sid, session["state"])
         host_log(provider, sid, "turn_done", dict(id=inflight.get("id") if isinstance(inflight, dict) else None,
                                                   subtype=event.get("subtype")))
@@ -3206,8 +2940,7 @@ def host_accept_client(provider, sid, tmux, session, server):
 
 def host_loop(provider, sid, tmux, session, server, agent):
     import selectors
-    host_session_reset(session, agent)
-    host_event(provider, sid, tmux, session, "host.status", dict(state="starting"))
+    session.update(agent=agent, inflight=None, buffer=b"", stop=False, idle=time.time())
     with selectors.DefaultSelector() as selector:
         selector.register(server, selectors.EVENT_READ, "client")
         selector.register(agent.stdout, selectors.EVENT_READ, "agent")
@@ -3218,11 +2951,10 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 session["state"]["inflight"] = None
                 host_state_write(provider, sid, session["state"])
                 host_log(provider, sid, "inflight_timeout", dict(id=inflight.get("id")))
-            idle_expired = time.time() - session["idle"] >= HOST_IDLE_SECONDS
-            if not isinstance(session.get("inflight"), dict) and not session["parked"] and idle_expired:
+            if not isinstance(session.get("inflight"), dict) and time.time() - session["idle"] >= HOST_IDLE_SECONDS:
                 host_log(provider, sid, "idle_stop")
                 return
-            for key, _ in selector.select(host_flush_timeout(session)):
+            for key, _ in selector.select(1.0):
                 if key.data == "agent":
                     try:
                         chunk = agent.stdout.read1(65536)
@@ -3234,7 +2966,6 @@ def host_loop(provider, sid, tmux, session, server, agent):
                 else:
                     session["idle"] = time.time()
                     host_accept_client(provider, sid, tmux, session, server)
-            host_flush(provider, sid, tmux, session)
 
 
 def host_main(provider, sid):
@@ -3272,11 +3003,8 @@ def host_main(provider, sid):
             return 5
         host_log(provider, sid, "agent_started", dict(pid=agent.pid))
         state["agent_pid"] = agent.pid
-        state["mode"] = (host_config(provider, sid) or {}).get("permission_mode") or "default"
         host_state_write(provider, sid, state)
-        session = dict(state=state)
-        host_loop(provider, sid, tmux, session, server, agent)
-        host_event(provider, sid, tmux, session, "host.status", dict(state="stopped"))
+        host_loop(provider, sid, tmux, dict(state=state), server, agent)
         return 0
     except (OSError, ValueError) as error:
         host_log(provider, sid, "host_error", dict(error=type(error).__name__))
@@ -3696,7 +3424,13 @@ def message_store_transaction(q):
             after = q.get('after')
             if type(after) is not int or after < 0:
                 raise ValueError('invalid event cursor')
-            return dict(epoch=epoch, seq=seq, **message_events_rows(db, provider, sid, after))
+            events, size = [], 0
+            for n, body in db.execute('SELECT seq,body FROM message_events WHERE provider=? AND sid=? AND seq>? ORDER BY seq LIMIT 256', (provider, sid, after)):
+                if events and size + len(body.encode()) > 512 * 1024:
+                    break
+                events.append(dict(seq=n, event=json.loads(body)))
+                size += len(body.encode())
+            return dict(epoch=epoch, seq=seq, events=events, next_after=events[-1]['seq'] if events else after)
         if op == 'message_snapshot':
             snapshot = q.get('snapshot_id')
             cursor = q.get('cursor', 0)
@@ -4674,130 +4408,48 @@ def watch(source, as_owner=False):
                 time.sleep(0.01)
 
 
-SERVE_PRINT_LOCK = threading.Lock()
-
-
-def serve_print(value):
-    with SERVE_PRINT_LOCK:
-        print(json.dumps(value, separators=(",", ":")), flush=True)
-
-
-def events_wake():
-    import ctypes
-    libc = ctypes.CDLL(None, use_errno=True)
-    libc.inotify_init1.argtypes = [ctypes.c_int]
-    libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
-    fd = libc.inotify_init1(os.O_CLOEXEC)
-    if fd < 0:
-        return None
-    folder = message_store_path().parent
-    try:
-        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if libc.inotify_add_watch(fd, os.fsencode(folder), 0x00000002 | 0x00000008 | 0x00000080 | 0x00000100) < 0:
-            os.close(fd)
-            return None
-    except OSError:
-        os.close(fd)
-        return None
-    return fd
-
-
-def events_subscription(query):
-    provider, sid, after = query.get("provider"), query.get("sid"), query.get("after", 0)
-    if provider not in ("claude", "codex") or not isinstance(sid, str) or SESSION_ID.fullmatch(sid) is None:
-        raise ValueError("invalid subscription")
-    if type(after) is not int or after < 0:
-        raise ValueError("invalid subscription cursor")
-    return dict(provider=provider, sid=sid, after=after)
-
-
-def events_push(subscriptions):
-    for rid, subscription in list(subscriptions.items()):
-        page = message_events_page(subscription["provider"], subscription["sid"], subscription["after"])
-        if not page["events"]:
-            continue
-        subscription["after"] = page["next_after"]
-        serve_print(dict(id=rid, message_protocol=1, result=page))
-
-
-def serve_push(subscriptions, lock, wake):
-    while True:
-        if wake is None:
-            time.sleep(1.0)
-        else:
-            try:
-                os.read(wake, 65536)
-            except OSError:
-                return
-        with lock:
-            events_push(subscriptions)
-
-
-def serve_request(line, source, subscriptions, lock):
-    query = None
-    rid = 0
-    try:
-        query = json.loads(line)
-        if not isinstance(query, dict):
-            raise ValueError("invalid request")
-        rid = query.get("id", 0)
-        if type(rid) is not int or rid < 0:
-            rid = 0
-            raise ValueError("invalid request id")
-        if query.get("op") == "engine_info":
-            serve_print(dict(id=rid, engine_info=globals().get("ENGINE_INFO"), message_protocols=[1]))
-            return
-        if query.get("op") == "host_adopt":
-            serve_print(dict(id=rid, host_adopt=host_adopt(query.get("provider"), query.get("sid"), query.get("tmux"), query.get("cwd"))))
-            return
-        if query.get("op") == "events_subscribe":
-            subscription = events_subscription(query)
-            page = message_events_page(subscription["provider"], subscription["sid"], subscription["after"])
-            subscription["after"] = page["next_after"]
-            with lock:
-                subscriptions[rid] = subscription
-            serve_print(dict(id=rid, message_protocol=1, result=page))
-            return
-        if query.get("op") == "events_unsubscribe":
-            with lock:
-                subscriptions.pop(rid, None)
-            serve_print(dict(id=rid, message_protocol=1, result=dict(events=[], next_after=query.get("after", 0))))
-            return
-        if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
-            result = message_store_request(query)
-            if query.get('op') in ('message_submit', 'message_retry', 'message_snapshot'):
-                start_message_worker(query, source)
-            elif query.get('op') in ('message_events', 'message_status'):
-                start_message_worker(query, source, only_if_work=True)
-            serve_print(dict(id=rid, message_protocol=1, result=result))
-            return
-        if query.get("op") in ("send", "question_text"):
-            wire = enqueue_response(query, source) if "message_id" in query else send_response(query)
-        elif query.get("op") == "cancel_queued":
-            wire = cancel_queued_response(query)
-        elif query.get("op") == "draft":
-            wire = draft_response(query)
-        elif query.get("op") in ("stop", "permission", "question", "send_queued", "edit_queued"):
-            wire = stop_response(query)
-        elif query.get("op") == "settle":
-            wire = settle_response(query, source)
-        else:
-            wire = response(query, source)
-    except (OSError, ValueError, KeyError, TypeError, IndexError, sqlite3.Error):
-        wire = f"@mp\t{rid}\thistory\terror\t-\t0\n{END}\n"
-    serve_print(dict(id=rid, wire=wire))
-
-
 def serve(source):
-    subscriptions = {}
-    lock = threading.Lock()
-    wake = events_wake()
-    push = threading.Thread(target=serve_push, args=(subscriptions, lock, wake), daemon=True)
-    push.start()
     for line in sys.stdin.buffer:
-        if not line.strip():
-            continue
-        serve_request(line, source, subscriptions, lock)
+        query = None
+        rid = 0
+        try:
+            query = json.loads(line)
+            if not isinstance(query, dict):
+                raise ValueError("invalid request")
+            rid = query.get("id", 0)
+            if type(rid) is not int or rid < 0:
+                rid = 0
+                raise ValueError("invalid request id")
+            if query.get("op") == "engine_info":
+                print(json.dumps(dict(id=rid, engine_info=globals().get("ENGINE_INFO"), message_protocols=[1]), separators=(",", ":")), flush=True)
+                continue
+            if query.get("op") == "host_adopt":
+                print(json.dumps(dict(id=rid, host_adopt=host_adopt(
+                    query.get("provider"), query.get("sid"), query.get("tmux"), query.get("cwd"))), separators=(",", ":")), flush=True)
+                continue
+            if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
+                result = message_store_request(query)
+                if query.get('op') in ('message_submit', 'message_retry', 'message_snapshot'):
+                    start_message_worker(query, source)
+                elif query.get('op') in ('message_events', 'message_status'):
+                    start_message_worker(query, source, only_if_work=True)
+                print(json.dumps(dict(id=rid, message_protocol=1, result=result), separators=(",", ":")), flush=True)
+                continue
+            if query.get("op") in ("send", "question_text"):
+                wire = enqueue_response(query, source) if "message_id" in query else send_response(query)
+            elif query.get("op") == "cancel_queued":
+                wire = cancel_queued_response(query)
+            elif query.get("op") == "draft":
+                wire = draft_response(query)
+            elif query.get("op") in ("stop", "permission", "question", "send_queued", "edit_queued"):
+                wire = stop_response(query)
+            elif query.get("op") == "settle":
+                wire = settle_response(query, source)
+            else:
+                wire = response(query, source)
+        except (OSError, ValueError, KeyError, TypeError, IndexError, sqlite3.Error):
+            wire = f"@mp\t{rid}\thistory\terror\t-\t0\n{END}\n"
+        print(json.dumps(dict(id=rid, wire=wire), separators=(",", ":")), flush=True)
 
 
 if __name__ == "__main__" and "--watch" in sys.argv[1:]:
@@ -4828,7 +4480,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 39
+RUNTIME_GENERATION = 38
 
 if __name__ == '__main__':
     import base64 as _base64
