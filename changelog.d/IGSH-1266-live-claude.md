@@ -8,3 +8,5 @@ Claude's questions now arrive as a card with its choices.
 A plan Claude proposes now waits for your go before anything runs.
 Stop now ends the answer instead of closing the whole chat.
 A stopped chat keeps the session, so the next message starts straight away.
+A hosted Claude chat keeps streaming after you switch tabs and come back.
+Escape on a waiting approval cancels it.

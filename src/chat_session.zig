@@ -609,6 +609,9 @@ pub fn chatFetchWanted(chat_active: bool) bool {
 pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool) void {
     const live_shell_id = if (app_state.g_chat_active and app_state.active_shell < app_state.shell_count and chatActiveTabWantsChat()) app_state.shells[app_state.active_shell].shell_id else 0;
     chatHistoryStreamsKeep(live_shell_id);
+    if (live_shell_id != 0 and key.shell_id == live_shell_id) {
+        if (chatLiveWanted(key)) chatLiveStreamEnsure(key) else chatLiveStreamStop();
+    }
     if ((!delivery and !chatFetchWanted(app_state.g_chat_active)) or key.shell_id == 0) return;
     if (app_state.g_main_hwnd == null or (!delivery and (IsIconic(app_state.g_main_hwnd) != 0 or IsWindowVisible(app_state.g_main_hwnd) == 0))) return;
     const entry = chatHistoryEntry(key) orelse return;
@@ -701,6 +704,110 @@ fn chatHistoryStreamStop(entry: *ChatHistoryEntry) void {
 pub fn chatHistoryStreamsKeep(shell_id: u32) void {
     for (app_state.g_chat_histories.items) |entry| {
         if (entry.key.shell_id != shell_id) chatHistoryStreamStop(entry);
+    }
+}
+
+const ChatLiveStream = struct {
+    shell_id: u32 = 0,
+    host: u8 = 0,
+    sid: [40]u8 = @splat(0),
+    sid_len: usize = 0,
+    refs: std.atomic.Value(u32) = .init(2),
+    mutex: std.Thread.Mutex = .{},
+    cancelled: std.atomic.Value(bool) = .init(false),
+    ended: std.atomic.Value(bool) = .init(false),
+    channel: ChatHistoryChannel = .{},
+};
+
+var g_chat_live_mutex: std.Thread.Mutex = .{};
+var g_chat_live_stream: ?*ChatLiveStream = null;
+
+fn chatLiveWanted(key: chat_transcript.Identity) bool {
+    if (key.shell_id == 0 or key.codex or key.sid[0] == 0) return false;
+    const index = findShellById(key.shell_id) orelse return false;
+    if (index >= app_state.shell_count) return false;
+    const shell = app_state.shells[index];
+    return @import("chat_send.zig").chatMessageGoesToHost(shell.kind, shell.ai_agent);
+}
+
+fn chatLiveStreamRelease(stream: *ChatLiveStream) void {
+    if (stream.refs.fetchSub(1, .acq_rel) != 1) return;
+    chatHistoryChannelClose(&stream.channel);
+    std.heap.page_allocator.destroy(stream);
+}
+
+fn chatLiveStreamStopLocked() void {
+    const stream = g_chat_live_stream orelse return;
+    g_chat_live_stream = null;
+    stream.cancelled.store(true, .release);
+    if (stream.mutex.tryLock()) {
+        if (stream.channel.process != null) _ = TerminateProcess(stream.channel.process, 0);
+        stream.mutex.unlock();
+    }
+    @import("chat_live.zig").release(stream.shell_id);
+    chatLiveStreamRelease(stream);
+}
+
+pub fn chatLiveStreamStop() void {
+    g_chat_live_mutex.lock();
+    defer g_chat_live_mutex.unlock();
+    chatLiveStreamStopLocked();
+}
+
+fn chatLiveStreamEnsure(key: chat_transcript.Identity) void {
+    const sid = std.mem.sliceTo(&key.sid, 0);
+    g_chat_live_mutex.lock();
+    defer g_chat_live_mutex.unlock();
+    if (g_chat_live_stream) |current| {
+        const same = !current.ended.load(.acquire) and current.shell_id == key.shell_id and current.host == key.host and
+            std.mem.eql(u8, current.sid[0..current.sid_len], sid);
+        if (same) return;
+        chatLiveStreamStopLocked();
+    }
+    const a = std.heap.page_allocator;
+    const stream = a.create(ChatLiveStream) catch return;
+    stream.* = .{ .shell_id = key.shell_id, .host = key.host };
+    stream.sid_len = @min(sid.len, stream.sid.len);
+    @memcpy(stream.sid[0..stream.sid_len], sid[0..stream.sid_len]);
+    const thread = std.Thread.spawn(.{}, chatLiveStreamThread, .{ stream, key }) catch {
+        a.destroy(stream);
+        return;
+    };
+    thread.detach();
+    g_chat_live_stream = stream;
+}
+
+fn chatLiveStreamThread(stream: *ChatLiveStream, key: chat_transcript.Identity) void {
+    const a = std.heap.page_allocator;
+    defer chatLiveStreamRelease(stream);
+    defer stream.ended.store(true, .release);
+    const sid = stream.sid[0..stream.sid_len];
+    const after = @import("chat_live.zig").begin(stream.shell_id, stream.host, sid);
+    while (!stream.mutex.tryLock()) Sleep(1);
+    const started = !stream.cancelled.load(.acquire) and chatHistoryChannelStart(key.host, &stream.channel);
+    if (stream.cancelled.load(.acquire) and stream.channel.process != null) _ = TerminateProcess(stream.channel.process, 0);
+    stream.mutex.unlock();
+    if (!started or stream.cancelled.load(.acquire)) return;
+    const line = @import("chat_live.zig").subscribeLine(a, stream.shell_id, sid, after) catch return;
+    defer a.free(line);
+    var written: DWORD = 0;
+    if (WriteFile(stream.channel.input, line.ptr, @intCast(line.len), &written, null) == 0 or written != line.len or
+        WriteFile(stream.channel.input, "\n", 1, &written, null) == 0 or written != 1) return;
+    var frame: std.ArrayList(u8) = .empty;
+    defer frame.deinit(a);
+    var chunk: [65536]u8 = undefined;
+    while (!stream.cancelled.load(.acquire)) {
+        while (std.mem.indexOfScalar(u8, frame.items, '\n') == null) {
+            var n: DWORD = 0;
+            if (ReadFile(stream.channel.output, &chunk, chunk.len, &n, null) == 0 or n == 0) return;
+            if (frame.items.len + n > @import("chat_live.zig").MAX_PAGE + 4096) return;
+            frame.appendSlice(a, chunk[0..n]) catch return;
+        }
+        const end = std.mem.indexOfScalar(u8, frame.items, '\n').?;
+        const changed = @import("chat_live.zig").applyPage(stream.shell_id, sid, frame.items[0..end]);
+        std.mem.copyForwards(u8, frame.items[0..], frame.items[end + 1 ..]);
+        frame.items.len -= end + 1;
+        if (changed and app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_FILE_READY, 0, 0);
     }
 }
 
@@ -1417,9 +1524,18 @@ fn refreshChatBlockCache(force: bool) bool {
     }
     if (!chatEnsureTranscriptCapacity(len, count)) return false;
     const source = if (from_file) entry.?.history.text.items else app_state.g_chat_screen[0..len];
-    const hash = if (from_file) entry.?.history.revision else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source));
+    const shell_id = app_state.shells[app_state.active_shell].shell_id;
+    const live_revision = @import("chat_live.zig").revision(shell_id);
+    const hash = (if (from_file) entry.?.history.revision else std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(source))) ^ (live_revision *% 0x9E3779B97F4A7C15);
     const generation = if (from_file) entry.?.generation else 0;
-    if (!force and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and len == app_state.g_chat_last_len and hash == app_state.g_chat_last_hash and generation == app_state.g_chat_cache_generation) return false;
+    var live_blocks: [16]ChatBlock = undefined;
+    const live_room = @min(live_blocks.len, CHAT_MAX_BLOCKS -| count);
+    const live_tail = if (len < app_state.g_chat_capture.len)
+        @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, live_blocks[0..live_room])
+    else
+        @import("chat_live.zig").Tail{};
+    const total = len + live_tail.text_len;
+    if (!force and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and total == app_state.g_chat_last_len and hash == app_state.g_chat_last_hash and generation == app_state.g_chat_cache_generation) return false;
     app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation and hash == app_state.g_chat_last_hash +% 1) @min(app_state.g_chat_layout_reuse, entry.?.history.changed_from) else 0;
     if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation) {
         chatTableRefresh(entry.?.history.blocks.items, source);
@@ -1442,7 +1558,7 @@ fn refreshChatBlockCache(force: bool) bool {
     );
     app_state.g_chat_cache_shell_id = app_state.shells[app_state.active_shell].shell_id;
     @memcpy(app_state.g_chat_capture[0..len], source);
-    app_state.g_chat_last_len = len;
+    app_state.g_chat_last_len = total;
     app_state.g_chat_last_hash = hash;
     app_state.g_chat_cache_generation = generation;
     app_state.g_chat_hover_copy = null;
@@ -1465,6 +1581,10 @@ fn refreshChatBlockCache(force: bool) bool {
         app_state.g_chat_block_count = screen_count;
         @memcpy(app_state.g_chat_blocks[0..screen_count], screen_blocks[0..screen_count]);
         chatApplyDisplayGlyphs(app_state.g_chat_capture[0..len], screen_blocks[0..screen_count]);
+    }
+    if (live_tail.blocks > 0 and app_state.g_chat_block_count + live_tail.blocks <= CHAT_MAX_BLOCKS) {
+        @memcpy(app_state.g_chat_blocks[app_state.g_chat_block_count..][0..live_tail.blocks], live_blocks[0..live_tail.blocks]);
+        app_state.g_chat_block_count += live_tail.blocks;
     }
     app_state.g_chat_received.retain(std.heap.page_allocator, app_state.g_chat_blocks[0..app_state.g_chat_block_count]);
     if (app_state.g_voice_cursor_shell_id == app_state.shells[app_state.active_shell].shell_id and app_state.g_voice_cursor_latest_hash != 0) {
