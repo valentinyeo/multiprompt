@@ -3038,6 +3038,8 @@ pub const OPENFILENAMEW = extern struct {
 
 pub var g_chat_swallow_paste_char_until: u64 = 0;
 
+pub var g_chat_enter_key_sent_tick: u64 = 0;
+
 const ShotFocus = struct {
     shell_id: u32 = 0,
     caret: ?u32 = null,

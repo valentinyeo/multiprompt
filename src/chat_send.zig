@@ -1238,7 +1238,8 @@ fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const
             .prefix = chatEchoNormalizePrefix(e.text, &prefixes[result.count]),
             .text = e.text,
             .anchor = e.anchor,
-            .unanchored_delivery = (e.write_started or e.retryable) and e.anchor.after_ms == 0 and e.anchor.sent_ms == 0 and !e.anchor.counted,
+            .unanchored_delivery = (e.write_started or e.channel_sent or e.channel_pending or e.retryable) and
+                e.anchor.after_ms == 0 and e.anchor.user_count == 0 and !e.anchor.counted,
         };
         result.id[result.count] = e.id;
         result.count += 1;
@@ -2733,6 +2734,16 @@ test "IGSH-1415 a host message stops its own bubble once the transcript has it" 
     try std.testing.expectEqual(@as(?usize, 2), try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, true));
     try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, false)) == null);
     try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, .{ .user_count = 2, .counted = true }, false, text, true)) == null);
+}
+
+test "IGSH-1266 the first message of a new chat stops its bubble once the transcript has it" {
+    const buf = std.unicode.utf8ToUtf16LeStringLiteral("\u{276f} say ok\r\n");
+    var blocks: [8]ChatBlock = undefined;
+    const n = chatClassifyBlocks(buf, &blocks);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("say ok\n");
+    const anchor = chat_echo.Anchor{ .sent_ms = 1761999999000 };
+    try std.testing.expectEqual(@as(?usize, 0), try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, true));
+    try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, false)) == null);
 }
 
 test "Chat View echo matches only user blocks after the baseline" {

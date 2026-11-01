@@ -1536,6 +1536,15 @@ fn chatComposerPaintBuffered(hwnd: HANDLE, target: HANDLE) bool {
     return w.BitBlt(target, 0, 0, client.right, client.bottom, dc, 0, 0, w.GDI_SRCCOPY) != 0;
 }
 
+fn chatComposerEnterSends() void {
+    if (app_state.g_chat_ac.open and !CHAT_AC_ENTER_SENDS) {
+        if (chatAcAccept()) return;
+        chatAcClose();
+    }
+    chatShellDraftNoteSend();
+    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_SEND, 0, 0);
+}
+
 fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRESULT {
     if (app_state.g_chat_ac.open and (msg == WM_KEYDOWN or msg == 0x0102)) list_input.skills.keyboard();
     const down = @as(i16, @bitCast(@as(u16, 0x8000)));
@@ -1646,6 +1655,15 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
         postPaletteToggle();
         return 0;
     }
+    if (msg == WM_KEYDOWN and wp == 0x0D) {
+        const shift = (GetAsyncKeyState(0x10) & down) != 0;
+        const alt = (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0;
+        if (!shift and !alt and !isCtrlDown() and chat_dictation_state != .listening) {
+            app_state.g_chat_enter_key_sent_tick = GetTickCount64();
+            chatComposerEnterSends();
+            return 0;
+        }
+    }
     if (msg == 0x0102) {
         if (wp == 0x09 and app_state.g_chat_ac_tab_accepted) {
             app_state.g_chat_ac_tab_accepted = false;
@@ -1655,12 +1673,10 @@ fn chatComposerSubclassCore(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) LRE
         if (wp == 0x0D) {
             const shift = (GetAsyncKeyState(0x10) & @as(i16, @bitCast(@as(u16, 0x8000)))) != 0;
             if (!shift) {
-                if (app_state.g_chat_ac.open and !CHAT_AC_ENTER_SENDS) {
-                    if (chatAcAccept()) return 0;
-                    chatAcClose();
-                }
-                chatShellDraftNoteSend();
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHAT_SEND, 0, 0);
+                const sent_tick = app_state.g_chat_enter_key_sent_tick;
+                app_state.g_chat_enter_key_sent_tick = 0;
+                if (sent_tick != 0 and GetTickCount64() -| sent_tick <= 200) return 0;
+                chatComposerEnterSends();
                 return 0;
             }
             chatAcClose();
@@ -2937,4 +2953,59 @@ test "IGSH-1072 queued Ctrl+D stops after physical Ctrl release" {
 
 test "IGSH-1072 queued Ctrl+A selects the full dictation draft" {
     try testChatDictation(.queued_select);
+}
+
+test "IGSH-1266 Enter sends from the key down and leaves the composer text alone" {
+    const w = @import("win32.zig");
+    const saved = .{
+        .main = app_state.g_main_hwnd,
+        .composer = app_state.g_chat_composer_hwnd,
+        .orig = app_state.g_chat_composer_orig_proc,
+        .active = app_state.g_chat_active,
+        .count = app_state.shell_count,
+        .shell = app_state.active_shell,
+        .sent_tick = app_state.g_chat_enter_key_sent_tick,
+        .ac_open = app_state.g_chat_ac.open,
+        .draft_pending = shell_draft.edit_pending,
+        .draft_quiet = shell_draft.quiet_until_ms,
+    };
+    defer {
+        app_state.g_main_hwnd = saved.main;
+        app_state.g_chat_composer_hwnd = saved.composer;
+        app_state.g_chat_composer_orig_proc = saved.orig;
+        app_state.g_chat_active = saved.active;
+        app_state.shell_count = saved.count;
+        app_state.active_shell = saved.shell;
+        app_state.g_chat_enter_key_sent_tick = saved.sent_tick;
+        app_state.g_chat_ac.open = saved.ac_open;
+        shell_draft.edit_pending = saved.draft_pending;
+        shell_draft.quiet_until_ms = saved.draft_quiet;
+    }
+    app_state.shells[0] = app_state.empty_shell;
+    app_state.shells[0].chat_id = 6415;
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.g_chat_active = true;
+    app_state.g_chat_enter_key_sent_tick = 0;
+    app_state.g_chat_ac.open = false;
+    const parent = CreateWindowExW(0, L("STATIC"), L(""), 0x80000000, 0, 0, 1200, 800, null, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(parent);
+    const edit = CreateWindowExW(0, L("EDIT"), L("Reply with exactly: pong four"), WS_CHILD | ES_MULTILINE | ES_WANTRETURN, 0, 0, 600, 80, parent, null, null, null) orelse return error.TestUnexpectedResult;
+    defer _ = w.DestroyWindow(edit);
+    app_state.g_main_hwnd = parent;
+    app_state.g_chat_composer_hwnd = edit;
+    app_state.g_chat_composer_orig_proc = GetWindowLongPtrW(edit, -4);
+    _ = chatComposerSubclassCore(edit, WM_KEYDOWN, 0x0D, 0x001C0001);
+    var message: w.MSG = undefined;
+    try std.testing.expect(w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1) != 0);
+    var text: [128]u16 = undefined;
+    const len: usize = @intCast(@max(0, w.GetWindowTextW(edit, &text, text.len)));
+    const expected = std.mem.span(L("Reply with exactly: pong four"));
+    try std.testing.expectEqual(expected.len, len);
+    try std.testing.expectEqualSlices(u16, expected, text[0..len]);
+    _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 1);
+    try std.testing.expectEqual(@as(BOOL, 0), w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1));
+    app_state.g_chat_enter_key_sent_tick = 0;
+    _ = chatComposerSubclassCore(edit, 0x0102, 0x0D, 1);
+    try std.testing.expect(w.PeekMessageW(&message, parent, WM_APP_CHAT_SEND, WM_APP_CHAT_SEND, 1) != 0);
 }
