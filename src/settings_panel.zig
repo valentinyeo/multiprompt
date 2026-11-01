@@ -6,6 +6,7 @@ const drawing = @import("drawing.zig");
 const smooth = @import("smooth.zig");
 const files = @import("file_io.zig");
 const L = @import("startup.zig").L;
+const words = @import("ui_words.zon");
 const a = std.heap.page_allocator;
 
 extern "user32" fn IsDialogMessageW(w.HANDLE, *w.MSG) callconv(w.WINAPI) w.BOOL;
@@ -119,15 +120,15 @@ fn controlRect(control: Control) w.RECT {
 
 fn label(control: Control) w.LPCWSTR {
     return switch (control) {
-        .close => L("Close Settings"),
-        .theme => L("Theme"),
-        .font_small => L("Small"),
-        .font_normal => L("Normal"),
-        .font_large => L("Large"),
-        .terminal => L("Terminal details"),
-        .dictation => L("Dictation key"),
-        .upload => L("Screencast2 upload key"),
-        .release_notes => L("Release notes"),
+        .close => L(words.settings_close),
+        .theme => L(words.settings_theme),
+        .font_small => L(words.settings_font_small),
+        .font_normal => L(words.settings_font_normal),
+        .font_large => L(words.settings_font_large),
+        .terminal => L(words.settings_terminal_details),
+        .dictation => L(words.settings_dictation_key),
+        .upload => L(words.settings_upload_key),
+        .release_notes => L(words.settings_release_notes),
     };
 }
 
@@ -312,7 +313,7 @@ fn keyProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv
             const id: u16 = @truncate(wp);
             if (id == 2) closeKey();
             if (id == 1) {
-                if (saveKey(key_control)) closeKey() else _ = w.MessageBoxW(hwnd, L("This key could not be saved. Check file permissions and try again."), L("Settings"), 0x10);
+                if (saveKey(key_control)) closeKey() else _ = w.MessageBoxW(hwnd, L(words.settings_key_save_error), L(words.settings_title), 0x10);
             }
             return 0;
         },
@@ -327,7 +328,7 @@ fn keyProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv
             const brush = w.CreateSolidBrush(tokens.ReaderPanel);
             _ = w.FillRect(hdc, &rc, brush);
             _ = w.DeleteObject(brush);
-            paintText(hdc, if (key_control == .dictation) "Dictation key" else "Screencast2 upload key", .{ .left = s(24), .right = rc.right - s(24), .top = s(16), .bottom = s(56) }, 1, tokens.ReaderForeground, 0);
+            paintText(hdc, if (key_control == .dictation) words.settings_dictation_key else words.settings_upload_key, .{ .left = s(24), .right = rc.right - s(24), .top = s(16), .bottom = s(56) }, 1, tokens.ReaderForeground, 0);
             _ = w.EndPaint(hwnd, &ps);
             return 0;
         },
@@ -361,8 +362,8 @@ fn openKey(control: Control) void {
     if (key_window == null) return;
     key_edit = w.CreateWindowExW(0, L("EDIT"), L(""), 0x40000000 | 0x10000000 | 0x00010000 | 0x20 | 0x80, s(24), s(76), width - s(48), s(32), key_window, @ptrFromInt(10), instance, null);
     key_edit_proc = w.SetWindowLongPtrW(key_edit, -4, @bitCast(@intFromPtr(&keyEditProc)));
-    const cancel = w.CreateWindowExW(0, L("BUTTON"), L("Cancel"), 0x40000000 | 0x10000000 | 0x00010000, width - s(208), s(140), s(84), s(36), key_window, @ptrFromInt(2), instance, null);
-    const save = w.CreateWindowExW(0, L("BUTTON"), L("Save"), 0x40000000 | 0x10000000 | 0x00010000 | 1, width - s(108), s(140), s(84), s(36), key_window, @ptrFromInt(1), instance, null);
+    const cancel = w.CreateWindowExW(0, L("BUTTON"), L(words.action_cancel), 0x40000000 | 0x10000000 | 0x00010000, width - s(208), s(140), s(84), s(36), key_window, @ptrFromInt(2), instance, null);
+    const save = w.CreateWindowExW(0, L("BUTTON"), L(words.action_save), 0x40000000 | 0x10000000 | 0x00010000 | 1, width - s(108), s(140), s(84), s(36), key_window, @ptrFromInt(1), instance, null);
     for ([_]w.HANDLE{ key_edit, cancel, save }) |child| _ = w.SendMessageW(child, 0x30, @intFromPtr(fonts[0]), 1);
     loadKey(control);
     _ = EnableWindow(window, 0);
@@ -403,11 +404,11 @@ fn paintContent(hdc: w.HANDLE) void {
     _ = w.FillRect(hdc, &rc, brush);
     const g = contentGeometry();
     const extra = if (g.stacked) s(40) else @as(i32, 0);
-    paintText(hdc, "LOOK", lineRect(0, s(20)), 2, tokens.ReaderHint, 0);
+    paintText(hdc, words.settings_section_look, lineRect(0, s(20)), 2, tokens.ReaderHint, 0);
     card(hdc, g.look);
-    paintText(hdc, "Theme", lineRect(g.look.top, s(48)), 0, tokens.ReaderForeground, 0);
-    paintText(hdc, "Chat font size", lineRect(g.look.top + s(48), s(48)), 0, tokens.ReaderForeground, 0);
-    paintText(hdc, "Terminal details", lineRect(g.look.top + s(96) + extra, s(48)), 0, tokens.ReaderForeground, 0);
+    paintText(hdc, words.settings_theme, lineRect(g.look.top, s(48)), 0, tokens.ReaderForeground, 0);
+    paintText(hdc, words.settings_chat_font_size, lineRect(g.look.top + s(48), s(48)), 0, tokens.ReaderForeground, 0);
+    paintText(hdc, words.settings_terminal_details, lineRect(g.look.top + s(96) + extra, s(48)), 0, tokens.ReaderForeground, 0);
     var presets = controlRect(.font_small);
     presets.left -= s(3);
     presets.right = controlRect(.font_large).right + s(3);
@@ -420,11 +421,11 @@ fn paintContent(hdc: w.HANDLE) void {
     presets.bottom -= s(1);
     smooth.fillRoundRect(hdc, presets, s(18), tokens.ReaderPanel);
     paintWorkspaceColors(hdc);
-    paintText(hdc, "KEYS", lineRect(g.keys.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
+    paintText(hdc, words.settings_section_keys, lineRect(g.keys.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
     card(hdc, g.keys);
-    paintText(hdc, "ABOUT", lineRect(g.about.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
+    paintText(hdc, words.settings_section_about, lineRect(g.about.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
     card(hdc, g.about);
-    paintText(hdc, "Version", lineRect(g.about.top + s(52), s(52)), 0, tokens.ReaderForeground, 0);
+    paintText(hdc, words.settings_version, lineRect(g.about.top + s(52), s(52)), 0, tokens.ReaderForeground, 0);
     paintText(hdc, @import("main.zig").APP_VERSION, lineRect(g.about.top + s(52), s(52)), 0, tokens.ReaderHint, w.DT_RIGHT);
     const separator = w.CreateSolidBrush(tokens.ReaderOutline);
     defer _ = w.DeleteObject(separator);
@@ -443,7 +444,7 @@ fn colorDotRect(workspace: usize, color: usize) w.RECT {
 
 fn paintWorkspaceColors(hdc: w.HANDLE) void {
     const g = contentGeometry();
-    paintText(hdc, "WORKSPACE COLORS", lineRect(g.colors.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
+    paintText(hdc, words.settings_section_workspace_colors, lineRect(g.colors.top - s(24), s(20)), 2, tokens.ReaderHint, 0);
     card(hdc, g.colors);
     for (0..state.g_lws_count) |workspace| {
         var name: [32]u8 = undefined;
@@ -458,7 +459,7 @@ fn paintWorkspaceColors(hdc: w.HANDLE) void {
             rc.bottom -= s(4);
             smooth.fillEllipse(hdc, rc, ((hex >> 16) & 255) | (hex & 0xFF00) | ((hex & 255) << 16));
         }
-        paintText(hdc, "Auto", colorDotRect(workspace, 7), 2, if (state.g_ws_colors[workspace] == null) tokens.ReaderForeground else tokens.ReaderHint, w.DT_CENTER);
+        paintText(hdc, words.settings_color_auto, colorDotRect(workspace, 7), 2, if (state.g_ws_colors[workspace] == null) tokens.ReaderForeground else tokens.ReaderHint, w.DT_CENTER);
     }
 }
 
@@ -470,14 +471,14 @@ fn chooseWorkspaceColor(workspace: usize, color: ?u8) void {
 }
 
 fn currentTheme() []const u8 {
-    if (state.g_system_theme) return "System";
-    if (state.g_light_theme) return "Light";
-    if (state.g_mid_theme) return "Mid";
-    if (state.g_amoled_theme) return "AMOLED";
-    if (state.g_edge_gray_theme) return "Edge gray";
-    if (state.g_multiprompt_theme) return "Multi Bot";
-    if (state.g_dev_theme_active) return "Custom";
-    return "Dark";
+    if (state.g_system_theme) return words.settings_theme_system;
+    if (state.g_light_theme) return words.settings_theme_light;
+    if (state.g_mid_theme) return words.settings_theme_mid;
+    if (state.g_amoled_theme) return words.settings_theme_amoled;
+    if (state.g_edge_gray_theme) return words.settings_theme_edge_gray;
+    if (state.g_multiprompt_theme) return words.settings_theme_multi_bot;
+    if (state.g_dev_theme_active) return words.settings_theme_custom;
+    return words.settings_theme_dark;
 }
 
 const DrawItem = extern struct {
@@ -534,17 +535,17 @@ fn drawControl(item: *const DrawItem) void {
         return;
     }
     if (control == .dictation or control == .upload or control == .release_notes) {
-        paintText(item.hdc, if (control == .dictation) "Dictation key" else if (control == .upload) "Screencast2 upload key" else "Release notes", rc, 0, tokens.ReaderForeground, 0);
-        paintText(item.hdc, if (control == .release_notes) ">" else "Set >", rc, 0, tokens.ReaderHint, w.DT_RIGHT);
+        paintText(item.hdc, if (control == .dictation) words.settings_dictation_key else if (control == .upload) words.settings_upload_key else words.settings_release_notes, rc, 0, tokens.ReaderForeground, 0);
+        paintText(item.hdc, if (control == .release_notes) ">" else words.settings_set_indicator, rc, 0, tokens.ReaderHint, w.DT_RIGHT);
     } else {
         if (control == .close or selected or (item.state & 0x11) != 0) smooth.fillRoundRect(item.hdc, rc, s(16), tokens.ReaderRaised);
         var buffer: [40]u8 = undefined;
         const value: []const u8 = switch (control) {
             .close => "x",
             .theme => std.fmt.bufPrint(&buffer, "{s} >", .{currentTheme()}) catch "",
-            .font_small => "Small",
-            .font_normal => "Normal",
-            .font_large => "Large",
+            .font_small => words.settings_font_small,
+            .font_normal => words.settings_font_normal,
+            .font_large => words.settings_font_large,
             else => "",
         };
         paintText(item.hdc, value, rc, 0, if (selected or control == .close) tokens.ReaderForeground else tokens.ReaderHint, if (control == .theme) w.DT_RIGHT else w.DT_CENTER);
@@ -577,7 +578,7 @@ fn ensureVisible(control: Control) void {
 fn chooseTheme() void {
     const menu = w.CreatePopupMenu();
     defer _ = w.DestroyMenu(menu);
-    const labels = [_]w.LPCWSTR{ L("System"), L("Dark"), L("Mid"), L("Light"), L("AMOLED"), L("Edge gray"), L("Multi Bot") };
+    const labels = [_]w.LPCWSTR{ L(words.settings_theme_system), L(words.settings_theme_dark), L(words.settings_theme_mid), L(words.settings_theme_light), L(words.settings_theme_amoled), L(words.settings_theme_edge_gray), L(words.settings_theme_multi_bot) };
     for (labels, 0..) |name, i| _ = w.AppendMenuW(menu, 0, i + 1, name);
     var bounds = std.mem.zeroes(w.RECT);
     _ = w.GetWindowRect(children[index(.theme)], &bounds);
@@ -750,7 +751,7 @@ fn panelProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callco
             inner.right -= outline;
             inner.bottom -= outline;
             smooth.fillRoundRect(hdc, inner, s(23), tokens.ReaderPanel);
-            paintText(hdc, "Settings", .{ .left = rc.left + s(24), .right = rc.right - s(80), .top = rc.top + s(24), .bottom = rc.top + s(56) }, 1, tokens.ReaderForeground, 0);
+            paintText(hdc, words.settings_title, .{ .left = rc.left + s(24), .right = rc.right - s(80), .top = rc.top + s(24), .bottom = rc.top + s(56) }, 1, tokens.ReaderForeground, 0);
             _ = w.EndPaint(hwnd, &ps);
             return 0;
         },
@@ -816,14 +817,14 @@ pub fn open(parent: w.HANDLE) void {
         return;
     }
     edit_brush = w.CreateSolidBrush(tokens.ReaderControl);
-    window = w.CreateWindowExW(0x10000 | 0x80, L("MultipromptSettings"), L("Settings"), 0x80000000 | 0x02000000, 0, 0, 1, 1, owner, null, instance, null);
+    window = w.CreateWindowExW(0x10000 | 0x80, L("MultipromptSettings"), L(words.settings_title), 0x80000000 | 0x02000000, 0, 0, 1, 1, owner, null, instance, null);
     if (window == null) {
         var trace: [100]u8 = undefined;
         @import("diagnostics.zig").debugLog(std.fmt.bufPrint(&trace, "[settings] create failed error={d}", .{w.GetLastError()}) catch "[settings] create failed");
         release();
         return;
     }
-    viewport = w.CreateWindowExW(0x10000, L("MultipromptSettingsContent"), L("Settings cards"), 0x40000000 | 0x10000000 | 0x02000000 | 0x00010000, 0, 0, 1, 1, window, null, instance, null);
+    viewport = w.CreateWindowExW(0x10000, L("MultipromptSettingsContent"), L(words.settings_cards), 0x40000000 | 0x10000000 | 0x02000000 | 0x00010000, 0, 0, 1, 1, window, null, instance, null);
     for (std.meta.tags(Control)) |control| {
         const parent_window = if (control == .close) window else viewport;
         children[index(control)] = w.CreateWindowExW(0, L("BUTTON"), label(control), 0x40000000 | 0x10000000 | 0x00010000 | 0xb | 0x4000, 0, 0, 1, 1, parent_window, @ptrFromInt(@intFromEnum(control)), instance, null);
