@@ -2119,9 +2119,12 @@ def message_row(row):
 def message_expire(db, provider, sid):
     rows = db.execute("SELECT * FROM shared_messages WHERE provider=? AND sid=? AND state='sent' AND deadline<=? ORDER BY position", (provider, sid, time.time())).fetchall()
     if rows and provider == 'claude' and host_owned(provider, sid):
-        inflight = host_session_state(provider, sid).get('inflight')
-        current = inflight.get('id') if isinstance(inflight, dict) else None
-        rows = [row for row in rows if row[0] != current]
+        state = host_session_state(provider, sid)
+        inflight = state.get('inflight')
+        current = {token for token in state.get('sends') or [] if isinstance(token, str)}
+        if isinstance(inflight, dict):
+            current.add(inflight.get('id'))
+        rows = [row for row in rows if row[0] not in current]
     for row in rows:
         db.execute("UPDATE shared_messages SET state='failed',deadline=NULL WHERE id=? AND state='sent'", (row[0],))
         message_event(db, provider, sid, message_row(db.execute("SELECT * FROM shared_messages WHERE id=?", (row[0],)).fetchone()))
@@ -2841,8 +2844,8 @@ def host_event_text(value, limit=HOST_EVENT_TEXT_LIMIT):
     return text if len(text) <= limit else text[:limit]
 
 
-def host_event(provider, sid, tmux, session, kind, payload=None, item=None):
-    message = dict(v=HOST_EVENT_VERSION, sid=sid, turn=session.get("turn"), kind=kind,
+def host_event(provider, sid, tmux, session, kind, payload=None, item=None, turn=None):
+    message = dict(v=HOST_EVENT_VERSION, sid=sid, turn=session.get("turn") if turn is None else turn, kind=kind,
                    at=int(time.time() * 1000), item=item, payload=payload if isinstance(payload, dict) else {})
     try:
         with host_db(provider, sid, tmux, session) as db:
@@ -2987,7 +2990,8 @@ def host_bind_uuid(provider, sid, tmux, session, event):
     names = [event.get("user_message_uuid")]
     listed = event.get("user_message_uuids")
     names.extend(listed if isinstance(listed, list) else [])
-    uuids = [name for name in names if isinstance(name, str) and name]
+    bound = {name for entry in session["sends"] for name in entry.get("uuid") or []}
+    uuids = [name for name in names if isinstance(name, str) and name and name not in bound]
     sends = [entry for entry in session["sends"] if not entry.get("uuid")]
     if not uuids or not sends:
         return
@@ -2997,7 +3001,8 @@ def host_bind_uuid(provider, sid, tmux, session, event):
 
 def host_turn_started(provider, sid, tmux, session, entry):
     host_event(provider, sid, tmux, session, "turn.started",
-               dict(message_id=entry["id"], text_sha256=entry["sha256"], uuids=list(entry.get("uuid") or [])))
+               dict(message_id=entry["id"], text_sha256=entry["sha256"], uuids=list(entry.get("uuid") or [])),
+               turn=entry["turn"])
 
 
 def host_user_event(provider, sid, tmux, session, event):
@@ -3260,8 +3265,6 @@ def host_handle_request(provider, sid, tmux, session, request):
     seen = written.get(token)
     if isinstance(seen, dict) and seen.get("epoch") == epoch:
         return dict(status="duplicate", reason="already_written", attempt=seen.get("attempt"))
-    if isinstance(session.get("inflight"), dict):
-        return dict(status="busy", reason="turn_in_flight")
     if tmux is None:
         return host_refuse("no_chat")
     binding = dict(v=1, mode="stream_json_user_line", host=os.getpid(), session=sid)
@@ -3295,14 +3298,17 @@ def host_handle_request(provider, sid, tmux, session, request):
     written[token] = dict(attempt=attempt, epoch=epoch, accepted=False, at=time.time(),
                           mode="stream_json_user_line")
     session["state"]["turns"] = session["state"].get("turns", 0) + 1
-    session["turn"] = "t-" + str(session["state"]["turns"])
-    entry = dict(id=token, attempt=attempt, epoch=epoch, at=time.time(), accepted=False, turn=session["turn"],
+    entry = dict(id=token, attempt=attempt, epoch=epoch, at=time.time(), accepted=False,
+                 turn="t-" + str(session["state"]["turns"]),
                  sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(), uuid=None)
     session["sends"].append(entry)
+    if session["turn"] is None:
+        session["turn"] = entry["turn"]
     if not isinstance(session.get("inflight"), dict):
         session["inflight"] = entry
     host_turn_started(provider, sid, tmux, session, entry)
     session["state"]["inflight"] = session["inflight"]
+    session["state"]["sends"] = [item["id"] for item in session["sends"]]
     host_state_write(provider, sid, session["state"])
     host_log(provider, sid, "delivered", dict(id=token, attempt=attempt))
     return dict(status="sent")
@@ -3384,6 +3390,7 @@ def host_agent_event(provider, sid, tmux, session, raw):
                    dict(status=host_turn_status(session, event), stop_reason=event.get("stop_reason"),
                         cost_usd=event.get("total_cost_usd"), usage=event.get("usage") or {}))
         session["state"]["inflight"] = None
+        session["state"]["sends"] = []
         session["inflight"] = None
         session["sends"] = []
         session["turn"] = None
@@ -5062,7 +5069,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 41
+RUNTIME_GENERATION = 42
 
 if __name__ == '__main__':
     import base64 as _base64

@@ -4156,17 +4156,22 @@ class AgentHostTest(unittest.TestCase):
         self.assertEqual(self.user_lines(), [self.text])
         self.assertEqual(len(self.host_events('delivered')), 1)
 
-    def test_host_busy_chat_keeps_the_next_message_queued(self):
+    def test_host_writes_a_second_message_while_a_turn_is_in_flight(self):
         self.enable(mode='silent')
         self.seed(text='first prompt')
         self.dispatch()
         self.wait_for(lambda: self.user_lines() == ['first prompt'])
         self.seed(token='host_fixture_message_02', text='second prompt')
         self.dispatch()
-        self.assertEqual(self.message('host_fixture_message_02')['state'], 'queued')
+        self.assertNotEqual(self.message('host_fixture_message_02')['state'], 'queued',
+                            'a hosted chat must take the next message while a turn runs')
+        self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt'])
         self.assertEqual(reader.host_backoff(self.provider, self.sid), 0.0)
-        self.assertEqual(self.user_lines(), ['first prompt'])
-        self.assertEqual(len(self.host_events('delivered')), 1)
+        db = reader.message_store_db(self.tmux)
+        attempts = db.execute("SELECT id FROM message_attempts WHERE provider='claude' AND sid=? AND outcome='sent' ORDER BY id",
+                              (self.sid,)).fetchall()
+        db.close()
+        self.assertEqual([row[0] for row in attempts], ['host_fixture_message_01', 'host_fixture_message_02'])
 
     def test_host_lock_refuses_second_owner(self):
         self.enable()
@@ -4703,31 +4708,34 @@ def ask(request_id, tool, payload, suggestions=None):
 
 record(dict(kind='start', args=sys.argv[1:]))
 emit(dict(type='system', subtype='init', session_id='native-fixture', uuid='u0'))
+turns = 0
 for raw in sys.stdin:
     try:
         line = json.loads(raw)
     except ValueError:
         continue
     record(dict(kind='user', text=line['message']['content'][0]['text']))
+    turns += 1
+    message_id = 'msg-' + str(turns)
     if mode == 'crash':
         os._exit(1)
     if mode not in ('tools', 'silent', 'approval', 'question', 'exitplan', 'slow'):
-        paced(frames('msg-1', [dict(type='thinking', parts=['Think ', 'first.'], text='Think first.'),
+        paced(frames(message_id, [dict(type='thinking', parts=['Think ', 'first.'], text='Think first.'),
                                dict(type='text', parts=['one an', 'swer'], text='one answer')], 'end_turn'))
         finish()
     elif mode == 'tools':
-        paced(frames('msg-1', [dict(type='tool_use', id='toolu_one', name='Bash', input=dict(command='echo alpha')),
+        paced(frames(message_id, [dict(type='tool_use', id='toolu_one', name='Bash', input=dict(command='echo alpha')),
                                dict(type='text', parts=['do', 'ne'], text='done')], 'tool_use'))
         emit(dict(type='user', message=dict(role='user', content=[dict(type='tool_result', tool_use_id='toolu_one', content='alpha')]), uuid='u1'))
         finish()
     elif mode == 'silent':
-        paced(frames('msg-1', [dict(type='text', parts=['first ', 'answer'], text='first answer')], 'end_turn')[:-2])
+        paced(frames(message_id, [dict(type='text', parts=['first ', 'answer'], text='first answer')], 'end_turn')[:-2])
     elif mode == 'approval':
         reply = ask('req-1', 'Bash', dict(command='rm -rf build', description='Remove the build directory'),
                     [dict(type='addRules', rules=[dict(toolName='Bash', ruleContent='rm -rf build')], behavior='allow', destination='localSettings')])
         record(dict(kind='decision', decision=reply))
         emit(dict(type='user', message=dict(role='user', content=[dict(type='tool_result', tool_use_id='toolu_req', content='removed')]), uuid='u1'))
-        paced(frames('msg-1', [dict(type='text', parts=['do', 'ne'], text='done')], 'end_turn'))
+        paced(frames(message_id, [dict(type='text', parts=['do', 'ne'], text='done')], 'end_turn'))
         finish()
     elif mode == 'question':
         reply = ask('req-1', 'AskUserQuestion', dict(questions=[
@@ -4740,7 +4748,7 @@ for raw in sys.stdin:
         record(dict(kind='decision', decision=reply))
         finish()
     elif mode == 'slow':
-        paced(frames('msg-1', [dict(type='text', parts=['work', 'ing'], text='working')], 'end_turn')[:-2])
+        paced(frames(message_id, [dict(type='text', parts=['work', 'ing'], text='working')], 'end_turn')[:-2])
         wait_control('never')
         finish(subtype='error_during_execution', stop_reason=None, cost=0)
 '''
@@ -5163,6 +5171,32 @@ class HostControlTest(HostEventStreamTest):
         self.assertEqual(self.writes(), [])
         self.assertEqual(self.reply(op='approval_reply', request_id=request_id, decision='accept')['reason'], 'unknown_request')
 
+    def test_a_reported_user_uuid_rebinds_the_turn_it_belongs_to(self):
+        self.session['sends'] = [dict(id='first', attempt='a', epoch=0, accepted=True, turn='t-1', sha256='x', uuid=None),
+                                 dict(id='second', attempt='b', epoch=0, accepted=False, turn='t-2', sha256='y', uuid=None)]
+        self.feed(dict(type='user', message=dict(role='user', content=[]), user_message_uuids=['um-1']))
+        started = self.events('turn.started')
+        self.assertEqual(len(started), 1)
+        self.assertEqual(started[0]['turn'], 't-2')
+        self.assertEqual(started[0]['payload'], dict(message_id='second', text_sha256='y', uuids=['um-1']))
+        self.feed(dict(type='user', message=dict(role='user', content=[]), user_message_uuids=['um-1']))
+        self.assertEqual(len(self.events('turn.started')), 1, 'one uuid binds one send')
+
+    def test_a_mid_turn_send_is_never_expired_while_it_waits(self):
+        reader.host_write(reader.host_paths(self.provider, self.sid)['owner'],
+                          dict(owner='host', pid=os.getpid(), at=time.time()))
+        reader.host_write(reader.host_paths(self.provider, self.sid)['state'],
+                          dict(inflight=dict(id='first'), sends=['second']))
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("INSERT OR IGNORE INTO message_chats(provider,sid) VALUES ('claude',?)", (self.sid,))
+            db.execute("INSERT OR REPLACE INTO shared_messages VALUES ('second','claude',?,?,1,'a','sent',?,'@mp-shared-v1:b:accepted:1',0,?)",
+                       (self.sid, 'second prompt', time.time() - 60, time.time()))
+        reader.message_expire(db, 'claude', self.sid)
+        state = db.execute("SELECT state FROM shared_messages WHERE id='second'").fetchone()[0]
+        db.close()
+        self.assertEqual(state, 'sent')
+
     def test_set_permission_mode_writes_the_control_request(self):
         self.assertEqual(self.reply(op='set_permission_mode', mode='acceptEdits')['status'], 'ok')
         written = self.writes()[0]
@@ -5318,23 +5352,7 @@ class AgentHostInterruptTest(AgentHostControlTest):
 
 
 class AgentHostMidTurnSendTest(AgentHostControlTest):
-    def test_a_second_message_is_written_while_the_first_turn_runs(self):
-        self.fake('silent')
-        self.seed(text='first prompt')
-        self.dispatch()
-        self.wait_for(lambda: self.user_lines() == ['first prompt'])
-        self.seed(token='host_fixture_message_02', text='second prompt')
-        self.dispatch()
-        self.assertEqual(self.message('host_fixture_message_02')['state'], 'sent')
-        self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt'])
-        self.assertEqual(reader.host_backoff(self.provider, self.sid), 0.0)
-        db = reader.message_store_db(self.tmux)
-        attempts = db.execute("SELECT id,outcome FROM message_attempts WHERE provider='claude' AND sid=? ORDER BY id", (self.sid,)).fetchall()
-        db.close()
-        self.assertEqual(attempts, [('host_fixture_message_01', 'sent'), ('host_fixture_message_02', 'sent')])
-        self.assertEqual([row['turn'] for row in self.events('turn.started')], ['t-1', 't-2'])
-
-    def test_a_reply_binds_to_the_turn_the_cli_reports(self):
+    def test_a_second_message_starts_its_own_turn_in_the_event_log(self):
         self.fake('silent')
         self.seed(text='first prompt')
         self.dispatch()
@@ -5342,13 +5360,17 @@ class AgentHostMidTurnSendTest(AgentHostControlTest):
         self.seed(token='host_fixture_message_02', text='second prompt')
         self.dispatch()
         self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt'])
-        second = self.events('turn.started')[1]
-        self.assertEqual(second['payload']['uuids'], [])
-        db = reader.message_store_db(self.tmux)
-        with db:
-            reader.message_event(db, 'claude', self.sid, dict(kind='probe'))
-        db.close()
-        self.assertEqual(len(self.events('turn.started')), 2)
+        started = self.events('turn.started')
+        self.assertEqual([row['turn'] for row in started], ['t-1', 't-2'])
+        self.assertEqual([row['payload']['message_id'] for row in started], ['host_fixture_message_01', 'host_fixture_message_02'])
+        self.assertEqual([row['payload']['text_sha256'] for row in started],
+                         [hashlib.sha256(b'first prompt').hexdigest(), hashlib.sha256(b'second prompt').hexdigest()])
+        self.wait_for(lambda: {row['item'] for row in self.events('text.delta')} == {'msg-1:text:0', 'msg-2:text:0'})
+        self.assertEqual({row['turn'] for row in self.events('text.delta')}, {'t-1'},
+                         'a queued message joins the turn that is already running')
+        self.assertEqual({row['item'] for row in self.events('text.delta')}, {'msg-1:text:0', 'msg-2:text:0'},
+                         'each message streams under its own message id')
+        self.assertEqual(self.host_events('delivered')[-1]['detail']['id'], 'host_fixture_message_02')
 
 
 

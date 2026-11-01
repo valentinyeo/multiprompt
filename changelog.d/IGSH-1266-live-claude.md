@@ -13,3 +13,5 @@ Escape on a waiting approval cancels it.
 You can answer Claude's questions right in the chat.
 The next message after a plan goes out as your go, or as your notes on it.
 The stop button now ends just the answer, not the whole chat.
+You can send the next message without waiting for the answer to finish.
+A message sent mid answer keeps its place instead of being turned away.
