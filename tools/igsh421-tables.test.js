@@ -22,6 +22,10 @@ var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const chat_hit = @import("chat_hit.zig");
+const chat_reaction = @import("chat_reaction.zig");
+const chat_reply = @import("chat_reply.zig");
+var g_reaction_view: chat_reaction.View = .{};
+fn chatDisplayForIndex(_: usize) ?ChatDisplay { return null; }
 const chat_markdown = @import("chat_markdown.zig");
 const chat_code = @import("chat_code.zig");
 const chat_style = @import("chat_style.zig");
@@ -323,10 +327,14 @@ test "ISSUE-458 production wheel targets the pointed table and leaves vertical w
 function execute(control) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh421-grid-'));
   try {
-    copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_table_measure.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig'], dir);
+    copyZig(['chat_hit.zig', 'chat_markdown.zig', 'chat_table_measure.zig', 'chat_code.zig', 'chat_style.zig', 'link_detect.zig', 'chat_reaction.zig', 'chat_reply.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_find_ui.zig'), 'pub var last: usize = 0;\npub fn paintRun(_: anytype, _: []const u16, at: usize, _: i32, _: i32, _: i32) void { last = at; }\n');
-    let functions = ['chatReceivedBlocks', 'chatBlockDisplayRange', 'chatRichSize', 'chatRichText', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY'].map(name => body(name)).join('\n');
+    let functions = ['chatReceivedBlocks', 'chatBlockDisplayRange', 'chatRichSize', 'chatRichText', 'chatTableLayout', 'chatFlowTable', 'chatFlowBlock', 'chatTableAt', 'chatTableSetScroll', 'chatTableMouseDown', 'chatTableMouseMove', 'chatTableWheel', 'chatFindY', 'chatReplyLineHeight'].map(name => body(name)).join('\n');
     const render = fs.readFileSync(path.join(__dirname, '../src/chat_render.zig'), 'utf8');
+    const displayStart = render.indexOf('pub const ChatDisplay = struct {');
+    const displayEnd = render.indexOf('test "IGSH-1132', displayStart);
+    assert.ok(displayStart >= 0 && displayEnd > displayStart, 'chat display declarations');
+    functions = render.slice(displayStart, displayEnd) + functions;
     const start = render.indexOf('const TableMeasureBackend =');
     const end = render.indexOf('fn chatTableLayout(');
     assert.ok(start >= 0 && end > start, 'table measurement declarations');

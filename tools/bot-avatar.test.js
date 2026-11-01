@@ -33,6 +33,7 @@ const state = struct {
   pub const Shell = struct {
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
     name: [64]u16 = @splat(0), name_len: u32 = 0, workspace: u8 = 0,
+    face: ?u8 = null, color: ?u8 = null,
   };
   pub var g_lws_count: u32 = 9;
   pub var g_ws_colors: [9]?u8 = @splat(null);
@@ -201,18 +202,23 @@ test "console buffer is used and released, never the inherited log file" {
 });
 
 test('IGSH-1192 fractional circle resolve preserves artwork, premultiplies edges and leaves exterior transparent', () => {
-  const resolve = block(read('src/smooth.zig'), 'pub fn resolveEllipse(');
+  const resolve = block(read('src/smooth.zig'), 'pub fn resolveRounded(');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-circle-'));
   try {
     fs.writeFileSync(path.join(dir, 'circle.zig'), `const std = @import("std");
+const RoundedBounds = struct { x: f32, y: f32, width: f32, height: f32, radius: f32 };
 ${resolve}
+fn circle(n: usize) RoundedBounds {
+    const side: f32 = @floatFromInt(n);
+    return .{ .x = 0, .y = 0, .width = side, .height = side, .radius = side / 2 };
+}
 test "fractional circle is symmetric, premultiplied and resolved in place" {
     for ([_]usize{ 28, 40, 56, 60, 84 }) |size| {
         const stride = size * 4;
         const pixels = try std.testing.allocator.alloc(u32, stride * stride);
         defer std.testing.allocator.free(pixels);
         @memset(pixels, 0x00ffffff);
-        resolveEllipse(pixels, size, size, 4);
+        resolveRounded(pixels, size, size, 4, circle(size));
         var partial: usize = 0;
         var area: usize = 0;
         for (0..size) |y| for (0..size) |x| {

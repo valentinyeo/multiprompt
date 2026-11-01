@@ -196,6 +196,7 @@ test('per-shell deferred console resize defaults to false', () => {
 
 test('production Chat View exits reveal, lay out and focus without ordinary console resets', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-console-return-'));
+  require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   const zig = process.env.ZIG || path.join(os.homedir(), 'zig/zig');
   try {
     copyZig(['chat_view.zig'], dir);

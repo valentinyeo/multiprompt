@@ -8,6 +8,8 @@ const { spawnSync } = require('node:child_process');
 const source = require('./app-source').readAppSource();
 const fontSource = fs.readFileSync(path.join(__dirname, '../src/fonts.zig'), 'utf8');
 const lineHeightPolicy = fontSource.match(/^pub const CHAT_LINE_HEIGHT_PERMILLE[^;]+;/m)[0] + '\n' + body(fontSource, 'chatLineHeight');
+const captureSource = fs.readFileSync(path.join(__dirname, '../src/chat_capture.zig'), 'utf8');
+const blockDisplay = body(captureSource, 'chatBlockDisplayRange');
 function body(text, name) {
   const start = text.indexOf(`fn ${name}(`);
   assert.ok(start >= 0, name);
@@ -192,6 +194,10 @@ var g_chat_capture: [1]u16 = .{'x'};
 var g_chat_last_len: usize = 1;
 var g_chat_layout_dirty = true;
 var g_chat_find_layout_open = false;
+var g_chat_find_id: u32 = 0;
+var g_chat_last_hash: u64 = 0;
+var g_chat_find_ranges: [500]?chat_markdown.Range = @splat(null);
+var g_chat_find_ranges_hash: u64 = 0;
 const CHAT_FIND_TOP_H: i32 = 52;
 const CHAT_STATUS_H: i32 = 20;
 var g_chat_layout_width: i32 = 0;
@@ -229,7 +235,7 @@ var g_chat_blocks_from_file = true;
 var active_shell: u32 = 0;
 var shell_count: u32 = 1;
 const CHAT_OUTBOX_KEY_CAP = 8;
-var g_chat_outbox = struct { items: []const struct { key: [8]u8, key_len: u8, text: []const u16, id: u64, state: chat_echo.OutboxState } = &.{} }{};
+var g_chat_outbox = struct { items: []const struct { key: [8]u8, key_len: u8, text: []const u16, id: u64, state: chat_echo.OutboxState, host_confirmed: bool = false, host_held: bool = false, delivery_watch: chat_echo.DeliveryWatch = .{} } = &.{} }{};
 var g_chat_echo_layout: [20]RECT = undefined;
 var g_chat_echo_layout_ids: [20]u64 = @splat(0);
 var measured: usize = 0;
@@ -246,6 +252,14 @@ fn chatMeasureBlockRect(_: HANDLE, _: []const u16, _: ChatBlock, _: chat_style.B
 fn chatImgStoreLayout(_: usize, _: ChatImgLayout) void {}
 fn chatOutboxKeyForShell(_: u32, _: []u8) []const u8 { return ""; }
 fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32, _: bool) RECT { unreachable; }
+fn chatMeasureProjectedBlockRect(hdc: HANDLE, text: []const u16, block: ChatBlock, pos: chat_style.BubblePos, w: i32, y: i32, imgs: ?*ChatImgLayout, _: ?*const chat_reaction.Projection) RECT {
+    return chatMeasureBlockRect(hdc, text, block, pos, w, y, imgs);
+}
+fn chatMeasureProjectedEchoRect(hdc: HANDLE, text: []const u16, w: i32, y: i32, status: bool, _: ?*const chat_reaction.Projection) RECT {
+    var rect = chatMeasureEchoRect(hdc, text, w, y, status);
+    if (!clean_chat and status) rect.bottom += uiScaled(CHAT_STATUS_H);
+    return rect;
+}
 fn chatShellRowsLayout(_: HANDLE, _: i32, y: i32) i32 { return y; }
 const ChoiceStub = struct { present: bool = false, prompt: bool = false, anchor: usize = 0 };
 var g_choice: ChoiceStub = .{};
@@ -255,6 +269,7 @@ fn chatChoicesRefresh(_: []const u16) void {}
 fn chatChoicesSig() [5]u64 { return .{ 0, 0, std.math.maxInt(u64), 0, 0 }; }
 fn chatChoicesReuseFor(_: [5]u64, _: [5]u64, reuse: usize) usize { return reuse; }
 fn chatChoicesLayout(_: i32, y: i32) i32 { return y; }
+${blockDisplay}
 `;
 const layoutChecks = `
 test "prefix rectangles survive repeated layout and suffix updates; resize and font changes invalidate" {

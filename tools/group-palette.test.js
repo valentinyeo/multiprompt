@@ -51,6 +51,7 @@ fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const json_reader = @import("json_reader.zig");
 const archive_rules = @import("archive_rules.zig");
+const ui_words = @import("ui_words.zon");
 const BROWSER_SPLIT_DEFAULT_PERMILLE = 350;
 const app_state = @This();
 const HANDLE = ?usize;
@@ -77,6 +78,7 @@ const Shell = struct {
     name: [64]u16 = @splat(0), name_len: u32 = 0, name_source: enum { manual, semantic, auto } = .manual,
     tmux_identity: [64]u8 = @splat(0), tmux_identity_len: u32 = 0,
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0, cached_cwd: [512]u8 = @splat(0), cached_cwd_len: u32 = 0,
+    face: ?u8 = null, color: ?u8 = null,
 };
 var shells = [_]Shell{.{}, .{}, .{}, .{}};
 var g_closed_count: u32 = 0;
@@ -390,7 +392,7 @@ test('extracted production group default, migration, explicit colors and palette
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'group-palette-'));
   require('./fixtures/inline-stubs').writeAll(dir);
   try {
-    copyZig(['json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'voice_filter.zig'], dir);
+    copyZig(['json_reader.zig', 'archive_rules.zig', 'frequent.zig', 'voice_filter.zig', 'ui_words.zon'], dir);
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], { encoding: 'utf8', timeout: 120000 });
@@ -423,7 +425,10 @@ test('group palette is painted and dispatched before open-ended palette bands', 
   assert.ok(sidebar.indexOf('if (result_idx >= app_state.SEARCH_GROUPCTX_BASE') < sidebar.indexOf('} else if (is_addfavicon)'));
   assert.match(main, /openGroupContextPalette\(hwnd, gidx\)/);
   assert.doesNotMatch(rename, /TrackPopupMenu\(/);
-  assert.match(read('command_palette'), /if \(app_state\.g_search_len > 0\) appendGroupPaletteResults\(\);\n    sortSearchResultsByRank/);
+  const paletteSource = read('command_palette');
+  const grouped = paletteSource.indexOf('if (app_state.g_search_len > 0) appendGroupPaletteResults();');
+  assert.ok(grouped > 0);
+  assert.ok(paletteSource.indexOf('sortSearchResultsByRank();', grouped) > grouped);
   assert.match(fn(rename, 'openGroupContextPalette'), /g_search_groupctx_mode = true/);
   assert.match(read('shortcuts'), /Right-click group \/ Ctrl\+K/);
 });

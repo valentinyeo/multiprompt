@@ -296,10 +296,11 @@ test('IGSH-1040 cached switch presents its final target before returning to queu
   const os = require('node:os'), path = require('node:path');
   const { spawnSync } = require('node:child_process');
   const switching = body('switchToShell');
-  const start = switching.lastIndexOf('    g_chat_switch_preparing = false;');
-  const end = switching.indexOf('    _ = InvalidateRect(g_main_hwnd, null, 0);', start);
-  assert.ok(start >= 0 && end > start);
-  const finish = switching.slice(start, end).replaceAll('@import("win32.zig").', '');
+  const start = switching.indexOf('    g_chat_switch_preparing = false;');
+  const present = switching.indexOf('    if (defer_browser', start);
+  const end = switching.indexOf('    _ = InvalidateRect(g_main_hwnd, null, 0);', present);
+  assert.ok(start >= 0 && present > start && end > present);
+  const finish = ('    g_chat_switch_preparing = false;\n' + switching.slice(present, end)).replaceAll('@import("win32.zig").', '');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-switch-present-'));
   try {
     fs.writeFileSync(path.join(dir, 'test.zig'), `
@@ -320,6 +321,7 @@ fn IsWindowVisible(_: ?usize) i32 { return 1; }
 fn chatViewShouldShowForTab(_: bool) bool { return true; }
 fn debugLog(_: []const u8) void {}
 fn InvalidateRect(_: ?usize, _: ?usize, _: i32) i32 { invalidated = true; return 1; }
+fn GetWindowRect(_: ?usize, rc: *RECT) i32 { rc.* = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 }; return 1; }
 fn UpdateWindow(_: ?usize) i32 {
     std.debug.assert(!g_chat_switch_preparing and invalidated);
     painted += 1;

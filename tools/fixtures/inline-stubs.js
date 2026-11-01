@@ -27,7 +27,9 @@ pub fn dpiChanged(_: anytype) void {}
 pub fn leaveForSession() void {}
 pub fn leaveForOtherFront() void {}
 pub fn cancelRestoreForUser() void {}
-pub fn restoreAfterOverlay() void {}
+pub fn restoreAfterOverlay() bool {
+    return false;
+}
 pub fn hideForOverlay() void {}
 pub fn flushUi() void {}
 pub fn pollTimer() void {}
@@ -52,8 +54,16 @@ function writeRoomFrontend(dir) {
   fs.writeFileSync(path.join(dir, 'room_frontend.zig'), roomFrontend);
 }
 
-function writeAll(dir) {
-  writeRoomFrontend(dir);
+const accountDesktop = `pub fn applyPendingAppearance(_: u32) void {}
+`;
+
+function writeAccountDesktop(dir) {
+  fs.writeFileSync(path.join(dir, 'account_desktop.zig'), accountDesktop);
 }
 
-module.exports = { roomFrontend, writeRoomFrontend, writeAll };
+function writeAll(dir) {
+  writeRoomFrontend(dir);
+  writeAccountDesktop(dir);
+}
+
+module.exports = { roomFrontend, accountDesktop, writeRoomFrontend, writeAccountDesktop, writeAll };

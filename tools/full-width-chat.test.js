@@ -142,6 +142,7 @@ test "ISSUE-440 production toggle changes only width and saves twice" {
 
 test('ISSUE-440 executes the production toggle without resetting the Chat View console', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'igsh440-'));
+  require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   try {
     copyZig(['chat_style.zig', 'chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');

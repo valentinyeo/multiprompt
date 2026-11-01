@@ -478,6 +478,7 @@ test('IGSH-955 production chat handoff transfers cross-thread foreground before 
 
 test('Alt+W hides native chat children, restores on Escape or Enter, and keeps one-link behavior', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'url-picker-'));
+  require('./fixtures/inline-stubs').writeRoomFrontend(dir);
   try {
     const production = ['openUrlPicker', 'closeUrlPickerInternal', 'hideShellsForOverlay'].map(name => fn(source, name)).join('\n');
     fs.writeFileSync(path.join(dir, 'test.zig'), `const std = @import("std");
