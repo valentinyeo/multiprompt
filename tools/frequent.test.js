@@ -13,7 +13,7 @@ function between(start, end, text = source) {
   return text.slice(a, b);
 }
 const normalize = text => text.replaceAll('pub fn ', 'fn ').replaceAll('app_state.', '').replaceAll('@import("inbox.zig").nowFileTime()', 'nowFileTime()').replaceAll('@import("account_desktop.zig").publishSessionLayout()', 'publishSessionLayout()').replaceAll('@import("account_desktop.zig").accountPush()', 'accountPush()');
-const painting = between('    var y: i32 = list_top;', '    _ = SelectObject(hdc, font_subtitle);\n    _ = SetTextColor(hdc, fg_dim);\n    var ft_rc', read('src/inbox.zig'));
+const painting = between('    var y: i32 = list_top;', '    _ = SelectObject(hdc, font_subtitle);\n    _ = SetTextColor(hdc, fg_dim);\n    var ft_rc', read('src/inbox.zig')).replaceAll('@import("dwrite_text.zig").draw(', 'drawText(');
 const harness = `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -81,8 +81,8 @@ fn publishSessionLayout() void { g_account_dirty_at = 1; }
 fn accountPush() void { pushes += 1; }
 fn findShellById(sid: u32) ?u32 { for (shells[0..shell_count], 0..) |shell, i| { if (sid == shell.shell_id) return @intCast(i); } return null; }
 fn inboxFilterMatches(_: *const InboxRow) bool { return true; }
-const RECT = @import("win32.zig").RECT;
-const HANDLE = @import("win32.zig").HANDLE;
+const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+const HANDLE = ?*anyopaque;
 var g_inbox_sel: u32 = 0;
 var g_multiprompt_theme = false;
 var g_light_theme = false;
@@ -113,6 +113,9 @@ fn SetTextColor(_: HANDLE, _: u32) u32 { return 0; }
 fn drawAttentionDot(_: HANDLE, _: i32, _: i32, _: i32, _: u32) void {}
 fn drawAgentIcon(_: HANDLE, _: *RECT, _: u8, _: bool) void {}
 fn asciiToU16(s: []const u8, out: []u16) usize { for (s, 0..) |c, i| out[i] = c; return s.len; }
+fn drawText(hdc: HANDLE, text: [*]const u16, len: i32, rc: *RECT, flags: u32) i32 {
+    return DrawTextW(hdc, text, len, rc, flags);
+}
 fn DrawTextW(_: HANDLE, text: [*]const u16, len: i32, rc: *RECT, _: u32) i32 {
     if (rc.left == 44 and rc.right == 400) {
         drawn_names[drawn_count] = .{0} ** 64;
