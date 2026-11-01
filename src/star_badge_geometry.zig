@@ -5,17 +5,16 @@ pub const Geometry = struct {
     center_y: i32,
     diameter: i32,
     ring: i32,
-    star: i32,
 };
 
 pub fn diameter(avatar: i32) i32 {
-    return @min(18, @max(11, @divTrunc(avatar * 2 + 4, 5)));
+    return @divTrunc(avatar * 11 + 18, 36);
 }
 
 pub fn geometry(right: i32, bottom: i32, avatar: i32, comptime scale: fn (i32) i32) Geometry {
     const size = scale(diameter(avatar));
-    const offset = scale(4);
-    return .{ .center_x = right - offset, .center_y = bottom - offset, .diameter = size, .ring = scale(2), .star = @divTrunc(size * 62, 100) };
+    const offset = scale(2);
+    return .{ .center_x = right - offset, .center_y = bottom - offset, .diameter = size, .ring = scale(2) };
 }
 
 fn identity(px: i32) i32 {

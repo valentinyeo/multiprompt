@@ -1888,17 +1888,6 @@ fn drawStarBadge(hdc: HANDLE, rect: RECT, avatar_size: i32, background: DWORD) v
     const smooth = @import("smooth.zig");
     smooth.fillEllipse(hdc, .{ .left = left - g.ring, .top = top - g.ring, .right = left + g.diameter + g.ring, .bottom = top + g.diameter + g.ring }, background);
     smooth.fillEllipse(hdc, .{ .left = left, .top = top, .right = left + g.diameter, .bottom = top + g.diameter }, RGB(240, 196, 75));
-    const points = [_]@import("win32.zig").POINT{
-        .{ .x = 0, .y = -50 }, .{ .x = 12, .y = -16 }, .{ .x = 48, .y = -15 },
-        .{ .x = 19, .y = 6 }, .{ .x = 29, .y = 40 }, .{ .x = 0, .y = 20 },
-        .{ .x = -29, .y = 40 }, .{ .x = -19, .y = 6 }, .{ .x = -48, .y = -15 },
-        .{ .x = -12, .y = -16 },
-    };
-    var scaled: [points.len]@import("win32.zig").POINT = undefined;
-    for (points, 0..) |point, i| {
-        scaled[i] = .{ .x = g.center_x + @divTrunc(point.x * g.star, 100), .y = g.center_y + @divTrunc(point.y * g.star, 100) };
-    }
-    smooth.fillPolygon(hdc, &scaled, RGB(16, 16, 16));
 }
 
 fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
