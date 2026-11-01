@@ -34,6 +34,7 @@ test('number shortcuts activate sidebar sessions in displayed order, including r
   assert.doesNotMatch(hook.slice(post - 180, post), /tab_idx < shell_count/,
     'remote Starred rows must not be capped by the local shell count');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-numbers-'));
+  require('./zig-stubs').writeRoomFrontend(dir);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const code = `const std = @import("std");
 const Row = struct { kind: enum { tab, inbox, header, section }, shell_idx: u32 = 0 };

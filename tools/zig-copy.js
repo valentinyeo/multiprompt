@@ -6,12 +6,18 @@ function imports(source) {
     .filter(match => match[1]).map(match => match[1]);
 }
 
+function dataImports(source) {
+  return [...source.matchAll(/\/\/[^\r\n]*|"(?:\\.|[^"\\])*"|@import\s*\(\s*"([^"\r\n]+)"\s*\)/g)]
+    .filter(match => match[1] && !match[1].endsWith('.zig') && match[1].includes('.'))
+    .map(match => match[1]);
+}
+
 function copyZig(roots, dest, srcDir = path.join(__dirname, '../src')) {
   srcDir = path.resolve(srcDir);
   const copied = new Set();
   function visit(file, importer) {
     const relative = path.relative(srcDir, file);
-    if (!relative.endsWith('.zig') || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return;
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return;
     const name = relative.split(path.sep).join('/');
     if (copied.has(name)) return;
     let source;
@@ -25,6 +31,14 @@ function copyZig(roots, dest, srcDir = path.join(__dirname, '../src')) {
     fs.copyFileSync(file, target);
     copied.add(name);
     for (const dependency of imports(source)) visit(path.resolve(path.dirname(file), dependency), name);
+    for (const dependency of dataImports(source)) {
+      const data = path.resolve(path.dirname(file), dependency);
+      const relativeData = path.relative(srcDir, data);
+      if (relativeData === '..' || relativeData.startsWith(`..${path.sep}`) || path.isAbsolute(relativeData)) continue;
+      const targetData = path.join(dest, relativeData);
+      fs.mkdirSync(path.dirname(targetData), { recursive: true });
+      if (fs.existsSync(data)) fs.copyFileSync(data, targetData);
+    }
     for (const match of source.matchAll(/\/\/[^\r\n]*|"(?:\\.|[^"\\])*"|@embedFile\s*\(\s*"([^"\r\n]+)"\s*\)/g)) {
       if (!match[1]) continue;
       const asset = path.resolve(path.dirname(file), match[1]);

@@ -24,6 +24,7 @@ function prepare(t, name, modules = []) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `chat-view-gaps-${name}-`));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   copyZig(modules, dir);
+  require('./zig-stubs').writeRoomFrontend(dir);
   fs.cpSync(path.join(__dirname, '../src/testdata'), path.join(dir, 'testdata'), { recursive: true });
   return dir;
 }

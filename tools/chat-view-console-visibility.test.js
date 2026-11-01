@@ -259,6 +259,7 @@ test "local Chat View input and Enter keep console hidden without flipping chat 
 
 test('executed production Zig decision, show, picker-close and input paths pass; an unconditional reveal fails', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-console-zig-'));
+  require('./zig-stubs').writeRoomFrontend(dir);
   const zig = process.env.ZIG || 'zig';
   try {
     copyZig(['chat_view.zig'], dir);
@@ -463,6 +464,7 @@ test "IGSH-955 failed chat control creation leaves console focus intact" {
 
 test('IGSH-955 production chat handoff transfers cross-thread foreground before hiding; preserves background focus', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-handoff-zig-'));
+  require('./zig-stubs').writeRoomFrontend(dir);
   try {
     const file = path.join(dir, 'test.zig');
     fs.writeFileSync(file, chatHandoffHarness(source));

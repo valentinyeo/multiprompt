@@ -21,6 +21,7 @@ function body(text, name) {
 }
 function run(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpu707-'));
+  require('./zig-stubs').writeRoomFrontend(dir);
   try {
     copyZig(['chat_hit.zig', 'chat_echo.zig', 'chat_markdown.zig', 'chat_style.zig', 'chat_code.zig', 'link_detect.zig', 'chat_working.zig', 'chat_reaction.zig', 'chat_transcript.zig'], dir);
     fs.writeFileSync(path.join(dir, 'chat_skill.zig'), 'pub fn known(_: []const u16) bool { return false; }\npub fn paint(_: anytype, _: anytype, _: u32) u32 { return 0; }\n');
@@ -169,7 +170,7 @@ const CHAT_OUTBOX_MAX_PER_KEY = 20;
 const chat_transcript = @import("chat_transcript.zig");
 const chat_reaction = @import("chat_reaction.zig");
 var g_reaction_view: chat_reaction.View = .{};
-const HistoryEntry = struct { history: struct { status: chat_transcript.Status = .{} } = .{} };
+const HistoryEntry = struct { history: struct { status: chat_transcript.Status = .{} } = .{}, message_v1_owned: bool = false };
 fn chatHistoryEntry(_: u32) ?*HistoryEntry { return null; }
 fn chatFileIdentity() u32 { return 0; }
 fn chatAcAgent() enum { claude, codex, other } { return .claude; }

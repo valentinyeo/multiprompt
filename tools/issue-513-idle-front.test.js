@@ -15,6 +15,7 @@ function frontFunction(source) {
 
 function run(source) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issue-513-front-'));
+  require('./zig-stubs').writeRoomFrontend(dir);
   try {
     copyZig(['frequent.zig'], dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), (`
