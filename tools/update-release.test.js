@@ -23,7 +23,9 @@ test('periodic update never invokes restart and explicit restart uses the verifi
   assert.match(updater, /5 \* 60 \* 1000/);
   assert.match(read('src/update_card.zig'), /update_release\.restart\(/);
   assert.match(read('src/sidebar.zig'), /Restart to update/);
-  assert.match(read('src/update_card.zig'), /Update ready: restart to get v/);
+  const card = read('src/update_card.zig');
+  assert.match(card, /else "Update ready"/);
+  assert.match(card, /"v\{s\} \\xc2\\xb7 takes a few seconds"/);
 });
 
 test('Windows behavioral update tests are required by CI', () => {

@@ -99,7 +99,7 @@ function auditBackground(source) {
   assert.match(prompt, /submitted = app_state\.g_account_busy;/);
   assert.match(section(source, 'startAccountJob'), /if \(g_account_key_prompt_active and job\.kind != \.decide_keys\)/);
   const reply = section(source, 'handleLayoutReply');
-  assert.match(reply, /if \(lp == 0\) \{\s*g_account_key_prompt_active = false;/);
+  assert.match(reply, /if \(lp == 0\) \{\s*@import\("room_frontend\.zig"\)\.setAccount\(null\);\s*g_account_key_prompt_active = false;/);
   assert.match(reply, /if \(reply\.job\.kind == \.decide_keys\) g_account_key_prompt_active = false;/);
 }
 

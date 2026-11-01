@@ -169,7 +169,7 @@ test('ISSUE-521 ended overlay and palette restart the same named host session ex
   assert.match(drawing, /"Session ended"/);
   assert.match(drawing, /L\("Start new session"\)/);
   const cmd = body('makeCmdLine', read('console.zig'));
-  assert.match(cmd, /tmux_identity\.zig"\)\.attachCommand\(&attach_buf, tmux_session\.\?, tmux_identity, new_session\)/);
+  assert.match(cmd, /tmux_identity\.zig"\)\.attachCommand\(&attach_buf, tmux_session\.\?, tmux_identity, new_session, app_state\.g_pending_tmux_hidden\)/);
   const attach = body('attachCommand', read('tmux_identity.zig'));
   assert.match(attach, /if \(create\) "tmux new-session -A -s " else "tmux attach -t "/);
   assert.match(attach, /try quote\(&writer,/);
@@ -202,7 +202,7 @@ test('ISSUE-521 user palette reconnect closes the palette and shows the requeste
   const tabStart = main.indexOf('if (target == SEARCH_TABCTX_RECONNECT or target == SEARCH_TABCTX_START_SESSION) {');
   assert.ok(tabStart >= 0);
   const tab = main.slice(tabStart, main.indexOf('} else if', tabStart));
-  assert.match(tab, /g_search_active = false;\s*app_state\.g_search_tabctx_mode = false;\s*app_state\.g_search_groupctx_mode = false;\s*app_state\.g_tabctx_sid = 0;\s*app_state\.g_shell_focused = true;\s*clearSearchBackdrop\(\);\s*app_state\.g_pending_new_tab_group = 0;\s*showActiveShellAfterOverlay\(\);\s*_ = InvalidateRect\(hwnd, null, 0\);\s*@import\("chat_send\.zig"\)\.sshReconnectNow\(ti\);\s*switchToShell\(ti\);/);
+  assert.match(tab, /g_search_active = false;\s*app_state\.g_search_tabctx_mode = false;\s*app_state\.g_search_groupctx_mode = false;\s*app_state\.g_tabctx_sid = 0;\s*app_state\.g_shell_focused = true;\s*clearSearchBackdrop\(\);\s*app_state\.g_pending_new_tab_group = 0;\s*showActiveShellAfterOverlay\(\);\s*_ = InvalidateRect\(hwnd, null, 0\);\s*@import\("chat_send\.zig"\)\.sshReconnectNow\(ti\);\s*@import\("console\.zig"\)\.switchToShellByUser\(ti\);/);
   assert.match(main, /const tc_sid = if \(target == SEARCH_TABCTX_START_SESSION and app_state\.g_tabctx_sid == 0 and app_state\.active_shell < app_state\.shell_count\) app_state\.shells\[app_state\.active_shell\]\.shell_id else app_state\.g_tabctx_sid;/);
 });
 

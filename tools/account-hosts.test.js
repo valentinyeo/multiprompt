@@ -33,7 +33,10 @@ function audit(desktop, client) {
   assert.match(client, /WinHttpQueryHeaders\(req, 22, null, &header_buf, &size, null\)/);
   assert.match(client, /hosts_supported = layoutSupportsHosts\(raw\);/);
   assert.match(client, /\.hosts_supported = hosts_supported/);
-  assert.match(client.slice(client.indexOf('pub fn request('), client.indexOf('pub fn field(')), /X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color\\r\\n/);
+  const layoutHeaders = client.slice(client.indexOf('pub fn request('), client.indexOf('pub fn field('));
+  assert.match(layoutHeaders, /X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal/);
+  assert.match(layoutHeaders, /and colors\) ",workspace_color"/);
+  assert.match(layoutHeaders, /and appearance\) ",bot_appearance"/);
   const worker = desktop.slice(desktop.indexOf('fn layoutSyncWorker('), desktop.indexOf('fn layoutSyncWorker(') + 700);
   assert.match(worker, /accountRequest\(job, reply\)/);
   assert.match(desktop, /std.Thread.spawn\(\.\{\}, layoutSyncWorker/);
@@ -77,7 +80,7 @@ test('hosts support is fail-closed and rechecked from the latest reply after con
   assert.match(loop, /const publish_hosts = if \(hosts_ready\) synced_hosts else server\.value\.hosts;\s*rebased\.hosts = if \(remote\.hosts_supported\) try account_hosts\.withoutRemoved\(alloc, publish_hosts orelse &\.\{\}, removed\) else null;/);
   assert.match(loop, /\.emit_null_optional_fields = false/);
   assert.match(loop, /remote = put;/);
-  assert.ok(loop.indexOf('rebased.hosts =') < loop.indexOf('account_client.request("PUT"'));
+  assert.ok(loop.indexOf('rebased.hosts =') < loop.indexOf('account_client.requestWithLayoutFeatures("PUT"'));
   for (const [before, after] of [
     ['hosts_supported: bool = false', 'hosts_supported: bool = true'],
     ['hosts_supported = layoutSupportsHosts(raw);', 'hosts_supported = true;'],

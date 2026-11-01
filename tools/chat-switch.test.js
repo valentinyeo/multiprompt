@@ -304,11 +304,21 @@ test('IGSH-1040 cached switch presents its final target before returning to queu
   try {
     fs.writeFileSync(path.join(dir, 'test.zig'), `
 const std = @import("std");
+const RECT = struct { left: i32 = 0, top: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
+const idx: u32 = 0;
 var g_chat_switch_preparing = true;
 var defer_browser = true;
 var g_chat_transcript_hwnd: ?usize = 2;
+var g_chat_active = false;
+var shell_count: u32 = 1;
+const Shell = struct { hwnd: ?usize = null, chat_view_on: bool = false, shell_id: u32 = 1 };
+var shells = [_]Shell{.{}};
 var invalidated = false;
 var painted: usize = 0;
+fn GetWindowRect(_: ?usize, _: *RECT) i32 { return 1; }
+fn IsWindowVisible(_: ?usize) i32 { return 1; }
+fn chatViewShouldShowForTab(_: bool) bool { return true; }
+fn debugLog(_: []const u8) void {}
 fn InvalidateRect(_: ?usize, _: ?usize, _: i32) i32 { invalidated = true; return 1; }
 fn UpdateWindow(_: ?usize) i32 {
     std.debug.assert(!g_chat_switch_preparing and invalidated);

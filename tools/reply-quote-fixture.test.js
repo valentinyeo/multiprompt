@@ -48,7 +48,7 @@ test('context Reply handles user and agent blocks but not tool-only blocks', () 
   const body = render.slice(render.indexOf('pub fn chatReplyToBlock('), render.indexOf('pub fn chatReplyLatestAgent('));
   assert.match(body, /role == \.tool\) return/);
   assert.doesNotMatch(body, /role == \.user\) return/);
-  assert.match(body, /selectChatReply\(buf\[disp.start/);
+  assert.match(body, /selectChatReply\(display\.text\)/);
 });
 
 
@@ -98,6 +98,12 @@ var shell_count: u32 = 1;
 var g_chat_cache_shell_id: u32 = 7;
 const shells = [_]struct { shell_id: u32 }{.{ .shell_id = 7 }};
 var selected: []const u16 = &.{};
+const ChatDisplay = struct { text: []const u16, offset: usize, source_map: ?[]const usize = null };
+fn chatDisplayForIndex(index: usize) ?ChatDisplay {
+    if (index >= g_chat_block_count) return null;
+    const range = chatBlockDisplayRange(g_chat_capture[0..g_chat_last_len], g_chat_blocks[index]);
+    return .{ .text = g_chat_capture[0..g_chat_last_len][range.start..][0..range.len], .offset = range.start };
+}
 fn selectChatReply(text: []const u16) void { selected = text; }
 fn refreshChatTranscript(_: bool) void {}
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
@@ -162,11 +168,18 @@ fn chatFileIdentity() chat_transcript.Identity { return identity; }
 fn chatHistoryEntry(_: chat_transcript.Identity) ?*@TypeOf(history_entry) { return &history_entry; }
 fn chatFileRequest(_: chat_transcript.Identity) void { requests += 1; history_entry.pending = true; }
 fn chatBlockDisplayRange(_: []const u16, block: Block) struct { start: usize, len: usize } { return .{ .start = block.start, .len = block.len }; }
+const ChatDisplay = struct { text: []const u16, offset: usize = 0, source_map: ?[]const usize = null };
+fn chatDisplayForIndex(index: usize) ?ChatDisplay {
+    const block = app_state.g_chat_blocks[index];
+    const range = chatBlockDisplayRange(app_state.g_chat_capture[0..app_state.g_chat_last_len], block);
+    return .{ .text = app_state.g_chat_capture[0..app_state.g_chat_last_len][range.start..][0..range.len], .offset = range.start };
+}
 fn debugLog(_: []const u8) void {}
 fn chatSelectionClear() void {}
 fn chatNavFocus(index: usize) void { focused = index; }
 fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void { notices += 1; }
 ${body('chatReplyJumpClear')}
+${body('chatReplyMatches').replaceAll('ChatBlock', 'Block')}
 ${body('chatReplyResolve')}
 test "load older source, choose nearest preceding original, cancel across sessions" {
     const w = std.unicode.utf8ToUtf16LeStringLiteral;

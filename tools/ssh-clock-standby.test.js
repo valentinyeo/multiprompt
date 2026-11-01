@@ -298,7 +298,7 @@ fn chatReadMark(_: bool) bool { return false; }
 const chat_echo = @import("chat_echo.zig");
 const Entry = struct {
     state: chat_echo.OutboxState = .delivered, host_held: bool = false, id: u64 = 1, channel_pending: bool = false,
-    transcript_queued: bool = false, retryable: bool = false, left_box_ms: u64 = 0,
+    transcript_queued: bool = false, retryable: bool = false, left_box_ms: u64 = 0, message_v1: bool = false,
     key: [1]u8 = .{0}, key_len: usize = 0, delivery_watch: chat_echo.DeliveryWatch = .{},
     anchor: chat_echo.Anchor = .{ .sent_ms = 8_000_000 }, sent_tick_ms: i64 = 100_000,
 };
@@ -311,7 +311,13 @@ const ISSUE_349_FULL_SETTLE = false;
 const g_chat_active = false;
 const active_shell = 0;
 const g_chat_screen_working = false;
-const shells = [_]struct { activity: enum { idle, active } = .idle }{.{}};
+const shells = [_]struct { activity: enum { idle, active } = .idle, kind: enum { cmd, tmux } = .tmux, ai_agent: u8 = 1 }{.{}};
+var shell_count: u32 = 1;
+var g_chat_pending_reset: ?usize = null;
+var g_chat_tmux_send_job: ?*anyopaque = null;
+var g_chat_reset_next: u64 = 0;
+var g_chat_message_sync_job: ?*anyopaque = null;
+var g_chat_message_sync_next: usize = 0;
 fn GetTickCount64() u64 { return fake_tick; }
 fn nowFileTime() u64 { return @as(u64, @intCast(fake_wall)) * 10000 + 116444736000000000; }
 fn chatTmuxSendFinish() void {}
@@ -325,6 +331,12 @@ fn chatEchoMatchActive() void {}
 fn chatOutboxFindSending(_: anytype) ?usize { return 0; }
 fn chatLinkLooksDown(_: u32) bool { return false; }
 fn chatOutboxTrySendEntry(_: u32, _: usize) bool { return false; }
+fn chatHoldLegacyCodex() bool { return false; }
+fn chatMessageSyncFinish() void {}
+fn chatMessageSyncStart(_: u32) void {}
+fn chatOutboxCountForShell(_: u32) usize { return 0; }
+fn chatPendingResetDropIfStale() ?usize { return null; }
+fn chatPendingResetStart(_: u32) void {}
 fn sshOutboxFlushed(_: u32) void {}
 fn chatFullSettleStart() void {}
 fn armChatOutboxTimerIfNeeded() void {}

@@ -7,7 +7,7 @@ const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 function audit(desktop, inbox, session) {
   assert.match(desktop, /\.used = if \(shell.last_used != 0\) shell.last_used else null/);
   assert.match(desktop, /if \(tab.used\) \|used\| shell.last_used = @max\(shell.last_used, used\)/);
-  assert.match(desktop, /account_layout.publishNeeded\(local, base.value, synced.value\)/);
+  assert.match(desktop, /account_layout.publishNeeded\(plain_local, plain_base, plain_synced\)/);
   assert.match(desktop, /syncInProcessWorkspacesToRegistry\(\);\s*@import\("inbox.zig"\).publishInboxStateNow\(\);\s*@import\("inbox.zig"\).loadInboxModel\(\)/);
   assert.match(inbox, /fn stampSessionUse[^]*?g_session_save_pending = true;\s*publishInboxState\(\)/);
   assert.match(session, /if \(saveSessionTo\(path, null\)\) publishSessionLayout\(\)/);
@@ -20,11 +20,14 @@ test('usage reaches the debounced layout publisher and server times refresh Freq
   audit(desktop, inbox, session);
   for (const mutated of [
     desktop.replace('shell.last_used = @max(shell.last_used, used)', 'shell.last_used = used'),
-    desktop.replace('account_layout.publishNeeded(local, base.value, synced.value)', 'account_layout.equal(local, base.value)'),
+    desktop.replace('account_layout.publishNeeded(plain_local, plain_base, plain_synced)', 'account_layout.equal(local, base.value)'),
     desktop.replace('@import("inbox.zig").loadInboxModel();', ''),
   ]) assert.throws(() => audit(mutated, inbox, session));
   assert.throws(() => audit(desktop, inbox, session.replace('if (saveSessionTo(path, null)) publishSessionLayout();', '')));
-  assert.ok(read('src/account_client.zig').includes('X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal,workspace_color\\r\\n'));
+  const client = read('src/account_client.zig');
+  assert.ok(client.includes('X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal'));
+  assert.ok(client.includes('",workspace_color"'));
+  assert.ok(client.includes('",bot_appearance"'));
 });
 
 test('Unix usage stamps are marked in all local serializers and the clock is converted only for usage', () => {
