@@ -255,7 +255,32 @@ fn ensureTarget(hdc: w.HANDLE, width: u32, height: u32) bool {
     return target != null and target.?.v.setPixelsPerDip(target.?, 1) >= 0;
 }
 
+const PositionedContext = struct {
+    text: []const u16,
+    advances: []const f32,
+    x: i32,
+    y: i32,
+    clip: w.RECT,
+    color: u32,
+};
+
+extern "c" fn mp_draw_color_positioned(w.HANDLE, [*]const u16, u32, [*]const f32, i32, i32, *const w.RECT, u32, *const fn (*anyopaque, w.HANDLE, [*]const u8) callconv(.c) c_int, *anyopaque) c_int;
+
+fn positionedCallback(raw: *anyopaque, hdc: w.HANDLE, omit: [*]const u8) callconv(.c) c_int {
+    const context: *PositionedContext = @ptrCast(@alignCast(raw));
+    return @intFromBool(drawPositionedPlain(hdc, context.text, context.advances, context.x, context.y, context.clip, context.color, omit[0..context.text.len]));
+}
+
 pub fn drawPositioned(hdc: w.HANDLE, text: []const u16, advances: []const f32, x: i32, y: i32, clip: w.RECT, color: u32) bool {
+    if (text.len == 0) return true;
+    if (text.len != advances.len or text.len > std.math.maxInt(i32)) return false;
+    var context = PositionedContext{ .text = text, .advances = advances, .x = x, .y = y, .clip = clip, .color = color };
+    const result = mp_draw_color_positioned(hdc, text.ptr, @intCast(text.len), advances.ptr, x, y, &clip, color, &positionedCallback, &context);
+    if (result == 1) return true;
+    return drawPositionedPlain(hdc, text, advances, x, y, clip, color, null);
+}
+
+fn drawPositionedPlain(hdc: w.HANDLE, text: []const u16, advances: []const f32, x: i32, y: i32, clip: w.RECT, color: u32, omit: ?[]const u8) bool {
     if (text.len == 0) return true;
     if (text.len != advances.len or !initialize()) return false;
     const face = fontFace(hdc) orelse return false;
@@ -280,22 +305,40 @@ pub fn drawPositioned(hdc: w.HANDLE, text: []const u16, advances: []const f32, x
     const memory = t.v.getMemoryDC(t);
     if (memory == null or w.BitBlt(memory, 0, 0, width, height, hdc, clip.left, clip.top, w.GDI_SRCCOPY) == 0) return false;
     for (items[0..@intCast(item_count)], 0..) |*item, item_index| {
-        const begin: usize = @intCast(item.position);
-        const end: usize = @intCast(items[item_index + 1].position);
-        const units = end - begin;
-        var capacity = units + units / 2 + 16;
+        const item_begin: usize = @intCast(item.position);
+        const item_end: usize = @intCast(items[item_index + 1].position);
+        var begin = item_begin;
+        var end = item_end;
+        var split = false;
         var cache: ?*anyopaque = null;
         defer _ = ScriptFreeCache(&cache);
-        while (true) {
+        while (begin < item_end) {
+            if (split) {
+                const mask = omit orelse return false;
+                while (begin < item_end and mask[begin] != 0) : (begin += 1) {}
+                if (begin == item_end) break;
+                end = begin;
+                while (end < item_end and mask[end] == 0) : (end += 1) {}
+            }
+            const units = end - begin;
+            var capacity = units + units / 2 + 16;
+            var analysis = item.analysis;
+            if (split and begin != item_begin) analysis.flags &= ~@as(u16, 0x1000);
+            if (split and end != item_end) analysis.flags &= ~@as(u16, 0x2000);
+            while (true) {
             const indices = allocator.alloc(u16, capacity) catch return false;
             defer allocator.free(indices);
             const attributes = allocator.alloc(u16, capacity) catch return false;
             defer allocator.free(attributes);
             var glyph_count: i32 = 0;
-            const shaped = ScriptShape(hdc, &cache, text[begin..].ptr, @intCast(units), @intCast(capacity), &item.analysis, indices.ptr, clusters[begin..].ptr, attributes.ptr, &glyph_count);
+            const shaped = ScriptShape(hdc, &cache, text[begin..].ptr, @intCast(units), @intCast(capacity), &analysis, indices.ptr, clusters[begin..].ptr, attributes.ptr, &glyph_count);
             if (shaped == @as(i32, @bitCast(@as(u32, 0x8007000e)))) {
                 capacity *= 2;
                 continue;
+            }
+            if (shaped == @as(i32, @bitCast(@as(u32, 0x80040200))) and omit != null and !split) {
+                split = true;
+                break;
             }
             if (shaped < 0) return false;
             const count: usize = @intCast(glyph_count);
@@ -304,34 +347,50 @@ pub fn drawPositioned(hdc: w.HANDLE, text: []const u16, advances: []const f32, x
             const native_offsets = allocator.alloc(GdiOffset, count) catch return false;
             defer allocator.free(native_offsets);
             var abc: Abc = undefined;
-            if (ScriptPlace(hdc, &cache, indices.ptr, glyph_count, attributes.ptr, &item.analysis, widths.ptr, native_offsets.ptr, &abc) < 0) return false;
+            if (ScriptPlace(hdc, &cache, indices.ptr, glyph_count, attributes.ptr, &analysis, widths.ptr, native_offsets.ptr, &abc) < 0) return false;
             const offsets = allocator.alloc(GlyphOffset, count) catch return false;
             defer allocator.free(offsets);
             const zero_advances = allocator.alloc(f32, count) catch return false;
             defer allocator.free(zero_advances);
             @memset(zero_advances, 0);
             var glyph: usize = 0;
+            var kept: usize = 0;
             while (glyph < count) {
                 const cluster_start = glyph;
                 glyph += 1;
                 while (glyph < count and attributes[glyph] & 0x10 == 0) : (glyph += 1) {}
-                const rtl = item.analysis.flags & 0x0400 != 0;
+                const rtl = analysis.flags & 0x0400 != 0;
                 var anchor: f32 = if (rtl) -std.math.inf(f32) else std.math.inf(f32);
+                var masked = false;
+                var retained = false;
                 for (clusters[begin..end], begin..) |cluster, unit| {
-                    if (cluster == cluster_start) anchor = if (rtl) @max(anchor, positions[unit]) else @min(anchor, positions[unit]);
+                    if (cluster == cluster_start) {
+                        anchor = if (rtl) @max(anchor, positions[unit]) else @min(anchor, positions[unit]);
+                        if (omit) |mask| {
+                            if (mask[unit] != 0) masked = true else retained = true;
+                        } else retained = true;
+                    }
                 }
-                if (!std.math.isFinite(anchor)) return false;
+                if (!std.math.isFinite(anchor) or (masked and retained)) return false;
                 if (rtl) for (widths[cluster_start..glyph]) |advance| {
                     anchor -= @floatFromInt(advance);
                 };
                 for (cluster_start..glyph) |g| {
-                    offsets[g] = .{ .advance = anchor + @as(f32, @floatFromInt(native_offsets[g].x)), .ascender = @floatFromInt(native_offsets[g].y) };
+                    if (!masked) {
+                        indices[kept] = indices[g];
+                        offsets[kept] = .{ .advance = anchor + @as(f32, @floatFromInt(native_offsets[g].x)), .ascender = @floatFromInt(native_offsets[g].y) };
+                        kept += 1;
+                    }
                     anchor += @floatFromInt(widths[g]);
                 }
             }
-            const run = GlyphRun{ .face = face, .em_size = @floatFromInt(metric.height - metric.internal_leading), .count = @intCast(count), .indices = indices.ptr, .advances = zero_advances.ptr, .offsets = @ptrCast(offsets.ptr) };
-            if (t.v.drawGlyphRun(t, @floatFromInt(x - clip.left), @floatFromInt(y - clip.top + metric.ascent), DWRITE_MEASURING_MODE_GDI_CLASSIC, &run, params.?, color, null) < 0) return false;
+            if (kept != 0) {
+                const run = GlyphRun{ .face = face, .em_size = @floatFromInt(metric.height - metric.internal_leading), .count = @intCast(kept), .indices = indices.ptr, .advances = zero_advances.ptr, .offsets = @ptrCast(offsets.ptr) };
+                if (t.v.drawGlyphRun(t, @floatFromInt(x - clip.left), @floatFromInt(y - clip.top + metric.ascent), DWRITE_MEASURING_MODE_GDI_CLASSIC, &run, params.?, color, null) < 0) return false;
+            }
+            begin = end;
             break;
+            }
         }
     }
     if (w.BitBlt(hdc, clip.left, clip.top, width, height, memory, 0, 0, w.GDI_SRCCOPY) == 0) return false;

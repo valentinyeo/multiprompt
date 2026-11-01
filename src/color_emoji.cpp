@@ -2,7 +2,9 @@
 #include <d2d1.h>
 #include <dwrite.h>
 #include <limits.h>
+#include <stdint.h>
 #include <string.h>
+#include <cmath>
 
 using PlainDraw = int (*)(HDC, const wchar_t *, int, RECT *, unsigned);
 
@@ -133,10 +135,11 @@ struct Painter {
             info.bmiHeader.biCompression = BI_RGB;
             void *pixels = nullptr;
             entry.bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
-            if (!entry.text || !entry.dc || !entry.bitmap) { entry.clear(); return false; }
+            if (!entry.text || !entry.dc || !entry.bitmap || !pixels) { entry.clear(); return false; }
             CopyMemory(entry.text, text, length * sizeof(wchar_t));
             entry.length = length; entry.width = width; entry.height = height; entry.em = em; entry.ink = ink;
             entry.previous = SelectObject(entry.dc, entry.bitmap);
+            if (!entry.previous || entry.previous == HGDI_ERROR) { entry.previous = nullptr; entry.clear(); return false; }
             ZeroMemory(pixels, width * height * 4);
             RECT cell = {0, 0, width, height};
             if (FAILED(target->BindDC(entry.dc, &cell))) { entry.clear(); return false; }
@@ -170,6 +173,112 @@ struct Painter {
         return AlphaBlend(dc, bounds.left, bounds.top, width, height, cached->dc, 0, 0, width, height, blend) != 0;
     }
 };
+
+using PositionedPlain = int (*)(void *, HDC, const unsigned char *);
+
+extern "C" int mp_draw_color_positioned(HDC dc, const wchar_t *text, unsigned length, const float *advances,
+    int x, int y, const RECT *clip, unsigned long color, PositionedPlain plain, void *context) {
+    if (!text || !advances || !clip || !plain || !context || !dc) return -1;
+    bool found = false;
+    for (unsigned at = 0; at < length;) {
+        unsigned end = clusterEnd(text, length, at);
+        if (end != at) { found = true; break; }
+        scalar(text, length, at);
+    }
+    if (!found) return 0;
+    if (GetMapMode(dc) != MM_TEXT || length > INT_MAX || clip->left == INT_MIN || clip->top == INT_MIN) return -1;
+    const long long width64 = static_cast<long long>(clip->right) - clip->left;
+    const long long height64 = static_cast<long long>(clip->bottom) - clip->top;
+    if (width64 <= 0 || height64 <= 0 || width64 > INT_MAX || height64 > INT_MAX ||
+        static_cast<long long>(x) - clip->left < INT_MIN || static_cast<long long>(x) - clip->left > INT_MAX ||
+        static_cast<long long>(y) - clip->top < INT_MIN || static_cast<long long>(y) - clip->top > INT_MAX) return -1;
+    const int width = static_cast<int>(width64), height = static_cast<int>(height64);
+    TEXTMETRICW metrics;
+    if (!GetTextMetricsW(dc, &metrics) || metrics.tmHeight <= 0 || metrics.tmInternalLeading < 0 || metrics.tmHeight <= metrics.tmInternalLeading ||
+        static_cast<long long>(y) + metrics.tmHeight > INT_MAX ||
+        static_cast<long long>(y) - clip->top + metrics.tmAscent > INT_MAX ||
+        static_cast<long long>(y) - clip->top + metrics.tmAscent < INT_MIN) return -1;
+    struct Resources {
+        unsigned char *mask = nullptr;
+        double *positions = nullptr;
+        HDC dc = nullptr;
+        HBITMAP bitmap = nullptr;
+        HGDIOBJ old_bitmap = nullptr;
+        HGDIOBJ old_font = nullptr;
+        ~Resources() {
+            if (dc && old_font && old_font != HGDI_ERROR) SelectObject(dc, old_font);
+            if (dc && old_bitmap && old_bitmap != HGDI_ERROR) SelectObject(dc, old_bitmap);
+            if (bitmap) DeleteObject(bitmap);
+            if (dc) DeleteDC(dc);
+            if (mask) HeapFree(GetProcessHeap(), 0, mask);
+            if (positions) HeapFree(GetProcessHeap(), 0, positions);
+        }
+    } r;
+    if (static_cast<size_t>(length) + 1 > SIZE_MAX / sizeof(double)) return -1;
+    r.mask = static_cast<unsigned char *>(HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, length));
+    r.positions = static_cast<double *>(HeapAlloc(GetProcessHeap(), 0, (static_cast<size_t>(length) + 1) * sizeof(double)));
+    if (!r.mask || !r.positions) return -1;
+    r.positions[0] = 0;
+    for (unsigned i = 0; i < length; ++i) {
+        if (!std::isfinite(advances[i]) || std::floor(advances[i]) != advances[i]) return -1;
+        r.positions[i + 1] = r.positions[i] + advances[i];
+        if (!std::isfinite(r.positions[i + 1]) || std::abs(r.positions[i + 1]) > 16777216 ||
+            r.positions[i + 1] + x < INT_MIN || r.positions[i + 1] + x > INT_MAX) return -1;
+    }
+    for (unsigned at = 0; at < length;) {
+        const unsigned end = clusterEnd(text, length, at);
+        if (end == at) { scalar(text, length, at); continue; }
+        if (at > 0 && !r.mask[at - 1]) {
+            const wchar_t previous = text[at - 1];
+            if (previous == 0x200d || previous == 0xfe0e || previous == 0xfe0f || (previous >= 0xd800 && previous <= 0xdbff)) return -1;
+            if (previous < 0xdc00 || previous > 0xdfff) {
+                WORD type = 0;
+                if (!GetStringTypeW(CT_CTYPE3, text + at - 1, 1, &type) ||
+                    (type & (C3_NONSPACING | C3_DIACRITIC | C3_VOWELMARK))) return -1;
+            }
+        }
+        if (end < length) {
+            const wchar_t next = text[end];
+            if (next == 0x200d || next == 0xfe0e || next == 0xfe0f || (next >= 0xdc00 && next <= 0xdfff)) return -1;
+            if (next < 0xd800 || next > 0xdbff) {
+                WORD type = 0;
+                if (!GetStringTypeW(CT_CTYPE3, text + end, 1, &type) ||
+                    (type & (C3_NONSPACING | C3_DIACRITIC | C3_VOWELMARK))) return -1;
+            }
+        }
+        memset(r.mask + at, 1, end - at);
+        const double left = r.positions[at] + x, right = r.positions[end] + x;
+        if (left == right || std::floor(left) != left || std::floor(right) != right ||
+            std::abs(right - left) > INT_MAX || std::abs(right - left) * metrics.tmHeight > INT_MAX / 4) return -1;
+        at = end;
+    }
+    r.dc = CreateCompatibleDC(dc);
+    if (!r.dc) return -1;
+    r.bitmap = CreateCompatibleBitmap(dc, width, height);
+    if (!r.bitmap) return -1;
+    r.old_bitmap = SelectObject(r.dc, r.bitmap);
+    if (!r.old_bitmap || r.old_bitmap == HGDI_ERROR) return -1;
+    HGDIOBJ font = GetCurrentObject(dc, OBJ_FONT);
+    if (!font) return -1;
+    r.old_font = SelectObject(r.dc, font);
+    if (!r.old_font || r.old_font == HGDI_ERROR) return -1;
+    if (!BitBlt(r.dc, 0, 0, width, height, dc, clip->left, clip->top, SRCCOPY)) return -1;
+    if (!SetViewportOrgEx(r.dc, -clip->left, -clip->top, nullptr) ||
+        IntersectClipRect(r.dc, clip->left, clip->top, clip->right, clip->bottom) == ERROR ||
+        SetTextColor(r.dc, color) == CLR_INVALID) return -1;
+    if (!plain(context, r.dc, r.mask)) return -1;
+    static thread_local Painter painter;
+    for (unsigned at = 0; at < length;) {
+        const unsigned end = clusterEnd(text, length, at);
+        if (end == at) { scalar(text, length, at); continue; }
+        const int a = static_cast<int>(r.positions[at] + x), b = static_cast<int>(r.positions[end] + x);
+        RECT cell = {a < b ? a : b, y, a < b ? b : a, y + metrics.tmHeight};
+        if (!painter.draw(r.dc, text + at, end - at, cell, float(metrics.tmHeight - metrics.tmInternalLeading))) return -1;
+        at = end;
+    }
+    if (!BitBlt(dc, clip->left, clip->top, width, height, r.dc, clip->left, clip->top, SRCCOPY)) return -1;
+    return 1;
+}
 
 extern "C" int mp_draw_color_text(HDC dc, const wchar_t *input, unsigned length, RECT *rect, unsigned flags, PlainDraw plain) {
     const unsigned supported = DT_SINGLELINE | DT_NOPREFIX | DT_VCENTER | DT_CENTER | DT_RIGHT | DT_END_ELLIPSIS;
