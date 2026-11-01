@@ -91,6 +91,47 @@ const writeUintTo = @import("inbox.zig").writeUintTo;
 const inboxPublishesShell = @import("inbox.zig").inboxPublishesShell;
 const findShellById = @import("inbox.zig").findShellById;
 
+pub fn getSessionPath(buf: *[512]u8) ?[]const u8 {
+    const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
+    if (appdata_len == 0 or appdata_len >= 460) return null;
+    const inst = getInstanceName();
+    var name_buf: [96]u8 = undefined;
+    const base: []const u8 = if (std.mem.eql(u8, inst, "default"))
+        "session.json"
+    else
+        std.fmt.bufPrint(&name_buf, "session-{s}.json", .{inst}) catch return null;
+    var tagged_buf: [128]u8 = undefined;
+    const tagged = channelFileName(&tagged_buf, base, IS_DEV) orelse return null;
+    const prefix = "\\ZigShell\\";
+    if (appdata_len + prefix.len + tagged.len >= buf.len) return null;
+    var pos: usize = appdata_len;
+    @memcpy(buf[pos .. pos + prefix.len], prefix);
+    pos += prefix.len;
+    @memcpy(buf[pos .. pos + tagged.len], tagged);
+    pos += tagged.len;
+    return buf[0..pos];
+}
+
+pub fn getSessionPathForWorkspace(buf: *[512]u8, id: []const u8) ?[]const u8 {
+    const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
+    if (appdata_len == 0 or appdata_len >= 460) return null;
+    var name_buf: [96]u8 = undefined;
+    const base: []const u8 = if (std.mem.eql(u8, id, "default"))
+        "session.json"
+    else
+        std.fmt.bufPrint(&name_buf, "session-{s}.json", .{id}) catch return null;
+    var tagged_buf: [128]u8 = undefined;
+    const tagged = channelFileName(&tagged_buf, base, IS_DEV) orelse return null;
+    const prefix = "\\ZigShell\\";
+    if (appdata_len + prefix.len + tagged.len >= buf.len) return null;
+    var pos: usize = appdata_len;
+    @memcpy(buf[pos .. pos + prefix.len], prefix);
+    pos += prefix.len;
+    @memcpy(buf[pos .. pos + tagged.len], tagged);
+    pos += tagged.len;
+    return buf[0..pos];
+}
+
 pub fn channelFileName(buf: []u8, name: []const u8, is_dev: bool) ?[]const u8 {
     const dot = std.mem.lastIndexOfScalar(u8, name, '.') orelse name.len;
     if (!is_dev or std.mem.endsWith(u8, name[0..dot], "-dev")) {
@@ -143,47 +184,6 @@ pub fn sharedDataFileName(buf: []u8, name: []const u8) ?[]const u8 {
 
 pub fn loginTokenFileName() []const u8 {
     return "sync-auth-tokens.dat";
-}
-
-pub fn getSessionPath(buf: *[512]u8) ?[]const u8 {
-    const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
-    if (appdata_len == 0 or appdata_len >= 460) return null;
-    const inst = getInstanceName();
-    var name_buf: [96]u8 = undefined;
-    const base: []const u8 = if (std.mem.eql(u8, inst, "default"))
-        "session.json"
-    else
-        std.fmt.bufPrint(&name_buf, "session-{s}.json", .{inst}) catch return null;
-    var tagged_buf: [128]u8 = undefined;
-    const tagged = channelFileName(&tagged_buf, base, IS_DEV) orelse return null;
-    const prefix = "\\ZigShell\\";
-    if (appdata_len + prefix.len + tagged.len >= buf.len) return null;
-    var pos: usize = appdata_len;
-    @memcpy(buf[pos .. pos + prefix.len], prefix);
-    pos += prefix.len;
-    @memcpy(buf[pos .. pos + tagged.len], tagged);
-    pos += tagged.len;
-    return buf[0..pos];
-}
-
-pub fn getSessionPathForWorkspace(buf: *[512]u8, id: []const u8) ?[]const u8 {
-    const appdata_len = GetEnvironmentVariableA("APPDATA", buf, 512);
-    if (appdata_len == 0 or appdata_len >= 460) return null;
-    var name_buf: [96]u8 = undefined;
-    const base: []const u8 = if (std.mem.eql(u8, id, "default"))
-        "session.json"
-    else
-        std.fmt.bufPrint(&name_buf, "session-{s}.json", .{id}) catch return null;
-    var tagged_buf: [128]u8 = undefined;
-    const tagged = channelFileName(&tagged_buf, base, IS_DEV) orelse return null;
-    const prefix = "\\ZigShell\\";
-    if (appdata_len + prefix.len + tagged.len >= buf.len) return null;
-    var pos: usize = appdata_len;
-    @memcpy(buf[pos .. pos + prefix.len], prefix);
-    pos += prefix.len;
-    @memcpy(buf[pos .. pos + tagged.len], tagged);
-    pos += tagged.len;
-    return buf[0..pos];
 }
 
 pub fn getSessionDir(buf: *[512]u8) ?[]const u8 {
