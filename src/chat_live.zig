@@ -9,7 +9,7 @@ pub const MAX_ID: usize = 96;
 pub const MAX_LABEL: usize = 192;
 pub const MAX_TEXT: usize = 48 * 1024;
 pub const MAX_ANSWER: usize = MAX_LABEL;
-pub const MAX_PAGE: usize = 512 * 1024;
+pub const MAX_PAGE: usize = 4 * 1024 * 1024;
 
 pub const ItemKind = enum { text, thinking, tool, plan };
 pub const ItemStatus = enum { running, ok, failed, interrupted };

@@ -127,3 +127,13 @@ test('IGSH-1266 the console status scan keeps a running live turn working so Esc
   assert.match(capture, /app_state\.g_chat_screen_working = working_visible or @import\("chat_live\.zig"\)\.running\(app_state\.shells\[shell_index\]\.shell_id\);/);
   assert.doesNotMatch(capture, /app_state\.g_chat_screen_working = working_visible;/);
 });
+
+test('IGSH-1266 a full host event page fits the client page cap even when every character is escaped', () => {
+  const reader = read('src/chat_history_reader.py');
+  const bytes = reader.match(/^HOST_EVENTS_BYTES = (\d+) \* (\d+)$/m);
+  assert.ok(bytes, 'HOST_EVENTS_BYTES');
+  const live = read('src/chat_live.zig');
+  const cap = live.match(/^pub const MAX_PAGE: usize = (\d+) \* (\d+) \* (\d+);$/m);
+  assert.ok(cap, 'MAX_PAGE');
+  assert.ok(Number(cap[1]) * Number(cap[2]) * Number(cap[3]) >= 6 * Number(bytes[1]) * Number(bytes[2]) + 64 * 1024);
+});
