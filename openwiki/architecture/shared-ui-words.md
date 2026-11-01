@@ -77,6 +77,10 @@ Palette keys hold the full visible caption.
 Clipping depends on the available screen width.
 Some palette captions bypass sentence-case drawing.
 Those keys preserve their exact displayed case.
+Some context keys are text fragments.
+They precede dynamic group or workspace names.
+Their trailing spaces are significant.
+Android must treat them as fragments.
 
 Native class names are not word-list labels.
 Examples include `BUTTON` and `EDIT`.
@@ -97,6 +101,8 @@ It does not cover the whole application.
 | Settings theme names and theme popup | Catalogued. Version and workspace names remain dynamic. Graphical indicators remain presentation. |
 | Edit and message menus `src/fonts.zig` | Catalogued. Native and plain variants keep separate IDs. |
 | Main palette navigation and settings `src/sidebar.zig` | Selected captions catalogued. Other palette actions remain. |
+| Tab, group and move palette contexts | Selected captions and fragments catalogued. |
+| Group color names `src/app_state.zig` | Not migrated. Eight names remain separate. |
 | Other sidebar menus and palette contexts | Not migrated. Keep sentence-case drawing and shortcut hints. |
 | Usage menu `src/telemetry_panel.zig` | Inventory incomplete. Classify dynamic values and static labels. |
 | `src/inbox.zig`, `src/archive.zig`, `src/workspaces.zig`, `src/browser_pane.zig` | Inventory incomplete. Inspect every button and menu. Include conditional states. |

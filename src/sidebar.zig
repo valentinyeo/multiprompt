@@ -3008,7 +3008,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         var sh_hint: [8]u16 = undefined;
                         var shl: usize = 0;
                         if (slot == app_state.g_active_workspace) {
-                            for ("current") |c| {
+                            for (ui_words.palette_hint_current) |c| {
                                 sh_hint[shl] = c;
                                 shl += 1;
                             }
@@ -3026,7 +3026,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var gm_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Move to Group\u{2026}"), -1, &gm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_move_group), -1, &gm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var gm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3035,13 +3035,13 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var ga_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        const ga_label: [*:0]const u16 = if (is_groupmove_back) L("Back") else if (is_groupmove_new) L("New group") else L("No group");
+                        const ga_label: [*:0]const u16 = if (is_groupmove_back) L(ui_words.palette_back) else if (is_groupmove_new) L(ui_words.palette_new_group) else L(ui_words.palette_no_group);
                         _ = DrawTextW(hdc, ga_label, -1, &ga_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         if (is_groupmove_back or is_groupmove_new) {
                             _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                             var ga_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                            _ = DrawTextW(hdc, if (is_groupmove_back) L("Esc") else L("new"), -1, &ga_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                            _ = DrawTextW(hdc, if (is_groupmove_back) L("Esc") else L(ui_words.palette_hint_new), -1, &ga_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (is_groupmove_group) {
                         const gi = result_idx - SEARCH_GROUPMOVE_GROUP_OFFSET;
@@ -3053,7 +3053,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             if (app_state.groups[gi].name_len > 0) {
                                 _ = DrawTextW(hdc, @ptrCast(&app_state.groups[gi].name), @intCast(app_state.groups[gi].name_len), &gg_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             } else {
-                                _ = paletteDrawText(hdc, L("(unnamed)"), -1, &gg_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                                _ = paletteDrawText(hdc, L(ui_words.palette_unnamed_group), -1, &gg_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             }
                             if (app_state.groups[gi].id == current_gid) {
                                 _ = SelectObject(hdc, palette_hint_font);
@@ -3066,7 +3066,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var mm_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Move to Workspace…"), -1, &mm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.palette_move_workspace), -1, &mm_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var mm_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3092,7 +3092,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         var mh_hint: [8]u16 = undefined;
                         var mhl: usize = 0;
                         if (mslot == active_ws) {
-                            for ("current") |c| {
+                            for (ui_words.palette_hint_current) |c| {
                                 mh_hint[mhl] = c;
                                 mhl += 1;
                             }
@@ -3120,7 +3120,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                 cwl += 1;
                             }
                             if (cwl == 0) {
-                                for ("Workspace") |c| {
+                                for (ui_words.palette_unnamed_workspace) |c| {
                                     if (cwl >= cw_buf.len) break;
                                     cw_buf[cwl] = c;
                                     cwl += 1;
@@ -3137,7 +3137,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
                         var mn_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = paletteDrawText(hdc, L("Move to NEW workspace"), -1, &mn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = paletteDrawText(hdc, L(ui_words.tab_context_move_new_workspace), -1, &mn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var mn_hint_rc = RECT{ .left = ox + overlay_w - 120, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -4173,7 +4173,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const gi = result_idx - SEARCH_TABCTX_GROUP_ADD_OFFSET;
                             var gal_buf: [96]u16 = std.mem.zeroes([96]u16);
                             var gal_i: usize = 0;
-                            for ("Add to group: ") |c| {
+                            for (ui_words.tab_context_add_group_prefix) |c| {
                                 if (gal_i >= gal_buf.len - 1) break;
                                 gal_buf[gal_i] = c;
                                 gal_i += 1;
@@ -4185,7 +4185,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                                     gal_i += 1;
                                 }
                                 if (app_state.groups[gi].name_len == 0) {
-                                    for ("(unnamed)") |c| {
+                                    for (ui_words.palette_unnamed_group) |c| {
                                         if (gal_i >= gal_buf.len - 1) break;
                                         gal_buf[gal_i] = c;
                                         gal_i += 1;
@@ -4202,7 +4202,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             const tc_kaw = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].keep_awake else false;
                             const tc_browser_on = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].browser_enabled else false;
                             const tc_has_tmux = if (findShellById(app_state.g_tabctx_sid)) |ti| app_state.shells[ti].tmux_session_len > 0 else false;
-                            const tc_label: [*:0]const u16 = if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L("Move chat to new mode") else if (result_idx == SEARCH_TABCTX_RECONNECT) L("Reconnect") else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L("Unfavorite") else L("Favorite")) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L("Chat View: Allow") else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L("Chat View: Always allow") else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L("Chat View: Deny") else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L("Chat View: Stop the agent") else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Chat View: Insert browser tab URL") else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L("Chat View: Reset this chat") else if (result_idx == SEARCH_TABCTX_BACK) L("Back") else if (result_idx == SEARCH_TABCTX_START_SESSION) L("Reconnect") else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L("Inbox: Show This Session Again") else L("Inbox: Never Show This Session")) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L("Unmute Tab") else L("Mute Tab")) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L("Keep Alive: On") else L("Keep Alive: Off")) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L("Unpin from Top") else L("Pin to Top")) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L("Keep Tab Awake: On") else L("Keep Tab Awake: Off")) else if (result_idx == SEARCH_TABCTX_WSMOVE) L("Move to Workspace\u{2026}") else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L("Add to new group") else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L("Remove from group") else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L("New chat in this group") else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L("Move to NEW workspace") else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L("Clear tab selection") else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L("Archive Session") else L("Close Session")) else if (result_idx == SEARCH_TABCTX_END_TMUX) L("End tmux session") else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_browser_on) L("Close Browser Pane") else L("Open Browser Pane")) else L("Tab action");
+                            const tc_label: [*:0]const u16 = if (result_idx == SEARCH_TABCTX_ADOPT_HOST) L(ui_words.tab_context_move_chat_mode) else if (result_idx == SEARCH_TABCTX_RECONNECT) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_FAVORITE) (if (tc_favorite) L(ui_words.tab_context_unfavorite) else L(ui_words.tab_context_favorite)) else if (result_idx == SEARCH_TABCTX_CHAT_ALLOW) L(ui_words.tab_context_chat_allow) else if (result_idx == SEARCH_TABCTX_CHAT_ALWAYS) L(ui_words.tab_context_chat_always_allow) else if (result_idx == SEARCH_TABCTX_CHAT_DENY) L(ui_words.tab_context_chat_deny) else if (result_idx == SEARCH_TABCTX_CHAT_STOP) L(ui_words.tab_context_chat_stop_agent) else if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L(ui_words.tab_context_chat_insert_browser_url) else if (result_idx == SEARCH_TABCTX_CHAT_RESET) L(ui_words.tab_context_chat_reset) else if (result_idx == SEARCH_TABCTX_BACK) L(ui_words.palette_back) else if (result_idx == SEARCH_TABCTX_START_SESSION) L(ui_words.palette_reconnect) else if (result_idx == SEARCH_TABCTX_INBOX_EXCLUDE) (if (tc_excluded) L(ui_words.tab_context_inbox_show_again) else L(ui_words.tab_context_inbox_never_show)) else if (result_idx == SEARCH_TABCTX_MUTE) (if (tc_muted) L(ui_words.tab_context_unmute) else L(ui_words.tab_context_mute)) else if (result_idx == SEARCH_TABCTX_KEEPALIVE) (if (tc_ka) L(ui_words.tab_context_keep_alive_on) else L(ui_words.tab_context_keep_alive_off)) else if (result_idx == SEARCH_TABCTX_PIN_TOP) (if (tc_pinned) L(ui_words.tab_context_unpin) else L(ui_words.tab_context_pin)) else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) (if (tc_kaw) L(ui_words.tab_context_keep_awake_on) else L(ui_words.tab_context_keep_awake_off)) else if (result_idx == SEARCH_TABCTX_WSMOVE) L(ui_words.tab_context_move_workspace_menu) else if (result_idx == SEARCH_TABCTX_GROUP_NEW) L(ui_words.tab_context_add_new_group) else if (result_idx == SEARCH_TABCTX_GROUP_REMOVE) L(ui_words.tab_context_remove_group) else if (result_idx == SEARCH_TABCTX_GROUP_NEW_TAB_IN) L(ui_words.tab_context_new_group_chat) else if (result_idx == SEARCH_TABCTX_MOVE_NEW_WS) L(ui_words.tab_context_move_new_workspace) else if (result_idx == SEARCH_TABCTX_CLEAR_SEL) L(ui_words.tab_context_clear_selection) else if (result_idx == SEARCH_TABCTX_ARCHIVE) (if (tc_has_tmux) L(ui_words.tab_context_archive_session) else L(ui_words.tab_context_close_session)) else if (result_idx == SEARCH_TABCTX_END_TMUX) L(ui_words.tab_context_end_tmux) else if (result_idx == SEARCH_TABCTX_BROWSER) (if (tc_browser_on) L(ui_words.tab_context_close_browser) else L(ui_words.tab_context_open_browser)) else L(ui_words.tab_context_action_fallback);
                             _ = DrawTextW(hdc, tc_label, -1, &tc_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             const tc_shortcut: ?[*:0]const u16 = if (result_idx == SEARCH_TABCTX_CHAT_TAB_URL) L("Ctrl+Shift+X") else if (result_idx == SEARCH_TABCTX_FAVORITE) L("Alt+S") else if (result_idx == SEARCH_TABCTX_BACK) L("Esc") else if (result_idx == SEARCH_TABCTX_RECONNECT or result_idx == SEARCH_TABCTX_START_SESSION) L("Ctrl+Shift+R") else if (result_idx == SEARCH_TABCTX_ARCHIVE) L("Alt+X") else if (result_idx == SEARCH_TABCTX_END_TMUX) L("Ctrl+Shift+W") else if (result_idx == SEARCH_TABCTX_BROWSER) L("Alt+A") else if (result_idx == SEARCH_TABCTX_KEEPAWAKE) L("Alt+P") else null;
                             if (tc_shortcut) |tc_hint| {

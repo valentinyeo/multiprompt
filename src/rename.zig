@@ -1,5 +1,6 @@
 const app_state = @import("app_state.zig");
 const std = @import("std");
+const ui_words = @import("ui_words.zon");
 const WINAPI = @import("win32.zig").WINAPI;
 const UINT = @import("win32.zig").UINT;
 const WPARAM = @import("win32.zig").WPARAM;
@@ -534,19 +535,19 @@ pub fn groupPaletteCommand(action: usize) usize {
 pub fn groupPaletteLabel(action: usize, buf: *[192]u16) usize {
     const gi = findGroupIdx(paletteGroupId()) orelse return 0;
     const label: []const u8 = switch (action) {
-        0 => "New tab in this group",
-        1 => "Rename group",
-        2 => if (app_state.groups[gi].collapsed) "Expand group" else "Collapse group",
-        3 => "Ungroup",
-        4 => "Close all tabs in group",
-        5 => "Move group to new workspace",
+        0 => ui_words.group_context_new_tab,
+        1 => ui_words.group_context_rename,
+        2 => if (app_state.groups[gi].collapsed) ui_words.group_context_expand else ui_words.group_context_collapse,
+        3 => ui_words.group_context_ungroup,
+        4 => ui_words.group_context_close_tabs,
+        5 => ui_words.group_context_move_new_workspace,
         8...15 => GROUP_COLOR_NAMES[action - 8],
-        16...88 => "Move group to workspace: ",
+        16...88 => ui_words.group_context_move_workspace_prefix,
         else => return 0,
     };
     var len: usize = 0;
     if (action >= 8 and action < 16) {
-        for ("Group color: ") |c| {
+        for (ui_words.group_context_color_prefix) |c| {
             buf[len] = c;
             len += 1;
         }
