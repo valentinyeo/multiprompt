@@ -145,3 +145,12 @@ test('IGSH-1266 a full host event page fits the client page cap even when every 
   assert.ok(cap, 'MAX_PAGE');
   assert.ok(Number(cap[1]) * Number(cap[2]) * Number(cap[3]) >= 6 * Number(bytes[1]) * Number(bytes[2]) + 64 * 1024);
 });
+
+test('IGSH-1266 a pushed history page is taken even while another window has focus', () => {
+  const session = read('src/chat_session.zig');
+  const request = session.slice(session.indexOf('pub fn chatFileRequestForDelivery('), session.indexOf('fn chatFileFailed('));
+  const take = request.indexOf('stream.ready.swap(false, .acq_rel)');
+  const idle = request.indexOf('GetLastInputInfo(');
+  assert.ok(take > 0, 'push taken');
+  assert.ok(idle > take, 'idle gate only after the push path');
+});

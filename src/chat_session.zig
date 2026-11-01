@@ -618,10 +618,6 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
     const now = GetTickCount64();
     if (!chat_history.retryDue(entry.pending, now, if (entry.stream == null) entry.next else 0)) return;
     const load_disk = !entry.disk_loaded;
-    if (!delivery and !load_disk and !foregroundIsOurs()) {
-        var input: LASTINPUTINFO = .{ .cbSize = @sizeOf(LASTINPUTINFO), .dwTime = 0 };
-        if (GetLastInputInfo(&input) == 0 or @as(u32, @truncate(now)) -% input.dwTime < 5000) return;
-    }
     const known = entry.key;
     entry.key = key;
     if (key.sid[0] == 0) entry.key.sid = if (known.sid[0] != 0) known.sid else entry.history.sid;
@@ -647,6 +643,9 @@ pub fn chatFileRequestForDelivery(key: chat_transcript.Identity, delivery: bool)
         pushed = .{ .wire = stream.wire, .id = stream.id, .read_us = stream.read_us };
         stream.wire = .empty;
         _ = @import("win32.zig").SetEvent(stream.ack);
+    } else if (!delivery and !load_disk and !foregroundIsOurs()) {
+        var input: LASTINPUTINFO = .{ .cbSize = @sizeOf(LASTINPUTINFO), .dwTime = 0 };
+        if (GetLastInputInfo(&input) == 0 or @as(u32, @truncate(now)) -% input.dwTime < 5000) return;
     }
     if (!load_disk and pushed == null and !chatFetchAcquire()) return;
     entry.push_pending = pushed != null;
