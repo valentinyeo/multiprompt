@@ -512,6 +512,7 @@ fn paletteTargetTracksUsage(target: usize) bool {
         target == SEARCH_SOUND_OFFSET or
         target == SEARCH_THEME_MENU_OFFSET or
         target == SEARCH_SETTINGS_OFFSET or
+        target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET or
         (target >= SEARCH_OPENALL_OFFSET and target <= SEARCH_RECOVER_REPO_OFFSET) or
         (target >= SEARCH_NEWWIN_OFFSET and target <= SEARCH_CREATEWS_OFFSET) or
         (target >= SEARCH_WORKSPACES_MENU_OFFSET and target <= SEARCH_SNIPPET_BACK_OFFSET) or
@@ -625,6 +626,7 @@ pub fn recordPaletteUsage(target: usize) void {
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
     const words = @import("ui_words.zon");
+    if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return words.workspace_color;
     if (target == app_state.SEARCH_TABCTX_BOT_FACE) return words.bot_face;
     if (target == app_state.SEARCH_TABCTX_BOT_COLOR) return words.bot_color;
     if (target >= app_state.SEARCH_BOT_FACE_OFFSET and target < app_state.SEARCH_BOT_FACE_OFFSET + app_state.BOT_FACE_COUNT) return @import("bot_look.zig").faces[target - app_state.SEARCH_BOT_FACE_OFFSET];
@@ -1180,6 +1182,7 @@ pub fn roomPaletteAllowed(target: usize) bool {
 }
 
 pub fn paletteGroupOf(target: usize) ?u8 {
+    if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return 3;
     if (target == app_state.SEARCH_TABCTX_BOT_FACE or target == app_state.SEARCH_TABCTX_BOT_COLOR) return 2;
     if (target == @import("room_frontend.zig").new_room_target or target == @import("room_frontend.zig").edit_room_target or (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) return 0;
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
@@ -1513,6 +1516,32 @@ fn folderEntryIndexFor(ws_name: []const u8) ?usize {
 
 pub fn activeWorkspaceSlot() u8 {
     return if (app_state.g_single_window) app_state.g_active_workspace else 0;
+}
+
+pub fn workspaceColorSlot() ?u8 {
+    if (!@import("room_frontend.zig").privateActionsAllowed()) return null;
+    if (app_state.g_account_locked or app_state.g_restoring or app_state.g_account_applying) return null;
+    if (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored) return null;
+    if (app_state.g_search_from_inbox) {
+        const kind = @import("frequent.zig").splitKind(app_state.g_inbox_tab);
+        if (kind != .workspace or kind.workspace >= app_state.g_inbox_ws_count) return null;
+        const inbox_ws = app_state.g_inbox_ws[kind.workspace];
+        if (app_state.g_main_hwnd == null or inbox_ws.hwnd != @intFromPtr(app_state.g_main_hwnd)) return null;
+        if (inbox_ws.workspace_entry) {
+            if (inbox_ws.id_len == 0 or inbox_ws.id_len > inbox_ws.id.len) return null;
+            return findMyWorkspaceSlot(inbox_ws.id[0..inbox_ws.id_len]);
+        }
+        if (app_state.g_single_window) return null;
+        return if (app_state.g_lws_count > 0) 0 else null;
+    }
+    if (app_state.g_search_spawn_ws == 0xFE or app_state.g_starred_workspace or app_state.g_all_sessions_active) return null;
+    const slot = activeWorkspaceSlot();
+    return if (slot < app_state.g_lws_count and slot < app_state.MAX_LWS) slot else null;
+}
+
+pub fn workspaceColorTargetSlot() ?u8 {
+    const target = app_state.g_workspace_color_target orelse return null;
+    return findMyWorkspaceSlot(target.id[0..target.id_len]);
 }
 
 pub fn workspaceFolderCurrent(ws: u8, out: *[256]u8, out_len: *u32) bool {
@@ -2697,7 +2726,13 @@ pub fn updateSearchResults() void {
         return;
     }
 
-    if (app_state.g_bot_look_mode != .none) {
+    if (app_state.g_workspace_color_target != null and workspaceColorTargetSlot() == null) {
+        app_state.g_workspace_color_target = null;
+        app_state.g_search_len = 0;
+        app_state.g_search_sel = 0;
+        app_state.g_search_scroll = 0;
+    }
+    if (app_state.g_bot_look_mode != .none or app_state.g_workspace_color_target != null) {
         app_state.g_search_results[0] = SEARCH_TABCTX_BACK;
         app_state.g_search_result_count = 1;
         const labels: []const []const u8 = if (app_state.g_bot_look_mode == .face) &@import("bot_look.zig").faces else &@import("bot_look.zig").colors;
@@ -3119,6 +3154,12 @@ pub fn updateSearchResults() void {
         }
     }
 
+    if (workspaceColorSlot() != null and app_state.g_search_result_count < app_state.g_search_results.len and
+        (app_state.g_search_len == 0 or labelsMatchQuery(&.{ @import("ui_words.zon").workspace_color, "workspace colour", "default bot color" }, app_state.g_search_buf[0..app_state.g_search_len])))
+    {
+        app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_WORKSPACE_COLOR_OFFSET;
+        app_state.g_search_result_count += 1;
+    }
     if (app_state.g_search_result_count < app_state.g_search_results.len and
         (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "settings", "preferences", "look and settings", "keys", "about" }, app_state.g_search_buf[0..app_state.g_search_len])))
     {

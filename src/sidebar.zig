@@ -2493,6 +2493,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
     }
 
     if (app_state.g_search_active) {
+        if (app_state.g_workspace_color_target != null and @import("command_palette.zig").workspaceColorTargetSlot() == null) @import("command_palette.zig").updateSearchResults();
         var win_rc: RECT = std.mem.zeroes(RECT);
         _ = GetClientRect(app_state.g_main_hwnd, &win_rc);
         const win_w = win_rc.right - win_rc.left;
@@ -2581,6 +2582,8 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 if (app_state.g_search_pick_repo_folder_mode) L("Set workspace folder...") else L("Pick a repo...")
             else if (app_state.g_search_openall_host_mode)
                 L("Choose a VPS...")
+            else if (app_state.g_workspace_color_target != null)
+                L(ui_words.workspace_color)
             else if (app_state.g_bot_look_mode == .face)
                 L(ui_words.bot_face)
             else if (app_state.g_bot_look_mode == .color)
@@ -2602,6 +2605,14 @@ pub fn paintSidebar(hdc: HANDLE) void {
             else
                 L("Search sessions and commands");
             _ = DrawTextW(hdc, placeholder, -1, &input_text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            if (@import("command_palette.zig").workspaceColorTargetSlot()) |slot| {
+                var name: [32]u8 = undefined;
+                var wide: [64]u16 = undefined;
+                const len = std.unicode.utf8ToUtf16Le(&wide, workspaceDisplayName(slot, &name)) catch 0;
+                var name_rc = input_text_rc;
+                name_rc.left += uiScaled(150);
+                _ = DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_END_ELLIPSIS | DT_NOPREFIX);
+            }
         } else {
             if (app_state.g_search_rename_input_mode and app_state.g_search_rename_select_all) {
                 const selected_br = CreateSolidBrush(customColorOr("selected_bg", RGB(0, 122, 204)));
@@ -4327,7 +4338,24 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         const label: []const u8 = if (face_choice) @import("bot_look.zig").faces[result_idx - app_state.SEARCH_BOT_FACE_OFFSET] else if (color_choice) @import("bot_look.zig").colors[result_idx - app_state.SEARCH_BOT_COLOR_OFFSET] else if (result_idx == app_state.SEARCH_TABCTX_BOT_FACE) ui_words.bot_face else ui_words.bot_color;
                         var wide: [96]u16 = undefined;
                         const len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
-                        const shell_index = if (face_choice or color_choice) findShellById(app_state.g_bot_look_sid) else null;
+                        const workspace_slot = if (color_choice) @import("command_palette.zig").workspaceColorTargetSlot() else null;
+                        const shell_index = if ((face_choice or color_choice) and app_state.g_workspace_color_target == null) findShellById(app_state.g_bot_look_sid) else null;
+                        if (workspace_slot) |slot| {
+                            const index = result_idx - app_state.SEARCH_BOT_COLOR_OFFSET;
+                            const size = @min(uiScaled(24), row_h);
+                            const x = row_left + uiScaled(10);
+                            const y = ry + @divTrunc(row_h - size, 2);
+                            const avatar_rc = RECT{ .left = x, .top = y, .right = x + size, .bottom = y + size };
+                            const color: u8 = if (index == 0) @import("session_layout.zig").workspaceColor(slot, null) else @intCast(index - 1);
+                            @import("bot_avatar.zig").draw(hdc, avatar_rc, .{ .face = 0, .color = color });
+                            _ = SelectObject(hdc, palette_font);
+                            _ = SetTextColor(hdc, primary_color);
+                            const chosen = app_state.g_ws_colors[slot];
+                            if ((index == 0 and chosen == null) or (index > 0 and chosen != null and chosen.? == index - 1)) {
+                                var mark_rc = RECT{ .left = ox + overlay_w - 60, .top = ry, .right = ox + overlay_w - 16, .bottom = ry + row_h };
+                                _ = DrawTextW(hdc, L("✓"), -1, &mark_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                            }
+                        }
                         if (shell_index) |si| {
                             const shell = &app_state.shells[si];
                             const chosen = if (face_choice) shell.face else shell.color;
@@ -4352,7 +4380,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         }
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
-                        var look_rc = RECT{ .left = if ((face_choice or color_choice) and shell_index != null) row_left + uiScaled(44) else text_left, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
+                        var look_rc = RECT{ .left = if ((face_choice or color_choice) and (shell_index != null or workspace_slot != null)) row_left + uiScaled(44) else text_left, .top = ry, .right = ox + overlay_w - 80, .bottom = ry + row_h };
                         _ = DrawTextW(hdc, @ptrCast(&wide), @intCast(len), &look_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | (if (face_choice) @as(u32, DT_END_ELLIPSIS) else 0));
                     } else if (is_tabctx) {
                         _ = SelectObject(hdc, palette_font);
@@ -4470,6 +4498,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var back_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
                         _ = paletteDrawText(hdc, L("main"), -1, &back_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                    } else if (result_idx == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) {
+                        _ = SelectObject(hdc, palette_font);
+                        _ = SetTextColor(hdc, primary_color);
+                        var color_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
+                        _ = paletteDrawText(hdc, L(ui_words.workspace_color), -1, &color_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (result_idx == SEARCH_SETTINGS_OFFSET) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);

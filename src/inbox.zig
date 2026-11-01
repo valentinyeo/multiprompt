@@ -494,7 +494,13 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
         var wn_buf: [64]u8 = std.mem.zeroes([64]u8);
         const wn_len = json_reader.copyString(wobj, "wn", &wn_buf);
         const wi2 = app_state.g_inbox_ws_count;
-        app_state.g_inbox_ws[wi2] = .{};
+        app_state.g_inbox_ws[wi2] = .{ .workspace_entry = true };
+        if (json_reader.string(json_reader.field(wobj, "wid"))) |id| {
+            if (id.len > 0 and id.len <= app_state.g_inbox_ws[wi2].id.len) {
+                @memcpy(app_state.g_inbox_ws[wi2].id[0..id.len], id);
+                app_state.g_inbox_ws[wi2].id_len = @intCast(id.len);
+            }
+        }
         const wnl = @min(wn_len, @as(u32, 63));
         @memcpy(app_state.g_inbox_ws[wi2].name[0..wnl], wn_buf[0..wnl]);
         app_state.g_inbox_ws[wi2].name_len = wnl;

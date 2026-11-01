@@ -241,6 +241,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Right-click group / Ctrl+K | Group: new tab, rename, color, collapse / expand, move workspace, ungroup, close all tabs |
 | Right-click tab | Tab actions palette (pin / reattach / mute / close / move / group) |
 | Ctrl+K / right-click tab → Bot face / Bot color | Choose a bot look or Auto; shared choices sync with your account |
+| Ctrl+K -&gt; Workspace color | Choose a workspace default color or Auto. Manual bot colors stay unchanged. |
 | Ctrl+F in Chat View | Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |
 | End / Ctrl+K "Chat View: Scroll to newest message" | Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch |
 | Double-click empty space | Switch between Chat View and the shell (without selecting text) |

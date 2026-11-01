@@ -3722,6 +3722,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const target_idx = findShellById(@intCast(lp)) orelse return 0;
                 if (!@import("bot_look.zig").eligible(target_idx)) return 0;
                 openTabContextPalette(hwnd, target_idx);
+                app_state.g_workspace_color_target = null;
                 app_state.g_bot_look_sid = app_state.shells[target_idx].shell_id;
                 app_state.g_bot_look_mode = if (wp == @intFromEnum(more_menu.Item.bot_face)) .face else .color;
                 app_state.g_search_len = 0;
@@ -4015,6 +4016,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_APP_SEARCH_OPEN => {
+            const was_all_sessions = app_state.g_all_sessions_active;
             debugLog("[usage-hover] close requested by palette");
             @import("usage_card.zig").close();
             app_state.g_search_snippet_mode = false;
@@ -4055,7 +4057,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 }
             } else {
                 app_state.g_search_from_inbox = false;
-                app_state.g_search_spawn_ws = 0xFF;
+                app_state.g_search_spawn_ws = if (was_all_sessions) 0xFE else 0xFF;
             }
             const was_search_active = app_state.g_search_active;
             altqLog("palette_refocus rem={} wait_alt={} grace_left={} inbox_left={}", .{ app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, app_state.g_ws_switch_focus_grace -| GetTickCount64(), app_state.g_inbox_shell_focus_until -| GetTickCount64() });
@@ -4106,6 +4108,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
             app_state.g_search_tabctx_mode = false;
+            app_state.g_workspace_color_target = null;
             app_state.g_bot_look_mode = .none;
             app_state.g_bot_look_sid = 0;
             app_state.g_search_groupctx_mode = false;
@@ -4171,6 +4174,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_groupmove_tab_sid = 0;
             app_state.g_search_skills_mode = false;
             app_state.g_search_tabctx_mode = false;
+            app_state.g_workspace_color_target = null;
             app_state.g_bot_look_mode = .none;
             app_state.g_bot_look_sid = 0;
             app_state.g_search_groupctx_mode = false;
@@ -4327,6 +4331,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             cancelShellRefocus(hwnd);
             if (app_state.g_search_active) {
                 app_state.g_search_active = false;
+                app_state.g_workspace_color_target = null;
                 app_state.g_browser_url_mode = false;
             }
             if (app_state.g_search_from_inbox) {
@@ -4547,7 +4552,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_search_scroll = 0;
                 updateSearchResults();
                 _ = InvalidateRect(hwnd, null, 0);
-            } else if (app_state.g_bot_look_mode != .none) {
+            } else if (app_state.g_bot_look_mode != .none or app_state.g_workspace_color_target != null) {
+                app_state.g_workspace_color_target = null;
                 app_state.g_bot_look_mode = .none;
                 app_state.g_bot_look_sid = 0;
                 app_state.g_search_len = 0;
@@ -4840,7 +4846,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_search_active and app_state.g_search_result_count > 0) {
                 const target = app_state.g_search_results[app_state.g_search_sel];
                 if (paletteRowIsHeader(target)) return 0;
-                if (app_state.g_bot_look_mode != .none and target == SEARCH_TABCTX_BACK) {
+                if ((app_state.g_bot_look_mode != .none or app_state.g_workspace_color_target != null) and target == SEARCH_TABCTX_BACK) {
+                    app_state.g_workspace_color_target = null;
                     app_state.g_bot_look_mode = .none;
                     app_state.g_bot_look_sid = 0;
                     app_state.g_search_len = 0;
@@ -4850,10 +4857,45 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) {
+                    const slot = @import("command_palette.zig").workspaceColorSlot() orelse return 0;
+                    ensureWorkspaceSlotId(slot);
+                    recordPaletteUsage(target);
+                    app_state.g_workspace_color_target = .{ .id = app_state.g_ws_ids[slot], .id_len = app_state.g_ws_id_len[slot] };
+                    app_state.g_bot_look_mode = .none;
+                    app_state.g_search_len = 0;
+                    app_state.g_search_sel = 1;
+                    app_state.g_search_scroll = 0;
+                    updateSearchResults();
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
+                if (app_state.g_workspace_color_target != null) {
+                    const slot = @import("command_palette.zig").workspaceColorTargetSlot() orelse {
+                        app_state.g_workspace_color_target = null;
+                        app_state.g_search_len = 0;
+                        app_state.g_search_sel = 0;
+                        app_state.g_search_scroll = 0;
+                        updateSearchResults();
+                        _ = InvalidateRect(hwnd, null, 0);
+                        return 0;
+                    };
+                    if (target >= app_state.SEARCH_BOT_COLOR_OFFSET and target < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT) {
+                        if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
+                        const choice = target - app_state.SEARCH_BOT_COLOR_OFFSET;
+                        const color: ?u8 = if (choice == 0) null else @intCast(choice - 1);
+                        if (@import("settings_panel.zig").chooseWorkspaceColor(slot, color)) {
+                            app_state.g_workspace_color_target = null;
+                            _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+                        }
+                    }
+                    return 0;
+                }
                 if (target == app_state.SEARCH_TABCTX_BOT_FACE or target == app_state.SEARCH_TABCTX_BOT_COLOR) {
                     const idx = if (app_state.g_search_tabctx_mode) findShellById(app_state.g_tabctx_sid) else if (app_state.active_shell < app_state.shell_count) app_state.active_shell else null;
                     if (idx) |shell_idx| {
                         if (@import("bot_look.zig").eligible(shell_idx)) {
+                            app_state.g_workspace_color_target = null;
                             app_state.g_bot_look_sid = app_state.shells[shell_idx].shell_id;
                             app_state.g_bot_look_mode = if (target == app_state.SEARCH_TABCTX_BOT_FACE) .face else .color;
                             app_state.g_search_len = 0;

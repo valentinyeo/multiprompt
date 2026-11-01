@@ -200,6 +200,7 @@
   "changelog_close": "close",
   "bot_face": "Bot face",
   "bot_color": "Bot color",
+  "workspace_color": "Workspace color",
   "bot_face_classic": "Circle dots",
   "bot_face_happy": "Square squares",
   "bot_face_square_eyes": "Squircle happy",

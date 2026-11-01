@@ -463,11 +463,16 @@ fn paintWorkspaceColors(hdc: w.HANDLE) void {
     }
 }
 
-fn chooseWorkspaceColor(workspace: usize, color: ?u8) void {
+pub fn chooseWorkspaceColor(workspace: usize, color: ?u8) bool {
+    if (workspace >= state.g_lws_count or workspace >= state.MAX_LWS) return false;
+    if (color) |value| if (value >= 7) return false;
+    if (state.g_account_locked or state.g_restoring or state.g_account_applying) return false;
+    if (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored) return false;
     state.g_ws_colors[workspace] = color;
     @import("session.zig").saveSession();
-    _ = w.InvalidateRect(state.g_main_hwnd, null, 0);
-    _ = w.InvalidateRect(viewport, null, 0);
+    if (state.g_main_hwnd != null) _ = w.InvalidateRect(state.g_main_hwnd, null, 0);
+    if (viewport != null) _ = w.InvalidateRect(viewport, null, 0);
+    return true;
 }
 
 fn currentTheme() []const u8 {
@@ -622,7 +627,7 @@ fn contentProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) call
                 if (x >= rc.left and x < rc.right and y >= rc.top and y < rc.bottom) {
                     color_focus = workspace;
                     _ = @import("focus.zig").SetFocus(hwnd);
-                    chooseWorkspaceColor(workspace, if (color < 7) @intCast(color) else null);
+                    _ = chooseWorkspaceColor(workspace, if (color < 7) @intCast(color) else null);
                     return 0;
                 }
             };
@@ -637,8 +642,8 @@ fn contentProc(hwnd: w.HANDLE, message: w.UINT, wp: w.WPARAM, lp: w.LPARAM) call
                 setScroll(scroll + rc.top - s(40));
             } else if (wp == 0x25 or wp == 0x27) {
                 const current = @import("session_layout.zig").workspaceColor(color_focus, state.g_ws_colors[color_focus]);
-                chooseWorkspaceColor(color_focus, (current + @as(u8, if (wp == 0x25) 6 else 1)) % 7);
-            } else if (wp == 0x24 or wp == 0x2e) chooseWorkspaceColor(color_focus, null);
+                _ = chooseWorkspaceColor(color_focus, (current + @as(u8, if (wp == 0x25) 6 else 1)) % 7);
+            } else if (wp == 0x24 or wp == 0x2e) _ = chooseWorkspaceColor(color_focus, null);
             return 0;
         },
         0x0087 => return 1,
