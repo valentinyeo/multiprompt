@@ -80,6 +80,7 @@ pub const Live = struct {
     revision: u64 = 0,
     card_dismissed: bool = false,
     held: bool = false,
+    reply_in_history: bool = false,
     items: std.ArrayList(Item) = .empty,
     request: Request = .{},
     prompt: chat_options.Prompt = .{},
@@ -96,6 +97,7 @@ pub const Live = struct {
         for (self.items.items) |*item| item.text.deinit(a);
         self.items.clearRetainingCapacity();
         self.held = false;
+        self.reply_in_history = false;
         self.after = 0;
         self.turn_len = 0;
         self.state = .idle;
@@ -184,18 +186,21 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
         for (self.items.items) |*item| item.text.deinit(a);
         self.items.clearRetainingCapacity();
         self.held = false;
+        self.reply_in_history = false;
         self.state = .running;
         self.turn_len = @min(turn.len, self.turn.len);
         @memcpy(self.turn[0..self.turn_len], turn[0..self.turn_len]);
     } else if (std.mem.eql(u8, kind, "text.delta") or std.mem.eql(u8, kind, "thinking.delta")) {
         const target = try self.itemFor(a, item_id, if (std.mem.eql(u8, kind, "text.delta")) .text else .thinking);
         try target.setText(a, strOf(payload, "text"));
+        self.reply_in_history = false;
     } else if (std.mem.eql(u8, kind, "text.done") or std.mem.eql(u8, kind, "thinking.done")) {
         const target = try self.itemFor(a, item_id, if (std.mem.eql(u8, kind, "text.done")) .text else .thinking);
         try target.setText(a, strOf(payload, "text"));
         target.done = true;
     } else if (std.mem.eql(u8, kind, "item.started")) {
         const target = try self.itemFor(a, item_id, .tool);
+        self.reply_in_history = false;
         const line = eventLabel(payload);
         try target.setText(a, if (line.len > 0) line else strOf(payload, "tool"));
         target.done = false;
@@ -244,7 +249,7 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
             self.question_lens = @splat(0);
         }
     } else if (std.mem.eql(u8, kind, "turn.ended")) {
-        self.held = self.state == .running;
+        self.held = self.state == .running and !self.reply_in_history;
         self.state = .idle;
         self.ended = statusOf(strOf(payload, "status"));
     } else if (std.mem.eql(u8, kind, "host.status") and std.mem.eql(u8, strOf(payload, "state"), "stopped")) {
@@ -596,9 +601,13 @@ pub fn historyCaughtUp(shell_id: u32) void {
     mutex.lock();
     defer mutex.unlock();
     for (&slots) |*live| {
-        if (live.used and live.shell_id == shell_id and live.held) {
+        if (!live.used or live.shell_id != shell_id) continue;
+        if (live.held) {
             live.held = false;
             live.touch();
+        } else if (live.state == .running and live.items.items.len > 0) {
+            const last = live.items.items[live.items.items.len - 1];
+            live.reply_in_history = last.kind == .text and last.done;
         }
     }
 }
@@ -1105,6 +1114,29 @@ test "IGSH-1266 a host that turns ready mid-turn keeps the live reply on screen"
     try std.testing.expect(applyPage(97, sid, stopped));
     try std.testing.expect(!running(97));
     try std.testing.expect(held(97));
+}
+
+test "IGSH-1266 history that lands before the turn ends does not leave a second copy of the reply" {
+    const sid = "11111111-2222-3333-4444-999999999999";
+    _ = begin(95, 0, sid);
+    defer release(95);
+    const reply = "{\"result\":{\"events\":[" ++
+        "{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t-1\",\"payload\":{}}}," ++
+        "{\"seq\":2,\"event\":{\"kind\":\"text.delta\",\"turn\":\"t-1\",\"item\":\"a:text:0\",\"payload\":{\"text\":\"Rep\"}}}" ++
+        "]}}";
+    try std.testing.expect(applyPage(95, sid, reply));
+    historyCaughtUp(95);
+    const done = "{\"result\":{\"events\":[" ++
+        "{\"seq\":3,\"event\":{\"kind\":\"text.done\",\"turn\":\"t-1\",\"item\":\"a:text:0\",\"payload\":{\"text\":\"Reply\"}}}" ++
+        "]}}";
+    try std.testing.expect(applyPage(95, sid, done));
+    historyCaughtUp(95);
+    const ended = "{\"result\":{\"events\":[{\"seq\":4,\"event\":{\"kind\":\"turn.ended\",\"turn\":\"t-1\",\"payload\":{\"status\":\"completed\"}}}]}}";
+    try std.testing.expect(applyPage(95, sid, ended));
+    try std.testing.expect(!held(95));
+    var text: [64]u16 = @splat(0);
+    var blocks: [4]chat_markdown.Block = undefined;
+    try std.testing.expectEqual(@as(usize, 0), tailFor(95, &text, 0, &blocks).blocks);
 }
 
 test "IGSH-1266 an empty thinking item does not hide the reply after it" {

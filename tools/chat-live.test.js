@@ -111,7 +111,7 @@ test('D5 stop on a live turn interrupts it and the turn ends interrupted', () =>
   assert.match(send, /live\.interruptLine\(std\.heap\.page_allocator, shell_id/);
   assert.match(send, /if \(chatLiveCancelApproval\(shell_index\)\) return true;\s*\n\s*if \(chatLiveInterrupt\(shell_index\)\) return true;/);
   const live = read('src/chat_live.zig');
-  assert.match(live, /std\.mem\.eql\(u8, kind, "turn\.ended"\)\) \{\s*\n(?:\s*self\.held = self\.state == \.running;\s*\n)?\s*self\.state = \.idle;\s*\n\s*self\.ended = statusOf\(strOf\(payload, "status"\)\);/);
+  assert.match(live, /std\.mem\.eql\(u8, kind, "turn\.ended"\)\) \{\s*\n(?:\s*self\.held = self\.state == \.running(?: and !self\.reply_in_history)?;\s*\n)?\s*self\.state = \.idle;\s*\n\s*self\.ended = statusOf\(strOf\(payload, "status"\)\);/);
 });
 
 test('D6 a single newline inside a paragraph is a line break, not a space', () => {
