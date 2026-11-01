@@ -4585,6 +4585,59 @@ class MoveToTerminalTest(unittest.TestCase):
         self.assertEqual(frame['host_terminal']['status'], 'moved')
         move.assert_called_once_with('claude', self.sid, self.tmux)
 
+    def test_a_move_that_cannot_type_puts_the_chat_back_on_the_host(self):
+        def refuse(command_seen, **kwargs):
+            self.calls.append((list(command_seen), bool(self.host_running[0])))
+            if command_seen[:2] == ['tmux', 'send-keys']:
+                raise subprocess.CalledProcessError(1, command_seen)
+            if command_seen[:2] == ['tmux', 'display']:
+                return types.SimpleNamespace(stdout='/usr/bin/bash\n', returncode=0)
+            if command_seen[:2] == ['tmux', 'capture-pane']:
+                return types.SimpleNamespace(stdout='user@host:~$ \n', returncode=0)
+            return types.SimpleNamespace(stdout='', returncode=0)
+
+        def restart(provider, sid, source=None):
+            self.calls.append((['host_start'], bool(self.host_running[0])))
+            self.host_running[0] = True
+            reader.host_write(reader.host_paths(provider, sid)['owner'],
+                              dict(owner='host', pid=os.getpid(), at=time.time()))
+            return dict(status='started')
+
+        patch.object(reader.subprocess, 'run', side_effect=refuse).start()
+        patch.object(reader, 'host_start', side_effect=restart).start()
+        moved = reader.host_terminal('claude', self.sid)
+        self.assertEqual(moved, dict(status='error', reason='pane_input_failed', start='started'))
+        self.assertFalse(reader.host_handed_over('claude', self.sid),
+                         'a pane that took nothing must not own the chat')
+        literal = [c for c, _ in self.calls if c[:5] == ['tmux', 'send-keys', '-t', '=' + self.tmux + ':', '-l']]
+        self.assertEqual(len(literal), 1, 'a failed move types the resume command once, never again')
+
+    def test_a_move_that_cannot_press_enter_clears_the_line_it_typed(self):
+        command = 'claude --resume ' + self.sid + ' --permission-mode bypassPermissions'
+
+        def refuse_enter(command_seen, **kwargs):
+            self.calls.append((list(command_seen), bool(self.host_running[0])))
+            if command_seen[:2] == ['tmux', 'send-keys'] and command_seen[-1] == 'Enter':
+                raise subprocess.CalledProcessError(1, command_seen)
+            if command_seen[:2] == ['tmux', 'display']:
+                return types.SimpleNamespace(stdout='/usr/bin/bash\n', returncode=0)
+            if command_seen[:2] == ['tmux', 'capture-pane']:
+                return types.SimpleNamespace(stdout='user@host:~$ ' + command + '\n', returncode=0)
+            return types.SimpleNamespace(stdout='', returncode=0)
+
+        def restart(provider, sid, source=None):
+            self.calls.append((['host_start'], bool(self.host_running[0])))
+            self.host_running[0] = True
+            return dict(status='started')
+
+        patch.object(reader.subprocess, 'run', side_effect=refuse_enter).start()
+        patch.object(reader, 'host_start', side_effect=restart).start()
+        self.assertEqual(reader.host_terminal('claude', self.sid)['reason'], 'pane_input_failed')
+        entered = [c for c, _ in self.calls]
+        clear_at = entered.index(['tmux', 'send-keys', '-t', '=' + self.tmux + ':', 'C-u'])
+        restore_at = entered.index(['host_start'])
+        self.assertLess(clear_at, restore_at, 'the typed line goes before the host takes the chat back')
+
     def test_resume_is_a_no_op_without_a_hosted_chat(self):
         reader.host_write(reader.host_paths('claude', self.sid)['config'], dict(enabled=False))
         self.assertEqual(reader.host_resume('claude', self.sid), dict(status='already', reason='not_hosted'))

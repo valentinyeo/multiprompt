@@ -2760,6 +2760,35 @@ def host_terminal_send(tmux, command):
     return True
 
 
+def host_undo_typed_line(tmux, command):
+    try:
+        shown = subprocess.run(['tmux', 'capture-pane', '-p', '-t', '=' + tmux + ':'],
+                               capture_output=True, text=True, timeout=5, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    lines = [line.rstrip() for line in ANSI.sub('', shown).splitlines() if line.strip()]
+    if not lines or command not in lines[-1]:
+        return True
+    try:
+        subprocess.run(['tmux', 'send-keys', '-t', '=' + tmux + ':', 'C-u'],
+                       capture_output=True, timeout=5, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
+def host_terminal_restore(provider, sid, tmux, command, reason):
+    cleared = host_undo_typed_line(tmux, command)
+    started = host_start(provider, sid)
+    host_log(provider, sid, 'terminal_move_failed', dict(reason=reason, cleared=cleared, start=started.get('status')))
+    if started.get('status') not in ('started', 'already'):
+        try:
+            host_paths(provider, sid)['owner'].unlink()
+        except OSError:
+            pass
+    return dict(status='error', reason=reason, start=started.get('status'))
+
+
 def host_terminal(provider, sid, tmux=None):
     if not host_identity(provider, sid):
         return dict(status='refused', reason='unsupported_provider')
@@ -2784,7 +2813,7 @@ def host_terminal(provider, sid, tmux=None):
     host_log(provider, sid, 'terminal_move')
     command = host_terminal_command(provider, sid)
     if not host_terminal_send(tmux, command):
-        return dict(status='error', reason='pane_input_failed')
+        return host_terminal_restore(provider, sid, tmux, command, 'pane_input_failed')
     deadline = time.time() + HOST_TERMINAL_TIMEOUT
     while time.time() < deadline:
         if host_pane_agent(tmux, sid):
@@ -5243,7 +5272,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 47
+RUNTIME_GENERATION = 48
 
 if __name__ == '__main__':
     import base64 as _base64
