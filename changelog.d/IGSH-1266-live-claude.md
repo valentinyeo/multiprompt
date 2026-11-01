@@ -6,3 +6,5 @@ A hosted Claude chat now asks before it runs a command.
 You can allow a step, allow it for the rest of the session, or turn it down.
 Claude's questions now arrive as a card with its choices.
 A plan Claude proposes now waits for your go before anything runs.
+Stop now ends the answer instead of closing the whole chat.
+A stopped chat keeps the session, so the next message starts straight away.

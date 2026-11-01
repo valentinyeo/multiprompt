@@ -3158,6 +3158,15 @@ def host_set_mode(provider, sid, session, mode):
     return dict(status="ok")
 
 
+def host_interrupt(provider, sid, session):
+    if not host_control_request(session, dict(subtype="interrupt", cancel_queued=True)):
+        return dict(status="error", reason="stdin_write_failed")
+    session["interrupted"] = True
+    inflight = session.get("inflight")
+    host_log(provider, sid, "interrupt", dict(id=inflight.get("id") if isinstance(inflight, dict) else None))
+    return dict(status="ok")
+
+
 def host_answer(provider, sid, tmux, session, request):
     operation, request_id = request.get("op"), request.get("request_id")
     parked = session["parked"].get(request_id) if isinstance(request_id, str) else None
@@ -3232,6 +3241,8 @@ def host_handle_request(provider, sid, tmux, session, request):
         return dict(status="ok")
     if operation in ("approval_reply", "question_reply", "plan_reply"):
         return host_answer(provider, sid, tmux, session, request)
+    if operation == "interrupt":
+        return host_interrupt(provider, sid, session)
     if operation == "set_permission_mode":
         if request.get("mode") not in HOST_PERMISSION_MODES:
             return host_refuse("invalid_permission_mode")
@@ -4983,7 +4994,7 @@ def serve_request(line, source, subscriptions, lock):
                 subscriptions.pop(rid, None)
             serve_print(dict(id=rid, message_protocol=1, result=dict(events=[], next_after=query.get("after", 0))))
             return
-        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode"):
+        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode", "interrupt"):
             serve_print(dict(id=rid, message_protocol=1, result=host_reply(query)))
             return
         if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
@@ -5051,7 +5062,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 40
+RUNTIME_GENERATION = 41
 
 if __name__ == '__main__':
     import base64 as _base64

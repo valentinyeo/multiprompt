@@ -5271,5 +5271,87 @@ class AgentHostControlTest(AgentHostStreamTest):
 
 
 
+class HostInterruptTest(HostControlTest):
+    def test_interrupt_writes_the_control_request_and_ends_the_turn_as_interrupted(self):
+        self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
+                  self.frame(dict(type='content_block_start', index=0, content_block=dict(type='text', text=''))),
+                  self.frame(dict(type='content_block_delta', index=0, delta=dict(type='text_delta', text='work'))))
+        self.assertEqual(self.reply(op='interrupt')['status'], 'ok')
+        written = self.writes()[0]
+        self.assertEqual(written['type'], 'control_request')
+        self.assertEqual(written['request'], dict(subtype='interrupt', cancel_queued=True))
+        self.assertTrue(self.session['interrupted'])
+        self.feed(dict(type='result', subtype='error_during_execution', stop_reason=None, total_cost_usd=0))
+        self.assertEqual(self.events('turn.ended')[0]['payload']['status'], 'interrupted')
+        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['work'])
+        self.assertFalse(self.session['interrupted'], 'the next turn must not inherit the interrupt')
+        self.assertIsNone(self.session['turn'])
+
+    def test_an_interrupt_without_a_running_agent_is_refused(self):
+        self.session['agent'] = types.SimpleNamespace(stdin=None)
+        self.assertEqual(self.reply(op='interrupt')['reason'], 'stdin_write_failed')
+
+    def test_stop_still_tears_the_host_down(self):
+        self.assertEqual(self.reply(op='stop')['status'], 'ok')
+        self.assertTrue(self.session['stop'])
+
+
+class AgentHostInterruptTest(AgentHostControlTest):
+    def test_stop_interrupts_the_turn_and_the_host_takes_the_next_message(self):
+        self.fake('slow')
+        self.seed(text='first prompt')
+        self.dispatch()
+        self.wait_for(lambda: self.events('text.done'))
+        self.assertEqual(self.answer(op='interrupt')['status'], 'ok')
+        ended = self.wait_for(lambda: self.events('turn.ended'))
+        self.assertEqual(ended[0]['payload']['status'], 'interrupted')
+        self.assertEqual(self.events('turn.ended')[0]['payload']['cost_usd'], 0)
+        self.assertEqual([row['frame']['request'] for row in self.agent_rows('interrupt')],
+                         [dict(subtype='interrupt', cancel_queued=True)])
+        self.assertTrue(reader.host_owned(self.provider, self.sid), 'an interrupt must not kill the host')
+        self.seed(token='host_fixture_message_02', text='second prompt')
+        self.dispatch()
+        self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt'])
+        self.assertEqual(self.answer(op='interrupt')['status'], 'ok')
+        self.wait_for(lambda: len(self.events('turn.ended')) == 2)
+        self.assertEqual([row['payload']['status'] for row in self.events('turn.ended')], ['interrupted', 'interrupted'])
+
+
+class AgentHostMidTurnSendTest(AgentHostControlTest):
+    def test_a_second_message_is_written_while_the_first_turn_runs(self):
+        self.fake('silent')
+        self.seed(text='first prompt')
+        self.dispatch()
+        self.wait_for(lambda: self.user_lines() == ['first prompt'])
+        self.seed(token='host_fixture_message_02', text='second prompt')
+        self.dispatch()
+        self.assertEqual(self.message('host_fixture_message_02')['state'], 'sent')
+        self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt'])
+        self.assertEqual(reader.host_backoff(self.provider, self.sid), 0.0)
+        db = reader.message_store_db(self.tmux)
+        attempts = db.execute("SELECT id,outcome FROM message_attempts WHERE provider='claude' AND sid=? ORDER BY id", (self.sid,)).fetchall()
+        db.close()
+        self.assertEqual(attempts, [('host_fixture_message_01', 'sent'), ('host_fixture_message_02', 'sent')])
+        self.assertEqual([row['turn'] for row in self.events('turn.started')], ['t-1', 't-2'])
+
+    def test_a_reply_binds_to_the_turn_the_cli_reports(self):
+        self.fake('silent')
+        self.seed(text='first prompt')
+        self.dispatch()
+        self.wait_for(lambda: self.user_lines() == ['first prompt'])
+        self.seed(token='host_fixture_message_02', text='second prompt')
+        self.dispatch()
+        self.wait_for(lambda: self.user_lines() == ['first prompt', 'second prompt'])
+        second = self.events('turn.started')[1]
+        self.assertEqual(second['payload']['uuids'], [])
+        db = reader.message_store_db(self.tmux)
+        with db:
+            reader.message_event(db, 'claude', self.sid, dict(kind='probe'))
+        db.close()
+        self.assertEqual(len(self.events('turn.started')), 2)
+
+
+
+
 if __name__ == '__main__':
     unittest.main()
