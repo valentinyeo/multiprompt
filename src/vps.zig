@@ -875,6 +875,7 @@ fn tmuxFetchThreadDual() void {
     app_state.g_tmux_cache_tick = GetTickCount64();
     app_state.g_tmux_fetch_tick = GetTickCount64();
     app_state.g_tmux_fetching = false;
+    @import("archive.zig").retryPendingSessionKills();
 
     _ = PostMessageW(app_state.g_main_hwnd, WM_APP_TMUX_LIST_READY, 0, 0);
 }

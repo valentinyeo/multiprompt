@@ -301,6 +301,15 @@ pub fn build(b: *std.Build) void {
     const agent_host_tests = b.addSystemCommand(&.{ "node", "--test", "tools/agent-host.test.js" });
     test_step.dependOn(&agent_host_tests.step);
     vps_test_step.dependOn(&agent_host_tests.step);
+    const end_session_tests = b.addSystemCommand(&.{ "node", "--test", "tools/end-session.test.js" });
+    test_step.dependOn(&end_session_tests.step);
+    vps_test_step.dependOn(&end_session_tests.step);
+    const session_end_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/session_end.zig"),
+        .target = target,
+        .optimize = .Debug,
+    }) });
+    test_step.dependOn(&b.addRunArtifact(session_end_tests).step);
     const chat_settle_tests = b.addSystemCommand(&.{ "python3", "tools/chat-settle-test.py" });
     vps_test_step.dependOn(&chat_settle_tests.step);
     if (b.graph.host.result.os.tag != .windows) b.step("test", "Run Linux server tests").dependOn(vps_test_step);
