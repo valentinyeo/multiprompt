@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { readChangelogEntry } = require('./changelog-entry.js');
 const test = require('node:test');
 
 const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
@@ -113,6 +114,5 @@ test('IGSH-1266 the archive keeps its own guard when the server cannot be reache
 });
 
 test('IGSH-1266 the force end session change is in the changelog', () => {
-  const fragment = read('changelog.d/IGSH-1266-force-end-session.md');
-  assert.equal(fragment.trim(), 'Ctrl+Shift+W always closes the tab and ends its session, even when the server is slow.');
+  assert.ok(readChangelogEntry('IGSH-1266').includes('Ctrl+Shift+W always closes the tab and ends its session, even when the server is slow.'));
 });
