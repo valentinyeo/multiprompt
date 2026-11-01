@@ -111,3 +111,11 @@ test('D5 stop on a live turn interrupts it and the turn ends interrupted', () =>
   const live = read('src/chat_live.zig');
   assert.match(live, /std\.mem\.eql\(u8, kind, "turn\.ended"\)\) \{\s*\n\s*self\.state = \.idle;\s*\n\s*self\.ended = statusOf\(strOf\(payload, "status"\)\);/);
 });
+
+test('D6 a single newline inside a paragraph is a line break, not a space', () => {
+  const render = read('src/chat_render.zig');
+  const rich = render.slice(render.indexOf('fn chatRichText('), render.indexOf('fn chatRichSize('));
+  const branch = rich.slice(rich.indexOf("text[pos] == '\\n'"));
+  assert.match(branch.slice(0, 400), /x = 0;\s*\n\s*y \+= line_h;/);
+  assert.doesNotMatch(rich, /text\[pos\] == '\\n' or text\[pos\] == ' '/);
+});

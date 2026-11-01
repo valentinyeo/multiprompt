@@ -540,7 +540,16 @@ fn chatRichText(hdc: HANDLE, text: []const u16, area: RECT, level: u3, paint: bo
                 pos += 1;
                 continue;
             }
-            if (text[pos] == '\n' or text[pos] == ' ' or text[pos] == '\t') {
+            if (text[pos] == '\n') {
+                if (hit) |pt| if (pt.find) |find| {
+                    if (find.position == offset + pos) find.y.* = area.top + y;
+                };
+                x = 0;
+                y += line_h;
+                pos += 1;
+                continue;
+            }
+            if (text[pos] == ' ' or text[pos] == '\t') {
                 if (hit) |pt| if (pt.find) |find| {
                     if (find.position == offset + pos) find.y.* = area.top + y;
                 };
@@ -993,6 +1002,27 @@ fn chatMeasureEchoRect(hdc: HANDLE, text: []const u16, width: i32, y: i32, statu
     var rect = chatMeasureBlockRect(hdc, text, .{ .start = 0, .len = text.len, .role = .user }, .single, width, y, null);
     if (!app_state.clean_chat and status) rect.bottom += uiScaled(CHAT_STATUS_H);
     return rect;
+}
+
+test "IGSH-1266 a single newline inside a paragraph keeps its line break" {
+    const w = std.unicode.utf8ToUtf16LeStringLiteral;
+    const dc = GetDC(null) orelse return error.TestUnexpectedResult;
+    defer _ = ReleaseDC(null, dc);
+    const old = SelectObject(dc, chatRichFont(.{}, 0));
+    defer _ = SelectObject(dc, old);
+    var flat: i32 = 0;
+    _ = chatRichText(dc, w("1 2 3"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 0, false, null, 0, &flat, false);
+    var broken: i32 = 0;
+    _ = chatRichText(dc, w("1\n2\n3"), .{ .left = 0, .top = 0, .right = 1000, .bottom = 0 }, 0, false, null, 0, &broken, false);
+    try std.testing.expect(flat > 0);
+    try std.testing.expectEqual(3 * flat, broken);
+    const text = w("1\n2\n3");
+    const block = ChatBlock{ .start = 0, .len = text.len, .role = .prose, .markdown = true, .first = true };
+    const rect = chatMeasureBlockRect(dc, text, block, .single, 752, 0, null);
+    const flat_text = w("1 2 3");
+    const flat_block = ChatBlock{ .start = 0, .len = flat_text.len, .role = .prose, .markdown = true, .first = true };
+    const flat_rect = chatMeasureBlockRect(dc, flat_text, flat_block, .single, 752, 0, null);
+    try std.testing.expectEqual(flat_rect.bottom - flat_rect.top + 2 * flat, rect.bottom - rect.top);
 }
 
 test "IGSH-376 top-level table cell sizes match master bytes" {
