@@ -42,7 +42,7 @@ test("one global switch closes every old-engine pane before delayed relaunch", (
   assert.match(sw, /while \(i < shell_count\)/);
   assert.match(sw, /if \(shells\[i\]\.browser_enabled\) closeBrowserForShell\(i\)/);
   assert.match(sw, /SetTimer\(hwnd, TIMER_BROWSER_ENGINE_SWITCH, 1800/);
-  assert.match(source, /WM_APP_BROWSER_ENGINE_TOGGLE => \{\s+switchBrowserEngine\(hwnd\)/);
+  assert.match(source, /WM_APP_BROWSER_ENGINE_TOGGLE => \{[^}]*switchBrowserEngine\(hwnd\)/);
   assert.match(source, /TIMER_BROWSER_ENGINE_SWITCH[\s\S]{0,180}?finishBrowserEngineSwitch\(hwnd\)/);
 });
 

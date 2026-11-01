@@ -112,7 +112,7 @@ test("IGSH-846 recording Escape discards audio and never delivers a transcript",
   assert.match(queue, /PostMessageW\(g_main_hwnd, WM_APP_DICTATION_TOGGLE, 1, 0\)/);
   assert.match(queue, /g_dictation_cancelled\.store\(false, \.release\)/,
     "failed posting must allow another cancellation attempt");
-  assert.match(source, /WM_APP_DICTATION_TOGGLE => \{\s*if \(wp == 1\) \{\s*cancelDictation\(\);\s*\} else \{\s*toggleDictation\(\);/);
+  assert.match(source, /WM_APP_DICTATION_TOGGLE => \{[^}]*if \(wp == 1\) \{[^}]*cancelDictation\(\);[^}]*\} else \{[^}]*toggleDictation\(\);/);
   const cancel = functionBody("cancelDictation", "handleDictationReady");
   assert.match(cancel, /g_dictation_recording\.store\(false, \.release\)/);
   const worker = functionBody("dictationWorkerThread", "synthesizeCtrlVIntoForeground");

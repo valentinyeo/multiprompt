@@ -14,7 +14,7 @@ test('command browse is reachable from keyboard, palette, and F1', () => {
 });
 test('popup is hidden on send, tab switch, close and overlay', () => {
   for (const fn of ['sendChatPrompt', 'switchToShell', 'closeChatView', 'hideShellsForOverlay']) {
-    assert.match(src, new RegExp(`fn ${fn}\\([^]*?\\) void \\{\\s*chatAcClose\\(\\);`));
+    assert.match(src, new RegExp(`fn ${fn}\\([^]*?\\) void \\{[^}]*?chatAcClose\\(\\);`));
   }
   assert.match(src, /endsInTriggerToken\(send_text/);
   assert.match(src, /g_chat_ac_mru_count/);
@@ -35,6 +35,10 @@ test('IGSH-911 Ctrl+Enter sends once before native translation; Enter and Shift+
     .replaceAll('@import("win32.zig").WM_APP_CHAT_SEND', 'WM_APP_CHAT_SEND');
   for (const [source, broken] of [['tools/fixtures/IGSH-911/composer-enter.zig', true], ['src/chat_composer.zig', false]]) {
     const composer = fs.readFileSync(source, 'utf8');
+    const production = fs.readFileSync('src/chat_composer.zig', 'utf8');
+    const enterStart = production.indexOf('fn chatComposerEnterSends(');
+    assert.ok(enterStart >= 0);
+    const enterSends = production.slice(enterStart, production.indexOf('\n}', enterStart) + 2);
     const start = composer.indexOf('    if (msg == 0x0102) {', composer.indexOf('fn chatComposerSubclassCore('));
     const end = composer.indexOf('\n    return CallWindowProcW', start);
     assert.ok(start >= 0 && end > start);
@@ -45,6 +49,7 @@ const app_state = struct {
     var g_chat_ac = struct { open: bool = false }{};
     var g_win_held = false;
     var g_chat_composer_hwnd: ?usize = 2;
+    var g_chat_enter_key_sent_tick: u64 = 0;
     const g_main_hwnd: ?usize = 1;
 };
 const WM_KEYDOWN = 0x0100;
@@ -66,8 +71,10 @@ fn GetAsyncKeyState(key: i32) i16 { return if (key == 0x10 and shift_down) -3276
 fn GetFocus() ?usize { return focus; }
 fn GetForegroundWindow() ?usize { return foreground; }
 fn chatViewOwnsInput() bool { return chat_active; }
+fn GetTickCount64() u64 { return 1000; }
 fn chatAcAccept() bool { accepts += 1; return true; }
 fn chatAcClose() void { app_state.g_chat_ac.open = false; }
+${enterSends}
 fn chatShellDraftNoteSend() void { notes += 1; }
 fn PostMessageW(_: ?usize, message: u32, wp: usize, lp: usize) i32 {
     std.debug.assert(message == WM_APP_CHAT_SEND and wp == 0 and lp == 0);

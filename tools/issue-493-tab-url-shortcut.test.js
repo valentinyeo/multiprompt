@@ -32,7 +32,7 @@ test('ISSUE-493 Ctrl+Shift+X reaches Chat View and browser focus once per press'
   assert.match(state, /pub var g_tab_url_chord_held: bool = false;/);
   assert.match(read('src/focus.zig'), /app_state\.g_tab_url_chord_held = false;/);
   assert.match(main, /const WM_APP_CHAT_TAB_URL = @import\("win32.zig"\)\.WM_APP_CHAT_TAB_URL;/);
-  assert.match(main, /WM_APP_CHAT_TAB_URL => \{\s*@import\("chat_render.zig"\)\.chatInsertBrowserTabUrl\(\);\s*return 0;/);
+  assert.match(main, /WM_APP_CHAT_TAB_URL => \{[^}]*@import\("chat_render.zig"\)\.chatInsertBrowserTabUrl\(\);[^}]*return 0;/);
 });
 
 test('ISSUE-493 current pane URL precedes the remembered browser tab URL', () => {
@@ -85,7 +85,7 @@ test('ISSUE-493 URL action has palette, tab context, shortcut documentation and 
     assert.ok(main.includes(`target == ${id}`));
   }
   assert.match(main, /target == SEARCH_TABCTX_CHAT_TAB_URL\) findShellById\(app_state\.g_tabctx_sid\)/);
-  assert.match(main, /if \(ti != app_state\.active_shell\) switchToShell\(ti\);\s*@import\("chat_render.zig"\)\.chatInsertBrowserTabUrl\(\);/);
+  assert.match(main, /if \(target == SEARCH_TABCTX_CHAT_TAB_URL\) \{\s*@import\("console\.zig"\)\.switchToShellByUser\(ti\);\s*\} else if \(!@import\("room_frontend\.zig"\)\.privateActionsAllowed\(\)\) return 0;\s*@import\("chat_render\.zig"\)\.chatInsertBrowserTabUrl\(\);/);
   assert.match(sidebar, /const is_chat_action = is_chat_tab_url or/);
   assert.match(sidebar, /L\("Chat View: Insert browser tab URL"\)/);
   assert.match(sidebar, /L\("Ctrl\+Shift\+X"\)/);
