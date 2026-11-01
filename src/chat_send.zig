@@ -1201,13 +1201,18 @@ fn chatEchoWindowFull() bool {
     return app_state.g_chat_window_full and app_state.g_chat_blocks_from_file;
 }
 
+fn chatEchoWaitsOnTranscript(e: ChatOutboxEntry) bool {
+    if (e.message_v1) return e.write_started or e.channel_sent or e.channel_pending;
+    return e.write_started or e.retryable;
+}
+
 fn chatEchoAssignForKey(key: []const u8, blocks: []const ChatBlock, buf: []const u16, window_full: bool, result: *ChatEchoAssignment) void {
     result.* = .{};
     var prefixes: [CHAT_OUTBOX_MAX_PER_KEY][CHAT_ECHO_PREFIX_CAP]u16 = undefined;
     var pending: [CHAT_OUTBOX_MAX_PER_KEY]chat_echo.Pending = undefined;
     for (app_state.g_chat_outbox.items) |e| {
         if (result.count >= pending.len) break;
-        if (e.message_v1 or e.state == .cancelled or (e.host_held and !e.host_confirmed) or (!e.write_started and !e.retryable) or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
+        if (e.state == .cancelled or (e.host_held and !e.host_confirmed) or !chatEchoWaitsOnTranscript(e) or !std.mem.eql(u8, e.key[0..@as(usize, e.key_len)], key)) continue;
         if (chatOutboxShellForKey(e.key[0..e.key_len])) |idx| {
             if (app_state.shells[idx].kind == .tmux and app_state.shells[idx].ai_agent == 2) continue;
         }
@@ -2677,6 +2682,39 @@ test "IGSH-1010 held input cannot borrow an unrelated identical transcript recei
     chatEchoAssignForKey("tmux:7:host-test", blocks[0..n], buf, true, &assignment);
     try std.testing.expectEqual(@as(usize, 1), assignment.count);
     try std.testing.expect(chatEchoAssignedBlock(&assignment, app_state.g_chat_outbox.items[0].id) != null);
+}
+
+fn chatEchoTestAssignV1(blocks: []const ChatBlock, buf: []const u16, anchor: chat_echo.Anchor, window_full: bool, text: []const u16, submitted: bool) !?usize {
+    const allocator = std.testing.allocator;
+    const saved = app_state.g_chat_outbox;
+    app_state.g_chat_outbox = .empty;
+    defer {
+        for (app_state.g_chat_outbox.items) |e| if (e.text.len > 0) allocator.free(e.text);
+        app_state.g_chat_outbox.deinit(allocator);
+        app_state.g_chat_outbox = saved;
+    }
+    if (!chatOutboxEnqueueInState(&app_state.g_chat_outbox, allocator, "tmux:7:echo-test", text, .queued)) return error.EnqueueFailed;
+    const entry = &app_state.g_chat_outbox.items[0];
+    entry.message_v1 = true;
+    entry.write_started = submitted;
+    entry.channel_sent = submitted;
+    entry.anchor = anchor;
+    var assignment: ChatEchoAssignment = .{};
+    chatEchoAssignForKey("tmux:7:echo-test", blocks, buf, window_full, &assignment);
+    return chatEchoAssignedBlock(&assignment, app_state.g_chat_outbox.items[0].id);
+}
+
+test "IGSH-1415 a host message stops its own bubble once the transcript has it" {
+    const buf = std.unicode.utf8ToUtf16LeStringLiteral(
+        "\u{276f} old message\r\n\r\n\u{25cf} reply\r\n\r\n\u{276f} wich effort?\r\n",
+    );
+    var blocks: [8]ChatBlock = undefined;
+    const n = chatClassifyBlocks(buf, &blocks);
+    const text = std.unicode.utf8ToUtf16LeStringLiteral("wich effort?");
+    const anchor = chat_echo.Anchor{ .user_count = 2, .counted = true };
+    try std.testing.expectEqual(@as(?usize, 2), try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, true));
+    try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, anchor, false, text, false)) == null);
+    try std.testing.expect((try chatEchoTestAssignV1(blocks[0..n], buf, .{ .user_count = 3, .counted = true }, false, text, true)) == null);
 }
 
 test "Chat View echo matches only user blocks after the baseline" {
