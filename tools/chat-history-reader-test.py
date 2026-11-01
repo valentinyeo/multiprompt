@@ -4946,10 +4946,15 @@ class AgentHostStreamTest(AgentHostTest):
         super().setUp()
         self.agent.write_text(FAKE_CLAUDE)
         self.agent.chmod(0o755)
+        self.addCleanup(os.environ.pop, 'FAKE_CLAUDE_MODE', None)
+
+    def enable(self, mode='ok', **extra):
+        os.environ.pop('FAKE_CLAUDE_MODE', None)
+        super().enable(mode, **extra)
 
     def fake(self, mode):
+        self.enable(mode)
         os.environ['FAKE_CLAUDE_MODE'] = mode
-        self.enable()
 
     def events(self, kind=None):
         db = reader.message_store_db(self.tmux)
@@ -5004,6 +5009,264 @@ class AgentHostStreamTest(AgentHostTest):
         tail = reader.message_store_request(dict(message_protocol=1, tmux=self.tmux, provider='claude', sid=self.sid,
                                                 op='message_events', after=page['next_after'] - 1))
         self.assertEqual([item['event']['kind'] for item in tail['events']], ['turn.ended'])
+
+
+
+
+class HostControlTest(HostEventStreamTest):
+    def writes(self):
+        return [json.loads(line) for line in self.agent_input.getvalue().decode().splitlines() if line.strip()]
+
+    def approval(self, tool='Bash', tool_use_id='toolu_req', request_id='req-1', suggestions=None, **extra):
+        request = dict(subtype='can_use_tool', tool_name=tool, display_name=tool, tool_use_id=tool_use_id,
+                       input=dict(command='rm -rf build', description='Remove the build directory'),
+                       requires_user_interaction=True)
+        if suggestions is not None:
+            request['permission_suggestions'] = suggestions
+        request.update(extra)
+        self.feed(dict(type='control_request', request_id=request_id, request=request))
+        return request_id
+
+    def reply(self, **request):
+        return reader.host_handle_request(self.provider, self.sid, self.tmux, self.session, request)
+
+    def test_a_control_request_is_parked_and_turned_into_an_approval_request(self):
+        request_id = self.approval(suggestions=[dict(type='addRules', rules=[dict(toolName='Bash', ruleContent='rm -rf build')],
+                                                     behavior='allow', destination='localSettings')])
+        parked = self.events('approval.request')
+        self.assertEqual(len(parked), 1)
+        payload = parked[0]['payload']
+        self.assertEqual(payload['request_id'], request_id)
+        self.assertEqual(payload['tool'], 'Bash')
+        self.assertEqual(payload['tool_use_id'], 'toolu_req')
+        self.assertEqual(payload['input'], dict(command='rm -rf build', description='Remove the build directory'))
+        self.assertEqual(payload['requires_user_interaction'], True)
+        self.assertEqual(payload['suggestions'], [dict(type='addRules', rules=[dict(toolName='Bash', ruleContent='rm -rf build')],
+                                                       behavior='allow', destination='localSettings')])
+        self.assertEqual(self.writes(), [], 'a parked request must not answer itself')
+        self.assertEqual(list(self.session['parked']), [request_id])
+
+    def test_accepting_an_approval_answers_the_request_once(self):
+        request_id = self.approval()
+        self.assertEqual(self.reply(op='approval_reply', request_id=request_id, decision='accept')['status'], 'ok')
+        self.assertEqual(self.writes(), [dict(type='control_response', response=dict(
+            subtype='success', request_id=request_id,
+            response=dict(behavior='allow', updatedInput=dict(command='rm -rf build', description='Remove the build directory'),
+                          toolUseID='toolu_req', decisionClassification='user_temporary')))])
+        resolved = self.events('approval.resolved')
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved[0]['payload'], dict(request_id=request_id, decision='accept', by='desktop'))
+        self.assertEqual(self.session['parked'], {})
+        self.assertEqual(self.reply(op='approval_reply', request_id=request_id, decision='accept')['reason'], 'unknown_request')
+        self.assertEqual(len(self.writes()), 1, 'a request must never be answered twice')
+
+    def test_always_allow_stays_inside_the_session(self):
+        request_id = self.approval(suggestions=[dict(type='addRules', rules=[dict(toolName='Bash', ruleContent='rm -rf build')],
+                                                     behavior='allow', destination='localSettings')])
+        self.reply(op='approval_reply', request_id=request_id, decision='acceptForSession')
+        response = self.writes()[0]['response']['response']
+        self.assertEqual(response['decisionClassification'], 'user_permanent')
+        self.assertEqual(response['updatedPermissions'], [dict(type='addRules', rules=[dict(toolName='Bash', ruleContent='rm -rf build')],
+                                                               behavior='allow', destination='session')])
+
+    def test_declining_and_cancelling_differ_only_in_the_stop_flag(self):
+        first = self.approval(request_id='req-1')
+        self.reply(op='approval_reply', request_id=first, decision='decline')
+        second = self.approval(request_id='req-2')
+        self.reply(op='approval_reply', request_id=second, decision='cancel')
+        declined, cancelled = [row['response']['response'] for row in self.writes()]
+        self.assertEqual(declined, dict(behavior='deny', message='User declined tool execution.',
+                                        toolUseID='toolu_req', decisionClassification='user_reject'))
+        self.assertEqual(cancelled, dict(behavior='deny', message='User cancelled tool execution.',
+                                         toolUseID='toolu_req', decisionClassification='user_reject', interrupt=True))
+        self.assertEqual([row['payload']['decision'] for row in self.events('approval.resolved')], ['decline', 'cancel'])
+
+    def test_an_unknown_decision_is_refused_without_answering(self):
+        request_id = self.approval()
+        self.assertEqual(self.reply(op='approval_reply', request_id=request_id, decision='maybe')['reason'], 'invalid_decision')
+        self.assertEqual(self.writes(), [])
+        self.assertIn(request_id, self.session['parked'])
+
+    def test_a_question_request_carries_its_options_and_answers_keyed_by_question_text(self):
+        questions = [dict(question='Which database should I target?', header='Database', multiSelect=False,
+                          options=[dict(label='Postgres', description='prod cluster'), dict(label='SQLite', description='local file')]),
+                     dict(question='Which checks should run?', header='Checks', multiSelect=True,
+                          options=[dict(label='Unit', description='fast'), dict(label='E2E', description='slow')])]
+        self.feed(dict(type='control_request', request_id='req-2', request=dict(
+            subtype='can_use_tool', tool_name='AskUserQuestion', display_name='AskUserQuestion',
+            tool_use_id='toolu_ask', input=dict(questions=questions), requires_user_interaction=True)))
+        asked = self.events('question.request')
+        self.assertEqual(len(asked), 1)
+        self.assertEqual(asked[0]['payload']['tool_use_id'], 'toolu_ask')
+        self.assertEqual(asked[0]['payload']['questions'][0]['question'], 'Which database should I target?')
+        self.assertEqual(asked[0]['payload']['questions'][0]['options'][0], dict(label='Postgres', description='prod cluster', preview=None))
+        self.assertEqual(asked[0]['payload']['questions'][1]['multiSelect'], True)
+        self.assertEqual(self.reply(op='question_reply', request_id='req-2',
+                                    answers={'Which database should I target?': 'Postgres',
+                                             'Which checks should run?': ['Unit', 'E2E']})['status'], 'ok')
+        response = self.writes()[0]['response']['response']
+        self.assertEqual(response['behavior'], 'allow')
+        self.assertEqual(response['toolUseID'], 'toolu_ask')
+        self.assertEqual(response['updatedInput']['questions'], questions)
+        self.assertEqual(response['updatedInput']['answers'], {'Which database should I target?': 'Postgres',
+                                                               'Which checks should run?': 'Unit, E2E'})
+        self.assertEqual(self.events('question.resolved')[0]['payload'],
+                         dict(request_id='req-2', answers={'Which database should I target?': 'Postgres',
+                                                           'Which checks should run?': 'Unit, E2E'}, dismissed=False))
+
+    def test_dismissing_a_question_denies_it(self):
+        self.feed(dict(type='control_request', request_id='req-2', request=dict(
+            subtype='can_use_tool', tool_name='AskUserQuestion', display_name='AskUserQuestion', tool_use_id='toolu_ask',
+            input=dict(questions=[dict(question='Which one?', header='Pick', multiSelect=False,
+                                       options=[dict(label='A', description='a')])]), requires_user_interaction=True)))
+        self.reply(op='question_reply', request_id='req-2', dismissed=True)
+        self.assertEqual(self.writes()[0]['response']['response'],
+                         dict(behavior='deny', message='User cancelled tool execution.', toolUseID='toolu_ask',
+                              decisionClassification='user_reject'))
+        self.assertEqual(self.events('question.resolved')[0]['payload'],
+                         dict(request_id='req-2', answers={}, dismissed=True))
+
+    def test_a_plan_is_captured_then_denied_and_the_mode_is_restored(self):
+        self.session['state']['mode'] = 'plan'
+        self.session['state']['plan_before'] = 'default'
+        self.feed(dict(type='control_request', request_id='req-3', request=dict(
+            subtype='can_use_tool', tool_name='ExitPlanMode', display_name='ExitPlanMode', tool_use_id='toolu_plan',
+            input=dict(plan='## Plan\n1. List the folder'), requires_user_interaction=True)))
+        proposed = self.events('plan.proposed')
+        self.assertEqual(len(proposed), 1)
+        self.assertEqual(proposed[0]['payload'], dict(request_id='req-3', tool_use_id='toolu_plan', markdown='## Plan\n1. List the folder'))
+        self.reply(op='plan_reply', request_id='req-3', action='implement')
+        written = self.writes()
+        self.assertEqual(written[0]['response']['response'],
+                         dict(behavior='deny', message=reader.HOST_PLAN_STOP_MESSAGE, toolUseID='toolu_plan',
+                              decisionClassification='user_reject'))
+        self.assertEqual(written[1]['type'], 'control_request')
+        self.assertEqual(written[1]['request'], dict(subtype='set_permission_mode', mode='default'))
+        self.assertEqual(self.events('plan.resolved')[0]['payload'], dict(request_id='req-3', action='implement'))
+
+    def test_plan_feedback_is_the_deny_message(self):
+        self.session['state']['mode'] = 'plan'
+        self.session['state']['plan_before'] = 'acceptEdits'
+        self.feed(dict(type='control_request', request_id='req-3', request=dict(
+            subtype='can_use_tool', tool_name='ExitPlanMode', display_name='ExitPlanMode', tool_use_id='toolu_plan',
+            input=dict(plan='## Plan'), requires_user_interaction=True)))
+        self.reply(op='plan_reply', request_id='req-3', action='feedback', feedback='Also cover the empty folder.')
+        self.assertEqual(self.writes()[0]['response']['response']['message'], 'Also cover the empty folder.')
+        self.assertEqual(self.events('plan.resolved')[0]['payload'],
+                         dict(request_id='req-3', action='feedback', feedback='Also cover the empty folder.'))
+
+    def test_a_cancelled_request_is_resolved_and_never_answered(self):
+        request_id = self.approval()
+        self.feed(dict(type='control_cancel_request', request_id=request_id))
+        self.assertEqual(self.events('approval.resolved')[0]['payload'],
+                         dict(request_id=request_id, decision='cancel', by='timeout'))
+        self.assertEqual(self.writes(), [])
+        self.assertEqual(self.reply(op='approval_reply', request_id=request_id, decision='accept')['reason'], 'unknown_request')
+
+    def test_set_permission_mode_writes_the_control_request(self):
+        self.assertEqual(self.reply(op='set_permission_mode', mode='acceptEdits')['status'], 'ok')
+        written = self.writes()[0]
+        self.assertEqual(written['type'], 'control_request')
+        self.assertEqual(written['request'], dict(subtype='set_permission_mode', mode='acceptEdits'))
+        self.assertEqual(self.session['state']['mode'], 'acceptEdits')
+        self.assertEqual(self.reply(op='set_permission_mode', mode='yolo')['reason'], 'invalid_permission_mode')
+
+
+
+
+class AgentHostControlTest(AgentHostStreamTest):
+    def answer(self, **request):
+        return reader.host_reply(dict(provider=self.provider, sid=self.sid, **request))
+
+    def test_an_approval_request_reaches_the_event_log_and_the_answer_runs_the_tool(self):
+        self.fake('approval')
+        self.seed()
+        self.dispatch()
+        asked = self.wait_for(lambda: self.events('approval.request'))
+        payload = asked[0]['payload']
+        self.assertEqual(payload['tool'], 'Bash')
+        self.assertEqual(payload['input']['command'], 'rm -rf build')
+        self.assertEqual(payload['blocked_path'], '/tmp/blocked')
+        self.assertEqual(payload['requires_user_interaction'], True)
+        self.assertEqual(self.events('item.done'), [], 'a waiting tool must not look finished')
+        self.assertEqual(self.answer(op='approval_reply', request_id=payload['request_id'], decision='accept')['status'], 'ok')
+        self.wait_for(lambda: self.events('turn.ended'))
+        self.assertEqual(self.events('approval.resolved')[0]['payload'],
+                         dict(request_id=payload['request_id'], decision='accept', by='desktop'))
+        self.assertEqual(self.events('item.done')[0]['payload']['output'], 'removed')
+        self.assertEqual(self.events('text.done')[0]['payload']['text'], 'done')
+        decisions = [row['decision'] for row in self.agent_rows('decision')]
+        self.assertEqual(decisions[0]['behavior'], 'allow')
+        self.assertEqual(decisions[0]['toolUseID'], 'toolu_req')
+
+    def test_the_answer_is_refused_once_the_host_is_gone(self):
+        self.fake('approval')
+        self.seed()
+        self.dispatch()
+        asked = self.wait_for(lambda: self.events('approval.request'))
+        reader.host_stop(self.provider, self.sid, force=True)
+        self.assertEqual(self.answer(op='approval_reply', request_id=asked[0]['payload']['request_id'],
+                                     decision='accept')['reason'], 'host_not_running')
+
+    def test_a_question_answer_carries_the_chosen_labels_back_to_claude(self):
+        self.fake('question')
+        self.seed()
+        self.dispatch()
+        asked = self.wait_for(lambda: self.events('question.request'))
+        payload = asked[0]['payload']
+        self.assertEqual(payload['questions'][0]['question'], 'Which database should I target?')
+        self.assertEqual([option['label'] for option in payload['questions'][0]['options']], ['Postgres', 'SQLite'])
+        self.assertEqual(self.answer(op='question_reply', request_id=payload['request_id'],
+                                     answers={'0': 'SQLite'})['status'], 'ok')
+        self.wait_for(lambda: self.events('turn.ended'))
+        self.assertEqual(self.events('question.resolved')[0]['payload'],
+                         dict(request_id=payload['request_id'],
+                              answers={'Which database should I target?': 'SQLite'}, dismissed=False))
+        decision = self.agent_rows('decision')[0]['decision']
+        self.assertEqual(decision['updatedInput']['answers'], {'Which database should I target?': 'SQLite'})
+        self.assertEqual(decision['updatedInput']['questions'][0]['header'], 'Database')
+
+    def test_a_plan_answer_captures_the_markdown_then_restores_the_mode(self):
+        self.enable(permission_mode='plan')
+        os.environ['FAKE_CLAUDE_MODE'] = 'exitplan'
+        self.seed()
+        self.dispatch()
+        proposed = self.wait_for(lambda: self.events('plan.proposed'))
+        self.assertEqual(proposed[0]['payload']['markdown'], '## Plan\n1. List the folder')
+        self.assertEqual(self.answer(op='plan_reply', request_id=proposed[0]['payload']['request_id'],
+                                     action='implement')['status'], 'ok')
+        self.wait_for(lambda: self.events('turn.ended'))
+        self.assertEqual(self.events('plan.resolved')[0]['payload'],
+                         dict(request_id=proposed[0]['payload']['request_id'], action='implement'))
+        decision = self.agent_rows('decision')[0]['decision']
+        self.assertEqual(decision['behavior'], 'deny')
+        self.assertEqual(decision['message'], reader.HOST_PLAN_STOP_MESSAGE)
+        self.assertEqual(reader.host_session_state(self.provider, self.sid)['mode'], 'plan')
+
+    def test_a_parked_request_holds_the_host_open_past_the_idle_timer(self):
+        import socket as module
+        path = self.home / 'loop.sock'
+        listener = module.socket(module.AF_UNIX, module.SOCK_STREAM)
+        listener.bind(str(path))
+        listener.listen(1)
+        self.addCleanup(listener.close)
+        read_end, write_end = os.pipe()
+        self.addCleanup(os.close, write_end)
+        agent = types.SimpleNamespace(stdin=io.BytesIO(), stdout=os.fdopen(read_end, 'rb', buffering=0))
+        self.addCleanup(agent.stdout.close)
+        session = dict(state={})
+        reader.host_session_reset(session, agent)
+        session['parked']['req-1'] = dict(kind='approval', request=dict(tool_name='Bash'), signal=threading.Event(), at=time.time())
+        running = threading.Thread(target=reader.host_loop, args=(self.provider, self.sid, self.tmux, session, listener, agent),
+                                   daemon=True)
+        with patch.object(reader, 'HOST_IDLE_SECONDS', 0.3):
+            running.start()
+            time.sleep(0.9)
+            self.assertTrue(running.is_alive(), 'a parked approval must not die with the idle timer')
+            session['parked'].clear()
+            running.join(timeout=5)
+        self.assertFalse(running.is_alive(), 'an unparked host must still stop when it is idle')
+        self.assertTrue([row for row in self.host_events('idle_stop')])
 
 
 

@@ -2598,6 +2598,18 @@ def host_request(provider, sid, request, timeout=HOST_DELIVERY_TIMEOUT):
         client.close()
 
 
+def host_reply(query):
+    provider, sid = query.get("provider"), query.get("sid")
+    if not host_identity(provider, sid):
+        return dict(status="refused", reason="unsupported_provider")
+    if not host_owned(provider, sid):
+        return dict(status="unavailable", reason="host_not_running")
+    request = {key: query[key] for key in ("op", "request_id", "decision", "answers", "dismissed",
+                                           "action", "feedback", "input", "mode") if key in query}
+    reply = host_request(provider, sid, request)
+    return reply if isinstance(reply, dict) else dict(status="error", reason="invalid_reply")
+
+
 def host_runtime_file():
     name = sys.argv[0] if sys.argv else ""
     if not name or name.startswith("-"):
@@ -3014,6 +3026,196 @@ def host_turn_status(session, event):
     return "failed"
 
 
+def host_control_send(session, payload):
+    agent = session.get("agent")
+    stdin = getattr(agent, "stdin", None) if agent is not None else None
+    if stdin is None:
+        return False
+    try:
+        stdin.write((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
+        stdin.flush()
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def host_control_response(session, request_id, response):
+    return host_control_send(session, dict(type="control_response", response=dict(subtype="success", request_id=request_id,
+                                                                                response=response)))
+
+
+def host_control_request(session, request):
+    import uuid
+    return host_control_send(session, dict(type="control_request", request_id="host-" + uuid.uuid4().hex,
+                                           request=request))
+
+
+def host_questions(request):
+    source = request.get("input") if isinstance(request.get("input"), dict) else {}
+    listed = source.get("questions")
+    questions = []
+    for index, question in enumerate(listed if isinstance(listed, list) else []):
+        if not isinstance(question, dict):
+            continue
+        options = [dict(label=option.get("label"), description=option.get("description"), preview=option.get("preview"))
+                   for option in question.get("options") or [] if isinstance(option, dict)]
+        questions.append(dict(id=str(index), header=question.get("header"), question=question.get("question"),
+                              options=options, multiSelect=bool(question.get("multiSelect"))))
+    return questions
+
+
+def host_approval(request, request_id):
+    return dict(request_id=request_id, tool=request.get("tool_name"), tool_use_id=request.get("tool_use_id"),
+                input=request.get("input") or {}, title=request.get("title") or request.get("tool_name"),
+                display_name=request.get("display_name"), description=request.get("description"),
+                decision_reason=request.get("decision_reason"), blocked_path=request.get("blocked_path"),
+                suggestions=request.get("permission_suggestions") or [],
+                default_to_no=bool(request.get("default_to_no")),
+                suppress_always_allow_rule=bool(request.get("suppress_always_allow_rule")),
+                requires_user_interaction=bool(request.get("requires_user_interaction")))
+
+
+def host_control_request_event(provider, sid, tmux, session, event):
+    request = event.get("request") if isinstance(event.get("request"), dict) else {}
+    request_id = event.get("request_id")
+    if not isinstance(request_id, str) or not request_id:
+        return
+    if request.get("subtype") != "can_use_tool":
+        host_control_response(session, request_id, {})
+        return
+    tool = request.get("tool_name")
+    kind = "plan" if tool == "ExitPlanMode" else "question" if tool == "AskUserQuestion" else "approval"
+    session["parked"][request_id] = dict(kind=kind, request=request, signal=threading.Event(), at=time.time())
+    if kind == "plan":
+        session["state"].setdefault("plan_before", session["state"].get("mode") or "default")
+        plan = (request.get("input") or {}).get("plan") if isinstance(request.get("input"), dict) else None
+        host_event(provider, sid, tmux, session, "plan.proposed",
+                   dict(request_id=request_id, tool_use_id=request.get("tool_use_id"),
+                        markdown=plan if isinstance(plan, str) else ""))
+    elif kind == "question":
+        host_event(provider, sid, tmux, session, "question.request",
+                   dict(request_id=request_id, tool_use_id=request.get("tool_use_id"), questions=host_questions(request)))
+    else:
+        host_event(provider, sid, tmux, session, "approval.request", host_approval(request, request_id))
+    host_log(provider, sid, "control_request", dict(request_id=request_id, tool=tool, kind=kind))
+
+
+def host_resolved(provider, sid, tmux, session, parked, payload):
+    kind = parked["kind"]
+    if kind == "question":
+        host_event(provider, sid, tmux, session, "question.resolved", payload)
+    elif kind == "plan":
+        host_event(provider, sid, tmux, session, "plan.resolved", payload)
+    else:
+        host_event(provider, sid, tmux, session, "approval.resolved", payload)
+
+
+def host_control_cancel(provider, sid, tmux, session, request_id):
+    parked = session["parked"].pop(request_id, None) if isinstance(request_id, str) else None
+    if not isinstance(parked, dict):
+        return
+    parked["signal"].set()
+    if parked["kind"] == "question":
+        payload = dict(request_id=request_id, answers={}, dismissed=True)
+    elif parked["kind"] == "plan":
+        payload = dict(request_id=request_id, action="feedback")
+    else:
+        payload = dict(request_id=request_id, decision="cancel", by="timeout")
+    host_resolved(provider, sid, tmux, session, parked, payload)
+    host_log(provider, sid, "control_cancelled", dict(request_id=request_id, kind=parked["kind"]))
+
+
+def host_session_permissions(request):
+    rules = []
+    for item in request.get("permission_suggestions") if isinstance(request.get("permission_suggestions"), list) else []:
+        if isinstance(item, dict) and item.get("behavior") == "allow":
+            rules.extend(rule for rule in item.get("rules") or [] if isinstance(rule, dict))
+    return [dict(type="addRules", rules=rules or [dict(toolName=request.get("tool_name"))],
+                 behavior="allow", destination="session")]
+
+
+def host_answers(questions, answers):
+    names = {}
+    for index, question in enumerate(questions if isinstance(questions, list) else []):
+        if isinstance(question, dict) and isinstance(question.get("question"), str):
+            names[str(question.get("id", index))] = question["question"]
+    resolved = {}
+    for key, value in (answers if isinstance(answers, dict) else {}).items():
+        if isinstance(value, list):
+            value = ", ".join(str(part) for part in value)
+        if isinstance(value, str) and value:
+            resolved[names.get(str(key), str(key))] = value
+    return resolved
+
+
+def host_set_mode(provider, sid, session, mode):
+    if mode == "plan":
+        session["state"].setdefault("plan_before", session["state"].get("mode") or "default")
+    if not host_control_request(session, dict(subtype="set_permission_mode", mode=mode)):
+        return dict(status="error", reason="stdin_write_failed")
+    session["state"]["mode"] = mode
+    host_state_write(provider, sid, session["state"])
+    return dict(status="ok")
+
+
+def host_answer(provider, sid, tmux, session, request):
+    operation, request_id = request.get("op"), request.get("request_id")
+    parked = session["parked"].get(request_id) if isinstance(request_id, str) else None
+    if not isinstance(parked, dict):
+        return dict(status="refused", reason="unknown_request")
+    body = parked["request"]
+    tool_use_id = body.get("tool_use_id")
+    kind = parked["kind"]
+    if operation == "approval_reply":
+        decision = request.get("decision")
+        if kind != "approval" or decision not in ("accept", "acceptForSession", "decline", "cancel"):
+            return host_refuse("invalid_decision")
+        edited = request.get("input") if isinstance(request.get("input"), dict) else None
+        if decision in ("accept", "acceptForSession"):
+            response = dict(behavior="allow", updatedInput=edited or (body.get("input") or {}), toolUseID=tool_use_id,
+                            decisionClassification="user_temporary" if decision == "accept" else "user_permanent")
+            if decision == "acceptForSession":
+                response["updatedPermissions"] = host_session_permissions(body)
+        else:
+            response = dict(behavior="deny",
+                            message="User declined tool execution." if decision == "decline" else "User cancelled tool execution.",
+                            toolUseID=tool_use_id, decisionClassification="user_reject")
+            if decision == "cancel":
+                response["interrupt"] = True
+        payload = dict(request_id=request_id, decision=decision, by="desktop")
+    elif operation == "question_reply":
+        if kind != "question":
+            return host_refuse("invalid_request")
+        dismissed = bool(request.get("dismissed"))
+        if dismissed:
+            response = dict(behavior="deny", message="User cancelled tool execution.", toolUseID=tool_use_id,
+                            decisionClassification="user_reject")
+            payload = dict(request_id=request_id, answers={}, dismissed=True)
+        else:
+            input = dict(body.get("input") or {})
+            answers = host_answers(input.get("questions"), request.get("answers"))
+            response = dict(behavior="allow", updatedInput=dict(input, answers=answers), toolUseID=tool_use_id)
+            payload = dict(request_id=request_id, answers=answers, dismissed=False)
+    else:
+        action = request.get("action")
+        if kind != "plan" or action not in ("implement", "feedback"):
+            return host_refuse("invalid_action")
+        feedback = request.get("feedback") if isinstance(request.get("feedback"), str) else ""
+        response = dict(behavior="deny", toolUseID=tool_use_id, decisionClassification="user_reject",
+                        message=feedback.strip() or HOST_PLAN_STOP_MESSAGE)
+        payload = dict(request_id=request_id, action=action)
+        if feedback.strip():
+            payload["feedback"] = feedback
+    del session["parked"][request_id]
+    parked["signal"].set()
+    host_control_response(session, request_id, response)
+    host_resolved(provider, sid, tmux, session, parked, payload)
+    if operation == "plan_reply":
+        host_set_mode(provider, sid, session, session["state"].get("plan_before") or "default")
+    host_log(provider, sid, "control_answer", dict(request_id=request_id, kind=kind, decision=request.get("decision") or request.get("action")))
+    return dict(status="ok")
+
+
 def host_refuse(reason, **extra):
     return dict(status="refused", reason=reason, **extra)
 
@@ -3023,10 +3225,17 @@ def host_handle_request(provider, sid, tmux, session, request):
     if operation == "ping":
         inflight = session.get("inflight")
         return dict(status="ok", pid=os.getpid(), sid=sid, tmux=tmux,
-                    inflight=inflight.get("id") if isinstance(inflight, dict) else None)
+                    inflight=inflight.get("id") if isinstance(inflight, dict) else None,
+                    parked=len(session["parked"]))
     if operation == "stop":
         session["stop"] = True
         return dict(status="ok")
+    if operation in ("approval_reply", "question_reply", "plan_reply"):
+        return host_answer(provider, sid, tmux, session, request)
+    if operation == "set_permission_mode":
+        if request.get("mode") not in HOST_PERMISSION_MODES:
+            return host_refuse("invalid_permission_mode")
+        return host_set_mode(provider, sid, session, request["mode"])
     if operation != "deliver":
         return dict(status="error", reason="invalid_op")
     token, attempt, epoch, text = request.get("id"), request.get("attempt"), request.get("epoch"), request.get("text")
@@ -3143,6 +3352,17 @@ def host_agent_event(provider, sid, tmux, session, raw):
         return
     if kind == "user":
         host_user_event(provider, sid, tmux, session, event)
+        return
+    if kind == "control_request":
+        host_control_request_event(provider, sid, tmux, session, event)
+        return
+    if kind == "control_cancel_request":
+        host_control_cancel(provider, sid, tmux, session, event.get("request_id"))
+        return
+    if kind == "control_response":
+        response = event.get("response") if isinstance(event.get("response"), dict) else {}
+        host_log(provider, sid, "control_response", dict(request_id=response.get("request_id"),
+                                                         subtype=response.get("subtype")))
         return
     if kind == "result":
         if isinstance(inflight, dict) and not inflight.get("accepted"):
@@ -4763,6 +4983,9 @@ def serve_request(line, source, subscriptions, lock):
                 subscriptions.pop(rid, None)
             serve_print(dict(id=rid, message_protocol=1, result=dict(events=[], next_after=query.get("after", 0))))
             return
+        if query.get("op") in ("approval_reply", "question_reply", "plan_reply", "set_permission_mode"):
+            serve_print(dict(id=rid, message_protocol=1, result=host_reply(query)))
+            return
         if query.get("op") in ("message_submit", "message_retry", "message_dismiss", "message_dispatch", "message_status", "message_snapshot", "message_events", "message_reset"):
             result = message_store_request(query)
             if query.get('op') in ('message_submit', 'message_retry', 'message_snapshot'):
@@ -4828,7 +5051,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 39
+RUNTIME_GENERATION = 40
 
 if __name__ == '__main__':
     import base64 as _base64
