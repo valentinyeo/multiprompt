@@ -4887,11 +4887,24 @@ def watch(source, as_owner=False):
             child.stdin.close()
             child.wait()
         return
+    import selectors
+
     resolved = resolve_response_path(q, source, as_owner)
     agent, sid, path, delegated = resolved
-    if delegated is not None or path is None:
-        print(json.dumps(dict(id=q["id"], wire=delegated or missing_response(q, "session transcript not found"))), flush=True)
-        return
+    shown = None
+    while delegated is not None or path is None:
+        wire = delegated or missing_response(q, "session transcript not found")
+        if wire != shown:
+            print(json.dumps(dict(id=q["id"], wire=wire)), flush=True)
+            shown = wire
+        if wire not in (missing_response(q, "session transcript not found"), empty_history_response(q, q["sid"], q["tmux"])):
+            return
+        with selectors.DefaultSelector() as selector:
+            selector.register(sys.stdin.fileno(), selectors.EVENT_READ)
+            if selector.select(timeout=0.25) and not os.read(sys.stdin.fileno(), 4096):
+                return
+        resolved = resolve_response_path(q, source, as_owner)
+        agent, sid, path, delegated = resolved
     q = dict(q, sid=sid, follow=False)
     previous = None
     for resolved in watch_changes(q, resolved, source, as_owner):

@@ -2528,6 +2528,21 @@ class HistoryReaderTest(unittest.TestCase):
         self.assertEqual(server.wait(timeout=5), 0)
         self.assertEqual(server.stderr.read(), b'')
 
+    def test_watch_waits_for_a_transcript_written_after_it_starts(self):
+        self.query.update(tmux='', live=False)
+        server = self.start_server('--watch')
+        first = self.server_request(server, self.query)
+        self.assertIn('\thistory\tmissing\t', first['wire'])
+        self.write(self.event('first reply in a new chat'))
+        with selectors.DefaultSelector() as selector:
+            selector.register(server.stdout, selectors.EVENT_READ)
+            self.assertTrue(selector.select(timeout=5), 'watch stopped before the new chat wrote its transcript')
+        second = json.loads(server.stdout.readline())
+        self.assertEqual(second['id'], self.query['id'])
+        self.assertIn('first reply in a new chat', second['wire'])
+        server.stdin.close()
+        self.assertEqual(server.wait(timeout=5), 0)
+
     def test_watch_follows_replaced_transcript_and_ignores_other_files(self):
         self.query.update(tmux='', live=False)
         self.write(self.event('old content'))
