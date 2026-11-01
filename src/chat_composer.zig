@@ -2968,6 +2968,7 @@ test "IGSH-1266 Enter sends from the key down and leaves the composer text alone
         .ac_open = app_state.g_chat_ac.open,
         .draft_pending = shell_draft.edit_pending,
         .draft_quiet = shell_draft.quiet_until_ms,
+        .shell0 = app_state.shells[0],
     };
     defer {
         app_state.g_main_hwnd = saved.main;
@@ -2980,6 +2981,7 @@ test "IGSH-1266 Enter sends from the key down and leaves the composer text alone
         app_state.g_chat_ac.open = saved.ac_open;
         shell_draft.edit_pending = saved.draft_pending;
         shell_draft.quiet_until_ms = saved.draft_quiet;
+        app_state.shells[0] = saved.shell0;
     }
     app_state.shells[0] = app_state.empty_shell;
     app_state.shells[0].chat_id = 6415;
