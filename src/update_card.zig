@@ -394,11 +394,12 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
     const notes_rect = updateCardNotesRect(card);
     const viewport_height = @max(0, notes_rect.bottom - notes_rect.top);
     card_scroll = std.math.clamp(card_scroll, 0, @max(0, notes_height - viewport_height));
+    const shown = card_notes.shown(card_expanded);
     const saved_dc = @import("win32.zig").SaveDC(hdc);
     if (saved_dc != 0) {
         _ = @import("win32.zig").IntersectClipRect(hdc, notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom);
         var top = notes_rect.top - card_scroll;
-        for (0..card_notes.shown(card_expanded)) |i| {
+        for (0..shown) |i| {
             var note_wide: [512]u16 = undefined;
             const n = std.unicode.utf8ToUtf16Le(&note_wide, card_notes.line(i)) catch continue;
             var bullet = RECT{ .left = notes_rect.left, .top = top, .right = notes_rect.left + uiScaled(12), .bottom = top + note_heights[i] - uiScaled(4) };
@@ -418,11 +419,30 @@ pub fn paintSidebarUpdateCard(hdc: HANDLE, font_title: HANDLE, font_subtitle: HA
         _ = @import("win32.zig").FillRect(hdc, &thumb, brush);
         _ = DeleteObject(brush);
     }
+    var more_buf: [32]u8 = undefined;
+    const more_text: []const u8 = if (card_expanded) "Show less" else card_notes.more(&more_buf, false);
     if (cardHasToggle()) {
-        var more_buf: [32]u8 = undefined;
-        const more = if (card_expanded) "Show less" else card_notes.more(&more_buf, false);
         var more_rect = updateCardMoreRect(card);
-        drawAscii(hdc, more, &more_rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        drawAscii(hdc, more_text, &more_rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    }
+    if (!std.meta.eql(last_notes_rect, notes_rect)) {
+        last_notes_rect = notes_rect;
+        card_notes_logged = false;
+    }
+    if (!card_notes_logged) {
+        card_notes_logged = true;
+        var log_buf: [640]u8 = undefined;
+        debugLog(std.fmt.bufPrint(&log_buf, "[update] notes viewport={d},{d},{d},{d} content={d} scroll={d}", .{ notes_rect.left, notes_rect.top, notes_rect.right, notes_rect.bottom, notes_height, card_scroll }) catch "[update] notes viewport unavailable");
+        for (0..shown) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] note height {d}={d}", .{ i, note_heights[i] }) catch continue);
+        const restart_button = updateCardButtonRect(card);
+        debugLog(std.fmt.bufPrint(&log_buf, "[update] restart button={d},{d}", .{ @divTrunc(restart_button.left + restart_button.right, 2), @divTrunc(restart_button.top + restart_button.bottom, 2) }) catch "[update] restart button unavailable");
+        if (cardHasToggle()) {
+            const more_button = updateCardMoreRect(card);
+            debugLog(std.fmt.bufPrint(&log_buf, "[update] more row={d},{d}", .{ @divTrunc(more_button.left + more_button.right, 2), @divTrunc(more_button.top + more_button.bottom, 2) }) catch "[update] more row unavailable");
+        }
+        debugLog(std.fmt.bufPrint(&log_buf, "[update] card view={s} n={d} first={s}", .{ if (card_expanded) "expanded" else "collapsed", shown, if (shown > 0) card_notes.line(0) else "" }) catch "[update] card view unavailable");
+        for (0..shown) |i| debugLog(std.fmt.bufPrint(&log_buf, "[update] card note {d}={s}", .{ i, card_notes.line(i) }) catch continue);
+        debugLog2("[update] card remaining=", more_text);
     }
     const button = updateCardButtonRect(card);
     smooth.fillRoundRect(hdc, button, uiScaled(12), RGB(242, 242, 242));
