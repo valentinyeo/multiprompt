@@ -756,7 +756,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         _ = SelectObject(hdc, uiFontTitle());
         _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(20, 20, 20) else if (@import("themes.zig").themeReaderDark()) tokens.ReaderForeground else RGB(255, 255, 255));
         var text = layout.text;
-        _ = DrawTextW(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = @import("dwrite_text.zig").draw(hdc, @ptrCast(&shell.name), @intCast(shell.name_len), &text, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
     paintMoreButton(hdc, layout.more, border, fill, edge);
     if (layout.meta.len > 0) {
@@ -769,7 +769,7 @@ fn paintChatTitlePill(hdc: HANDLE) void {
         _ = SetTextColor(hdc, if (layout.meta_warn) warn_col else dim_col);
         const meta = layout.meta;
         var text = layout.meta_text;
-        _ = DrawTextW(hdc, meta.ptr, @intCast(meta.len), &text, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = @import("dwrite_text.zig").draw(hdc, meta.ptr, @intCast(meta.len), &text, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
 }
 
@@ -854,7 +854,7 @@ pub fn paintThreadTitle(hdc: HANDLE, win_w: i32) void {
             _ = SelectObject(hdc, uiFontThreadTitle());
             _ = SetTextColor(hdc, title_col);
             var t_rc = title_rc;
-            _ = DrawTextW(hdc, @ptrCast(&app_state.shells[app_state.active_shell].name), @intCast(app_state.shells[app_state.active_shell].name_len), &t_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            _ = @import("dwrite_text.zig").draw(hdc, @ptrCast(&app_state.shells[app_state.active_shell].name), @intCast(app_state.shells[app_state.active_shell].name_len), &t_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         }
     }
 }

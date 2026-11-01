@@ -57,7 +57,7 @@ fn inset(rc: w.RECT, amount: i32) w.RECT {
 fn drawName(dc: w.HANDLE, name: []const u8, rect: *w.RECT, flags: u32) void {
     var utf16: [128]u16 = undefined;
     const len = std.unicode.utf8ToUtf16Le(&utf16, name) catch 0;
-    _ = w.DrawTextW(dc, &utf16, @intCast(len), rect, flags);
+    _ = @import("dwrite_text.zig").draw(dc, &utf16, @intCast(len), rect, flags);
 }
 
 pub fn paintHeader(dc: w.HANDLE) void {

@@ -1772,7 +1772,11 @@ fn drawSidebarLabel(hdc: HANDLE, column: RECT, y: i32, text: [*]const u16, len: 
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
     _ = SetTextColor(hdc, customColorOr("muted", if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(138, 138, 138)));
     var rc = RECT{ .left = column.left + uiScaled(12), .top = y + uiScaled(12), .right = column.right - uiScaled(8), .bottom = y + uiScaled(42) };
-    _ = DrawTextW(hdc, text, len, &rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (len < 0) {
+        _ = DrawTextW(hdc, text, len, &rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    } else {
+        _ = @import("dwrite_text.zig").draw(hdc, text, len, &rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    }
 }
 
 const PaletteSessionView = struct {
@@ -1928,7 +1932,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
     var name = RECT{ .left = avatar_rect.right + uiScaled(10), .top = y + uiScaled(10), .right = right, .bottom = y + uiScaled(29) };
-    if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (shell.name_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
     _ = SetTextColor(hdc, hint);
     var preview: [128]u16 = undefined;
@@ -1937,7 +1941,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     if (chatDraftHasForShell(index)) {
         _ = DrawTextW(hdc, L("DRAFT"), -1, &line, DT_SINGLELINE | DT_NOPREFIX);
     } else if (len > 0) {
-        _ = DrawTextW(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = @import("dwrite_text.zig").draw(hdc, &preview, @intCast(len), &line, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
 }
 
@@ -1970,7 +1974,7 @@ fn paintPinnedBot(hdc: HANDLE, row: Row, y: i32) void {
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
     var name = RECT{ .left = row.x + uiScaled(4), .top = top + size + uiScaled(4), .right = row.x + row.width - uiScaled(4), .bottom = y + uiScaled(92) };
-    if (shell.name_len > 0) _ = DrawTextW(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (shell.name_len > 0) _ = @import("dwrite_text.zig").draw(hdc, &shell.name, @intCast(shell.name_len), &name, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 fn paintRoomRow(hdc: HANDLE, column: RECT, y: i32, row: Row) void {
@@ -2013,7 +2017,7 @@ fn paintRoomRow(hdc: HANDLE, column: RECT, y: i32, row: Row) void {
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(28, 28, 28) else RGB(242, 242, 242));
     var name_rect = RECT{ .left = left, .top = y + uiScaled(6), .right = column.right - uiScaled(8), .bottom = y + uiScaled(30) };
-    if (len > 0) _ = DrawTextW(hdc, &name, @intCast(len), &name_rect, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (len > 0) _ = @import("dwrite_text.zig").draw(hdc, &name, @intCast(len), &name_rect, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
     _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(138, 138, 138));
     var preview_rect = RECT{ .left = left, .top = y + uiScaled(31), .right = column.right - uiScaled(8), .bottom = y + tabRowH() };
@@ -2031,7 +2035,7 @@ fn paintRoomRow(hdc: HANDLE, column: RECT, y: i32, row: Row) void {
         @memcpy(subtitle[used..][0..n], item.preview[0..n]);
         used += n;
     }
-    if (used > 0) _ = DrawTextW(hdc, &subtitle, @intCast(used), &preview_rect, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (used > 0) _ = @import("dwrite_text.zig").draw(hdc, &subtitle, @intCast(used), &preview_rect, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 }
 
 pub fn paintSidebar(hdc: HANDLE) void {
@@ -2721,7 +2725,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         var label: [192]u16 = undefined;
                         const len = @import("rename.zig").groupPaletteLabel(result_idx - app_state.SEARCH_GROUPCTX_BASE, &label);
                         var text_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 12, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, &label, @intCast(len), &text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = @import("dwrite_text.zig").draw(hdc, &label, @intCast(len), &text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                     } else if (is_session_overview_menu) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -2789,7 +2793,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SelectObject(hdc, palette_font);
                             _ = SetTextColor(hdc, primary_color);
                             var sn_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 100, .bottom = ry + row_h };
-                            _ = DrawTextW(hdc, @ptrCast(&s.name), @intCast(s.name_len), &sn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            _ = @import("dwrite_text.zig").draw(hdc, @ptrCast(&s.name), @intCast(s.name_len), &sn_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                             _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (confirming_delete) RGB(255, 180, 180) else if (ri == app_state.g_search_sel) RGB(170, 210, 170) else RGB(90, 150, 90));
                             var sn_hint_rc = RECT{ .left = ox + overlay_w - 100, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
@@ -3044,7 +3048,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = SetTextColor(hdc, primary_color);
                             var gg_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 90, .bottom = ry + row_h };
                             if (app_state.groups[gi].name_len > 0) {
-                                _ = DrawTextW(hdc, @ptrCast(&app_state.groups[gi].name), @intCast(app_state.groups[gi].name_len), &gg_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                                _ = @import("dwrite_text.zig").draw(hdc, @ptrCast(&app_state.groups[gi].name), @intCast(app_state.groups[gi].name_len), &gg_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             } else {
                                 _ = paletteDrawText(hdc, L(ui_words.palette_unnamed_group), -1, &gg_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                             }
@@ -3672,7 +3676,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         } else if (@import("room_frontend.zig").paletteRoomName(result_idx - app_state.SEARCH_ROOM_ROW_OFFSET)) |name| {
                             var wide: [256]u16 = undefined;
                             const count = std.unicode.utf8ToUtf16Le(&wide, name) catch 0;
-                            if (count > 0) _ = DrawTextW(hdc, &wide, @intCast(count), &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                            if (count > 0) _ = @import("dwrite_text.zig").draw(hdc, &wide, @intCast(count), &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                         } else {
                             _ = DrawTextW(hdc, L("Room unavailable"), -1, &room_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         }
@@ -4238,7 +4242,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var rw_hint_rc = RECT{ .left = ox + overlay_w - 140, .top = ry, .right = ox + overlay_w - 8, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, @ptrCast(&app_state.g_window_display_name), @intCast(app_state.g_window_display_name_len), &rw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
+                        _ = @import("dwrite_text.zig").draw(hdc, @ptrCast(&app_state.g_window_display_name), @intCast(app_state.g_window_display_name_len), &rw_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                     } else if (is_codex_tmux) {
                         _ = SelectObject(hdc, palette_font);
                         _ = SetTextColor(hdc, primary_color);
@@ -4450,7 +4454,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SetTextColor(hdc, primary_color);
                         const show_ws_label = true;
                         var name_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - @as(i32, 180), .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, @ptrCast(&app_state.shells[shell_idx].name), @intCast(app_state.shells[shell_idx].name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | (if (show_ws_label) DT_END_ELLIPSIS else 0));
+                        _ = @import("dwrite_text.zig").draw(hdc, @ptrCast(&app_state.shells[shell_idx].name), @intCast(app_state.shells[shell_idx].name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | (if (show_ws_label) DT_END_ELLIPSIS else 0));
                         if (show_ws_label) {
                             _ = SelectObject(hdc, palette_hint_font);
                             _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(0x8A, 0x8A, 0x8A));

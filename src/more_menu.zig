@@ -198,7 +198,7 @@ pub fn paint(dc: HANDLE, bounds: RECT, anchor: RECT, state: *const State) void {
             _ = w.SelectObject(dc, drawing.uiFontSubtitle());
             _ = w.SetTextColor(dc, c.hint);
             var value_rc = RECT{ .left = cell.left + uiScaled(90), .top = cell.top, .right = cell.right - uiScaled(14), .bottom = cell.bottom };
-            _ = w.DrawTextW(dc, &state.model, @intCast(state.model_len), &value_rc, flags | w.DT_RIGHT);
+            _ = @import("dwrite_text.zig").draw(dc, &state.model, @intCast(state.model_len), &value_rc, flags | w.DT_RIGHT);
         }
     }
 }
