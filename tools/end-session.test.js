@@ -24,8 +24,8 @@ function runScript(script, env) {
   return spawnSync('bash', ['-c', script], { encoding: 'utf8', env: env || process.env, timeout: 10000 });
 }
 
-function bashReady() {
-  return spawnSync('bash', ['-c', 'true'], { encoding: 'utf8' }).status === 0;
+function canRunShell() {
+  return process.platform !== 'win32' && spawnSync('bash', ['-c', 'true'], { encoding: 'utf8' }).status === 0;
 }
 
 function stubHome() {
@@ -52,7 +52,7 @@ test('IGSH-1266 a session the server no longer has still counts as ended', () =>
   assert.match(read('src/agent_host.zig'), /pub const READER = "~\/\.multiprompt-runtime\/reader\.py";/);
   assert.ok(end.includes('python3 ' + READER + ' host stop claude'), 'the host stop must name the reader the launch uses');
 
-  if (!bashReady()) return;
+  if (!canRunShell()) return;
   const before = runScript("tmux kill-session -t 'term-abc'", { PATH: process.env.PATH });
   assert.notEqual(before.status, 0, 'the old script must fail once the session is gone');
 
@@ -63,7 +63,7 @@ test('IGSH-1266 a session the server no longer has still counts as ended', () =>
 test('IGSH-1266 ending a live chat tab also stops the app owned host for its chat', () => {
   const { home, marker, path: stubbed } = stubHome();
   try {
-    if (!bashReady()) return;
+    if (!canRunShell()) return;
     const result = runScript(EXPECTED_HOST, { ...process.env, HOME: home, PATH: stubbed });
     assert.equal(result.status, 0);
     assert.equal(fs.existsSync(marker), true, 'the host stop must run for the chat session');
