@@ -79,7 +79,7 @@ jobs:
 
   build:
     needs: prepare
-    timeout-minutes: 10
+    timeout-minutes: 15
     name: build-${{ matrix.arch }}
     runs-on: ubuntu-latest
     strategy:
