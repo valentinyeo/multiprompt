@@ -874,6 +874,43 @@ fn chatHistoryStreamThread(stream: *ChatHistoryStream, key: chat_transcript.Iden
     }
 }
 
+pub fn chatLiveWrite(line: []const u8) bool {
+    g_chat_live_mutex.lock();
+    defer g_chat_live_mutex.unlock();
+    const stream = g_chat_live_stream orelse return false;
+    if (stream.cancelled.load(.acquire) or stream.channel.input == null) return false;
+    while (!stream.mutex.tryLock()) Sleep(1);
+    defer stream.mutex.unlock();
+    var written: DWORD = 0;
+    return WriteFile(stream.channel.input, line.ptr, @intCast(line.len), &written, null) != 0 and written == line.len and
+        WriteFile(stream.channel.input, "\n", 1, &written, null) != 0 and written == 1;
+}
+
+fn chatLiveSyncCard() void {
+    if (app_state.active_shell >= app_state.shell_count) return;
+    const shell_id = app_state.shells[app_state.active_shell].shell_id;
+    if (shell_id == 0) return;
+    const live = @import("chat_live.zig");
+    var menu: @import("chat_permission.zig").PermissionMenu = .{};
+    if (live.approvalMenu(shell_id, &menu)) {
+        live.cardShown(shell_id);
+        if (app_state.g_chat_permission_sid == shell_id and app_state.g_chat_permission.count == menu.count and
+            app_state.g_chat_permission.allow == menu.allow and app_state.g_chat_permission.always == menu.always and
+            app_state.g_chat_permission.deny == menu.deny) return;
+        app_state.g_chat_permission = menu;
+        app_state.g_chat_permission_sid = shell_id;
+        app_state.shells[app_state.active_shell].permission_answered = false;
+        if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        return;
+    }
+    if (app_state.g_chat_permission_sid != shell_id or app_state.g_chat_permission.count == 0) return;
+    if (!live.cardDismissed(shell_id)) return;
+    app_state.g_chat_permission = .{};
+    app_state.g_chat_permission.count = 0;
+    live.cardShown(shell_id);
+    if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
 fn chatHistoryChannelClose(ch: *ChatHistoryChannel) void {
     if (ch.input != null) _ = CloseHandle(ch.input);
     if (ch.output != null) _ = CloseHandle(ch.output);
@@ -1497,6 +1534,7 @@ fn chatEnsureTranscriptCapacity(text_len: usize, block_count: usize) bool {
 
 fn refreshChatBlockCache(force: bool) bool {
     if (app_state.active_shell >= app_state.shell_count) return false;
+    chatLiveSyncCard();
     const key = chatFileIdentity();
     chatFileRequest(key);
     const entry = if (app_state.g_chat_active) chatHistoryEntry(key) else null;

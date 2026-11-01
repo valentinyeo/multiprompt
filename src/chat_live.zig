@@ -198,8 +198,11 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
         self.request.openWith(.question, strOf(payload, "request_id"), strOf(payload, "tool"));
         self.prompt = promptOf(payload);
     } else if (std.mem.eql(u8, kind, "plan.proposed")) {
-        self.request.openWith(.plan, strOf(payload, "request_id"), strOf(payload, "title"));
-        const target = try self.itemFor(a, item_id, .plan);
+        const request_id = strOf(payload, "request_id");
+        self.request.openWith(.plan, request_id, strOf(payload, "title"));
+        var key_buf: [MAX_ID]u8 = undefined;
+        const key = if (item_id.len > 0) item_id else std.fmt.bufPrint(&key_buf, "plan:{s}", .{request_id}) catch request_id;
+        const target = try self.itemFor(a, key, .plan);
         try target.setText(a, strOf(payload, "markdown"));
         target.done = true;
     } else if (std.mem.eql(u8, kind, "approval.resolved") or std.mem.eql(u8, kind, "question.resolved") or
@@ -530,7 +533,7 @@ pub fn tailFor(shell_id: u32, text: []u16, offset: usize, blocks: []chat_markdow
     mutex.lock();
     defer mutex.unlock();
     for (&slots) |*live| {
-        if (live.used and live.shell_id == shell_id) return live.tailInto(text, offset, blocks);
+        if (live.used and live.shell_id == shell_id) return tailInto(live, text, offset, blocks);
     }
     return .{};
 }
@@ -556,6 +559,15 @@ pub fn approvalMenu(shell_id: u32, out: *chat_permission.PermissionMenu) bool {
         menu.deny = '3';
         out.* = menu;
         return true;
+    }
+    return false;
+}
+
+pub fn approvalOpen(shell_id: u32) bool {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (live.used and live.shell_id == shell_id) return live.request.open and live.request.kind == .approval;
     }
     return false;
 }

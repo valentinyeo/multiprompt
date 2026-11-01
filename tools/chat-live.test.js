@@ -56,3 +56,27 @@ test('D1 working dots follow the live turn, not the screen', () => {
   assert.match(layout, /@import\("chat_live\.zig"\)\.running\(app_state\.shells\[app_state\.active_shell\]\.shell_id\)/);
   assert.match(layout, /app_state\.g_chat_screen_status_len > 0 or chatLiveWorking\(\)\);/);
 });
+
+test('D2 a live approval fills the existing permission card and clears when it resolves', () => {
+  const session = read('src/chat_session.zig');
+  assert.match(session, /live\.approvalMenu\(shell_id, &menu\)/);
+  assert.match(session, /app_state\.g_chat_permission = menu;/);
+  assert.match(session, /app_state\.g_chat_permission_sid = shell_id;/);
+  assert.match(session, /live\.cardDismissed\(shell_id\)/);
+});
+
+test('D2 the three existing card buttons reply with the request id on the live channel', () => {
+  const send = read('src/chat_send.zig');
+  assert.match(send, /\.requestId\(shell_id, \.approval, &request\)/);
+  assert.match(send, /approvalReplyLine\(/);
+  assert.match(send, /\.decisionFor\(action\)/);
+  assert.match(send, /chatLiveWrite\(/);
+  const session = read('src/chat_session.zig');
+  assert.match(session, /pub fn chatLiveWrite\(line: \[\]const u8\) bool/);
+});
+
+test('D2 escape on a live approval cancels it instead of typing into a pane', () => {
+  const send = read('src/chat_send.zig');
+  assert.match(send, /pub fn chatStopAgent\(shell_index: u32\) bool \{[\s\S]{0,200}if \(chatLiveCancelApproval\(shell_index\)\) return true;/);
+  assert.match(send, /live\.approvalReplyLine\(std\.heap\.page_allocator, shell_id, std\.mem\.sliceTo\(&key\.sid, 0\), request\[0\.\.len\], \.cancel\)/);
+});

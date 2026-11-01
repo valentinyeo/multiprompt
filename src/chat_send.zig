@@ -3403,11 +3403,47 @@ fn chatFullSettleFinish() void {
 
 pub fn chatStopAgent(shell_index: u32) bool {
     if (!app_state.ISSUE_265_WORKING_BAR or shell_index >= app_state.shell_count) return false;
+    if (chatLiveCancelApproval(shell_index)) return true;
     return chatAgentKey(shell_index, 0x1B);
+}
+
+fn chatLiveReply(line: []u8) bool {
+    defer std.heap.page_allocator.free(line);
+    if (@import("chat_session.zig").chatLiveWrite(line)) return true;
+    debugLog("[chat] live reply failed");
+    return false;
+}
+
+fn chatLiveApprovalAnswer(shell_index: u32, action: @import("chat_permission.zig").Action) bool {
+    if (shell_index >= app_state.shell_count) return false;
+    const live = @import("chat_live.zig");
+    const shell_id = app_state.shells[shell_index].shell_id;
+    var request: [96]u8 = undefined;
+    const len = live.requestId(shell_id, .approval, &request) orelse return false;
+    const key = chatFileIdentityForShell(shell_index);
+    const line = live.approvalReplyLine(std.heap.page_allocator, shell_id, std.mem.sliceTo(&key.sid, 0), request[0..len], live.decisionFor(action)) catch return false;
+    if (!chatLiveReply(line)) return false;
+    app_state.shells[shell_index].permission_answered = true;
+    @import("window_layout.zig").chatWorkingIndicatorInvalidate();
+    var log: [96]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat] approval sent shell={d} decision={s}", .{ shell_id, live.decisionText(live.decisionFor(action)) }) catch "");
+    return true;
+}
+
+pub fn chatLiveCancelApproval(shell_index: u32) bool {
+    if (shell_index >= app_state.shell_count) return false;
+    const live = @import("chat_live.zig");
+    const shell_id = app_state.shells[shell_index].shell_id;
+    var request: [96]u8 = undefined;
+    const len = live.requestId(shell_id, .approval, &request) orelse return false;
+    const key = chatFileIdentityForShell(shell_index);
+    const line = live.approvalReplyLine(std.heap.page_allocator, shell_id, std.mem.sliceTo(&key.sid, 0), request[0..len], .cancel) catch return false;
+    return chatLiveReply(line);
 }
 
 pub fn chatPermissionAnswer(shell_index: u32, action: @import("chat_permission.zig").Action) bool {
     if (!app_state.g_chat_active or shell_index != app_state.active_shell or shell_index >= app_state.shell_count) return false;
+    if (chatLiveApprovalAnswer(shell_index, action)) return true;
     var scratch: [2]u16 = undefined;
     if (@import("chat_capture.zig").captureChatTranscript(shell_index, &scratch, true) == null) return false;
     const shell = &app_state.shells[shell_index];
