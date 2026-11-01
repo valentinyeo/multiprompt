@@ -7,18 +7,16 @@ const read = file => fs.existsSync(path.join(root, file)) ? fs.readFileSync(path
 
 test('approved card replaces the plain menu and shows the actual installed version on both surfaces', () => {
   const card = read('src/usage_card.zig');
-  assert.match(card, /AI USAGE THIS WEEK/);
+  assert.match(card, /L\("AI subscriptions"\)/);
   assert.match(card, /std\.unicode\.utf8ToUtf16Le\(&wide, value\)/);
   assert.match(read('.claude/skills/verify-multiprompt/control-feature-status-card.ps1'), /'MultiPromptUsageCard', 'AI usage this week'/);
-  assert.match(card, /Multi Bot v" \+\+ @import\("main.zig"\).APP_VERSION/);
-  assert.match(card, /"v" \+\+ @import\("main.zig"\).APP_VERSION/);
+  assert.match(card, /"Multiprompt v" \+\+ @import\("main.zig"\)\.APP_VERSION/);
   assert.match(card, /5-hour window not reported/);
-  assert.match(card, /Grey tick = how much of the week has passed/);
+  assert.match(card, /Grey tick = time passed in the window/);
   assert.match(read('src/telemetry_panel.zig'), /pub fn showSidebarAiUsageMenu\(\) void \{\s+@import\("usage_card.zig"\).open\(\)/);
   assert.match(read('src/sidebar.zig'), /@import\("usage_card.zig"\).paintSidebarFooter\(hdc\)/);
-  assert.match(card, /paintVersionStrip\(dc\)/);
-  assert.match(read('src/main.zig'), /versionStripHit\(mx, my\)\) \{\s+updateCardRelaunch\(hwnd\)/);
-  assert.match(read('src/update_card.zig'), /if \(app_state.g_sidebar_status_card == 2\) return false/);
+  assert.match(read('src/main.zig'), /if \(upd_hit == 1\) updateCardRelaunch\(hwnd\)/);
+  assert.match(read('src/telemetry_panel.zig'), /app_state.g_sidebar_status_card == 2\) return/);
 });
 
 test('weekly tick uses elapsed time, not quota usage, and the native card keeps user dismissal', () => {
@@ -29,9 +27,9 @@ test('weekly tick uses elapsed time, not quota usage, and the native card keeps 
   assert.match(read('src/telemetry_panel.zig'), /week_elapsed_tenths = aiPacePercentTenths\(week.object.get\("time_gone"\)\)/);
   assert.match(card, /w.WS_CHILD \| w.WS_CLIPSIBLINGS/);
   assert.match(card, /w.HWND_TOP/);
-  assert.match(card, /w.VK_ESCAPE => close\(\)/);
+  assert.match(card, /if \(value == w.VK_ESCAPE\) dismiss\(\) else close\(\)/);
   for (const file of ['src/main.zig', 'src/chat_composer.zig']) assert.match(read(file), /@import\("usage_card.zig"\).key\(wp\)/);
-  assert.match(card, /if \(!inside\(card, x, y\)\) close\(\)/);
+  assert.match(card, /if \(!inside\(card, x, y\) and !inside\(@import\("capacity.zig"\)\.sidebarUsageRowRect\(\), x, y\)\)/);
   assert.match(card, /w.WM_APP_CHANGELOG_OPEN/);
   assert.match(card, /test "IGSH-1086 usage card keeps missing windows honest/);
 });

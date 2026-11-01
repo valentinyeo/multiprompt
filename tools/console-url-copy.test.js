@@ -48,7 +48,7 @@ test("Chat View paints, hovers, and opens links through the shell-link route", (
   assert.match(source, /chatFlowBlock\(hdc, text, block, text_rc, true/);
   assert.match(source, /return chatFlowText\(hdc, text, area, block.role == \.code/);
   assert.match(source, /customColorOr\("link"/);
-  assert.match(source, /g_chat_hover_link\.\?\.start == offset \+ link\.\?\.start/);
+  assert.match(source, /g_chat_hover_link\.\?\.start == link_start and g_chat_hover_link\.\?\.end == link_end/);
 });
 
 test("the dedicated mouse thread catches Ctrl+click before the temporary hook is ready", () => {

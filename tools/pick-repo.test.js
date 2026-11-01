@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const test = require('node:test');
 
 const read = (file) => fs.readFileSync(file, 'utf8');
+const { readChangelogEntry } = require('./changelog-entry');
 
 test('IGSH-1266 a workspace folder is declared once and the last entry wins', () => {
   const palette = read('src/command_palette.zig');
@@ -57,7 +58,7 @@ test('IGSH-1266 Pick repo and Set workspace folder are painted, confirmed and do
   assert.match(sidebar, /Pick a repo/);
   assert.match(read('src/shortcuts.zig'), /Ctrl\+K -> Set workspace folder/);
   assert.match(read('openwiki/architecture/session-start.md'), /Pick repo/);
-  assert.match(read('changelog.d/IGSH-1266-pick-repo.md'), /[A-Za-z]/);
+  assert.match(readChangelogEntry('IGSH-1266'), /[A-Za-z]/);
 });
 
 test('IGSH-1266 saving the workspace folder tells the user', () => {

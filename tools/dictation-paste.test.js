@@ -119,7 +119,7 @@ test("IGSH-846 recording Escape discards audio and never delivers a transcript",
   assert.match(worker, /captureDictationPcm\(&audio\)[\s\S]*?if \(g_dictation_cancelled\.load\(\.acquire\)\) \{\s*if \(g_main_hwnd != null\) _ = PostMessageW\(g_main_hwnd, WM_APP_DICTATION_READY, 0, 0\);\s*return;\s*\}[\s\S]*?deepgramTranscribePcm\(/,
     "cancelled audio must be freed without provider transcription");
   const ready = functionBody("handleDictationReady", "toggleDictation");
-  const discard = ready.indexOf('if (g_dictation_cancelled.load(.acquire))');
+  const discard = ready.indexOf('g_dictation_cancelled.load(.acquire)');
   assert.ok(discard >= 0 && discard < ready.indexOf('rememberLastPasteText(transcript)'));
   assert.match(ready.slice(discard, ready.indexOf('if (was_voice_listening and')), /return;/,
     "even a late result must not reach any composer, shell or clipboard delivery");

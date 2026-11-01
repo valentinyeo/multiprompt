@@ -32,7 +32,7 @@ test("IGSH-820 pinned protection uses one guard and no session lock state", () =
   assert.match(bodyOf("fn runGroupPaletteAction("), /rejectPinnedGroupClose\(gid\)/);
   assert.doesNotMatch(bodyOf("fn quitAllZigShellWindows("), /rejectPinned/);
   assert.match(source, /WM_CLOSE => \{\s*if \(g_app_closing\) return 0;\s*if \(@import\("archive\.zig"\)\.anyPinnedSession\(\) and !@import\("console\.zig"\)\.hasOtherZigShellWindows\(\)\) g_quit_all_in_progress = true;\s*if \(!g_quit_all_in_progress and @import\("archive\.zig"\)\.rejectPinnedCloseAll\(\)\) return 0;/);
-  assert.match(source, /WM_APP_CLOSE => \{\s*if \(shell_count > 0\) \{\s*closeShell\(active_shell\)/);
+  assert.match(source, /WM_APP_CLOSE => \{\s*(?:if \(!@import\("room_frontend\.zig"\)\.privateActionsAllowed\(\)\) return 0;\s*)?if \(shell_count > 0\) \{\s*closeShell\(active_shell\)/);
 });
 
 test("IGSH-820 pinned robot tiles select safely", () => {
