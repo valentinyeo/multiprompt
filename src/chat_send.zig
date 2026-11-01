@@ -3537,7 +3537,6 @@ fn chatLiveQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_h
     var buffer: [512]u8 = undefined;
     const len = chatLiveAnswerLabels(group, digit, selected, &buffer) orelse return false;
     if (!live.answerQuestion(shell_id, index, buffer[0..len])) return false;
-    chatQuestionAdvance(shell_index, index, prompt.count);
     if (live.questionAnswerLine(shell_id, std.heap.page_allocator)) |line| {
         if (!chatLiveReply(line)) return false;
     }
@@ -3545,8 +3544,8 @@ fn chatLiveQuestionAnswer(shell_index: u32, digit: u8, selected: u32, question_h
     return true;
 }
 
-fn chatQuestionAdvance(shell_index: u32, index: usize, count: usize) void {
-    if (shell_index >= app_state.shell_count or index + 1 >= count) return;
+fn chatQuestionAdvance(shell_index: u32, index: usize) void {
+    if (shell_index >= app_state.shell_count) return;
     app_state.shells[shell_index].chat_question_index = index + 1;
     app_state.shells[shell_index].chat_question_selected = 0;
     app_state.g_chat_layout_dirty = true;
@@ -3565,7 +3564,7 @@ fn chatLiveQuestionText(text: []const u16) bool {
     const len = std.unicode.utf16LeToUtf8(&buffer, text) catch return false;
     const index = app_state.shells[shell_index].chat_question_index;
     if (!live.answerQuestion(shell_id, index, buffer[0..len])) return false;
-    chatQuestionAdvance(shell_index, index, prompt.count);
+    chatQuestionAdvance(shell_index, index);
     if (live.questionAnswerLine(shell_id, std.heap.page_allocator)) |line| _ = chatLiveReply(line);
     app_state.shells[shell_index].chat_question_other = false;
     app_state.shells[shell_index].chat_question_other_sent = false;

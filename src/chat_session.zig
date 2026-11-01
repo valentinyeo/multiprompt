@@ -905,6 +905,9 @@ fn chatLiveSyncQuestion() void {
     app_state.shells[app_state.active_shell].chat_question_identity = 0;
 }
 
+var g_chat_live_card_request: [96]u8 = @splat(0);
+var g_chat_live_card_len: usize = 0;
+
 fn chatLiveSyncCard() void {
     if (app_state.active_shell >= app_state.shell_count) return;
     const shell_id = app_state.shells[app_state.active_shell].shell_id;
@@ -913,12 +916,15 @@ fn chatLiveSyncCard() void {
     var menu: @import("chat_permission.zig").PermissionMenu = .{};
     if (live.approvalMenu(shell_id, &menu)) {
         live.cardShown(shell_id);
-        if (app_state.g_chat_permission_sid == shell_id and app_state.g_chat_permission.count == menu.count and
-            app_state.g_chat_permission.allow == menu.allow and app_state.g_chat_permission.always == menu.always and
-            app_state.g_chat_permission.deny == menu.deny) return;
+        var request: [96]u8 = undefined;
+        const len = live.requestId(shell_id, .approval, &request) orelse 0;
+        const fresh = len != g_chat_live_card_len or !std.mem.eql(u8, g_chat_live_card_request[0..len], request[0..len]);
+        if (!fresh and app_state.g_chat_permission_sid == shell_id and app_state.g_chat_permission.count == menu.count) return;
         app_state.g_chat_permission = menu;
         app_state.g_chat_permission_sid = shell_id;
         app_state.shells[app_state.active_shell].permission_answered = false;
+        g_chat_live_card_len = len;
+        @memcpy(g_chat_live_card_request[0..len], request[0..len]);
         if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         return;
     }
@@ -926,6 +932,7 @@ fn chatLiveSyncCard() void {
     if (!live.cardDismissed(shell_id)) return;
     app_state.g_chat_permission = .{};
     app_state.g_chat_permission.count = 0;
+    g_chat_live_card_len = 0;
     live.cardShown(shell_id);
     if (app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
