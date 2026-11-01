@@ -4856,6 +4856,10 @@ class HostEventStreamTest(unittest.TestCase):
         self.feed(dict(type='result', subtype='error_max_turns', stop_reason=None, total_cost_usd=0))
         self.assertEqual(self.events('turn.ended')[0]['payload']['status'], 'failed')
 
+    def test_events_are_skipped_for_a_chat_with_no_name(self):
+        reader.host_event(self.provider, self.sid, None, self.session, 'text.delta', dict(text='x'))
+        self.assertEqual(self.events(), [])
+
     def test_an_unfinished_item_is_flushed_when_the_turn_ends(self):
         self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
                   self.frame(dict(type='content_block_start', index=0, content_block=dict(type='text', text=''))),

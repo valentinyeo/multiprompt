@@ -2845,6 +2845,8 @@ def host_event_text(value, limit=HOST_EVENT_TEXT_LIMIT):
 
 
 def host_event(provider, sid, tmux, session, kind, payload=None, item=None, turn=None):
+    if tmux is None:
+        return
     message = dict(v=HOST_EVENT_VERSION, sid=sid, turn=session.get("turn") if turn is None else turn, kind=kind,
                    at=int(time.time() * 1000), item=item, payload=payload if isinstance(payload, dict) else {})
     try:
@@ -5069,7 +5071,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 42
+RUNTIME_GENERATION = 43
 
 if __name__ == '__main__':
     import base64 as _base64
