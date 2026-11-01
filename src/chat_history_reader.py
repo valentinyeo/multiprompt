@@ -2300,6 +2300,7 @@ HOST_IDLE_SECONDS = 300
 HOST_DELIVERY_TIMEOUT = 15
 HOST_INFLIGHT_TIMEOUT = 900
 HOST_STOP_GRACE = 5.0
+HOST_TERMINAL_TIMEOUT = 20
 HOST_LINE_LIMIT = 4 * 1024 * 1024
 HOST_LOG_TAIL = 6
 HOST_EVENT_VERSION = 1
@@ -2708,6 +2709,82 @@ def host_handover(provider, sid):
     host_write(host_paths(provider, sid)["owner"], dict(owner="terminal", at=time.time()))
     host_log(provider, sid, "handover", dict(previous=result.get("status")))
     return dict(status="handover", previous=result.get("status"))
+
+
+def host_pane_agent(tmux, sid):
+    try:
+        bound = resolve_tmux_agent('claude', tmux, require_bound=True)
+    except (OSError, ValueError):
+        return False
+    return bool(bound) and bound[0] == sid
+
+
+def host_terminal_command(provider, sid):
+    config = host_config(provider, sid) or {}
+    parts = [host_binary_name(provider), '--resume', sid]
+    mode = config.get('permission_mode')
+    if mode in HOST_PERMISSION_MODES:
+        parts += ['--permission-mode', mode]
+    return ' '.join(parts)
+
+
+def host_terminal_send(tmux, command):
+    try:
+        subprocess.run(['tmux', 'send-keys', '-t', '=' + tmux + ':', '-l', '--', command],
+                       capture_output=True, timeout=5, check=True)
+        subprocess.run(['tmux', 'send-keys', '-t', '=' + tmux + ':', 'Enter'],
+                       capture_output=True, timeout=5, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
+def host_terminal(provider, sid, tmux=None):
+    if not host_identity(provider, sid):
+        return dict(status='refused', reason='unsupported_provider')
+    if not host_enabled(provider, sid):
+        return dict(status='already', reason='not_hosted')
+    if tmux is None:
+        tmux = host_chat_name(provider, sid)
+    if not isinstance(tmux, str) or TMUX_NAME.fullmatch(tmux) is None:
+        return dict(status='refused', reason='no_chat')
+    if host_pane_agent(tmux, sid):
+        host_stop(provider, sid)
+        host_write(host_paths(provider, sid)['owner'], dict(owner='terminal', at=time.time()))
+        return dict(status='already', reason='pane_agent')
+    if not host_pane_is_shell(tmux) and host_pane_prompt(tmux) is None:
+        return dict(status='refused', reason='pane_busy')
+    host_stop(provider, sid)
+    host_reap_agent(provider, sid)
+    if host_alive(provider, sid):
+        return dict(status='error', reason='host_still_running')
+    host_write(host_paths(provider, sid)['owner'], dict(owner='terminal', at=time.time()))
+    host_log(provider, sid, 'terminal_move')
+    command = host_terminal_command(provider, sid)
+    if not host_terminal_send(tmux, command):
+        return dict(status='error', reason='pane_input_failed')
+    deadline = time.time() + HOST_TERMINAL_TIMEOUT
+    while time.time() < deadline:
+        if host_pane_agent(tmux, sid):
+            return dict(status='moved', command=command)
+        time.sleep(0.2)
+    return dict(status='error', reason='pane_agent_timeout')
+
+
+def host_resume(provider, sid, tmux=None, cwd=None, mode=None):
+    if not host_identity(provider, sid):
+        return dict(status='refused', reason='unsupported_provider')
+    if not host_enabled(provider, sid):
+        return dict(status='already', reason='not_hosted')
+    if host_owned(provider, sid):
+        return dict(status='already', reason='host_running')
+    if tmux is None:
+        tmux = host_chat_name(provider, sid)
+    adopted = host_adopt(provider, sid, tmux, cwd, mode)
+    started = adopted.get('start')
+    if started in ('started', 'already') or adopted.get('status') == 'already':
+        return dict(status='moved', start=started or adopted.get('reason'))
+    return dict(status='error', reason=adopted.get('reason') or 'host_start_failed')
 
 
 def host_deliver(provider, sid, token, attempt, epoch, text):
@@ -3577,7 +3654,7 @@ def host_status(provider, sid):
 
 
 def host_cli(argv):
-    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt"):
+    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume"):
         return dict(status="error", reason="invalid_command")
     command, rest = argv[0], argv[1:]
     if len(rest) < 2:
@@ -3638,6 +3715,10 @@ def host_cli(argv):
         return host_start(provider, sid)
     if command == "adopt":
         return host_adopt(provider, sid, tmux, folder, mode)
+    if command == "terminal":
+        return host_terminal(provider, sid, tmux)
+    if command == "resume":
+        return host_resume(provider, sid, tmux, folder, mode)
     if command == "stop":
         return host_stop(provider, sid)
     if command == "handover":
@@ -5017,6 +5098,12 @@ def serve_request(line, source, subscriptions, lock):
         if query.get("op") == "host_adopt":
             serve_print(dict(id=rid, host_adopt=host_adopt(query.get("provider"), query.get("sid"), query.get("tmux"), query.get("cwd"))))
             return
+        if query.get("op") == "host_terminal":
+            serve_print(dict(id=rid, host_terminal=host_terminal(query.get("provider"), query.get("sid"), query.get("tmux"))))
+            return
+        if query.get("op") == "host_resume":
+            serve_print(dict(id=rid, host_resume=host_resume(query.get("provider"), query.get("sid"), query.get("tmux"), query.get("cwd"))))
+            return
         if query.get("op") == "events_subscribe":
             subscription = events_subscription(query)
             page = message_events_page(subscription["provider"], subscription["sid"], subscription["after"])
@@ -5098,7 +5185,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 45
+RUNTIME_GENERATION = 46
 
 if __name__ == '__main__':
     import base64 as _base64

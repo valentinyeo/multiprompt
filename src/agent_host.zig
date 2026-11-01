@@ -65,6 +65,40 @@ pub fn launchCommand(out: []u8, session: []const u8, cwd: []const u8, sid: []con
     return std.fmt.bufPrint(out, "tmux new-session -d -s {s} -c {s} 2>/dev/null; python3 {s} host enable claude {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1; python3 {s} host start claude {s} --tmux {s} --cwd {s}{s} >/dev/null 2>&1; tmux attach -t {s}", .{ session, cwd, READER, sid, session, cwd, mode, READER, sid, session, cwd, mode, session }) catch null;
 }
 
+pub const MoveTarget = enum { terminal, chat };
+
+pub fn moveRequest(out: []u8, target: MoveTarget, id: u32, host: u8, sid: []const u8, tmux: []const u8, cwd: []const u8) ?[]const u8 {
+    if (!safeSessionId(sid) or !safeName(tmux) or !safePath(cwd)) return null;
+    const op = switch (target) {
+        .terminal => "host_terminal",
+        .chat => "host_resume",
+    };
+    return std.fmt.bufPrint(out, "{{\"op\":\"{s}\",\"id\":{d},\"host\":{d},\"provider\":\"claude\",\"sid\":\"{s}\",\"tmux\":\"{s}\",\"cwd\":\"{s}\"}}", .{ op, id, host, sid, tmux, cwd }) catch null;
+}
+
+pub fn movedReply(body: []const u8) bool {
+    return std.mem.indexOf(u8, body, "\"status\":\"moved\"") != null or std.mem.indexOf(u8, body, "\"status\":\"already\"") != null;
+}
+
+test "IGSH-1266 moving a chat asks the reader for the side it should run on" {
+    var out: [512]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    try std.testing.expectEqualStrings("{\"op\":\"host_terminal\",\"id\":7,\"host\":0,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"term-abc\",\"cwd\":\"/home/x/proj\"}",
+        moveRequest(&out, .terminal, 7, 0, sid, "term-abc", "/home/x/proj") orelse return error.TestUnexpectedResult);
+    try std.testing.expectEqualStrings("{\"op\":\"host_resume\",\"id\":9,\"host\":1,\"provider\":\"claude\",\"sid\":\"ffffffff-ffff-4fff-bfff-ffffffffffff\",\"tmux\":\"term-abc\",\"cwd\":\"/home/x/proj\"}",
+        moveRequest(&out, .chat, 9, 1, sid, "term-abc", "/home/x/proj") orelse return error.TestUnexpectedResult);
+    try std.testing.expect(moveRequest(&out, .terminal, 7, 0, "short", "term-abc", "/home/x/proj") == null);
+    try std.testing.expect(moveRequest(&out, .terminal, 7, 0, sid, "term-a;b", "/home/x/proj") == null);
+    try std.testing.expect(moveRequest(&out, .terminal, 7, 0, sid, "term-abc", "/home/x proj") == null);
+}
+
+test "IGSH-1266 a move counts as done once the chat runs in the place that was asked for" {
+    try std.testing.expect(movedReply("{\"id\":7,\"host_terminal\":{\"status\":\"moved\",\"command\":\"claude --resume x\"}}"));
+    try std.testing.expect(movedReply("{\"id\":7,\"host_resume\":{\"status\":\"already\",\"reason\":\"not_hosted\"}}"));
+    try std.testing.expect(!movedReply("{\"id\":7,\"host_terminal\":{\"status\":\"error\",\"reason\":\"pane_agent_timeout\"}}"));
+    try std.testing.expect(!movedReply(""));
+}
+
 test "IGSH-1266 session ids are version four uuids" {
     var out: [36]u8 = undefined;
     const random = [_]u8{0xff} ** 16;

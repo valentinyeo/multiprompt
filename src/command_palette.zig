@@ -465,6 +465,19 @@ const AdoptHostJob = struct {
     finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
 
+const MoveChatJob = struct {
+    id: u32 = 0,
+    host: u8 = 0,
+    target: u8 = 0,
+    sid: [40]u8 = std.mem.zeroes([40]u8),
+    sid_len: u8 = 0,
+    tmux: [64]u8 = std.mem.zeroes([64]u8),
+    tmux_len: u8 = 0,
+    cwd: [256]u8 = std.mem.zeroes([256]u8),
+    cwd_len: u16 = 0,
+    finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+};
+
 const SHELL_ROWS = [_]ShellRow{
     .{ .target = SEARCH_NEW_OFFSET + 0, .keywords = "command prompt cmd shell new cmd shell" },
     .{ .target = SEARCH_NEW_OFFSET + 5, .keywords = "powershell pwsh shell new powershell" },
@@ -1937,6 +1950,60 @@ pub fn startAdoptHost(tab: usize) bool {
     @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
     @memcpy(job.cwd[0..job.cwd_len], cwd[0..job.cwd_len]);
     const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, adoptHostThread, .{job}) catch {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    thread.detach();
+    return true;
+}
+
+fn moveChatThread(job: *MoveChatJob) void {
+    defer job.finished.store(true, .release);
+    const a = std.heap.page_allocator;
+    defer a.destroy(job);
+    var buf: [512]u8 = undefined;
+    const target: @import("agent_host.zig").MoveTarget = if (job.target == 1) .terminal else .chat;
+    const request = @import("agent_host.zig").moveRequest(&buf, target, job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len]) orelse return;
+    var response: std.ArrayList(u8) = .empty;
+    defer response.deinit(a);
+    _ = @import("chat_session.zig").chatHistoryPersistent(job.host, job.id, request, 65536, &response, null);
+    if (@import("agent_host.zig").movedReply(response.items)) {
+        if (app_state.g_main_hwnd != null) _ = @import("focus.zig").PostMessageW(app_state.g_main_hwnd, @import("win32.zig").WM_APP_CHAT_HANDOVER, @intCast(job.id), @intCast(job.target));
+    } else {
+        const notice = a.dupeZ(u8, "Move chat: the chat did not move, see the tab") catch return;
+        if (app_state.g_main_hwnd == null or @import("focus.zig").PostMessageW(app_state.g_main_hwnd, app_state.WM_APP_CHAT_ATTACH_FAILED, 0, @bitCast(@intFromPtr(notice.ptr))) == 0) a.free(notice);
+    }
+}
+
+pub fn canMoveHostChat(ai_agent: u8, claude_sid_len: usize, tmux_len: usize) bool {
+    return ai_agent == 1 and claude_sid_len == 36 and tmux_len > 0;
+}
+
+test "IGSH-1266 only a Claude chat with a session and a terminal can move between the two" {
+    try std.testing.expect(canMoveHostChat(1, 36, 12));
+    try std.testing.expect(!canMoveHostChat(0, 36, 12));
+    try std.testing.expect(!canMoveHostChat(2, 36, 12));
+    try std.testing.expect(!canMoveHostChat(1, 0, 12));
+    try std.testing.expect(!canMoveHostChat(1, 36, 0));
+}
+
+pub fn startMoveChat(tab: usize, target: u8) bool {
+    if (tab >= app_state.shell_count) return false;
+    const shell = &app_state.shells[tab];
+    if (!canMoveHostChat(shell.ai_agent, shell.claude_sid_len, shell.tmux_session_len)) return false;
+    const job = std.heap.page_allocator.create(MoveChatJob) catch return false;
+    var cwd: [256]u8 = undefined;
+    var cwd_len: usize = 0;
+    for (shell.cached_cwd[0..shell.cached_cwd_len], 0..) |c, i| {
+        if (i >= cwd.len) break;
+        cwd[i] = c;
+        cwd_len = i + 1;
+    }
+    job.* = .{ .id = shell.shell_id, .host = shell.tmux_host, .target = target, .sid_len = @intCast(@min(shell.claude_sid_len, 40)), .tmux_len = @intCast(@min(shell.tmux_session_len, 64)), .cwd_len = @intCast(@min(cwd_len, cwd.len)) };
+    @memcpy(job.sid[0..job.sid_len], shell.claude_sid[0..job.sid_len]);
+    @memcpy(job.tmux[0..job.tmux_len], shell.tmux_session[0..job.tmux_len]);
+    @memcpy(job.cwd[0..job.cwd_len], cwd[0..job.cwd_len]);
+    const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 }, moveChatThread, .{job}) catch {
         std.heap.page_allocator.destroy(job);
         return false;
     };

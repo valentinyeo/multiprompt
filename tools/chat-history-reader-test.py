@@ -4483,6 +4483,141 @@ class AdoptHostTest(unittest.TestCase):
         self.assertEqual(reader.host_cli(['adopt', 'claude', self.sid, '--tmux', 'bad name'])['reason'], 'invalid_chat')
 
 
+class MoveToTerminalTest(unittest.TestCase):
+    sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+    tmux = 'move-terminal-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        self.transcript = self.home / 'move.jsonl'
+        self.transcript.write_text('')
+        self.calls = []
+        self.pane_agent = [False]
+        self.host_running = [True]
+
+        def resolve(agent, name, pid=None, require_bound=False):
+            return (self.sid, self.transcript) if self.pane_agent[0] else None
+
+        def run(command, **kwargs):
+            self.calls.append((list(command), bool(self.host_running[0])))
+            if command[:2] == ['tmux', 'send-keys'] and command[-1] == 'Enter':
+                self.pane_agent[0] = True
+            if command[:2] == ['tmux', 'display']:
+                return types.SimpleNamespace(stdout='/usr/bin/bash\n', returncode=0)
+            if command[:2] == ['tmux', 'capture-pane']:
+                return types.SimpleNamespace(stdout='user@host:~/projects$ ', returncode=0)
+            return types.SimpleNamespace(stdout='', returncode=0)
+
+        def stop(provider, sid, force=False):
+            self.calls.append((['host_stop'], bool(self.host_running[0])))
+            self.host_running[0] = False
+            return dict(status='stopped')
+
+        patch.object(reader, 'resolve_tmux_agent', side_effect=resolve).start()
+        patch.object(reader.subprocess, 'run', side_effect=run).start()
+        patch.object(reader, 'host_stop', side_effect=stop).start()
+        patch.object(reader, 'host_alive', side_effect=lambda provider, sid: self.host_running[0]).start()
+        patch.object(reader, 'host_reap_agent', return_value=False).start()
+        self.enable()
+
+    def enable(self):
+        reader.host_write(reader.host_paths('claude', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, permission_mode='bypassPermissions'))
+
+    def typed(self):
+        return [c for c, _ in self.calls if c[:2] == ['tmux', 'send-keys']]
+
+    def test_move_to_terminal_types_the_same_conversation_after_the_host_exits(self):
+        moved = reader.host_terminal('claude', self.sid)
+        self.assertEqual(moved['status'], 'moved')
+        self.assertEqual(moved['command'], 'claude --resume ' + self.sid + ' --permission-mode bypassPermissions')
+        typed = self.typed()
+        self.assertEqual(typed[0][-1], 'claude --resume ' + self.sid + ' --permission-mode bypassPermissions')
+        stop_at = next(index for index, (call, _) in enumerate(self.calls) if call == ['host_stop'])
+        send_at = next(index for index, (call, _) in enumerate(self.calls) if call[:2] == ['tmux', 'send-keys'])
+        self.assertLess(stop_at, send_at, 'the host must be stopped before the pane takes the chat')
+        self.assertFalse(self.calls[send_at][1], 'typing into the pane while the host lives would run two drivers')
+        self.assertTrue(reader.host_handed_over('claude', self.sid))
+
+    def test_move_to_terminal_uses_the_permission_mode_the_host_used(self):
+        reader.host_write(reader.host_paths('claude', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, permission_mode='acceptEdits'))
+        self.assertEqual(reader.host_terminal('claude', self.sid)['command'],
+                         'claude --resume ' + self.sid + ' --permission-mode acceptEdits')
+
+    def test_a_second_press_types_nothing_again(self):
+        self.assertEqual(reader.host_terminal('claude', self.sid)['status'], 'moved')
+        sent = len(self.typed())
+        self.assertEqual(reader.host_terminal('claude', self.sid), dict(status='already', reason='pane_agent'))
+        self.assertEqual(len(self.typed()), sent, 'one chat may run in the terminal once')
+
+    def test_a_chat_without_a_host_is_left_alone(self):
+        reader.host_write(reader.host_paths('claude', self.sid)['config'], dict(enabled=False))
+        self.assertEqual(reader.host_terminal('claude', self.sid), dict(status='already', reason='not_hosted'))
+        self.assertEqual(self.typed(), [])
+
+    def test_a_pane_running_something_else_is_never_typed_into(self):
+        def busy(command, **kwargs):
+            self.calls.append((list(command), bool(self.host_running[0])))
+            if command[:2] == ['tmux', 'display']:
+                return types.SimpleNamespace(stdout='/usr/bin/codex\n', returncode=0)
+            if command[:2] == ['tmux', 'capture-pane']:
+                return types.SimpleNamespace(stdout='working on it', returncode=0)
+            return types.SimpleNamespace(stdout='', returncode=0)
+        patch.object(reader.subprocess, 'run', side_effect=busy).start()
+        self.enable()
+        self.assertEqual(reader.host_terminal('claude', self.sid)['reason'], 'pane_busy')
+        self.assertEqual(self.typed(), [])
+        self.assertTrue(self.host_running[0], 'a refused move must leave the host running')
+
+    def test_the_reader_channel_answers_a_move_to_terminal_request(self):
+        incoming = types.SimpleNamespace(buffer=io.BytesIO((json.dumps(dict(id=9, op='host_terminal', provider='claude', sid=self.sid, tmux=self.tmux)) + '\n').encode()), fileno=lambda: 56)
+        output = io.StringIO()
+        with patch.object(reader, 'host_terminal', return_value=dict(status='moved')) as move, \
+                patch.object(reader.sys, 'stdin', incoming), patch.object(reader.sys, 'stdout', output):
+            reader.serve(reader.READER_SOURCE)
+        frame = json.loads(output.getvalue().splitlines()[0])
+        self.assertEqual(frame['id'], 9)
+        self.assertEqual(frame['host_terminal']['status'], 'moved')
+        move.assert_called_once_with('claude', self.sid, self.tmux)
+
+    def test_resume_is_a_no_op_without_a_hosted_chat(self):
+        reader.host_write(reader.host_paths('claude', self.sid)['config'], dict(enabled=False))
+        self.assertEqual(reader.host_resume('claude', self.sid), dict(status='already', reason='not_hosted'))
+        self.assertEqual(self.calls, [])
+
+    def test_resume_leaves_a_running_host_alone(self):
+        with patch.object(reader, 'host_owned', return_value=True):
+            self.assertEqual(reader.host_resume('claude', self.sid), dict(status='already', reason='host_running'))
+        self.assertEqual(self.calls, [])
+
+
+class HandsOverChatTest(unittest.TestCase):
+    sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeec001'
+    tmux = 'resume-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        patch.object(reader, 'host_owned', return_value=False).start()
+        patch.object(reader, 'host_adopt', return_value=dict(status='ok', start='started')).start()
+        reader.host_write(reader.host_paths('claude', self.sid)['config'], dict(enabled=True, tmux=self.tmux))
+
+    def test_resume_restarts_the_host_for_a_chat_left_in_the_terminal(self):
+        self.assertEqual(reader.host_resume('claude', self.sid, self.tmux), dict(status='moved', start='started'))
+        self.assertTrue(reader.host_adopt.called, 'the chat must come back on the host it left')
+
+    def test_resume_reports_a_failed_start(self):
+        reader.host_adopt.return_value = dict(status='ok', start='error', reason='host_timeout')
+        self.assertEqual(reader.host_resume('claude', self.sid, self.tmux), dict(status='error', reason='host_timeout'))
+
+
 class HostWorkerDeliveryTest(AgentHostTest):
     def test_a_hosted_chat_delivers_without_a_pane_agent_or_locator(self):
         self.enable()

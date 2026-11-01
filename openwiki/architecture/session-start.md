@@ -232,10 +232,13 @@ protocol. Nothing is typed into a terminal.
    terminal, and the chat opens only when asked for. The switch is the existing
    per-tab `chat_view_on` flag, available as `Alt+C`, the `Ctrl+K` row and the
    right-click tab menu (`SEARCH_TABCTX_CHAT_VIEW`), with the labels "Switch to
-   Live Chat" and "Switch to Terminal". Both surfaces read the one session and
-   its history, so switching never restarts anything. Handing the chat back to a
-   `claude --resume` terminal through `host handover` still needs its own control
-   and stays out of scope.
+   Live Chat" and "Switch to Terminal". One chat runs in one place at a time:
+   moving to the terminal asks the reader for `host_terminal`, which stops the
+   host, waits until it has exited, then types `claude --resume <sid>` with the
+   host's own permission mode into the tab's pane; moving back asks for
+   `host_resume`, which releases that terminal agent and starts the host again on
+   the same id. Both sides read the one session and its history, both commands are
+   idempotent, and a second press ends with the chat running once.
 6. Codex and Pi keep today's terminal start: `buildCodexTmuxLaunchCmd` and the
    `send-keys` variants are untouched, and their Chat View path is unchanged.
 

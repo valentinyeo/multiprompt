@@ -159,6 +159,7 @@ const more_menu = @import("more_menu.zig");
 const WM_APP_SHOT_PASTE = @import("win32.zig").WM_APP_SHOT_PASTE;
 const WM_APP_BROWSER_SHOTURL = @import("win32.zig").WM_APP_BROWSER_SHOTURL;
 const WM_APP_CHAT_TAB_URL = @import("win32.zig").WM_APP_CHAT_TAB_URL;
+const WM_APP_CHAT_HANDOVER = @import("win32.zig").WM_APP_CHAT_HANDOVER;
 const WM_APP_MARK_ACTIVE_UNREAD = @import("win32.zig").WM_APP_MARK_ACTIVE_UNREAD;
 const WM_APP_SNIPPET_DELETE = @import("win32.zig").WM_APP_SNIPPET_DELETE;
 const WM_APP_INBOX_UNARCHIVE = @import("win32.zig").WM_APP_INBOX_UNARCHIVE;
@@ -1097,6 +1098,8 @@ const sshAutoReconnectTick = @import("chat_send.zig").sshAutoReconnectTick;
 const showShellConsole = @import("chat_composer.zig").showShellConsole;
 const chatDraftFlush = @import("chat_composer.zig").chatDraftFlush;
 const toggleChatView = @import("chat_composer.zig").toggleChatView;
+const openChatView = @import("chat_composer.zig").openChatView;
+const closeChatView = @import("chat_composer.zig").closeChatView;
 const invalidateChatHeader = @import("chat_composer.zig").invalidateChatHeader;
 const voiceStartListening = @import("voice.zig").voiceStartListening;
 const voiceScheduleTurnEnd = @import("voice.zig").voiceScheduleTurnEnd;
@@ -3765,6 +3768,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_APP_CHAT_TOGGLE => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
             toggleChatView();
+            return 0;
+        },
+        WM_APP_CHAT_HANDOVER => {
+            if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
+            const shell_index = findShellById(@truncate(wp)) orelse return 0;
+            if (shell_index >= app_state.shell_count) return 0;
+            const to_terminal = lp != 0;
+            app_state.shells[shell_index].chat_view_on = !to_terminal;
+            if (shell_index == app_state.active_shell) {
+                if (to_terminal) closeChatView() else openChatView();
+            }
+            saveSession();
+            _ = InvalidateRect(hwnd, null, 0);
             return 0;
         },
         WM_APP_CHAT_COPY_CODE => {
