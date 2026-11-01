@@ -1224,6 +1224,13 @@ class HistoryReaderTest(unittest.TestCase):
         event = dict(type='user', message=dict(role='user', content='<task-notification>synthetic task</task-notification>'))
         self.assertIsNone(reader.conversation_event(event, 'claude'))
 
+    def test_igsh1266_interrupt_markers_are_not_user_messages(self):
+        for text in ('[Request interrupted by user]', '[Request interrupted by user for tool use]'):
+            event = dict(type='user', message=dict(role='user', content=[dict(type='text', text=text)]))
+            self.assertIsNone(reader.conversation_event(event, 'claude'))
+        event = dict(type='user', message=dict(role='user', content='Why did you write [Request interrupted by user] here?'))
+        self.assertIsNotNone(reader.conversation_event(event, 'claude'))
+
     def test_igsh349_queued_command_uses_latest_exact_queue_stamp(self):
         text = 'please check the build'
         self.query['settlement'] = True
