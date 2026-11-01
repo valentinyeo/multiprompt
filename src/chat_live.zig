@@ -247,7 +247,8 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
         self.held = self.state == .running;
         self.state = .idle;
         self.ended = statusOf(strOf(payload, "status"));
-    } else if (std.mem.eql(u8, kind, "host.status")) {
+    } else if (std.mem.eql(u8, kind, "host.status") and std.mem.eql(u8, strOf(payload, "state"), "stopped")) {
+        self.held = self.state == .running;
         self.state = .idle;
     } else {
         changed = false;
@@ -1081,6 +1082,28 @@ test "IGSH-1266 a new turn drops the last turn so the live tail shows only the r
     const tail = tailFor(98, &text, 0, &blocks);
     try std.testing.expectEqual(@as(usize, 1), tail.blocks);
     try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("New"), text[0..tail.text_len]);
+}
+
+test "IGSH-1266 a host that turns ready mid-turn keeps the live reply on screen" {
+    const sid = "11111111-2222-3333-4444-777777777777";
+    _ = begin(97, 0, sid);
+    defer release(97);
+    const page = "{\"result\":{\"events\":[" ++
+        "{\"seq\":1,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"starting\"}}}," ++
+        "{\"seq\":2,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t-1\",\"payload\":{}}}," ++
+        "{\"seq\":3,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"ready\"}}}," ++
+        "{\"seq\":4,\"event\":{\"kind\":\"text.delta\",\"turn\":\"t-1\",\"item\":\"a:text:0\",\"payload\":{\"text\":\"Live\"}}}" ++
+        "]}}";
+    try std.testing.expect(applyPage(97, sid, page));
+    try std.testing.expect(running(97));
+    var text: [64]u16 = @splat(0);
+    var blocks: [4]chat_markdown.Block = undefined;
+    const tail = tailFor(97, &text, 0, &blocks);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Live"), text[0..tail.text_len]);
+    const stopped = "{\"result\":{\"events\":[{\"seq\":5,\"event\":{\"kind\":\"host.status\",\"payload\":{\"state\":\"stopped\"}}}]}}";
+    try std.testing.expect(applyPage(97, sid, stopped));
+    try std.testing.expect(!running(97));
+    try std.testing.expect(held(97));
 }
 
 fn parse(a: std.mem.Allocator, json: []const u8) !std.json.Value {
