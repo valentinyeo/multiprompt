@@ -286,7 +286,7 @@ pub fn publishSessionLayout() void {
     }
     const pending = std.json.Stringify.valueAlloc(arena.allocator(), .{ .base = base.value, .edited = local }, .{ .emit_null_optional_fields = false }) catch return;
     var path_buf: [512]u8 = undefined;
-    if (syncAuthPath(&path_buf, "account-layout-pending.json")) |path| {
+    if (layoutPendingPath(&path_buf)) |path| {
         if (!writeFileAtomicW(path, pending)) {
             showHeaderNoticeAscii("Could not save pending sync changes", 4000, true);
             return;
@@ -376,9 +376,14 @@ pub fn accountRemoveServer(slot: u8) void {
     };
     startAccountJob(.{ .kind = .remove_host, .slot = slot, .base = base, .edited = edited });
 }
+fn layoutPendingPath(buf: *[512]u8) ?[]const u8 {
+    var name_buf: [64]u8 = undefined;
+    const name = @import("session.zig").channelFileName(&name_buf, "account-layout-pending.json", IS_DEV) orelse return null;
+    return syncAuthPath(buf, name);
+}
 fn accountDeletePending() void {
     var buf: [512]u8 = undefined;
-    if (syncAuthPath(&buf, "account-layout-pending.json")) |path| {
+    if (layoutPendingPath(&buf)) |path| {
         var wide: [600]u16 = undefined;
         if (win32WidePath(&wide, path)) |wp| _ = DeleteFileW(wp.ptr);
     }
@@ -387,7 +392,7 @@ fn accountResumeJob(kind: AccountJobKind) AccountJob {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     var buf: [512]u8 = undefined;
-    const path = syncAuthPath(&buf, "account-layout-pending.json") orelse return .{ .kind = kind };
+    const path = layoutPendingPath(&buf) orelse return .{ .kind = kind };
     const bytes = readFileAllocWin32(path, session_layout.max_bytes) orelse return .{ .kind = kind };
     defer std.heap.page_allocator.free(bytes);
     const Pending = struct { base: session_layout.Layout, edited: session_layout.Layout };
