@@ -24,13 +24,21 @@ function runScript(script, env) {
   return spawnSync('bash', ['-c', script], { encoding: 'utf8', env: env || process.env, timeout: 10000 });
 }
 
+function bashReady() {
+  return spawnSync('bash', ['-c', 'true'], { encoding: 'utf8' }).status === 0;
+}
+
 function stubHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'end-session-'));
   const runtime = path.join(home, '.multiprompt-runtime');
+  const bin = path.join(home, 'bin');
   fs.mkdirSync(runtime, { recursive: true });
+  fs.mkdirSync(bin, { recursive: true });
   const marker = path.join(home, 'host-stop.txt');
-  fs.writeFileSync(path.join(runtime, 'reader.py'), `import sys\nopen(${JSON.stringify(marker)}, 'w').write(' '.join(sys.argv[1:]))\n`);
-  return { home, marker };
+  fs.writeFileSync(path.join(runtime, 'reader.py'), '');
+  fs.writeFileSync(path.join(bin, 'python3'), `#!/bin/sh\nshift\nprintf '%s' "$*" > ${JSON.stringify(marker)}\n`);
+  fs.chmodSync(path.join(bin, 'python3'), 0o755);
+  return { home, marker, path: bin + path.delimiter + process.env.PATH };
 }
 
 test('IGSH-1266 a session the server no longer has still counts as ended', () => {
@@ -44,6 +52,7 @@ test('IGSH-1266 a session the server no longer has still counts as ended', () =>
   assert.match(read('src/agent_host.zig'), /pub const READER = "~\/\.multiprompt-runtime\/reader\.py";/);
   assert.ok(end.includes('python3 ' + READER + ' host stop claude'), 'the host stop must name the reader the launch uses');
 
+  if (!bashReady()) return;
   const before = runScript("tmux kill-session -t 'term-abc'", { PATH: process.env.PATH });
   assert.notEqual(before.status, 0, 'the old script must fail once the session is gone');
 
@@ -52,9 +61,10 @@ test('IGSH-1266 a session the server no longer has still counts as ended', () =>
 });
 
 test('IGSH-1266 ending a live chat tab also stops the app owned host for its chat', () => {
-  const { home, marker } = stubHome();
+  const { home, marker, path: stubbed } = stubHome();
   try {
-    const result = runScript(EXPECTED_HOST, { ...process.env, HOME: home });
+    if (!bashReady()) return;
+    const result = runScript(EXPECTED_HOST, { ...process.env, HOME: home, PATH: stubbed });
     assert.equal(result.status, 0);
     assert.equal(fs.existsSync(marker), true, 'the host stop must run for the chat session');
     assert.equal(fs.readFileSync(marker, 'utf8'), 'host stop claude ' + SID);
