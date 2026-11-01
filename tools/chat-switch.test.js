@@ -316,7 +316,6 @@ const Shell = struct { hwnd: ?usize = null, chat_view_on: bool = false, shell_id
 var shells = [_]Shell{.{}};
 var invalidated = false;
 var painted: usize = 0;
-fn GetWindowRect(_: ?usize, _: *RECT) i32 { return 1; }
 fn IsWindowVisible(_: ?usize) i32 { return 1; }
 fn chatViewShouldShowForTab(_: bool) bool { return true; }
 fn debugLog(_: []const u8) void {}

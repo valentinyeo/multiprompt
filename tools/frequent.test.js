@@ -81,8 +81,8 @@ fn publishSessionLayout() void { g_account_dirty_at = 1; }
 fn accountPush() void { pushes += 1; }
 fn findShellById(sid: u32) ?u32 { for (shells[0..shell_count], 0..) |shell, i| { if (sid == shell.shell_id) return @intCast(i); } return null; }
 fn inboxFilterMatches(_: *const InboxRow) bool { return true; }
-const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
-const HANDLE = ?*anyopaque;
+const RECT = @import("win32.zig").RECT;
+const HANDLE = @import("win32.zig").HANDLE;
 var g_inbox_sel: u32 = 0;
 var g_multiprompt_theme = false;
 var g_light_theme = false;
