@@ -190,5 +190,12 @@
   "global_hint_switcher": "switcher",
   "global_hint_on": "on",
   "global_hint_off": "off",
-  "global_next_unread_prefix": "Next unread: "
+  "global_next_unread_prefix": "Next unread: ",
+  "changelog_title": "What's new",
+  "changelog_current_version": "You are on",
+  "changelog_installed": "Installed",
+  "changelog_open_ticket": "Open ticket ›",
+  "changelog_move": "move",
+  "changelog_open_ticket_footer": "open ticket",
+  "changelog_close": "close"
 }

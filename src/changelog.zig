@@ -7,16 +7,12 @@ const SW_SHOW = @import("win32.zig").SW_SHOW;
 const DT_SINGLELINE = @import("win32.zig").DT_SINGLELINE;
 const DT_VCENTER = @import("win32.zig").DT_VCENTER;
 const DT_RIGHT = @import("win32.zig").DT_RIGHT;
-const DT_WORDBREAK = @import("win32.zig").DT_WORDBREAK;
 const DT_NOPREFIX = @import("win32.zig").DT_NOPREFIX;
-const DT_CALCRECT = @import("win32.zig").DT_CALCRECT;
 const TRANSPARENT = @import("win32.zig").TRANSPARENT;
 const TIMER_REFOCUS = @import("win32.zig").TIMER_REFOCUS;
 const RECT = @import("win32.zig").RECT;
 const GetClientRect = @import("win32.zig").GetClientRect;
 const InvalidateRect = @import("win32.zig").InvalidateRect;
-const GetDC = @import("win32.zig").GetDC;
-const ReleaseDC = @import("win32.zig").ReleaseDC;
 const FillRect = @import("win32.zig").FillRect;
 const DrawTextW = @import("win32.zig").DrawTextW;
 const CreateSolidBrush = @import("win32.zig").CreateSolidBrush;
@@ -24,7 +20,6 @@ const DeleteObject = @import("win32.zig").DeleteObject;
 const SetBkMode = @import("win32.zig").SetBkMode;
 const SetTextColor = @import("win32.zig").SetTextColor;
 const SelectObject = @import("win32.zig").SelectObject;
-const CreatePen = @import("win32.zig").CreatePen;
 const IntersectClipRect = @import("win32.zig").IntersectClipRect;
 const SaveDC = @import("win32.zig").SaveDC;
 const RestoreDC = @import("win32.zig").RestoreDC;
@@ -35,14 +30,11 @@ const customColorOr = @import("themes.zig").customColorOr;
 const clearSearchBackdrop = @import("rename.zig").clearSearchBackdrop;
 const showActiveShellAfterOverlay = @import("rename.zig").showActiveShellAfterOverlay;
 const drawAscii = @import("drawing.zig").drawAscii;
-const drawAsciiLong = @import("drawing.zig").drawAsciiLong;
 const drawModalShadow = @import("drawing.zig").drawModalShadow;
 const ChangelogLayout = @import("app_state.zig").ChangelogLayout;
 const ChangelogEntryRange = @import("app_state.zig").ChangelogEntryRange;
 const ChangelogHit = @import("app_state.zig").ChangelogHit;
 const uiScaled = @import("drawing.zig").uiScaled;
-const uiFontTitle = @import("drawing.zig").uiFontTitle;
-const uiFontSubtitle = @import("drawing.zig").uiFontSubtitle;
 const SetTimer = @import("win32.zig").SetTimer;
 
 const ChangelogBullet = struct { text: []const u8, ticket: []const u8 };
@@ -2380,322 +2372,282 @@ comptime {
     }
 }
 
-fn changelogEntryTopPad() i32 {
-    return uiScaled(6);
-}
-
-fn changelogEntryBottomPad() i32 {
-    return uiScaled(6);
-}
-
-fn changelogMinRowH() i32 {
-    return uiScaled(30);
-}
-
-fn changelogSummaryWidth(overlay_w: i32) i32 {
-    return @max(1, overlay_w - 142 - 120);
-}
-
-fn changelogSummaryRight(ox: i32, overlay_w: i32, has_ticket: bool) i32 {
-    return if (has_ticket) ox + overlay_w - 142 else ox + overlay_w - 18;
-}
-
-fn changelogBulletIndent() i32 {
-    return uiScaled(16);
-}
-
-fn changelogBulletGap() i32 {
-    return uiScaled(4);
-}
-
-fn changelogBulletRightPad(has_ticket: bool) i32 {
-    return if (has_ticket) uiScaled(42) else uiScaled(18);
-}
-
-fn changelogBulletTextWidth(summary_w: i32, has_ticket: bool) i32 {
-    const overlay_w = summary_w + 142 + 120;
-    const left_offset = 120 + changelogBulletIndent();
-    return @max(1, overlay_w - left_offset - changelogBulletRightPad(has_ticket));
-}
-
-fn appendChangelogBulletText(buf: []u16, text: []const u8) i32 {
-    var n: usize = 0;
-    if (n < buf.len) {
-        buf[n] = '-';
-        n += 1;
+const words = @import("ui_words.zon");
+const smooth = @import("smooth.zig");
+const Selection = app_state.ChangelogSelection;
+const max_change_bytes = blk: {
+    @setEvalBranchQuota(10_000_000);
+    var n: usize = 1;
+    for (SOURCE_CHANGELOG) |entry| {
+        n = @max(n, entry.summary.len);
+        for (entry.items) |item| n = @max(n, item.text.len);
     }
-    if (n < buf.len) {
-        buf[n] = ' ';
-        n += 1;
-    }
-    for (text) |c| {
-        if (n >= buf.len) break;
-        buf[n] = @intCast(c);
-        n += 1;
-    }
-    return @intCast(n);
-}
-
-fn changelogBulletHeightWithHdc(hdc: HANDLE, text: []const u8, text_w: i32) i32 {
-    if (text_w <= 0 or hdc == null) return uiScaled(22);
-    var buf: [1024]u16 = undefined;
-    const n = appendChangelogBulletText(&buf, text);
-    var rc = RECT{ .left = 0, .top = 0, .right = text_w, .bottom = 0 };
-    _ = DrawTextW(hdc, @ptrCast(&buf), n, &rc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-    return @max(uiScaled(18), rc.bottom - rc.top);
-}
-
-fn drawAsciiBulletLong(hdc: HANDLE, text: []const u8, rc: *RECT, flags: u32) void {
-    var buf: [1024]u16 = undefined;
-    const n = appendChangelogBulletText(&buf, text);
-    _ = DrawTextW(hdc, @ptrCast(&buf), n, rc, flags);
-}
-
-fn changelogEntryHeightWithHdc(hdc: HANDLE, idx: usize, summary_w: i32) i32 {
-    const min_row_h = changelogMinRowH();
-    if (idx >= CHANGELOG.len or summary_w <= 0 or hdc == null) return min_row_h;
-
-    const old_font = SelectObject(hdc, uiFontSubtitle());
-    defer _ = SelectObject(hdc, old_font);
-
-    const entry = CHANGELOG[idx];
-    if (entry.items.len > 0) {
-        var total_h = changelogEntryTopPad() + uiScaled(22);
-        for (entry.items, 0..) |item, item_idx| {
-            const bullet_w = changelogBulletTextWidth(summary_w, item.ticket.len > 0);
-            const bullet_h = changelogBulletHeightWithHdc(hdc, item.text, bullet_w);
-            changelog_bullet_heights[changelog_bullet_starts[idx] + item_idx] = bullet_h;
-            total_h += changelogBulletGap() + bullet_h;
-        }
-        total_h += changelogEntryBottomPad();
-        return @max(min_row_h, total_h);
-    }
-
-    var buf: [1024]u16 = undefined;
-    var n: usize = 0;
-    for (entry.summary) |c| {
-        if (n >= buf.len) break;
-        buf[n] = @intCast(c);
-        n += 1;
-    }
-
-    var rc = RECT{ .left = 0, .top = 0, .right = summary_w, .bottom = 0 };
-    _ = DrawTextW(hdc, @ptrCast(&buf), @intCast(n), &rc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
-    const wrapped_h = @max(0, rc.bottom - rc.top);
-    return @max(min_row_h, changelogEntryTopPad() + wrapped_h + changelogEntryBottomPad());
-}
-
-const changelog_bullet_count = blk: {
-    @setEvalBranchQuota(10000);
-    var count: usize = 0;
-    for (SOURCE_CHANGELOG) |entry| count += entry.items.len;
-    break :blk count;
+    break :blk n;
 };
-var changelog_bullet_starts: [CHANGELOG.len + 1]usize = .{0} ** (CHANGELOG.len + 1);
-var changelog_bullet_heights: [changelog_bullet_count]i32 = .{0} ** changelog_bullet_count;
-var changelog_layout_width: i32 = 0;
-var changelog_layout_scale: i32 = 0;
-var changelog_row_tops: [CHANGELOG.len + 1]i32 = .{0} ** (CHANGELOG.len + 1);
-var changelog_row_measured: [CHANGELOG.len]bool = .{false} ** CHANGELOG.len;
+
+fn changeFont(size: i32, weight: i32) HANDLE {
+    return @import("fonts.zig").create(-uiScaled(size), 0, 0, 0, weight, 0, 0, 0, 0, 0, 0, 5, 0, null);
+}
+
+var changelog_body_font: HANDLE = null;
+var changelog_body_owned = false;
+var changelog_body_scale: i32 = 0;
+
+fn bodyFont() HANDLE {
+    const scale = uiScaled(100);
+    if (changelog_body_font != null and changelog_body_scale == scale) return changelog_body_font;
+    if (changelog_body_owned) _ = DeleteObject(changelog_body_font);
+    changelog_body_font = changeFont(14, 400);
+    changelog_body_owned = changelog_body_font != null;
+    if (!changelog_body_owned) changelog_body_font = @import("win32.zig").GetStockObject(@import("win32.zig").DEFAULT_GUI_FONT);
+    changelog_body_scale = scale;
+    return changelog_body_font;
+}
 
 pub fn resetChangelogLayout() void {
-    changelog_layout_width = 0;
+    if (changelog_body_owned) _ = DeleteObject(changelog_body_font);
+    changelog_body_font = null;
+    changelog_body_owned = false;
 }
 
-fn prepareChangelogLayout(summary_w: i32) void {
-    const scale = uiScaled(100);
-    if (changelog_layout_width == summary_w and changelog_layout_scale == scale) return;
+fn changeText(hdc: HANDLE, text: []const u8, rc: *RECT, flags: u32) void {
+    var wide: [max_change_bytes]u16 = undefined;
+    const n = std.unicode.utf8ToUtf16Le(&wide, text) catch return;
+    _ = DrawTextW(hdc, &wide, @intCast(n), rc, flags);
+}
+
+fn rowHeight() i32 {
+    return @max(1, uiScaled(34));
+}
+
+fn noteCount(idx: usize) usize {
+    const entry = CHANGELOG[idx];
+    return if (entry.items.len > 0) entry.items.len else if (entry.summary.len > 0) 1 else 0;
+}
+
+fn noteSelection(idx: usize, item: usize) Selection {
+    return .{ .entry = idx, .item = if (CHANGELOG[idx].items.len > 0) item else null };
+}
+
+var changelog_row_tops: [CHANGELOG.len + 1]i32 = .{0} ** (CHANGELOG.len + 1);
+
+fn prepareChangelogLayout() void {
+    const row = rowHeight();
     changelog_row_tops[0] = 0;
-    changelog_bullet_starts[0] = 0;
-    for (CHANGELOG, 0..) |entry, idx| {
-        changelog_bullet_starts[idx + 1] = changelog_bullet_starts[idx] + entry.items.len;
-        var height = changelogEntryTopPad() + uiScaled(22) + changelogEntryBottomPad();
-        for (entry.items) |item| {
-            const width = changelogBulletTextWidth(summary_w, item.ticket.len > 0);
-            const text_width = @as(i32, @intCast(@min(1024, item.text.len + 2))) * uiScaled(8);
-            const lines = @max(1, @divTrunc(text_width + width - 1, width));
-            height += changelogBulletGap() + lines * uiScaled(18);
-        }
-        changelog_row_tops[idx + 1] = changelog_row_tops[idx] + @max(changelogMinRowH(), height);
-    }
-    @memset(&changelog_row_measured, false);
-    changelog_layout_width = summary_w;
-    changelog_layout_scale = scale;
-}
-
-fn measureChangelogEntry(hdc: HANDLE, idx: usize, summary_w: i32) void {
-    if (idx >= CHANGELOG.len or changelog_row_measured[idx] or hdc == null) return;
-    const height = changelogEntryHeightWithHdc(hdc, idx, summary_w);
-    const delta = height - (changelog_row_tops[idx + 1] - changelog_row_tops[idx]);
-    for (changelog_row_tops[idx + 1 ..]) |*top| top.* += delta;
-    changelog_row_measured[idx] = true;
-}
-
-fn measureVisibleChangelogRows(summary_w: i32, view_h: i32) void {
-    const first: usize = @intCast(changelogIndexAtContentY(app_state.g_changelog_scroll, summary_w) orelse 0);
-    var hdc: HANDLE = null;
-    defer {
-        if (hdc != null) _ = ReleaseDC(app_state.g_main_hwnd, hdc);
-    }
-    for (first..CHANGELOG.len) |idx| {
-        if (changelog_row_tops[idx] >= app_state.g_changelog_scroll + view_h) break;
-        if (changelog_row_measured[idx]) continue;
-        if (hdc == null) hdc = GetDC(app_state.g_main_hwnd);
-        measureChangelogEntry(hdc, idx, summary_w);
+    for (CHANGELOG, 0..) |_, idx| {
+        changelog_row_tops[idx + 1] = changelog_row_tops[idx] + row * (1 + @as(i32, @intCast(noteCount(idx)))) + if (idx + 1 < CHANGELOG.len) @max(0, uiScaled(8)) else 0;
     }
 }
 
-fn changelogEntryYRange(idx: usize, summary_w: i32) ChangelogEntryRange {
-    prepareChangelogLayout(summary_w);
-    const i = @min(idx, CHANGELOG.len);
-    if (i < CHANGELOG.len and !changelog_row_measured[i]) {
-        const hdc = GetDC(app_state.g_main_hwnd);
-        defer _ = ReleaseDC(app_state.g_main_hwnd, hdc);
-        measureChangelogEntry(hdc, i, summary_w);
-    }
-    return .{ .top = changelog_row_tops[i], .h = if (i < CHANGELOG.len) changelog_row_tops[i + 1] - changelog_row_tops[i] else 0 };
-}
-
-fn changelogIndexAtContentY(content_y: i32, summary_w: i32) ?i32 {
-    prepareChangelogLayout(summary_w);
-    if (content_y < 0 or content_y >= changelog_row_tops[CHANGELOG.len]) return null;
+fn changelogIndexAtContentY(y: i32) ?usize {
+    if (y < 0 or y >= changelog_row_tops[CHANGELOG.len]) return null;
     var lo: usize = 0;
     var hi: usize = CHANGELOG.len;
     while (lo < hi) {
         const mid = lo + (hi - lo) / 2;
-        if (changelog_row_tops[mid + 1] <= content_y) {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
+        if (changelog_row_tops[mid + 1] <= y) lo = mid + 1 else hi = mid;
     }
-    return @intCast(lo);
+    return lo;
 }
 
-fn changelogTotalContentHeight(summary_w: i32) i32 {
-    prepareChangelogLayout(summary_w);
-    return changelog_row_tops[CHANGELOG.len];
+fn selectionRange(selection: Selection) ChangelogEntryRange {
+    const row = rowHeight();
+    return .{ .top = changelog_row_tops[selection.entry] + row * (1 + @as(i32, @intCast(selection.item orelse 0))), .h = row };
 }
 
-fn clampChangelogState(view_h: i32, max_scroll: i32, summary_w: i32) void {
-    const total_rows: i32 = @intCast(CHANGELOG.len);
-    if (total_rows <= 0) {
-        app_state.g_changelog_scroll = 0;
-        app_state.g_changelog_sel = 0;
-        return;
+pub fn firstChangelogSelection() ?Selection {
+    for (CHANGELOG, 0..) |_, idx| if (noteCount(idx) > 0) return noteSelection(idx, 0);
+    return null;
+}
+
+fn lastChangelogSelection() ?Selection {
+    var idx: usize = CHANGELOG.len;
+    while (idx > 0) {
+        idx -= 1;
+        const count = noteCount(idx);
+        if (count > 0) return noteSelection(idx, count - 1);
     }
+    return null;
+}
 
-    if (app_state.g_changelog_sel < 0) app_state.g_changelog_sel = 0;
-    if (app_state.g_changelog_sel >= total_rows) app_state.g_changelog_sel = total_rows - 1;
-
-    const sel_range = changelogEntryYRange(@intCast(app_state.g_changelog_sel), summary_w);
-    const sel_top = sel_range.top;
-    const sel_bottom = sel_range.top + sel_range.h;
-
-    if (sel_top < app_state.g_changelog_scroll) {
-        app_state.g_changelog_scroll = sel_top;
-    } else if (sel_bottom > app_state.g_changelog_scroll + view_h) {
-        app_state.g_changelog_scroll = sel_bottom - view_h;
+fn nextSelection(sel: Selection, forward: bool) Selection {
+    if (forward) {
+        const item = sel.item orelse 0;
+        if (item + 1 < noteCount(sel.entry)) return noteSelection(sel.entry, item + 1);
+        var idx = sel.entry + 1;
+        while (idx < CHANGELOG.len) : (idx += 1) if (noteCount(idx) > 0) return noteSelection(idx, 0);
+        return firstChangelogSelection() orelse sel;
     }
+    const item = sel.item orelse 0;
+    if (item > 0) return noteSelection(sel.entry, item - 1);
+    var idx = sel.entry;
+    while (idx > 0) {
+        idx -= 1;
+        const count = noteCount(idx);
+        if (count > 0) return noteSelection(idx, count - 1);
+    }
+    return lastChangelogSelection() orelse sel;
+}
 
-    if (app_state.g_changelog_scroll < 0) app_state.g_changelog_scroll = 0;
-    if (app_state.g_changelog_scroll > max_scroll) app_state.g_changelog_scroll = max_scroll;
+pub fn selectedChangelogTicket() []const u8 {
+    const sel = app_state.g_changelog_sel orelse return "";
+    if (sel.entry >= CHANGELOG.len) return "";
+    const entry = CHANGELOG[sel.entry];
+    if (sel.item) |i| return if (i < entry.items.len) entry.items[i].ticket else "";
+    return if (entry.items.len == 0 and entry.summary.len > 0) entry.ticket else "";
+}
+
+fn rect(left: i32, top: i32, right: i32, bottom: i32) RECT {
+    return .{ .left = left, .top = top, .right = @max(left, right), .bottom = @max(top, bottom) };
 }
 
 pub fn calcChangelogLayout() ChangelogLayout {
-    var win_rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_main_hwnd, &win_rc);
-    const win_w = win_rc.right - win_rc.left;
-    const win_h = win_rc.bottom - win_rc.top;
-
-    var overlay_w: i32 = 760;
-    if (win_w < overlay_w + 32) overlay_w = @max(360, win_w - 32);
-    const title_h: i32 = 46;
-    const bottom_pad: i32 = 12;
-    const summary_w = changelogSummaryWidth(overlay_w);
-    prepareChangelogLayout(summary_w);
-    var available_h: i32 = win_h - 80 - title_h - bottom_pad;
-    const min_view_h = uiScaled(120);
-    if (available_h < min_view_h) available_h = min_view_h;
-    app_state.g_changelog_scroll = std.math.clamp(app_state.g_changelog_scroll, 0, @max(0, changelogTotalContentHeight(summary_w) - available_h));
-    measureVisibleChangelogRows(summary_w, available_h);
-    const total_content_h = changelogTotalContentHeight(summary_w);
-    const view_h: i32 = @min(total_content_h, available_h);
-    const max_scroll: i32 = @max(0, total_content_h - view_h);
-    app_state.g_changelog_scroll = std.math.clamp(app_state.g_changelog_scroll, 0, max_scroll);
-
-    const overlay_h: i32 = title_h + view_h + bottom_pad;
-    return .{
-        .ox = @divFloor(win_w - overlay_w, 2),
-        .oy = @divFloor(win_h - overlay_h, 2),
-        .overlay_w = overlay_w,
-        .overlay_h = overlay_h,
-        .title_h = title_h,
-        .bottom_pad = bottom_pad,
-        .view_h = view_h,
-        .max_scroll = max_scroll,
-    };
-}
-
-pub fn changelogContainsPoint(mx: i32, my: i32) bool {
-    const layout = calcChangelogLayout();
-    return mx >= layout.ox and mx < layout.ox + layout.overlay_w and
-        my >= layout.oy and my < layout.oy + layout.overlay_h;
-}
-
-pub fn changelogHitTest(mx: i32, my: i32) ?ChangelogHit {
-    const layout = calcChangelogLayout();
-    if (mx < layout.ox or mx >= layout.ox + layout.overlay_w) return null;
-    const rows_top = layout.oy + layout.title_h;
-    const rows_bottom = rows_top + layout.view_h;
-    if (my < rows_top or my >= rows_bottom) return null;
-    const content_y = my - rows_top + app_state.g_changelog_scroll;
-    const summary_w = changelogSummaryWidth(layout.overlay_w);
-    const idx = changelogIndexAtContentY(content_y, summary_w) orelse return null;
-    const uidx: usize = @intCast(idx);
-    const entry = CHANGELOG[uidx];
-    if (entry.items.len == 0) return .{ .idx = idx, .ticket = entry.ticket };
-
-    const range = changelogEntryYRange(uidx, summary_w);
-    const local_y = content_y - range.top;
-    var bullet_y = changelogEntryTopPad() + uiScaled(22) + changelogBulletGap();
-    const bullet_left = layout.ox + 120 + changelogBulletIndent();
-    const bullet_right = layout.ox + layout.overlay_w - 18;
-    for (entry.items, 0..) |item, item_idx| {
-        const bullet_h = changelog_bullet_heights[changelog_bullet_starts[uidx] + item_idx];
-        if (local_y >= bullet_y and local_y < bullet_y + bullet_h) {
-            const ticket = if (mx >= bullet_left and mx < bullet_right) item.ticket else "";
-            return .{ .idx = idx, .ticket = ticket };
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client);
+    const win_w = @max(0, client.right - client.left);
+    const win_h = @max(0, client.bottom - client.top);
+    const pane = if (app_state.g_chat_active) @import("chat_composer.zig").chatViewLayout().pane else @import("window_layout.zig").activePaneRects(client).primary;
+    const pane_left = std.math.clamp(pane.left, 0, win_w);
+    const pane_right = std.math.clamp(pane.right, pane_left, win_w);
+    const pane_width = pane_right - pane_left;
+    const margin = @min(uiScaled(8), @divTrunc(pane_width, 2));
+    const width = @min(uiScaled(640), @max(0, pane_width - 2 * margin));
+    const x = pane_left + @divTrunc(pane_width - width, 2);
+    const inset = @min(uiScaled(16), @divTrunc(width, 2));
+    const left = x + inset;
+    const right = x + width - inset;
+    const gutter = @min(@max(0, right - left), uiScaled(8));
+    const rows_right = right - gutter;
+    const compact = rows_right - left < uiScaled(24 + 96 + 8 + 112 + 8);
+    const foot_width = right - left;
+    const padding = @min(uiScaled(8), @divTrunc(foot_width, 2));
+    const usable = @max(0, foot_width - 2 * padding);
+    const budgets = [_]i32{ uiScaled(76), uiScaled(122), uiScaled(76) };
+    const key_widths = [_]i32{ uiScaled(32), uiScaled(42), uiScaled(32) };
+    var key_rel: [3]RECT = undefined;
+    var label_rel: [3]RECT = undefined;
+    var fx: i32 = 0;
+    var line_idx: i32 = 0;
+    for (budgets, 0..) |budget, i| {
+        if (fx > 0 and fx + budget > usable) {
+            line_idx += 1;
+            fx = 0;
         }
-        bullet_y += bullet_h + changelogBulletGap();
+        const group_end = @min(usable, fx + budget);
+        const key_end = @min(group_end, fx + key_widths[i]);
+        const top = uiScaled(12) + line_idx * uiScaled(24);
+        key_rel[i] = rect(fx, top, key_end, top + uiScaled(20));
+        label_rel[i] = rect(@min(group_end, key_end + uiScaled(6)), top, group_end, top + uiScaled(20));
+        fx = @min(usable, group_end + uiScaled(4));
     }
-    return .{ .idx = idx, .ticket = "" };
+    const footer_desired = uiScaled(48) + line_idx * uiScaled(24);
+    prepareChangelogLayout();
+    const total = changelog_row_tops[CHANGELOG.len];
+    const action_desired = if (compact and firstChangelogSelection() != null) rowHeight() else 0;
+    const cap: i32 = @intCast(@divTrunc(@as(i64, win_h) * 4, 5));
+    const header_desired = if (@as(i64, cap) < @as(i64, uiScaled(96)) + footer_desired + action_desired + @min(total, rowHeight())) uiScaled(64) else uiScaled(96);
+    const desired: i64 = @as(i64, header_desired) + total + action_desired + footer_desired;
+    const height: i32 = @intCast(@min(@as(i64, cap), desired));
+    const y = @divTrunc(win_h - height, 2);
+    const card = rect(x, y, x + width, y + height);
+    const header_h = @min(height, header_desired);
+    const footer_h = @min(height - header_h, footer_desired);
+    const action_h = @min(height - header_h - footer_h, action_desired);
+    const header = rect(x, y, x + width, y + header_h);
+    const footer = rect(left, card.bottom - footer_h, right, card.bottom);
+    const action = rect(@max(left, rows_right - uiScaled(112)), footer.top - action_h, rows_right, footer.top);
+    const viewport = rect(left, header.bottom, right, action.top);
+    const rows = rect(left, viewport.top, rows_right, viewport.bottom);
+    const scrollbar = rect(rows_right, viewport.top, right, viewport.bottom);
+    const close_size = @min(uiScaled(32), @min(width, header_h));
+    const close_inset = @min(uiScaled(16), @max(0, width - close_size));
+    const close_right = card.right - close_inset;
+    const close_top = header.top + @min(uiScaled(16), @max(0, header_h - close_size));
+    const close = rect(close_right - close_size, close_top, close_right, close_top + close_size);
+    var keys: [3]RECT = undefined;
+    var labels: [3]RECT = undefined;
+    for (0..3) |i| {
+        keys[i] = rect(left + padding + key_rel[i].left, @min(footer.bottom, footer.top + key_rel[i].top), left + padding + key_rel[i].right, @min(footer.bottom, footer.top + key_rel[i].bottom));
+        labels[i] = rect(left + padding + label_rel[i].left, @min(footer.bottom, footer.top + label_rel[i].top), left + padding + label_rel[i].right, @min(footer.bottom, footer.top + label_rel[i].bottom));
+    }
+    const view_h = viewport.bottom - viewport.top;
+    const max_scroll = @max(0, total - view_h);
+    app_state.g_changelog_scroll = std.math.clamp(app_state.g_changelog_scroll, 0, max_scroll);
+    return .{ .card = card, .header = header, .close = close, .viewport = viewport, .scrollbar = scrollbar, .rows = rows, .action = action, .footer = footer, .footer_keys = keys, .footer_labels = labels, .compact = compact, .view_h = view_h, .max_scroll = max_scroll };
+}
+
+fn contains(rc: RECT, x: i32, y: i32) bool {
+    return x >= rc.left and x < rc.right and y >= rc.top and y < rc.bottom;
+}
+
+fn compactAction(layout: ChangelogLayout) ?Selection {
+    if (!layout.compact or selectedChangelogTicket().len == 0 or layout.view_h <= 0) return null;
+    const sel = app_state.g_changelog_sel orelse return null;
+    const range = selectionRange(sel);
+    if (range.top + range.h <= app_state.g_changelog_scroll or range.top >= app_state.g_changelog_scroll + layout.view_h) return null;
+    if (layout.action.right <= layout.action.left or layout.action.bottom <= layout.action.top) return null;
+    return sel;
+}
+
+pub fn changelogHitTest(mx: i32, my: i32) ChangelogHit {
+    const layout = calcChangelogLayout();
+    if (!contains(layout.card, mx, my)) return .outside;
+    if (contains(layout.close, mx, my)) return .close;
+    if (contains(layout.action, mx, my)) {
+        if (compactAction(layout)) |sel| return .{ .row = sel };
+        return .inside;
+    }
+    if (!contains(layout.rows, mx, my)) return .inside;
+    const y = my - layout.viewport.top + app_state.g_changelog_scroll;
+    const idx = changelogIndexAtContentY(y) orelse return .inside;
+    const offset = y - changelog_row_tops[idx] - rowHeight();
+    if (offset < 0) return .inside;
+    const item: usize = @intCast(@divTrunc(offset, rowHeight()));
+    if (item >= noteCount(idx)) return .inside;
+    return .{ .row = noteSelection(idx, item) };
+}
+
+fn selectionAtOrAfter(y: i32) ?Selection {
+    const first = changelogIndexAtContentY(y) orelse return lastChangelogSelection();
+    for (first..CHANGELOG.len) |idx| {
+        const count = noteCount(idx);
+        if (count == 0) continue;
+        const offset = y - changelog_row_tops[idx] - rowHeight();
+        const item: usize = if (offset <= 0) 0 else @intCast(@divTrunc(offset, rowHeight()));
+        if (item < count) return noteSelection(idx, item);
+    }
+    return lastChangelogSelection();
 }
 
 pub fn moveChangelogSelection(action: WPARAM) void {
     const layout = calcChangelogLayout();
-    const summary_w = changelogSummaryWidth(layout.overlay_w);
+    var sel = app_state.g_changelog_sel orelse firstChangelogSelection() orelse return;
     switch (action) {
-        0 => app_state.g_changelog_sel = if (app_state.g_changelog_sel <= 0) @as(i32, @intCast(CHANGELOG.len)) - 1 else app_state.g_changelog_sel - 1,
-        1 => app_state.g_changelog_sel = if (app_state.g_changelog_sel >= @as(i32, @intCast(CHANGELOG.len)) - 1) 0 else app_state.g_changelog_sel + 1,
-        2 => {
-            var target_scroll = app_state.g_changelog_scroll - layout.view_h;
-            if (target_scroll < 0) target_scroll = 0;
-            app_state.g_changelog_scroll = target_scroll;
-            app_state.g_changelog_sel = changelogIndexAtContentY(target_scroll, summary_w) orelse 0;
+        0 => sel = nextSelection(sel, false),
+        1 => sel = nextSelection(sel, true),
+        2, 3 => {
+            if (layout.view_h <= 0) return;
+            app_state.g_changelog_scroll = std.math.clamp(app_state.g_changelog_scroll + (if (action == 2) -layout.view_h else layout.view_h), 0, layout.max_scroll);
+            app_state.g_changelog_sel = selectionAtOrAfter(app_state.g_changelog_scroll);
+            return;
         },
-        3 => {
-            var target_scroll = app_state.g_changelog_scroll + layout.view_h;
-            if (target_scroll > layout.max_scroll) target_scroll = layout.max_scroll;
-            app_state.g_changelog_scroll = target_scroll;
-            app_state.g_changelog_sel = changelogIndexAtContentY(target_scroll, summary_w) orelse (@as(i32, @intCast(CHANGELOG.len)) - 1);
+        4 => {
+            app_state.g_changelog_sel = firstChangelogSelection();
+            app_state.g_changelog_scroll = 0;
+            return;
         },
-        4 => app_state.g_changelog_sel = 0,
-        5 => app_state.g_changelog_sel = @as(i32, @intCast(CHANGELOG.len)) - 1,
-        else => {},
+        5 => sel = lastChangelogSelection() orelse return,
+        else => return,
     }
-    _ = changelogEntryYRange(@intCast(@max(0, app_state.g_changelog_sel)), summary_w);
-    clampChangelogState(layout.view_h, @max(0, changelogTotalContentHeight(summary_w) - layout.view_h), summary_w);
+    app_state.g_changelog_sel = sel;
+    if (layout.view_h <= 0) return;
+    const range = selectionRange(sel);
+    if (layout.view_h < range.h or range.top < app_state.g_changelog_scroll) {
+        app_state.g_changelog_scroll = range.top;
+    } else if (range.top + range.h > app_state.g_changelog_scroll + layout.view_h) {
+        app_state.g_changelog_scroll = range.top + range.h - layout.view_h;
+    }
+    app_state.g_changelog_scroll = std.math.clamp(app_state.g_changelog_scroll, 0, layout.max_scroll);
 }
 
 fn changelogTicketUrl(ticket: []const u8, buf: []u8) []const u8 {
@@ -2722,162 +2674,191 @@ pub fn openAsciiUrlInDefaultBrowser(ticket: []const u8) void {
     _ = ShellExecuteW(null, L("open"), @ptrCast(&wbuf), null, null, SW_SHOW);
 }
 
-pub fn changelogDefaultTicket(uidx: usize) []const u8 {
-    if (uidx >= CHANGELOG.len) return "";
-    const entry = CHANGELOG[uidx];
-    if (entry.items.len > 0) {
-        for (entry.items) |item| {
-            if (item.ticket.len > 0) return item.ticket;
-        }
-        return "";
+const ChangeFont = struct {
+    handle: HANDLE,
+    owned: bool,
+
+    fn init(size: i32, weight: i32) ChangeFont {
+        const font = changeFont(size, weight);
+        return .{ .handle = if (font != null) font else @import("win32.zig").GetStockObject(@import("win32.zig").DEFAULT_GUI_FONT), .owned = font != null };
     }
-    return entry.ticket;
+
+    fn release(self: ChangeFont) void {
+        if (self.owned) _ = DeleteObject(self.handle);
+    }
+};
+
+fn selectChangeFont(hdc: HANDLE, preferred: HANDLE) bool {
+    if (preferred != null and SelectObject(hdc, preferred) != null) return true;
+    const fallback = @import("win32.zig").GetStockObject(@import("win32.zig").DEFAULT_GUI_FONT);
+    return fallback != null and SelectObject(hdc, fallback) != null;
 }
 
-pub fn openChangelogTicket(idx: i32) void {
-    if (idx < 0) return;
-    const uidx: usize = @intCast(idx);
-    const ticket = changelogDefaultTicket(uidx);
-    if (ticket.len == 0) return;
-    openAsciiUrlInDefaultBrowser(ticket);
+fn clipChangeRegion(hdc: HANDLE, bounds: RECT) i32 {
+    if (bounds.right <= bounds.left or bounds.bottom <= bounds.top) return 0;
+    const saved = SaveDC(hdc);
+    if (saved == 0) return 0;
+    if (IntersectClipRect(hdc, bounds.left, bounds.top, bounds.right, bounds.bottom) == 0) {
+        _ = RestoreDC(hdc, saved);
+        return 0;
+    }
+    return saved;
+}
+
+fn drawChangeRow(hdc: HANDLE, layout: ChangelogLayout, sel: Selection, text: []const u8, ticket: []const u8, text_col: u32, dim_col: u32, selected_col: u32, body_font: HANDLE, action_font: HANDLE) void {
+    const range = selectionRange(sel);
+    const top = layout.viewport.top + range.top - app_state.g_changelog_scroll;
+    const row = rect(layout.rows.left, top, layout.rows.right, top + range.h);
+    const selected = if (app_state.g_changelog_sel) |current| current.entry == sel.entry and current.item == sel.item else false;
+    if (selected) smooth.fillRoundRect(hdc, row, uiScaled(10), selected_col);
+    const dot_size = @min(uiScaled(4), @min(row.right - row.left, row.bottom - row.top));
+    const dot_left = @min(row.right - dot_size, row.left + uiScaled(8));
+    const dot_top = top + @divTrunc(range.h - dot_size, 2);
+    smooth.fillEllipse(hdc, rect(dot_left, dot_top, dot_left + dot_size, dot_top + dot_size), dim_col);
+    const body_left = @min(row.right, row.left + uiScaled(24));
+    const body_right = if (layout.compact) @max(body_left, row.right - uiScaled(8)) else @max(body_left, row.right - uiScaled(128));
+    var body = rect(body_left, top, body_right, row.bottom);
+    if (body.right > body.left and selectChangeFont(hdc, body_font)) {
+        _ = SetTextColor(hdc, text_col);
+        changeText(hdc, text, &body, DT_SINGLELINE | DT_VCENTER | @import("win32.zig").DT_END_ELLIPSIS | DT_NOPREFIX);
+    }
+    if (!layout.compact and selected and ticket.len > 0 and selectChangeFont(hdc, action_font)) {
+        _ = SetTextColor(hdc, dim_col);
+        var action = rect(@min(row.right, body_right + uiScaled(8)), top, @max(body_right, row.right - uiScaled(8)), row.bottom);
+        if (action.right > action.left) _ = DrawTextW(hdc, L(words.changelog_open_ticket), -1, &action, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | @import("win32.zig").DT_END_ELLIPSIS | DT_NOPREFIX);
+    }
 }
 
 pub fn paintChangelogOverlay(hdc: HANDLE) void {
     if (!app_state.g_changelog_active) return;
     const layout = calcChangelogLayout();
-    const overlay_radius: i32 = 14;
-    const font_title = uiFontTitle();
-    const font_subtitle = uiFontSubtitle();
-    const old_font = SelectObject(hdc, font_title);
-    defer _ = SelectObject(hdc, old_font);
-
-    drawModalShadow(hdc, layout.ox, layout.oy, layout.overlay_w, layout.overlay_h, overlay_radius);
-
-    const border_col = customColorOr("overlay_border", if (app_state.g_light_theme) RGB(200, 200, 200) else if (app_state.g_edge_gray_theme) RGB(86, 86, 86) else if (app_state.g_mid_theme) RGB(110, 110, 110) else RGB(80, 80, 80));
-    const border_br = CreateSolidBrush(border_col);
-    const border_pen = CreatePen(0, 1, border_col);
-    const old_border_br = SelectObject(hdc, border_br);
-    const old_border_pen = SelectObject(hdc, border_pen);
-    _ = @import("smooth.zig").drawRoundRect(hdc, layout.ox - 1, layout.oy - 1, layout.ox + layout.overlay_w + 1, layout.oy + layout.overlay_h + 1, overlay_radius, overlay_radius);
-    _ = SelectObject(hdc, old_border_br);
-    _ = SelectObject(hdc, old_border_pen);
-    _ = DeleteObject(border_br);
-    _ = DeleteObject(border_pen);
-
-    const bg_col = customColorOr("overlay_bg", if (app_state.g_light_theme) RGB(249, 249, 249) else if (app_state.g_edge_gray_theme) RGB(51, 51, 51) else if (app_state.g_mid_theme) RGB(68, 68, 68) else RGB(40, 40, 40));
-    const bg_br = CreateSolidBrush(bg_col);
-    const bg_pen = CreatePen(0, 1, bg_col);
-    const old_bg_br = SelectObject(hdc, bg_br);
-    const old_bg_pen = SelectObject(hdc, bg_pen);
-    _ = @import("smooth.zig").drawRoundRect(hdc, layout.ox, layout.oy, layout.ox + layout.overlay_w, layout.oy + layout.overlay_h, overlay_radius, overlay_radius);
-    _ = SelectObject(hdc, old_bg_br);
-    _ = SelectObject(hdc, old_bg_pen);
-    _ = DeleteObject(bg_br);
-    _ = DeleteObject(bg_pen);
-
+    const card = layout.card;
+    const light = app_state.g_light_theme;
+    const bg = customColorOr("overlay_bg", if (light) RGB(250, 250, 250) else RGB(24, 24, 24));
+    const border = customColorOr("overlay_border", if (light) RGB(222, 222, 222) else RGB(46, 46, 46));
+    const text = customColorOr("text", if (light) RGB(32, 32, 32) else RGB(242, 242, 242));
+    const dim = customColorOr("tab_text_dim", if (light) RGB(96, 96, 96) else RGB(138, 138, 138));
+    const selected = if (light) RGB(224, 224, 224) else RGB(53, 53, 53);
+    const key_bg = if (light) RGB(245, 245, 245) else RGB(31, 31, 31);
+    var client: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &client);
+    @import("dialog.zig").dim(hdc, client.right, client.bottom);
+    drawModalShadow(hdc, card.left, card.top, card.right - card.left, card.bottom - card.top, uiScaled(40));
+    smooth.fillRoundRect(hdc, card, uiScaled(20), border);
+    const line = @max(1, uiScaled(1));
+    const inner = rect(@min(card.right, card.left + line), @min(card.bottom, card.top + line), card.right - line, card.bottom - line);
+    smooth.fillRoundRect(hdc, inner, uiScaled(20), bg);
+    const body_font = bodyFont();
+    const saved = SaveDC(hdc);
+    if (saved == 0) return;
+    const title_font = ChangeFont.init(18, 600);
+    const version_font = ChangeFont.init(13, 600);
+    const subtitle_font = ChangeFont.init(13, 400);
+    const action_font = ChangeFont.init(12, 400);
+    const cap_font = ChangeFont.init(11, 400);
+    defer {
+        _ = RestoreDC(hdc, saved);
+        title_font.release();
+        version_font.release();
+        subtitle_font.release();
+        action_font.release();
+        cap_font.release();
+    }
     _ = SetBkMode(hdc, TRANSPARENT);
-
-    _ = SelectObject(hdc, font_title);
-    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(25, 25, 25) else RGB(245, 245, 245));
-    var title_rc = RECT{ .left = layout.ox + 18, .top = layout.oy + 8, .right = layout.ox + layout.overlay_w - 170, .bottom = layout.oy + layout.title_h - 6 };
-    drawAscii(hdc, "Changelog", &title_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-    _ = SelectObject(hdc, font_subtitle);
-    _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(120, 120, 120) else RGB(140, 140, 150));
-    var hint_rc = RECT{ .left = layout.ox + layout.overlay_w - 170, .top = layout.oy + 8, .right = layout.ox + layout.overlay_w - 16, .bottom = layout.oy + layout.title_h - 6 };
-    drawAscii(hdc, "Enter opens ticket", &hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-
-    var div_rc = RECT{ .left = layout.ox + 1, .top = layout.oy + layout.title_h - 1, .right = layout.ox + layout.overlay_w - 1, .bottom = layout.oy + layout.title_h };
-    const div_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(228, 228, 228) else RGB(60, 60, 60));
-    _ = FillRect(hdc, &div_rc, div_br);
-    _ = DeleteObject(div_br);
-
-    const text_col = customColorOr("text", if (app_state.g_light_theme) RGB(40, 40, 40) else RGB(225, 225, 225));
-    const dim_col = customColorOr("tab_text_dim", if (app_state.g_light_theme) RGB(110, 110, 110) else RGB(150, 150, 155));
-    const link_col = customColorOr("accent", RGB(79, 168, 255));
-    const rows_top = layout.oy + layout.title_h;
-    const rows_bottom = rows_top + layout.view_h;
-    const summary_w = changelogSummaryWidth(layout.overlay_w);
-    const total_content_h = changelogTotalContentHeight(summary_w);
-    const top_pad = changelogEntryTopPad();
-    const bottom_pad = changelogEntryBottomPad();
-    const line_h = uiScaled(22);
-    const saved_rows_dc = SaveDC(hdc);
-    if (saved_rows_dc != 0) {
-        _ = IntersectClipRect(hdc, layout.ox + 1, rows_top, layout.ox + layout.overlay_w - 1, rows_bottom);
+    const single = DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | @import("win32.zig").DT_END_ELLIPSIS;
+    const header_save = clipChangeRegion(hdc, layout.header);
+    if (header_save != 0) {
+        const title_left = @min(layout.close.left, card.left + uiScaled(24));
+        const title_right = @max(title_left, layout.close.left - uiScaled(8));
+        var title = rect(title_left, @min(layout.header.bottom, card.top + uiScaled(20)), title_right, @min(layout.header.bottom, card.top + uiScaled(44)));
+        _ = SetTextColor(hdc, text);
+        if (title.right > title.left and title.bottom > title.top and selectChangeFont(hdc, title_font.handle)) _ = DrawTextW(hdc, L(words.changelog_title), -1, &title, single);
+        var subtitle_buf: [128]u8 = undefined;
+        const subtitle = std.fmt.bufPrint(&subtitle_buf, "{s} v{s}", .{ words.changelog_current_version, APP_VERSION }) catch words.changelog_current_version;
+        var subtitle_rc = rect(title_left, @min(layout.header.bottom, card.top + uiScaled(52)), @max(title_left, card.right - uiScaled(24)), @min(layout.header.bottom, card.top + uiScaled(72)));
+        _ = SetTextColor(hdc, dim);
+        if (subtitle_rc.right > subtitle_rc.left and subtitle_rc.bottom > subtitle_rc.top and selectChangeFont(hdc, subtitle_font.handle)) drawAscii(hdc, subtitle, &subtitle_rc, single);
+        smooth.fillEllipse(hdc, layout.close, border);
+        const close_inner = rect(@min(layout.close.right, layout.close.left + line), @min(layout.close.bottom, layout.close.top + line), layout.close.right - line, layout.close.bottom - line);
+        if (close_inner.right > close_inner.left and close_inner.bottom > close_inner.top) smooth.fillEllipse(hdc, close_inner, key_bg);
+        var close_text = layout.close;
+        if (selectChangeFont(hdc, subtitle_font.handle)) _ = DrawTextW(hdc, L("×"), -1, &close_text, single | @import("win32.zig").DT_CENTER);
+        _ = RestoreDC(hdc, header_save);
     }
-    const first: usize = @intCast(changelogIndexAtContentY(app_state.g_changelog_scroll, summary_w) orelse 0);
-    for (first..CHANGELOG.len) |idx| {
-        const entry = CHANGELOG[idx];
-        const range = changelogEntryYRange(idx, summary_w);
-        const h = range.h;
-        const ry = rows_top + range.top - app_state.g_changelog_scroll;
-        if (ry >= rows_bottom) break;
-
-        const idx_i: i32 = @intCast(idx);
-        const selected = idx_i == app_state.g_changelog_sel;
-
-        if (selected) {
-            var sel_rc = RECT{ .left = layout.ox + 1, .top = ry, .right = layout.ox + layout.overlay_w - 1, .bottom = ry + h };
-            const sel_br = CreateSolidBrush(customColorOr("selected_bg", RGB(0, 122, 204)));
-            _ = FillRect(hdc, &sel_rc, sel_br);
-            _ = DeleteObject(sel_br);
-        }
-
-        var ver_buf: [16]u8 = undefined;
-        const ver_txt = std.fmt.bufPrint(&ver_buf, "v{s}", .{entry.ver}) catch entry.ver;
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, if (selected) RGB(255, 255, 255) else text_col);
-        var ver_rc = RECT{ .left = layout.ox + 22, .top = ry + top_pad, .right = layout.ox + 112, .bottom = ry + top_pad + line_h };
-        drawAscii(hdc, ver_txt, &ver_rc, DT_SINGLELINE | DT_NOPREFIX);
-
-        _ = SelectObject(hdc, font_subtitle);
-        _ = SetTextColor(hdc, if (selected) RGB(230, 238, 248) else dim_col);
-        if (entry.items.len == 0) {
-            const summary_right = changelogSummaryRight(layout.ox, layout.overlay_w, entry.ticket.len > 0);
-            var summary_rc = RECT{ .left = layout.ox + 120, .top = ry + top_pad, .right = summary_right, .bottom = ry + h - bottom_pad };
-            drawAsciiLong(hdc, entry.summary, &summary_rc, DT_WORDBREAK | DT_NOPREFIX);
-
-            if (entry.ticket.len > 0) {
-                _ = SetTextColor(hdc, if (selected) RGB(255, 255, 255) else link_col);
-                var link_rc = RECT{ .left = layout.ox + layout.overlay_w - 138, .top = ry + top_pad, .right = layout.ox + layout.overlay_w - 18, .bottom = ry + top_pad + line_h };
-                drawAscii(hdc, "open ticket ->", &link_rc, DT_SINGLELINE | DT_RIGHT | DT_NOPREFIX);
-            }
-        } else {
-            var bullet_y = ry + top_pad + line_h + changelogBulletGap();
-            const bullet_left = layout.ox + 120 + changelogBulletIndent();
-            for (entry.items, 0..) |item, item_idx| {
-                const has_ticket = item.ticket.len > 0;
-                const bullet_w = changelogBulletTextWidth(summary_w, has_ticket);
-                const bullet_h = changelog_bullet_heights[changelog_bullet_starts[idx] + item_idx];
-                _ = SetTextColor(hdc, if (selected) RGB(230, 238, 248) else dim_col);
-                var bullet_rc = RECT{ .left = bullet_left, .top = bullet_y, .right = bullet_left + bullet_w, .bottom = bullet_y + bullet_h };
-                drawAsciiBulletLong(hdc, item.text, &bullet_rc, DT_WORDBREAK | DT_NOPREFIX);
-
-                if (has_ticket) {
-                    _ = SetTextColor(hdc, if (selected) RGB(255, 255, 255) else link_col);
-                    var arrow_rc = RECT{ .left = layout.ox + layout.overlay_w - 42, .top = bullet_y, .right = layout.ox + layout.overlay_w - 18, .bottom = bullet_y + line_h };
-                    drawAscii(hdc, "->", &arrow_rc, DT_SINGLELINE | DT_RIGHT | DT_NOPREFIX);
+    const rows_save = clipChangeRegion(hdc, layout.rows);
+    if (rows_save != 0) {
+        const first = changelogIndexAtContentY(app_state.g_changelog_scroll) orelse 0;
+        for (first..CHANGELOG.len) |idx| {
+            const entry = CHANGELOG[idx];
+            const top = layout.viewport.top + changelog_row_tops[idx] - app_state.g_changelog_scroll;
+            if (top >= layout.viewport.bottom) break;
+            _ = SetTextColor(hdc, text);
+            var version_buf: [32]u8 = undefined;
+            const version = std.fmt.bufPrint(&version_buf, "v{s}", .{entry.ver}) catch entry.ver;
+            const ver_left = @min(layout.rows.right, layout.rows.left + uiScaled(8));
+            const installed = std.mem.eql(u8, entry.ver, APP_VERSION);
+            const version_available = @max(0, layout.rows.right - ver_left - if (installed) uiScaled(68) else 0);
+            const has_version_font = selectChangeFont(hdc, version_font.handle);
+            var measure = rect(0, 0, 0, 0);
+            if (has_version_font) drawAscii(hdc, version, &measure, DT_SINGLELINE | @import("win32.zig").DT_CALCRECT | DT_NOPREFIX);
+            const ver_right = ver_left + @min(version_available, @max(0, measure.right));
+            var version_rc = rect(ver_left, top, ver_right, top + rowHeight());
+            if (version_rc.right > version_rc.left and has_version_font) drawAscii(hdc, version, &version_rc, single);
+            if (installed) {
+                const pill_left = @min(layout.rows.right, ver_right + uiScaled(8));
+                const pill = rect(pill_left, top + uiScaled(8), @min(layout.rows.right, pill_left + uiScaled(60)), @min(top + rowHeight(), top + uiScaled(26)));
+                if (pill.right > pill.left and pill.bottom > pill.top) {
+                    smooth.fillRoundRect(hdc, pill, uiScaled(10), selected);
+                    var pill_text = pill;
+                    if (selectChangeFont(hdc, cap_font.handle)) _ = DrawTextW(hdc, L(words.changelog_installed), -1, &pill_text, single | @import("win32.zig").DT_CENTER);
                 }
-
-                bullet_y += bullet_h + changelogBulletGap();
             }
+            if (entry.items.len == 0) {
+                if (entry.summary.len > 0) drawChangeRow(hdc, layout, noteSelection(idx, 0), entry.summary, entry.ticket, text, dim, selected, body_font, action_font.handle);
+            } else for (entry.items, 0..) |item, i| {
+                const sel = noteSelection(idx, i);
+                const range = selectionRange(sel);
+                if (range.top + range.h <= app_state.g_changelog_scroll) continue;
+                if (range.top >= app_state.g_changelog_scroll + layout.view_h) break;
+                drawChangeRow(hdc, layout, sel, item.text, item.ticket, text, dim, selected, body_font, action_font.handle);
+            };
         }
+        _ = RestoreDC(hdc, rows_save);
     }
-    if (saved_rows_dc != 0) _ = RestoreDC(hdc, saved_rows_dc);
-
-    if (total_content_h > layout.view_h) {
-        const track_top = layout.oy + layout.title_h + 4;
-        const track_bottom = layout.oy + layout.overlay_h - 6;
-        const track_h = track_bottom - track_top;
-        if (track_h > 0) {
-            const thumb_h = @max(24, @divTrunc(track_h * layout.view_h, total_content_h));
-            const scroll_space = track_h - thumb_h;
-            const thumb_top = track_top + if (layout.max_scroll == 0) 0 else @divTrunc(scroll_space * app_state.g_changelog_scroll, layout.max_scroll);
-            var thumb_rc = RECT{ .left = layout.ox + layout.overlay_w - 7, .top = thumb_top, .right = layout.ox + layout.overlay_w - 3, .bottom = thumb_top + thumb_h };
-            const thumb_br = CreateSolidBrush(customColorOr("scrollbar_thumb", RGB(145, 145, 145)));
-            _ = FillRect(hdc, &thumb_rc, thumb_br);
-            _ = DeleteObject(thumb_br);
+    if (layout.max_scroll > 0 and layout.view_h > 0) {
+        const total = layout.view_h + layout.max_scroll;
+        const thumb_h = @min(layout.view_h, @max(uiScaled(24), @divTrunc(layout.view_h * layout.view_h, total)));
+        const thumb_top = layout.viewport.top + @divTrunc((layout.view_h - thumb_h) * app_state.g_changelog_scroll, layout.max_scroll);
+        smooth.fillRoundRect(hdc, rect(@max(layout.scrollbar.left, layout.scrollbar.right - uiScaled(4)), thumb_top, layout.scrollbar.right, thumb_top + thumb_h), uiScaled(2), dim);
+    }
+    const action_save = clipChangeRegion(hdc, layout.action);
+    if (action_save != 0) {
+        if (compactAction(layout) != null and selectChangeFont(hdc, action_font.handle)) {
+            _ = SetTextColor(hdc, dim);
+            var action_rc = layout.action;
+            _ = DrawTextW(hdc, L(words.changelog_open_ticket), -1, &action_rc, single | DT_RIGHT);
         }
+        _ = RestoreDC(hdc, action_save);
+    }
+    const footer_save = clipChangeRegion(hdc, layout.footer);
+    if (footer_save != 0) {
+        var divider = rect(layout.footer.left, layout.footer.top, layout.footer.right, @min(layout.footer.bottom, layout.footer.top + line));
+        const divider_brush = CreateSolidBrush(if (light) RGB(222, 222, 222) else RGB(42, 42, 42));
+        _ = FillRect(hdc, &divider, divider_brush);
+        _ = DeleteObject(divider_brush);
+        const keys = [_][*:0]const u16{ L("↑↓"), L("Enter"), L("Esc") };
+        const labels = [_][*:0]const u16{ L(words.changelog_move), L(words.changelog_open_ticket_footer), L(words.changelog_close) };
+        for (keys, labels, 0..) |key, label, i| {
+            var cap = layout.footer_keys[i];
+            smooth.fillRoundRect(hdc, cap, uiScaled(6), border);
+            const cap_inner = rect(@min(cap.right, cap.left + line), @min(cap.bottom, cap.top + line), cap.right - line, cap.bottom - line);
+            smooth.fillRoundRect(hdc, cap_inner, uiScaled(6), key_bg);
+            _ = SetTextColor(hdc, dim);
+            if (cap.right > cap.left and cap.bottom > cap.top and selectChangeFont(hdc, cap_font.handle)) _ = DrawTextW(hdc, key, -1, &cap, single | @import("win32.zig").DT_CENTER);
+            var caption = layout.footer_labels[i];
+            if (caption.right > caption.left and caption.bottom > caption.top and selectChangeFont(hdc, cap_font.handle)) _ = DrawTextW(hdc, label, -1, &caption, single);
+        }
+        _ = RestoreDC(hdc, footer_save);
     }
 }
 

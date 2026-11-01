@@ -1056,7 +1056,7 @@ pub var g_shortcuts_active: bool = false;
 pub var g_shortcuts_scroll: i32 = 0;
 pub var g_changelog_active: bool = false;
 pub var g_changelog_scroll: i32 = 0;
-pub var g_changelog_sel: i32 = 0;
+pub var g_changelog_sel: ?ChangelogSelection = null;
 pub var g_snippet_create_active: bool = false;
 pub var g_snippet_name_hwnd: HANDLE = null;
 pub var g_snippet_text_hwnd: HANDLE = null;
@@ -3439,18 +3439,24 @@ pub var g_chat_working_timer_running: bool = false;
 pub const CHAT_WORKING_GENERIC = [_]u16{ 'W', 'o', 'r', 'k', 'i', 'n', 'g', 0x2026 };
 
 pub const ChangelogLayout = struct {
-    ox: i32,
-    oy: i32,
-    overlay_w: i32,
-    overlay_h: i32,
-    title_h: i32,
-    bottom_pad: i32,
+    card: RECT,
+    header: RECT,
+    close: RECT,
+    viewport: RECT,
+    scrollbar: RECT,
+    rows: RECT,
+    action: RECT,
+    footer: RECT,
+    footer_keys: [3]RECT,
+    footer_labels: [3]RECT,
+    compact: bool,
     view_h: i32,
     max_scroll: i32,
 };
 
+pub const ChangelogSelection = struct { entry: usize, item: ?usize };
 pub const ChangelogEntryRange = struct { top: i32, h: i32 };
-pub const ChangelogHit = struct { idx: i32, ticket: []const u8 };
+pub const ChangelogHit = union(enum) { outside, inside, close, row: ChangelogSelection };
 
 pub const UsageLoginAccount = enum { primary, secondary };
 

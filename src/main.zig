@@ -1126,9 +1126,7 @@ const hideShellsForOverlay = @import("rename.zig").hideShellsForOverlay;
 const showActiveShellAfterOverlay = @import("rename.zig").showActiveShellAfterOverlay;
 const applySearchSpawnContext = @import("rename.zig").applySearchSpawnContext;
 const captureSearchBackdrop = @import("rename.zig").captureSearchBackdrop;
-const CHANGELOG = @import("changelog.zig").CHANGELOG;
 const calcChangelogLayout = @import("changelog.zig").calcChangelogLayout;
-const changelogContainsPoint = @import("changelog.zig").changelogContainsPoint;
 const changelogHitTest = @import("changelog.zig").changelogHitTest;
 const moveChangelogSelection = @import("changelog.zig").moveChangelogSelection;
 const openAsciiUrlInDefaultBrowser = @import("changelog.zig").openAsciiUrlInDefaultBrowser;
@@ -1138,8 +1136,8 @@ const ensureUsageTelemetryCollector = @import("telemetry_panel.zig").ensureUsage
 const requestAiPaceRefresh = @import("telemetry_panel.zig").requestAiPaceRefresh;
 const startLadderMode = @import("telemetry_panel.zig").startLadderMode;
 const cycleSidebarStatusCard = @import("telemetry_panel.zig").cycleSidebarStatusCard;
-const changelogDefaultTicket = @import("changelog.zig").changelogDefaultTicket;
-const openChangelogTicket = @import("changelog.zig").openChangelogTicket;
+const selectedChangelogTicket = @import("changelog.zig").selectedChangelogTicket;
+const firstChangelogSelection = @import("changelog.zig").firstChangelogSelection;
 const chatTitleLayout = @import("drawing.zig").chatTitleLayout;
 const resetPaintBackbuffer = @import("drawing.zig").resetPaintBackbuffer;
 const ensurePaintBackbuffer = @import("drawing.zig").ensurePaintBackbuffer;
@@ -1776,19 +1774,19 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
 
             if (app_state.g_changelog_active) {
-                if (changelogHitTest(mx, my)) |hit| {
-                    app_state.g_changelog_sel = hit.idx;
-                    if (hit.ticket.len > 0) {
-                        closeChangelogOverlay(hwnd, true);
-                        openAsciiUrlInDefaultBrowser(hit.ticket);
-                    } else {
-                        _ = InvalidateRect(hwnd, null, 0);
-                    }
-                    return 0;
-                }
-                if (!changelogContainsPoint(mx, my)) {
-                    _ = PostMessageW(app_state.g_main_hwnd, WM_APP_CHANGELOG_CLOSE, 0, 0);
-                    return 0;
+                switch (changelogHitTest(mx, my)) {
+                    .close, .outside => closeChangelogOverlay(hwnd, true),
+                    .inside => {},
+                    .row => |selection| {
+                        app_state.g_changelog_sel = selection;
+                        const ticket = selectedChangelogTicket();
+                        if (ticket.len > 0) {
+                            closeChangelogOverlay(hwnd, true);
+                            openAsciiUrlInDefaultBrowser(ticket);
+                        } else {
+                            _ = InvalidateRect(hwnd, null, 0);
+                        }
+                    },
                 }
                 return 0;
             }
@@ -4222,7 +4220,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_shortcuts_active = false;
             app_state.g_changelog_active = true;
             app_state.g_changelog_scroll = 0;
-            app_state.g_changelog_sel = 0;
+            app_state.g_changelog_sel = firstChangelogSelection();
             if (app_state.g_search_backdrop_bmp == null) {
                 captureSearchBackdrop();
             }
@@ -4242,13 +4240,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_CHANGELOG_CONFIRM => {
-            const idx = app_state.g_changelog_sel;
-            if (idx >= 0 and idx < @as(i32, @intCast(CHANGELOG.len))) {
-                const uidx: usize = @intCast(idx);
-                if (changelogDefaultTicket(uidx).len > 0) {
-                    closeChangelogOverlay(hwnd, true);
-                    openChangelogTicket(idx);
-                }
+            const ticket = selectedChangelogTicket();
+            if (ticket.len > 0) {
+                closeChangelogOverlay(hwnd, true);
+                openAsciiUrlInDefaultBrowser(ticket);
             }
             return 0;
         },
