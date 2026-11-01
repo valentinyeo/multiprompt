@@ -720,6 +720,10 @@ const ChatLiveStream = struct {
 };
 
 var g_chat_live_mutex: @import("app_state.zig").SpinMutex = .{};
+
+fn chatLiveLock(mutex: *@import("app_state.zig").SpinMutex) void {
+    while (!mutex.tryLock()) Sleep(1);
+}
 var g_chat_live_stream: ?*ChatLiveStream = null;
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {
@@ -749,14 +753,14 @@ fn chatLiveStreamStopLocked() void {
 }
 
 pub fn chatLiveStreamStop() void {
-    g_chat_live_mutex.lock();
+    chatLiveLock(&g_chat_live_mutex);
     defer g_chat_live_mutex.unlock();
     chatLiveStreamStopLocked();
 }
 
 fn chatLiveStreamEnsure(key: chat_transcript.Identity) void {
     const sid = std.mem.sliceTo(&key.sid, 0);
-    g_chat_live_mutex.lock();
+    chatLiveLock(&g_chat_live_mutex);
     defer g_chat_live_mutex.unlock();
     if (g_chat_live_stream) |current| {
         const same = !current.ended.load(.acquire) and current.shell_id == key.shell_id and current.host == key.host and
@@ -875,7 +879,7 @@ fn chatHistoryStreamThread(stream: *ChatHistoryStream, key: chat_transcript.Iden
 }
 
 pub fn chatLiveWrite(line: []const u8) bool {
-    g_chat_live_mutex.lock();
+    chatLiveLock(&g_chat_live_mutex);
     defer g_chat_live_mutex.unlock();
     const stream = g_chat_live_stream orelse return false;
     if (stream.cancelled.load(.acquire) or stream.channel.input == null) return false;
