@@ -19,19 +19,20 @@ function functionBody(name, nextName) {
 }
 
 test("Alt+T starts only the configured program in a fresh workspace tmux session", () => {
-  const spawn = functionBody("spawnWorkspaceSession", "activeRemoteContextForCodexTmux");
+  const spawn = functionBody("spawnWorkspaceSession", "spawnWorkspaceSessionAt");
   assert.match(spawn, /workspaceConfiguredTerminalFolder\(workspace, &host, &cwd_buf, &cwd_len, &program_buf, &program_len\)/);
-  assert.match(spawn, /workspacePrimaryRepo\(&host, &cwd_buf, &cwd_len\)/,
-    "live workspace inference must remain the neutral fallback");
-  assert.match(spawn, /workspaceSessionProgram\(program_buf\[0\.\.program_len\], with_agent\)/,
+  assert.match(spawn, /pickRepoOpen\(with_agent, false, workspaceHostForNewTab\(workspace\)\)/,
+    "the repo picker must remain the neutral fallback");
+  const spawnAt = functionBody("spawnWorkspaceSessionAt", "workspaceFolderForNewChat");
+  assert.match(spawnAt, /workspaceSessionProgram\(configured_program, with_agent\)/,
     "an explicit alt_t program wins and Claude is the default");
-  assert.match(spawn, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse return false;/);
+  assert.match(spawnAt, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse return false;/);
   const chooser = functionBody("workspaceLaunchCommand", "workspaceSessionProgram");
   assert.match(chooser, /return buildWorkspaceTmuxLaunchCmd\(command_out, session, cwd, program\);/,
     "a program that is not a Claude workload must still start through the typed tmux command");
-  assert.match(spawn, /spawnShellWithSession\(\.tmux, session, null, null\)/);
-  assert.match(spawn, /ai_agent = if \(claude\) 1 else 0/);
-  assert.match(spawn, /program\.len > 0 and commandCreatesAgentWorkload\(program\)/);
+  assert.match(spawnAt, /spawnShellWithSession\(\.tmux, session, null, null\)/);
+  assert.match(spawnAt, /ai_agent = if \(claude\) 1 else 0/);
+  assert.match(spawnAt, /program\.len > 0 and commandCreatesAgentWorkload\(program\)/);
 
   const build = functionBody("buildWorkspaceTmuxLaunchCmd", "buildWorkspaceTmuxSessionName");
   assert.match(build, /"tmux new-session -d -s "/);
@@ -51,10 +52,12 @@ test("Alt+T starts only the configured program in a fresh workspace tmux session
     "legacy command defaults must not launch cmd for Alt+T");
 
   const folder = functionBody("workspaceConfiguredTerminalFolder", "customCmdMatchesQuery");
-  assert.match(folder, /c\.is_default/);
-  assert.match(folder, /c\.cwd/);
-  assert.match(folder, /c\.alt_t/);
+  assert.match(folder, /folderEntryIndexFor\(ws_name\)/);
   assert.doesNotMatch(folder, /startup_cmd|spawnCustomCmd|tnn|Claude/);
+  const entry = functionBody("folderEntryIndexFor", "workspaceConfiguredTerminalFolder");
+  assert.match(entry, /c\.is_default/);
+  assert.match(entry, /c\.cwd/);
+  assert.match(folder, /c\.alt_t/);
 });
 
 test("Alt+T and shell Ctrl+T open workspace tabs while browser Ctrl+T passes through", () => {
@@ -134,8 +137,9 @@ test("Ctrl+K ranks intent, workspace context, and decaying usage stably", () => 
   const update = functionBody("updateSearchResults", "u16ToLower");
   assert.match(update, /sortSearchResultsByRank\(\);[\s\S]*?keepSearchSelectionVisible\(\)/,
     "the completed top-level result list must be ranked before selection is clamped");
-  assert.match(source, /const target = g_search_results\[g_search_sel\];\s+if \(paletteRowIsHeader\(target\)\) return 0;\s+recordPaletteUsage\(target\);/,
-    "confirming a palette action must persist its use, and a group header row is never confirmed");
+  assert.match(source, /const target = g_search_results\[g_search_sel\];\s+if \(paletteRowIsHeader\(target\)\) return 0;/,
+    "a group header row is never confirmed");
+  assert.match(source, /recordPaletteUsage\(target\);/, "confirming a palette action must persist its use");
   assert.match(source, /loadPaletteUsage\(\);[\s\S]*?loadSnippetsIfChanged\(\);[\s\S]*?updateSearchResults\(\);/,
     "each palette open must see usage recorded by other workspace windows");
 });

@@ -93,7 +93,7 @@ test("collapsed carousel retains status data and expanded footer opens usage", (
   const move = source.slice(source.indexOf("WM_MOUSEMOVE => {"), source.indexOf("const upd_hit = if (g_sidebar_collapsed) updateCardHit(GET_X(lp), GET_Y(lp))"));
   assert.match(move, /sidebarStickyCardHoverTest\(GET_X\(lp\), GET_Y\(lp\)\)/);
   assert.match(move, /TrackMouseEvent\(&tracking\)/);
-  assert.match(source, /0x02A3 => \{\s+if \(g_status_card_hover\) \{\s+g_status_card_hover = false;/);
+  assert.match(source, /0x02A3 => \{\s+(?:@import\("usage_card\.zig"\)\.updateHoverSuppression\(\);\s+)?if \(g_status_card_hover\) \{\s+g_status_card_hover = false;/);
   const line = functionBody(source, "paintSidebarAiPaceCard", "createAiUsageMenu");
   assert.match(line, /paintAiPaceWeekRuns/);
   assert.doesNotMatch(line, /formatResetHours|aiPaceNextWeeklyReset/);
@@ -109,7 +109,7 @@ test("the usage display draws no burn label and no hours to reset", () => {
 });
 
 test("the entire card cycles and has no dashboard deep-link target", () => {
-  const clickAt = source.indexOf("if (sidebarStickyCardHitTest(my)) {");
+  const clickAt = source.indexOf("if (sidebarStickyCardHitTest(my) or sidebarStickyCardHoverTest(mx, my)) {");
   const logicalAt = source.indexOf("const logical_my = my + g_sidebar_scroll;", clickAt);
   assert.ok(clickAt >= 0 && logicalAt > clickAt);
   const click = source.slice(clickAt, logicalAt);
