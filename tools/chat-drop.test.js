@@ -17,7 +17,7 @@ function body(source, name) {
 
 function auditDrop(source) {
   const proc = body(source, 'chatComposerSubclassProc');
-  assert.match(proc, /if \(msg == 0x0233\) \{\s*chatDropFiles\(@ptrFromInt\(wp\)\);\s*return 0;/);
+  assert.match(proc, /if \(msg == 0x0233\) \{\s*if \(!@import\("room_frontend\.zig"\)\.privateActionsAllowed\(\)\) \{[^}]*return 0; \}\s*chatDropFiles\(@ptrFromInt\(wp\)\);\s*return 0;/);
   const controls = body(source, 'ensureChatControls');
   for (const control of ['composer', 'transcript']) {
     assert.match(controls, new RegExp(`DragAcceptFiles\\(app_state.g_chat_${control}_hwnd, 1\\)`));
