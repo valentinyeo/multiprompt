@@ -535,7 +535,8 @@ fn prefixOf(kind: ItemKind) []const u16 {
 pub fn tailInto(self: *const Live, text: []u16, offset: usize, blocks: []chat_markdown.Block) Tail {
     var out = Tail{};
     for (self.items.items) |*item| {
-        if (item.text.items.len == 0 or out.blocks >= blocks.len) break;
+        if (out.blocks >= blocks.len) break;
+        if (item.text.items.len == 0) continue;
         if (out.text_len > 0) {
             if (out.text_len >= text.len) break;
             text[out.text_len] = '\n';
@@ -1104,6 +1105,23 @@ test "IGSH-1266 a host that turns ready mid-turn keeps the live reply on screen"
     try std.testing.expect(applyPage(97, sid, stopped));
     try std.testing.expect(!running(97));
     try std.testing.expect(held(97));
+}
+
+test "IGSH-1266 an empty thinking item does not hide the reply after it" {
+    const sid = "11111111-2222-3333-4444-888888888888";
+    _ = begin(96, 0, sid);
+    defer release(96);
+    const page = "{\"result\":{\"events\":[" ++
+        "{\"seq\":1,\"event\":{\"kind\":\"turn.started\",\"turn\":\"t-1\",\"payload\":{}}}," ++
+        "{\"seq\":2,\"event\":{\"kind\":\"thinking.done\",\"turn\":\"t-1\",\"item\":\"a:thinking:0\",\"payload\":{\"text\":\"\"}}}," ++
+        "{\"seq\":3,\"event\":{\"kind\":\"text.delta\",\"turn\":\"t-1\",\"item\":\"a:text:0\",\"payload\":{\"text\":\"Reply\"}}}" ++
+        "]}}";
+    try std.testing.expect(applyPage(96, sid, page));
+    var text: [64]u16 = @splat(0);
+    var blocks: [4]chat_markdown.Block = undefined;
+    const tail = tailFor(96, &text, 0, &blocks);
+    try std.testing.expectEqual(@as(usize, 1), tail.blocks);
+    try std.testing.expectEqualSlices(u16, std.unicode.utf8ToUtf16LeStringLiteral("Reply"), text[0..tail.text_len]);
 }
 
 fn parse(a: std.mem.Allocator, json: []const u8) !std.json.Value {
