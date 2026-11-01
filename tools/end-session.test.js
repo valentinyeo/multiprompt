@@ -5,7 +5,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
-const read = (file) => fs.readFileSync(file, 'utf8');
+const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
 
 const SID = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
 const READER = '~/.multiprompt-runtime/reader.py';
