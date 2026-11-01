@@ -3123,7 +3123,7 @@ fn chatMessageSyncFinish() void {
         }
         if (job.synced) applied_seq = json_reader.uintDefault(item, "seq", applied_seq);
     }
-    if (native_rows.items.len > 0) history.history.upsertNativeRows(std.heap.page_allocator, native_rows.items, history.history.inode) catch { history.message_next_tick = 0; return; };
+    if (native_rows.items.len > 0) history.history.upsertNativeRows(std.heap.page_allocator, native_rows.items, history.history.inode, 0) catch { history.message_next_tick = 0; return; };
     if (!saveChatOutbox()) { history.message_next_tick = 0; return; }
     if (job.synced) history.message_seq = applied_seq;
     if (!job.synced) {
