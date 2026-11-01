@@ -91,3 +91,13 @@ test('D3 a live question shows the existing pills and answers one question at a 
   const render = read('src/chat_render.zig');
   assert.match(render, /chatChoiceDigitKey\(wp\)/);
 });
+
+test('D4 a plan cards the send button as implement or feedback for the open plan', () => {
+  const send = read('src/chat_send.zig');
+  assert.match(send, /fn chatLivePlanReply\(text: \[\]const u16\) bool \{/);
+  assert.match(send, /std\.ascii\.eqlIgnoreCase\(value, "implement"\)/);
+  assert.match(send, /\.plan, &request\)/);
+  assert.match(send, /\.implement, null\)/);
+  assert.match(send, /\.feedback, value\)/);
+  assert.match(send, /if \(chatLivePlanReply\(text_buf\[0\.\.@intCast\(@max\(0, text_len_i\)\)\]\)\) return;/);
+});

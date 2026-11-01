@@ -403,6 +403,7 @@ pub fn sendChatPrompt() void {
     if (!app_state.g_chat_active or app_state.g_chat_composer_hwnd == null or app_state.active_shell >= app_state.shell_count) return;
     var text_buf: [16384]u16 = undefined;
     const text_len_i = GetWindowTextW(app_state.g_chat_composer_hwnd, &text_buf, @intCast(text_buf.len));
+    if (chatLivePlanReply(text_buf[0..@intCast(@max(0, text_len_i))])) return;
     if (text_len_i <= 0) {
         if (chat_steer_prompt) chatEchoPushQueuedNow();
         return;
@@ -3554,6 +3555,31 @@ fn chatLiveQuestionText(text: []const u16) bool {
     if (live.questionAnswerLine(shell_id, std.heap.page_allocator)) |line| _ = chatLiveReply(line);
     app_state.shells[shell_index].chat_question_other = false;
     app_state.shells[shell_index].chat_question_other_sent = false;
+    return true;
+}
+
+fn chatLivePlanReply(text: []const u16) bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    const shell_index = app_state.active_shell;
+    const live = @import("chat_live.zig");
+    const shell_id = app_state.shells[shell_index].shell_id;
+    var request: [96]u8 = undefined;
+    const len = live.requestId(shell_id, .plan, &request) orelse return false;
+    const key = chatFileIdentityForShell(shell_index);
+    const sid = std.mem.sliceTo(&key.sid, 0);
+    var buffer: [4096]u8 = undefined;
+    const written = std.unicode.utf16LeToUtf8(&buffer, text) catch 0;
+    const value = std.mem.trim(u8, buffer[0..written], " \t\r\n");
+    const line = if (value.len == 0 or std.ascii.eqlIgnoreCase(value, "implement"))
+        live.planReplyLine(std.heap.page_allocator, shell_id, sid, request[0..len], .implement, null) catch return false
+    else
+        live.planReplyLine(std.heap.page_allocator, shell_id, sid, request[0..len], .feedback, value) catch return false;
+    if (!chatLiveReply(line)) return false;
+    live.closeRequest(shell_id);
+    if (app_state.g_chat_composer_hwnd != null) _ = SetWindowTextW(app_state.g_chat_composer_hwnd, L(""));
+    app_state.g_chat_draft_dirty = true;
+    chatDraftFlush();
+    debugLog("[chat] plan reply sent");
     return true;
 }
 

@@ -716,6 +716,17 @@ pub fn questionsOpen(shell_id: u32) bool {
     return false;
 }
 
+pub fn closeRequest(shell_id: u32) void {
+    mutex.lock();
+    defer mutex.unlock();
+    for (&slots) |*live| {
+        if (live.used and live.shell_id == shell_id) {
+            live.request.open = false;
+            live.touch();
+        }
+    }
+}
+
 pub fn planOpen(shell_id: u32) bool {
     mutex.lock();
     defer mutex.unlock();
