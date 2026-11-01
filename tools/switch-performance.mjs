@@ -48,8 +48,9 @@ export function instrument(root, profile = false) {
   const file = path.join(root, 'src/main.zig');
   let source = fs.readFileSync(file, 'utf8');
   if (source.includes('chat-idle-poll: us=')) return;
-  const needle = '                    chatFileOnReady();';
-  if (!source.includes(needle)) throw new Error('Unknown idle-poll timing boundary');
+  const needle = `                    chatFileOnReady();
+                    if (app_state.g_chat_active) {`;
+  if (source.indexOf(needle) < 0 || source.indexOf(needle) !== source.lastIndexOf(needle)) throw new Error('Unknown idle-poll timing boundary');
   source = source.replace(needle, `                    const poll_revision = app_state.g_chat_last_hash;
                     var poll_started: i64 = 0;
                     if (app_state.g_chat_active and !app_state.g_chat_screen_working and !app_state.g_voice_mode_active and @import("diagnostics.zig").verboseLoggingEnabled()) _ = @import("win32.zig").QueryPerformanceCounter(&poll_started);
@@ -68,9 +69,15 @@ export function instrument(root, profile = false) {
     const calls = ['chatFileOnReady();', 'refreshChatTranscript(false);', 'if (app_state.g_chat_active) chatWorkingIndicatorSync();', '@import("chat_composer.zig").chatStopSlotSync();', 'voiceCheckScreenFallback();'];
     const start = source.indexOf('if (wp == TIMER_CHAT_REFRESH)');
     const end = source.indexOf('if (wp == TIMER_CHAT_FOREGROUND_RETRY)', start);
+    if (start < 0 || end < 0) throw new Error('Unknown idle-poll profile boundary');
     let poll = source.slice(start, end);
+    const declared = 'var poll_started: i64 = 0;\n';
     poll = poll.replace('var poll_started: i64 = 0;', 'var poll_started: i64 = 0;\n                    var poll_stages: [5]i64 = @splat(0);');
-    for (const [index, call] of calls.entries()) poll = poll.replace(call, call + `\n                    if (poll_started != 0) _ = @import("win32.zig").QueryPerformanceCounter(&poll_stages[${index}]);`);
+    const bodyStart = poll.indexOf(declared) + declared.length;
+    if (bodyStart < declared.length) throw new Error('Unknown idle-poll profile boundary');
+    let tail = poll.slice(bodyStart);
+    for (const [index, call] of calls.entries()) tail = tail.replace(call, call + `\n                    if (poll_started != 0) _ = @import("win32.zig").QueryPerformanceCounter(&poll_stages[${index}]);`);
+    poll = poll.slice(0, bodyStart) + tail;
     poll = poll.replace('var buf: [80]u8 = undefined;', 'var buf: [256]u8 = undefined;');
     poll = poll.replace('chat-idle-poll: us={d}', 'chat-idle-poll: us={d} ready_us={d} transcript_us={d} working_us={d} composer_us={d} voice_us={d}');
     const times = calls.map((_, index) => `@divTrunc((poll_stages[${index}] -| ${index ? `poll_stages[${index - 1}]` : 'poll_started'}) * 1_000_000, @max(1, frequency))`);

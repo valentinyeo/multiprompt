@@ -52,11 +52,33 @@ test('performance builds add high-resolution idle timing without changing the sh
     const poll = source.slice(source.indexOf('if (wp == TIMER_CHAT_REFRESH)'), source.indexOf('if (wp == TIMER_CHAT_REFRESH)') + 7000);
     assert.match(poll, /QueryPerformanceCounter\(&poll_started\)/);
     assert.match(poll, /poll_revision == app_state\.g_chat_last_hash[\s\S]*chat-idle-poll: us=/);
+    const chats = source.slice(source.indexOf('if (app_state.g_chat_active or app_state.g_voice_mode_active) {'));
+    assert.match(chats.slice(0, 1600), /QueryPerformanceCounter\(&poll_started\)[\s\S]*chatFileOnReady\(\);/, 'Idle timing must cover the chat refresh branch the user leaves idle');
+    assert.doesNotMatch(source, /privateActionsAllowed\(\)\) \{\n\s*const poll_revision/, 'A rooms early return must never take the idle timing with it');
     instrument(directory);
     assert.equal(fs.readFileSync(file, 'utf8'), source);
     const flow = fs.readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
     assert.match(flow, /node tools\/switch-performance\.mjs instrument baseline/);
     assert.match(flow, /node tools\/switch-performance\.mjs instrument \./);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('idle timing instrumentation refuses to attach to a moved refresh branch', async () => {
+  const { instrument } = await oracle();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'speed-anchor-'));
+  try {
+    fs.mkdirSync(path.join(directory, 'src'));
+    const file = path.join(directory, 'src/main.zig');
+    copyZig(['main.zig'], path.join(directory, 'src'));
+    const original = fs.readFileSync(file, 'utf8');
+    const anchor = '                    chatFileOnReady();\n                    if (app_state.g_chat_active) {';
+    assert.ok(original.includes(anchor), 'The chat refresh branch anchor must ship');
+    fs.writeFileSync(file, original.replace(anchor, anchor.slice(0, -1) + ' and true'));
+    assert.throws(() => instrument(directory), /Unknown idle-poll timing boundary/);
+    fs.writeFileSync(file, original.replace(anchor, `${anchor}\n${anchor}`));
+    assert.throws(() => instrument(directory), /Unknown idle-poll timing boundary/);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -278,6 +300,10 @@ test('diagnostic instrumentation qualifies capture logging and keeps ordinary bu
     assert.match(fs.readFileSync(path.join(target, 'diagnostics.zig'), 'utf8'), /defer @import\("switch_cpu_profile.zig"\)\.end\(\.logging/);
     assert.match(fs.readFileSync(path.join(target, 'switch_cpu_profile.zig'), 'utf8'), /QueryThreadCycleTime/);
     assert.match(fs.readFileSync(path.join(target, 'main.zig'), 'utf8'), /ready_us=\{d\} transcript_us=\{d\}/);
+    const profiled = fs.readFileSync(path.join(target, 'main.zig'), 'utf8');
+    const declared = profiled.indexOf('var poll_started: i64 = 0;');
+    assert.ok(declared > 0, 'The profiled poll must declare its start');
+    assert.doesNotMatch(profiled.slice(profiled.indexOf('if (wp == TIMER_CHAT_REFRESH)'), declared), /poll_stages\[/, 'Stage timings must stay inside the branch that declares poll_started');
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
