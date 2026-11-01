@@ -19,6 +19,8 @@ function declaration(name) {
 const prelude = `
 const std = @import("std");
 fn chatCancelFinish() void {}
+fn chatLivePlanReply(_: []const u16) bool { return false; }
+fn chatLiveQuestionText(_: []const u16) bool { return false; }
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
@@ -45,7 +47,12 @@ const CHAT_CONFIRMED_MAX_PER_KEY = 50;
 const CHAT_STATUS_H: i32 = 20;
 const ShellSendResult = enum { ok, write_failed, enter_failed };
 const ReconnectState = struct { phase: enum { connected, ended, closed } = .connected, fn ok(_: *@This()) void {} };
-const Shell = struct { chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
+const ShellKind = enum { cmd, tmux, vps, vps2 };
+const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
+const ChatPendingReset = struct { key: chat_transcript.Identity = .{}, nonce: u64 = 0, request_nonce: u64 = 0 };
+var g_chat_pending_reset: ?ChatPendingReset = null;
+var g_chat_reset_next: u64 = 0;
+const Shell = struct { chat_question_other: bool = false, chat_question_other_sent: bool = false, chat_question_other_hash: u64 = 0, shell_id: u32 = 1, kind: ShellKind = .cmd, ai_agent: u8 = 0, activity: enum { idle, active } = .idle, disconnected: bool = false, ssh_reconnect: ReconnectState = .{} };
 const g_main_hwnd: ?*anyopaque = null;
 const g_chat_transcript_hwnd: ?*anyopaque = @ptrFromInt(2);
 const send_latency = struct {
@@ -89,10 +96,25 @@ fn chatShellOp(_: u32, op: []const u8, text: ?[]const u16, _: ?*std.atomic.Value
     return question_send_ok;
 }
 const ChatTmuxSendJob = struct {
-    key: struct { shell_id: u32 = 1 } = .{},
-    echo_id: u64,
+    key: chat_transcript.Identity = .{},
+    echo_id: u64 = 0,
     text: []u16,
     retry: bool = false,
+    queued_at: i64 = 0,
+    queue_id: u64 = 0,
+    message_nonce: u64 = 0,
+    request_nonce: u64 = 0,
+    message_v1: bool = false,
+    message_status: bool = false,
+    message_reset: bool = false,
+    message_dismiss: bool = false,
+    reset_cutoff: u64 = 0,
+    history_instance: u64 = 0,
+    message_generation: u64 = 0,
+    message_epoch: u64 = 0,
+    reset_result_epoch: u64 = 0,
+    message_state: [16]u8 = @splat(0),
+    message_wire_id: [81]u8 = @splat(0),
     held: bool = false,
     written: bool = true,
     rejected: bool = false,
@@ -111,10 +133,10 @@ var channel_enabled = false;
 fn chatTmuxSendEligible(_: u32) bool { return channel_enabled; }
 var channel_starts: usize = 0;
 var delivery_polls: usize = 0;
-fn chatTmuxSendStart(_: u32, text: []const u16, id: u64, retry: bool) bool {
+fn chatTmuxSendStart(idx: u32, text: []const u16, id: u64, retry: bool, _: bool, _: bool) bool {
     std.debug.assert(g_chat_tmux_send_job == null);
     const job = std.heap.page_allocator.create(ChatTmuxSendJob) catch return false;
-    job.* = .{ .echo_id = id, .text = std.heap.page_allocator.dupe(u16, text) catch {
+    job.* = .{ .key = .{ .shell_id = shells[idx].shell_id }, .echo_id = id, .text = std.heap.page_allocator.dupe(u16, text) catch {
         std.heap.page_allocator.destroy(job);
         return false;
     }, .retry = retry };
@@ -123,9 +145,21 @@ fn chatTmuxSendStart(_: u32, text: []const u16, id: u64, retry: bool) bool {
     if (chatOutboxIndexById(id)) |i| g_chat_outbox.items[i].channel_pending = true;
     return true;
 }
-fn chatFileIdentityForShell(_: u32) u32 { return 1; }
-fn chatFileRequestForDelivery(_: u32, delivery: bool) void { std.debug.assert(delivery); delivery_polls += 1; }
-fn chatHistoryEntry(_: u32) ?*HistoryEntry { return &history_entry; }
+fn chatFileIdentityForShell(_: u32) chat_transcript.Identity {
+    var key: chat_transcript.Identity = .{};
+    key.sid[0] = 's';
+    key.tmux[0] = 't';
+    return key;
+}
+fn chatMessageSyncFinish() void {}
+fn chatPendingResetStart(_: u32) void {}
+fn chatMessageSyncStart(_: u32) void {}
+const ChatIdentity = chat_transcript.Identity;
+fn chatLogSendPath(_: u32, _: ?*const ChatOutboxEntry, _: ChatSendRoute, _: []const u8) void {}
+const ChatSubmitPatch = struct { write_started: bool, state: ChatEchoState, retryable: bool };
+fn chatFileRequestForDelivery(_: chat_transcript.Identity, delivery: bool) void { std.debug.assert(delivery); delivery_polls += 1; }
+fn MessageBoxW(_: anytype, _: anytype, _: anytype, _: u32) u32 { return 6; }
+fn chatHistoryEntry(_: chat_transcript.Identity) ?*HistoryEntry { return &history_entry; }
 const ISSUE_349_FULL_SETTLE = false;
 var tmux_steers: usize = 0;
 var direct_steers: usize = 0;
@@ -281,7 +315,23 @@ fn chatBlockDisplayRange(_: []const u16, b: ChatBlock) struct { start: usize, le
 var fake_now_ms: i64 = 2000;
 var fake_loaded_ms: i64 = 0;
 var fake_history: chat_history.History = .{};
-const HistoryEntry = struct { loaded_ms: i64 = 0, generation: u64 = 1, retired: bool = false, key: struct { shell_id: u32 = 1 } = .{}, history: chat_history.History = .{} };
+const HistoryEntry = struct {
+    loaded_ms: i64 = 0,
+    generation: u64 = 1,
+    retired: bool = false,
+    key: chat_transcript.Identity = .{ .shell_id = 1 },
+    message_epoch: u64 = 0,
+    message_seq: u64 = 0,
+    message_generation: u64 = 0,
+    message_snapshot: [33]u8 = @splat(0),
+    message_cursor: u64 = 0,
+    message_snapshot_seq: u64 = 0,
+    message_synced: bool = false,
+    message_v1_owned: bool = false,
+    message_next_tick: u64 = 0,
+    message_retry_step: u8 = 0,
+    history: chat_history.History = .{},
+};
 var history_entry = HistoryEntry{};
 var history_entries = [_]*HistoryEntry{&history_entry};
 var g_chat_histories = struct { items: []*HistoryEntry }{ .items = &history_entries };
@@ -291,7 +341,9 @@ fn chatEchoWindowFull() bool { return false; }
 fn chatEchoAnchorNow(_: u32) chat_echo.Anchor { return .{ .after_ms = 1000, .sent_ms = fake_now_ms, .counted = true, .user_count = 1 }; }
 fn chatShouldUseDirectInput(_: u32) bool { return true; }
 fn chatSendForceBracketed(_: u32) bool { return true; }
-fn chatSendEnterDelayMs(_: u8) u32 { return 0; }
+fn chatSendEnterDelayMs(_: ShellKind) u32 { return 0; }
+var g_chat_message_sync_job: ?*anyopaque = null;
+var g_chat_message_sync_next: usize = 0;
 fn Sleep(_: u32) void {}
 fn pasteTextToShellDirectEx(_: u32, text: []const u16, _: bool) bool {
     // The disk reservation must precede the first byte, even a partial failure.
@@ -324,7 +376,7 @@ var g_chat_echo_layout_ids: [20]u64 = undefined;
 var g_chat_content_left: i32 = 0;
 var g_chat_content_h: i32 = 0;
 fn chatBlockGapBefore(_: bool, _: enum { user }, _: bool, _: enum { single }) i32 { return 1; }
-fn chatMeasureEchoRect(_: u8, _: []const u16, _: i32, y: i32, _: bool) RECT { return .{ .bottom = y + 10 }; }
+fn chatMeasureProjectedEchoRect(_: u8, _: []const u16, _: i32, y: i32, _: bool, _: anytype) RECT { return .{ .bottom = y + 10 }; }
 fn chatShellRowsLayout(_: u8, _: i32, y: i32) i32 { return y; }
 fn uiScaled(n: i32) i32 { return n; }
 fn layoutPending() void {
@@ -1472,7 +1524,7 @@ test "delivery: IGSH-1010 cancellation survives restart without retry or termina
 }
 
 `;
-const names = ['chatSendQuestionText', 'chatQuestionOtherFinish', 'chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatTmuxSendFinish', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatConfirmedHas', 'chatEchoPrefixMatches', 'chatEchoBlockConfirmed', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry'];
+const names = ['chatSendQuestionText', 'chatQuestionOtherFinish', 'chatReactToMessage', 'sendChatMessage', 'chatSteerPrompt', 'sendChatPrompt', 'chatPromptNormalizeLineEndings', 'chatSteerChord', 'chatEchoPushQueuedNow', 'chatEchoPushQueuedForShell', 'chatEchoCountDeliveredForShell', 'chatSteerAfterDelivery', 'chatTmuxSendFinish', 'loadChatOutbox', 'chatOutboxFreeAll', 'chatOutboxPurgeOrphans', 'chatEchoEnqueueForShell', 'chatOutboxClearIn', 'chatOutboxEnqueueIn', 'chatOutboxTick', 'chatEchoSendAgain', 'chatEchoRemove', 'chatEchoTryMatchEntry', 'chatEchoConfirmWithBlock', 'chatOutboxPrefixOf', 'chatOutboxShellForKey', 'chatTmuxSettle', 'chatOutboxCountIn', 'chatOutboxFirstIndexIn', 'chatOutboxFirstSendableIndexIn', 'chatOutboxFindSending', 'chatOutboxIndexById', 'chatOutboxRemoveAtIn', 'chatOutboxEnqueueInState', 'chatOutboxSerialize', 'chatOutboxParseJson', 'appendJsonEscaped', 'appendJsonEscapedWide', 'chatEchoNormalizePrefix', 'chatEchoAssignForKey', 'chatEchoStoreAnchors', 'chatEchoAssignedBlock', 'chatConfirmedCountIn', 'chatConfirmedFirstIndexIn', 'chatConfirmedAdd', 'chatConfirmedHas', 'chatEchoPrefixMatches', 'chatEchoBlockConfirmed', 'chatEchoMatchActive', 'chatEchoDeliveryEvidence', 'chatEchoRetryAllForActive', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatOutboxReadyToType', 'chatOutboxTrySendEntry', 'chatSubmitRetryPatch', 'chatUpgradeToHostMessage', 'chatPendingResetDropIfStale', 'chatResetSameChat', 'chatResetShellMayOwn', 'chatOutboxCountForShell', 'chatMessageGoesToHost', 'chatHoldLegacyCodex', 'chatEchoWaitsOnTranscript', 'chatOutboxEnqueueInStateLimit', 'chatSendRoute'];
 const sourceOutboxTests = ['Chat View outbox is FIFO and capped per key', 'Chat View outbox flush skips unconfirmed entries and keeps FIFO order', 'ISSUE-460 session queued evidence cannot release the next outbox entry', 'IGSH-564 busy tmux session still gets the queued message typed'].map(name => {
   const start = source.indexOf(`test "${name}" {`);
   assert.ok(start >= 0, name);
@@ -1494,7 +1546,10 @@ function runHarness(control = false) {
       .replaceAll('@import("chat_composer.zig").clearChatReply', 'clearChatReply')
       .replaceAll('@import("chat_composer.zig").chatAcAgent', 'chatAcAgent')
       .replaceAll('@import("chat_composer.zig").chatShellDraftNoteSend', 'chatShellDraftNoteSend')
-      .replaceAll('@import("chat_send.zig").sendChatMessage', 'sendChatMessage');
+      .replaceAll('@import("chat_send.zig").sendChatMessage', 'sendChatMessage')
+      .replaceAll('@import("app_state.zig").ShellKind', 'ShellKind')
+      .replaceAll('@import("win32.zig").MessageBoxW', 'MessageBoxW')
+      .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
     functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk').replaceAll('@import("console.zig").showReconnectedConsole', 'showReconnectedConsole').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent') : 'fn sshReconnectOk(_: u32) void {}');
     if (control === 'question-old') {
       functions = functions.replace('    if (chatSendQuestionText(send_text)) return;', '');
@@ -1600,7 +1655,7 @@ test('IGSH-564 steer hook leaves Ctrl+X native and dispatches only the completed
   assert.ok(hook.indexOf('chatSteerChord(') < hook.indexOf('chatComposerOwnsKey('));
   assert.match(body('chatComposerOwnsKey'), /0x58/);
   assert.match(body('chatSteerPrompt'), /sendChatPrompt\(\)/);
-  assert.match(source, /WM_APP_CHAT_SEND => \{\s*if \(wp == 1\) @import\("chat_send.zig"\)\.chatSteerPrompt\(\) else @import\("chat_composer.zig"\)\.chatSendOrFinishDictation\(\)/);
+  assert.match(source, /WM_APP_CHAT_SEND => \{\s*if \(!@import\("room_frontend\.zig"\)\.privateActionsAllowed\(\)\) return 0;\s*if \(wp == 1\) @import\("chat_send\.zig"\)\.chatSteerPrompt\(\) else @import\("chat_composer\.zig"\)\.chatSendOrFinishDictation\(\)/);
   assert.doesNotMatch(body('chatSteerChord'), /GetTickCount|Timer|Sleep/);
 });
 
