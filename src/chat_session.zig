@@ -713,13 +713,13 @@ const ChatLiveStream = struct {
     sid: [40]u8 = @splat(0),
     sid_len: usize = 0,
     refs: std.atomic.Value(u32) = .init(2),
-    mutex: std.Thread.Mutex = .{},
+    mutex: @import("app_state.zig").SpinMutex = .{},
     cancelled: std.atomic.Value(bool) = .init(false),
     ended: std.atomic.Value(bool) = .init(false),
     channel: ChatHistoryChannel = .{},
 };
 
-var g_chat_live_mutex: std.Thread.Mutex = .{};
+var g_chat_live_mutex: @import("app_state.zig").SpinMutex = .{};
 var g_chat_live_stream: ?*ChatLiveStream = null;
 
 fn chatLiveWanted(key: chat_transcript.Identity) bool {

@@ -405,7 +405,19 @@ pub fn planReplyLine(a: std.mem.Allocator, id: u32, sid: []const u8, request_id:
     return finish(&out, a);
 }
 
-pub var mutex: std.Thread.Mutex = .{};
+pub const Lock = struct {
+    state: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
+
+    pub fn lock(self: *Lock) void {
+        while (self.state.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
+    }
+
+    pub fn unlock(self: *Lock) void {
+        self.state.store(0, .release);
+    }
+};
+
+pub var mutex: Lock = .{};
 var slots: [MAX_LIVE]Live = @splat(.{});
 
 fn slotFor(shell_id: u32, sid: []const u8) ?*Live {
@@ -743,7 +755,7 @@ test "D3 answers are stored per question and only a full set builds the reply" {
     const sid = "11111111-2222-3333-4444-666666666666";
     try std.testing.expect(applyPage(77, sid, "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"question.request\",\"payload\":{\"request_id\":\"req_5\",\"questions\":[" ++
         "{\"question\":\"Which colour?\",\"options\":[{\"label\":\"Lime\"},{\"label\":\"Orange\"}]}," ++
-        "{\"question\":\"Which devices?\",\"multiSelect\":true,\"options\":[{\"label\":\"Desktop\"},{\"label\":\"Phone\"}]}]}}]}}"));
+        "{\"question\":\"Which devices?\",\"multiSelect\":true,\"options\":[{\"label\":\"Desktop\"},{\"label\":\"Phone\"}]}]}}}]}}"));
     try std.testing.expect(questionAnswerLine(77, a) == null);
     try std.testing.expect(answerQuestion(77, 0, "Lime"));
     try std.testing.expect(questionAnswerLine(77, a) == null);
