@@ -616,7 +616,7 @@ pub fn accountSetAppearance(shell_id: u32, edit: app_state.AppearanceEdit) !void
         switch (edit) {
             .face => |face| shell.face = face,
             .color => |color| shell.color = color,
-        };
+        }
         @import("launch_cache.zig").changed();
         var path_buf: [512]u8 = undefined;
         if (getSessionPath(&path_buf)) |path| {
@@ -650,7 +650,7 @@ pub fn accountSetAppearance(shell_id: u32, edit: app_state.AppearanceEdit) !void
     }
     const intent = &staged.items[found.?];
     intent.touched |= bit;
-    switch (edit) { .face => |face| intent.face = face, .color => |color| intent.color = color };
+    switch (edit) { .face => |face| intent.face = face, .color => |color| intent.color = color }
     try appearance_intent.validate(staged.items);
     const owned = try appearance_intent.clone(a, staged.items);
     errdefer appearance_intent.free(a, owned);
@@ -684,7 +684,7 @@ pub fn accountSetAppearance(shell_id: u32, edit: app_state.AppearanceEdit) !void
     for (g_after_submit.items) |touch| a.free(touch.tmux_session);
     g_after_submit.deinit(a);
     g_after_submit = next_touches;
-    switch (edit) { .face => |face| shell.face = face, .color => |color| shell.color = color };
+    switch (edit) { .face => |face| shell.face = face, .color => |color| shell.color = color }
     saveSession();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 1);
 }
