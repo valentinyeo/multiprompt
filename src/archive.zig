@@ -3,6 +3,7 @@ const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const session_end = @import("session_end.zig");
 const agent_host = @import("agent_host.zig");
+const Sleep = @import("win32.zig").Sleep;
 const DWORD = @import("win32.zig").DWORD;
 const WPARAM = @import("win32.zig").WPARAM;
 const HANDLE = @import("win32.zig").HANDLE;
@@ -652,7 +653,7 @@ fn killRemoteTmuxSession(session: []const u8, host: u8, sid: []const u8) RemoteK
 }
 
 fn queuePendingSessionKill(session: []const u8, host: u8, sid: []const u8) void {
-    if (!app_state.g_pending_session_kill_mutex.tryLock()) return;
+    while (!app_state.g_pending_session_kill_mutex.tryLock()) Sleep(0);
     defer app_state.g_pending_session_kill_mutex.unlock();
     if (app_state.g_pending_session_kill_count >= app_state.PENDING_SESSION_KILL_MAX) {
         debugLog("queuePendingSessionKill: queue full, kill dropped");
