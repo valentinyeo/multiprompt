@@ -48,6 +48,18 @@
 - Runtime errors return history error frames.
 - They never execute older code instead.
 
+## Hosted chats and other tools
+
+- A hosted chat's tmux session carries `@mp_host_sid` while a host runs on it.
+- The host clears that option when it stops, and a move to the terminal clears
+  it too, so a tool reading it never types into a hosted pane's shell.
+- Read it with `tmux show-options -t <session> -v @mp_host_sid`.
+- A tool with that id sends through the reader, never into the pane:
+  `python3 <runtime>/reader.py host send claude <sid> <text>`.
+- `host send` submits through the shared store and dispatches to the host, so
+  the message gets an id and a receipt like any message from the desktop.
+- `--tmux <session>` overrides the chat the host is bound to.
+
 ## Limits
 
 - Older launchers still run their embedded reader.

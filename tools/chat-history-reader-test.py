@@ -4596,6 +4596,105 @@ class MoveToTerminalTest(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
+class HostPaneMarkTest(unittest.TestCase):
+    sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeef001'
+    tmux = 'marked-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        self.commands = []
+
+        def run(command, **kwargs):
+            self.commands.append(list(command))
+            return types.SimpleNamespace(stdout='', returncode=0)
+
+        patch.object(reader.subprocess, 'run', side_effect=run).start()
+        reader.host_write(reader.host_paths('claude', self.sid)['config'],
+                          dict(enabled=True, tmux=self.tmux, permission_mode='bypassPermissions'))
+
+    def test_a_running_host_marks_its_pane_with_the_session_it_owns(self):
+        self.assertTrue(reader.host_mark_pane('claude', self.sid))
+        self.assertEqual(self.commands[0], ['tmux', 'set-option', '-t', '=' + self.tmux + ':', '@mp_host_sid', self.sid])
+
+    def test_a_stopped_host_clears_the_mark(self):
+        self.assertTrue(reader.host_clear_pane('claude', self.sid))
+        self.assertEqual(self.commands[0], ['tmux', 'set-option', '-t', '=' + self.tmux + ':', '-u', '@mp_host_sid'])
+
+    def test_an_unknown_chat_never_reaches_tmux(self):
+        self.assertFalse(reader.host_pane_option('bad name', self.sid))
+        self.assertFalse(reader.host_pane_option(None, None))
+        self.assertEqual(self.commands, [])
+
+    def test_stopping_the_host_clears_the_pane_mark(self):
+        with patch.object(reader, 'host_pane_option', return_value=True) as option, \
+                patch.object(reader, 'host_request', return_value=dict(status='ok')), \
+                patch.object(reader, 'host_alive', return_value=False), \
+                patch.object(reader, 'host_owner', return_value=None):
+            self.assertEqual(reader.host_stop('claude', self.sid)['status'], 'stopped')
+        option.assert_called_once_with(self.tmux, None)
+
+    def test_the_host_process_marks_its_pane_once_it_owns_the_chat(self):
+        with patch.object(reader, 'host_pane_option', return_value=True) as option:
+            reader.host_mark_pane('claude', self.sid)
+        option.assert_called_once_with(self.tmux, self.sid)
+
+
+class HostSendTest(unittest.TestCase):
+    sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeef002'
+    tmux = 'send-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', Path(self.temp.name)).start()
+        self.queries = []
+
+        def store(query):
+            self.queries.append(dict(query))
+            if query['op'] == 'message_submit':
+                return dict(message=dict(id=query['message_id'], state='queued'))
+            if query['op'] == 'message_status':
+                return dict(message=dict(id=query['message_id'], state='accepted'))
+            return dict(message=None)
+
+        patch.object(reader, 'message_store_request', side_effect=store).start()
+        reader.host_write(reader.host_paths('claude', self.sid)['config'], dict(enabled=True, tmux=self.tmux))
+
+    def test_a_message_from_outside_reaches_the_host_by_id(self):
+        sent = reader.host_send('claude', self.sid, 'status please')
+        self.assertEqual(sent['status'], 'sent')
+        self.assertEqual(sent['state'], 'accepted')
+        self.assertEqual([q['op'] for q in self.queries], ['message_submit', 'message_dispatch', 'message_status'])
+        self.assertEqual(self.queries[0]['message_id'], sent['id'])
+        self.assertEqual(self.queries[0]['text'], 'status please')
+        self.assertEqual(self.queries[0]['tmux'], self.tmux)
+        self.assertTrue(all(q['provider'] == 'claude' and q['sid'] == self.sid for q in self.queries))
+
+    def test_a_chat_without_the_host_never_gets_a_message(self):
+        reader.host_write(reader.host_paths('claude', self.sid)['config'], dict(enabled=False))
+        self.assertEqual(reader.host_send('claude', self.sid, 'hello')['reason'], 'host_disabled')
+        self.assertEqual(self.queries, [])
+
+    def test_empty_text_and_a_foreign_session_are_refused(self):
+        self.assertEqual(reader.host_send('claude', self.sid, '   ')['reason'], 'invalid_text')
+        self.assertEqual(reader.host_send('codex', self.sid, 'hello')['reason'], 'unsupported_provider')
+        self.assertEqual(self.queries, [])
+
+    def test_the_send_cli_takes_the_text_and_the_chat(self):
+        with patch.object(reader, 'host_send', return_value=dict(status='sent')) as send:
+            reader.host_cli(['send', 'claude', self.sid, 'hello', 'there', '--tmux', self.tmux])
+        send.assert_called_once_with('claude', self.sid, 'hello there', self.tmux)
+
+    def test_the_send_cli_accepts_text_after_a_flag(self):
+        with patch.object(reader, 'host_send', return_value=dict(status='sent')) as send:
+            reader.host_cli(['send', 'claude', self.sid, '--tmux', self.tmux, '--text', 'hello there'])
+        send.assert_called_once_with('claude', self.sid, 'hello there', self.tmux)
+
+
 class HandsOverChatTest(unittest.TestCase):
     sid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeec001'
     tmux = 'resume-chat'

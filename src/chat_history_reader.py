@@ -2454,6 +2454,26 @@ def host_chat_name(provider, sid):
     return located if isinstance(located, str) and TMUX_NAME.fullmatch(located) else None
 
 
+def host_pane_option(tmux, value):
+    if not isinstance(tmux, str) or TMUX_NAME.fullmatch(tmux) is None:
+        return False
+    command = ['tmux', 'set-option', '-t', '=' + tmux + ':']
+    command += ['-u', '@mp_host_sid'] if value is None else ['@mp_host_sid', value]
+    try:
+        subprocess.run(command, capture_output=True, timeout=5, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
+def host_mark_pane(provider, sid):
+    return host_pane_option(host_chat_name(provider, sid), sid)
+
+
+def host_clear_pane(provider, sid):
+    return host_pane_option(host_chat_name(provider, sid), None)
+
+
 def host_lock(provider, sid, wait=False):
     import fcntl
     handle = host_paths(provider, sid)["lock"].open("a")
@@ -2701,6 +2721,7 @@ def host_stop(provider, sid, force=False):
                 break
             time.sleep(0.125)
     host_clear_stale(provider, sid)
+    host_clear_pane(provider, sid)
     return dict(status="stopped")
 
 
@@ -2759,6 +2780,7 @@ def host_terminal(provider, sid, tmux=None):
     if host_alive(provider, sid):
         return dict(status='error', reason='host_still_running')
     host_write(host_paths(provider, sid)['owner'], dict(owner='terminal', at=time.time()))
+    host_clear_pane(provider, sid)
     host_log(provider, sid, 'terminal_move')
     command = host_terminal_command(provider, sid)
     if not host_terminal_send(tmux, command):
@@ -2785,6 +2807,30 @@ def host_resume(provider, sid, tmux=None, cwd=None, mode=None):
     if started in ('started', 'already') or adopted.get('status') == 'already':
         return dict(status='moved', start=started or adopted.get('reason'))
     return dict(status='error', reason=adopted.get('reason') or 'host_start_failed')
+
+
+def host_send(provider, sid, text, tmux=None):
+    import uuid
+    if not host_identity(provider, sid):
+        return dict(status='refused', reason='unsupported_provider')
+    if not isinstance(text, str) or not text.strip() or '\x00' in text:
+        return dict(status='refused', reason='invalid_text')
+    if not host_enabled(provider, sid):
+        return dict(status='refused', reason='host_disabled')
+    if tmux is None:
+        tmux = host_chat_name(provider, sid)
+    if not isinstance(tmux, str) or TMUX_NAME.fullmatch(tmux) is None:
+        return dict(status='refused', reason='no_chat')
+    token = 'mp-' + uuid.uuid4().hex
+    store = dict(message_protocol=1, provider=provider, sid=sid, tmux=tmux)
+    try:
+        submitted = message_store_request(dict(store, op='message_submit', message_id=token, text=text))
+        message_store_request(dict(store, op='message_dispatch'))
+        message = message_store_request(dict(store, op='message_status', message_id=token)).get('message')
+    except (OSError, ValueError, KeyError, TypeError):
+        return dict(status='error', reason='message_store_failed', id=token)
+    state = message.get('state') if isinstance(message, dict) else (submitted.get('message') or {}).get('state')
+    return dict(status='queued' if state in (None, 'queued') else 'sent', id=token, state=state)
 
 
 def host_deliver(provider, sid, token, attempt, epoch, text):
@@ -3591,6 +3637,7 @@ def host_main(provider, sid):
         state.update(dict(provider=provider, sid=sid, tmux=tmux, pid=os.getpid(), started=time.time()))
         host_written(state)
         host_write(paths["owner"], dict(owner="host", pid=os.getpid(), at=time.time(), tmux=tmux))
+        host_mark_pane(provider, sid)
         host_state_write(provider, sid, state)
         host_log(provider, sid, "start", dict(tmux=tmux))
         server = module.socket(module.AF_UNIX, module.SOCK_STREAM)
@@ -3654,7 +3701,7 @@ def host_status(provider, sid):
 
 
 def host_cli(argv):
-    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume"):
+    if not argv or argv[0] not in ("start", "stop", "status", "enable", "disable", "handover", "adopt", "terminal", "resume", "send"):
         return dict(status="error", reason="invalid_command")
     command, rest = argv[0], argv[1:]
     if len(rest) < 2:
@@ -3719,6 +3766,17 @@ def host_cli(argv):
         return host_terminal(provider, sid, tmux)
     if command == "resume":
         return host_resume(provider, sid, tmux, folder, mode)
+    if command == "send":
+        words = []
+        index = 2
+        while index < len(rest):
+            if rest[index].startswith("--"):
+                index += 2 if rest[index] in ("--tmux", "--text", "--cwd") else 1
+                continue
+            words.append(rest[index])
+            index += 1
+        text = rest[rest.index("--text") + 1] if "--text" in rest[:-1] else " ".join(words)
+        return host_send(provider, sid, text, tmux)
     if command == "stop":
         return host_stop(provider, sid)
     if command == "handover":
@@ -5185,7 +5243,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 46
+RUNTIME_GENERATION = 47
 
 if __name__ == '__main__':
     import base64 as _base64
