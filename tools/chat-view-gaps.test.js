@@ -64,6 +64,7 @@ var attempts: usize = 0;
 var transport_ok = false;
 fn captureChatTranscript(_: u32, _: []u16, _: bool) ?usize { return 0; }
 fn chatWorkingIndicatorInvalidate() void {}
+fn chatLiveApprovalAnswer(_: u32, _: permission.Action) bool { return false; }
 fn chatAgentKey(_: u32, _: u8) bool { attempts += 1; return transport_ok; }
 test "audit failed permission send can be retried" {
     try std.testing.expect(!chatPermissionAnswer(0, .allow));
