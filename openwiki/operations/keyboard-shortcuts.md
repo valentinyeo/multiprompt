@@ -234,6 +234,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Browser pane focused | Ctrl+C / Ctrl+V / Ctrl+K pass through to the page |
 | Ctrl+K / right-click tab -&gt; Pin to Top | Pins keep sessions above other tabs. Closing unpins them. Archiving and group closing remain protected. |
 | Ctrl+K / right-click tab -&gt; Close all disconnected sessions | Close disconnected sessions, including pinned sessions. Keep live sessions. |
+| Ctrl / Shift+click tabs, then drag | Select tabs and move them together |
 | Drag tab onto a group | Move it there without changing pin state |
 | Drag tab: Pinned / Recents | Change its order inside the group or ungrouped list |
 | Click tier heading | Collapse / expand ungrouped Pinned or Recents |

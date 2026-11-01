@@ -1389,33 +1389,10 @@ pub fn materializeDisplayOrder() void {
     var sorted_n: u32 = 0;
     buildSortedOrder(&sorted, &sorted_n);
 
-    const active_pid: DWORD = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].pid else 0;
-
-    var new_shells: [MAX_SHELLS]Shell = undefined;
-    var placed: [MAX_SHELLS]bool = [_]bool{false} ** MAX_SHELLS;
-    var new_idx: u32 = 0;
-
-    for (0..sorted_n) |si| {
-        const old_idx = sorted[si];
-        new_shells[new_idx] = app_state.shells[old_idx];
-        placed[old_idx] = true;
-        new_idx += 1;
-    }
-    for (0..app_state.shell_count) |i| {
-        if (!placed[i]) {
-            new_shells[new_idx] = app_state.shells[i];
-            new_idx += 1;
-        }
-    }
-    for (0..app_state.shell_count) |i| app_state.shells[i] = new_shells[i];
-
-    if (active_pid != 0) {
-        for (0..app_state.shell_count) |i| {
-            if (app_state.shells[i].pid == active_pid) {
-                app_state.active_shell = @intCast(i);
-                break;
-            }
-        }
+    for (sorted[0..sorted_n]) |*idx| idx.* = app_state.shells[idx.*].shell_id;
+    for (sorted[0..sorted_n], 0..) |id, dest| {
+        const src = @import("inbox.zig").findShellById(id) orelse continue;
+        _ = moveShellToIndexWithGroup(src, @intCast(dest), tabGroupId(src));
     }
 }
 
@@ -1681,6 +1658,177 @@ pub fn rowTotalHeight(row: Row) i32 {
         .room_header => sectionHeaderHeight(),
         .tab, .inbox, .room, .room_new => tabRowH(),
     };
+}
+
+pub fn dragGroupsToken() u64 {
+    var token: u64 = 14695981039346656037;
+    for (app_state.groups[0..app_state.group_count]) |group| {
+        token = (token ^ group.id) *% 1099511628211;
+        token = (token ^ @as(u64, @intFromBool(group.collapsed))) *% 1099511628211;
+    }
+    return token;
+}
+
+pub fn dragIdsInCurrentWorkspace(ids: []const u32) bool {
+    for (ids) |id| {
+        const i = @import("inbox.zig").findShellById(id) orelse return false;
+        if (!tabInCurrentWorkspace(i)) return false;
+    }
+    return true;
+}
+
+pub fn visibleTabIds(out: *[MAX_SHELLS]u32) u32 {
+    var rows: [MAX_ROWS]Row = undefined;
+    const n = layoutRows(&rows);
+    var count: u32 = 0;
+    for (rows[0..n]) |row| {
+        if (row.kind != .tab or row.shell_idx >= app_state.shell_count or count >= MAX_SHELLS) continue;
+        out[count] = app_state.shells[row.shell_idx].shell_id;
+        count += 1;
+    }
+    return count;
+}
+
+pub fn selectVisibleTab(tab_idx: u32, ctrl: bool, shift: bool) void {
+    var ids: [MAX_SHELLS]u32 = undefined;
+    const count = visibleTabIds(&ids);
+    const visible = ids[0..count];
+    const clicked = app_state.shells[tab_idx].shell_id;
+    for (0..app_state.shell_count) |i| {
+        if (std.mem.indexOfScalar(u32, visible, app_state.shells[i].shell_id) == null) app_state.shells[i].selected = false;
+    }
+    if (shift) {
+        const active = if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else clicked;
+        const anchor = if (app_state.drag_anchor) |id| if (std.mem.indexOfScalar(u32, visible, id) != null) id else active else active;
+        const first = std.mem.indexOfScalar(u32, visible, anchor) orelse std.mem.indexOfScalar(u32, visible, clicked) orelse return;
+        const last = std.mem.indexOfScalar(u32, visible, clicked) orelse return;
+        app_state.drag_anchor = visible[first];
+        for (visible[@min(first, last) .. @max(first, last) + 1]) |id| {
+            if (@import("inbox.zig").findShellById(id)) |i| app_state.shells[i].selected = true;
+        }
+    } else if (ctrl) {
+        if (selectedTabCount() == 0) {
+            if (app_state.active_shell < app_state.shell_count and std.mem.indexOfScalar(u32, visible, app_state.shells[app_state.active_shell].shell_id) != null) app_state.shells[app_state.active_shell].selected = true;
+            app_state.shells[tab_idx].selected = true;
+        } else {
+            app_state.shells[tab_idx].selected = !app_state.shells[tab_idx].selected;
+        }
+        app_state.drag_anchor = clicked;
+    } else {
+        if (!app_state.shells[tab_idx].selected) _ = clearTabSelection();
+        app_state.drag_anchor = clicked;
+    }
+}
+
+pub fn moveSelectedShellIds(ids: []const u32, hit: HitTarget) bool {
+    if (ids.len < 2 or !dragIdsInCurrentWorkspace(ids)) return false;
+    for (ids, 0..) |id, pos| {
+        if (std.mem.indexOfScalar(u32, ids[0..pos], id) != null) return false;
+        const i = @import("inbox.zig").findShellById(id).?;
+        const gid = tabGroupId(i);
+        if (gid != 0 and findGroupIdx(gid) == null) return false;
+    }
+
+    var order: [MAX_SHELLS]u32 = undefined;
+    var original: [MAX_SHELLS]u32 = undefined;
+    const auto = app_state.g_tab_sort_auto and !app_state.g_starred_workspace;
+    var count: usize = 0;
+    if (auto) {
+        var sorted: [MAX_SHELLS]u32 = undefined;
+        var sorted_n: u32 = 0;
+        buildSortedOrder(&sorted, &sorted_n);
+        for (sorted[0..sorted_n]) |i| { order[count] = app_state.shells[i].shell_id; count += 1; }
+    }
+    for (0..app_state.shell_count) |i| {
+        const id = app_state.shells[i].shell_id;
+        if (std.mem.indexOfScalar(u32, order[0..count], id) == null) { order[count] = id; count += 1; }
+    }
+    @memcpy(original[0..count], order[0..count]);
+
+    var boundary: ?u32 = null;
+    var group: ?u32 = null;
+    var tier: ?SidebarTier = null;
+    switch (hit) {
+        .tab => |i| {
+            if (i >= app_state.shell_count) return false;
+            const id = app_state.shells[i].shell_id;
+            if (std.mem.indexOfScalar(u32, ids, id) != null) return false;
+            boundary = id;
+            group = tabGroupId(i);
+            if (group.? != 0 and findGroupIdx(group.?) == null) return false;
+            tier = sidebarTierForDrop(hit);
+        },
+        .header => |gi| {
+            if (gi >= app_state.group_count) return false;
+            const gid = app_state.groups[gi].id;
+            group = gid;
+            var last_member: ?usize = null;
+            for (order[0..count], 0..) |id, pos| {
+                const i = @import("inbox.zig").findShellById(id).?;
+                if (!tabInCurrentWorkspace(i) or tabGroupId(i) != gid) continue;
+                last_member = pos;
+                if (std.mem.indexOfScalar(u32, ids, id) == null) {
+                    boundary = id;
+                    break;
+                }
+            }
+            if (boundary == null) {
+                var all_in_group = true;
+                for (ids) |id| {
+                    const i = @import("inbox.zig").findShellById(id).?;
+                    if (tabGroupId(i) != gid) all_in_group = false;
+                }
+                if (all_in_group) return false;
+                if (last_member) |last| {
+                    for (order[last + 1..count]) |id| {
+                        if (std.mem.indexOfScalar(u32, ids, id) == null) { boundary = id; break; }
+                    }
+                }
+            }
+        },
+        .section => |t| {
+            tier = t;
+            for (order[0..count]) |id| {
+                const i = @import("inbox.zig").findShellById(id).?;
+                if (!tabInCurrentWorkspace(i) or shellSidebarTier(i) != t) continue;
+                if (std.mem.indexOfScalar(u32, ids, id) == null) { boundary = id; break; }
+            }
+        },
+        else => return false,
+    }
+
+    var metadata_changed = false;
+    for (ids) |id| {
+        const i = @import("inbox.zig").findShellById(id).?;
+        if (group) |gid| if (tabGroupId(i) != gid) { metadata_changed = true; };
+        if (tier) |t| if (shellSidebarTier(i) != t) { metadata_changed = true; };
+        const s = std.mem.indexOfScalar(u32, order[0..count], id).?;
+        const t = if (boundary) |b| std.mem.indexOfScalar(u32, order[0..count], b).? else count;
+        const dst = if (s < t) t - 1 else t;
+        if (s < dst) {
+            var j = s;
+            while (j < dst) : (j += 1) order[j] = order[j + 1];
+        } else {
+            var j = s;
+            while (j > dst) : (j -= 1) order[j] = order[j - 1];
+        }
+        order[dst] = id;
+    }
+    if (!metadata_changed and std.mem.eql(u32, order[0..count], original[0..count])) return false;
+    if (auto) { materializeDisplayOrder(); app_state.g_tab_sort_auto = false; }
+    for (ids) |id| {
+        const s = @import("inbox.zig").findShellById(id).?;
+        const t = if (boundary) |b| @import("inbox.zig").findShellById(b).? else app_state.shell_count;
+        const dst = if (s < t) t - 1 else t;
+        const gid = group orelse tabGroupId(s);
+        if (tier) |want| setPinnedTop(s, want == .pinned);
+        _ = moveShellToIndexWithGroup(s, dst, gid);
+    }
+    if (group) |gid| if (gid != 0) {
+        if (findGroupIdx(gid)) |gi| app_state.groups[gi].collapsed = false;
+    };
+    pruneEmptyGroups();
+    return true;
 }
 
 pub fn sidebarTierForDrop(hit: HitTarget) ?SidebarTier {
@@ -2328,6 +2476,21 @@ pub fn paintSidebar(hdc: HANDLE) void {
         paintWorkspaceStrip(hdc, sidebar_bg);
         @import("workspace_switcher.zig").paintHeader(hdc);
         if (app_state.g_sidebar_collapsed) paintSidebarStatusCardPopup(hdc, font_title, font_status_card);
+        if (app_state.drag_id_count > 1 and app_state.drag_crossed) {
+            const radius = uiScaled(12);
+            const bottom = client_rc.bottom - sidebarStickyCardSpan();
+            if (SIDEBAR_W() >= radius * 2 and bottom >= radius * 2) {
+                const x = @max(radius, @min(SIDEBAR_W() - radius, app_state.drag_pointer_x + radius));
+                const y = @max(radius, @min(bottom - radius, app_state.drag_pointer_y + radius));
+                drawAttentionDot(hdc, x, y, radius, customColorOr("attention", RGB(60, 120, 220)));
+                var buf: [12]u8 = undefined;
+                const label = std.fmt.bufPrint(&buf, "{d}", .{app_state.drag_id_count}) catch "";
+                _ = SelectObject(hdc, font_subtitle);
+                _ = SetTextColor(hdc, RGB(255, 255, 255));
+                var badge = RECT{ .left = x - radius, .top = y - radius, .right = x + radius, .bottom = y + radius };
+                drawAscii(hdc, label, &badge, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+            }
+        }
     }
 
     if (app_state.g_search_active) {

@@ -1375,6 +1375,53 @@ fn recordFrontVisit() void {
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }
 
+fn resetSidebarDrag() void {
+    app_state.drag_id_count = 0;
+    app_state.drag_crossed = false;
+    app_state.drag_collapse = false;
+    app_state.drag_active = false;
+    app_state.drag_pending_materialize = false;
+    app_state.drag_is_group = false;
+    app_state.drag_section_only = false;
+    app_state.drag_detach_blocked = false;
+    invalidateSidebar();
+}
+
+fn sidebarDragValid() bool {
+    if (app_state.drag_starred != app_state.g_starred_workspace or
+        (!app_state.drag_starred and app_state.drag_workspace != app_state.g_active_workspace) or
+        app_state.drag_unread_only != app_state.g_unread_only or app_state.g_hide_sidebar or
+        app_state.drag_sidebar_collapsed != app_state.g_sidebar_collapsed or app_state.drag_single_window != app_state.g_single_window or
+        app_state.drag_pinned_collapsed != app_state.g_pinned_section_collapsed or app_state.drag_recents_collapsed != app_state.g_recents_section_collapsed or
+        (app_state.drag_id_count > 1 and app_state.drag_groups_token != @import("sidebar.zig").dragGroupsToken()) or
+        app_state.g_account_locked or @import("settings_panel.zig").isOpen() or
+        app_state.g_search_active or app_state.g_inbox_active or app_state.g_all_sessions_active or
+        app_state.g_shortcuts_active or app_state.g_changelog_active or app_state.g_url_picker_active or
+        app_state.g_snippet_create_active) return false;
+    return @import("sidebar.zig").dragIdsInCurrentWorkspace(app_state.drag_ids[0..app_state.drag_id_count]);
+}
+
+fn clearSelectionForClick(hwnd: HANDLE, mx: i32, my: i32) void {
+    if (app_state.g_search_active) {
+        var rc: RECT = std.mem.zeroes(RECT);
+        _ = GetClientRect(hwnd, &rc);
+        const width = searchOverlayW();
+        const height = searchInputH() + @as(i32, @intCast(@min(app_state.g_search_result_count, @import("drawing.zig").searchVisibleRows()))) * searchRowH() + searchFooterH();
+        const x = searchOverlayOx(rc.right - rc.left, width);
+        const y = searchOverlayOy(rc.bottom - rc.top, height);
+        if (mx >= x and mx < x + width and my >= y and my < y + height) return;
+    } else if (!@import("settings_panel.zig").isOpen() and !app_state.g_account_locked and !app_state.g_hide_sidebar and
+        !inboxButtonHitTest(mx, my) and !app_state.g_inbox_active and !app_state.g_all_sessions_active and !app_state.g_shortcuts_active and
+        !app_state.g_changelog_active and !app_state.g_url_picker_active and !app_state.g_snippet_create_active and
+        mx >= 0 and mx < SIDEBAR_W() - 4 and my >= @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight() and
+        !sidebarStickyCardHitTest(my) and !sidebarStickyCardHoverTest(mx, my) and updateCardHit(mx, my) == 0)
+    {
+        if (hitTestSidebar(mx, my + app_state.g_sidebar_scroll) == .tab) return;
+    }
+    app_state.drag_anchor = null;
+    if (clearTabSelection()) invalidateSidebar();
+}
+
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     if (freeze_recorder.heartbeat(msg, wp)) return 0;
     freeze_recorder.note(msg, app_state.active_shell, if (app_state.g_inbox_active) .inbox else if (app_state.g_all_sessions_active) .sessions else if (app_state.g_search_active) .search else if (app_state.g_shortcuts_active) .shortcuts else if (app_state.g_changelog_active) .changelog else if (app_state.g_browser_focus_mode) .browser else if (app_state.g_chat_active) .chat else .terminal);
@@ -1386,6 +1433,15 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
     defer app_state.g_focus_user_action_tick = prior_focus_action;
+    if (msg == WM_LBUTTONDOWN) clearSelectionForClick(hwnd, GET_X(lp), GET_Y(lp));
+    if (app_state.drag_id_count > 0) {
+        if (msg == 0x0215) {
+            resetSidebarDrag();
+        } else if (msg == 0x001F or (msg == WM_MOUSEMOVE and (wp & MK_LBUTTON) == 0) or !sidebarDragValid()) {
+            resetSidebarDrag();
+            _ = ReleaseCapture();
+        }
+    }
     if (@import("window_frame.zig").handle(hwnd, msg, wp, lp)) |result| return result;
     if (msg == WM_LBUTTONDOWN and @import("settings_panel.zig").isOpen()) {
         @import("settings_panel.zig").close();
@@ -2049,20 +2105,43 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     },
                     .tab => |tab_idx| {
                         if (tab_idx < app_state.shell_count) {
-                            if (isCtrlDown()) {
-                                commitRename();
-                                const had_selection = selectedTabCount() > 0;
-                                if (!had_selection) {
-                                    if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].selected = true;
-                                    app_state.shells[tab_idx].selected = true;
-                                } else {
-                                    app_state.shells[tab_idx].selected = !app_state.shells[tab_idx].selected;
-                                }
+                            commitRename();
+                            const ctrl = isCtrlDown();
+                            const shift = (wp & 0x0004) != 0;
+                            @import("sidebar.zig").selectVisibleTab(tab_idx, ctrl, shift);
+                            if (ctrl or shift) {
                                 invalidateSidebar();
                             } else {
-                                commitRename();
-                                _ = clearTabSelection();
+                                const leader = app_state.shells[tab_idx].shell_id;
+                                const collapse = app_state.shells[tab_idx].selected;
+                                var visible: [app_state.MAX_SHELLS]u32 = undefined;
+                                const visible_count = @import("sidebar.zig").visibleTabIds(&visible);
+                                var count: u32 = 0;
+                                if (collapse) {
+                                    for (visible[0..visible_count]) |id| {
+                                        const i = findShellById(id) orelse continue;
+                                        if (app_state.shells[i].selected) { app_state.drag_ids[count] = id; count += 1; }
+                                    }
+                                }
+                                if (count == 0) { app_state.drag_ids[0] = leader; count = 1; }
+                                app_state.drag_starred = app_state.g_starred_workspace;
+                                app_state.drag_workspace = app_state.g_active_workspace;
+                                app_state.drag_unread_only = app_state.g_unread_only;
+                                app_state.drag_sidebar_collapsed = app_state.g_sidebar_collapsed;
+                                app_state.drag_single_window = app_state.g_single_window;
+                                app_state.drag_pinned_collapsed = app_state.g_pinned_section_collapsed;
+                                app_state.drag_recents_collapsed = app_state.g_recents_section_collapsed;
+                                app_state.drag_groups_token = @import("sidebar.zig").dragGroupsToken();
                                 @import("console.zig").switchToShellByUser(tab_idx);
+                                app_state.drag_leader = leader;
+                                app_state.drag_id_count = count;
+                                app_state.drag_collapse = collapse;
+                                app_state.drag_crossed = false;
+                                if (!sidebarDragValid()) {
+                                    resetSidebarDrag();
+                                    return 0;
+                                }
+                                invalidateSidebar();
                                 app_state.drag_pending_materialize = app_state.g_tab_sort_auto;
                                 app_state.drag_active = true;
                                 app_state.drag_is_group = false;
@@ -2384,6 +2463,33 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 const mx = GET_X(lp);
                 const my = GET_Y(lp);
 
+                if (app_state.drag_id_count > 0) {
+                    const dx = mx - app_state.drag_start_x;
+                    const dy = my - app_state.drag_start_y;
+                    const adx: i32 = if (dx < 0) -dx else dx;
+                    const ady: i32 = if (dy < 0) -dy else dy;
+                    if (adx >= DRAG_MATERIALIZE_THRESH or ady >= DRAG_MATERIALIZE_THRESH) app_state.drag_crossed = true;
+                    if (app_state.drag_id_count > 1) {
+                        app_state.drag_pointer_x = mx;
+                        app_state.drag_pointer_y = my;
+                        invalidateSidebar();
+                        if (!app_state.drag_crossed) return 0;
+                        if (my >= @import("browser_pane.zig").wsStripHeight() + @import("workspace_switcher.zig").headerHeight() and
+                            mx >= -32 and mx < SIDEBAR_W() + 32 and !inboxButtonHitTest(mx, my) and
+                            !sidebarStickyCardHitTest(my) and !sidebarStickyCardHoverTest(mx, my) and updateCardHit(mx, my) == 0)
+                        {
+                            const hit = hitTestSidebar(mx, my + app_state.g_sidebar_scroll);
+                            if (@import("sidebar.zig").moveSelectedShellIds(app_state.drag_ids[0..app_state.drag_id_count], hit)) {
+                                app_state.drag_groups_token = @import("sidebar.zig").dragGroupsToken();
+                                saveSession();
+                                invalidateSidebar();
+                            }
+                        }
+                        return 0;
+                    }
+                    app_state.drag_src = findShellById(app_state.drag_leader) orelse return 0;
+                }
+
                 if (app_state.drag_pending_materialize) {
                     const pdx = mx - app_state.drag_start_x;
                     const pdy = my - app_state.drag_start_y;
@@ -2478,15 +2584,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
                         if (is_zigshell_target) {
                             app_state.drag_detached = true;
-                            app_state.drag_active = false;
-                            app_state.drag_pending_materialize = false;
+                            resetSidebarDrag();
                             _ = ReleaseCapture();
                             _ = detachTabToExistingWindow(app_state.drag_src, zigshell_target, false);
                             return 0;
                         } else if (app_state.shell_count > 1) {
                             app_state.drag_detached = true;
-                            app_state.drag_active = false;
-                            app_state.drag_pending_materialize = false;
+                            resetSidebarDrag();
                             _ = ReleaseCapture();
                             detachTabToNewWindow(app_state.drag_src);
                             return 0;
@@ -2612,11 +2716,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         _ = InvalidateRect(hwnd, null, 0);
                     }
                 }
-                app_state.drag_active = false;
-                app_state.drag_pending_materialize = false;
-                app_state.drag_is_group = false;
-                app_state.drag_section_only = false;
-                app_state.drag_detach_blocked = false;
+                if (app_state.drag_id_count > 0 and app_state.drag_collapse and !app_state.drag_crossed) {
+                    _ = clearTabSelection();
+                }
+                resetSidebarDrag();
                 _ = ReleaseCapture();
             }
             app_state.drag_detached = false;
@@ -7514,8 +7617,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_PARENTNOTIFY => {
-            const child_msg = @as(u32, @truncate(wp));
+            const child_msg = @as(u16, @truncate(wp));
             if (child_msg == WM_LBUTTONDOWN) {
+                app_state.drag_anchor = null;
+                if (clearTabSelection()) invalidateSidebar();
                 if (!@import("room_frontend.zig").privateActionsAllowed()) return DefWindowProcW(hwnd, msg, wp, lp);
                 forceReinstallHooksThrottled();
                 syncMouseHookForUrlClicks();
