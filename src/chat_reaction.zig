@@ -211,27 +211,27 @@ pub const View = struct {
             cursor = @max(cursor, match.range.end);
         }
         visible += body.len - cursor;
-        const projected = try a.alloc(u16, visible);
-        errdefer a.free(projected);
+        const display_text = try a.alloc(u16, visible);
+        errdefer a.free(display_text);
         const source = try a.alloc(usize, visible);
         errdefer a.free(source);
         cursor = 0;
         var out: usize = 0;
         for (matches.items) |match| {
             while (cursor < match.range.start) : (cursor += 1) {
-                projected[out] = body[cursor];
+                display_text[out] = body[cursor];
                 source[out] = cursor;
                 out += 1;
             }
             cursor = @max(cursor, match.range.end);
         }
         while (cursor < body.len) : (cursor += 1) {
-            projected[out] = body[cursor];
+            display_text[out] = body[cursor];
             source[out] = cursor;
             out += 1;
         }
         for (matches.items) |match| self.badges.items[match.target] |= match.emoji.bit();
-        return .{ .text = projected, .source = source };
+        return .{ .text = display_text, .source = source };
     }
 
     pub fn projected(self: *const View, index: usize) ?*const Projection {
