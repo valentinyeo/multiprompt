@@ -4027,7 +4027,7 @@ class AgentHostTest(unittest.TestCase):
     text = 'host delivery fixture'
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
         self.addCleanup(patch.stopall)
@@ -4759,7 +4759,7 @@ class HostEventStreamTest(unittest.TestCase):
     tmux = 'stream-chat'
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
         self.addCleanup(patch.stopall)
@@ -4871,7 +4871,7 @@ class ServeEventPushTest(unittest.TestCase):
     tmux = 'serve-events-chat'
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
         self.addCleanup(patch.stopall)
