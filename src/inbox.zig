@@ -139,16 +139,6 @@ pub fn writeUintTo(dst: []u8, v: u64) usize {
     return s.len;
 }
 
-fn u16ToAsciiBuf(src: []const u16, out: []u8) u32 {
-    var n: usize = 0;
-    for (src) |wc| {
-        if (n >= out.len) break;
-        out[n] = if (wc >= 32 and wc < 127) @intCast(wc) else '?';
-        n += 1;
-    }
-    return @intCast(n);
-}
-
 pub fn asciiToU16(src: []const u8, out: []u16) usize {
     var n: usize = 0;
     for (src) |c| {
@@ -340,9 +330,11 @@ pub fn publishInboxStateNow() void {
         const o2 = ",\"name\":\"";
         @memcpy(json[pos .. pos + o2.len], o2);
         pos += o2.len;
-        var nm: [64]u8 = undefined;
-        const nl = u16ToAsciiBuf(app_state.shells[i].name[0..app_state.shells[i].name_len], &nm);
-        appendJsonEscaped(&json, &pos, nm[0..nl]);
+        var nm: [192]u8 = undefined;
+        var wide_name = app_state.shells[i].name[0..app_state.shells[i].name_len];
+        if (wide_name.len > 0 and std.unicode.utf16IsHighSurrogate(wide_name[wide_name.len - 1])) wide_name = wide_name[0 .. wide_name.len - 1];
+        const name = json_reader.utf8(wide_name, &nm);
+        appendJsonEscaped(&json, &pos, name);
         const o3 = "\",\"sub\":\"";
         @memcpy(json[pos .. pos + o3.len], o3);
         pos += o3.len;
@@ -530,7 +522,7 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
     }
     for (json_reader.array(entries)) |o| {
         if (app_state.g_inbox_row_count >= INBOX_MAX_ROWS) break;
-        var sname: [64]u8 = std.mem.zeroes([64]u8);
+        var sname: [193]u8 = std.mem.zeroes([193]u8);
         var ssub: [64]u8 = std.mem.zeroes([64]u8);
         var spv: [96]u8 = std.mem.zeroes([96]u8);
         const snl = json_reader.copyString(o, "name", &sname);
@@ -577,9 +569,8 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
         app_state.g_inbox_rows[ri].br = @intCast(@min(sbr, @as(u64, 2)));
         app_state.g_inbox_rows[ri].eta_deadline_tick = sed;
         app_state.g_inbox_rows[ri].eta_total_ms = set;
-        const nl2 = @min(snl, @as(u32, 63));
-        @memcpy(app_state.g_inbox_rows[ri].name[0..nl2], sname[0..nl2]);
-        app_state.g_inbox_rows[ri].name_len = nl2;
+        @memcpy(app_state.g_inbox_rows[ri].name[0..snl], sname[0..snl]);
+        app_state.g_inbox_rows[ri].name_len = snl;
         const sl2 = @min(ssl, @as(u32, 63));
         @memcpy(app_state.g_inbox_rows[ri].sub[0..sl2], ssub[0..sl2]);
         app_state.g_inbox_rows[ri].sub_len = sl2;
@@ -1344,9 +1335,9 @@ pub fn paintInbox(hdc: HANDLE) void {
         _ = SelectObject(hdc, font_title);
         _ = SetTextColor(hdc, if (selected or row.att) fg_bright else fg_dim);
         var name_rc = RECT{ .left = name_left, .top = y, .right = name_right, .bottom = y + row_h };
-        var nbuf: [64]u16 = undefined;
-        const nl2 = asciiToU16(row.name[0..row.name_len], &nbuf);
-        _ = DrawTextW(hdc, @ptrCast(&nbuf), @intCast(nl2), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        var nbuf: [193]u16 = undefined;
+        const nl2 = json_reader.wide(row.name[0..row.name_len], &nbuf);
+        _ = @import("dwrite_text.zig").draw(hdc, &nbuf, @intCast(nl2), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 
         _ = SelectObject(hdc, font_subtitle);
         _ = SetTextColor(hdc, fg_dim);
@@ -1642,7 +1633,8 @@ pub fn refreshNextUnreadCache() void {
         const row = &app_state.g_inbox_rows[i];
         if (!row.att) continue;
         if (app_state.g_nextunread_count == 0) {
-            const nlen: u32 = @min(row.name_len, @as(u32, app_state.g_nextunread_name.len));
+            var nlen: u32 = @min(row.name_len, @as(u32, app_state.g_nextunread_name.len));
+            while (nlen > 0 and nlen < row.name_len and row.name[nlen] & 0xc0 == 0x80) nlen -= 1;
             @memcpy(app_state.g_nextunread_name[0..nlen], row.name[0..nlen]);
             app_state.g_nextunread_name_len = nlen;
         }

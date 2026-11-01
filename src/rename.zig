@@ -480,13 +480,12 @@ pub fn commitRename() void {
             for (0..app_state.g_inbox_row_count) |ri| {
                 const row = &app_state.g_inbox_rows[ri];
                 if (row.sid != renamed_sid or app_state.g_inbox_ws[row.ws].hwnd != @intFromPtr(app_state.g_main_hwnd)) continue;
-                const name_len: usize = @min(app_state.shells[app_state.g_edit_tab].name_len, row.name.len - 1);
-                for (0..name_len) |ni| {
-                    const ch = app_state.shells[app_state.g_edit_tab].name[ni];
-                    row.name[ni] = if (ch < 128) @intCast(ch) else '?';
-                }
-                row.name[name_len] = 0;
-                row.name_len = @intCast(name_len);
+                const shell = &app_state.shells[app_state.g_edit_tab];
+                var wide_name = shell.name[0..shell.name_len];
+                if (wide_name.len > 0 and std.unicode.utf16IsHighSurrogate(wide_name[wide_name.len - 1])) wide_name = wide_name[0 .. wide_name.len - 1];
+                const name = @import("json_reader.zig").utf8(wide_name, row.name[0 .. row.name.len - 1]);
+                row.name[name.len] = 0;
+                row.name_len = @intCast(name.len);
             }
         }
         publishInboxState();

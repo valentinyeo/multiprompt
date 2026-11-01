@@ -397,7 +397,6 @@ const formatEtaRemaining = @import("notifications.zig").formatEtaRemaining;
 const etaFillFraction = @import("notifications.zig").etaFillFraction;
 const nowFileTime = @import("inbox.zig").nowFileTime;
 const writeUintTo = @import("inbox.zig").writeUintTo;
-const asciiToU16 = @import("inbox.zig").asciiToU16;
 const publishInboxState = @import("inbox.zig").publishInboxState;
 const publishInboxStateNow = @import("inbox.zig").publishInboxStateNow;
 const inboxNextRowFromContext = @import("inbox.zig").inboxNextRowFromContext;
@@ -2332,10 +2331,10 @@ pub fn paintSidebar(hdc: HANDLE) void {
                 _ = SelectObject(hdc, font_title);
                 _ = SetTextColor(hdc, customColorOr("text_inactive", if (app_state.g_light_theme) RGB(60, 60, 60) else RGB(220, 220, 220)));
                 drawFavoriteDot(hdc, 12, y + @divTrunc(tabRowH(), 2));
-                var name: [64]u16 = undefined;
-                const name_len = asciiToU16(session.name[0..session.name_len], &name);
+                var name: [193]u16 = undefined;
+                const name_len = @import("json_reader.zig").wide(session.name[0..session.name_len], &name);
                 var name_rc = RECT{ .left = 24, .top = y, .right = SIDEBAR_W() - 8, .bottom = y + tabRowH() };
-                _ = DrawTextW(hdc, &name, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                _ = @import("dwrite_text.zig").draw(hdc, &name, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
                 continue;
             }
 
@@ -3344,19 +3343,15 @@ pub fn paintSidebar(hdc: HANDLE) void {
                         _ = SelectObject(hdc, palette_font);
                         const nu_blue = customColorOr("attention", RGB(60, 120, 220));
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(255, 255, 255) else nu_blue);
-                        var nu_buf: [96]u16 = undefined;
+                        var nu_buf: [ui_words.global_next_unread_prefix.len + 193]u16 = undefined;
                         var nul: usize = 0;
                         for (ui_words.global_next_unread_prefix) |c| {
                             nu_buf[nul] = c;
                             nul += 1;
                         }
-                        for (app_state.g_nextunread_name[0..app_state.g_nextunread_name_len]) |c| {
-                            if (nul >= nu_buf.len) break;
-                            nu_buf[nul] = c;
-                            nul += 1;
-                        }
+                        nul += @import("json_reader.zig").wide(app_state.g_nextunread_name[0..app_state.g_nextunread_name_len], nu_buf[nul..]);
                         var nu_rc = RECT{ .left = text_left, .top = ry, .right = ox + overlay_w - 120, .bottom = ry + row_h };
-                        _ = DrawTextW(hdc, @ptrCast(&nu_buf), @intCast(nul), &nu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                        _ = @import("dwrite_text.zig").draw(hdc, &nu_buf, @intCast(nul), &nu_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
                         _ = SelectObject(hdc, palette_hint_font);
                         _ = SetTextColor(hdc, if (ri == app_state.g_search_sel) RGB(160, 160, 170) else RGB(100, 100, 110));
                         var nu_cnt: [12]u8 = undefined;
