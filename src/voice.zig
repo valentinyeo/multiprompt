@@ -143,10 +143,6 @@ const invalidateChatHeader = @import("chat_composer.zig").invalidateChatHeader;
 const voiceScreenFallbackShouldSpeak = @import("app_state.zig").voiceScreenFallbackShouldSpeak;
 const VoiceMic = @import("app_state.zig").VoiceMic;
 const VoiceResult = @import("app_state.zig").VoiceResult;
-var dictation_private_epoch: u64 = 0;
-var dictation_capture_epoch: u64 = 0;
-var dictation_private_capture = false;
-var dictation_external_target: @import("win32.zig").HANDLE = null;
 const VoiceJob = @import("app_state.zig").VoiceJob;
 const VoiceFrame = @import("app_state.zig").VoiceFrame;
 const ReadConsoleOutputCharacterW = @import("win32.zig").ReadConsoleOutputCharacterW;
@@ -2422,3 +2418,8 @@ test "IGSH-888 Chat View header shows no dictation status text" {
     showDictationStatus("Dictation transcribing...", 60000);
     try std.testing.expect(app_state.g_cap_msg_len > 0);
 }
+
+var dictation_private_epoch: u64 = 0;
+var dictation_capture_epoch: u64 = 0;
+var dictation_private_capture = false;
+var dictation_external_target: @import("win32.zig").HANDLE = null;
