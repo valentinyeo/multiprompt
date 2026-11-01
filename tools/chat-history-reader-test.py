@@ -5148,6 +5148,19 @@ class HostControlTest(HostEventStreamTest):
                          dict(request_id='req-2', answers={'Which database should I target?': 'Postgres',
                                                            'Which checks should run?': 'Unit, E2E'}, dismissed=False))
 
+    def test_a_question_longer_than_a_display_line_answers_under_its_id(self):
+        question = ('Which of these three approaches should I take for the retry loop in the chat reader when the host '
+                    'keeps restarting in the middle of a turn while the desktop is asleep and the socket never comes back')
+        self.feed(dict(type='control_request', request_id='req-9', request=dict(
+            subtype='can_use_tool', tool_name='AskUserQuestion', display_name='AskUserQuestion', tool_use_id='toolu_long',
+            input=dict(questions=[dict(question=question, header='Retry', multiSelect=False,
+                                       options=[dict(label='Keep waiting'), dict(label='Fail fast')])]),
+            requires_user_interaction=True)))
+        self.assertEqual(self.reply(op='question_reply', request_id='req-9', answers={'0': 'Fail fast'})['status'], 'ok')
+        response = self.writes()[0]['response']['response']
+        self.assertEqual(response['updatedInput']['answers'], {question: 'Fail fast'})
+        self.assertEqual(self.events('question.resolved')[0]['payload']['answers'], {question: 'Fail fast'})
+
     def test_dismissing_a_question_denies_it(self):
         self.feed(dict(type='control_request', request_id='req-2', request=dict(
             subtype='can_use_tool', tool_name='AskUserQuestion', display_name='AskUserQuestion', tool_use_id='toolu_ask',

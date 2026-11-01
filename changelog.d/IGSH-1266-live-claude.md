@@ -17,3 +17,4 @@ You can send the next message without waiting for the answer to finish.
 A message sent mid answer keeps its place instead of being turned away.
 A single line break in a reply now shows as a line break instead of a space.
 A Claude reply now streams into the chat as it is written, with the working dots on.
+A long question from Claude now answers with the right choice instead of losing the answer.

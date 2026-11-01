@@ -94,6 +94,13 @@ test('D3 a live question shows the existing pills and answers one question at a 
   assert.match(render, /chatChoiceDigitKey\(wp\)/);
 });
 
+test('D3 a question answer is keyed by the question id, not its cut down text', () => {
+  const live = read('src/chat_live.zig');
+  assert.match(live, /\.question = std\.fmt\.bufPrint\(&keys\[index\], "\{d\}", \.\{index\}\)/);
+  assert.ok(!live.includes('question_lens'), 'the display copy of a question must not key the answer');
+  assert.ok(!live.includes('live.questions[index]'), 'the answer key must not come from the shortened title');
+});
+
 test('D4 a plan cards the send button as implement or feedback for the open plan', () => {
   const send = read('src/chat_send.zig');
   assert.match(send, /fn chatLivePlanReply\(text: \[\]const u16\) bool \{/);

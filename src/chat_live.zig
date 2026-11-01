@@ -84,8 +84,6 @@ pub const Live = struct {
     items: std.ArrayList(Item) = .empty,
     request: Request = .{},
     prompt: chat_options.Prompt = .{},
-    questions: [chat_options.MAX_QUESTIONS][MAX_LABEL]u8 = @splat(@splat(0)),
-    question_lens: [chat_options.MAX_QUESTIONS]usize = @splat(0),
     answers: [chat_options.MAX_QUESTIONS][MAX_ANSWER]u8 = @splat(@splat(0)),
     answer_lens: [chat_options.MAX_QUESTIONS]usize = @splat(0),
 
@@ -104,7 +102,6 @@ pub const Live = struct {
         self.ended = .ok;
         self.request = .{};
         self.prompt = .{};
-        self.question_lens = @splat(0);
         self.answer_lens = @splat(0);
         self.card_dismissed = false;
         self.touch();
@@ -215,19 +212,6 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
         self.request.openWith(.question, strOf(payload, "request_id"), strOf(payload, "tool"));
         self.prompt = promptOf(payload);
         self.answer_lens = @splat(0);
-        self.question_lens = @splat(0);
-        if (fieldOf(payload, "questions")) |questions_value| {
-            const rows = switch (questions_value) {
-                .array => |array| array.items,
-                else => &.{},
-            };
-            for (rows, 0..) |row, index| {
-                if (index >= chat_options.MAX_QUESTIONS) break;
-                const text = strOf(row, "question");
-                self.question_lens[index] = @min(text.len, self.questions[index].len);
-                @memcpy(self.questions[index][0..self.question_lens[index]], text[0..self.question_lens[index]]);
-            }
-        }
     } else if (std.mem.eql(u8, kind, "plan.proposed")) {
         const request_id = strOf(payload, "request_id");
         self.request.openWith(.plan, request_id, strOf(payload, "title"));
@@ -246,7 +230,6 @@ pub fn applyValue(self: *Live, a: std.mem.Allocator, seq: u64, event: std.json.V
         if (std.mem.eql(u8, kind, "question.resolved")) {
             self.prompt = .{};
             self.answer_lens = @splat(0);
-            self.question_lens = @splat(0);
         }
     } else if (std.mem.eql(u8, kind, "turn.ended")) {
         self.held = self.state == .running and !self.reply_in_history;
@@ -733,10 +716,11 @@ pub fn questionAnswerLine(shell_id: u32, a: std.mem.Allocator) ?[]u8 {
     for (&slots) |*live| {
         if (!live.used or live.shell_id != shell_id) continue;
         if (!answersComplete(live)) return null;
+        var keys: [chat_options.MAX_QUESTIONS][4]u8 = undefined;
         var pairs: [chat_options.MAX_QUESTIONS]Answer = undefined;
         for (0..live.prompt.count) |index| {
             pairs[index] = .{
-                .question = live.questions[index][0..live.question_lens[index]],
+                .question = std.fmt.bufPrint(&keys[index], "{d}", .{index}) catch return null,
                 .answer = live.answers[index][0..live.answer_lens[index]],
             };
         }
@@ -801,12 +785,25 @@ test "D3 answers are stored per question and only a full set builds the reply" {
     const line = questionAnswerLine(77, a).?;
     defer a.free(line);
     try std.testing.expectEqualStrings(
-        "{\"id\":77,\"op\":\"question_reply\",\"provider\":\"claude\",\"sid\":\"11111111-2222-3333-4444-666666666666\",\"request_id\":\"req_5\",\"answers\":{\"Which colour?\":\"Lime\",\"Which devices?\":\"Desktop, Phone\"},\"dismissed\":false}",
+        "{\"id\":77,\"op\":\"question_reply\",\"provider\":\"claude\",\"sid\":\"11111111-2222-3333-4444-666666666666\",\"request_id\":\"req_5\",\"answers\":{\"0\":\"Lime\",\"1\":\"Desktop, Phone\"},\"dismissed\":false}",
         line,
     );
     try std.testing.expect(applyPage(77, sid, "{\"result\":{\"events\":[{\"seq\":2,\"event\":{\"kind\":\"question.resolved\",\"payload\":{\"request_id\":\"req_5\",\"answers\":{},\"dismissed\":false}}}]}}"));
     try std.testing.expect(questionAnswerLine(77, a) == null);
     try std.testing.expect(!questionsOpen(77));
+}
+
+test "D3 a question longer than a display line still answers under its id" {
+    defer release(78);
+    _ = begin(78, 0, "22222222-3333-4444-5555-666666666666");
+    const a = std.testing.allocator;
+    const sid = "22222222-3333-4444-5555-666666666666";
+    try std.testing.expect(applyPage(78, sid, "{\"result\":{\"events\":[{\"seq\":1,\"event\":{\"kind\":\"question.request\",\"payload\":{\"request_id\":\"req_long\",\"questions\":[" ++
+        "{\"question\":\"Which of these three approaches should I take for the retry loop in the chat reader when the host keeps restarting in the middle of a turn while the desktop is asleep and the socket never comes back\",\"options\":[{\"label\":\"Lime\"},{\"label\":\"Orange\"}]}]}}}]}}"));
+    try std.testing.expect(answerQuestion(78, 0, "Lime"));
+    const line = questionAnswerLine(78, a).?;
+    defer a.free(line);
+    try std.testing.expect(std.mem.endsWith(u8, line, ",\"answers\":{\"0\":\"Lime\"},\"dismissed\":false}"));
 }
 
 test "D1 a text delta replaces the accumulated text instead of appending" {
