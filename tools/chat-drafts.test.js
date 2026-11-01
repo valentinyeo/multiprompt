@@ -16,8 +16,9 @@ function body(name) {
 function execute(code) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-drafts-'));
   try {
-    copyZig(['switch_timing.zig'], dir);
+    fs.writeFileSync(path.join(dir, 'switch_timing.zig'), 'pub const Step = enum { read_marker, draft_bind, save_session, chat_history, console_shown, hide_prev_browser, park, browser_visible, arm_settle, position, focus, reposition, browser_swp, browser_show, browser_launch, browser_wake };\n');
     if (fs.existsSync('src/chat_drafts.zig')) copyZig(['chat_drafts.zig'], dir);
+    require('./fixtures/inline-stubs').writeAccountDesktop(dir);
     fs.writeFileSync(path.join(dir, 'test.zig'), code.replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     const result = spawnSync(process.env.ZIG || 'zig', ['test', 'test.zig', '-j1', '-fllvm'], {
       cwd: dir, encoding: 'utf8', timeout: 120000,
@@ -54,7 +55,6 @@ var g_chat_composer_hwnd: ?usize = 2;
 var g_chat_draft_dirty = false;
 var dictation_private_epoch: u64 = 0;
 var dictation_capture_epoch: u64 = 0;
-var dictation_private_capture = false;
 var dictation_external_target: ?usize = null;
 var g_chat_draft_owner: [192]u8 = undefined;
 var g_chat_draft_owner_len: usize = 0;

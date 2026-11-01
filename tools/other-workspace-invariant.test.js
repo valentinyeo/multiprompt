@@ -122,7 +122,7 @@ test("unmatched session routing uses the permanent Other slot", () => {
   assert.match(ensure, /otherPillSlot\(\) orelse return g_active_workspace/);
 
   const resolve = functionBody("resolveOverviewSpawnWorkspace", "localTmuxSessionAlreadyOpen");
-  assert.match(resolve, /return ensureOtherWorkspace\(\)/,
+  assert.match(resolve, /orelse ensureOtherWorkspace\(\)/,
     "a session without a matching product repository must land in Other");
 });
 

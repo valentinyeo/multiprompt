@@ -26,7 +26,7 @@ test('workspace order owns color and raw session owns face for arbitrary names',
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-identity-'));
   try {
     const identity = block(source, 'pub const Appearance = struct') + ';';
-    const forShell = block(source, 'pub fn forShell(');
+    const forShell = block(source, 'pub fn forShell(') + '\n' + block(source, 'pub fn forShellWithFace(');
     fs.writeFileSync(path.join(dir, 'session_layout.zig'), block(read('src/session_layout.zig'), 'pub fn workspaceColor('));
     fs.writeFileSync(path.join(dir, 'identity.zig'), `const std = @import("std");
 const state = struct {
@@ -80,13 +80,18 @@ test('pinned tile hit testing measures both coordinates, shared with the painted
   const hit = block(sidebar, 'pub fn hitTestSidebar(');
   const height = block(sidebar, 'pub fn rowTotalHeight(');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-layout-'));
+  require('./fixtures/inline-stubs').writeRoomFrontend(dir);
+  fs.writeFileSync(path.join(dir, 'window_layout.zig'), 'pub fn paneOuterMargin() i32 { return 0; }\n');
+  fs.writeFileSync(path.join(dir, 'workspace_switcher.zig'), 'pub fn headerHeight() i32 { return 0; }\n');
+  fs.writeFileSync(path.join(dir, 'room_frontend.zig'), 'pub const enabled = false;\npub fn roomHit(_: usize) ?@import("layout.zig").HitTarget { return null; }\n');
   try {
     fs.writeFileSync(path.join(dir, 'layout.zig'), `const std = @import("std");
 const MAX_ROWS = 16;
+const MAX_SESSION_ROWS = 16;
 const SidebarTier = enum {recent, pinned};
-const Kind = enum {section, header, tab, inbox};
-const Row = struct {kind: Kind = .tab, gidx: u32 = 0, shell_idx: u32 = 0, section_tier: SidebarTier = .recent, y: i32 = 0, x: i32 = 0, width: i32 = 0, tile: bool = false};
-const HitTarget = union(enum) {none: void, section: SidebarTier, header: u32, tab: u32, inbox: u32, buttons: void};
+const Kind = enum {section, header, tab, inbox, room_header, room, room_new};
+const Row = struct {kind: Kind = .tab, gidx: u32 = 0, shell_idx: u32 = 0, section_tier: SidebarTier = .recent, y: i32 = 0, x: i32 = 0, width: i32 = 0, tile: bool = false, room_idx: u32 = 0};
+pub const HitTarget = union(enum) {none: void, section: SidebarTier, header: u32, tab: u32, inbox: u32, buttons: void, room_header: void, room: struct { index: u32, generation: u64, id: [36]u8, store_uuid: [36]u8 }, room_new: void};
 const app_state = @This();
 var g_sidebar_collapsed = false;
 var g_starred_workspace = false;
@@ -95,6 +100,11 @@ var pinned_count: usize = 4;
 const SECTION_HEADER_H = 24;
 const GROUP_HEADER_H = 24;
 const BTN_H = 30;
+const LOOK_UNIFIED = false;
+fn sectionHeaderHeight() i32 {return if (g_sidebar_collapsed) SECTION_HEADER_H else 24;}
+fn wsStripHeight() i32 {return 0;}
+fn groupHeaderHeight() i32 {return if (g_sidebar_collapsed) GROUP_HEADER_H else 24;}
+fn appendRoomRows(_: *[MAX_ROWS]Row, _: *u32, _: *i32) void {}
 fn uiScaled(n: i32) i32 {return n;}
 fn SIDEBAR_W() i32 {return 300;}
 fn tabRowH() i32 {return 58;}
@@ -238,7 +248,7 @@ test "fractional circle is symmetric, premultiplied and resolved in place" {
         const expected = @as(f64, @floatFromInt(size * size)) * std.math.pi / 4;
         try std.testing.expect(@abs(@as(f64, @floatFromInt(area)) / 255 - expected) < @as(f64, @floatFromInt(size)) / 4);
         for (0..size * 4) |y| for (0..size * 4) |x| { pixels[y * stride + x] = if (x < stride / 2) 0x00ffffff else 0; };
-        resolveEllipse(pixels, size, size, 4);
+        resolveRounded(pixels, size, size, 4, circle(size));
         try std.testing.expectEqual(@as(u32, 0xffffffff), pixels[(size / 2) * stride + size / 4]);
         try std.testing.expectEqual(@as(u32, 0xff000000), pixels[(size / 2) * stride + size * 3 / 4]);
     }

@@ -123,11 +123,11 @@ test("sidebar VPS card explains pressure as percentages with explicit Critical b
   assert.match(carousel, /paintSidebarAiPaceCard/);
 
   const paint = functionBody("paintSidebar", "clampSearchSelectionAndScroll");
-  const newTab = paint.indexOf('L("+"), -1, &btn_rc');
+  const rows = paint.indexOf("paintChatSidebarRow(");
   const sticky = paint.indexOf("paintSidebarStickyStatusCard");
-  assert.ok(newTab >= 0 && sticky > newTab, "sticky card must cover scrolling New Tab content");
+  assert.ok(rows >= 0 && sticky > rows, "sticky card must cover scrolling session rows");
 
-  assert.match(source, /const button_y = content_end \+ 4/);
+  assert.match(source, /const btns_y: i32 = content_end_logical \+ 4/);
   assert.match(source, /return content_end \+ 4 \+ BTN_H \+ 8/);
   assert.match(source, /return @max\(@as\(i32, 0\), rc\.bottom - sidebarStickyCardSpan\(\)\)/);
 });

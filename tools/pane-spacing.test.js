@@ -523,12 +523,19 @@ const DWORD = u32;
 const app_state = @This();
 var g_multiprompt_theme = false;
 var g_amoled_theme = false;
+var g_light_theme = false;
 fn RGB(r: u32, g: u32, b: u32) u32 { return r | (g << 8) | (b << 16); }
 fn customColorOr(_: []const u8, fallback: u32) u32 { return fallback; }
 ${fn(sidebar, 'tintColor')}
+const LOOK_UNIFIED = true;
+const active_shell: u32 = 0;
+const index: u32 = 0;
+fn themeConsoleBg() DWORD { return RGB(40, 40, 40); }
+fn themeSidebarBg() DWORD { return RGB(36, 36, 36); }
 fn selectedBackground(sidebar_bg: DWORD) DWORD {
-    ${statement(sidebar, 'const hl =')}
-    return hl;
+    _ = sidebar_bg;
+    ${statement(sidebar, 'const background = if (index == app_state.active_shell')}
+    return background;
 }
 test "selected session is gray and distinct from its sidebar" {
     for ([_]u32{0, 36, 51, 60, 243}) |base| {

@@ -1623,7 +1623,7 @@ pub fn chatEchoSendAgain(id: u64) void {
                 showHeaderNoticeAscii("Cannot verify this Codex chat yet", 5000, true);
                 return;
             }
-            if (@import("win32.zig").MessageBoxW(app_state.g_main_hwnd, L("The original chat cannot be verified. This message may already have been sent. Sending again may duplicate it. Send to this Codex chat?"), L("Send again"), 0x24) != 6) return;
+            if (@import("fonts.zig").messageBox(app_state.g_main_hwnd, L("The original chat cannot be verified. This message may already have been sent. Sending again may duplicate it. Send to this Codex chat?"), L("Send again"), 0x24) != 6) return;
             if (app_state.active_shell != idx or idx >= app_state.shell_count or !std.meta.eql(chatFileIdentityForShell(idx), current)) return;
             const confirmed_index = chatOutboxIndexById(id) orelse return;
             const confirmed_entry = &app_state.g_chat_outbox.items[confirmed_index];
@@ -1658,7 +1658,7 @@ pub fn chatEchoSendAgain(id: u64) void {
         }
     }
     if (entry.message_v1) {
-        if (@import("win32.zig").MessageBoxW(app_state.g_main_hwnd, L("Your agent may already have this message. Sending again may duplicate it. Send again?"), L("Send again"), 0x24) != 6) return;
+        if (@import("fonts.zig").messageBox(app_state.g_main_hwnd, L("Your agent may already have this message. Sending again may duplicate it. Send again?"), L("Send again"), 0x24) != 6) return;
         const confirmed_index = chatOutboxIndexById(id) orelse return;
         const confirmed_entry = &app_state.g_chat_outbox.items[confirmed_index];
         if (!confirmed_entry.message_v1 or confirmed_entry.channel_pending or !chat_echo.pendingActions(confirmed_entry.state).send_again) return;
