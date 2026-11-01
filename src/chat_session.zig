@@ -79,7 +79,6 @@ const ecoqosReevaluateAll = @import("power.zig").ecoqosReevaluateAll;
 const armBrowserVisibilitySettle = @import("browser_pane.zig").armBrowserVisibilitySettle;
 const ChatBlock = @import("app_state.zig").ChatBlock;
 const CHAT_MAX_BLOCKS = @import("app_state.zig").CHAT_MAX_BLOCKS;
-const CHAT_LIVE_TEXT_ROOM = 1 << 17;
 const win32WidePath = @import("file_io.zig").win32WidePath;
 const win32OpenRead = @import("file_io.zig").win32OpenRead;
 const win32ReadAll = @import("file_io.zig").win32ReadAll;
@@ -719,6 +718,8 @@ const ChatLiveStream = struct {
     ended: std.atomic.Value(bool) = .init(false),
     channel: ChatHistoryChannel = .{},
 };
+
+const CHAT_LIVE_TEXT_ROOM = 1 << 17;
 
 var g_chat_live_mutex: @import("app_state.zig").SpinMutex = .{};
 
