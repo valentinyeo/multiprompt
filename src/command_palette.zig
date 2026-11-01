@@ -241,6 +241,7 @@ const SEARCH_TABCTX_PIN_TOP = @import("app_state.zig").SEARCH_TABCTX_PIN_TOP;
 const SEARCH_TABCTX_KEEPAWAKE = @import("app_state.zig").SEARCH_TABCTX_KEEPAWAKE;
 const SEARCH_TABCTX_INBOX_EXCLUDE = @import("app_state.zig").SEARCH_TABCTX_INBOX_EXCLUDE;
 const SEARCH_TABCTX_CHAT_RESET = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESET;
+const SEARCH_TABCTX_CHAT_VIEW = @import("app_state.zig").SEARCH_TABCTX_CHAT_VIEW;
 const SEARCH_TABCTX_CHAT_ALLOW = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALLOW;
 const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALWAYS;
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
@@ -492,7 +493,7 @@ test "IGSH-1266 new session rows keep the approved order" {
     const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
     try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
-    try std.testing.expectEqualStrings("New Claude chat", palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Claude session", palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Codex chat", palettePrimaryLabel(SEARCH_CODEX_TMUX_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Pi chat", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New terminal", palettePrimaryLabel(SEARCH_NEW_TERMINAL_OFFSET) orelse "");
@@ -635,7 +636,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == room.new_room_target) return "New room";
     if (target == room.edit_room_target) return "Edit room";
     if (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS) return room.paletteRoomName(target - app_state.SEARCH_ROOM_ROW_OFFSET);
-    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) return "New Claude chat";
+    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) return "New Claude session";
     if (target == SEARCH_CODEX_TMUX_OFFSET) return "New Codex chat";
     if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
     if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
@@ -678,6 +679,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
             SEARCH_TABCTX_ARCHIVE => if (tab != null and tab.?.tmux_session_len > 0) "archive session" else "close session",
             SEARCH_TABCTX_END_TMUX => "end tmux session",
             SEARCH_TABCTX_BROWSER => if (tab != null and tab.?.browser_enabled) "close browser pane" else "open browser pane",
+            SEARCH_TABCTX_CHAT_VIEW => "chat view live chat switch to terminal alt c",
             else => null,
         };
     }
@@ -836,7 +838,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CUSTOMCMD_RELOAD_OFFSET => "commands reload",
         SEARCH_ARCHIVE_OFFSET => "archive session",
         SEARCH_REOPEN_OFFSET => "reopen closed tab restore undo",
-        SEARCH_NEW_CLAUDE_CHAT_OFFSET => "new claude chat session tab agent",
+        SEARCH_NEW_CLAUDE_CHAT_OFFSET => "new claude session chat terminal tab agent",
         SEARCH_NEW_PI_CHAT_OFFSET => "new pi chat session",
         SEARCH_NEW_TERMINAL_OFFSET => "new terminal shell plain",
         SEARCH_PICK_REPO_OFFSET => "pick repo choose repository folder repo",
@@ -849,7 +851,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_MUTETAB_OFFSET => "mute tab",
         SEARCH_INBOX_EXCLUDE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].inbox_excluded) "inbox: show this session again" else "inbox: never show this session",
         SEARCH_KEEPALIVE_OFFSET => "keep alive",
-        SEARCH_CHAT_VIEW_OFFSET => "chat view",
+        SEARCH_CHAT_VIEW_OFFSET => "chat view live chat switch terminal alt c",
         SEARCH_CHAT_ALLOW_OFFSET => "chat view allow",
         SEARCH_CHAT_ALWAYS_OFFSET => "chat view always allow",
         SEARCH_CHAT_DENY_OFFSET => "chat view deny",
@@ -1963,30 +1965,6 @@ test "IGSH-1266 moving a chat to the new mode needs an idle old-style Claude tab
     try std.testing.expect(adoptHostRequest(7, 0, "", "term-abc", "/home/x/proj", &buf) == null);
 }
 
-pub fn newTabOpensChatView(program: []const u8) bool {
-    return @import("agent_host.zig").eligible(program);
-}
-
-test "IGSH-1266 a hosted Claude tab opens in Chat View and a neutral tab does not" {
-    try std.testing.expect(newTabChatViewBeforeSwitch("claude"));
-    try std.testing.expect(!newTabChatViewBeforeSwitch(""));
-    try std.testing.expect(!newTabChatViewBeforeSwitch("codex"));
-    try std.testing.expect(!newTabChatViewBeforeSwitch("pi"));
-    try std.testing.expect(newTabOpensChatView("claude"));
-    try std.testing.expect(newTabOpensChatView("claude-code"));
-    try std.testing.expect(!newTabOpensChatView(""));
-    try std.testing.expect(!newTabOpensChatView("codex"));
-    try std.testing.expect(!newTabOpensChatView("pi"));
-    try std.testing.expect(!newTabOpensChatView("bash"));
-    try std.testing.expect(workspaceSessionProgram("", true).len > 0 and newTabOpensChatView(workspaceSessionProgram("", true)));
-    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
-    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
-}
-
-pub fn newTabChatViewBeforeSwitch(program: []const u8) bool {
-    return @import("agent_host.zig").eligible(program);
-}
-
 pub fn workspaceSessionProgram(configured: []const u8, with_agent: bool) []const u8 {
     if (!with_agent) return "";
     return if (configured.len > 0) configured else "claude";
@@ -2056,9 +2034,7 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
     app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
     app_state.g_pending_tmux_host = host;
-    app_state.g_pending_chat_view = newTabChatViewBeforeSwitch(program);
     const ok = spawnShellWithSession(.tmux, session, null, null);
-    app_state.g_pending_chat_view = false;
     app_state.g_pending_tmux_host = 0;
     app_state.g_pending_tmux_cmd_len = 0;
 
@@ -2068,18 +2044,15 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
         setShellName(&app_state.shells[ns], if (claude) "Claude" else "Terminal");
         app_state.shells[ns].name_source = .default;
         app_state.shells[ns].ai_agent = if (claude) 1 else 0;
-        var hosted_claude = false;
         if (host_sid) |sid| {
             const sid_len = @min(sid.len, app_state.shells[ns].claude_sid.len);
             @memcpy(app_state.shells[ns].claude_sid[0..sid_len], sid[0..sid_len]);
             app_state.shells[ns].claude_sid_len = @intCast(sid_len);
-            hosted_claude = newTabOpensChatView(program);
         }
         const n = @min(cwd.len, app_state.shells[ns].cached_cwd.len - 1);
         @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
         app_state.shells[ns].cached_cwd_len = @intCast(n);
         publishInboxState();
-        if (hosted_claude and app_state.active_shell == ns and !app_state.g_chat_active) @import("chat_composer.zig").openChatView();
         saveSession();
     }
     return ok;
@@ -2888,6 +2861,15 @@ pub fn updateSearchResults() void {
                 app_state.g_search_result_count += 1;
             }
         }
+        if (tc_idx) |ti| {
+            if (app_state.g_search_result_count < app_state.g_search_results.len) {
+                const chat_str: []const u8 = if (app_state.shells[ti].chat_view_on) "Switch to Terminal" else "Switch to Live Chat";
+                if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ chat_str, "chat view", "live chat", "switch", "terminal", "alt c" }, app_state.g_search_buf[0..app_state.g_search_len])) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_VIEW;
+                    app_state.g_search_result_count += 1;
+                }
+            }
+        }
         if (tc_idx != null and app_state.g_search_result_count < app_state.g_search_results.len and
             (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "Chat View: Insert browser tab URL", "link", "ctrl shift x" }, app_state.g_search_buf[0..app_state.g_search_len])))
         {
@@ -3097,7 +3079,7 @@ pub fn updateSearchResults() void {
         var cwd_buf: [256]u8 = undefined;
         var cwd_len: u32 = 0;
         const remote_folder = workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len);
-        if (keywordsMatchAll("new claude chat session tab agent ctrl t", app_state.g_search_buf[0..app_state.g_search_len])) {
+        if (keywordsMatchAll("new claude session chat terminal tab agent ctrl t", app_state.g_search_buf[0..app_state.g_search_len])) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CLAUDE_CHAT_OFFSET;
             app_state.g_search_result_count += 1;
         }
@@ -4517,7 +4499,7 @@ pub fn updateSearchResults() void {
         var show_chat_view = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];
-            const chat_labels = [_][]const u8{ "chat view", "chat overlay", "conversation", "composer", "terminal transcript", "alt c" };
+            const chat_labels = [_][]const u8{ "chat view", "chat overlay", "conversation", "composer", "terminal transcript", "alt c", "live chat", "switch to terminal" };
             for (chat_labels) |label| {
                 if (asciiContainsQueryInsensitive(label, q)) {
                     show_chat_view = true;

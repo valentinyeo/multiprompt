@@ -227,11 +227,15 @@ protocol. Nothing is typed into a terminal.
 4. Delivery no longer runs through a terminal prompt box, so a draft, a
    permission prompt or a TUI repaint cannot refuse a message. `draft_present`
    and `draft_not_cleared` disappear from the Claude path.
-5. The terminal becomes a user shell. It is still the tab's visible content
-   today because that is the existing UI; opening it on demand only, and handing
-   the chat back to a `claude --resume` terminal through `host handover`, needs a
-   control that does not exist yet — a new UI element, so it is out of scope for
-   this change and recorded as such.
+5. The terminal is the tab's visible content. A new tab no longer opens the
+   chat: `Ctrl+T`, `Alt+T`, the sidebar plus and the palette row all land in the
+   terminal, and the chat opens only when asked for. The switch is the existing
+   per-tab `chat_view_on` flag, available as `Alt+C`, the `Ctrl+K` row and the
+   right-click tab menu (`SEARCH_TABCTX_CHAT_VIEW`), with the labels "Switch to
+   Live Chat" and "Switch to Terminal". Both surfaces read the one session and
+   its history, so switching never restarts anything. Handing the chat back to a
+   `claude --resume` terminal through `host handover` still needs its own control
+   and stays out of scope.
 6. Codex and Pi keep today's terminal start: `buildCodexTmuxLaunchCmd` and the
    `send-keys` variants are untouched, and their Chat View path is unchanged.
 

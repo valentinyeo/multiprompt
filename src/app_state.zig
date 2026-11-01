@@ -1578,6 +1578,7 @@ pub const SEARCH_TABCTX_ARCHIVE: usize = 7110;
 pub const SEARCH_TABCTX_BROWSER: usize = 7111;
 pub const SEARCH_TABCTX_END_TMUX: usize = 7112;
 pub const SEARCH_TABCTX_PIN_TOP: usize = 7113;
+pub const SEARCH_TABCTX_CHAT_VIEW: usize = 7114;
 pub const SEARCH_TABCTX_KEEPAWAKE: usize = 7115;
 pub const SEARCH_TABCTX_INBOX_EXCLUDE: usize = 7116;
 pub const SEARCH_TABCTX_CHAT_RESET: usize = 7117;
@@ -1619,7 +1620,6 @@ pub var g_pending_new_tab_group: u32 = 0;
 
 pub var g_pending_tmux_host: u8 = 0;
 pub var g_pending_tmux_hidden: bool = false;
-pub var g_pending_chat_view: bool = false;
 pub var g_pending_tmux_identity: ?[]const u8 = null;
 pub var g_pending_chat_id: u64 = 0;
 pub var g_pending_background_workspace: ?u8 = null;

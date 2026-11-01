@@ -173,7 +173,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+R | Reattach active SSH/tmux tab |
 | Ctrl+K → Reconnect | Restart an ended server session with the same name (also in tab actions) |
 | Ctrl+K -&gt; Move chat to new mode | Hand an idle old-style Claude tab to the app-owned chat, keeping its session id and history |
-| Ctrl+K -&gt; New chat in this group | Open a Claude chat in the tab's group straight away |
+| Ctrl+K -&gt; New session in this group | Start a Claude session in the tab's group straight away, in the terminal |
 | Ctrl+K -&gt; All Sessions | Open session overview (w = Waiting, a = Archived, u = unattached) |
 | Ctrl+F in All Sessions | Reduce the list to matching sessions |
 | Space in All Sessions | Mark or unmark the selected unattached session |
@@ -217,8 +217,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+G | Show usage, servers, and app version. Cycle collapsed cards. |
 | Ctrl+K -&gt; Usage and servers / collapsed status cards | Show usage, servers, and app version. Cycle collapsed cards. |
 | Alt+T | New workspace tmux tab, Claude by default (optional configured program) |
-| Ctrl+T | New Claude chat in this workspace folder (also Alt+T outside the palette and the sidebar plus) |
-| Ctrl+K -&gt; New Claude chat | Open a Claude chat in this workspace folder; same as Ctrl+T and the sidebar plus |
+| Ctrl+T | New Claude session in this workspace folder, in the terminal (also Alt+T outside the palette and the sidebar plus) |
+| Ctrl+K -&gt; New Claude session | Start a Claude session in this workspace folder in the terminal; same as Ctrl+T and the sidebar plus |
 | Ctrl+K -&gt; New Codex chat | Open a Codex session in this workspace folder |
 | Ctrl+K -&gt; New Pi chat | Open a Pi session in this workspace folder |
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |
@@ -245,7 +245,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+F in Chat View | Chat View: Find in conversation; Enter / F3 next, Shift+Enter / Shift+F3 previous, Esc closes |
 | End / Ctrl+K "Chat View: Scroll to newest message" | Chat View: jump to the newest message; also the round down-arrow button above the message box that shows when you are scrolled up; Page Up / Page Down / Home scroll, the thin scrollbar on the right drags, the mouse wheel moves about 3 lines per notch |
 | Double-click empty space | Switch between Chat View and the shell (without selecting text) |
-| Alt+C | Toggle formatted Chat View for this tab; screen copy remains the fallback |
+| Alt+C | Switch this tab between the terminal and Live Chat; same chat and history; also the Ctrl+K row and the tab menu |
+| Ctrl+K -&gt; Switch to Live Chat / Switch to Terminal | Move this tab's chat between the Live Chat view and the terminal; same as Alt+C and the right-click tab menu |
 | + button / Ctrl+V in Chat View | Attach files and images: pick, drop, or paste; images become links, other files go to the server session and their path goes in at the caret (Ctrl+K Chat View: Attach File) |
 | Right-click Claude message / Ctrl+K reactions | Send a quoted reaction; show its badge |
 | Right-click message → Reply / Ctrl+K "Chat View: Reply to latest agent message" | Quote a message above your reply; select text and press Enter to quote only the selection; click × or press Esc with an empty composer to cancel |

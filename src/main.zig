@@ -751,6 +751,7 @@ const SEARCH_TABCTX_PIN_TOP = @import("app_state.zig").SEARCH_TABCTX_PIN_TOP;
 const SEARCH_TABCTX_KEEPAWAKE = @import("app_state.zig").SEARCH_TABCTX_KEEPAWAKE;
 const SEARCH_TABCTX_INBOX_EXCLUDE = @import("app_state.zig").SEARCH_TABCTX_INBOX_EXCLUDE;
 const SEARCH_TABCTX_CHAT_RESET = @import("app_state.zig").SEARCH_TABCTX_CHAT_RESET;
+const SEARCH_TABCTX_CHAT_VIEW = @import("app_state.zig").SEARCH_TABCTX_CHAT_VIEW;
 const SEARCH_TABCTX_CHAT_ALLOW = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALLOW;
 const SEARCH_TABCTX_CHAT_ALWAYS = @import("app_state.zig").SEARCH_TABCTX_CHAT_ALWAYS;
 const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY;
@@ -6870,6 +6871,21 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    return 0;
+                }
+                if (target == SEARCH_TABCTX_CHAT_VIEW) {
+                    if (findShellById(app_state.g_tabctx_sid)) |ti| {
+                        app_state.g_search_active = false;
+                        app_state.g_search_tabctx_mode = false;
+                        app_state.g_search_groupctx_mode = false;
+                        app_state.g_tabctx_sid = 0;
+                        app_state.g_shell_focused = true;
+                        clearSearchBackdrop();
+                        _ = @import("console.zig").switchToShellByUser(ti);
+                        toggleChatView();
+                        _ = InvalidateRect(hwnd, null, 0);
+                        _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
+                    }
                     return 0;
                 }
                 if ((target >= SEARCH_TABCTX_RECONNECT and target <= SEARCH_TABCTX_FAVORITE) or target == SEARCH_TABCTX_CHAT_STOP or target == SEARCH_TABCTX_CHAT_DENY or target == SEARCH_TABCTX_CHAT_ALWAYS or target == SEARCH_TABCTX_CHAT_ALLOW or target == SEARCH_TABCTX_START_SESSION or
