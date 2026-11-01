@@ -170,8 +170,9 @@ test "a hidden client never sizes the session window for the tab the user is on"
     try std.testing.expectEqualStrings("tmux attach -f ignore-size -t '=remote'", try attachCommand(&buf, "remote", "", false, true));
     try std.testing.expectEqualStrings("tmux new-session -A -f ignore-size -s 'remote'", try attachCommand(&buf, "remote", "", true, true));
     const guarded = try attachCommand(&buf, "remote", "1700:123:$7", true, true);
-    try std.testing.expect(std.mem.indexOf(u8, guarded, "attach-session -f ignore-size -t '$7'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, guarded, "attach-session -f ignore-size -t '\\''$7'\\'''") != null);
     const visible = try attachCommand(&buf, "remote", "1700:123:$7", true, false);
+    try std.testing.expect(std.mem.indexOf(u8, visible, "attach-session -t '\\''$7'\\'''") != null);
     try std.testing.expect(std.mem.indexOf(u8, visible, "ignore-size") == null);
     const plain = try attachCommand(&buf, "remote", "", false, false);
     try std.testing.expect(std.mem.indexOf(u8, plain, "ignore-size") == null);
