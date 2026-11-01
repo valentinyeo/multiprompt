@@ -31,7 +31,7 @@ test('stable session identity gates results, backoff and local console fallback 
   assert.match(body('chatFileOnReady'), /refreshChatTranscript\(false\)/);
 });
 test('markdown measurement paint and link hit test share the same layout', () => {
-  for (const name of ['chatMeasureBlockRect', 'chatPaintBlock', 'chatTranscriptLinkAt']) {
+  for (const name of ['chatMeasureProjectedBlockRect', 'chatPaintProjectedBlock', 'chatTranscriptLinkAt']) {
     assert.match(body(name), /chatFlowBlock/);
   }
   assert.match(body('chatTableLayout'), /g_chat_tables\.layout/);
@@ -42,14 +42,14 @@ test('markdown measurement paint and link hit test share the same layout', () =>
   assert.match(body('resetFontCache'), /g_chat_rich_fonts/);
 });
 test('role paint and hit testing omit sender headers and timestamps', () => {
-  assert.match(body('chatMeasureBlockRect'), /chat_style\.headerHeight/);
-  assert.match(body('chatMeasureBlockRect'), /chat_style\.bubbleWidth/);
+  assert.match(body('chatMeasureProjectedBlockRect'), /chat_style\.headerHeight/);
+  assert.match(body('chatMeasureProjectedBlockRect'), /chat_style\.bubbleWidth/);
   assert.doesNotMatch(body('chatPaintBlock'), /chatPaintAgentHeader/);
   assert.match(body('chatTranscriptLinkAt'), /chat_style\.headerHeight/);
   assert.match(body('refreshChatBlockCache'), /chat_style\.markScreenMessages/);
   assert.match(body('chatUserBubbleColor'), /chat_style\.bubbleColors/);
   assert.match(body('chatRelayout'), /chat_style\.bubblePositions/);
-  assert.match(body('chatPaintBlock'), /fillBubbleStyled/);
+  assert.match(body('chatPaintProjectedBlock'), /fillBubbleStyled/);
   assert.match(body('fillBubbleStyled'), /fillBubbleAA/);
   assert.match(body('chatTranscriptCharAt'), /chat_style\.topInset/);
   assert.doesNotMatch(body('chatPaintTime'), /block\.time|block\.zone/);
@@ -116,7 +116,7 @@ test('file attachment and inline image previews ship on every surface (issue)', 
   assert.ok(build.includes('src/chat_image.zig'));
   assert.ok(build.includes('comdlg32'));
   assert.match(body('chatButtonAt'), /attach_btn/);
-  assert.match(body('chatMeasureBlockRect'), /chatImgMeasure/);
+  assert.match(body('chatMeasureProjectedBlockRect'), /chatImgMeasure/);
   assert.match(body('chatRelayout'), /chatImgFirstBlock/);
   assert.match(body('chatImgWorker'), /chatImgLoadThumb/);
 });
@@ -173,7 +173,7 @@ test('IGSH-404 every Chat View copy path owns selection-sized storage and report
 
 test('IGSH-567 pending bubbles share transcript ranges, hit testing, highlighting and copying', () => {
   const display = body('chatSelectionDisplay');
-  assert.match(display, /chatBlockDisplayRange/);
+  assert.match(display, /chatDisplayForIndex/);
   assert.match(display, /g_chat_echo_layout_ids/);
   assert.match(display, /chatOutboxIndexById/);
   assert.match(display, /chat_hit\.pending_selection_base/);
@@ -185,7 +185,7 @@ test('IGSH-567 pending bubbles share transcript ranges, hit testing, highlightin
   assert.match(body('chatTranscriptCharAt'), /chatSelectionRect/);
   assert.match(body('chatTranscriptCharAt'), /chatFlowBlock/);
   assert.match(body('chatTranscriptMouseDown'), /chatWordRangeAt\(display\.text/);
-  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, e\.text\[start\.\.\], text_rc, false, true, null, offset \+ start,/);
+  assert.match(body('chatPaintEcho'), /chatFlowText\(hdc, body_display\.text, text_rc, false, true, null, body_display\.offset,/);
   assert.match(body('chatPaintTranscriptContent'), /chatPaintEcho\([^;]*display\.start\)/);
   assert.match(body('chatSelectionToClipboard'), /chatCopyPlainText\([^;]*display\.text/);
   assert.match(body('chatCopyTextAlloc'), /g_chat_block_count \+ g_chat_echo_layout_count/);
@@ -276,9 +276,8 @@ test('IGSH-567 fixed pending regions retain selections across compatible capture
 test('IGSH-567 selection allocation counts display intersections instead of the reserved offset gap', () => {
   const allocate = body('chatCopyTextAlloc');
   assert.match(allocate, /chatSelectionDisplay\(i\)/);
-  assert.match(allocate, /const lo = @max\(sel.start, display.start\)/);
-  assert.match(allocate, /const hi = @min\(sel.end, display.start \+ display.text.len\)/);
-  assert.match(allocate, /std.math.add\(usize, selected_len, hi -\| lo\)/);
+  assert.match(allocate, /mapped\.displayBoundary\(sel\.end\) -\| mapped\.displayBoundary\(sel\.start\)/);
+  assert.match(allocate, /std.math.add\(usize, selected_len, mapped\.displayBoundary/);
   assert.doesNotMatch(allocate, /sel.end - sel.start/);
   assert.match(body('chatRelayout'), />= chat_hit\.pending_selection_base/);
 });

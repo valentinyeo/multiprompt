@@ -18,12 +18,14 @@ pub fn isActive() bool {
 pub fn init(_: std.mem.Allocator) void {}
 pub fn deinit() void {}
 pub fn startupSettled() void {}
-pub fn accountReady(_: bool) void {}
-pub fn setAccount(_: anytype) void {}
-pub fn applyAccountLayout() void {}
+pub fn accountReady() void {}
+pub fn setAccount(_: ?[]const u8) void {}
+pub fn applyAccountLayout(_: ?[]const u8, _: []const u8) bool {
+    return false;
+}
 pub fn syncVisibility() void {}
-pub fn resize(_: anytype) void {}
-pub fn dpiChanged(_: anytype) void {}
+pub fn resize(_: ?*anyopaque) void {}
+pub fn dpiChanged(_: u32) void {}
 pub fn leaveForSession() void {}
 pub fn leaveForOtherFront() void {}
 pub fn cancelRestoreForUser() void {}
