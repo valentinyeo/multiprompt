@@ -1645,7 +1645,7 @@ fn makeCmdLine(kind: ShellKind, buf: []u16, tmux_session: ?[]const u8, startup_c
         } else {
             if (!appendRemoteZsbCommandStart(buf, &pos, zsb_shell_id)) return null;
             var attach_buf: [1536]u8 = undefined;
-            const attach = @import("tmux_identity.zig").attachCommand(&attach_buf, tmux_session.?, tmux_identity, new_session) catch return null;
+            const attach = @import("tmux_identity.zig").attachCommand(&attach_buf, tmux_session.?, tmux_identity, new_session, app_state.g_pending_tmux_hidden) catch return null;
             for (attach) |c| {
                 if (c == '"') {
                     if (!appendWideAscii(buf, &pos, "\\\"")) return null;
@@ -1802,6 +1802,9 @@ pub fn spawnBackgroundTmuxSession(host: u8, session: []const u8, workspace: u8) 
     }
     app_state.g_pending_tmux_cmd_len = 0;
     app_state.g_pending_resurrect_len = 0;
+    const old_hidden = app_state.g_pending_tmux_hidden;
+    app_state.g_pending_tmux_hidden = true;
+    defer app_state.g_pending_tmux_hidden = old_hidden;
     return spawnShellWithSession(.tmux, session, null, null);
 }
 

@@ -1865,7 +1865,11 @@ pub fn restoreSession() u32 {
                 }
             }
         }
+        const tab_hidden = if (restored_active_tab) |active_tab| active_tab != t else false;
+        const old_hidden = app_state.g_pending_tmux_hidden;
+        app_state.g_pending_tmux_hidden = tab_hidden;
         const ok = if (chatBenchEnabled() and isRemoteShellKind(tabs[t].kind)) false else spawnSavedTab(&tabs[t], .continue_latest);
+        app_state.g_pending_tmux_hidden = old_hidden;
         if (ok) {
             const idx = app_state.shell_count - 1;
             app_state.active_shell = idx;
