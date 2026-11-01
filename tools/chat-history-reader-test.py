@@ -4256,6 +4256,15 @@ class AgentHostTest(unittest.TestCase):
         self.assertIn('--permission-mode', args)
         self.assertEqual(args[args.index('--permission-mode') + 1], 'plan')
 
+    def test_host_launches_the_agent_with_partial_messages_and_the_stdio_prompt_tool(self):
+        self.enable()
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
+        args = self.agent_rows('start')[0]['args']
+        self.assertIn('--include-partial-messages', args)
+        self.assertEqual(args[args.index('--permission-prompt-tool') + 1], 'stdio')
+
     def test_host_turn_runs_with_bypass_permissions_after_enable(self):
         self.enable()
         self.assertEqual(reader.host_cli(["enable", self.provider, self.sid, "--tmux", self.tmux,
@@ -4626,6 +4635,377 @@ class AgentHostReviewTest(AgentHostTest):
         self.dispatch()
         self.wait_for(lambda: (self.message() or {}).get('state') == 'accepted')
         self.assertEqual(self.agent_rows('start')[0]['cwd'], str(folder))
+
+
+FAKE_CLAUDE = r'''#!/usr/bin/env python3
+import json, os, sys, time
+
+log = os.environ['FAKE_AGENT_LOG']
+mode = os.environ.get('FAKE_CLAUDE_MODE') or os.environ.get('FAKE_AGENT_MODE') or 'stream'
+
+def record(value):
+    with open(log, 'a') as stream:
+        stream.write(json.dumps(value) + '\n')
+        stream.flush()
+
+def emit(value):
+    sys.stdout.write(json.dumps(value) + '\n')
+    sys.stdout.flush()
+
+def frames(message_id, blocks, stop_reason):
+    out = [dict(type='stream_event', event=dict(type='message_start', message=dict(id=message_id, role='assistant', content=[])), parent_tool_use_id=None)]
+    for index, block in enumerate(blocks):
+        parent = block.get('parent')
+        if block['type'] == 'tool_use':
+            out.append(dict(type='stream_event', event=dict(type='content_block_start', index=index, content_block=dict(type='tool_use', id=block['id'], name=block['name'], input={})), parent_tool_use_id=None))
+            out.append(dict(type='assistant', message=dict(id=message_id, role='assistant', content=[dict(type='tool_use', id=block['id'], name=block['name'], input=block['input'])], stop_reason=None), parent_tool_use_id=None))
+            out.append(dict(type='stream_event', event=dict(type='content_block_stop', index=index), parent_tool_use_id=None))
+            continue
+        kind = block['type']
+        out.append(dict(type='stream_event', event=dict(type='content_block_start', index=index, content_block=dict(type=kind, **{kind: ''})), parent_tool_use_id=parent))
+        for part in block['parts']:
+            out.append(dict(type='stream_event', event=dict(type='content_block_delta', index=index, delta=dict(type=kind + '_delta', **{kind: part})), parent_tool_use_id=parent))
+        out.append(dict(type='assistant', message=dict(id=message_id, role='assistant', content=[dict(type=kind, **{kind: block['text']})], stop_reason=None), parent_tool_use_id=parent))
+        out.append(dict(type='stream_event', event=dict(type='content_block_stop', index=index), parent_tool_use_id=parent))
+    out.append(dict(type='stream_event', event=dict(type='message_delta', delta=dict(stop_reason=stop_reason)), parent_tool_use_id=None))
+    out.append(dict(type='stream_event', event=dict(type='message_stop'), parent_tool_use_id=None))
+    return out
+
+def paced(frames):
+    for frame in frames:
+        emit(frame)
+        if (frame.get('event') or {}).get('type') == 'content_block_delta':
+            time.sleep(0.12)
+
+def finish(subtype='success', stop_reason='end_turn', cost=0.01):
+    emit(dict(type='result', subtype=subtype, stop_reason=stop_reason, session_id='native-fixture',
+              total_cost_usd=cost, usage=dict(input_tokens=3, output_tokens=7)))
+
+def wait_control(request_id):
+    for raw in sys.stdin:
+        value = json.loads(raw)
+        record(dict(kind='frame', frame=value))
+        if value.get('type') == 'control_response' and value['response'].get('request_id') == request_id:
+            return value['response'].get('response') or {}
+        if value.get('type') == 'control_request' and value['request'].get('subtype') == 'interrupt':
+            record(dict(kind='interrupt', frame=value))
+            return dict(_interrupt=True)
+    return {}
+
+def ask(request_id, tool, payload, suggestions=None):
+    request = dict(subtype='can_use_tool', tool_name=tool, display_name=tool, tool_use_id='toolu_req',
+                   input=payload, requires_user_interaction=True)
+    if suggestions is not None:
+        request['permission_suggestions'] = suggestions
+        request['blocked_path'] = '/tmp/blocked'
+    emit(dict(type='control_request', request_id=request_id, request=request))
+    return wait_control(request_id)
+
+record(dict(kind='start', args=sys.argv[1:]))
+emit(dict(type='system', subtype='init', session_id='native-fixture', uuid='u0'))
+for raw in sys.stdin:
+    try:
+        line = json.loads(raw)
+    except ValueError:
+        continue
+    record(dict(kind='user', text=line['message']['content'][0]['text']))
+    if mode == 'crash':
+        os._exit(1)
+    if mode not in ('tools', 'silent', 'approval', 'question', 'exitplan', 'slow'):
+        paced(frames('msg-1', [dict(type='thinking', parts=['Think ', 'first.'], text='Think first.'),
+                               dict(type='text', parts=['one an', 'swer'], text='one answer')], 'end_turn'))
+        finish()
+    elif mode == 'tools':
+        paced(frames('msg-1', [dict(type='tool_use', id='toolu_one', name='Bash', input=dict(command='echo alpha')),
+                               dict(type='text', parts=['do', 'ne'], text='done')], 'tool_use'))
+        emit(dict(type='user', message=dict(role='user', content=[dict(type='tool_result', tool_use_id='toolu_one', content='alpha')]), uuid='u1'))
+        finish()
+    elif mode == 'silent':
+        paced(frames('msg-1', [dict(type='text', parts=['first ', 'answer'], text='first answer')], 'end_turn')[:-2])
+    elif mode == 'approval':
+        reply = ask('req-1', 'Bash', dict(command='rm -rf build', description='Remove the build directory'),
+                    [dict(type='addRules', rules=[dict(toolName='Bash', ruleContent='rm -rf build')], behavior='allow', destination='localSettings')])
+        record(dict(kind='decision', decision=reply))
+        emit(dict(type='user', message=dict(role='user', content=[dict(type='tool_result', tool_use_id='toolu_req', content='removed')]), uuid='u1'))
+        paced(frames('msg-1', [dict(type='text', parts=['do', 'ne'], text='done')], 'end_turn'))
+        finish()
+    elif mode == 'question':
+        reply = ask('req-1', 'AskUserQuestion', dict(questions=[
+            dict(question='Which database should I target?', header='Database', multiSelect=False,
+                 options=[dict(label='Postgres', description='prod cluster'), dict(label='SQLite', description='local file')])]))
+        record(dict(kind='decision', decision=reply))
+        finish()
+    elif mode == 'exitplan':
+        reply = ask('req-1', 'ExitPlanMode', dict(plan='## Plan\n1. List the folder'))
+        record(dict(kind='decision', decision=reply))
+        finish()
+    elif mode == 'slow':
+        paced(frames('msg-1', [dict(type='text', parts=['work', 'ing'], text='working')], 'end_turn')[:-2])
+        wait_control('never')
+        finish(subtype='error_during_execution', stop_reason=None, cost=0)
+'''
+
+class HostEventStreamTest(unittest.TestCase):
+    provider = 'claude'
+    sid = 'host-stream-session'
+    tmux = 'stream-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        self.agent_input = io.BytesIO()
+        self.session = dict(state={})
+        reader.host_session_reset(self.session, types.SimpleNamespace(stdin=self.agent_input))
+        self.session['turn'] = 't-1'
+
+    def frame(self, body, parent=None):
+        return dict(type='stream_event', event=body, parent_tool_use_id=parent)
+
+    def feed(self, *events):
+        for event in events:
+            reader.host_agent_read(self.provider, self.sid, self.tmux, self.session,
+                                   (json.dumps(event) + '\n').encode())
+
+    def flush(self):
+        reader.host_flush(self.provider, self.sid, self.tmux, self.session, now=time.time() + 1)
+
+    def events(self, kind=None):
+        db = reader.message_store_db(self.tmux)
+        rows = [json.loads(body) for (body,) in db.execute(
+            "SELECT body FROM message_events WHERE provider='claude' AND sid=? ORDER BY seq", (self.sid,))]
+        db.close()
+        return [row for row in rows if kind is None or row.get('kind') == kind]
+
+    def test_text_and_thinking_deltas_coalesce_into_one_full_text_row_then_complete(self):
+        self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
+                  self.frame(dict(type='content_block_start', index=0, content_block=dict(type='thinking', thinking=''))),
+                  self.frame(dict(type='content_block_delta', index=0, delta=dict(type='thinking_delta', thinking='Think '))),
+                  self.frame(dict(type='content_block_delta', index=0, delta=dict(type='thinking_delta', thinking='first.'))))
+        self.assertEqual(self.events('thinking.delta'), [], 'a delta must wait for the coalescer window')
+        self.flush()
+        deltas = self.events('thinking.delta')
+        self.assertEqual([row['payload']['text'] for row in deltas], ['Think first.'])
+        self.assertEqual([row['item'] for row in deltas], ['msg-1:thinking:0'])
+        self.assertEqual(deltas[0]['payload']['done'], False)
+        self.assertEqual(deltas[0]['turn'], 't-1')
+        self.assertEqual(deltas[0]['v'], 1)
+        self.assertEqual(self.events('thinking.done'), [])
+        self.feed(dict(type='assistant', message=dict(id='msg-1', content=[dict(type='thinking', thinking='Think first.')])))
+        self.assertEqual([row['payload']['text'] for row in self.events('thinking.done')], ['Think first.'])
+        self.assertEqual([row['item'] for row in self.events('thinking.done')], ['msg-1:thinking:0'])
+        self.flush()
+        self.assertEqual(len(self.events('thinking.delta')), 1, 'a completed item must not flush again')
+
+    def test_the_assistant_snapshot_wins_over_the_accumulated_deltas(self):
+        self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
+                  self.frame(dict(type='content_block_start', index=0, content_block=dict(type='text', text=''))),
+                  self.frame(dict(type='content_block_delta', index=0, delta=dict(type='text_delta', text='Hi'))))
+        self.flush()
+        self.assertEqual([row['payload']['text'] for row in self.events('text.delta')], ['Hi'])
+        self.feed(dict(type='assistant', message=dict(id='msg-1', content=[dict(type='text', text='Hi there')])))
+        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['Hi there'])
+
+    def test_a_subagent_stream_keeps_its_tool_steps_but_not_its_text(self):
+        self.feed(self.frame(dict(type='message_start', message=dict(id='msg-sub')), parent='toolu_sub'),
+                  self.frame(dict(type='content_block_start', index=0, content_block=dict(type='text', text='')), parent='toolu_sub'),
+                  self.frame(dict(type='content_block_delta', index=0, delta=dict(type='text_delta', text='inner')), parent='toolu_sub'))
+        self.flush()
+        self.feed(dict(type='assistant', parent_tool_use_id='toolu_sub',
+                       message=dict(id='msg-sub', content=[dict(type='text', text='inner'),
+                                                           dict(type='tool_use', id='toolu_inner', name='Read', input=dict(file_path='a'))])))
+        self.assertEqual(self.events('text.delta'), [])
+        self.assertEqual(self.events('text.done'), [])
+        started = self.events('item.started')
+        self.assertEqual([row['item'] for row in started], ['toolu_inner'])
+        self.assertEqual(started[0]['payload'], dict(type='tool_call', tool='Read', input=dict(file_path='a'),
+                                                    title='Read', display_name='Read'))
+
+    def test_tool_steps_and_the_turn_end_reach_the_event_log(self):
+        self.feed(dict(type='assistant', message=dict(id='msg-1', content=[dict(type='tool_use', id='toolu_one', name='Bash',
+                                                                               input=dict(command='echo alpha'))])))
+        self.feed(dict(type='user', message=dict(role='user', content=[
+            dict(type='tool_result', tool_use_id='toolu_one', content=[dict(type='text', text='alpha')])])))
+        done = self.events('item.done')
+        self.assertEqual([row['item'] for row in done], ['toolu_one'])
+        self.assertEqual(done[0]['payload'], dict(status='completed', output='alpha', is_error=False))
+        self.feed(dict(type='result', subtype='success', stop_reason='end_turn', total_cost_usd=0.25,
+                       usage=dict(output_tokens=9)))
+        ended = self.events('turn.ended')
+        self.assertEqual(len(ended), 1)
+        self.assertEqual(ended[0]['payload']['status'], 'completed')
+        self.assertEqual(ended[0]['payload']['cost_usd'], 0.25)
+        self.assertEqual(ended[0]['payload']['usage'], dict(output_tokens=9))
+        self.assertIsNone(self.session['turn'])
+
+    def test_a_failed_tool_result_and_a_failed_result_are_reported_as_failures(self):
+        self.feed(dict(type='user', message=dict(role='user', content=[
+            dict(type='tool_result', tool_use_id='toolu_one', content='boom', is_error=True)])))
+        self.assertEqual(self.events('item.done')[0]['payload'],
+                         dict(status='failed', output='boom', is_error=True))
+        self.feed(dict(type='result', subtype='error_max_turns', stop_reason=None, total_cost_usd=0))
+        self.assertEqual(self.events('turn.ended')[0]['payload']['status'], 'failed')
+
+    def test_an_unfinished_item_is_flushed_when_the_turn_ends(self):
+        self.feed(self.frame(dict(type='message_start', message=dict(id='msg-1'))),
+                  self.frame(dict(type='content_block_start', index=0, content_block=dict(type='text', text=''))),
+                  self.frame(dict(type='content_block_delta', index=0, delta=dict(type='text_delta', text='half'))))
+        self.feed(dict(type='result', subtype='error_during_execution', stop_reason=None, total_cost_usd=0))
+        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['half'])
+        self.assertEqual(self.events('text.delta'), [])
+
+
+class ServeEventPushTest(unittest.TestCase):
+    provider = 'claude'
+    sid = 'serve-events-session'
+    tmux = 'serve-events-chat'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(reader, 'HOME', self.home).start()
+        bootstrap = "import base64,sys;exec(base64.b64decode(sys.stdin.buffer.readline()))"
+        self.server = subprocess.Popen([sys.executable, '-u', '-c', bootstrap, '--serve'],
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       env=dict(os.environ, HOME=str(self.home)))
+        self.addCleanup(self.stop)
+        self.server.stdin.write(base64.b64encode((ROOT / 'src/chat_history_reader.py').read_bytes()) + b'\n')
+        self.server.stdin.flush()
+
+    def stop(self):
+        self.server.stdin.close()
+        try:
+            self.server.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.server.kill()
+            self.server.wait(timeout=5)
+        self.server.stdout.close()
+        self.server.stderr.close()
+
+    def ask(self, query):
+        self.server.stdin.write(json.dumps(query).encode() + b'\n')
+        self.server.stdin.flush()
+
+    def line(self, timeout=10):
+        with selectors.DefaultSelector() as selector:
+            selector.register(self.server.stdout, selectors.EVENT_READ)
+            self.assertTrue(selector.select(timeout=timeout), 'reader push timed out')
+        return json.loads(self.server.stdout.readline())
+
+    def publish(self, text):
+        db = reader.message_store_db(self.tmux)
+        with db:
+            db.execute("INSERT OR IGNORE INTO message_chats(provider,sid) VALUES ('claude',?)", (self.sid,))
+            seq = reader.message_event(db, 'claude', self.sid,
+                                       dict(v=1, sid=self.sid, turn='t-1', kind='text.delta', at=1, item='i', payload=dict(text=text)))
+        db.close()
+        return seq
+
+    def test_a_subscription_replies_with_the_backlog_then_pushes_new_rows_on_the_same_channel(self):
+        first = self.publish('backlog')
+        self.ask(dict(id=88, op='events_subscribe', provider=self.provider, sid=self.sid, after=0))
+        reply = self.line()
+        self.assertEqual(reply['id'], 88)
+        self.assertEqual(reply['message_protocol'], 1)
+        self.assertEqual([item['seq'] for item in reply['result']['events']], [first])
+        self.assertEqual(reply['result']['next_after'], first)
+        second = self.publish('pushed')
+        pushed = self.line()
+        self.assertEqual(pushed['id'], 88)
+        self.assertEqual([item['seq'] for item in pushed['result']['events']], [second])
+        self.assertEqual(pushed['result']['events'][0]['event']['payload']['text'], 'pushed')
+        self.ask(dict(id=89, op='engine_info'))
+        self.assertEqual(self.line()['id'], 89)
+
+    def test_a_subscription_is_refused_for_an_unknown_chat_identity(self):
+        self.ask(dict(id=88, op='events_subscribe', provider='claude', sid='bad sid', after=0))
+        self.assertIn('history\terror', self.line()['wire'])
+
+    def test_unsubscribing_stops_the_push(self):
+        self.publish('one')
+        self.ask(dict(id=88, op='events_subscribe', provider=self.provider, sid=self.sid, after=0))
+        self.assertEqual(self.line()['id'], 88)
+        self.ask(dict(id=88, op='events_unsubscribe', provider=self.provider, sid=self.sid))
+        self.assertEqual(self.line()['id'], 88)
+        self.publish('two')
+        self.ask(dict(id=89, op='engine_info'))
+        reply = self.line()
+        while reply['id'] == 88 and 'message_protocol' in reply:
+            reply = self.line()
+        self.assertEqual(reply['id'], 89)
+
+
+
+
+class AgentHostStreamTest(AgentHostTest):
+    def setUp(self):
+        super().setUp()
+        self.agent.write_text(FAKE_CLAUDE)
+        self.agent.chmod(0o755)
+
+    def fake(self, mode):
+        os.environ['FAKE_CLAUDE_MODE'] = mode
+        self.enable()
+
+    def events(self, kind=None):
+        db = reader.message_store_db(self.tmux)
+        rows = [json.loads(body) for (body,) in db.execute(
+            "SELECT body FROM message_events WHERE provider='claude' AND sid=? ORDER BY seq", (self.sid,))]
+        db.close()
+        return [row for row in rows if kind is None or row.get('kind') == kind]
+
+    def test_a_hosted_turn_streams_thinking_text_and_its_end_into_the_event_log(self):
+        self.fake('stream')
+        self.seed(text='say hello')
+        self.dispatch()
+        ended = self.wait_for(lambda: self.events('turn.ended'))
+        self.assertEqual(ended[0]['payload']['status'], 'completed')
+        self.assertEqual(ended[0]['payload']['cost_usd'], 0.01)
+        started = self.events('turn.started')[0]
+        self.assertEqual(started['payload']['message_id'], self.token)
+        self.assertEqual(started['payload']['text_sha256'], hashlib.sha256(b'say hello').hexdigest())
+        self.assertEqual(started['payload']['uuids'], [])
+        self.assertEqual(started['turn'], 't-1')
+        self.assertEqual([row['payload']['text'] for row in self.events('thinking.done')], ['Think first.'])
+        self.assertEqual([row['payload']['text'] for row in self.events('text.done')], ['one answer'])
+        deltas = [row['payload']['text'] for row in self.events('text.delta')]
+        self.assertTrue(deltas, 'the live stream must reach the event log before the turn ends')
+        self.assertEqual(deltas[-1], 'one answer')
+        self.assertTrue(all(done < 'one answer' or done == 'one answer' for done in deltas))
+        self.assertEqual(self.events('text.delta')[-1]['item'], 'msg-1:text:0')
+        self.assertEqual([row['payload']['state'] for row in self.events('host.status')][-1], 'ready')
+
+    def test_a_hosted_turn_shows_tool_steps_through_item_events(self):
+        self.fake('tools')
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: self.events('turn.ended'))
+        started = self.events('item.started')
+        self.assertEqual([row['item'] for row in started], ['toolu_one'])
+        self.assertEqual(started[0]['payload']['tool'], 'Bash')
+        self.assertEqual(started[0]['payload']['input'], dict(command='echo alpha'))
+        self.assertEqual(started[0]['payload']['type'], 'tool_call')
+        done = self.events('item.done')
+        self.assertEqual([row['item'] for row in done], ['toolu_one'])
+        self.assertEqual(done[0]['payload']['output'], 'alpha')
+
+    def test_the_event_cursor_replays_a_streamed_turn_from_any_point(self):
+        self.fake('stream')
+        self.seed()
+        self.dispatch()
+        self.wait_for(lambda: self.events('turn.ended'))
+        page = reader.message_store_request(dict(message_protocol=1, tmux=self.tmux, provider='claude', sid=self.sid,
+                                                op='message_events', after=0))
+        self.assertEqual([item['seq'] for item in page['events']], list(range(1, len(page['events']) + 1)))
+        tail = reader.message_store_request(dict(message_protocol=1, tmux=self.tmux, provider='claude', sid=self.sid,
+                                                op='message_events', after=page['next_after'] - 1))
+        self.assertEqual([item['event']['kind'] for item in tail['events']], ['turn.ended'])
+
+
 
 
 if __name__ == '__main__':
