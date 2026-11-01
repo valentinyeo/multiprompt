@@ -65,6 +65,7 @@ const RegisterClassExW = @import("win32.zig").RegisterClassExW;
 const CreateWindowExW = @import("win32.zig").CreateWindowExW;
 const GetFocus = @import("win32.zig").GetFocus;
 const IsWindowVisible = @import("win32.zig").IsWindowVisible;
+const GetWindowRect = @import("win32.zig").GetWindowRect;
 const DefWindowProcW = @import("win32.zig").DefWindowProcW;
 const GetClientRect = @import("win32.zig").GetClientRect;
 const MoveWindow = @import("win32.zig").MoveWindow;
