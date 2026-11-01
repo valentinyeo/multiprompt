@@ -1588,10 +1588,8 @@ fn refreshChatBlockCache(force: bool) bool {
     const generation = if (from_file) entry.?.generation else 0;
     var live_blocks: [16]ChatBlock = undefined;
     const live_room = @min(live_blocks.len, CHAT_MAX_BLOCKS -| count);
-    const live_tail = if (len < app_state.g_chat_capture.len)
-        @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, live_blocks[0..live_room])
-    else
-        @import("chat_live.zig").Tail{};
+    var live_tail = @import("chat_live.zig").Tail{};
+    if (len < app_state.g_chat_capture.len) live_tail = @import("chat_live.zig").tailFor(shell_id, app_state.g_chat_capture[len..], len, live_blocks[0..live_room]);
     const total = len + live_tail.text_len;
     if (!force and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and total == app_state.g_chat_last_len and hash == app_state.g_chat_last_hash and generation == app_state.g_chat_cache_generation) return false;
     app_state.g_chat_layout_reuse = if (from_file and app_state.g_chat_blocks_from_file and app_state.g_chat_cache_shell_id == app_state.shells[app_state.active_shell].shell_id and generation == app_state.g_chat_cache_generation and hash == app_state.g_chat_last_hash +% 1) @min(app_state.g_chat_layout_reuse, entry.?.history.changed_from) else 0;
