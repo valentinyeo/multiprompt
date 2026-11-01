@@ -8429,7 +8429,7 @@ pub fn main(init: std.process.Init) void {
     defer @import("console_snapshot.zig").close();
     if (update_release.runHelperIfRequested(args)) return;
 
-    debugLog(if (IS_DEV) "launch process-start version=" ++ APP_VERSION ++ " dev" else "launch process-start version=" ++ APP_VERSION);
+    debugLog("launch process-start version=" ++ APP_VERSION ++ (if (IS_DEV) " dev" else ""));
     if (update_check.runRelaunchHelperIfRequested()) return;
 
     defer @import("fonts.zig").unregister();
