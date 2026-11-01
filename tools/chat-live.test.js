@@ -101,3 +101,13 @@ test('D4 a plan cards the send button as implement or feedback for the open plan
   assert.match(send, /\.feedback, value\)/);
   assert.match(send, /if \(chatLivePlanReply\(text_buf\[0\.\.@intCast\(@max\(0, text_len_i\)\)\]\)\) return;/);
 });
+
+test('D5 stop on a live turn interrupts it and the turn ends interrupted', () => {
+  const send = read('src/chat_send.zig');
+  assert.match(send, /fn chatLiveInterrupt\(shell_index: u32\) bool \{/);
+  assert.match(send, /if \(!live\.running\(shell_id\)\) return false;/);
+  assert.match(send, /live\.interruptLine\(std\.heap\.page_allocator, shell_id/);
+  assert.match(send, /if \(chatLiveCancelApproval\(shell_index\)\) return true;\s*\n\s*if \(chatLiveInterrupt\(shell_index\)\) return true;/);
+  const live = read('src/chat_live.zig');
+  assert.match(live, /std\.mem\.eql\(u8, kind, "turn\.ended"\)\) \{\s*\n\s*self\.state = \.idle;\s*\n\s*self\.ended = statusOf\(strOf\(payload, "status"\)\);/);
+});

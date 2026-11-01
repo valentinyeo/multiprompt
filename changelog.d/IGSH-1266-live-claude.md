@@ -12,3 +12,4 @@ A hosted Claude chat keeps streaming after you switch tabs and come back.
 Escape on a waiting approval cancels it.
 You can answer Claude's questions right in the chat.
 The next message after a plan goes out as your go, or as your notes on it.
+The stop button now ends just the answer, not the whole chat.

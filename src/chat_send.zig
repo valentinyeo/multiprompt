@@ -3411,6 +3411,7 @@ fn chatFullSettleFinish() void {
 pub fn chatStopAgent(shell_index: u32) bool {
     if (!app_state.ISSUE_265_WORKING_BAR or shell_index >= app_state.shell_count) return false;
     if (chatLiveCancelApproval(shell_index)) return true;
+    if (chatLiveInterrupt(shell_index)) return true;
     return chatAgentKey(shell_index, 0x1B);
 }
 
@@ -3434,6 +3435,19 @@ fn chatLiveApprovalAnswer(shell_index: u32, action: @import("chat_permission.zig
     @import("window_layout.zig").chatWorkingIndicatorInvalidate();
     var log: [96]u8 = undefined;
     debugLog(std.fmt.bufPrint(&log, "[chat] approval sent shell={d} decision={s}", .{ shell_id, live.decisionText(live.decisionFor(action)) }) catch "");
+    return true;
+}
+
+fn chatLiveInterrupt(shell_index: u32) bool {
+    if (shell_index >= app_state.shell_count) return false;
+    const live = @import("chat_live.zig");
+    const shell_id = app_state.shells[shell_index].shell_id;
+    if (!live.running(shell_id)) return false;
+    const key = chatFileIdentityForShell(shell_index);
+    const line = live.interruptLine(std.heap.page_allocator, shell_id, std.mem.sliceTo(&key.sid, 0)) catch return false;
+    if (!chatLiveReply(line)) return false;
+    var log: [96]u8 = undefined;
+    debugLog(std.fmt.bufPrint(&log, "[chat] interrupt sent shell={d}", .{shell_id}) catch "");
     return true;
 }
 
