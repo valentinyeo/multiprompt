@@ -149,6 +149,12 @@ pub fn asciiToU16(src: []const u8, out: []u16) usize {
     return n;
 }
 
+fn inboxUtf8Prefix(text: []const u8, capacity: usize) []const u8 {
+    var n = @min(text.len, capacity);
+    while (n > 0 and n < text.len and text[n] & 0xc0 == 0x80) n -= 1;
+    return text[0..n];
+}
+
 fn inboxSubtitle(shell: *const Shell, out: *[64]u8) u32 {
     if (shell.tmux_session_len > 0) {
         const pre = "tmux: ";
@@ -378,7 +384,7 @@ pub fn publishInboxStateNow() void {
         const o9 = ",\"pv\":\"";
         @memcpy(json[pos .. pos + o9.len], o9);
         pos += o9.len;
-        appendJsonEscaped(&json, &pos, app_state.shells[i].preview[0..@min(app_state.shells[i].preview_len, 90)]);
+        appendJsonEscaped(&json, &pos, inboxUtf8Prefix(app_state.shells[i].preview[0..app_state.shells[i].preview_len], 90));
         json[pos] = '"';
         pos += 1;
         if (app_state.shells[i].ai_agent != 0) {
@@ -1100,18 +1106,12 @@ pub fn drawInboxTab(hdc: HANDLE, x: *i32, y: i32, label: []const u8, count: u32,
         x.* += FAVORITE_DOT_D + 6;
     }
     var buf: [96]u16 = undefined;
-    var n: usize = 0;
-    for (label) |c| {
-        if (n < buf.len - 1) {
-            buf[n] = if (c >= 32 and c < 127) @as(u16, c) else '?';
-            n += 1;
-        }
-    }
+    const n = json_reader.wide(label, &buf);
     _ = SetTextColor(hdc, if (active) fg_bright else fg_dim);
     var meas = RECT{ .left = 0, .top = 0, .right = 400, .bottom = 24 };
     _ = DrawTextW(hdc, @ptrCast(&buf), @intCast(n), &meas, DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT);
     var r = RECT{ .left = x.*, .top = y, .right = x.* + (meas.right - meas.left) + 4, .bottom = y + 24 };
-    _ = DrawTextW(hdc, @ptrCast(&buf), @intCast(n), &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    _ = @import("dwrite_text.zig").draw(hdc, &buf, @intCast(n), &r, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
     var adv = meas.right - meas.left + 6;
     if (count > 0) {
         var cbuf: [8]u16 = undefined;
@@ -1350,16 +1350,16 @@ pub fn paintInbox(hdc: HANDLE) void {
         var ws_rc = RECT{ .left = ws_left, .top = y, .right = ws_right, .bottom = y + row_h };
         var wbuf: [64]u16 = undefined;
         const wsrc = &app_state.g_inbox_ws[row.ws];
-        const wl2 = asciiToU16(wsrc.name[0..wsrc.name_len], &wbuf);
-        _ = DrawTextW(hdc, @ptrCast(&wbuf), @intCast(wl2), &ws_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        const wl2 = json_reader.wide(wsrc.name[0..wsrc.name_len], &wbuf);
+        _ = @import("dwrite_text.zig").draw(hdc, &wbuf, @intCast(wl2), &ws_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 
         _ = SetTextColor(hdc, fg_dim);
         const has_pv = row.pv_len > 0;
         const sub_right: i32 = if (has_pv) @min(cwd_left + 200, preview_right) else preview_right;
         var sub_rc = RECT{ .left = cwd_left, .top = y, .right = sub_right, .bottom = y + row_h };
         var sbuf: [64]u16 = undefined;
-        const sl2 = asciiToU16(row.sub[0..row.sub_len], &sbuf);
-        _ = DrawTextW(hdc, @ptrCast(&sbuf), @intCast(sl2), &sub_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        const sl2 = json_reader.wide(row.sub[0..row.sub_len], &sbuf);
+        _ = @import("dwrite_text.zig").draw(hdc, &sbuf, @intCast(sl2), &sub_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
 
         if (has_pv) {
             const pv_left: i32 = sub_right + 14;
@@ -1367,8 +1367,8 @@ pub fn paintInbox(hdc: HANDLE) void {
                 _ = SetTextColor(hdc, fg_dim);
                 var pv_rc = RECT{ .left = pv_left, .top = y, .right = preview_right, .bottom = y + row_h };
                 var pbuf: [96]u16 = undefined;
-                const pl = asciiToU16(row.pv[0..row.pv_len], &pbuf);
-                _ = DrawTextW(hdc, @ptrCast(&pbuf), @intCast(pl), &pv_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                const pl = json_reader.wide(row.pv[0..row.pv_len], &pbuf);
+                _ = @import("dwrite_text.zig").draw(hdc, &pbuf, @intCast(pl), &pv_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
             }
         }
 

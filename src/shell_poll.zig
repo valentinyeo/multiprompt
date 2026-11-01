@@ -1555,6 +1555,52 @@ pub fn lineLooksLikeGenericTmuxStatusPreview(shell: *const Shell, line: []const 
     return false;
 }
 
+fn encodeInboxPreview(line: []const u16, out: *[96]u8) u32 {
+    var n: usize = 0;
+    var index: usize = 0;
+    var prev_space = true;
+    while (index < line.len and n < 90) {
+        const c = line[index];
+        var unit_count: usize = 1;
+        const space = if (c < 32 or c == 127 or std.unicode.utf16IsLowSurrogate(c)) true else if (std.unicode.utf16IsHighSurrogate(c)) blk: {
+            if (index + 1 >= line.len or !std.unicode.utf16IsLowSurrogate(line[index + 1])) break :blk true;
+            unit_count = 2;
+            break :blk false;
+        } else c == ' ';
+        if (space) {
+            if (!prev_space) {
+                out[n] = ' ';
+                n += 1;
+            }
+            prev_space = true;
+        } else {
+            var bytes: [4]u8 = undefined;
+            const byte_count = std.unicode.utf16LeToUtf8(&bytes, line[index .. index + unit_count]) catch unreachable;
+            if (n + byte_count > 90) break;
+            @memcpy(out[n..][0..byte_count], bytes[0..byte_count]);
+            n += byte_count;
+            prev_space = false;
+        }
+        index += unit_count;
+    }
+    while (n > 0 and out[n - 1] == ' ') n -= 1;
+    return @intCast(n);
+}
+
+test "inbox preview preserves unicode within byte budget" {
+    var output: [96]u8 = undefined;
+    const input = [_]u16{ ' ', 'A', '\t', 0x00e9, ' ', 0xd83d, 0xde00, 0xd800, 'B', 0xdc00, ' ' };
+    const length = encodeInboxPreview(&input, &output);
+    try std.testing.expectEqualStrings("A é 😀 B", output[0..length]);
+
+    var boundary = [_]u16{'a'} ** 91;
+    boundary[89] = 0xd83d;
+    boundary[90] = 0xde00;
+    const boundary_length = encodeInboxPreview(&boundary, &output);
+    try std.testing.expectEqual(@as(u32, 89), boundary_length);
+    try std.testing.expectEqualSlices(u8, &([_]u8{'a'} ** 89), output[0..boundary_length]);
+}
+
 fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool {
     if (pid == 0 or i >= app_state.shell_count) return false;
     _ = FreeConsole();
@@ -1653,22 +1699,7 @@ fn captureShellPreview(i: usize, pid: DWORD, missed_done_recovered: *bool) bool 
         }
         if (saw_glyph and only_box) continue;
 
-        if (out_len == 0) {
-            var prev_space = true;
-            for (line) |c| {
-                if (out_len >= 90) break;
-                const a: u8 = if (c >= 32 and c < 127) @intCast(c) else ' ';
-                if (a == ' ') {
-                    if (prev_space) continue;
-                    prev_space = true;
-                } else {
-                    prev_space = false;
-                }
-                out[out_len] = a;
-                out_len += 1;
-            }
-            while (out_len > 0 and out[out_len - 1] == ' ') out_len -= 1;
-        }
+        if (out_len == 0) out_len = encodeInboxPreview(line, &out);
     }
 
     const detect_agent: u8 = if (saw_grok_agent) 6 else if (saw_kimi_agent) 4 else if (saw_codex_agent) 2 else if (saw_claude_agent) 1 else 0;
