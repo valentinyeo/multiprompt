@@ -6,6 +6,27 @@ Both apps hash the raw tmux session name. Editable titles and hosts never affect
 
 Reference faces: `agent-one` → 15; `agent-two` → 13; `机器人` → 9. Local desktop consoles use their names.
 
+Manual choices retain stable IDs 0 through 19. Auto keeps the face field absent. Window transfers use sentinel 20 for Auto. It is not a manual face ID. Resetting Auto remains an explicit user choice.
+
+Twelve drawings represent the twenty IDs:
+
+| IDs | Head and eyes |
+|---|---|
+| 0, 12 | Circle, dots |
+| 1, 13 | Square, squares |
+| 2, 14 | Squircle, happy |
+| 3, 15 | Wide, dashes |
+| 4, 16 | Tall, one eye |
+| 5, 17 | Circle, wink |
+| 6, 18 | Square, dots |
+| 7, 19 | Squircle, dashes |
+| 8 | Wide, happy |
+| 9 | Tall, dots |
+| 10 | Circle, squares |
+| 11 | Wide, one eye |
+
+Choices keep their exact stored IDs. Repeated drawings do not share checkmarks. Automatic faces still use `hash % 20`. Android's matching update uses this same mapping. Old clients keep displaying their old drawings. New clients display the new drawings. Both keep exchanging the same IDs.
+
 ## Workspace colors
 
 The shared account workspace order assigns default colors. Index is workspace position modulo seven. Local filters and session ordering never affect colors. Every session within one workspace shares its color. Colors repeat only after exhausting the palette.
@@ -22,7 +43,7 @@ Palette order:
 | 5 | Rose | `#FF667B` |
 | 6 | Mint | `#5EFED1` |
 
-White and grey are never palette choices. Eyes and hardware retain their existing colors.
+White and grey are never palette choices. Heads have dark visors and light eyes.
 
 ## Change a color
 

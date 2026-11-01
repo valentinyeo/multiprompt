@@ -390,24 +390,28 @@ pub fn drawPie(hdc: HANDLE, l: i32, t: i32, r: i32, b: i32, sx: i32, sy: i32, ex
     return canvas.selected(.{ .pie = .{ .rc = .{ .left = l, .top = t, .right = r, .bottom = b }, .start = .{ .x = sx, .y = sy }, .end = .{ .x = ex, .y = ey } } });
 }
 
-pub fn resolveEllipse(pixels: []u32, width: usize, height: usize, samples: usize) void {
+pub const RoundedBounds = struct { x: f32, y: f32, width: f32, height: f32, radius: f32 };
+
+pub fn resolveRounded(pixels: []u32, width: usize, height: usize, samples: usize, bounds: RoundedBounds) void {
     const stride = width * samples;
     const rows = height * samples;
     std.debug.assert(pixels.len == stride * rows and samples > 0);
     const total: u32 = @intCast(samples * samples);
-    const ww: i64 = @intCast(stride * stride);
-    const hh: i64 = @intCast(rows * rows);
+    const radius = @min(bounds.radius, @min(bounds.width, bounds.height) / 2);
     for (0..height) |y| {
         for (0..width) |x| {
             var sum: [3]u32 = @splat(0);
             var covered: u32 = 0;
             for (0..samples) |sy| {
                 const yy = y * samples + sy;
-                const dy = @as(i64, @intCast(2 * yy + 1)) - @as(i64, @intCast(rows));
+                const py = @as(f32, @floatFromInt(yy)) + 0.5;
                 for (0..samples) |sx| {
                     const xx = x * samples + sx;
-                    const dx = @as(i64, @intCast(2 * xx + 1)) - @as(i64, @intCast(stride));
-                    if (dx * dx * hh + dy * dy * ww > ww * hh) continue;
+                    const px = @as(f32, @floatFromInt(xx)) + 0.5;
+                    if (px < bounds.x or px >= bounds.x + bounds.width or py < bounds.y or py >= bounds.y + bounds.height) continue;
+                    const dx = @max(@abs(px - (bounds.x + bounds.width / 2)) - (bounds.width / 2 - radius), 0);
+                    const dy = @max(@abs(py - (bounds.y + bounds.height / 2)) - (bounds.height / 2 - radius), 0);
+                    if (dx * dx + dy * dy > radius * radius) continue;
                     covered += 1;
                     const pixel = pixels[yy * stride + xx];
                     inline for (0..3) |channel| sum[channel] += (pixel >> (channel * 8)) & 255;
