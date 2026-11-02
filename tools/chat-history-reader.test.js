@@ -62,6 +62,14 @@ test('ISSUE-268 sticky find bar fences hidden transcript controls and keeps brow
     const branch = render.slice(render.indexOf(`        ${message} => {`));
     assert.match(branch, /^        \w+ => \{\s*(?:_ = KillTimer\(hwnd, selection_offer_timer\);\s*)?if \(app_state\.g_chat_find_open and GET_Y\(lp\) < uiScaled\(app_state\.CHAT_FIND_TOP_H\)\) return 0;/);
   }
+  for (const message of ['WM_LBUTTONDOWN', 'WM_LBUTTONDBLCLK']) {
+    const branchStart = render.indexOf(`        ${message} => {`);
+    const branch = render.slice(branchStart, render.indexOf('\n        },', branchStart));
+    const guard = branch.indexOf('g_chat_find_open');
+    const cleared = branch.indexOf('KillTimer(hwnd, selection_offer_timer)');
+    assert.ok(guard >= 0 && (cleared < 0 || guard < cleared),
+      `${message} must ignore a find bar press before it clears the selection offer`);
+  }
   const shortcuts = fs.readFileSync('src/shortcuts.zig', 'utf8');
   const start = shortcuts.indexOf('if (app_state.ISSUE_268_CHAT_FIND');
   assert.match(shortcuts.slice(start, shortcuts.indexOf('{', start)), /!activeBrowserHasForegroundFocus\(\)/);
