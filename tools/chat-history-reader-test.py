@@ -4339,6 +4339,17 @@ class AgentHostTest(unittest.TestCase):
         self.assertIsNotNone(command, 'a host must find its agent outside the login PATH')
         self.assertEqual(command[0], str(binary))
 
+    def test_IGSH_1525_live_agent_knows_its_browser_pane_session(self):
+        self.enable()
+        with patch.dict(os.environ, dict(TMUX='/tmp/other,1,0', TMUX_PANE='%9')), \
+                patch.object(reader.subprocess, 'Popen') as popen:
+            reader.host_agent_start(self.provider, self.sid)
+        env = popen.call_args.kwargs['env']
+        self.assertEqual(env['ZSB_SESSION'], self.tmux, 'the browser bridge finds the pane by this session name')
+        self.assertEqual(env['MULTIPROMPT_TAB'], self.tmux)
+        self.assertNotIn('TMUX', env, 'a stray tmux would point the bridge at another session')
+        self.assertNotIn('TMUX_PANE', env)
+
     def test_host_reports_a_missing_agent_instead_of_raising(self):
         self.enable()
         empty = self.home / 'empty-home'
