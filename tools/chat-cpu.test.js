@@ -251,6 +251,7 @@ fn chatMeasureBlockRect(_: HANDLE, _: []const u16, _: ChatBlock, _: chat_style.B
 }
 fn chatImgStoreLayout(_: usize, _: ChatImgLayout) void {}
 fn chatOutboxKeyForShell(_: u32, _: []u8) []const u8 { return ""; }
+fn chatEchoRowLanded(_: anytype) bool { return false; }
 fn chatMeasureEchoRect(_: HANDLE, _: []const u16, _: i32, _: i32, _: bool) RECT { unreachable; }
 fn chatMeasureProjectedBlockRect(hdc: HANDLE, text: []const u16, block: ChatBlock, pos: chat_style.BubblePos, w: i32, y: i32, imgs: ?*ChatImgLayout, _: ?*const chat_reaction.Projection) RECT {
     return chatMeasureBlockRect(hdc, text, block, pos, w, y, imgs);
