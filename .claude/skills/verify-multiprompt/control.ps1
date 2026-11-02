@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('settings-panel', 'appearance', 'bot-picture', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -332,7 +332,7 @@ try {
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
-    } elseif ($Feature -in @('browser-own-profile', 'tab-names', 'inbox-order')) {
+    } elseif ($Feature -in @('browser-own-profile', 'tab-names', 'inbox-order', 'bot-picture')) {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'relaunch-saved-sessions') {
         $relaunchSeed = New-RelaunchSeed
@@ -432,6 +432,9 @@ try {
         }
         'appearance' {
             . (Join-Path $PSScriptRoot 'control-feature-appearance.ps1')
+        }
+        'bot-picture' {
+            . (Join-Path $PSScriptRoot 'control-feature-bot-picture.ps1')
         }
         'chat-dictation' {
             . (Join-Path $PSScriptRoot 'control-feature-chat-dictation.ps1')

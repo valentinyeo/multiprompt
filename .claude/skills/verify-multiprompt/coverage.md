@@ -103,6 +103,7 @@ One row per user-facing ticket, combining its changes in this period. CI, test, 
 | IGSH-678 | Chat View code uses Nordwand Mono SemiBold, 2 pt smaller, with smooth edges on diff rows. | chat-code-font | partial | Live code size and face come from a real console code block; diff rows come from the branch painter with a synthetic tool block. A live diff preview needs an agent transcript on the runner. |
 | IGSH-847 | Agents can distinguish a created tab from a connected or failed SSH session. | session-open | partial | Journey requires disconnected status and the exact logged nonzero exit code; updated journey and CI not run yet. Successful remote attachment still needs credentials. |
 | IGSH-988 | Agents can rename, rebind, move and close terminal tabs from the command line without touching the active tab. | session-tabs | partial | Journey drives four background tabs through the real local listener, checks the saved layout and a restart; successful remote attachment after a rebind is not verified because no server is supplied. |
+| IGSH-1424 | Give a bot your own picture instead of the drawn face: the file picker copies it, the face draws it, it survives a restart, and Reset picture brings the drawn face back. | bot-picture | journey added, not yet run | Run the branch journey on GitHub Windows and inspect `before.png`, `action.png`, `uploaded.png`, `unreadable.png`, `restart.png`, `reset.png` and `result.json`. It proves the desktop picker, copy, saved `tabs[].picture`, restart and reset only; account-synced bot faces, the Android surface and a store file deleted while the session still names it are not covered. |
 
 ## Live results on this pass
 
@@ -134,6 +135,7 @@ These are the supplied real GitHub runs on this branch, not new executions by th
 | ended-remote-session | 39870853585, exe_source=v0.28.820 | passed |
 | saved-remote-workspace | 39870853585, exe_source=v0.28.820 | passed |
 | chat-sync-audit | 39870850652 | passed |
+| bot-picture | not run in this pass; added by IGSH-1424 with its own GitHub runs | — |
 
 Sessions also fails after rename on v0.28.820 (39870847994); v0.28.788 (39872684784) fails earlier at `renamed tab persisted`. There is no earlier verify.yml sessions run. Keep this product gap separate from harness fixes and do not weaken the journey. Appearance on v0.28.820 failed `IGSH-587: main window did not start maximized` because that release predates the asserted change; use a release containing every change the harness asserts.
 
