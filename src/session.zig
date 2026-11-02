@@ -297,25 +297,25 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             json_buf[pos] = '"';
             pos += 1;
         }
-        if (app_state.shells[i].kind == .cmd or app_state.shells[i].kind == .pwsh or app_state.shells[i].kind == .bash) {
-            if (app_state.shells[i].cached_cwd_len > 0) {
-                const cwd = app_state.shells[i].cached_cwd[0..app_state.shells[i].cached_cwd_len];
-                const cwd_pre = ",\"cwd\":\"";
-                @memcpy(json_buf[pos .. pos + cwd_pre.len], cwd_pre);
-                pos += cwd_pre.len;
-                for (cwd) |c| {
-                    if (c == '\\' or c == '"') {
-                        json_buf[pos] = '\\';
-                        pos += 1;
-                    }
-                    json_buf[pos] = c;
+        if (app_state.shells[i].cached_cwd_len > 0) {
+            const cwd = app_state.shells[i].cached_cwd[0..app_state.shells[i].cached_cwd_len];
+            const cwd_pre = ",\"cwd\":\"";
+            @memcpy(json_buf[pos .. pos + cwd_pre.len], cwd_pre);
+            pos += cwd_pre.len;
+            for (cwd) |c| {
+                if (c == '\\' or c == '"') {
+                    json_buf[pos] = '\\';
                     pos += 1;
-                    if (pos >= json_buf.len - 40) break;
                 }
-                json_buf[pos] = '"';
+                json_buf[pos] = c;
                 pos += 1;
+                if (pos >= json_buf.len - 40) break;
             }
+            json_buf[pos] = '"';
+            pos += 1;
+        }
 
+        if (app_state.shells[i].kind == .cmd or app_state.shells[i].kind == .pwsh or app_state.shells[i].kind == .bash) {
             if (app_state.shells[i].claude_session or app_state.shells[i].claude_sid_len > 0) {
                 const cf = ",\"claude_session\":true";
                 @memcpy(json_buf[pos .. pos + cf.len], cf);
@@ -2446,6 +2446,47 @@ test "ISSUE-569 filtered save records stable selection and filtered index" {
     defer excluded_parsed.deinit();
     try std.testing.expect(json_reader.field(excluded_parsed.value, "active_shell_id") == .null);
     try std.testing.expect(json_reader.field(excluded_parsed.value, "active_tab") == .null);
+}
+
+test "IGSH-1447 a remote tab saves the folder it was opened in" {
+    const saved_count = app_state.shell_count;
+    const saved_shell = app_state.shells[0];
+    defer {
+        app_state.shell_count = saved_count;
+        app_state.shells[0] = saved_shell;
+    }
+    app_state.shell_count = 1;
+    app_state.active_shell = 0;
+    app_state.shells[0] = empty_shell;
+    app_state.shells[0].kind = .tmux;
+    app_state.shells[0].tmux_host = 0;
+    app_state.shells[0].shell_id = 9;
+    const folder = "/tmp/picked-repo";
+    @memcpy(app_state.shells[0].cached_cwd[0..folder.len], folder);
+    app_state.shells[0].cached_cwd_len = folder.len;
+    var temp: [512]u8 = undefined;
+    const len = GetEnvironmentVariableA("TEMP", &temp, temp.len);
+    try std.testing.expect(len > 0 and len < temp.len);
+    var path_buf: [600]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, "{s}\\issue-1447-{d}-{d}.json", .{ temp[0..len], @import("win32.zig").GetCurrentProcessId(), GetTickCount64() });
+    defer {
+        for ([_][]const u8{ "", ".tmp", ".bak" }) |suffix| {
+            var clean_buf: [640]u8 = undefined;
+            const clean = std.fmt.bufPrint(&clean_buf, "{s}{s}", .{ path, suffix }) catch unreachable;
+            var wide: [640]u16 = undefined;
+            const wp = @import("file_io.zig").win32WidePath(&wide, clean).?;
+            _ = @import("win32.zig").DeleteFileW(wp.ptr);
+        }
+    }
+    try std.testing.expect(saveSessionTo(path, null));
+    const bytes = @import("file_io.zig").readFileAllocWin32(path, SESSION_JSON_CAPACITY) orelse return error.TestUnexpectedResult;
+    defer std.heap.page_allocator.free(bytes);
+    var parsed = try json_reader.parse(std.testing.allocator, bytes);
+    defer parsed.deinit();
+    var tabs: [MAX_SHELLS]SavedTab = undefined;
+    const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
+    try std.testing.expectEqual(@as(u32, 1), count);
+    try std.testing.expectEqualStrings(folder, tabs[0].cwd[0..tabs[0].cwd_len]);
 }
 
 test "IGSH-820 pre-change session ignores locks and preserves pinned tabs" {
