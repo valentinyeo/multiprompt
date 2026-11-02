@@ -174,13 +174,13 @@ test('ISSUE-423 settings use the account feature and existing debounced save pat
     assert.match(desktop, /return \.\{ \.settings = app_state.g_layout_settings,/);
     assert.match(desktop, /app_state.g_layout_settings = desired.settings;/);
     assert.match(desktop, /TIMER_ACCOUNT_SAVE, 2000/);
-    assert.match(session, /if \(saveSessionTo\(path, null\)\) publishSessionLayout\(\)/);
+    assert.match(session, /if \(!saveSessionTo\(path, null\)\) return false;\s*publishSessionLayout\(\);/);
     assert.match(session, /parseFromValue\(@import\("frequent.zig"\).Settings/);
   };
   audit(client, desktop, session);
   assert.throws(() => audit(client.replace(',input,settings', ',input'), desktop, session));
   assert.throws(() => audit(client, desktop.replace('.settings = app_state.g_layout_settings,', ''), session));
-  assert.throws(() => audit(client, desktop, session.replace('if (saveSessionTo(path, null)) publishSessionLayout();', '')));
+  assert.throws(() => audit(client, desktop, session.replace('publishSessionLayout();', '')));
   assert.match(layout, /\.settings = edited.settings/);
   const words = read('src/ui_words.zon'), sidebar = read('src/sidebar.zig');
   for (const [label, word] of [

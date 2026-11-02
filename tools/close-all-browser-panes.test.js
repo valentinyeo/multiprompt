@@ -42,6 +42,7 @@ var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
+fn cancelPinnedBrowserEntry(_: u32) void {}
 fn chatReadMark(_: bool) bool { return false; }
 const app_state = @This();
 const HANDLE = ?usize;

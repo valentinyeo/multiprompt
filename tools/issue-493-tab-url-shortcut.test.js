@@ -50,7 +50,8 @@ test('ISSUE-493 current pane URL precedes the remembered browser tab URL', () =>
   const switching = section(read('src/console.zig'), 'pub fn switchToShell(idx:', '\n    app_state.active_shell = idx;');
   assert.match(switching, /@import\("browser_pane.zig"\)\.rememberActiveBrowserTabUrl\(\);/);
   assert.match(section(browser, 'pub fn updateBrowserVisibility()', '\n    if (webView2OwnsActiveShell())'), /rememberActiveBrowserTabUrl\(\);/);
-  assert.match(section(main, 'WM_APP_BROWSER_URL_UPDATE => {', '\n        WM_APP_SHELL_EXITED'), /if \(ti == app_state\.active_shell\) \{\s*@import\("browser_pane.zig"\)\.rememberActiveBrowserTabUrl\(\);/);
+  const query = section(browser, 'pub fn handleBrowserUrlQueryDone(', '\npub fn pollBrowserUrlTick(');
+  assert.match(query, /if \(idx == app_state\.active_shell\) \{\s*rememberActiveBrowserTabUrl\(\);/);
 });
 
 test('ISSUE-493 URL insertion reuses the caret and menu-safe focus handoff without sending', () => {

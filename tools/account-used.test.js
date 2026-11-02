@@ -10,7 +10,7 @@ function audit(desktop, inbox, session) {
   assert.match(desktop, /account_layout.publishNeeded\(plain_local, plain_base, plain_synced\)/);
   assert.match(desktop, /syncInProcessWorkspacesToRegistry\(\);\s*@import\("inbox.zig"\).publishInboxStateNow\(\);\s*@import\("inbox.zig"\).loadInboxModel\(\)/);
   assert.match(inbox, /fn stampSessionUse[^]*?g_session_save_pending = true;\s*publishInboxState\(\)/);
-  assert.match(session, /if \(saveSessionTo\(path, null\)\) publishSessionLayout\(\)/);
+  assert.match(session, /if \(!saveSessionTo\(path, null\)\) return false;\s*publishSessionLayout\(\);/);
 }
 
 test('usage reaches the debounced layout publisher and server times refresh Frequent without lowering local time', () => {
@@ -23,7 +23,7 @@ test('usage reaches the debounced layout publisher and server times refresh Freq
     desktop.replace('account_layout.publishNeeded(plain_local, plain_base, plain_synced)', 'account_layout.equal(local, base.value)'),
     desktop.replace('@import("inbox.zig").loadInboxModel();', ''),
   ]) assert.throws(() => audit(mutated, inbox, session));
-  assert.throws(() => audit(desktop, inbox, session.replace('if (saveSessionTo(path, null)) publishSessionLayout();', '')));
+  assert.throws(() => audit(desktop, inbox, session.replace('publishSessionLayout();', '')));
   const client = read('src/account_client.zig');
   assert.ok(client.includes('X-Layout-Features: favorite,muted,used,visits,input,settings,hosts,host_removal'));
   assert.ok(client.includes('",workspace_color"'));

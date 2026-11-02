@@ -284,8 +284,9 @@ test("the URL poll never persists the pane launch placeholder", () => {
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   const handler = mainZig.slice(start, end);
-  assert.match(handler, /std\.mem\.startsWith\(u8, new_url, "data:text\/html"\)/);
-  assert.match(handler, /ZSPANE/);
+  assert.match(handler, /@import\("browser_pane.zig"\)\.handleBrowserUrlQueryDone\(@bitCast\(lp\)\);/);
+  const pane = fs.readFileSync(path.join(root, "src", "browser_pane.zig"), "utf8");
+  assert.match(pane, /std\.mem\.startsWith\(u8, url, "data:text\/html"\) and std\.mem\.indexOf\(u8, url, "ZSPANE"\) != null/);
 });
 
 test("the bridge CLI retries a request that reached the wrong bridge instance", () => {

@@ -50,7 +50,7 @@ test('ISSUE-502 bounded snapshots are synchronously restored and coalesced atomi
   assert.match(worker, /writeFileAtomicW\(job\.path\[0\.\.job\.len\], job\.bytes\)/);
   assert.doesNotMatch(cache.slice(cache.indexOf('pub fn save(')), /writeFileAtomicW/);
   assert.match(cache, /state\.g_chat_last_len -\| first > 32768/);
-  assert.match(read('src/session.zig'), /pub fn saveSession\(\) void \{\s*@import\("launch_cache.zig"\)\.changed\(\);/);
+  assert.match(read('src/session.zig'), /pub fn saveSessionQueued\(\) bool \{\s*@import\("launch_cache.zig"\)\.changed\(\);/);
   assert.match(read('src/chat_session.zig'), /chatStoreTabCache\(from_file\);\s*@import\("launch_cache.zig"\)\.changed\(\);/);
   const finish = cache.slice(cache.indexOf('pub fn finish('), cache.indexOf('const Write ='));
   assert.match(finish, /while \(busy\.load\(\.acquire\)\) win\.Sleep\(1\);\s*save\(\);\s*while \(busy\.load\(\.acquire\)\) win\.Sleep\(1\);/);

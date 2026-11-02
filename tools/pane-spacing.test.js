@@ -169,6 +169,7 @@ fn hideBrowserEdgeMasks() void {}
 fn activeBrowserTransientPopupHasForegroundFocus() bool { return false; }
 fn suspendBrowserEdgeMaskRaiseForPopup() void {}
 fn activeBrowserEdgeMasksAllowed() bool { return true; }
+${fn(browser, 'activeBrowserShowsUrlBar')}
 fn browserChromeHiddenForOverlay() bool { return false; }
 fn browserChromeForegroundAllowed() bool { return true; }
 fn ensureBrowserEdgeMaskWindows() void {}
