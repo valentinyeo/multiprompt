@@ -603,6 +603,11 @@ const SEARCH_CLOSE_DISCONNECTED_OFFSET = @import("app_state.zig").SEARCH_CLOSE_D
 const SEARCH_TABCTX_CLOSE_DISCONNECTED = @import("app_state.zig").SEARCH_TABCTX_CLOSE_DISCONNECTED;
 const SEARCH_MUTETAB_OFFSET = @import("app_state.zig").SEARCH_MUTETAB_OFFSET;
 const SEARCH_KEEPALIVE_OFFSET = @import("app_state.zig").SEARCH_KEEPALIVE_OFFSET;
+const computer = @import("computer_pane.zig");
+const SEARCH_COMPUTER_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_TOGGLE_OFFSET;
+const SEARCH_COMPUTER_CONTROL_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_CONTROL_OFFSET;
+const SEARCH_COMPUTER_WIDTH_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_WIDTH_OFFSET;
+const SEARCH_COMPUTER_RETRY_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_RETRY_OFFSET;
 const SEARCH_BROWSER_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_TOGGLE_OFFSET;
 const SEARCH_BROWSER_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_URL_OFFSET;
 const SEARCH_BROWSER_INSTRUCT_OFFSET = @import("app_state.zig").SEARCH_BROWSER_INSTRUCT_OFFSET;
@@ -1356,6 +1361,7 @@ pub fn sessionFrontSelected() void {
 }
 
 pub fn sessionFrontChanged() void {
+    computer.sync();
     @import("room_frontend.zig").syncVisibility();
     @import("voice.zig").voiceManualFrontChanged();
     updateSessionFront(false);
@@ -1448,6 +1454,7 @@ fn showPickRepoFailure(saving_folder: bool) void {
 }
 
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (msg == WM_TIMER and wp == computer.TIMER) { computer.tick(); return 0; }
     if (freeze_recorder.heartbeat(msg, wp)) return 0;
     freeze_recorder.note(msg, app_state.active_shell, if (app_state.g_inbox_active) .inbox else if (app_state.g_all_sessions_active) .sessions else if (app_state.g_search_active) .search else if (app_state.g_shortcuts_active) .shortcuts else if (app_state.g_changelog_active) .changelog else if (app_state.g_browser_focus_mode) .browser else if (app_state.g_chat_active) .chat else .terminal);
     if (msg == update_release.WM_RESPONSIVE) {
@@ -2914,6 +2921,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_TOGGLE_FULLWIDTH => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
+            if (computer.selected()) { computer.toggleFullWidth(); return 0; }
             if (app_state.active_shell < app_state.shell_count) {
                 app_state.shells[app_state.active_shell].full_width = !app_state.shells[app_state.active_shell].full_width;
                 if (@import("chat_composer.zig").fullWidthShouldResizeConsole(app_state.g_chat_active)) {
@@ -2961,6 +2969,11 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             app_state.g_tabctx_sid = 0;
             if (target_idx < app_state.shell_count) {
+                if (computer.chosenFor(target_idx)) {
+                    computer.chooseBrowser(target_idx);
+                    openBrowserPaneForShell(target_idx, "");
+                    return 0;
+                }
                 const browser_hwnd_live = if (app_state.shells[target_idx].browser_hwnd) |bh|
                     IsWindow(bh) != 0 and windowOwnerProcessStillActive(bh)
                 else
@@ -3102,6 +3115,13 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_BROWSER_FOCUS_TOGGLE => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
+            if (computer.selected()) {
+                computer.giveBack();
+                cancelPendingNativeBrowserFocus();
+                app_state.g_browser_focus_mode = false;
+                focusActiveShell();
+                return 0;
+            }
             if (app_state.g_chat_find_open) @import("chat_find_ui.zig").close(false);
             const pane_present = webView2OwnsActiveShell() or (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled);
             const focus_drifted = @import("chat_composer.zig").chatFocusDrifted() and !activeBrowserHasForegroundFocus() and !webView2HasInputFocus();
@@ -6114,6 +6134,26 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET or target == app_state.SEARCH_TABCTX_COMPUTER) {
+                    const sid = if (target == app_state.SEARCH_TABCTX_COMPUTER) app_state.g_tabctx_sid else if (app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
+                    app_state.g_search_active = false;
+                    app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
+                    app_state.g_tabctx_sid = 0;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    if (findShellById(sid)) |idx| {
+                        if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == app_state.SEARCH_TABCTX_COMPUTER) computer.toggle(idx)
+                        else if (idx == app_state.active_shell) {
+                            computer.sync();
+                            if (target == SEARCH_COMPUTER_CONTROL_OFFSET) computer.takeOrGiveControl()
+                            else if (target == SEARCH_COMPUTER_WIDTH_OFFSET) computer.toggleFullWidth()
+                            else computer.retry();
+                        }
+                    }
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if (target == SEARCH_BROWSER_TOGGLE_OFFSET) {
                     app_state.g_search_active = false;
                     app_state.g_shell_focused = true;
@@ -7008,7 +7048,9 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         } else if (target == SEARCH_TABCTX_END_TMUX) {
                             if (app_state.shells[ti].tmux_session_len > 0) endTmuxSessionAt(ti);
                         } else if (target == SEARCH_TABCTX_BROWSER) {
-                            app_state.shells[ti].browser_enabled = !app_state.shells[ti].browser_enabled;
+                            const from_computer = computer.chosenFor(ti);
+                            computer.chooseBrowser(ti);
+                            app_state.shells[ti].browser_enabled = from_computer or !app_state.shells[ti].browser_enabled;
                             if (app_state.shells[ti].browser_enabled) {
                                 ensureBrowserDefaultUrl(ti);
                                 updateBrowserVisibility();
@@ -7658,6 +7700,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_ACTIVATEAPP => {
             if (wp == 0) {
+                computer.revoke();
                 @import("diagnostics.zig").focusTrace(.activateapp_inactive, GetForegroundWindow(), 0);
                 debugLog("[usage-hover] close requested by app deactivation");
                 @import("usage_card.zig").close();
@@ -7709,7 +7752,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SETFOCUS => {
-            const allowed = focusGuardComposerRepairAllowed();
+            const allowed = !computer.controlling() and focusGuardComposerRepairAllowed();
             if (allowed) _ = SetFocus(app_state.g_chat_composer_hwnd);
             altqLog("composer_focus site=setfocus allowed={} pending={} focus={X} chat={}", .{ allowed, app_state.g_native_browser_focus_pending_shell_id, altqPtr(GetFocus()), app_state.g_chat_active });
             return DefWindowProcW(hwnd, msg, wp, lp);
@@ -7722,6 +7765,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (!@import("room_frontend.zig").privateActionsAllowed()) return DefWindowProcW(hwnd, msg, wp, lp);
                 forceReinstallHooksThrottled();
                 syncMouseHookForUrlClicks();
+                if (computer.cursorInside()) return 0;
+                computer.revoke();
                 if (webView2OwnsActiveShell() and (cursorInsideWebView2() or webView2HasInputFocus())) {
                     requestWebView2Focus();
                     return 0;
@@ -7973,6 +8018,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 return 0;
             }
             if (wp == TIMER_NATIVE_BROWSER_FOCUS) {
+                if (computer.selected()) { cancelPendingNativeBrowserFocus(); return 0; }
                 const pending_sid = app_state.g_native_browser_focus_pending_shell_id;
                 if (!@import("room_frontend.zig").privateActionsAllowed() or pending_sid == 0 or app_state.active_shell >= app_state.shell_count or
                     app_state.shells[app_state.active_shell].shell_id != pending_sid or
@@ -8204,6 +8250,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 invalidateSidebar();
             } else if (wp == TIMER_REFOCUS) {
                 _ = KillTimer(hwnd, TIMER_REFOCUS);
+                if (computer.controlling()) { cancelShellRefocus(hwnd); return 0; }
                 if (!@import("room_frontend.zig").privateActionsAllowed()) { cancelShellRefocus(hwnd); return 0; }
                 if (app_state.g_search_active) {
                     altqLog("palette_refocus suppressed foreground={X} rem={} wait_alt={}", .{ altqPtr(GetForegroundWindow()), app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release });
@@ -8601,6 +8648,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             if (app_state.g_app_closing) return 0;
             if (@import("archive.zig").anyPinnedSession() and !@import("console.zig").hasOtherZigShellWindows()) app_state.g_quit_all_in_progress = true;
             if (!app_state.g_quit_all_in_progress and @import("archive.zig").rejectPinnedCloseAll()) return 0;
+            if (!computer.prepareClose()) return 0;
             if (!@import("room_frontend.zig").flushUi()) debugLog("Room UI flush failed on close");
             @import("workspaces.zig").captureWorkspaceFocus();
             app_state.g_app_closing = true;
@@ -8678,6 +8726,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_DESTROY => {
+            computer.shutdown();
             @import("room_frontend.zig").deinit();
             freeze_recorder.closing();
             if (std.Thread.spawn(.{}, exitWatchdog, .{})) |thread| thread.detach() else |_| {}

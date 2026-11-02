@@ -28,6 +28,7 @@ Source of truth for the F1 overlay is `SHORTCUT_ROWS` in `src/shortcuts.zig`. Th
 - `$` in a Codex Chat View: Suggest Codex skills; press Enter again to send after inserting.
 - Ctrl+/ in Chat View: Browse all available commands and skills. Ctrl+K also has `Chat View: Insert Command or Skill...`.
 - Alt+Q (Alt+M): Switch between typing and the browser pane. With no pane, restore the chat box or shell; in Chat View, lost focus or transcript focus returns to the chat box. Closes Chat Find before switching.
+- Ctrl+K -> `Computer: Show or hide`: show or hide this session's Computer. Watching starts view-only. The session's right-click menu also opens Computer. The pill controls typing and mouse access. Ctrl+Shift+F expands Computer without hiding window controls. Ctrl+K includes `Computer: Retry` for lost connections. See [Computer view](../browser/computer-view.md).
 - Alt+C: Toggle Chat View on/off for the active tab, current tab only. Works from every focus state — terminal, the chat composer, the transcript, or a focused docked browser pane (exits browser focus first). Esc no longer closes Chat View; it only closes an overlay (Ctrl+K/F1/Inbox) opened on top of it. Also a Ctrl+K entry that toggles the same way. Page Up / Page Down scroll the conversation while the cursor stays in the typing box (once the box has grown past five lines and shows its own scroll bar, they scroll the box instead).
 - Chat View: Ctrl+K "Chat View: On Everywhere" or "Chat View: Off Everywhere" switches every unlocked session once. Afterwards, Alt+C and tab switches remember each session independently. "Always Chat View for this session" and "Always shell view for this session" immediately lock the session to that view, survive restart, and are skipped by everywhere actions. "Clear Always view for this session" removes the lock without changing the view. All three session actions are also in the right-click tab palette.
 - Ctrl+K → "Chat View: Send Queued Messages Now" / "Chat View: Clear Offline Queue": no dedicated shortcut. When Chat View sends into a stalled ssh/tmux link, or the write/Enter fails, the message is queued per tab (FIFO, max 20) instead of being lost and the composer clears. The queue persists across restart in `%APPDATA%\ZigShell\chat-outbox.json` and flushes one at a time once the link is back and the agent is idle at its `❯` input prompt; background tabs flush when their console is idle and the send route does not need focus. "Send Queued Messages Now" flushes immediately (still waits for the idle prompt); "Clear Offline Queue" drops the active tab's queue and reports how many were dropped. Closing a tab drops its queue. Disconnected `.tmux` tabs also auto-reattach on a 5s/10s/20s/30s backoff while Windows reports internet; plain VPS tabs stay manual (Ctrl+Shift+R) because a fresh plain shell would lose the remote session's live state.
@@ -164,6 +165,8 @@ Opening multiprompt is locked until device login is validated and the initial se
 
 | Keys | Action |
 | --- | --- |
+| Ctrl+K -&gt; Computer: Take control / Give back | Control Computer or return to watching |
+| Ctrl+K -&gt; Computer: Retry | Retry a lost Computer connection |
 | Ctrl+Shift+F | Toggle full-width (fullscreen) |
 | Ctrl+Shift+B | Cycle sidebar: open / collapsed / hidden |
 | multiprompt-browser sidebar | Reveal the sidebar from a shell |

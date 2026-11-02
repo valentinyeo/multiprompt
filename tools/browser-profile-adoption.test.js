@@ -49,11 +49,26 @@ function state() {
   };
 }
 
-function launchDecision(source, app_state, idx) {
-  return runDecision(body(source, 'launchBrowserForShellEx'),
+function launchDecision(source, app_state, idx, computer = false) {
+  return runDecision(body(source, 'launchBrowserForShellEx').replaceAll('@import("computer_pane.zig").chosenFor', 'computerChosenFor'),
     'if (app_state.g_app_closing', '    const launch_now',
-    { app_state, idx, webView2OwnsShell: () => false });
+    { app_state, idx, webView2OwnsShell: () => false, computerChosenFor: () => computer });
 }
+
+test('Computer selection prevents an ordinary browser relaunch', () => {
+  assert.equal(launchDecision(pane, state(), 0, true), undefined);
+  assert.equal(launchDecision(pane, state(), 0, false), 'proceed');
+});
+
+test('Computer selection prevents development browser focus retries from owning the session', () => {
+  const source = body(pane, 'webView2OwnsActiveShell').replaceAll('@import("computer_pane.zig").selected', 'computerSelected');
+  for (const [computer, expected] of [[true, false], [false, true]]) {
+    const result = runDecision(source, 'return ', '\u0000', {
+      app_state: state(), computerSelected: () => computer, webView2OwnsShell: () => true,
+    });
+    assert.equal(result, expected);
+  }
+});
 
 function pollDecision(source, app_state, foreground = true) {
   const calls = [];

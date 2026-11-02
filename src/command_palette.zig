@@ -98,6 +98,10 @@ const SEARCH_CLOSE_DISCONNECTED_OFFSET = @import("app_state.zig").SEARCH_CLOSE_D
 const SEARCH_TABCTX_CLOSE_DISCONNECTED = @import("app_state.zig").SEARCH_TABCTX_CLOSE_DISCONNECTED;
 const SEARCH_MUTETAB_OFFSET = @import("app_state.zig").SEARCH_MUTETAB_OFFSET;
 const SEARCH_KEEPALIVE_OFFSET = @import("app_state.zig").SEARCH_KEEPALIVE_OFFSET;
+const SEARCH_COMPUTER_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_TOGGLE_OFFSET;
+const SEARCH_COMPUTER_CONTROL_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_CONTROL_OFFSET;
+const SEARCH_COMPUTER_WIDTH_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_WIDTH_OFFSET;
+const SEARCH_COMPUTER_RETRY_OFFSET = @import("app_state.zig").SEARCH_COMPUTER_RETRY_OFFSET;
 const SEARCH_BROWSER_TOGGLE_OFFSET = @import("app_state.zig").SEARCH_BROWSER_TOGGLE_OFFSET;
 const SEARCH_BROWSER_URL_OFFSET = @import("app_state.zig").SEARCH_BROWSER_URL_OFFSET;
 const SEARCH_BROWSER_INSTRUCT_OFFSET = @import("app_state.zig").SEARCH_BROWSER_INSTRUCT_OFFSET;
@@ -644,6 +648,12 @@ pub fn recordPaletteUsage(target: usize) void {
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
     const words = @import("ui_words.zon");
+    if (target == app_state.SEARCH_TABCTX_COMPUTER) return words.computer_toggle;
+    if (target == SEARCH_TABCTX_BROWSER) {
+        if (findShellById(app_state.g_tabctx_sid)) |idx| {
+            if (@import("computer_pane.zig").chosenFor(idx)) return words.computer_return_browser;
+        }
+    }
     if (target == app_state.SEARCH_TABCTX_PIN_PAGE) return words.browser_pin_page;
     if (target == app_state.SEARCH_TABCTX_UNPIN_PAGE) return words.browser_unpin_page;
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return words.workspace_color;
@@ -917,7 +927,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_SELECT_ALL_OFFSET => "chat view select all text ctrl a",
         SEARCH_CHAT_AC_OFFSET => "chat view insert command or skill browse ctrl slash",
         SEARCH_SKILLS_BACK_OFFSET => "back",
-        SEARCH_BROWSER_TOGGLE_OFFSET => if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) "retry browser pane" else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) "close browser pane" else "open browser pane",
+        SEARCH_COMPUTER_TOGGLE_OFFSET, SEARCH_COMPUTER_CONTROL_OFFSET, SEARCH_COMPUTER_WIDTH_OFFSET, SEARCH_COMPUTER_RETRY_OFFSET => @import("computer_pane.zig").actionLabel(target),
+        SEARCH_BROWSER_TOGGLE_OFFSET => if (@import("computer_pane.zig").selected()) @import("ui_words.zon").computer_return_browser else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) "retry browser pane" else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) "close browser pane" else "open browser pane",
         SEARCH_BROWSER_URL_OFFSET => "browser open url",
         SEARCH_BROWSER_INSTRUCT_OFFSET => "browser: insert agent instructions",
         SEARCH_BROWSER_FOCUS_URL_OFFSET => "browser: focus address bar",
@@ -1208,6 +1219,7 @@ pub fn roomPaletteAllowed(target: usize) bool {
 }
 
 pub fn paletteGroupOf(target: usize) ?u8 {
+    if (target == SEARCH_COMPUTER_TOGGLE_OFFSET or target == SEARCH_COMPUTER_CONTROL_OFFSET or target == SEARCH_COMPUTER_WIDTH_OFFSET or target == SEARCH_COMPUTER_RETRY_OFFSET) return 5;
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return 3;
     if (target == app_state.SEARCH_TABCTX_BOT_FACE or target == app_state.SEARCH_TABCTX_BOT_COLOR) return 2;
     if (target == @import("room_frontend.zig").new_room_target or target == @import("room_frontend.zig").edit_room_target or (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS)) return 0;
@@ -3084,6 +3096,12 @@ pub fn updateSearchResults() void {
             }
         }
         if (tc_idx) |ti| {
+            if (app_state.shells[ti].tmux_session_len > 0 and app_state.g_search_result_count < app_state.g_search_results.len and
+                (app_state.g_search_len == 0 or labelsMatchQuery(&.{ "computer", "vps", "screen" }, app_state.g_search_buf[0..app_state.g_search_len])))
+            {
+                app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_TABCTX_COMPUTER;
+                app_state.g_search_result_count += 1;
+            }
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
                 const chat_str: []const u8 = if (app_state.shells[ti].chat_view_on) "Switch to shell" else "Switch to chat view";
                 if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ chat_str, "chat view", "live chat", "switch", "terminal", "alt c" }, app_state.g_search_buf[0..app_state.g_search_len])) {
@@ -4853,6 +4871,27 @@ pub fn updateSearchResults() void {
             app_state.g_search_result_count += 1;
         }
 
+        if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].tmux_session_len > 0) {
+            const q = app_state.g_search_buf[0..app_state.g_search_len];
+            if ((q.len == 0 or labelsMatchQuery(&.{ "computer", "vps", "screen" }, q)) and app_state.g_search_result_count < app_state.g_search_results.len) {
+                app_state.g_search_results[app_state.g_search_result_count] = SEARCH_COMPUTER_TOGGLE_OFFSET;
+                app_state.g_search_result_count += 1;
+            }
+            if (@import("computer_pane.zig").selected()) {
+                if ((q.len == 0 or labelsMatchQuery(&.{ "computer", "take control", "give back", "view only" }, q)) and app_state.g_search_result_count < app_state.g_search_results.len) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_COMPUTER_CONTROL_OFFSET;
+                    app_state.g_search_result_count += 1;
+                }
+                if ((q.len == 0 or labelsMatchQuery(&.{ "computer", "full width", "fullscreen" }, q)) and app_state.g_search_result_count < app_state.g_search_results.len) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_COMPUTER_WIDTH_OFFSET;
+                    app_state.g_search_result_count += 1;
+                }
+                if ((q.len == 0 or labelsMatchQuery(&.{ "computer", "retry", "reconnect" }, q)) and app_state.g_search_result_count < app_state.g_search_results.len) {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_COMPUTER_RETRY_OFFSET;
+                    app_state.g_search_result_count += 1;
+                }
+            }
+        }
         var show_browser_toggle = (app_state.g_search_len == 0);
         if (app_state.g_search_len > 0) {
             const q = app_state.g_search_buf[0..app_state.g_search_len];

@@ -36,6 +36,12 @@ fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
 const chat_style = @import("chat_style.zig");
 const app_state = @This();
+var computer_selected = false;
+var computer_width_changes: usize = 0;
+const computer = struct {
+    fn selected() bool { return computer_selected; }
+    fn toggleFullWidth() void { computer_width_changes += 1; }
+};
 const HANDLE = ?usize;
 const ISSUE_440_FULL_WIDTH_CHAT = true;
 const chatViewShouldShowForTab = @import("chat_view.zig").shouldShow;
@@ -57,6 +63,19 @@ var scale: i32 = 100;
 fn uiScaled(value: i32) i32 { return @divTrunc(value * scale, 100); }
 ${body(source, 'fullWidthShouldResizeConsole')}
 ${handler}
+test "IGSH-1087 Computer full width leaves console width and saved browser state alone" {
+    computer_selected = true;
+    defer computer_selected = false;
+    const width = shells[active_shell].full_width;
+    const before_resizes = resizes;
+    const before_saves = saves;
+    const before_changes = computer_width_changes;
+    _ = toggleFullWidth(null);
+    try std.testing.expectEqual(before_changes + 1, computer_width_changes);
+    try std.testing.expectEqual(width, shells[active_shell].full_width);
+    try std.testing.expectEqual(before_resizes, resizes);
+    try std.testing.expectEqual(before_saves, saves);
+}
 fn chatColumn(width: i32) struct { left: i32, width: i32 } {
     const slot = .{ .left = @as(i32, 220), .right = 220 + width };
 ${geometry}
