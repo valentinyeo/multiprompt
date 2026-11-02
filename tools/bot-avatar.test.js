@@ -19,6 +19,14 @@ function block(source, prefix) {
   return source.slice(start, end);
 }
 
+test('a picture id rides on the shell appearance beside the face and colour', () => {
+  const source = read('src/bot_avatar.zig');
+  assert.match(source, /pub const Appearance = struct \{\n {4}face: u8,\n {4}color: u8,\n {4}picture: u64 = 0,/);
+  assert.match(source, /appearance\.picture = shell\.picture;/);
+  assert.match(read('src/app_state.zig'), /face: \?u8 = null,\n {4}color: \?u8 = null,\n {4}picture: u64 = 0,/);
+  assert.doesNotMatch(block(source, 'pub fn forShellWithFace('), /picture/);
+});
+
 test('workspace order owns color and raw session owns face for arbitrary names', () => {
   const source = read('src/bot_avatar.zig');
   assert.match(source, /workspaceColor\(workspace, state\.g_ws_colors\[workspace\]\)/);
