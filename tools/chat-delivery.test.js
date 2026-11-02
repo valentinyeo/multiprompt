@@ -1549,6 +1549,7 @@ function runHarness(control = false) {
       .replaceAll('@import("chat_send.zig").sendChatMessage', 'sendChatMessage')
       .replaceAll('@import("app_state.zig").ShellKind', 'ShellKind')
       .replaceAll('@import("win32.zig").MessageBoxW', 'MessageBoxW')
+      .replaceAll('@import("fonts.zig").messageBox', 'MessageBoxW')
       .replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
     functions += '\n' + (source.includes('fn sshReconnectOk(') ? body('sshReconnectOk').replaceAll('@import("console.zig").showReconnectedConsole', 'showReconnectedConsole').replaceAll('@import("drawing.zig").invalidateReconnectContent', 'invalidateReconnectContent') : 'fn sshReconnectOk(_: u32) void {}');
     if (control === 'question-old') {
