@@ -115,6 +115,8 @@ try {
     $oneShown = & $showPage $one 'chat-one-show'
     Wait-Until { [VerifyNative]::PaneVisible($script:window) } ($one.name + ' pane is on screen') 25
     Snapshot 'chat-one-page'
+    [VerifyNative]::Chord(@(0x12, 0x51))
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } ('Alt+Q returns input to the ' + $one.name + ' chat') 15
     $result.checks += @{ name = 'chat-one-agent-path'; session = $one.tmux; tab = $one.shellId; status = $oneStatus; paneInfo = $onePane; navigated = $oneNavigate.result.tab; shown = $oneShown; page = $one.page }
     Wait-Until {
         $pane = Read-BrowserPaneFor $two.shellId
@@ -137,6 +139,8 @@ try {
     $twoShown = & $showPage $two 'chat-two-show'
     Wait-Until { [VerifyNative]::PaneVisible($script:window) } ($two.name + ' pane is on screen') 25
     Snapshot 'chat-two-own-page'
+    [VerifyNative]::Chord(@(0x12, 0x51))
+    Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } ('Alt+Q returns input to the ' + $two.name + ' chat') 15
     Save-Json (Read-BrowserPaneFor $two.shellId) 'pane-chat-two-connected.json'
     $result.checks += @{ name = 'chat-two-own-page'; session = $two.tmux; tab = $two.shellId; open = $twoOpen; shown = $twoShown; page = $two.page }
     Press @(0x11, (0x31 + $one.index)) ('Ctrl+' + ($one.index + 1) + ': return to ' + $one.name)
