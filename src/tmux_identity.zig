@@ -48,6 +48,7 @@ pub fn attachCommand(buf: []u8, session: []const u8, identity: []const u8, creat
         try writer.writeAll(if (create) "-s " else "-t ");
         var target: [66]u8 = undefined;
         try quote(&writer, if (create) session else try std.fmt.bufPrint(&target, "={s}", .{session}));
+        if (create and std.mem.startsWith(u8, session, "live-")) try writer.writeAll(" 'exec sleep infinity'");
     } else {
         if (!validIdentity(identity)) return error.InvalidIdentity;
         var target: [66]u8 = undefined;
@@ -163,6 +164,13 @@ test "IGSH-985 first attach is exact and shell metacharacters remain quoted" {
     try std.testing.expectEqualStrings("tmux attach -t '=remote'", try attachCommand(&buf, "remote", "", false, false));
     try std.testing.expectEqualStrings("tmux new-session -A -s 'remote'", try attachCommand(&buf, "remote", "", true, false));
     try std.testing.expectEqualStrings("tmux attach -t '=a'\\''b'", try attachCommand(&buf, "a'b", "", false, false));
+}
+
+test "IGSH-1447 a recreated live chat session parks on an idle wait instead of a shell" {
+    var buf: [2048]u8 = undefined;
+    try std.testing.expectEqualStrings("tmux new-session -A -s 'live-abc' 'exec sleep infinity'", try attachCommand(&buf, "live-abc", "", true, false));
+    try std.testing.expectEqualStrings("tmux attach -t '=live-abc'", try attachCommand(&buf, "live-abc", "", false, false));
+    try std.testing.expectEqualStrings("tmux new-session -A -s 'term-abc'", try attachCommand(&buf, "term-abc", "", true, false));
 }
 
 test "a hidden client never sizes the session window for the tab the user is on" {

@@ -1894,6 +1894,28 @@ fn buildWorkspaceTmuxSessionName(out: *[64]u8) []const u8 {
     return std.fmt.bufPrint(out, "term-{x}", .{GetTickCount64()}) catch "term";
 }
 
+fn buildLiveChatSessionName(out: *[64]u8) []const u8 {
+    return std.fmt.bufPrint(out, "live-{x}", .{GetTickCount64()}) catch "live";
+}
+
+pub fn newTabOpensChatView(program: []const u8) bool {
+    return @import("agent_host.zig").eligible(program);
+}
+
+test "IGSH-1447 a new Claude tab opens as a live chat and other tabs open as terminals" {
+    try std.testing.expect(newTabOpensChatView("claude"));
+    try std.testing.expect(newTabOpensChatView("claude-code"));
+    try std.testing.expect(newTabOpensChatView(workspaceSessionProgram("", true)));
+    try std.testing.expect(!newTabOpensChatView(""));
+    try std.testing.expect(!newTabOpensChatView("codex"));
+    try std.testing.expect(!newTabOpensChatView("pi"));
+    try std.testing.expect(!newTabOpensChatView("bash"));
+    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
+    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
+    var out: [64]u8 = undefined;
+    try std.testing.expect(std.mem.startsWith(u8, buildLiveChatSessionName(&out), "live-"));
+}
+
 test "workspace tmux program runs after shell startup and neutral fallback stays unchanged" {
     var out: [512]u8 = undefined;
     const launched = buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/project", "claude") orelse return error.TestUnexpectedResult;
@@ -1925,7 +1947,8 @@ test "IGSH-1447 a new Claude session spawns exactly the terminal launch command"
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings(expected, spawned);
     try std.testing.expect(std.mem.indexOf(u8, spawned, "tmux attach -t term-abc") != null);
-    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id") == null);
 
     const codex = workspaceLaunchCommand("codex", "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
@@ -2125,7 +2148,8 @@ test "IGSH-1266 a new tab starts Claude unless the workspace names a program" {
     const expected = agent_host.launchCommand(&expected_buf, "term-abc", "~/projects", sid) orelse
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings(expected, spawned);
-    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id") == null);
 
     const neutral = workspaceLaunchCommand(workspaceSessionProgram("claude", false), "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
@@ -2174,11 +2198,12 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
         return false;
     }
 
-    var session_buf: [64]u8 = undefined;
-    const session = buildWorkspaceTmuxSessionName(&session_buf);
     const agent_host = @import("agent_host.zig");
     var sid_buf: [36]u8 = undefined;
     const host_sid: ?[]const u8 = if (agent_host.eligible(program)) agent_host.mintSessionId(&sid_buf) else null;
+    const live_chat = host_sid != null and newTabOpensChatView(program);
+    var session_buf: [64]u8 = undefined;
+    const session = if (live_chat) buildLiveChatSessionName(&session_buf) else buildWorkspaceTmuxSessionName(&session_buf);
     var cmd_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
     var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
     const launch_cmd = workspaceLaunchCommand(program, session, cwd, host_sid, &host_buf, &cmd_buf) orelse {
@@ -2194,7 +2219,9 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
     app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
     app_state.g_pending_tmux_host = host;
+    app_state.g_pending_chat_view = live_chat;
     const ok = spawnShellWithSession(.tmux, session, null, null);
+    app_state.g_pending_chat_view = false;
     app_state.g_pending_tmux_host = 0;
     app_state.g_pending_tmux_cmd_len = 0;
     if (!ok) {
@@ -2217,6 +2244,7 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
         @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
         app_state.shells[ns].cached_cwd_len = @intCast(n);
         publishInboxState();
+        if (live_chat and app_state.active_shell == ns and !app_state.g_chat_active) @import("chat_composer.zig").openChatView();
         saveSession();
     }
     return ok;

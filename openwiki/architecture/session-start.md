@@ -212,8 +212,8 @@ tests, `tools/chat-tmux-send-test.py` (delivery through the reader),
 The host contract is `openwiki/architecture/agent-host.md`. One chat is one agent
 session id; the runtime owns at most one host process per chat and speaks the
 agent CLI's `--print --input-format stream-json --output-format stream-json`
-protocol. A new tab starts Claude in the terminal; the host runs only after
-"Switch to Live Chat".
+protocol. A new Claude tab is a live chat: the host runs Claude, and no shell or
+terminal Claude sits under it.
 
 ### New session, in order
 
@@ -221,31 +221,24 @@ protocol. A new tab starts Claude in the terminal; the host runs only after
    `spawnWorkspaceTmuxSession` asks `src/agent_host.zig` whether this program is a
    Claude workload and the app-owned host is enabled.
 2. When it is, the app mints the session id itself (`mintSessionId`, a version 4
-   UUID) before anything is spawned, and builds one remote command with
-   `agent_host.launchCommand`: create the tmux session, run `host enable` and
-   `host handover` from the selected runtime file, type
-   `claude --session-id <sid>` into the pane, then attach. Handover marks the
-   terminal as the owner, so dispatch never starts a hidden host next to the
-   terminal Claude, and no hook is needed to discover the id later.
-3. The tab records the minted id as the chat's `sid` at spawn time, so Chat View
-   has an identity from the first paint. Once the chat moves to Live Chat,
-   messages are rows in the shared store keyed by that id; the host drains them
-   once it is ready, and a retry after reconnect is idempotent by message id.
+   UUID) before anything is spawned, names the tmux session `live-<hex>`, and
+   builds one remote command with `agent_host.launchCommand`: create the tmux
+   session whose only program runs `host enable` and `host start` from the
+   selected runtime file and then `exec sleep infinity`, then attach. The pane
+   never holds a shell, so nothing can be typed into it. The session only parks
+   the chat: the reader needs a live tmux name to deliver, and closing the tab
+   kills it and stops the host.
+3. The tab records the minted id as the chat's `sid` at spawn time and opens with
+   `chat_view_on` set, so the chat is on screen from the first paint and comes
+   back as a chat after a restart. Messages are rows in the shared store keyed by
+   that id; the host drains them once it is ready, and a retry after reconnect is
+   idempotent by message id. A host that stopped wakes on the next send.
 4. While the chat runs on the host, delivery does not run through a terminal
    prompt box, so a draft, a permission prompt or a TUI repaint cannot refuse a
    message.
-5. The terminal is the tab's visible content. A new tab no longer opens the
-   chat: `Ctrl+T`, `Alt+T`, the sidebar plus and the palette row all land in the
-   terminal, and the chat opens only when asked for. The switch is the existing
-   per-tab `chat_view_on` flag, available as `Alt+C`, the `Ctrl+K` row and the
-   right-click tab menu (`SEARCH_TABCTX_CHAT_VIEW`), with the labels "Switch to
-   Live Chat" and "Switch to Terminal". One chat runs in one place at a time:
-   moving to the terminal asks the reader for `host_terminal`, which stops the
-   host, waits until it has exited, then types `claude --resume <sid>` with the
-   host's own permission mode into the tab's pane; moving back asks for
-   `host_resume`, which releases that terminal agent and starts the host again on
-   the same id. Both sides read the one session and its history, both commands are
-   idempotent, and a second press ends with the chat running once.
+5. When the app has to recreate a missing `live-` session, `attachCommand` starts
+   it on `exec sleep infinity` instead of a shell. The host settings outlive the
+   tmux session, so the next send starts the host again on the same id.
 6. Codex and Pi keep today's terminal start: `buildCodexTmuxLaunchCmd` and the
    `send-keys` variants are untouched, and their Chat View path is unchanged.
 
