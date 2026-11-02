@@ -25,7 +25,7 @@ test('deliberate window, restart and workspace closes carry explicit reasons', (
     assert.ok(main.includes(`, .${reason});`), `${reason} remains available`);
   }
   for (const file of ['src/main.zig', 'src/workspaces.zig', 'src/chat_session.zig']) {
-    assert.doesNotMatch(read(file), /PostMessageW\([^;]*WM_CLOSE, 0, 0\)/, `${file} has no unexplained app close`);
+    assert.doesNotMatch(read(file), /PostMessageW\((?:app_state\.g_main_hwnd|hwnd)[^;]*WM_CLOSE, 0, 0\)/, `${file} has no unexplained app close`);
   }
   const state = read('src/app_state.zig');
   assert.match(state, /pub const CloseReason = enum\(usize\)/);

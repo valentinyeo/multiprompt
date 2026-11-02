@@ -118,6 +118,6 @@ test('both app command paths qualify shared and own profiles before inheriting t
   assert.match(body(pane, 'browserWindowResolveWorker'), /browser_command_profile = job.profile;/);
   assert.match(body(pane, 'resolveBrowserWindowIdFromCommand'), /browser_own_profile\.command\(&qualified_buf, raw_cmd, std.mem.sliceTo\(&browser_command_profile, 0\)\)/);
   assert.match(body(bridge, 'resolveWindowFromEnv'), /g_window_file_profile_set = true/);
-  assert.match(body(bridge, 'requestBrowserForWindow'), /isolatedPipeName\(&pipe_name_buf, profile_token\)/);
+  assert.match(body(bridge, 'requestBrowserForWindowCancellable'), /isolatedPipeName\(&pipe_name_buf, profile_token\)/);
   assert.match(body(bridge, 'isolatedPipeName'), /if \(token.len == 0\) return isolated_pipe_name/);
 });
