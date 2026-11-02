@@ -83,7 +83,6 @@
             $repoTabsBefore = @((Read-Session).tabs).Count
             Press @(0x11, 0x54) 'Ctrl+T: new tab in the harness folder'
             Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore + 1 } 'harness folder tab open'
-            Press @(0x12, 0x43) 'Alt+C: return to the terminal view'
             Start-Sleep -Milliseconds 500
             $otherEntries = @($repoEntries | Where-Object { $_.workspace -ne 'Other' })
             [IO.File]::WriteAllText($repoCommands, ([ordered]@{ commands = $otherEntries } | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
@@ -106,6 +105,24 @@
             $pickTabsAfter = @((Read-Session).tabs).Count
             if ($pickTabsAfter -ne $pickTabsBefore) { throw ('Pick repo changed the tab count: ' + $pickTabsBefore + ' -> ' + $pickTabsAfter) }
             $result.checks += @{ name = 'pick-repo-list'; row = 'pick-repo-row.png'; list = 'pick-repo-list.png'; back = 'pick-repo-back.png'; tabsBefore = $pickTabsBefore; tabsAfter = $pickTabsAfter; escapeLeavesTabs = $true; repoRows = $repoRows; repo = $repoFolder }
+            $repoListsBefore = ([regex]::Matches(((Get-Content $repoLog -Raw) -join ''), '\[palette\] rows chars=0 count=2 ids=6702 6710')).Count
+            Palette 'pick repo'
+            Press @(0x0D) 'Enter: reopen Pick repo'
+            Wait-Until { ([regex]::Matches(((Get-Content $repoLog -Raw) -join ''), '\[palette\] rows chars=0 count=2 ids=6702 6710')).Count -gt $repoListsBefore } 'Pick repo list reopened'
+            Press @(0x0D) 'Enter: open the harness folder repo'
+            Wait-Until { @((Read-Session).tabs).Count -eq $pickTabsBefore + 1 } 'Pick repo opened one new tab'
+            $openedTabs = @((Read-Session).tabs)
+            $openedRepo = @($openedTabs | Where-Object { $_.PSObject.Properties.Name -contains 'cwd' -and $_.cwd -eq $repoFolder })
+            if ($openedRepo.Count -ne 1) { throw ('Pick repo saved ' + $openedRepo.Count + ' tabs for the harness folder') }
+            Doctor
+            $crashReports = 0
+            $crashRoot = Join-Path $scratch 'roaming/ZigShell/crashes'
+            if (Test-Path -LiteralPath $crashRoot) { $crashReports = @(Get-ChildItem -LiteralPath $crashRoot -Filter 'crash-*.txt' -File -ErrorAction SilentlyContinue).Count }
+            if ($crashReports -ne 0) { throw 'Pick repo left a crash report behind' }
+            Snapshot 'pick-repo-opened'
+            Press @(0x11, 0x57) 'Ctrl+W: close the tab Pick repo opened'
+            Wait-Until { @((Read-Session).tabs).Count -eq $pickTabsBefore } 'Pick repo tab closed'
+            $result.checks += @{ name = 'pick-repo-open'; shot = 'pick-repo-opened.png'; tabsBefore = $pickTabsBefore; tabsAfter = $openedTabs.Count; tabCwd = $openedRepo[0].cwd; crashReports = $crashReports }
             Press @(0x11, 0x57) 'Ctrl+W: close the harness folder tab'
             Wait-Until { @((Read-Session).tabs).Count -eq $repoTabsBefore } 'harness folder tab closed'
             Snapshot 'pick-repo-closed'
