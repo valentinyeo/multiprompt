@@ -28,7 +28,27 @@ test('release asset includes every historical version, plain lines only, and the
   assert.ok(notes.releases.every(release => release.changes.every(plainChange)));
   assert.ok(notes.releases[0].changes.length > 0);
   assert.equal(notes.version, versions[0]);
+  assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes, no visible change/);
   assert.throws(() => releaseNotes(source, 'v99.0.0'), /offered version/);
+});
+
+test('IGSH-1266 the update card never shows the empty release filler', async () => {
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const source = `pub const CHANGELOG = [_]ChangelogEntry{
+    .{ .ver = "0.28.1400", .items = &.{
+        .{ .text = "Checks and fixes, no visible change", .ticket = "IGSH-1300" },
+    } },
+    .{ .ver = "0.28.1399", .items = &.{
+        .{ .text = "A failed move to the terminal keeps your chat open.", .ticket = "IGSH-1266" },
+    } },
+};`;
+  assert.deepEqual(releaseNotes(source, 'v0.28.1400'), {
+    version: '0.28.1400', releases: [
+      { version: '0.28.1400', changes: [], tickets: [] },
+      { version: '0.28.1399', changes: ['A failed move to the terminal keeps your chat open.'], tickets: ['https://app.hypertask.ai/detail/project-2060/1266'] },
+    ],
+  });
+  assert.doesNotMatch(JSON.stringify(releaseNotes(source, 'v0.28.1400')), /Checks and fixes/);
 });
 
 test('publication exports pending fragments after the release fold and handles older Zig string escapes', async () => {
@@ -303,8 +323,8 @@ test('IGSH-1243 builds one linked line for each commit ticket', async () => {
   const commits = [{ sha: 'aaa', subject: 'IGSH-2: Improve chats' }, { sha: 'bbb', subject: 'IGSH-3: Repair checks' }, { sha: 'ccc', subject: 'IGSH-2: Follow up' }];
   const generated = buildChangelog(files, 'v0.28.1100', [], commits);
   const latest = releaseNotes(generated, 'v0.28.1100').releases[0];
-  assert.deepEqual(latest.changes, ['Chats open sooner. Drafts stay visible.', 'Checks and fixes, no visible change']);
-  assert.deepEqual(latest.tickets, ['https://app.hypertask.ai/detail/project-2060/2', 'https://app.hypertask.ai/detail/project-2060/3']);
+  assert.deepEqual(latest.changes, ['Chats open sooner. Drafts stay visible.']);
+  assert.deepEqual(latest.tickets, ['https://app.hypertask.ai/detail/project-2060/2']);
   assert.match(generated, /\.text = "Chats open sooner\. Drafts stay visible\.", \.ticket = "IGSH-2"/);
   assert.throws(() => buildChangelog(files, 'v0.28.1100', [], [{ sha: 'bad123', subject: 'Repair checks' }]), /bad123.*leading ticket ID/);
   assert.throws(() => buildChangelog(files, 'v0.28.1100', [], []), /fragment has no matching commit ticket/);
@@ -312,8 +332,8 @@ test('IGSH-1243 builds one linked line for each commit ticket', async () => {
   delete noFragments[path.posix.join('changelog.d', 'IGSH-2-chat.md')];
   assert.throws(() => buildChangelog(noFragments, 'v0.28.1100'), /no ticketed release lines/);
   const tooling = releaseNotes(buildChangelog(noFragments, 'v0.28.1100', [], [commits[1]]), 'v0.28.1100').releases[0];
-  assert.deepEqual(tooling.changes, ['Checks and fixes, no visible change']);
-  assert.deepEqual(tooling.tickets, ['https://app.hypertask.ai/detail/project-2060/3']);
+  assert.deepEqual(tooling.changes, []);
+  assert.deepEqual(tooling.tickets, []);
   assert.throws(() => releaseNotes(generated.replace('.ticket = "IGSH-2"', '.ticket = ""'), 'v0.28.1100'), /needs plain ticketed lines/);
 });
 
@@ -338,10 +358,12 @@ test('IGSH-1243 reconstructs every published 1027 to 1048 release', async () => 
   const notes = releaseNotes(generated, 'v0.28.1100');
   for (const tag of tags) {
     const release = notes.releases.find(item => item.version === tag.slice(1));
-    assert.ok(release?.changes.length, tag);
+    assert.ok(release, tag);
     assert.equal(release.changes.length, release.tickets.length, tag);
     assert.ok(release.tickets.every(ticket => /^https:\/\/app\.hypertask\.ai\/detail\/project-2060\/\d+$/.test(ticket)), tag);
   }
+  assert.ok(notes.releases.some(release => release.changes.length > 0));
+  assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes/);
   assert.equal(notes.releases.some(item => item.version === '0.28.1041'), false);
   const release1038 = notes.releases.find(item => item.version === '0.28.1038');
   const actualFragment = git('show', `v0.28.1038:${path.posix.join('changelog.d', 'IGSH-1238-busy-queue.md')}`).split('\n').join(' ');

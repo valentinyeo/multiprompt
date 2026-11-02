@@ -735,8 +735,8 @@ test('IGSH-1243 build reads ticketed commits between published tags', async t =>
     if (subject.startsWith('IGSH-')) {
       assert.equal(result.status, 0, result.stderr);
       const notes = releaseNotes(fs.readFileSync(path.join(r.dir, 'src/changelog.zig'), 'utf8'), 'v0.29.2');
-      assert.deepEqual(notes.releases[0].changes, ['Checks and fixes, no visible change']);
-      assert.deepEqual(notes.releases[0].tickets, ['https://app.hypertask.ai/detail/project-2060/1111']);
+      assert.deepEqual(notes.releases[0].changes, []);
+      assert.deepEqual(notes.releases[0].tickets, []);
     } else {
       assert.equal(result.status, 1);
       assert.ok(result.stderr.includes(sha));

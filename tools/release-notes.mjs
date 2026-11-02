@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareTags, plainChange, productChange } from './version-stamp.mjs';
 
+const filler = 'Checks and fixes, no visible change';
+
 export function releaseNotes(source, tag) {
   const releases = [...source.matchAll(/\.\{ \.ver = "(\d+\.\d+\.\d+)",[^\n]*?\.items = &\.\{([\s\S]*?)\n    \}(?:, \.ticket = "(?:\\.|[^"\\])*")? \},/g)].map(match => {
     const strict = compareTags(`v${match[1]}`, 'v0.28.1027') >= 0;
@@ -16,8 +18,8 @@ export function releaseNotes(source, tag) {
     if (strict && (!items.length || items.length !== [...match[2].matchAll(/\.text\s*=/g)].length || items.some(item => !plainChange(item.text) || !/^(?:IGSH-\d+|https:\/\/app\.hypertask\.ai\/detail\/project-2060\/\d+)$/.test(item.ticket)))) {
       throw new Error(`Release ${match[1]} needs plain ticketed lines`);
     }
-    const kept = items.filter(item => productChange(item.text) || item.text === 'Checks and fixes, no visible change');
-    if (strict && kept.length !== items.length) throw new Error(`Release ${match[1]} has an unsupported line`);
+    const kept = items.filter(item => productChange(item.text));
+    if (strict && items.some(item => !productChange(item.text) && item.text !== filler)) throw new Error(`Release ${match[1]} has an unsupported line`);
     const release = { version: match[1], changes: kept.map(item => item.text) };
     if (strict) release.tickets = kept.map(item => item.ticket.startsWith('IGSH-') ? `https://app.hypertask.ai/detail/project-2060/${item.ticket.slice(5)}` : item.ticket);
     return release;
