@@ -125,3 +125,9 @@ test('a repository with no release tag skips the check', t => {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'SKIP no release tag');
 });
+
+test('the Tests job runs the check beside the version rule with full history', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/test.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /- name: Check a shipped change carries a release note\n        if: steps\.paths\.outputs\.heavy == 'true'\n        shell: bash\n        run: node tools\/check-release-note\.mjs\n/);
+  assert.match(workflow, /tools\/update-card-restart\.test\.js tools\/check-release-note\.test\.mjs/);
+});
