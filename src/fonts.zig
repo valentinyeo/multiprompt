@@ -162,6 +162,7 @@ pub fn editMessage(hwnd: w.HANDLE, owner: w.HANDLE, msg: w.UINT, lp: w.LPARAM) ?
 }
 
 pub const MessageMenuItem = enum(u32) {
+    add_to_chat = 13,
     reply = 4,
     copy = 1,
     copy_link = 7,
@@ -175,6 +176,7 @@ pub const MessageMenuItem = enum(u32) {
 
     pub fn label(self: MessageMenuItem) []const u8 {
         return switch (self) {
+            .add_to_chat => ui_words.message_add_to_chat_label,
             .reply => ui_words.message_reply_label,
             .copy => ui_words.message_copy_label,
             .copy_link => ui_words.message_copy_link_label,
@@ -190,6 +192,7 @@ pub const MessageMenuItem = enum(u32) {
 
     pub fn text(self: MessageMenuItem) w.LPCWSTR {
         return switch (self) {
+            .add_to_chat => L(ui_words.message_add_to_chat_label),
             .reply => L(ui_words.message_reply_menu),
             .copy => L(ui_words.action_copy_menu),
             .copy_link => L(ui_words.message_copy_link_menu),
@@ -205,6 +208,7 @@ pub const MessageMenuItem = enum(u32) {
 
     pub fn glyph(self: MessageMenuItem) u16 {
         return switch (self) {
+            .add_to_chat => 0xE710,
             .reply => 0xE97A,
             .copy => 0xE8C8,
             .copy_link => 0xE71B,

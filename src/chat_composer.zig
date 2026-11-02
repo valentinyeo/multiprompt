@@ -577,13 +577,13 @@ fn chatReplyRefreshPreview() void {
     app_state.g_chat_reply_preview_len = n;
 }
 
-pub fn selectChatReply(text: []const u16) void {
-    if (app_state.g_chat_composer_hwnd == null) return;
-    const bytes = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, text) catch return;
+pub fn selectChatReply(text: []const u16) bool {
+    if (app_state.g_chat_composer_hwnd == null) return false;
+    const bytes = std.unicode.utf16LeToUtf8Alloc(std.heap.page_allocator, text) catch return false;
     defer std.heap.page_allocator.free(bytes);
     if (bytes.len > app_state.g_chat_reply.len) {
         showHeaderNoticeAscii("This message is too large to quote", 3500, true);
-        return;
+        return false;
     }
     @memcpy(app_state.g_chat_reply[0..bytes.len], bytes);
     app_state.g_chat_reply_len = bytes.len;
@@ -594,6 +594,7 @@ pub fn selectChatReply(text: []const u16) void {
     layoutChatControls();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
     _ = SetFocus(app_state.g_chat_composer_hwnd);
+    return true;
 }
 
 pub fn pointInRect(rc: RECT, x: i32, y: i32) bool {
@@ -1403,15 +1404,21 @@ pub fn selectChatSkill(skill: skill_model.Skill) void {
     _ = SetFocus(app_state.g_chat_composer_hwnd);
 }
 
-fn dropPendingEnterChar(hwnd: HANDLE) void {
+fn dropPendingActivationChar(hwnd: HANDLE, key: WPARAM) void {
     const w = @import("win32.zig");
     var pending: w.MSG = undefined;
-    while (w.PeekMessageW(&pending, hwnd, 0x0102, 0x0102, 0) != 0 and pending.wParam == 0x0D) {
-        _ = w.PeekMessageW(&pending, hwnd, 0x0102, 0x0102, 1);
+    for ([_]UINT{ 0x0102, 0x0106 }) |char_msg| {
+        while (w.PeekMessageW(&pending, hwnd, char_msg, char_msg, 0) != 0 and @import("message_menu.zig").activationCharMatches(key, pending.wParam)) {
+            _ = w.PeekMessageW(&pending, hwnd, char_msg, char_msg, 1);
+        }
     }
 }
 
 fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
+    if (@import("message_menu.zig").suppressComposerActivation(msg, wp, lp)) {
+        if (msg == WM_KEYUP or msg == 0x0105) dropPendingActivationChar(hwnd, wp);
+        return 0;
+    }
     if (!@import("room_frontend.zig").privateActionsAllowed() and (msg == WM_KEYDOWN or msg == 0x0102 or msg == 0x0302 or msg == 0x0303 or msg == 0x0304)) return 0;
     const redraw = @import("chat_composer_text.zig").suspendNativePaint(hwnd, msg);
     defer @import("chat_composer_text.zig").resumeNativePaint(hwnd, msg, redraw);
@@ -1428,15 +1435,15 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
     if (@import("chat_find_ui.zig").windowKey(msg, wp)) return 0;
     if (app_state.g_chat_nav_active and (msg == 0x0201 or msg == 0x0102 or msg == 0x0302 or msg == 0x0300 or CallWindowProcW(app_state.g_chat_composer_orig_proc, hwnd, 0x000E, 0, 0) != 0)) @import("chat_render.zig").chatNavClear();
     if (msg == WM_KEYDOWN and @import("workspace_switcher.zig").key(wp)) {
-        if (wp == 0x0D) dropPendingEnterChar(hwnd);
+        if (wp == 0x0D) dropPendingActivationChar(hwnd, 0x0D);
         return 0;
     }
     if (msg == WM_KEYDOWN and @import("usage_card.zig").key(wp)) {
-        if (wp == 0x0D) dropPendingEnterChar(hwnd);
+        if (wp == 0x0D) dropPendingActivationChar(hwnd, 0x0D);
         return 0;
     }
     if (msg == WM_KEYDOWN and @import("more_menu.zig").key(wp)) {
-        if (wp == 0x0D) dropPendingEnterChar(hwnd);
+        if (wp == 0x0D) dropPendingActivationChar(hwnd, 0x0D);
         return 0;
     }
     if (msg == WM_KEYDOWN) {
@@ -1450,9 +1457,9 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
             (GetAsyncKeyState(0x10) & key_down) != 0,
             (GetAsyncKeyState(@as(i32, VK_MENU)) & key_down) != 0,
         );
-        if (nav_action == .open) dropPendingEnterChar(hwnd);
+        if (nav_action == .open) dropPendingActivationChar(hwnd, 0x0D);
         if (@import("chat_render.zig").chatNavKey(nav_action)) {
-            if (nav_action == .open) dropPendingEnterChar(hwnd);
+            if (nav_action == .open) dropPendingActivationChar(hwnd, 0x0D);
             return 0;
         }
     }
@@ -1466,7 +1473,6 @@ fn chatComposerSubclassProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) cal
         if (app_state.g_chat_transcript_hwnd != null) _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
         return 0;
     }
-    if (msg == 0x0102 and app_state.g_chat_sel_transcript_focus and @import("chat_render.zig").chatSelectionReply(msg, wp, lp)) return 0;
     if (msg == 0x0201 or msg == 0x0102) app_state.g_chat_sel_transcript_focus = false;
     if ((msg == 0x0201 or msg == 0x0102) and app_state.g_chat_sel_active) {
         chatSelectionClear();

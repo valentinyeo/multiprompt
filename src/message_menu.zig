@@ -7,9 +7,11 @@ const Item = fonts.MessageMenuItem;
 const L = std.unicode.utf8ToUtf16LeStringLiteral;
 const scaled = drawing.uiScaled;
 
+pub const capacity = 11;
+
 pub const Geometry = struct {
     panel: w.RECT,
-    cells: [9]w.RECT = @splat(std.mem.zeroes(w.RECT)),
+    cells: [capacity]w.RECT = @splat(std.mem.zeroes(w.RECT)),
     divider: ?i32 = null,
     count: usize,
 };
@@ -18,14 +20,20 @@ pub fn geometry(items: []const Item) Geometry {
     const pad = scaled(8);
     const width = scaled(232);
     var g: Geometry = .{ .panel = .{ .left = 0, .top = 0, .right = width, .bottom = 0 }, .count = items.len };
+    if (items.len > capacity) {
+        g.count = 0;
+        return g;
+    }
     var y = pad;
     var reaction: i32 = 0;
+    var reaction_top: i32 = 0;
     for (items, 0..) |item, i| {
         if (@intFromEnum(item) >= 8 and @intFromEnum(item) <= 10) {
-            g.cells[i] = .{ .left = pad + reaction * scaled(42), .top = pad, .right = pad + (reaction + 1) * scaled(42), .bottom = pad + scaled(38) };
+            if (reaction == 0) reaction_top = y;
+            g.cells[i] = .{ .left = pad + reaction * scaled(42), .top = reaction_top, .right = pad + (reaction + 1) * scaled(42), .bottom = reaction_top + scaled(38) };
             reaction += 1;
-            y = pad + scaled(47);
-            g.divider = pad + scaled(42);
+            y = reaction_top + scaled(47);
+            g.divider = reaction_top + scaled(42);
         } else {
             g.cells[i] = .{ .left = pad, .top = y, .right = width - pad, .bottom = y + scaled(34) };
             y += scaled(34);
@@ -43,6 +51,7 @@ pub fn hit(g: Geometry, x: i32, y: i32) ?usize {
 }
 
 pub fn paint(dc: w.HANDLE, items: []const Item, hover: ?usize, light: bool) void {
+    if (items.len > capacity) return;
     const g = geometry(items);
     const fill: u32 = if (light) 0xFAFAFA else tokens.ReaderControl;
     const outline: u32 = if (light) 0xDEDEDE else tokens.ReaderOutline;
@@ -100,6 +109,39 @@ pub fn paint(dc: w.HANDLE, items: []const Item, hover: ?usize, light: bool) void
 const State = struct { items: []const Item, hover: ?usize = null, pointer: ?w.POINT = null, selected: u32 = 0, open: bool = true, light: bool };
 var active: ?*State = null;
 var registered = false;
+var suppress_activation: w.WPARAM = 0;
+
+pub fn activationCharMatches(key: w.WPARAM, char: w.WPARAM) bool {
+    return char == key or (key >= 'A' and key <= 'Z' and char == key + ('a' - 'A'));
+}
+
+fn mnemonic(items: []const Item, key: w.WPARAM) ?usize {
+    if (key < 'A' or key > 'Z') return null;
+    for (items, 0..) |item, i| {
+        const text = std.mem.span(item.text());
+        var j: usize = 0;
+        while (j + 1 < text.len) : (j += 1) {
+            if (text[j] != '&') continue;
+            j += 1;
+            if (text[j] <= 127 and std.ascii.toUpper(@as(u8, @intCast(text[j]))) == key) return i;
+        }
+    }
+    return null;
+}
+
+pub fn suppressComposerActivation(msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) bool {
+    if (suppress_activation == 0) return false;
+    if ((msg == w.WM_KEYUP or msg == 0x0105) and wp == suppress_activation) {
+        suppress_activation = 0;
+        return true;
+    }
+    if ((msg == w.WM_KEYDOWN or msg == 0x0104) and wp == suppress_activation) {
+        if ((lp & 0x40000000) != 0) return true;
+        suppress_activation = 0;
+        return false;
+    }
+    return (msg == 0x0102 or msg == 0x0106) and activationCharMatches(suppress_activation, wp);
+}
 
 fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
     const state = active orelse return w.DefWindowProcW(hwnd, msg, wp, lp);
@@ -141,8 +183,8 @@ fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.W
     }
 }
 
-pub fn track(owner: w.HANDLE, anchor: w.RECT, items: []const Item) u32 {
-    if (active != null or items.len == 0 or items.len > 9) return 0;
+pub fn track(owner: w.HANDLE, anchor: w.RECT, items: []const Item, default_action: ?Item) u32 {
+    if (active != null or items.len == 0 or items.len > capacity) return 0;
     if (!registered) {
         const wc = w.WNDCLASSEXW{ .cbSize = @sizeOf(w.WNDCLASSEXW), .style = 0x00020000, .lpfnWndProc = wndProc, .cbClsExtra = 0, .cbWndExtra = 0, .hInstance = w.GetModuleHandleW(null), .hIcon = null, .hCursor = w.LoadCursorW(null, @ptrFromInt(32512)), .hbrBackground = null, .lpszMenuName = null, .lpszClassName = L("MultiPromptMessageMenu"), .hIconSm = null };
         if (w.RegisterClassExW(&wc) == 0) return 0;
@@ -154,6 +196,9 @@ pub fn track(owner: w.HANDLE, anchor: w.RECT, items: []const Item) u32 {
     const left = std.math.clamp(anchor.left, monitor.rcWork.left, @max(monitor.rcWork.left, monitor.rcWork.right - g.panel.right));
     const top = std.math.clamp(anchor.bottom + scaled(6), monitor.rcWork.top, @max(monitor.rcWork.top, monitor.rcWork.bottom - g.panel.bottom));
     var state: State = .{ .items = items, .light = @import("app_state.zig").g_light_theme };
+    if (default_action) |action| {
+        for (items, 0..) |item, i| if (item == action) { state.hover = i; break; };
+    }
     active = &state;
     defer active = null;
     const hwnd = w.CreateWindowExW(w.WS_EX_TOOLWINDOW | w.WS_EX_NOACTIVATE, L("MultiPromptMessageMenu"), L("Message actions"), w.WS_POPUP, left, top, g.panel.right, g.panel.bottom, owner, null, w.GetModuleHandleW(null), null) orelse return 0;
@@ -167,17 +212,27 @@ pub fn track(owner: w.HANDLE, anchor: w.RECT, items: []const Item) u32 {
     _ = w.SetCapture(hwnd);
     defer _ = w.ReleaseCapture();
     var message: w.MSG = undefined;
+    const down = @as(i16, @bitCast(@as(u16, 0x8000)));
+    var opening_enter_held = (w.GetAsyncKeyState(0x0D) & down) != 0;
     while (state.open) {
         const status = w.GetMessageW(&message, null, 0, 0);
         if (status <= 0) {
             if (status == 0) w.PostQuitMessage(@intCast(message.wParam));
             return 0;
         }
+        if (message.message == w.WM_KEYUP and message.wParam == 0x0D) {
+            opening_enter_held = false;
+            continue;
+        }
         if (message.message == w.WM_KEYDOWN or message.message == 0x0104) {
+            if (message.wParam == 0x0D and (opening_enter_held or (message.lParam & 0x40000000) != 0)) continue;
             switch (message.wParam) {
                 w.VK_ESCAPE => state.open = false,
                 0x0D, 0x20 => {
-                    if (state.hover) |index| state.selected = @intFromEnum(items[index]);
+                    if (state.hover) |index| {
+                        state.selected = @intFromEnum(items[index]);
+                        suppress_activation = message.wParam;
+                    }
                     state.open = false;
                 },
                 0x25, 0x26, 0x27, 0x28 => {
@@ -185,15 +240,31 @@ pub fn track(owner: w.HANDLE, anchor: w.RECT, items: []const Item) u32 {
                     state.hover = if (state.hover) |index| (if (backwards) (index + items.len - 1) % items.len else (index + 1) % items.len) else if (backwards) items.len - 1 else 0;
                     _ = w.InvalidateRect(hwnd, null, 0);
                 },
-                else => state.open = false,
+                else => {
+                    const ctrl_down = (w.GetKeyState(0x11) & down) != 0;
+                    if (!ctrl_down) {
+                        if (mnemonic(items, message.wParam)) |index| {
+                            if ((message.lParam & 0x40000000) == 0) {
+                                state.selected = @intFromEnum(items[index]);
+                                suppress_activation = message.wParam;
+                                state.open = false;
+                            }
+                            continue;
+                        }
+                    }
+                    state.open = false;
+                    _ = w.TranslateMessage(&message);
+                    _ = w.DispatchMessageW(&message);
+                },
             }
             continue;
         }
-        if (message.message == 0x0102 or message.message == w.WM_KEYUP) continue;
+        if (message.message == 0x0102 and message.wParam == 0x0D) continue;
         if (message.message == w.WM_ACTIVATEAPP and message.wParam == 0) state.open = false;
         _ = w.TranslateMessage(&message);
         _ = w.DispatchMessageW(&message);
     }
+    if (state.selected != 0 and suppress_activation == 0 and (w.GetAsyncKeyState(0x0D) & down) != 0) suppress_activation = 0x0D;
     return state.selected;
 }
 
@@ -215,4 +286,25 @@ test "IGSH-1019 stationary mouse messages preserve keyboard action selection" {
     _ = wndProc(null, w.WM_MOUSEMOVE, 0, (20 << 16) | 20);
     try std.testing.expectEqual(@as(?usize, 5), state.hover);
     try std.testing.expect(state.open);
+}
+
+test "IGSH-832 maximum menu geometry remains bounded" {
+    const items = [_]Item{ .add_to_chat, .reaction_like, .reaction_dislike, .reaction_heart, .reply, .copy, .copy_link, .send_again, .remove, .cancel_queued, .copy_request_id };
+    const g = geometry(&items);
+    try std.testing.expectEqual(@as(usize, capacity), g.count);
+    for (g.cells[0..items.len], 0..) |rc, i| try std.testing.expectEqual(@as(?usize, i), hit(g, @divTrunc(rc.left + rc.right, 2), @divTrunc(rc.top + rc.bottom, 2)));
+}
+
+test "IGSH-832 menu mnemonics select only present actions" {
+    const items = [_]Item{ .reply, .copy, .copy_link, .copy_request_id, .send_again, .remove, .cancel_queued };
+    try std.testing.expectEqual(@as(?usize, 0), mnemonic(&items, 'R'));
+    try std.testing.expectEqual(@as(?usize, 1), mnemonic(&items, 'C'));
+    try std.testing.expectEqual(@as(?usize, 2), mnemonic(&items, 'L'));
+    try std.testing.expectEqual(@as(?usize, 3), mnemonic(&items, 'I'));
+    try std.testing.expectEqual(@as(?usize, 4), mnemonic(&items, 'S'));
+    try std.testing.expectEqual(@as(?usize, 5), mnemonic(&items, 'M'));
+    try std.testing.expectEqual(@as(?usize, 6), mnemonic(&items, 'N'));
+    try std.testing.expectEqual(@as(?usize, null), mnemonic(&items, 'X'));
+    try std.testing.expect(activationCharMatches('R', 'r'));
+    try std.testing.expect(!activationCharMatches('R', 's'));
 }

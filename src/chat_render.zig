@@ -137,18 +137,11 @@ const WinHttpCloseHandle = @import("win32.zig").WinHttpCloseHandle;
 const MoveFileExW = @import("win32.zig").MoveFileExW;
 const GetTickCount64 = @import("win32.zig").GetTickCount64;
 const SendMessageW = @import("win32.zig").SendMessageW;
-const CreatePopupMenu = @import("win32.zig").CreatePopupMenu;
-const AppendMenuW = @import("win32.zig").AppendMenuW;
-const TrackPopupMenu = @import("fonts.zig").trackMessagePopupMenu;
-const DestroyMenu = @import("win32.zig").DestroyMenu;
 const ClientToScreen = @import("win32.zig").ClientToScreen;
 const ScreenToClient = @import("win32.zig").ScreenToClient;
 const GetCursorPos = @import("win32.zig").GetCursorPos;
 const TrackMouseEvent = @import("win32.zig").TrackMouseEvent;
 const WM_RBUTTONDOWN = @import("win32.zig").WM_RBUTTONDOWN;
-const MF_STRING = @import("win32.zig").MF_STRING;
-const TPM_RETURNCMD = @import("win32.zig").TPM_RETURNCMD;
-const TPM_LEFTALIGN = @import("win32.zig").TPM_LEFTALIGN;
 const L = @import("startup.zig").L;
 const RGB = @import("startup.zig").RGB;
 const GET_X = @import("startup.zig").GET_X;
@@ -3982,7 +3975,7 @@ fn chatPaintReactions(hdc: HANDLE, mask: u8, rc: RECT) void {
 pub fn chatReplyToBlock(index: usize) void {
     if (index >= app_state.g_chat_block_count or app_state.g_chat_blocks[index].role == .tool) return;
     const display = chatDisplayForIndex(index) orelse return;
-    if (display.text.len > 0) @import("chat_composer.zig").selectChatReply(display.text);
+    if (display.text.len > 0) _ = @import("chat_composer.zig").selectChatReply(display.text);
 }
 
 pub fn chatReplyLatestAgent() void {
@@ -4422,41 +4415,6 @@ fn chatCopyTextAlloc(allocator: std.mem.Allocator, index: ?usize) ![]u16 {
     return allocator.realloc(out, n);
 }
 
-pub fn chatSelectionReplyKey(vk: WPARAM, ctrl: bool, shift: bool, alt: bool, has_selection: bool) bool {
-    return vk == 0x0D and !ctrl and !shift and !alt and has_selection;
-}
-
-pub fn chatSelectionReply(msg: UINT, wp: WPARAM, lp: LPARAM) bool {
-    const down = @as(i16, @bitCast(@as(u16, 0x8000)));
-    if (!chatSelectionReplyKey(wp, isCtrlDown(), (GetAsyncKeyState(0x10) & down) != 0, (GetAsyncKeyState(@as(i32, VK_MENU)) & down) != 0, chatSelRange() != null)) return false;
-    const text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
-        showHeaderNoticeAscii("Could not quote text; try again", 2500, true);
-        return true;
-    };
-    defer std.heap.page_allocator.free(text);
-    app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
-    @import("chat_composer.zig").selectChatReply(text);
-    chatSelectionClear();
-    app_state.g_chat_sel_transcript_focus = false;
-    _ = InvalidateRect(app_state.g_chat_transcript_hwnd, null, 0);
-    return true;
-}
-
-test "IGSH-717 only unmodified Enter with a selection replies" {
-    try std.testing.expect(chatSelectionReplyKey(0x0D, false, false, false, true));
-    try std.testing.expect(!chatSelectionReplyKey(0x0D, false, false, false, false));
-    for ([_]bool{ false, true }) |ctrl| {
-        for ([_]bool{ false, true }) |shift| {
-            for ([_]bool{ false, true }) |alt| {
-                if (ctrl or shift or alt) try std.testing.expect(!chatSelectionReplyKey(0x0D, ctrl, shift, alt, true));
-            }
-        }
-    }
-    for ([_]WPARAM{ 0x0A, 0x1B, 0x20, 0x41 }) |vk| {
-        try std.testing.expect(!chatSelectionReplyKey(vk, false, false, false, true));
-    }
-}
-
 pub fn chatCopySelection() void {
     const text = chatCopyTextAlloc(std.heap.page_allocator, null) catch {
         showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
@@ -4862,7 +4820,18 @@ pub fn openClickedLink(url: []const u16) void {
     if (webView2OwnsActiveShell()) requestWebView2Focus() else requestNativeBrowserFocus();
 }
 
+var selection_completion_pending = false;
+const selection_offer_timer: usize = 0x832;
+var selection_offer_focus: HANDLE = null;
+var selection_offer_anchor: usize = 0;
+var selection_offer_caret: usize = 0;
+var selection_offer_shell: u32 = 0;
+var selection_offer_identity: ?chat_transcript.Identity = null;
+var selection_offer_sid: [40]u8 = @splat(0);
+var selection_offer_position: LPARAM = 0;
+
 fn chatTranscriptMouseDown(hwnd: HANDLE, x: i32, y: i32) void {
+    selection_completion_pending = false;
     const now = GetTickCount64();
     const near = @abs(x - app_state.g_chat_sel_last_x) <= uiScaled(4) and @abs(y - app_state.g_chat_sel_last_y) <= uiScaled(4);
     if (now - app_state.g_chat_sel_last_click <= 500 and near) {
@@ -4894,6 +4863,7 @@ fn chatTranscriptMouseDown(hwnd: HANDLE, x: i32, y: i32) void {
         app_state.g_chat_sel_dragging = false;
         _ = ReleaseCapture();
         _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
+        selection_completion_pending = chatSelRange() != null;
     } else if (app_state.g_chat_sel_click_count == 2) {
         const idx = chatTranscriptSelectionBlockAt(y) orelse return;
         const display = chatSelectionDisplay(idx) orelse return;
@@ -5289,10 +5259,22 @@ fn chatPaintMessageActions(dc: HANDLE) void {
     }
 }
 
-fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_block: ?usize) LRESULT {
-    const menu = CreatePopupMenu();
-    if (menu == null) return 0;
-    defer _ = DestroyMenu(menu);
+fn chatMenuEligible(hwnd: HANDLE) bool {
+    const w = @import("win32.zig");
+    return hwnd == app_state.g_chat_transcript_hwnd and chatViewOwnsInput() and app_state.g_chat_composer_hwnd != null and w.IsWindowVisible(hwnd) != 0 and w.IsWindowVisible(app_state.g_chat_composer_hwnd) != 0;
+}
+
+pub fn chatSelectionMenu() void {
+    const hwnd = app_state.g_chat_transcript_hwnd orelse return;
+    if (chatSelRange() == null or !chatMenuEligible(hwnd)) return;
+    var rc: RECT = std.mem.zeroes(RECT);
+    chatViewClientRect(&rc);
+    const pos: u32 = (@as(u32, @intCast(@max(0, rc.top + uiScaled(20)))) << 16) | @as(u32, @intCast(@max(0, rc.left + uiScaled(20))));
+    _ = chatMessageMenu(hwnd, WM_KEYDOWN, 0, @intCast(pos), null, true);
+}
+
+fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_block: ?usize, selection_offer: bool) LRESULT {
+    if (!chatMenuEligible(hwnd)) return 0;
     const link_text: ?[]u16 = if (keyboard_block != null) null else if (chatContextLinkText(app_state.g_chat_capture[0..app_state.g_chat_last_len], chatTranscriptLinkAt(hwnd, GET_X(lp), GET_Y(lp)))) |text|
         std.heap.page_allocator.dupe(u16, text) catch {
             showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
@@ -5310,6 +5292,7 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
         return 0;
     };
     defer std.heap.page_allocator.free(selection_text);
+    if (selection_offer and selection_text.len == 0) return 0;
     const message_text: []u16 = if (block_at) |idx| chatCopyTextAlloc(std.heap.page_allocator, idx) catch {
         showHeaderNoticeAscii("Could not copy text; try again", 2500, true);
         return 0;
@@ -5335,13 +5318,15 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     const request_id: ?[]u16 = if (block_at) |index| (if (chatHistoryEntry(reaction_identity)) |entry| entry.history.requestIdAlloc(std.heap.page_allocator, app_state.g_chat_blocks[index]) catch null else null) else null;
     defer if (request_id) |id| std.heap.page_allocator.free(id);
     const waiting = if (echo_index) |ei| !app_state.g_chat_outbox.items[ei].host_confirmed and chat_echo.cancellable(app_state.g_chat_outbox.items[ei].state, app_state.g_chat_outbox.items[ei].delivery_watch.removed_ms) else false;
-    var items = chatContextMenuItems(keyboard_block == null and chatSelRange() != null, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions, waiting);
+    var items = chatContextMenuItems(keyboard_block == null and selection_text.len > 0, selection_offer, block_at != null or echo_index != null, reply_text != null, link_text != null, unsent_actions, waiting);
     if (block_at) |index| {
         const role = app_state.g_chat_blocks[index].role;
         if ((role == .prose or role == .code) and reply_text != null and @import("chat_composer.zig").chatAcAgent() == .claude) {
             const Item = @import("fonts.zig").MessageMenuItem;
-            std.mem.copyBackwards(Item, items.items[3..][0..items.len], items.items[0..items.len]);
-            @memcpy(items.items[0..3], &[_]Item{ .reaction_like, .reaction_dislike, .reaction_heart });
+            const at: usize = if (selection_offer) 1 else 0;
+            if (items.len + 3 > items.items.len) return 0;
+            std.mem.copyBackwards(Item, items.items[at + 3 ..][0 .. items.len - at], items.items[at..items.len]);
+            @memcpy(items.items[at..][0..3], &[_]Item{ .reaction_like, .reaction_dislike, .reaction_heart });
             items.len += 3;
         }
     }
@@ -5352,13 +5337,13 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
             items.items[write] = item;
             write += 1;
         }
+        if (write == items.items.len) return 0;
         items.items[write] = .copy_request_id;
         items.len = write + 1;
     }
     var menu_log: [192]u8 = undefined;
     var menu_log_len: usize = 0;
     for (items.items[0..items.len], 0..) |item, i| {
-        _ = AppendMenuW(menu, MF_STRING, @intFromEnum(item), item.text());
         const label = std.fmt.bufPrint(menu_log[menu_log_len..], "{s}{s}", .{ if (i == 0) @as([]const u8, "[chat] message menu items=") else ",", item.label() }) catch unreachable;
         menu_log_len += label.len;
     }
@@ -5367,9 +5352,9 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
     debugLog(std.fmt.bufPrint(&echo_log, "[chat] message menu echo={d}", .{echo_id orelse 0}) catch "");
     var pt = POINT{ .x = GET_X(lp), .y = GET_Y(lp) };
     _ = ClientToScreen(hwnd, &pt);
-    _ = SetForegroundWindow(app_state.g_main_hwnd);
-    const cmd: u32 = if (request_id != null and block_at != null) custom: {
-        var anchor = app_state.g_chat_layout_rects[block_at.?];
+    var anchor = RECT{ .left = pt.x, .top = pt.y, .right = pt.x, .bottom = pt.y };
+    if (!selection_offer and request_id != null and block_at != null) {
+        anchor = app_state.g_chat_layout_rects[block_at.?];
         anchor.left += app_state.g_chat_content_left;
         anchor.right += app_state.g_chat_content_left;
         anchor.top -= app_state.g_chat_scroll_y;
@@ -5380,18 +5365,20 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
         anchor.right += origin.x;
         anchor.top += origin.y;
         anchor.bottom += origin.y;
-        break :custom @import("message_menu.zig").track(app_state.g_main_hwnd, anchor, items.items[0..items.len]);
-    } else @intCast(TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN, pt.x, pt.y, 0, app_state.g_main_hwnd, null));
-    if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
+    }
+    const cmd = @import("message_menu.zig").track(app_state.g_main_hwnd, anchor, items.items[0..items.len], if (selection_offer) .add_to_chat else null);
+    if (!chatMenuEligible(hwnd)) return 0;
+    if (cmd == 13 or cmd == 4 or (cmd >= 8 and cmd <= 10)) {
+        const current_identity = chatFileIdentity();
+        var current_sid = current_identity.sid;
+        if (chatHistoryEntry(current_identity)) |entry| current_sid = entry.history.sid;
+        if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != reaction_shell_id or !std.meta.eql(reaction_identity, current_identity) or !std.mem.eql(u8, &reaction_sid, &current_sid)) {
+            showHeaderNoticeAscii("Conversation changed; open the menu again", 3500, true);
+            return 0;
+        }
+    }
     switch (cmd) {
         8, 9, 10 => if (reply_text) |quote| {
-            const current_identity = chatFileIdentity();
-            var current_sid = current_identity.sid;
-            if (chatHistoryEntry(current_identity)) |entry| current_sid = entry.history.sid;
-            if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != reaction_shell_id or !std.meta.eql(reaction_identity, current_identity) or !std.mem.eql(u8, &reaction_sid, &current_sid)) {
-                showHeaderNoticeAscii("Conversation changed; open the menu again", 3500, true);
-                return 0;
-            }
             chatReactToMessage(reaction_reference, quote, @enumFromInt(cmd - 8));
         },
         11 => if (request_id) |id| chatCopyTextToClipboard(id),
@@ -5400,10 +5387,19 @@ fn chatMessageMenu(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM, keyboard_blo
         5 => if (echo_id) |id| chatEchoSendAgain(id),
         6 => if (echo_id) |id| chatEchoRemove(id),
         @intFromEnum(@import("fonts.zig").MessageMenuItem.cancel_queued) => if (echo_id) |id| chatCancelQueuedFromMenu(id),
+        13 => if (selection_offer and selection_text.len > 0) {
+            app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
+            chatNavClear();
+            if (@import("chat_composer.zig").selectChatReply(selection_text)) {
+                chatSelectionClear();
+                app_state.g_chat_sel_transcript_focus = false;
+                _ = InvalidateRect(hwnd, null, 0);
+            }
+        },
         4 => if (reply_text) |text| {
             app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);
             chatNavClear();
-            @import("chat_composer.zig").selectChatReply(text);
+            _ = @import("chat_composer.zig").selectChatReply(text);
         },
         else => {},
     }
@@ -5620,7 +5616,7 @@ pub fn chatNavKey(action: chat_keynav.Action) bool {
             const y = std.math.clamp(rect.top - app_state.g_chat_scroll_y + uiScaled(12), client.top, client.bottom - 1);
             const packed_pos: u32 = ((@as(u32, @intCast(y)) & 0xffff) << 16) | (@as(u32, @intCast(x)) & 0xffff);
             const lp: LPARAM = @intCast(packed_pos);
-            _ = chatMessageMenu(hwnd, WM_KEYDOWN, 0x0D, lp, index);
+            _ = chatMessageMenu(hwnd, WM_KEYDOWN, 0x0D, lp, index, false);
             if (app_state.g_chat_nav_active) {
                 if (chatNavIndex()) |after| chatNavFocus(after) else chatNavClear();
             }
@@ -5780,10 +5776,11 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_LBUTTONDOWN => {
+            _ = KillTimer(hwnd, selection_offer_timer);
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
             if (chatMessageActionAt(GET_X(lp), GET_Y(lp))) |action| {
                 const index = chat_hover_message orelse return 0;
-                if (action == 1) chatReplyToBlock(index) else _ = chatMessageMenu(hwnd, msg, wp, lp, index);
+                if (action == 1) chatReplyToBlock(index) else _ = chatMessageMenu(hwnd, msg, wp, lp, index, false);
                 return 0;
             }
             chatReplyJumpClear();
@@ -5833,6 +5830,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             chat_scroll_drag = null;
             if (msg == 0x001F and (table_dragging or scroll_dragging)) _ = ReleaseCapture();
             app_state.g_chat_sel_dragging = false;
+            selection_completion_pending = false;
             _ = KillTimer(hwnd, TIMER_CHAT_SEL_SCROLL);
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
@@ -5844,6 +5842,8 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 return 0;
             }
             if (chatScrollUiMouseUp(hwnd)) return 0;
+            const selection_completed = app_state.g_chat_sel_dragging or selection_completion_pending;
+            selection_completion_pending = false;
             if (app_state.g_chat_sel_dragging) {
                 app_state.g_chat_sel_dragging = false;
                 _ = ReleaseCapture();
@@ -5861,6 +5861,25 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
                 }
                 _ = InvalidateRect(hwnd, null, 0);
             }
+            if (selection_completed and chatSelRange() != null) {
+                if (app_state.g_chat_sel_click_count == 2 and chatMenuEligible(hwnd) and app_state.active_shell < app_state.shell_count) {
+                    _ = GetAsyncKeyState(1);
+                    _ = GetAsyncKeyState(2);
+                    _ = GetAsyncKeyState(4);
+                    selection_offer_focus = GetFocus();
+                    selection_offer_anchor = app_state.g_chat_sel_anchor;
+                    selection_offer_caret = app_state.g_chat_sel_caret;
+                    selection_offer_shell = app_state.shells[app_state.active_shell].shell_id;
+                    const identity = chatFileIdentity();
+                    selection_offer_identity = identity;
+                    selection_offer_sid = identity.sid;
+                    if (chatHistoryEntry(identity)) |entry| selection_offer_sid = entry.history.sid;
+                    selection_offer_position = lp;
+                    if (SetTimer(hwnd, selection_offer_timer, 500, null) != 0) return 0;
+                }
+                _ = chatMessageMenu(hwnd, msg, wp, lp, null, true);
+                return 0;
+            }
             if (!app_state.g_chat_sel_active) {
                 app_state.g_chat_sel_transcript_focus = false;
                 if (chatComposerFocusAllowed()) _ = SetFocus(app_state.g_chat_composer_hwnd);
@@ -5868,6 +5887,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return 0;
         },
         WM_LBUTTONDBLCLK => {
+            _ = KillTimer(hwnd, selection_offer_timer);
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
             if (chatScrollUiMouseDown(hwnd, GET_X(lp), GET_Y(lp))) return 0;
             if (chatNoteAt(GET_X(lp), GET_Y(lp))) |index| {
@@ -5918,7 +5938,8 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_RBUTTONDOWN => {
             if (app_state.g_chat_find_open and GET_Y(lp) < uiScaled(app_state.CHAT_FIND_TOP_H)) return 0;
-            return chatMessageMenu(hwnd, msg, wp, lp, null);
+            const selection_offer = if (chatSelRange()) |sel| if (chatTranscriptCharAt(hwnd, GET_X(lp), GET_Y(lp))) |pos| pos >= sel.start and pos < sel.end else false else false;
+            return chatMessageMenu(hwnd, msg, wp, lp, null, selection_offer);
         },
         WM_MOUSEWHEEL, WM_MOUSEHWHEEL => {
             if (chatTableWheel(hwnd, msg, wp, lp)) return 0;
@@ -5927,7 +5948,6 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             return 0;
         },
         WM_KEYDOWN => {
-            if (chatSelectionReply(msg, wp, lp)) return 0;
             if (chatCopyCodeKeyDown(wp)) {
                 chatCopyLatestCode();
                 return 0;
@@ -5943,6 +5963,7 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
             }
             if (isCtrlDown() and wp == 0x41) {
                 chatSelectAll();
+                chatSelectionMenu();
                 return 0;
             }
             if (wp == 0x1B and app_state.g_chat_sel_active) {
@@ -5970,6 +5991,21 @@ fn chatTranscriptWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callco
         },
         WM_SETFOCUS => return 0,
         WM_TIMER => {
+            if (wp == selection_offer_timer) {
+                _ = KillTimer(hwnd, selection_offer_timer);
+                const mouse_changed = (GetAsyncKeyState(1) & 1) != 0 or (GetAsyncKeyState(2) & 1) != 0 or (GetAsyncKeyState(4) & 1) != 0;
+                const identity = chatFileIdentity();
+                var sid = identity.sid;
+                if (chatHistoryEntry(identity)) |entry| sid = entry.history.sid;
+                if (!mouse_changed and (GetFocus() == selection_offer_focus or GetFocus() == app_state.g_chat_composer_hwnd) and GetForegroundWindow() == app_state.g_main_hwnd and chatMenuEligible(hwnd) and
+                    app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].shell_id == selection_offer_shell and
+                    selection_offer_identity != null and std.meta.eql(selection_offer_identity.?, identity) and std.mem.eql(u8, &selection_offer_sid, &sid) and
+                    app_state.g_chat_sel_anchor == selection_offer_anchor and app_state.g_chat_sel_caret == selection_offer_caret and chatSelRange() != null)
+                {
+                    _ = chatMessageMenu(hwnd, WM_LBUTTONUP, 0, selection_offer_position, null, true);
+                }
+                return 0;
+            }
             if (wp == TIMER_CHAT_SCROLLBAR) {
                 chatScrollbarTimer(hwnd);
                 return 0;
@@ -6076,17 +6112,18 @@ test "status row todo expansion stays on its tab and unknown tabs have no strip"
 
 const ChatContextCopyTarget = enum { selection, message, nothing };
 const ChatContextMenu = struct {
-    items: [9]@import("fonts.zig").MessageMenuItem = undefined,
+    items: [@import("message_menu.zig").capacity]@import("fonts.zig").MessageMenuItem = undefined,
     len: usize = 0,
     copy_target: ChatContextCopyTarget,
 };
 
-fn chatContextMenuItems(selected: bool, message: bool, reply: bool, link: bool, unsent: bool, waiting: bool) ChatContextMenu {
+fn chatContextMenuItems(selected: bool, offer: bool, message: bool, reply: bool, link: bool, unsent: bool, waiting: bool) ChatContextMenu {
     var result = ChatContextMenu{ .copy_target = chatContextCopyTarget(selected, message) };
     const Item = @import("fonts.zig").MessageMenuItem;
-    const actions = [_]?Item{ if (reply) .reply else null, .copy, if (link) .copy_link else null, if (unsent) .send_again else null, if (unsent) .remove else null, if (waiting) .cancel_queued else null };
+    const actions = [_]?Item{ if (offer) .add_to_chat else null, if (reply) .reply else null, .copy, if (link) .copy_link else null, if (unsent) .send_again else null, if (unsent) .remove else null, if (waiting) .cancel_queued else null };
     for (actions) |action| {
         if (action) |item| {
+            if (result.len == result.items.len) break;
             result.items[result.len] = item;
             result.len += 1;
         }
@@ -6100,34 +6137,37 @@ fn chatContextCopyTarget(selected: bool, message: bool) ChatContextCopyTarget {
 
 test "IGSH-718 message menu contains exactly Reply then Copy" {
     const Item = @import("fonts.zig").MessageMenuItem;
-    const menu = chatContextMenuItems(false, true, true, false, false, false);
+    const menu = chatContextMenuItems(false, false, true, true, false, false, false);
     try std.testing.expectEqualSlices(Item, &.{ .reply, .copy }, menu.items[0..menu.len]);
     try std.testing.expectEqual(.message, menu.copy_target);
 }
 
 test "IGSH-718 tool menu contains Copy only and selection wins" {
     const Item = @import("fonts.zig").MessageMenuItem;
-    const tool = chatContextMenuItems(false, true, false, false, false, false);
+    const tool = chatContextMenuItems(false, false, true, false, false, false, false);
     try std.testing.expectEqualSlices(Item, &.{.copy}, tool.items[0..tool.len]);
-    const selected = chatContextMenuItems(true, true, true, false, false, false);
-    try std.testing.expectEqualSlices(Item, &.{ .reply, .copy }, selected.items[0..selected.len]);
+    const selected = chatContextMenuItems(true, true, true, true, false, false, false);
+    try std.testing.expectEqualSlices(Item, &.{ .add_to_chat, .reply, .copy }, selected.items[0..selected.len]);
     try std.testing.expectEqual(.selection, selected.copy_target);
-    try std.testing.expectEqual(.selection, chatContextMenuItems(true, false, false, false, false, false).copy_target);
+    const message_target = chatContextMenuItems(true, false, true, true, false, false, false);
+    try std.testing.expectEqualSlices(Item, &.{ .reply, .copy }, message_target.items[0..message_target.len]);
+    try std.testing.expectEqual(.selection, message_target.copy_target);
+    try std.testing.expectEqual(.selection, chatContextMenuItems(true, true, false, false, false, false, false).copy_target);
 }
 
 test "IGSH-718 link and unsent actions follow Reply and Copy" {
     const Item = @import("fonts.zig").MessageMenuItem;
-    const link = chatContextMenuItems(false, true, true, true, false, false);
+    const link = chatContextMenuItems(false, false, true, true, true, false, false);
     try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .copy_link }, link.items[0..link.len]);
-    const unsent = chatContextMenuItems(false, true, true, false, true, false);
+    const unsent = chatContextMenuItems(false, false, true, true, false, true, false);
     try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .send_again, .remove }, unsent.items[0..unsent.len]);
-    const both = chatContextMenuItems(false, true, true, true, true, false);
+    const both = chatContextMenuItems(false, false, true, true, true, true, false);
     try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .copy_link, .send_again, .remove }, both.items[0..both.len]);
 }
 
 test "IGSH-1010 a message waiting in Claude's queue gets Cancel after Reply and Copy" {
     const Item = @import("fonts.zig").MessageMenuItem;
-    const waiting = chatContextMenuItems(false, true, true, false, false, true);
+    const waiting = chatContextMenuItems(false, false, true, true, false, false, true);
     try std.testing.expectEqualSlices(Item, &.{ .reply, .copy, .cancel_queued }, waiting.items[0..waiting.len]);
 }
 
