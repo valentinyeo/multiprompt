@@ -117,6 +117,7 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 fn chatReadMark(_: bool) bool { return false; }
+fn consumePinnedBrowserEntry(_: u32) void {}
 const chat_switch = @import("chat_switch.zig");
 var g_chat_browser_swap: chat_switch.Pending = .{};
 var g_chat_active = true;
@@ -264,7 +265,7 @@ test "browserless switches save selection immediately without another queued wri
   try {
     copyZig(['chat_switch.zig', 'switch_step.zig'], dir);
     const check = timer => {
-      fs.writeFileSync(path.join(dir, 'timer.zig'), (prelude + body('chatViewOwnsInput') + '\n' + timer + cases).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+      fs.writeFileSync(path.join(dir, 'timer.zig'), (prelude + body('chatViewOwnsInput') + '\n' + timer + cases).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("browser_pane.zig").consumePinnedBrowserEntry', 'consumePinnedBrowserEntry').replaceAll('@import("room_frontend.zig").privateActionsAllowed()', 'true'));
       return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'timer.zig')], { encoding: 'utf8', timeout: 120_000 });
     };
     const current = check(body('chatSwitchBrowserTick'));
