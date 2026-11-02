@@ -1,6 +1,23 @@
+function ConvertTo-PlainValue($Value, [int]$Level = 0) {
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) { return [string]$Value }
+    if ($Level -ge 8) { return $Value }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $copy = [ordered]@{}
+        foreach ($key in $Value.Keys) { $copy[$key] = ConvertTo-PlainValue $Value[$key] ($Level + 1) }
+        return $copy
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        return @(foreach ($item in $Value) { ConvertTo-PlainValue $item ($Level + 1) })
+    }
+    return $Value
+}
+
 function Save-Json($Value, [string]$Name) {
     Write-Host "Evidence: serialize $Name"
-    ConvertTo-Json -InputObject $Value -Depth 12 | Set-Content -Encoding UTF8 (Join-Path $Evidence $Name)
+    $json = ConvertTo-Json -InputObject (ConvertTo-PlainValue $Value) -Depth 12
+    if ($json.Length -gt 1048576) { throw ("Evidence: " + $Name + " serialized to " + $json.Length + " characters; store plain values, not pipeline objects") }
+    Set-Content -Encoding UTF8 -Path (Join-Path $Evidence $Name) -Value $json
 }
 
 function Record([string]$Action) {

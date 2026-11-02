@@ -67,9 +67,9 @@
             Wait-Until { @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count -gt $tabRowsBefore } 'tab actions palette opened'
             Type-Text 'move chat'
             Wait-Until { @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=9 ' }).Count -gt 0 } 'tab actions filtered by move chat'
-            $moveRows = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=9 ' })
+            $moveRows = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=9 ' } | ForEach-Object { [string]$_ })
             if ($moveRows[-1] -match '\b7186\b') { throw 'A plain terminal tab without a Claude chat offered Move chat to new mode' }
-            $result.checks += @{ name = 'move-chat-row-hidden-on-plain-tab'; rows = $moveRows[-1]; shot = 'move-chat-row.png' }
+            $result.checks += @{ name = 'move-chat-row-hidden-on-plain-tab'; rows = ('{0}' -f $moveRows[-1]); shot = 'move-chat-row.png' }
             Snapshot 'move-chat-row'
             Press @(0x1B) 'Esc: close tab actions'
             Remove-Item -LiteralPath $commandsPath -Force
