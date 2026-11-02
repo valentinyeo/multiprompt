@@ -31,11 +31,23 @@ const Entry = struct {
     sent_tick_ms: i64 = 0,
     channel_retries: u8 = 0,
     retryable: bool = false,
+    message_v1: bool = false,
+    message_wire_id: [81]u8 = @splat(0),
+    message_phase: [16]u8 = @splat(0),
+    message_sid: [40]u8 = @splat(0),
+    retry_nonce: u64 = 0,
+    reset_pending: bool = false,
+    key: [192]u8 = @splat(0),
+    key_len: u32 = 0,
+    queue_id: u64 = 0,
+    message_nonce: u64 = 0,
 };
 var storage = [_]Entry{.{}};
 var g_chat_outbox = struct { items: []Entry }{ .items = &storage };
-const Key = struct { shell_id: u32 = 7, host: u8 = 0, tmux: [64]u8 = @splat(0) };
-var shells = [_]struct { kind: enum { tmux, local, ssh } = .tmux }{.{}};
+const ShellKind = enum { cmd, tmux, vps, vps2, local, ssh };
+const Key = struct { shell_id: u32 = 7, host: u8 = 0, codex: bool = false, tmux: [64]u8 = @splat(0), sid: [40]u8 = @splat(0) };
+var shells = [_]struct { kind: ShellKind = .tmux, ai_agent: u8 = 1 }{.{}};
+const CHAT_OUTBOX_KEY_CAP = 192;
 var clean_chat: bool = false;
 var shell_count: u32 = 1;
 var test_key: Key = .{};
@@ -55,8 +67,40 @@ var notices: usize = 0;
 const chat_echo = struct { fn fileTimeToUnixMs(_: u64) i64 { return 12345; } };
 const ChatTmuxSendJob = struct {
     key: Key = .{}, echo_id: u64 = 1, text: []u16, retry: bool = false, held: bool = false, written: bool = false, rejected: bool = false, box_not_clear: bool = false,
+    queued_at: i64 = 0, queue_id: u64 = 0, message_nonce: u64 = 0, request_nonce: u64 = 0,
+    message_v1: bool = false, message_status: bool = false, message_reset: bool = false, message_dismiss: bool = false,
+    reset_cutoff: u64 = 0, history_instance: u64 = 0, message_generation: u64 = 0, message_epoch: u64 = 0, reset_result_epoch: u64 = 0,
+    message_state: [16]u8 = @splat(0), message_wire_id: [81]u8 = @splat(0),
     finished: std.atomic.Value(bool) = .init(true),
 };
+const ChatPendingReset = struct { key: Key = .{}, nonce: u64 = 0, request_nonce: u64 = 0 };
+var g_chat_pending_reset: ?ChatPendingReset = null;
+const ChatSendRoute = enum { host_message, terminal_send, wait_for_start };
+fn chatLogSendPath(_: u32, _: ?*const Entry, _: ChatSendRoute, _: []const u8) void {}
+const ChatSubmitPatch = struct { write_started: bool, state: @TypeOf(storage[0].state), retryable: bool };
+fn chatUpgradeToHostMessage(_: u32, entry: *Entry) bool {
+    if (entry.message_v1) return true;
+    if (test_key.sid[0] == 0 or test_key.tmux[0] == 0) return false;
+    entry.message_nonce = 7;
+    entry.queue_id = 9;
+    entry.message_v1 = true;
+    entry.message_sid = test_key.sid;
+    entry.channel_pending = false;
+    entry.write_started = false;
+    entry.retryable = false;
+    entry.state = .queued;
+    return true;
+}
+fn showHeaderNoticeAscii(_: []const u8, _: u32, _: bool) void {}
+fn debugLog(_: []const u8) void {}
+const HistoryStub = struct { generation: u64 = 0, message_generation: u64 = 0, message_epoch: u64 = 0, message_synced: bool = false, message_snapshot: [33]u8 = @splat(0), message_cursor: u64 = 0, message_seq: u64 = 0, message_next_tick: u64 = 0 };
+var g_history_stub: HistoryStub = .{};
+fn chatHistoryEntry(_: Key) ?*HistoryStub { return &g_history_stub; }
+fn chatOutboxKeyForShell(_: u32, buf: *[CHAT_OUTBOX_KEY_CAP]u8) []const u8 { buf[0] = 'k'; return buf[0..1]; }
+fn chatOutboxRemoveAtIn(_: *@TypeOf(g_chat_outbox), _: std.mem.Allocator, _: usize) void {}
+fn chatSubmitRetryPatch() ChatSubmitPatch {
+    return .{ .write_started = false, .state = .queued, .retryable = false };
+}
 var g_chat_tmux_send_job: ?*ChatTmuxSendJob = null;
 fn chatFileIdentityForShell(_: u32) Key { return test_key; }
 fn chatOutboxIndexById(id: u64) ?usize { return if (id == 1) 0 else null; }
@@ -70,7 +114,7 @@ fn Sleep(_: u32) void {}
 fn chatSendEnterDelayMs(_: anytype) u32 { return 150; }
 fn sendEnterToShell(_: u32) bool { enters += 1; return enter_ok; }
 fn chatArmSendVerify(_: u32, _: []const u16, _: u64) bool { verifies += 1; return true; }
-fn chatTmuxSendStart(_: u32, _: []const u16, _: u64, _: bool) bool {
+fn chatTmuxSendStart(_: u32, _: []const u16, _: u64, _: bool, _: bool, _: bool) bool {
     starts += 1;
     if (spawn_ok) storage[0].channel_pending = true;
     return spawn_ok;
@@ -80,7 +124,7 @@ fn findShellById(_: u32) ?u32 { return 0; }
 fn chatOutboxChanged() void { notices += 1; }
 fn chatSteerAfterDelivery(_: u32, _: usize) void {}
 fn reset() void {
-    storage[0] = .{}; shells[0].kind = .tmux; test_key = .{}; test_key.tmux[0] = 't';
+    storage[0] = .{}; shells[0].kind = .tmux; shells[0].ai_agent = 1; test_key = .{}; test_key.tmux[0] = 't'; test_key.sid[0] = 's'; g_history_stub = .{};
     starts = 0; pastes = 0; local_pastes = 0; enters = 0; verifies = 0;
     saves = 0; save_ok = true; spawn_ok = true; direct = true; paste_ok = true; enter_ok = true;
     g_chat_tmux_send_job = null;
@@ -108,10 +152,9 @@ test "VPS tmux routing ignores console visibility lock and busy status" {
     try std.testing.expect(storage[0].write_started);
     try std.testing.expect(storage[0].channel_pending);
 }
-test "local plain SSH unsupported host and missing tmux retain console paste" {
-    for (0..4) |case| {
-        reset();
-        switch (case) { 0 => shells[0].kind = .local, 1 => shells[0].kind = .ssh, 2 => test_key.host = 3, 3 => test_key.tmux[0] = 0, else => unreachable }
+test "a local shell keeps the console paste while a hosted tab never types into the pane" {
+    for ([_]ShellKind{ .local, .ssh, .cmd, .vps }) |kind| {
+        reset(); shells[0].kind = kind;
         try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
         try std.testing.expectEqual(@as(usize, 0), starts);
         try std.testing.expectEqual(@as(usize, 1), pastes);
@@ -121,13 +164,25 @@ test "local plain SSH unsupported host and missing tmux retain console paste" {
     reset(); shells[0].kind = .local; direct = false;
     try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
     try std.testing.expectEqual(@as(usize, 1), local_pastes);
-}
-test "failed worker startup safely falls back once and reserved writes never repeat" {
-    reset(); spawn_ok = false;
-    try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
-    try std.testing.expectEqual(@as(usize, 1), pastes);
+    reset(); test_key.host = 3;
     try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
-    try std.testing.expectEqual(@as(usize, 1), pastes);
+    try std.testing.expectEqual(@as(usize, 0), pastes + enters + verifies);
+    reset(); test_key.tmux[0] = 0;
+    try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expectEqual(@as(usize, 0), pastes + enters + verifies);
+    reset(); shells[0].ai_agent = 0;
+    try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expectEqual(@as(usize, 0), pastes + enters + verifies);
+}
+test "a host message stays reserved when the worker cannot start and never types into the pane" {
+    reset(); spawn_ok = false;
+    try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expectEqual(@as(usize, 1), starts);
+    try std.testing.expectEqual(@as(usize, 0), pastes + enters + verifies);
+    try std.testing.expect(storage[0].write_started);
+    try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+    try std.testing.expectEqual(@as(usize, 1), starts);
+    try std.testing.expectEqual(@as(usize, 0), pastes);
     reset(); save_ok = false;
     try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
     try std.testing.expectEqual(@as(usize, 0), starts + pastes);
@@ -184,12 +239,15 @@ test "channel write failure falls back once but a written request or retry never
 function execute(disabled = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-tmux-routing-'));
   try {
-    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById');
+    const functions = ['chatTmuxSendEligible', 'sendTextToShellVerifiedAt', 'chatSendViaConsole', 'chatTmuxSendFinish', 'chatMessageGoesToHost', 'chatSendRoute'].map(body).join('\n').replaceAll('@import("inbox.zig").findShellById', 'findShellById').replaceAll('@import("app_state.zig").ShellKind', 'ShellKind').replaceAll('@import("diagnostics.zig").debugLog', 'debugLog');
     const checks = disabled ? prelude.slice(0, prelude.indexOf('test "VPS')) + String.raw`
-      test "disabled switch retains paste for VPS tmux" {
+      test "a disabled worker never types a hosted message into the pane" {
         reset();
-        try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
+        try std.testing.expectEqual(ShellSendResult.write_failed, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
         try std.testing.expectEqual(@as(usize, 0), starts);
+        try std.testing.expectEqual(@as(usize, 0), pastes + enters + verifies);
+        reset(); shells[0].kind = .local;
+        try std.testing.expectEqual(ShellSendResult.ok, sendTextToShellVerifiedAt(0, &.{'x'}, 1));
         try std.testing.expectEqual(@as(usize, 1), pastes);
       }
     ` : prelude;
@@ -228,7 +286,7 @@ test('worker uses existing persistent reader and background settlement uses pure
   assert.match(body('chatTmuxSendThread'), /\.op = "send"[^]*chatHistoryPersistent\([^]*&job\.written/);
   assert.doesNotMatch(body('chatTmuxSendThread'), /pasteText|sendEnterToShell|chatArmSendVerify/);
   assert.match(body('chatOutboxTick'), /!entry\.channel_pending and chat_echo\.orphanedSending/);
-  assert.match(body('chatFileRequestForDelivery'), /!delivery and !g_chat_active/);
+  assert.match(body('chatFileRequestForDelivery'), /!delivery and !chatFetchWanted\(g_chat_active\)/, 'a background tab still defers its transcript fetch to the quiet policy');
   const settle = body('chatTmuxSettle');
   assert.match(settle, /chatFileRequestForDelivery\(key, true\)/);
   assert.match(settle, /facts\.enqueued[^]*transcriptStatus\(/);

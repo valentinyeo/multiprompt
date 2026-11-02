@@ -37,7 +37,6 @@ const switch_timing = struct {
     fn record(_: Step, _: i64) void {}
 };
 var g_chat_active = true;
-var dictation_private_capture = false;
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
 var g_chat_read_divider_y: i32 = 0;
@@ -144,9 +143,13 @@ test('ISSUE-498 dictation started in A completes in A while B is active', () => 
   const toggle = body('toggleDictation');
   const captureStart = toggle.indexOf('    g_dictation_draft_owner_len = 0;');
   const capture = captureStart < 0 ? '' : toggle.slice(captureStart, toggle.indexOf('    g_dictation_recording.store(true', captureStart)).replaceAll('@import("chat_composer.zig").', '');
-  const route = source.includes('chatDraftAppend') ? appReady.slice(appReady.indexOf('    if (g_dictation_draft_owner_len > 0)'), marker) : appReady.slice(branchStart, marker);
+  const owner = appReady.indexOf('    if (g_dictation_draft_owner_len > 0)');
+  const external = appReady.indexOf('    if (!dictation_private_capture)');
+  const route = source.includes('chatDraftAppend') ? appReady.slice(owner, external) : appReady.slice(branchStart, marker);
+  assert.ok(owner >= 0 && external > owner, 'the dictated text reaches its own draft before any external target');
   assert.ok(marker >= 0);
   execute(production() + `
+var dictation_private_capture = true;
 var g_dictation_draft_owner: [192]u8 = undefined;
 var g_dictation_draft_owner_len: usize = 0;
 var g_dictation_cancelled = std.atomic.Value(bool).init(false);
