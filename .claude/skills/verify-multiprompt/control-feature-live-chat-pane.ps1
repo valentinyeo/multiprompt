@@ -43,7 +43,7 @@ foreach ($chat in @(
     $openArgs = @('session-open', '--workspace', $workspaceName, '--group', $group.name, '--host', $hostName, '--tmux', $chat.tmux, '--name', $chat.name)
     $created = Invoke-Zsb $openArgs $script:liveChatPort ('session-open-' + $chat.tmux)
     if ($created.created -ne $true -or $created.tab -le 0) { throw ('session-open did not create the ' + $chat.tmux + ' chat') }
-    $chat.shellId = [uint32]$created.tab
+    $chat.shellId = [int]$created.tab
     $chats += $chat
 }
 Wait-Until {
@@ -54,8 +54,9 @@ Wait-Until {
 } 'two saved tabs bound to live-* tmux sessions'
 $state = Read-Session
 foreach ($chat in $chats) {
-    $chat.index = [array]::IndexOf(@($state.tabs | ForEach-Object { $_.shell_id }), $chat.shellId)
-    if ($chat.index -lt 0) { throw ('saved tab for ' + $chat.tmux + ' is missing') }
+    $chat.index = [array]::IndexOf(@($state.tabs | ForEach-Object { [string]$_.tmux_session }), [string]$chat.tmux)
+    $saved = @($state.tabs | Where-Object { $_.PSObject.Properties['tmux_session'] -and $_.tmux_session -ceq $chat.tmux })[0]
+    if ($chat.index -lt 0 -or $null -eq $saved -or [int]$saved.shell_id -ne $chat.shellId) { throw ('saved tab for ' + $chat.tmux + ' is missing') }
 }
 Save-Json $state 'session-live-chats.json'
 $pageRoot = Join-Path $scratch 'live-chat-pages'
