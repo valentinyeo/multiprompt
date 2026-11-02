@@ -482,7 +482,7 @@ pub fn paintChatView(hdc: HANDLE) void {
         preview.right -= uiScaled(40);
         preview.bottom = layout.composer_card.top + @import("chat_composer.zig").chatReplyBarH();
         _ = SetTextColor(hdc, customColorOr("subtitle", if (app_state.g_light_theme) RGB(112, 117, 128) else RGB(137, 146, 164)));
-        _ = DrawTextW(hdc, &app_state.g_chat_reply_preview, @intCast(app_state.g_chat_reply_preview_len), &preview, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        _ = @import("dwrite_text.zig").draw(hdc, &app_state.g_chat_reply_preview, @intCast(app_state.g_chat_reply_preview_len), &preview, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         var cancel = @import("chat_composer.zig").chatReplyCancelRect();
         _ = DrawTextW(hdc, L("×"), -1, &cancel, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     }
