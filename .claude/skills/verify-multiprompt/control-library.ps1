@@ -152,10 +152,10 @@ function Read-BrowserPane {
     return @($state.shells | Where-Object { $_.sid -eq $script:browserShellId })[0]
 }
 
-function Read-BrowserPaneFor([uint32]$ShellId) {
+function Read-BrowserPaneFor([uint32]$TabShellId) {
     $state = Read-Inbox
     if ($null -eq $state) { return $null }
-    return @($state.shells | Where-Object { $_.sid -eq $ShellId })[0]
+    return @($state.shells | Where-Object { $_.sid -eq $TabShellId })[0]
 }
 
 function Wait-SwitchNativeHost {
