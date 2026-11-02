@@ -99,7 +99,7 @@ test("remote requests and signed URLs are carried without silent truncation", ()
   assert.match(queuedOpen, /if \(url\.len >= g_zsb_open_url\.len\) return null/);
   assert.doesNotMatch(queuedOpen, /@min\(url\.len/);
 
-  const navigate = functionBody(app, "navigateBrowserPaneWithActivation", "openBrowserPaneForShell");
+  const navigate = functionBody(app, "navigateBrowserPaneWithIntent", "openBrowserPaneForShell");
   assert.match(navigate, /browser_pending_url\[0\.\.url\.len\]/);
   assert.match(navigate, /\[WIN32_COMMAND_LINE_CAP\]u8/);
   assert.doesNotMatch(navigate, /safe_url_buf/);

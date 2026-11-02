@@ -79,7 +79,7 @@ test('pane follows without requesting browser focus and debug timings sample act
   assert.match(body('switchToShell'), /armSshReconnectTimerIfNeeded\(\)/);
   assert.doesNotMatch(body('switchToShell'), /respawnShellInPlace\(/);
   assert.doesNotMatch(body('openChatView'), /shells\[active_shell\]\.hwnd == null/);
-  assert.match(body('updateBrowserVisibility'), /if \(g_chat_active or shells\[active_shell\]\.browser_pending_intent == \.select_preserve_focus\) launchBrowserForShellFromRequest/);
+  assert.match(body('updateBrowserVisibility'), /if \(g_chat_active\) launchBrowserForShellFromRequest/);
   assert.doesNotMatch(body('chatSwitchBrowserTick'), /requestNativeBrowserFocus|focusActiveBrowserPane/);
   const log = body('chatSwitchLogBrowserShown');
   assert.match(log, /verboseLoggingEnabled\(\)/);
@@ -263,8 +263,6 @@ test "browserless switches save selection immediately without another queued wri
 `;
   try {
     copyZig(['chat_switch.zig', 'switch_timing.zig'], dir);
-    const copied_bridge = path.join(dir, 'bridge.zig');
-    fs.writeFileSync(copied_bridge, fs.readFileSync(copied_bridge, 'utf8').replace('@import("bridge_config").extension_version', '"0.0.0"'));
     const check = timer => {
       fs.writeFileSync(path.join(dir, 'timer.zig'), (prelude + body('chatViewOwnsInput') + '\n' + timer + cases).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
       return spawnSync(process.env.ZIG || 'zig', ['test', path.join(dir, 'timer.zig')], { encoding: 'utf8', timeout: 120_000 });

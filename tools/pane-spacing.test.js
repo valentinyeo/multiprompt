@@ -95,7 +95,7 @@ var g_hide_sidebar = false;
 var g_thread_title = true;
 var shell_count: u32 = 1;
 var active_shell: u32 = 0;
-var shells = [_]struct { hwnd: HANDLE = @ptrFromInt(2), browser_split_permille: u16 = 500, full_width: bool = false, browser_native: bool = true, font_gen: u32 = 0, disconnected: bool = false }{.{}};
+var shells = [_]struct { hwnd: HANDLE = @ptrFromInt(2), browser_split_permille: u16 = 500, full_width: bool = false, browser_native: bool = true, font_gen: u32 = 0, disconnected: bool = false, browser_pinned_url_len: usize = 0 }{.{}};
 var g_main_hwnd: HANDLE = @ptrFromInt(1);
 var g_chat_active = false;
 var g_chat_composer_extra_h: i32 = 0;
