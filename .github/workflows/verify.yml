@@ -227,6 +227,59 @@ jobs:
           const policy = require('./tools/journey-policy.json');
           console.log(`quarantined=${JSON.stringify(Object.keys(policy.quarantined))}`);
           NODE
+  build-app:
+    needs: journeys
+    if: inputs.feature != 'chat-sync-audit'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Keep LF line endings
+        if: inputs.tag == ''
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: inputs.tag == ''
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Restore Zig toolchain
+        if: inputs.tag == ''
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
+      - name: Install Zig 0.16.0
+        if: inputs.tag == ''
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0\zig.exe")) {
+            $zip = "$env:RUNNER_TEMP\zig.zip"
+            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+            if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
+            tar -xf $zip -C $env:RUNNER_TEMP
+            if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
+          }
+          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Identify the shared executable revision
+        if: inputs.tag == ''
+        shell: pwsh
+        run: |
+          $revision = (git rev-parse HEAD).Trim()
+          $tag = (git describe --tags --match 'v[0-9]*' --abbrev=0 HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $tag -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Reachable release version not found' }
+          "VERIFY_VERSION=$($Matches[1])" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Build the Windows app once for this push
+        if: inputs.tag == ''
+        run: zig build -Drelease=false -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.tag == ''
+        with:
+          name: verify-app
+          path: zig-out/bin/
+          retention-days: 1
+          if-no-files-found: error
   reopen-board-contract:
     runs-on: ubuntu-latest
     steps:
@@ -306,7 +359,7 @@ jobs:
           path: evidence/
           if-no-files-found: error
   verify:
-    needs: journeys
+    needs: [journeys, build-app]
     if: inputs.feature != 'chat-sync-audit'
     runs-on: windows-latest
     name: ${{ inputs.feature == 'title-bar' && format('verify ({0}, {1}, {2})', matrix.feature, matrix.caption-dpi, matrix.caption-browser-theme) || inputs.feature == 'window-controls' && format('verify ({0}, {1})', matrix.feature, matrix.caption-dpi) || format('verify ({0})', matrix.feature) }}
@@ -482,8 +535,14 @@ jobs:
           $version = $Matches[1]
           "VERIFY_VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VERIFY_REVISION=$revision" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+      - name: Download the shared Windows app build
+        if: env.RELEASE_TAG == '' && matrix.app-revision == '' && env.FEATURE != 'safe-updates' && env.CHAT_SHAPE_PROOF != '1' && env.CHAT_SWITCH_PROFILE != '1'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: verify-app
+          path: zig-out/bin
       - name: Build branch executable
-        if: env.RELEASE_TAG == ''
+        if: env.RELEASE_TAG == '' && (matrix.app-revision != '' || env.FEATURE == 'safe-updates' || env.CHAT_SHAPE_PROOF == '1' || env.CHAT_SWITCH_PROFILE == '1')
         run: zig build -Drelease=${{ env.FEATURE == 'safe-updates' }} -Dversion="${{ env.VERIFY_VERSION }}" -Drevision="${{ env.VERIFY_REVISION }}" ${{ env.CHAT_SHAPE_PROOF == '1' && '-Doptimize=ReleaseSmall' || '' }} ${{ env.CHAT_SWITCH_PROFILE == '1' && '-Dsymbols=true' || '' }}
         working-directory: ${{ matrix.app-revision && 'app-source' || '.' }}
       - name: Stage the independently built application
