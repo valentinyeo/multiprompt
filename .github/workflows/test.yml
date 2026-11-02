@@ -227,7 +227,7 @@ jobs:
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
       - name: Check a shipped change carries a release note
-        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
+        if: steps.paths.outputs.heavy == 'true'
         shell: bash
         run: node tools/check-release-note.mjs
       - name: Test release update source regressions
