@@ -90,12 +90,16 @@ using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
 public class MpShot {
-    [DllImport(\"user32.dll\")] public static extern IntPtr FindWindow(string cls, string title);
+    public delegate bool Proc(IntPtr h, IntPtr l);
+    [DllImport(\"user32.dll\")] public static extern bool EnumWindows(Proc p, IntPtr l);
+    [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport(\"user32.dll\")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
     public struct RECT { public int Left, Top, Right, Bottom; }
-    public static string Save(string path) {
-        var h = FindWindow(\"MultipromptDevWindow\", null);
+    public static string Save(string path, uint want) {
+        var h = IntPtr.Zero;
+        EnumWindows((w, l) => { uint pid; GetWindowThreadProcessId(w, out pid); if (pid == want && IsWindowVisible(w)) { h = w; return false; } return true; }, IntPtr.Zero);
         if (h == IntPtr.Zero) return \"window-missing\";
         RECT r; if (!GetWindowRect(h, out r)) return \"no-rect\";
         var bmp = new Bitmap(r.Right - r.Left, r.Bottom - r.Top);
@@ -104,7 +108,7 @@ public class MpShot {
         return \"saved \" + path;
     }
 }
-'@; Add-Type -TypeDefinition \$d; [MpShot]::Save(\"\$env:TEMP\\$name.png\")" 45)
+'@; Add-Type -TypeDefinition \$d -ReferencedAssemblies System.Drawing; \$p = (Get-Process -Name 'multiprompt-dev' -ErrorAction SilentlyContinue | Select-Object -First 1).Id; if (-not \$p) { 'dev-not-running' } else { [MpShot]::Save(\"\$env:TEMP\\$name.png\", [uint32]\$p) }" 45)
     echo "$out"
     mkdir -p "$evidence"
     local local_png="$evidence/$name.png"

@@ -97,7 +97,7 @@ public class MpP {
     return \"ok\";
   }
 }
-'@; Add-Type -TypeDefinition \$d; [MpP]::Go([IntPtr]$h, \"\$env:TEMP\\$name.png\")" 60 >/dev/null
+'@; Add-Type -TypeDefinition \$d -ReferencedAssemblies System.Drawing; [MpP]::Go([IntPtr]$h, \"\$env:TEMP\\$name.png\")" 60 >/dev/null
     : > "$png.b64"
     while :; do
         chunk=$(hc "\$p = Join-Path \$env:TEMP '$name.png'; if (-not (Test-Path \$p)) { '' } else { \$b = [IO.File]::ReadAllBytes(\$p); \$take = [Math]::Min(150000, [Math]::Max(0, \$b.Length - $offset)); if (\$take -le 0) { '' } else { [Convert]::ToBase64String(\$b, $offset, \$take) } }" 60 | tr -d '\r\n')
