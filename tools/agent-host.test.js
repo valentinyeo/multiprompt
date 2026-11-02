@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const read = (file) => fs.readFileSync(file, 'utf8');
 
@@ -72,4 +74,19 @@ test('IGSH-1266 mp-send ships inside the runtime bundle and is published next to
   assert.match(source, /reader\.message_store_request\(query\)/);
   assert.match(source, /op="message_submit", message_protocol=1/);
   assert.match(read('tools/mp-send'), /runpy\.run_path\(str\(target\), run_name="__main__"\)/);
+});
+
+test('IGSH-1266 a stopped live chat host restarts with the reader even when mp-send loaded it', () => {
+  const reader = path.resolve('src/chat_history_reader.py');
+  const run = spawnSync('python3', ['-I', '-c', [
+    'import importlib.util,sys',
+    'target=sys.argv[1]',
+    "sys.argv=['/usr/local/bin/mp-send','claude','x']",
+    "spec=importlib.util.spec_from_file_location('mp_reader',target)",
+    'module=importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'print(module.host_runtime_file())',
+  ].join('\n'), reader], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: process.env.HOME } });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout.trim(), reader);
 });

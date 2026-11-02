@@ -105,6 +105,8 @@ def wait(reader, provider, sid, tmux, message_id, timeout):
         if time.monotonic() >= deadline:
             return message
         time.sleep(0.2)
+        if message is not None and message.get("state") == "queued":
+            dispatch(reader, provider, sid, tmux)
         poll(reader, provider, sid, tmux)
         message = status(reader, provider, sid, tmux, message_id) or message
     return message

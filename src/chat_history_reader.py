@@ -2636,7 +2636,7 @@ def host_reply(query):
 
 
 def host_runtime_file():
-    name = sys.argv[0] if sys.argv else ""
+    name = globals().get("__file__") or (sys.argv[0] if sys.argv else "")
     if not name or name.startswith("-"):
         return None
     try:
