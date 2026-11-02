@@ -2461,6 +2461,9 @@ test "IGSH-1447 a remote tab saves the folder it was opened in" {
     app_state.shells[0].kind = .tmux;
     app_state.shells[0].tmux_host = 0;
     app_state.shells[0].shell_id = 9;
+    const session = "term-picked";
+    @memcpy(app_state.shells[0].tmux_session[0..session.len], session);
+    app_state.shells[0].tmux_session_len = session.len;
     const folder = "/tmp/picked-repo";
     @memcpy(app_state.shells[0].cached_cwd[0..folder.len], folder);
     app_state.shells[0].cached_cwd_len = folder.len;
@@ -2486,6 +2489,7 @@ test "IGSH-1447 a remote tab saves the folder it was opened in" {
     var tabs: [MAX_SHELLS]SavedTab = undefined;
     const count = json_reader.sessionTabs(parsed.value, &tabs, MAX_LWS);
     try std.testing.expectEqual(@as(u32, 1), count);
+    try std.testing.expectEqualStrings(session, tabs[0].tmux_session[0..tabs[0].tmux_session_len]);
     try std.testing.expectEqualStrings(folder, tabs[0].cwd[0..tabs[0].cwd_len]);
 }
 
