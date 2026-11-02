@@ -396,10 +396,12 @@ pub fn commitRename() void {
         app_state.g_edit_sync_remote_name = false;
         _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 0);
         if (ulen > 0) {
-            var url8: [512]u8 = undefined;
-            for (0..ulen) |i| url8[i] = if (buf[i] < 128) @intCast(buf[i]) else '?';
-            navigateBrowserPane(app_state.active_shell, url8[0..ulen]);
-            saveSession();
+            var url8: [2048]u8 = undefined;
+            const n = std.unicode.utf16LeToUtf8(&url8, buf[0..ulen]) catch 0;
+            if (n > 0) {
+                navigateBrowserPane(app_state.active_shell, url8[0..n]);
+                saveSession();
+            }
         }
         app_state.g_shell_focused = true;
         focusActiveShell();

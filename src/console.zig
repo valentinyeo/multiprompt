@@ -2088,6 +2088,8 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
     const saved_browser_enabled = app_state.shells[idx].browser_enabled;
     const saved_browser_url = app_state.shells[idx].browser_url;
     const saved_browser_url_len = app_state.shells[idx].browser_url_len;
+    const saved_browser_pinned_url = app_state.shells[idx].browser_pinned_url;
+    const saved_browser_pinned_url_len = app_state.shells[idx].browser_pinned_url_len;
     const saved_browser_launch_tick = app_state.shells[idx].browser_launch_tick;
     const saved_browser_first_launch_tick = app_state.shells[idx].browser_first_launch_tick;
     const saved_browser_connection_id = app_state.shells[idx].browser_connection_id;
@@ -2232,6 +2234,8 @@ pub fn respawnShellInPlace(idx: u32, terminate_existing: bool) bool {
         .browser_enabled = saved_browser_enabled,
         .browser_url = saved_browser_url,
         .browser_url_len = saved_browser_url_len,
+        .browser_pinned_url = saved_browser_pinned_url,
+        .browser_pinned_url_len = saved_browser_pinned_url_len,
         .browser_launch_tick = saved_browser_launch_tick,
         .browser_first_launch_tick = saved_browser_first_launch_tick,
         .browser_connection_id = saved_browser_connection_id,
@@ -2710,6 +2714,10 @@ pub fn switchToShell(idx: u32) void {
     }
     app_state.g_browser_focus_mode = false;
     const prev = app_state.active_shell;
+    if (idx != prev) {
+        if (prev < app_state.shell_count) @import("browser_pane.zig").cancelPinnedBrowserEntry(app_state.shells[prev].shell_id);
+        if (idx < app_state.shell_count and !app_state.g_restoring and !app_state.g_account_applying and !app_state.g_startup_progress and @import("room_frontend.zig").privateActionsAllowed() and !app_state.g_all_sessions_active) @import("browser_pane.zig").armPinnedBrowserEntry(app_state.shells[idx].shell_id);
+    }
     @import("browser_pane.zig").rememberActiveBrowserTabUrl();
     if (!app_state.g_restoring and idx < app_state.shell_count and prev < app_state.shell_count and idx != prev) {
         app_state.g_previous_shell_sid = app_state.shells[prev].shell_id;
@@ -2819,6 +2827,10 @@ pub fn switchToShell(idx: u32) void {
                 }
             }
         }
+    }
+    if (!defer_browser and idx < app_state.shell_count and idx != prev and !app_state.g_restoring and !app_state.g_account_applying and !app_state.g_startup_progress and @import("room_frontend.zig").privateActionsAllowed() and !app_state.g_all_sessions_active) {
+        @import("browser_pane.zig").armPinnedBrowserEntry(app_state.shells[idx].shell_id);
+        @import("browser_pane.zig").consumePinnedBrowserEntry(app_state.shells[idx].shell_id);
     }
     if (@import("room_frontend.zig").privateActionsAllowed() and idx < app_state.shell_count and idx != prev) {
         for (&app_state.g_voice_deferred_text) |*pending| {

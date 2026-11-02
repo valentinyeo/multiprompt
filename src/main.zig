@@ -4070,6 +4070,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 app_state.g_search_spawn_ws = if (was_all_sessions) 0xFE else 0xFF;
             }
             const was_search_active = app_state.g_search_active;
+            if (!was_search_active) app_state.g_search_pin_sid = if (!was_all_sessions and !app_state.g_search_from_inbox and app_state.active_shell < app_state.shell_count) app_state.shells[app_state.active_shell].shell_id else 0;
             altqLog("palette_refocus rem={} wait_alt={} grace_left={} inbox_left={}", .{ app_state.g_refocus_remaining, app_state.g_refocus_waiting_for_alt_release, app_state.g_ws_switch_focus_grace -| GetTickCount64(), app_state.g_inbox_shell_focus_until -| GetTickCount64() });
             cancelShellRefocus(hwnd);
             app_state.g_search_active = true;
@@ -6822,6 +6823,25 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     _ = InvalidateRect(hwnd, null, 0);
                     return 0;
                 }
+                if (target == app_state.SEARCH_TABCTX_PIN_PAGE or target == app_state.SEARCH_TABCTX_UNPIN_PAGE) {
+                    const sid = if (app_state.g_search_tabctx_mode) app_state.g_tabctx_sid else app_state.g_search_pin_sid;
+                    const idx = findShellById(sid);
+                    const enabled = if (target == app_state.SEARCH_TABCTX_PIN_PAGE) @import("browser_pane.zig").canPinBrowserPage(sid) else if (idx) |i| app_state.shells[i].browser_pinned_url_len != 0 else false;
+                    if (!enabled) {
+                        showHeaderNoticeAscii(if (target == app_state.SEARCH_TABCTX_PIN_PAGE) "Open a page in this chat first" else "This chat has no pinned page", 4000, true);
+                        return 0;
+                    }
+                    app_state.g_search_active = false;
+                    app_state.g_search_tabctx_mode = false;
+                    app_state.g_search_groupctx_mode = false;
+                    app_state.g_tabctx_sid = 0;
+                    app_state.g_search_pin_sid = 0;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    if (target == app_state.SEARCH_TABCTX_PIN_PAGE) @import("browser_pane.zig").pinBrowserPage(sid) else @import("browser_pane.zig").clearPinnedBrowserPage(sid);
+                    _ = InvalidateRect(hwnd, null, 0);
+                    return 0;
+                }
                 if (target == SEARCH_TABCTX_BACK) {
                     app_state.g_search_tabctx_mode = false;
                     app_state.g_search_groupctx_mode = false;
@@ -7497,33 +7517,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return 0;
         },
         WM_APP_BROWSER_URL_UPDATE => {
-            const polled_shell_id: u32 = @intCast(wp & 0xFFFFFFFF);
-            for (0..app_state.shell_count) |i| {
-                if (app_state.shells[i].shell_id != polled_shell_id) continue;
-                const ti: u32 = @intCast(i);
-                const new_url = app_state.g_browser_url_poll_result[0..app_state.g_browser_url_poll_result_len];
-                if (new_url.len == 0) break;
-                if (std.mem.startsWith(u8, new_url, "data:text/html") and
-                    std.mem.indexOf(u8, new_url, "ZSPANE") != null) break;
-                const old_url = app_state.shells[ti].browser_url[0..app_state.shells[ti].browser_url_len];
-                if (std.mem.eql(u8, old_url, new_url)) break;
-                const copy_len: u32 = @intCast(@min(new_url.len, app_state.shells[ti].browser_url.len - 1));
-                @memcpy(app_state.shells[ti].browser_url[0..copy_len], new_url[0..copy_len]);
-                app_state.shells[ti].browser_url_len = copy_len;
-                if (ti == app_state.active_shell) {
-                    @import("browser_pane.zig").rememberActiveBrowserTabUrl();
-                    if (calcBrowserLayout()) |layout| {
-                        var urlbar_rc = RECT{
-                            .left = layout.urlbar_x,
-                            .top = layout.urlbar_y,
-                            .right = layout.urlbar_x + layout.urlbar_w,
-                            .bottom = layout.urlbar_y + layout.urlbar_h,
-                        };
-                        _ = InvalidateRect(hwnd, &urlbar_rc, 0);
-                    }
-                }
-                break;
-            }
+            @import("browser_pane.zig").handleBrowserUrlQueryDone(@bitCast(lp));
             return 0;
         },
         WM_APP_SHELL_EXITED => {
@@ -8409,14 +8403,25 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         WM_COPYDATA => {
             const cds_ptr: ?*const COPYDATASTRUCT = @ptrFromInt(@as(usize, @bitCast(lp)));
             if (cds_ptr) |cds| {
-                if (cds.dwData == COPYDATA_TAB_TRANSFER and (cds.cbData == @sizeOf(TabTransfer) or cds.cbData == @sizeOf(app_state.AppearanceTabTransfer))) {
+                if (cds.dwData == COPYDATA_TAB_TRANSFER and (cds.cbData == @sizeOf(TabTransfer) or cds.cbData == @sizeOf(app_state.AppearanceTabTransfer) or cds.cbData == @sizeOf(app_state.BrowserTabTransfer))) {
                     if (cds.lpData) |data_ptr| {
+                        const browser: ?*const app_state.BrowserTabTransfer = if (cds.cbData == @sizeOf(app_state.BrowserTabTransfer)) @ptrCast(@alignCast(data_ptr)) else null;
+                        if (browser) |metadata| {
+                            if (app_state.g_account_locked or app_state.g_restoring or (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored)) return 0;
+                            if (!app_state.validBrowserTabTransfer(metadata)) return 0;
+                            if (metadata.appearance.face > 20 or metadata.appearance.color > 7 or metadata.appearance.pending_mask != 0) return 0;
+                        }
                         const transfer: *const TabTransfer = @ptrCast(@alignCast(data_ptr));
-                        const appearance: ?*const app_state.AppearanceTabTransfer = if (cds.cbData == @sizeOf(app_state.AppearanceTabTransfer)) @ptrCast(@alignCast(data_ptr)) else null;
+                        const appearance: ?*const app_state.AppearanceTabTransfer = if (browser) |metadata|
+                            (if (metadata.has_appearance != 0) &metadata.appearance else null)
+                        else if (cds.cbData == @sizeOf(app_state.AppearanceTabTransfer)) @ptrCast(@alignCast(data_ptr)) else null;
                         if (appearance) |extended| {
                             if (extended.face > 20 or extended.color > 7 or extended.pending_mask != 0) return 0;
                         }
                         if (transfer.tmux_identity_len > 63) return 0;
+                        if (browser != null and (transfer.console_hwnd == 0 or transfer.kind > 6 or transfer.name_source > 4 or
+                            transfer.name_len > 63 or transfer.cwd_len > 511 or transfer.tmux_len > 63 or transfer.favicon_path_len > 511 or
+                            transfer.group_name_len > 63 or transfer.starred_group_name_len > 63)) return 0;
                         if (transfer.tmux_len > 0 and transfer.tmux_len <= 63) {
                             if (findLocalTmuxTab(transfer.tmux_host, transfer.tmux[0..transfer.tmux_len])) |existing| {
                                 switchToShell(existing);
@@ -8437,7 +8442,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
 
                             const proc = OpenProcess(0x001F0FFF, 0, transfer.pid);
                             if (proc == null) return 0;
-                            if (app_state.g_job != null and proc != null) _ = AssignProcessToJobObject(app_state.g_job, proc);
+                            if (browser == null and app_state.g_job != null and proc != null) _ = AssignProcessToJobObject(app_state.g_job, proc);
 
                             var new_shell = empty_shell;
                             new_shell.hwnd = adopt_h;
@@ -8461,6 +8466,16 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             new_shell.claude_session = transfer.claude_session != 0;
                             new_shell.tmux_host = transfer.tmux_host;
                             new_shell.shell_id = shell_id;
+                            if (browser) |metadata| {
+                                new_shell.browser_pinned_url = metadata.pinned_url;
+                                new_shell.browser_pinned_url_len = metadata.pinned_url_len;
+                                new_shell.browser_url = metadata.current_url;
+                                new_shell.browser_url_len = metadata.current_url_len;
+                                new_shell.browser_enabled = metadata.browser_enabled != 0;
+                                new_shell.browser_native = metadata.browser_native != 0;
+                                new_shell.chat_view_on = metadata.chat_view_on != 0;
+                                new_shell.browser_split_permille = metadata.split_permille;
+                            }
 
                             const nlen = @min(transfer.name_len, 63);
                             for (0..nlen) |ni| {
@@ -8482,6 +8497,10 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             if (flen > 0) @memcpy(new_shell.favicon_path[0..flen], transfer.favicon_path[0..flen]);
                             new_shell.favicon_path_len = flen;
 
+                            var saved_groups: @TypeOf(app_state.groups) = undefined;
+                            const saved_group_count = app_state.group_count;
+                            const saved_next_group_id = app_state.next_group_id;
+                            if (browser != null) @memcpy(saved_groups[0..saved_group_count], app_state.groups[0..saved_group_count]);
                             const max_group_id = @max(transfer.group_id, transfer.starred_group_id);
                             if (max_group_id < std.math.maxInt(u32)) app_state.next_group_id = @max(app_state.next_group_id, max_group_id + 1);
                             if (transfer.group_id != 0) {
@@ -8513,17 +8532,34 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             }
 
                             app_state.shells[app_state.shell_count] = new_shell;
-                            registerShellExitWait(app_state.shell_count);
                             app_state.shell_count += 1;
+                            if (browser != null and !@import("session.zig").saveSessionQueued()) {
+                                app_state.shell_count -= 1;
+                                app_state.shells[app_state.shell_count] = empty_shell;
+                                @memcpy(app_state.groups[0..saved_group_count], saved_groups[0..saved_group_count]);
+                                app_state.group_count = saved_group_count;
+                                app_state.next_group_id = saved_next_group_id;
+                                _ = CloseHandle(proc);
+                                return 0;
+                            }
+                            if (browser != null and app_state.g_job != null) _ = AssignProcessToJobObject(app_state.g_job, proc);
+                            registerShellExitWait(app_state.shell_count - 1);
                             if (appearance == null) @import("account_desktop.zig").applyPendingAppearance(app_state.shell_count - 1);
                             @import("chat_send.zig").armSshReconnectTimerIfNeeded();
-                            if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
-                                _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
-                            app_state.active_shell = app_state.shell_count - 1;
-                            @import("chat_composer.zig").chatDraftBindToActive();
-                            ensureActiveVisible();
-                            _ = showShellConsole(app_state.active_shell, SW_SHOW, "wndProc.WM_COPYDATA");
-                            repositionActive();
+                            if (browser != null) {
+                                const target = app_state.shell_count - 1;
+                                @import("browser_pane.zig").armPinnedBrowserEntry(shell_id);
+                                switchToShell(target);
+                                if (app_state.g_chat_browser_swap.shell_id != shell_id) @import("browser_pane.zig").consumePinnedBrowserEntry(shell_id);
+                            } else {
+                                if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].hwnd != null)
+                                    _ = ShowWindow(app_state.shells[app_state.active_shell].hwnd, SW_HIDE);
+                                app_state.active_shell = app_state.shell_count - 1;
+                                @import("chat_composer.zig").chatDraftBindToActive();
+                                ensureActiveVisible();
+                                _ = showShellConsole(app_state.active_shell, SW_SHOW, "wndProc.WM_COPYDATA");
+                                repositionActive();
+                            }
                             saveSession();
                             _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
                             _ = SetTimer(hwnd, TIMER_REFOCUS, 100, null);
@@ -9030,6 +9066,10 @@ fn initializeDeferred(hwnd: HANDLE) bool {
             }
         },
         .tabs => {
+            if (app_state.g_adopt_browser_invalid) {
+                showHeaderNoticeAscii("Cannot move this pinned page", 4000, true);
+                return true;
+            }
             if (app_state.g_account_locked or !@import("session.zig").startupRestoreReady()) return false;
             switch (@import("notifications.zig").listener_status.load(.acquire)) {
                 .pending => return false,
@@ -9072,6 +9112,16 @@ fn initializeDeferred(hwnd: HANDLE) bool {
                 new_shell.input = app_state.g_adopt_input;
                 new_shell.visits = app_state.g_adopt_visits;
                 new_shell.shell_id = app_state.allocateShellId() orelse return true;
+                if (app_state.g_adopt_browser) |metadata| {
+                    new_shell.browser_pinned_url = metadata.pinned_url;
+                    new_shell.browser_pinned_url_len = metadata.pinned_url_len;
+                    new_shell.browser_url = metadata.current_url;
+                    new_shell.browser_url_len = metadata.current_url_len;
+                    new_shell.browser_enabled = metadata.browser_enabled != 0;
+                    new_shell.browser_native = metadata.browser_native != 0;
+                    new_shell.chat_view_on = metadata.chat_view_on != 0;
+                    new_shell.browser_split_permille = metadata.split_permille;
+                }
 
                 if (app_state.g_adopt_name_len > 0) {
                     for (0..app_state.g_adopt_name_len) |ni| {
@@ -9129,6 +9179,7 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         },
         .chat => {
             launch_cache.tabs_restored = true;
+            if (app_state.g_adopt_browser != null and !@import("session.zig").saveSessionQueued()) showHeaderNoticeAscii("Could not save this pinned page", 4000, true);
             for (0..app_state.shell_count) |idx| {
                 @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
             }
@@ -9170,6 +9221,11 @@ fn initializeDeferred(hwnd: HANDLE) bool {
         .browser => {
             app_state.g_startup_progress = false;
             launch_cache.step(.browser);
+            if (app_state.active_shell < app_state.shell_count) {
+                const sid = app_state.shells[app_state.active_shell].shell_id;
+                @import("browser_pane.zig").armPinnedBrowserEntry(sid);
+                if (!app_state.g_chat_active or app_state.g_chat_browser_swap.shell_id != sid) @import("browser_pane.zig").consumePinnedBrowserEntry(sid);
+            }
             relaunchActiveRestoredBrowserPane();
             updateBrowserVisibility();
             if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_enabled) {

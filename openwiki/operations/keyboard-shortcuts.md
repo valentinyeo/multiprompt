@@ -298,6 +298,9 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+1..9 (browser focus) | Switch workspace: 1 is Starred, 2-9 are stored workspaces |
 | Alt+J / Alt+K (browser focus) | Next / previous Inbox session, or workspace (including Starred) outside Inbox context |
 | URL bar ‹ / › | Browser back / forward |
+| Ctrl+K or chat menu: Pin this page to this chat | Pin the current page to this chat |
+| Ctrl+K or chat menu: Unpin from this chat | Remove this chat's pinned page |
+| URL bar pin | Return to this chat's pinned page |
 | Ctrl+K → Browser: Auto-Suspend Idle Panes | Toggle idle browser pane suspension |
 | Alt+P | Keep this tab's browser pane awake (exempt from freeze/hibernate) |
 | Ctrl+K → Crash Reports: Open Folder | Open the folder with crash reports saved after a crash (the app also reopens itself) |

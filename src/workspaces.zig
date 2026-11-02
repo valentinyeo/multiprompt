@@ -439,6 +439,12 @@ pub fn mergeWorkspaceRegistryFromDisk() void {
     parseWorkspaceRegistryJson(buf[0..n]);
 }
 
+pub fn jsonEscapedLen(value: []const u8) usize {
+    var len: usize = 0;
+    for (value) |c| len += if (c < 0x20) @as(usize, 6) else if (c == '"' or c == '\\') @as(usize, 2) else @as(usize, 1);
+    return len;
+}
+
 pub fn appendJsonEscaped(out: []u8, pos: *usize, value: []const u8) void {
     const hex = "0123456789abcdef";
     for (value) |c| {
@@ -1875,18 +1881,13 @@ pub fn detachTabToNewWindow(idx: u32) void {
     const shell = app_state.shells[idx];
     if (shell.hwnd == null) return;
 
-    _ = SetParent(shell.hwnd, null);
-    _ = ShowWindow(shell.hwnd, SW_HIDE);
-
-    var style = GetWindowLongPtrW(shell.hwnd, GWL_STYLE);
-    style &= ~@as(isize, @intCast(WS_CHILD));
-    _ = SetWindowLongPtrW(shell.hwnd, GWL_STYLE, style);
-
     var exe_buf: [512]u16 = undefined;
     const exe_len = GetModuleFileNameW(null, &exe_buf, 512);
     if (exe_len == 0 or exe_len >= 512) return;
 
-    var cmd_buf: [2048]u16 = undefined;
+    var cmd_buf: [8192]u16 = undefined;
+    if (shell.name_len > shell.name.len or shell.cached_cwd_len > shell.cached_cwd.len or shell.tmux_session_len > shell.tmux_session.len or shell.tmux_identity_len > shell.tmux_identity.len or
+        @as(usize, exe_len) + shell.name_len + shell.cached_cwd_len + shell.tmux_session_len + shell.tmux_identity_len + 4096 >= cmd_buf.len) return;
     var pos: usize = 0;
 
     cmd_buf[pos] = '"';
@@ -1938,7 +1939,7 @@ pub fn detachTabToNewWindow(idx: u32) void {
     }
 
     const writeNum = struct {
-        fn f(buf: *[2048]u16, p: *usize, val: usize) void {
+        fn f(buf: *[8192]u16, p: *usize, val: usize) void {
             var digs: [20]u8 = undefined;
             var dl: usize = 0;
             var v = val;
@@ -2063,7 +2064,52 @@ pub fn detachTabToNewWindow(idx: u32) void {
     }
     cmd_buf[pos] = '"';
     pos += 1;
+    if (shell.browser_pinned_url_len > 0) {
+        for (shell.name[0..shell.name_len]) |c| if (c == 0) return;
+        for (shell.cached_cwd[0..shell.cached_cwd_len]) |c| if (c == 0) return;
+        for (shell.tmux_session[0..shell.tmux_session_len]) |c| if (c == 0) return;
+        for (shell.tmux_identity[0..shell.tmux_identity_len]) |c| if (c == 0 or c == '"') return;
+        const metadata = browserTransferForShell(idx) orelse {
+            showHeaderNoticeAscii("Cannot move this pinned page", 4000, true);
+            return;
+        };
+        var token: [2200]u8 = undefined;
+        const head = std.fmt.bufPrint(&token, "bp1:{d}{d}{d}:{d}:", .{ metadata.browser_enabled, metadata.browser_native, metadata.chat_view_on, metadata.split_permille }) catch return;
+        var token_len = head.len;
+        const hex = "0123456789abcdef";
+        for (metadata.pinned_url[0..metadata.pinned_url_len]) |c| {
+            if (token_len + 2 > token.len) return;
+            token[token_len] = hex[c >> 4];
+            token[token_len + 1] = hex[c & 15];
+            token_len += 2;
+        }
+        if (token_len >= token.len) return;
+        token[token_len] = ':';
+        token_len += 1;
+        for (metadata.current_url[0..metadata.current_url_len]) |c| {
+            if (token_len + 2 > token.len) return;
+            token[token_len] = hex[c >> 4];
+            token[token_len + 1] = hex[c & 15];
+            token_len += 2;
+        }
+        if (@import("startup.zig").decodeBrowserAdoptToken(token[0..token_len]) == null or pos + 1 + token_len + 1 > cmd_buf.len) {
+            showHeaderNoticeAscii("Cannot move this pinned page", 4000, true);
+            return;
+        }
+        cmd_buf[pos] = ' ';
+        pos += 1;
+        for (token[0..token_len]) |c| {
+            cmd_buf[pos] = c;
+            pos += 1;
+        }
+    }
     cmd_buf[pos] = 0;
+
+    _ = SetParent(shell.hwnd, null);
+    _ = ShowWindow(shell.hwnd, SW_HIDE);
+    var style = GetWindowLongPtrW(shell.hwnd, GWL_STYLE);
+    style &= ~@as(isize, @intCast(WS_CHILD));
+    _ = SetWindowLongPtrW(shell.hwnd, GWL_STYLE, style);
 
     unregisterShellExitWait(idx);
     if (shell.process != null) _ = CloseHandle(shell.process);
@@ -2091,6 +2137,13 @@ pub fn detachTabToNewWindow(idx: u32) void {
     const create_ok = CreateProcessW(null, @ptrCast(&cmd_buf), null, null, 0, 0, null, null, &si, &pi);
     if (create_ok != 0) {
         debugLog("detachTabToNewWindow: CreateProcessW succeeded");
+        if (shell.browser_pinned_url_len > 0) {
+            if (app_state.g_webview2_active and app_state.g_webview2_owner_shell_id == shell.shell_id) {
+                @import("browser_pane.zig").closeWebView2();
+            } else if (shell.browser_hwnd != null) {
+                _ = PostMessageW(shell.browser_hwnd, @import("win32.zig").WM_CLOSE, 0, 0);
+            }
+        }
         if (app_state.g_job != null) {
             var job_info = std.mem.zeroes(JOBOBJECT_EXTENDED_LIMIT_INFORMATION);
             _ = SetInformationJobObject(app_state.g_job, JobObjectExtendedLimitInformation, @ptrCast(&job_info), @sizeOf(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
@@ -2123,12 +2176,42 @@ pub fn detachTabToNewWindow(idx: u32) void {
     }
 }
 
+fn browserTransferForShell(idx: u32) ?app_state.BrowserTabTransfer {
+    const shell = &app_state.shells[idx];
+    var data: app_state.BrowserTabTransfer = std.mem.zeroes(app_state.BrowserTabTransfer);
+    if (shell.browser_pinned_url_len == 0 or shell.browser_pinned_url_len >= shell.browser_pinned_url.len) return null;
+    data.version = 1;
+    data.pinned_url = shell.browser_pinned_url;
+    data.pinned_url_len = shell.browser_pinned_url_len;
+    data.browser_enabled = @intFromBool(shell.browser_enabled);
+    data.browser_native = @intFromBool(shell.browser_native);
+    data.chat_view_on = @intFromBool(shell.chat_view_on);
+    data.split_permille = shell.browser_split_permille;
+    if (!app_state.validBrowserTabTransfer(&data)) return null;
+    if (@import("browser_pane.zig").webView2OwnsShell(idx)) {
+        if (@import("browser_pane.zig").currentWebView2Url(idx, &data.current_url)) |url| data.current_url_len = @intCast(url.len) else |_| {}
+    } else if (shell.browser_url_len < shell.browser_url.len - 1) {
+        data.current_url = shell.browser_url;
+        data.current_url_len = shell.browser_url_len;
+    }
+    if (!app_state.validBrowserTabTransfer(&data)) data.current_url_len = 0;
+    return data;
+}
+
 pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: bool) bool {
     if (idx >= app_state.shell_count) return false;
     const shell = app_state.shells[idx];
     if (shell.hwnd == null) return false;
     const pending_mask = @import("account_desktop.zig").appearancePendingMask(shell.tmux_host, shell.tmux_session[0..shell.tmux_session_len]) catch return false;
     if (pending_mask != 0) return false;
+
+    var browser_transfer: app_state.BrowserTabTransfer = std.mem.zeroes(app_state.BrowserTabTransfer);
+    if (shell.browser_pinned_url_len > 0) {
+        browser_transfer = browserTransferForShell(idx) orelse {
+            showHeaderNoticeAscii("Cannot move this pinned page", 4000, true);
+            return false;
+        };
+    }
 
     _ = SetParent(shell.hwnd, null);
     _ = ShowWindow(shell.hwnd, SW_HIDE);
@@ -2205,10 +2288,13 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     appearance_transfer.face = shell.face orelse 20;
     appearance_transfer.color = shell.color orelse 7;
     const extended = shell.face != null or shell.color != null;
+    browser_transfer.appearance = appearance_transfer;
+    browser_transfer.has_appearance = @intFromBool(extended);
+    const has_pin = shell.browser_pinned_url_len > 0;
     var cds: COPYDATASTRUCT = .{
         .dwData = COPYDATA_TAB_TRANSFER,
-        .cbData = if (extended) @sizeOf(app_state.AppearanceTabTransfer) else @sizeOf(TabTransfer),
-        .lpData = if (extended) @ptrCast(&appearance_transfer) else @ptrCast(&transfer),
+        .cbData = if (has_pin) @sizeOf(app_state.BrowserTabTransfer) else if (extended) @sizeOf(app_state.AppearanceTabTransfer) else @sizeOf(TabTransfer),
+        .lpData = if (has_pin) @ptrCast(&browser_transfer) else if (extended) @ptrCast(&appearance_transfer) else @ptrCast(&transfer),
     };
     var copy_result: usize = 0;
     const sent = SendMessageTimeoutW(target_hwnd, WM_COPYDATA, @intFromPtr(app_state.g_main_hwnd), @bitCast(@intFromPtr(&cds)), SMTO_ABORTIFHUNG, 2000, &copy_result);
@@ -2223,6 +2309,7 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
         registerShellExitWait(idx);
         repositionActive();
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        if (has_pin and sent != 0 and copy_result == 0) showHeaderNoticeAscii("Could not move this pinned chat", 4000, true);
         return false;
     }
 
@@ -2231,6 +2318,9 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
         _ = SetInformationJobObject(app_state.g_job, JobObjectExtendedLimitInformation, @ptrCast(&job_info), @sizeOf(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
     }
 
+    if (has_pin) {
+        if (@import("browser_pane.zig").webView2OwnsShell(idx)) @import("browser_pane.zig").closeWebView2() else @import("browser_pane.zig").closeBrowserForShell(idx);
+    }
     unregisterShellExitWait(idx);
     if (shell.process != null) _ = CloseHandle(shell.process);
     app_state.shells[idx].process = null;
@@ -3916,11 +4006,23 @@ fn exportSlotSessionFile(slot: u8) bool {
             @memcpy(json_buf[pos .. pos + bnat_str.len], bnat_str);
             pos += bnat_str.len;
         }
-        if (app_state.shells[i].browser_enabled and app_state.shells[i].browser_url_len > 0 and pos < json_buf.len - 540) {
+        if (app_state.shells[i].browser_enabled and app_state.shells[i].browser_url_len > 0) {
             const bu_pre = ",\"burl\":\"";
+            const url = app_state.shells[i].browser_url[0..app_state.shells[i].browser_url_len];
+            if (json_buf.len - pos < bu_pre.len + jsonEscapedLen(url) + 1 + 4096) return false;
             @memcpy(json_buf[pos .. pos + bu_pre.len], bu_pre);
             pos += bu_pre.len;
-            appendJsonEscaped(&json_buf, &pos, app_state.shells[i].browser_url[0..app_state.shells[i].browser_url_len]);
+            appendJsonEscaped(&json_buf, &pos, url);
+            json_buf[pos] = '"';
+            pos += 1;
+        }
+        if (app_state.shells[i].browser_pinned_url_len > 0) {
+            const pin = app_state.shells[i].browser_pinned_url[0..app_state.shells[i].browser_pinned_url_len];
+            const prefix = ",\"bpin\":\"";
+            if (json_buf.len - pos < prefix.len + jsonEscapedLen(pin) + 1 + 4096) return false;
+            @memcpy(json_buf[pos .. pos + prefix.len], prefix);
+            pos += prefix.len;
+            appendJsonEscaped(&json_buf, &pos, pin);
             json_buf[pos] = '"';
             pos += 1;
         }

@@ -224,6 +224,51 @@ pub const AppearanceTabTransfer = extern struct {
     pending_mask: u8,
 };
 
+pub const BrowserTabTransfer = extern struct {
+    appearance: AppearanceTabTransfer,
+    version: u32,
+    pinned_url_len: u32,
+    pinned_url: [512]u8,
+    current_url_len: u32,
+    current_url: [512]u8,
+    browser_enabled: u8,
+    browser_native: u8,
+    chat_view_on: u8,
+    has_appearance: u8,
+    split_permille: u16,
+};
+
+pub fn validBrowserTabTransfer(transfer: *const BrowserTabTransfer) bool {
+    if (transfer.version != 1 or transfer.pinned_url_len >= transfer.pinned_url.len or transfer.current_url_len >= transfer.current_url.len or
+        transfer.browser_enabled > 1 or transfer.browser_native > 1 or transfer.chat_view_on > 1 or transfer.has_appearance > 1 or transfer.split_permille > 1000) return false;
+    const pin = transfer.pinned_url[0..transfer.pinned_url_len];
+    if (pin.len > 0 and !@import("json_reader.zig").validPinnedUrl(pin)) return false;
+    const url = transfer.current_url[0..transfer.current_url_len];
+    if (!std.unicode.utf8ValidateSlice(url)) return false;
+    for (url) |c| if (c < 0x20 or c == 0x7f) return false;
+    return true;
+}
+
+test "browser transfer rejects malformed metadata" {
+    var transfer = std.mem.zeroes(BrowserTabTransfer);
+    transfer.version = 1;
+    transfer.browser_native = 1;
+    transfer.split_permille = 350;
+    const pin = "https://example.com/board?q=%22#part";
+    @memcpy(transfer.pinned_url[0..pin.len], pin);
+    transfer.pinned_url_len = pin.len;
+    try std.testing.expect(validBrowserTabTransfer(&transfer));
+    transfer.pinned_url_len = transfer.pinned_url.len;
+    try std.testing.expect(!validBrowserTabTransfer(&transfer));
+    transfer.pinned_url_len = pin.len;
+    transfer.version = 2;
+    try std.testing.expect(!validBrowserTabTransfer(&transfer));
+    transfer.version = 1;
+    transfer.current_url_len = 1;
+    transfer.current_url[0] = 0;
+    try std.testing.expect(!validBrowserTabTransfer(&transfer));
+}
+
 pub const ShellKind = enum(u3) { cmd, pwsh, vps, tmux, vps2, bash, gitbash };
 
 pub const ShellActivity = enum(u2) { idle, active };
@@ -337,8 +382,15 @@ pub const Shell = struct {
     browser_enabled: bool = false,
     browser_url: [512]u8 = std.mem.zeroes([512]u8),
     browser_url_len: u32 = 0,
+    browser_pinned_url: [512]u8 = std.mem.zeroes([512]u8),
+    browser_pinned_url_len: u32 = 0,
+    browser_pin_revision: u64 = 0,
+    browser_pin_entry_token: u64 = 0,
+    browser_pin_entry_pending: bool = false,
+    browser_pin_navigation_token: u64 = 0,
     browser_pending_url: [BROWSER_PENDING_URL_CAP]u8 = std.mem.zeroes([BROWSER_PENDING_URL_CAP]u8),
     browser_pending_url_len: u32 = 0,
+    browser_pending_intent: BrowserNavigationIntent = .background,
     browser_launch_tick: u64 = 0,
     browser_first_launch_tick: u64 = 0,
     browser_connection_id: u64 = 0,
@@ -372,6 +424,8 @@ pub const Shell = struct {
     eta_active_start_tick: u64 = 0,
     ssh_reconnect: @import("ssh_reconnect.zig").State = .{},
 };
+
+pub const BrowserNavigationIntent = enum { background, select_preserve_focus, select_and_focus };
 
 pub const empty_shell = Shell{
     .hwnd = null,
@@ -1016,6 +1070,7 @@ pub var g_groupctx_gid: u32 = 0;
 pub const SEARCH_GROUPCTX_BASE: usize = 10000;
 pub const SEARCH_GROUPCTX_COUNT: usize = 16 + MAX_LWS + MAX_WORKSPACES;
 pub var g_tabctx_sid: u32 = 0;
+pub var g_search_pin_sid: u32 = 0;
 pub var g_search_remind_input_mode: bool = false;
 pub var g_search_rename_input_mode: bool = false;
 pub var g_search_rename_sid: u32 = 0;
@@ -1053,11 +1108,6 @@ pub var g_browser_settle_ticks: i32 = 0;
 pub var g_console_geometry_settle_ticks: i32 = 0;
 pub var g_last_browser_tab_url: [512]u8 = @splat(0);
 pub var g_last_browser_tab_url_len: usize = 0;
-pub var g_browser_url_poll_pending: bool = false;
-pub var g_browser_url_poll_shell_id: u32 = 0;
-pub var g_browser_url_poll_window_id: i64 = 0;
-pub var g_browser_url_poll_result: [512]u8 = std.mem.zeroes([512]u8);
-pub var g_browser_url_poll_result_len: u32 = 0;
 
 pub var g_urlbar_hwnd: HANDLE = null;
 pub var g_urlbar_class_registered: bool = false;
@@ -1594,6 +1644,8 @@ pub const SEARCH_TABCTX_CHAT_TAB_URL: usize = 7183;
 pub const SEARCH_TABCTX_ADOPT_HOST: usize = 7186;
 pub const SEARCH_TABCTX_BOT_FACE: usize = 7187;
 pub const SEARCH_TABCTX_BOT_COLOR: usize = 7188;
+pub const SEARCH_TABCTX_PIN_PAGE: usize = 7189;
+pub const SEARCH_TABCTX_UNPIN_PAGE: usize = 7190;
 pub const SEARCH_BOT_FACE_OFFSET: usize = 7140;
 pub const BOT_FACE_COUNT: usize = 21;
 pub const SEARCH_BOT_COLOR_OFFSET: usize = 7161;
@@ -1880,6 +1932,8 @@ pub const WorkspaceEntry = struct {
 pub var g_workspaces: [MAX_WORKSPACES]WorkspaceEntry = undefined;
 pub var g_workspace_count: u32 = 0;
 
+pub var g_adopt_browser: ?BrowserTabTransfer = null;
+pub var g_adopt_browser_invalid: bool = false;
 pub var g_adopt_hwnd: ?usize = null;
 pub var g_adopt_pid: DWORD = 0;
 pub var g_adopt_kind: u8 = 0;
@@ -2284,6 +2338,8 @@ pub const SavedTab = struct {
     needs_attention: bool = false,
     burl: [512]u8 = std.mem.zeroes([512]u8),
     burl_len: u32 = 0,
+    bpin: [512]u8 = std.mem.zeroes([512]u8),
+    bpin_len: u32 = 0,
     bnat: bool = true,
     bsplit_permille: u16 = BROWSER_SPLIT_DEFAULT_PERMILLE,
     kaw: bool = false,
@@ -2658,6 +2714,7 @@ pub const BrowserResolveJob = struct {
     nonce_len: usize = 0,
     connection_id: u64 = 0,
     window_id: i64 = 0,
+    pin_entry_token: u64 = 0,
 };
 
 pub const BrowserResolveInflight = struct {
@@ -2716,6 +2773,7 @@ const WebView2CycleTabFn = *const fn (BOOL) callconv(WINAPI) i32;
 const WebView2CloseTabFn = *const fn () callconv(WINAPI) i32;
 const WebView2HasFocusFn = *const fn () callconv(WINAPI) BOOL;
 const WebView2GetHostFn = *const fn () callconv(WINAPI) HANDLE;
+const WebView2GetSourceFn = *const fn ([*]u16, i32) callconv(WINAPI) i32;
 
 pub var g_webview2_module: HANDLE = null;
 pub var g_webview2_create: ?WebView2CreateFn = null;
@@ -2732,6 +2790,7 @@ pub var g_webview2_next_tab: ?WebView2CycleTabFn = null;
 pub var g_webview2_close_tab: ?WebView2CloseTabFn = null;
 pub var g_webview2_has_focus: ?WebView2HasFocusFn = null;
 pub var g_webview2_get_host: ?WebView2GetHostFn = null;
+pub var g_webview2_get_source: ?WebView2GetSourceFn = null;
 pub var g_webview2_active: bool = false;
 pub var g_webview2_owner_shell_id: u32 = 0;
 pub var g_webview2_focus_retries: u8 = 0;

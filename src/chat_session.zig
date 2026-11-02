@@ -1941,6 +1941,7 @@ pub fn chatSwitchBrowserTick() void {
     parkInactiveBrowserPanes();
     ecoqosReevaluateAll();
     if (app_state.shells[app_state.active_shell].browser_frozen) wakeBrowserPaneFromFreeze(app_state.active_shell);
+    @import("browser_pane.zig").consumePinnedBrowserEntry(shell_id);
     updateBrowserVisibility();
     if (browserPaneActive()) armBrowserVisibilitySettle(12);
     if (!app_state.g_restoring and app_state.shells[app_state.active_shell].browser_enabled) saveSession();

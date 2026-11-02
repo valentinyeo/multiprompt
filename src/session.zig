@@ -541,15 +541,27 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             @memcpy(json_buf[pos .. pos + bnat_str.len], bnat_str);
             pos += bnat_str.len;
         }
-        if (app_state.shells[i].browser_enabled and app_state.shells[i].browser_url_len > 0 and pos < json_buf.len - 540) {
+        if (app_state.shells[i].browser_enabled and app_state.shells[i].browser_url_len > 0) {
             const bu_pre = ",\"burl\":\"";
+            const url = app_state.shells[i].browser_url[0..app_state.shells[i].browser_url_len];
+            if (json_buf.len - pos < bu_pre.len + @import("workspaces.zig").jsonEscapedLen(url) + 1 + 4096) return false;
             @memcpy(json_buf[pos .. pos + bu_pre.len], bu_pre);
             pos += bu_pre.len;
-            appendJsonEscaped(&json_buf, &pos, app_state.shells[i].browser_url[0..app_state.shells[i].browser_url_len]);
+            appendJsonEscaped(&json_buf, &pos, url);
             json_buf[pos] = '"';
             pos += 1;
         }
 
+        if (app_state.shells[i].browser_pinned_url_len > 0) {
+            const pin = app_state.shells[i].browser_pinned_url[0..app_state.shells[i].browser_pinned_url_len];
+            const prefix = ",\"bpin\":\"";
+            if (json_buf.len - pos < prefix.len + @import("workspaces.zig").jsonEscapedLen(pin) + 1 + 4096) return false;
+            @memcpy(json_buf[pos .. pos + prefix.len], prefix);
+            pos += prefix.len;
+            appendJsonEscaped(&json_buf, &pos, pin);
+            json_buf[pos] = '"';
+            pos += 1;
+        }
         json_buf[pos] = '}';
         pos += 1;
     }
@@ -873,7 +885,6 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
         }
     }
     const ok = writeFileAtomicW(path, json_buf[0..pos]);
-    if (workspace_filter == null) debugLog2("saveSession: ", json_buf[0..pos]);
     return ok;
 }
 
@@ -945,24 +956,27 @@ fn restoreStarredView(starred: bool) void {
 }
 
 pub fn saveSession() void {
+    _ = saveSessionQueued();
+}
+
+pub fn saveSessionQueued() bool {
     @import("launch_cache.zig").changed();
-    if (app_state.g_account_locked or app_state.g_restoring) return;
+    if (app_state.g_account_locked or app_state.g_restoring) return false;
     if (@import("launch_cache.zig").pending) {
         if (app_state.g_focus_user_action_tick != 0 and app_state.active_shell < app_state.shell_count) {
             const shell_id = app_state.shells[app_state.active_shell].shell_id;
             @import("launch_cache.zig").selected_shell_id = shell_id;
             @import("launch_cache.zig").selected_starred = app_state.g_starred_workspace;
             @import("launch_cache.zig").selected_live_shell_id = if (@import("launch_cache.zig").tabs_restored or !@import("launch_cache.zig").cachedShell(shell_id)) shell_id else 0;
-        } else if (!@import("launch_cache.zig").tabs_restored) return;
+        } else if (!@import("launch_cache.zig").tabs_restored) return false;
     }
     logSessionAudit("saveSession:before-write");
     var path_buf: [512]u8 = undefined;
-    const path = getSessionPath(&path_buf) orelse return;
-    if (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored) {
-        _ = saveSessionTo(path, null);
-        return;
-    }
-    if (saveSessionTo(path, null)) publishSessionLayout();
+    const path = getSessionPath(&path_buf) orelse return false;
+    if (@import("launch_cache.zig").pending and !@import("launch_cache.zig").tabs_restored) return saveSessionTo(path, null);
+    if (!saveSessionTo(path, null)) return false;
+    publishSessionLayout();
+    return true;
 }
 
 pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
@@ -1099,6 +1113,10 @@ pub fn restoreBrowserStateFromSavedTab(idx: u32, tab: *const SavedTab) void {
     app_state.shells[idx].keep_awake = tab.kaw;
     app_state.shells[idx].last_read_message_id = tab.last_read_message_id;
     app_state.shells[idx].chat_view_on = tab.cv;
+    @import("browser_pane.zig").cancelPinnedBrowserEntry(app_state.shells[idx].shell_id);
+    app_state.shells[idx].browser_pin_revision = 0;
+    app_state.shells[idx].browser_pinned_url = tab.bpin;
+    app_state.shells[idx].browser_pinned_url_len = tab.bpin_len;
     if (app_state.ISSUE_347_KEEP_FULL_WIDTH) app_state.shells[idx].full_width = tab.fw;
     if (tab.burl_len > 0) {
         @memcpy(app_state.shells[idx].browser_url[0..tab.burl_len], tab.burl[0..tab.burl_len]);

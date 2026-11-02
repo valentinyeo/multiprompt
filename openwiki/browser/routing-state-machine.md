@@ -12,6 +12,8 @@ Subsequent reads and actions follow the remembered target unless `--tab` selects
 
 Physical app actions can transfer keyboard focus. Automated navigation, screenshots, notifications, extension reconnects, and selftests cannot acquire foreground authority. The UI thread must not block waiting for browser commands. Native screenshot delivery uses nonblocking loopback connects/sends with a per-port deadline.
 
+Each chat can keep one pinned page. Desktop session storage keeps that preference. Pin reads that chat's actual browser page. Entering a chat may reopen its pin. Automatic reopening never takes typing focus. Return is an explicit user action. Window transfers carry each pin separately. Transfers may include the last browser address. Confirmation means accepted details and queued saving. Disk writing may still be unfinished.
+
 `MULTIPROMPT_BROWSER_PROFILE` (or `--profile <token>`) sends commands to that profile's own pipe `multiprompt-browser-isolated-<token>` (1 to 32 of `a-z`, `0-9`, `-`, no leading `-`); no token keeps the default pipe, and an unknown or invalid profile fails instead of falling back.
 
 The extension and native bridge versions must match. Reload unpacked extension code after changes; `zsb extension-reload` schedules a profile-wide reload and reports acknowledgement, not completed reload. See [zsb-selftest.md](zsb-selftest.md) for installation checks and diagnostics.

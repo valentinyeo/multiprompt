@@ -2345,6 +2345,10 @@ fn requestBrowser(allocator: std.mem.Allocator, method: []const u8, fields_json:
 }
 
 pub fn requestBrowserForWindow(allocator: std.mem.Allocator, window_id: ?i64, profile_token: []const u8, method: []const u8, fields_json: []const u8, deadline: ?u64) ![]u8 {
+    return requestBrowserForWindowCancellable(allocator, window_id, profile_token, method, fields_json, deadline, null, 0);
+}
+
+pub fn requestBrowserForWindowCancellable(allocator: std.mem.Allocator, window_id: ?i64, profile_token: []const u8, method: []const u8, fields_json: []const u8, deadline: ?u64, allowed: ?*const std.atomic.Value(u64), job_id: u64) ![]u8 {
     const until = deadline orelse (GetTickCount64() + 20_000);
     const pid = GetCurrentProcessId();
     const tick = GetTickCount64();
@@ -2381,6 +2385,7 @@ pub fn requestBrowserForWindow(allocator: std.mem.Allocator, window_id: ?i64, pr
     const command_pipe = blk: {
         const connect_until = @min(until, GetTickCount64() + 1500);
         while (true) {
+            if (allowed) |permission| if (permission.load(.acquire) != job_id) return error.BrowserRequestCancelled;
             const pipe = CreateFileA(
                 command_pipe_name.ptr,
                 GENERIC_WRITE,
@@ -2402,6 +2407,7 @@ pub fn requestBrowserForWindow(allocator: std.mem.Allocator, window_id: ?i64, pr
     };
     defer _ = CloseHandle(command_pipe);
 
+    if (allowed) |permission| if (permission.load(.acquire) != job_id) return error.BrowserRequestCancelled;
     try writeAll(command_pipe, request);
     while (GetTickCount64() < until) {
         _ = ConnectNamedPipe(reply_pipe, null);

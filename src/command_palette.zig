@@ -641,6 +641,8 @@ pub fn recordPaletteUsage(target: usize) void {
 
 fn palettePrimaryLabel(target: usize) ?[]const u8 {
     const words = @import("ui_words.zon");
+    if (target == app_state.SEARCH_TABCTX_PIN_PAGE) return words.browser_pin_page;
+    if (target == app_state.SEARCH_TABCTX_UNPIN_PAGE) return words.browser_unpin_page;
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return words.workspace_color;
     if (target == app_state.SEARCH_TABCTX_BOT_FACE) return words.bot_face;
     if (target == app_state.SEARCH_TABCTX_BOT_COLOR) return words.bot_color;
@@ -2473,6 +2475,17 @@ fn appendGroupPaletteResults() void {
     }
 }
 
+fn appendPinnedPageResults(shell_id: u32) void {
+    if (findShellById(shell_id) == null) return;
+    const words = @import("ui_words.zon");
+    for ([_]usize{ app_state.SEARCH_TABCTX_PIN_PAGE, app_state.SEARCH_TABCTX_UNPIN_PAGE }, [_][]const u8{ words.browser_pin_page, words.browser_unpin_page }) |id, label| {
+        if (app_state.g_search_result_count >= app_state.g_search_results.len) break;
+        if (app_state.g_search_len != 0 and !labelsMatchQuery(&.{ label, "pin page", "pinned page", "unpin page" }, app_state.g_search_buf[0..app_state.g_search_len])) continue;
+        app_state.g_search_results[app_state.g_search_result_count] = id;
+        app_state.g_search_result_count += 1;
+    }
+}
+
 pub fn updateSearchResults() void {
     app_state.g_search_revision +%= 1;
     if (app_state.g_search_revision == 0) app_state.g_search_revision = 1;
@@ -2884,6 +2897,7 @@ pub fn updateSearchResults() void {
         app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_BACK;
         app_state.g_search_result_count += 1;
         const tc_idx = findShellById(app_state.g_tabctx_sid);
+        appendPinnedPageResults(app_state.g_tabctx_sid);
         if (tc_idx) |ti| {
             if (@import("bot_look.zig").eligible(ti)) {
                 const words = @import("ui_words.zon");
@@ -3216,6 +3230,7 @@ pub fn updateSearchResults() void {
         return;
     }
 
+    appendPinnedPageResults(app_state.g_search_pin_sid);
     if (app_state.g_nextunread_count > 0 and app_state.g_search_result_count < app_state.g_search_results.len) {
         var show_nu = (app_state.g_search_len == 0);
         if (!show_nu) {

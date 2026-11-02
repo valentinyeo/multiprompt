@@ -107,6 +107,61 @@ pub fn visits(obj: std.json.Value) @import("frequent.zig").Visits {
     return result;
 }
 
+pub fn validPinnedUrl(url: []const u8) bool {
+    if (url.len == 0 or url.len >= 512 or !std.unicode.utf8ValidateSlice(url)) return false;
+    for (url) |c| if (c <= 0x20 or c == 0x7f) return false;
+    const uri = std.Uri.parse(url) catch return false;
+    const network = std.ascii.eqlIgnoreCase(uri.scheme, "http") or std.ascii.eqlIgnoreCase(uri.scheme, "https");
+    const file = std.ascii.eqlIgnoreCase(uri.scheme, "file");
+    if (!network and !file) return false;
+    const scheme_end = uri.scheme.len;
+    if (url.len < scheme_end + 3 or !std.mem.eql(u8, url[scheme_end .. scheme_end + 3], "://")) return false;
+    const start = scheme_end + 3;
+    const end = start + (std.mem.indexOfAny(u8, url[start..], "/?#") orelse url.len - start);
+    const authority = url[start..end];
+    if (network) {
+        if (uri.host == null or authority.len == 0) return false;
+        const hostport = if (std.mem.lastIndexOfScalar(u8, authority, '@')) |at| authority[at + 1 ..] else authority;
+        if (hostport.len == 0 or std.mem.indexOfScalar(u8, hostport, '\\') != null) return false;
+        if (hostport[0] == '[') {
+            const close = std.mem.indexOfScalar(u8, hostport, ']') orelse return false;
+            if (close <= 1) return false;
+            const suffix = hostport[close + 1 ..];
+            if (suffix.len != 0) {
+                if (suffix[0] != ':' or suffix.len == 1) return false;
+                for (suffix[1..]) |c| if (!std.ascii.isDigit(c)) return false;
+            }
+        } else {
+            const colon = std.mem.indexOfScalar(u8, hostport, ':') orelse hostport.len;
+            if (colon == 0) return false;
+            if (colon < hostport.len) {
+                if (colon + 1 == hostport.len) return false;
+                for (hostport[colon + 1 ..]) |c| if (!std.ascii.isDigit(c)) return false;
+            }
+        }
+    } else {
+        if (std.mem.indexOfScalar(u8, authority, '@') != null or std.mem.indexOfScalar(u8, authority, '\\') != null) return false;
+        if (end >= url.len or url[end] != '/') return false;
+    }
+    var i: usize = 0;
+    while (i < url.len) : (i += 1) {
+        if (url[i] == '%') {
+            if (i + 2 >= url.len or !std.ascii.isHex(url[i + 1]) or !std.ascii.isHex(url[i + 2])) return false;
+            i += 2;
+        }
+    }
+    return true;
+}
+
+test "pinned URLs require complete supported destinations" {
+    try std.testing.expect(validPinnedUrl("https://example.com/path?q=%22#part"));
+    try std.testing.expect(validPinnedUrl("file:///C:/board.html"));
+    try std.testing.expect(!validPinnedUrl("file:x://host/path"));
+    try std.testing.expect(!validPinnedUrl("https://user@:443/path"));
+    try std.testing.expect(!validPinnedUrl("https://example.com/%zz"));
+    try std.testing.expect(!validPinnedUrl("https:///path"));
+}
+
 pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 {
     const Tab = @TypeOf(tabs[0]);
     var count: u32 = 0;
@@ -130,6 +185,9 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         tab.claude_sid_len = copyString(obj, "csid", &tab.claude_sid);
         tab.claude_cwd_len = copyString(obj, "ccwd", &tab.claude_cwd);
         tab.burl_len = copyString(obj, "burl", &tab.burl);
+        if (string(field(obj, "bpin"))) |pin| {
+            if (validPinnedUrl(pin)) tab.bpin_len = copyString(obj, "bpin", &tab.bpin);
+        }
         inline for (.{ "sync_owned", "manual", "sem", "claude_session", "muted", "keep_alive", "pinned_top", "starred_pinned_top", "inbox_excluded", "favorite", "bon", "kaw", "cv", "cso", "fw" }) |key| {
             @field(tab, key) = boolTrue(obj, key);
         }

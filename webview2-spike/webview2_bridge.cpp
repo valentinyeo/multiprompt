@@ -437,6 +437,25 @@ WV2_EXPORT void wv2_set_visible(BOOL visible) {
     if (g_host) ShowWindow(g_host, visible ? SW_SHOW : SW_HIDE);
 }
 
+WV2_EXPORT int wv2_get_source(wchar_t *buffer, int capacity) {
+    if (!g_webview || !buffer || capacity <= 0) return -1;
+    LPWSTR source = nullptr;
+    const HRESULT result = g_webview->get_Source(&source);
+    if (FAILED(result) || !source) {
+        CoTaskMemFree(source);
+        return -1;
+    }
+    int len = 0;
+    while (len < capacity && source[len]) ++len;
+    if (len == capacity) {
+        CoTaskMemFree(source);
+        return -2;
+    }
+    for (int i = 0; i <= len; ++i) buffer[i] = source[i];
+    CoTaskMemFree(source);
+    return len;
+}
+
 WV2_EXPORT void wv2_navigate(const wchar_t *url) {
     if (g_webview && url && *url) g_webview->Navigate(url);
 }

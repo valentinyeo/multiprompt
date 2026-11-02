@@ -147,6 +147,42 @@ pub fn parseSingleWindowFlag() void {
     app_state.g_single_window = std.mem.indexOf(u8, haystack, "--single-window") != null;
 }
 
+pub fn decodeBrowserAdoptToken(token: []const u8) ?app_state.BrowserTabTransfer {
+    var parts = std.mem.splitScalar(u8, token, ':');
+    if (!std.mem.eql(u8, parts.next() orelse return null, "bp1")) return null;
+    const flags = parts.next() orelse return null;
+    const split = parts.next() orelse return null;
+    const pin = parts.next() orelse return null;
+    const current = parts.next() orelse return null;
+    if (parts.next() != null or flags.len != 3 or pin.len == 0 or pin.len % 2 != 0 or current.len % 2 != 0 or pin.len / 2 >= 512 or current.len / 2 >= 512) return null;
+    for (flags) |c| if (c != '0' and c != '1') return null;
+    for (pin) |c| if (!std.ascii.isHex(c)) return null;
+    for (current) |c| if (!std.ascii.isHex(c)) return null;
+    for (split) |c| if (!std.ascii.isDigit(c)) return null;
+    if (split.len == 0) return null;
+    var data: app_state.BrowserTabTransfer = std.mem.zeroes(app_state.BrowserTabTransfer);
+    data.version = 1;
+    data.browser_enabled = flags[0] - '0';
+    data.browser_native = flags[1] - '0';
+    data.chat_view_on = flags[2] - '0';
+    data.split_permille = std.fmt.parseInt(u16, split, 10) catch return null;
+    data.pinned_url_len = @intCast(pin.len / 2);
+    data.current_url_len = @intCast(current.len / 2);
+    for (0..data.pinned_url_len) |i| data.pinned_url[i] = std.fmt.parseInt(u8, pin[i * 2 ..][0..2], 16) catch return null;
+    for (0..data.current_url_len) |i| data.current_url[i] = std.fmt.parseInt(u8, current[i * 2 ..][0..2], 16) catch return null;
+    if (!app_state.validBrowserTabTransfer(&data)) return null;
+    return data;
+}
+
+test "adopt browser metadata validates before use" {
+    const data = decodeBrowserAdoptToken("bp1:110:350:68747470733a2f2f6578616d706c652e636f6d2f61253366:").?;
+    try std.testing.expectEqualStrings("https://example.com/a%3f", data.pinned_url[0..data.pinned_url_len]);
+    try std.testing.expect(decodeBrowserAdoptToken("bp2:110:350:68747470733a2f2f6578616d706c652e636f6d:") == null);
+    try std.testing.expect(decodeBrowserAdoptToken("bp1:120:350:68747470733a2f2f6578616d706c652e636f6d:") == null);
+    try std.testing.expect(decodeBrowserAdoptToken("bp1:110:350:zz:") == null);
+    try std.testing.expect(decodeBrowserAdoptToken("bp1:110:350:1:") == null);
+}
+
 pub fn parseAdoptArgs() void {
     const cmdline = GetCommandLineA();
     var i: usize = 0;
@@ -311,6 +347,17 @@ pub fn parseAdoptArgs() void {
                 const identity_len = @min(cur - identity_start, 63);
                 @memcpy(app_state.g_adopt_tmux_identity[0..identity_len], haystack[identity_start .. identity_start + identity_len]);
                 app_state.g_adopt_tmux_identity_len = @intCast(identity_len);
+                if (cur < len) cur += 1;
+            }
+            while (cur < len and haystack[cur] == ' ') cur += 1;
+            if (cur < len and std.mem.startsWith(u8, haystack[cur..], "bp")) {
+                const start = cur;
+                while (cur < len and haystack[cur] != ' ') cur += 1;
+                app_state.g_adopt_browser = decodeBrowserAdoptToken(haystack[start..cur]) orelse {
+                    app_state.g_adopt_browser_invalid = true;
+                    app_state.g_adopt_hwnd = null;
+                    return;
+                };
             }
 
             return;

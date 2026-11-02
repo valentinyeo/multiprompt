@@ -264,7 +264,6 @@ const SetTimer = @import("win32.zig").SetTimer;
 const KillTimer = @import("win32.zig").KillTimer;
 const zsbShellRecentlyDriven = @import("browser_bridge.zig").zsbShellRecentlyDriven;
 const ensureZsbPaneBindingForShell = @import("browser_bridge.zig").ensureZsbPaneBindingForShell;
-const zsbReplyTab = @import("browser_bridge.zig").zsbReplyTab;
 const nowFileTime = @import("inbox.zig").nowFileTime;
 const publishInboxState = @import("inbox.zig").publishInboxState;
 const findShellById = @import("inbox.zig").findShellById;
@@ -1164,8 +1163,7 @@ fn spawnBrowserCliWorker(cmd: []u8) void {
         debugLog("browser CLI command exceeds the Win32 command-line limit");
         return;
     }
-    const wlen = cmd.len;
-    for (0..wlen) |i| wcmd[i] = cmd[i];
+    const wlen = std.unicode.utf8ToUtf16Le(wcmd[0 .. wcmd.len - 1], cmd) catch return;
     wcmd[wlen] = 0;
     const CREATE_NO_WINDOW_FLAG: DWORD = 0x08000000;
     var si = std.mem.zeroes(STARTUPINFOW);
@@ -1270,76 +1268,465 @@ pub fn runActiveBrowserShotUrl() void {
     spawnBrowserCliForShell(app_state.active_shell, cmd);
 }
 
-fn browserUrlPollThread(profile: [32]u8) void {
+const BrowserUrlQueryPurpose = enum { poll, pin_page, ensure_pin, navigate_pin };
+const BrowserUrlQueryResult = enum { failed, too_long, success };
+
+const BrowserUrlQueryJob = struct {
+    owner: HANDLE,
+    pane: HANDLE,
+    shell_id: u32,
+    connection_id: u64,
+    window_id: i64,
+    profile: [32]u8,
+    effective_profile: [512]u8 = @splat(0),
+    effective_profile_len: usize = 0,
+    nonce: [40]u8,
+    nonce_len: u32,
+    purpose: BrowserUrlQueryPurpose,
+    id: u64,
+    revision: u64,
+    entry_token: u64 = 0,
+    pin: [512]u8 = @splat(0),
+    pin_len: u32 = 0,
+    result: BrowserUrlQueryResult = .failed,
+    url: [512]u8 = @splat(0),
+    url_len: usize = 0,
+};
+
+var browser_url_query_next: u64 = 0;
+var browser_url_query_inflight: u64 = 0;
+var browser_url_query_inflight_owner: ?BrowserUrlQueryJob = null;
+var browser_url_query_failed = std.atomic.Value(u64).init(0);
+var browser_pin_send_allowed = std.atomic.Value(u64).init(0);
+var browser_url_query_deferred: ?*BrowserUrlQueryJob = null;
+
+fn browserUrlProfile(sh: *const Shell, out: *[512]u8) ?usize {
+    const own = std.mem.sliceTo(&sh.browser_profile_token, 0);
+    if (own.len != 0) {
+        @memcpy(out[0..own.len], own);
+        return own.len;
+    }
+    const n = GetEnvironmentVariableA("MULTIPROMPT_BROWSER_PROFILE", out, out.len);
+    if (n >= out.len) return null;
+    return n;
+}
+
+fn browserUrlQueryOwner(job: *const BrowserUrlQueryJob) ?u32 {
+    if (app_state.g_app_closing or app_state.g_account_locked or !@import("room_frontend.zig").privateActionsAllowed() or app_state.g_main_hwnd != job.owner) return null;
+    const idx = findShellById(job.shell_id) orelse return null;
+    const sh = &app_state.shells[idx];
+    if (!sh.browser_enabled or sh.browser_open_failed or sh.browser_suspended or sh.browser_hwnd != job.pane or job.pane == null or IsWindow(job.pane) == 0 or webView2OwnsShell(idx) or
+        sh.browser_connection_id != job.connection_id or sh.browser_window_id != job.window_id or
+        !std.mem.eql(u8, &sh.browser_profile_token, &job.profile) or sh.browser_bind_nonce_len != job.nonce_len or
+        !std.mem.eql(u8, &sh.browser_bind_nonce, &job.nonce)) return null;
+    var effective: [512]u8 = undefined;
+    const len = browserUrlProfile(sh, &effective) orelse return null;
+    if (!std.mem.eql(u8, effective[0..len], job.effective_profile[0..job.effective_profile_len])) return null;
+    if (job.purpose != .poll and sh.browser_pin_revision != job.revision) return null;
+    if ((job.purpose == .ensure_pin or job.purpose == .navigate_pin) and (idx != app_state.active_shell or sh.browser_pin_entry_token != job.entry_token or
+        sh.browser_pinned_url_len != job.pin_len or !std.mem.eql(u8, sh.browser_pinned_url[0..sh.browser_pinned_url_len], job.pin[0..job.pin_len]))) return null;
+    return idx;
+}
+
+fn browserUrlQueryWorker(job: *BrowserUrlQueryJob) void {
     crash_recorder.guardThread();
-    defer app_state.g_browser_url_poll_pending = false;
-    const window_id = app_state.g_browser_url_poll_window_id;
-    if (window_id == 0) return;
-    var raw_buf: [1024]u8 = undefined;
-    const raw_cmd = std.fmt.bufPrint(&raw_buf, "\"{s}\" --window {d} active-tab", .{ bridgeExePath(), window_id }) catch return;
-    var cmd_buf: [1024]u8 = undefined;
-    const cmd = browser_own_profile.command(&cmd_buf, raw_cmd, std.mem.sliceTo(&profile, 0)) catch return;
+    const allocator = std.heap.page_allocator;
+    query: {
+        var fields_buf: [4096]u8 = undefined;
+        var fields_len: usize = 0;
+        if (job.purpose == .navigate_pin) {
+            const prefix = "\"url\":\"";
+            @memcpy(fields_buf[0..prefix.len], prefix);
+            fields_len = prefix.len;
+            @import("workspaces.zig").appendJsonEscaped(&fields_buf, &fields_len, job.pin[0..job.pin_len]);
+            const suffix = "\",\"activate\":true";
+            @memcpy(fields_buf[fields_len..][0..suffix.len], suffix);
+            fields_len += suffix.len;
+            if (browser_pin_send_allowed.load(.acquire) != job.id) break :query;
+        }
+        const method: []const u8 = if (job.purpose == .navigate_pin) "navigate" else "tabs";
+        const reply = @import("bridge.zig").requestBrowserForWindowCancellable(allocator, job.window_id, job.effective_profile[0..job.effective_profile_len], method, fields_buf[0..fields_len], GetTickCount64() + 3000, if (job.purpose == .navigate_pin) &browser_pin_send_allowed else null, job.id) catch break :query;
+        defer allocator.free(reply);
+        var parsed = json_reader.parse(allocator, reply) catch break :query;
+        defer parsed.deinit();
+        if (!json_reader.boolTrue(parsed.value, "ok")) break :query;
+        if (job.purpose == .navigate_pin) {
+            job.result = .success;
+            break :query;
+        }
+        const result = json_reader.field(parsed.value, "result");
+        const tabs = json_reader.field(result, "tabs");
+        if (tabs != .array) break :query;
+        var selected: ?[]const u8 = null;
+        for (tabs.array.items) |tab| {
+            if (!json_reader.boolTrue(tab, "active")) continue;
+            const tab_id = json_reader.field(tab, "id");
+            const window_id = json_reader.field(tab, "windowId");
+            if ((tab_id != .integer and tab_id != .number_string) or (window_id != .integer and window_id != .number_string) or
+                selected != null or json_reader.unsigned(tab_id, 0) == 0 or json_reader.unsigned(window_id, 0) != @as(u64, @intCast(job.window_id))) break :query;
+            selected = json_reader.string(json_reader.field(tab, "url")) orelse break :query;
+        }
+        const url = selected orelse break :query;
+        if (url.len >= job.url.len) {
+            job.result = .too_long;
+            break :query;
+        }
+        if (url.len == 0 or !std.unicode.utf8ValidateSlice(url) or std.mem.indexOfScalar(u8, url, 0) != null) break :query;
+        @memcpy(job.url[0..url.len], url);
+        job.url_len = url.len;
+        job.result = .success;
+    }
+    if (PostMessageW(job.owner, WM_APP_BROWSER_URL_UPDATE, 0, @bitCast(@intFromPtr(job))) == 0) {
+        browser_url_query_failed.store(job.id, .release);
+        allocator.destroy(job);
+    }
+}
 
-    var sa = SECURITY_ATTRIBUTES{
-        .nLength = @sizeOf(SECURITY_ATTRIBUTES),
-        .lpSecurityDescriptor = null,
-        .bInheritHandle = 1,
+fn startBrowserUrlQuery(job: *BrowserUrlQueryJob) bool {
+    if (browserUrlQueryOwner(job) == null) return false;
+    browser_url_query_inflight = job.id;
+    browser_url_query_inflight_owner = job.*;
+    if (job.purpose == .navigate_pin) browser_pin_send_allowed.store(job.id, .release);
+    const thread = std.Thread.spawn(.{}, browserUrlQueryWorker, .{job}) catch {
+        if (job.purpose == .navigate_pin) browser_pin_send_allowed.store(0, .release);
+        browser_url_query_inflight = 0;
+        browser_url_query_inflight_owner = null;
+        return false;
     };
-    var read_pipe: HANDLE = null;
-    var write_pipe: HANDLE = null;
-    if (CreatePipe(&read_pipe, &write_pipe, &sa, 4096) == 0) return;
+    thread.detach();
+    return true;
+}
 
-    var si = std.mem.zeroes(STARTUPINFOW);
-    si.cb = @sizeOf(STARTUPINFOW);
-    si.dwFlags = 0x00000100;
-    si.hStdOutput = write_pipe;
-    si.hStdError = write_pipe;
-    si.hStdInput = null;
+fn finishPinnedNavigation(shell_id: u32, token: u64) void {
+    if (token == 0) return;
+    const idx = findShellById(shell_id) orelse return;
+    const sh = &app_state.shells[idx];
+    if (sh.browser_pin_navigation_token != token) return;
+    sh.browser_pin_navigation_token = 0;
+    if (sh.browser_pending_intent == .select_preserve_focus) {
+        sh.browser_pending_url_len = 0;
+        sh.browser_pending_intent = .background;
+    }
+}
 
-    var cmd_w: [1024]u16 = undefined;
-    var pi = std.mem.zeroes(PROCESS_INFORMATION);
-    const cmd_ws = win32WidePath(&cmd_w, cmd) orelse {
-        _ = CloseHandle(read_pipe);
-        _ = CloseHandle(write_pipe);
-        return;
+fn startDeferredBrowserUrlQuery() void {
+    const job = browser_url_query_deferred orelse return;
+    browser_url_query_deferred = null;
+    if (!startBrowserUrlQuery(job)) {
+        if (job.purpose == .navigate_pin) finishPinnedNavigation(job.shell_id, job.entry_token);
+        std.heap.page_allocator.destroy(job);
+        @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+    }
+}
+
+fn recoverBrowserUrlQuery() void {
+    const failed = browser_url_query_failed.swap(0, .acq_rel);
+    if (failed != 0 and failed == browser_url_query_inflight) {
+        if (browser_url_query_inflight_owner) |*job| {
+            if (job.purpose == .navigate_pin) {
+                browser_pin_send_allowed.store(0, .release);
+                finishPinnedNavigation(job.shell_id, job.entry_token);
+            }
+            if (job.purpose != .poll and browserUrlQueryOwner(job) != null) @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+        }
+        browser_url_query_inflight = 0;
+        browser_url_query_inflight_owner = null;
+        if (browser_url_query_deferred != null) startDeferredBrowserUrlQuery();
+    }
+}
+
+fn requestBrowserUrl(shell_id: u32, purpose: BrowserUrlQueryPurpose) bool {
+    recoverBrowserUrlQuery();
+    const idx = findShellById(shell_id) orelse return false;
+    const sh = &app_state.shells[idx];
+    if (app_state.g_app_closing or app_state.g_account_locked or !@import("room_frontend.zig").privateActionsAllowed() or app_state.g_main_hwnd == null or
+        !sh.browser_enabled or sh.browser_suspended or sh.browser_hwnd == null or IsWindow(sh.browser_hwnd) == 0 or sh.browser_window_id <= 0 or webView2OwnsShell(idx)) return false;
+    if (browser_url_query_inflight != 0 and purpose == .poll) return true;
+    if (browser_url_query_deferred) |pending| {
+        if (purpose != .poll and pending.purpose == purpose and pending.shell_id == shell_id and browserUrlQueryOwner(pending) != null) return true;
+        return false;
+    }
+    if (browser_url_query_inflight_owner) |*pending| {
+        if (purpose != .poll and pending.purpose == purpose and pending.shell_id == shell_id and browserUrlQueryOwner(pending) != null) return true;
+    }
+    const job = std.heap.page_allocator.create(BrowserUrlQueryJob) catch return false;
+    browser_url_query_next +%= 1;
+    if (browser_url_query_next == 0) browser_url_query_next = 1;
+    if (purpose == .pin_page) sh.browser_pin_revision = browser_url_query_next;
+    job.* = .{
+        .owner = app_state.g_main_hwnd,
+        .pane = sh.browser_hwnd,
+        .shell_id = shell_id,
+        .connection_id = sh.browser_connection_id,
+        .window_id = sh.browser_window_id,
+        .profile = sh.browser_profile_token,
+        .nonce = sh.browser_bind_nonce,
+        .nonce_len = sh.browser_bind_nonce_len,
+        .purpose = purpose,
+        .id = browser_url_query_next,
+        .revision = sh.browser_pin_revision,
+        .entry_token = sh.browser_pin_entry_token,
+        .pin = sh.browser_pinned_url,
+        .pin_len = sh.browser_pinned_url_len,
     };
-    const CREATE_NO_WINDOW_POLL: DWORD = 0x08000000;
-    const proc_ok = CreateProcessW(null, cmd_ws.ptr, null, null, 1, CREATE_NO_WINDOW_POLL, null, null, &si, &pi);
-    _ = CloseHandle(write_pipe);
-    if (proc_ok == 0) {
-        _ = CloseHandle(read_pipe);
+    job.effective_profile_len = browserUrlProfile(sh, &job.effective_profile) orelse {
+        std.heap.page_allocator.destroy(job);
+        return false;
+    };
+    if (browser_url_query_inflight != 0) {
+        browser_url_query_deferred = job;
+        return true;
+    }
+    if (startBrowserUrlQuery(job)) return true;
+    std.heap.page_allocator.destroy(job);
+    return false;
+}
+
+var browser_pin_entry_sequence: u64 = 0;
+
+pub fn cancelPinnedBrowserEntry(shell_id: u32) void {
+    const idx = findShellById(shell_id) orelse return;
+    const sh = &app_state.shells[idx];
+    if (browser_url_query_inflight_owner) |*job| {
+        if (job.purpose == .navigate_pin and job.shell_id == shell_id and job.entry_token == sh.browser_pin_entry_token) browser_pin_send_allowed.store(0, .release);
+    }
+    sh.browser_pin_entry_token = 0;
+    sh.browser_pin_entry_pending = false;
+    sh.browser_pin_navigation_token = 0;
+    if (sh.browser_pending_intent == .select_preserve_focus) {
+        sh.browser_pending_url_len = 0;
+        sh.browser_pending_intent = .background;
+    }
+    if (browser_url_query_deferred) |job| {
+        if (job.shell_id == shell_id and (job.purpose == .ensure_pin or job.purpose == .navigate_pin)) {
+            browser_url_query_deferred = null;
+            std.heap.page_allocator.destroy(job);
+        }
+    }
+}
+
+pub fn armPinnedBrowserEntry(shell_id: u32) void {
+    const idx = findShellById(shell_id) orelse return;
+    const sh = &app_state.shells[idx];
+    if (sh.browser_pinned_url_len == 0 or sh.browser_pin_entry_pending) return;
+    browser_pin_entry_sequence +%= 1;
+    if (browser_pin_entry_sequence == 0) browser_pin_entry_sequence = 1;
+    sh.browser_pin_entry_token = browser_pin_entry_sequence;
+    sh.browser_pin_entry_pending = true;
+    sh.browser_pin_navigation_token = 0;
+}
+
+pub fn consumePinnedBrowserEntry(shell_id: u32) void {
+    const idx = findShellById(shell_id) orelse return;
+    const sh = &app_state.shells[idx];
+    if (idx != app_state.active_shell or !sh.browser_pin_entry_pending or sh.browser_pinned_url_len == 0 or
+        app_state.g_account_locked or app_state.g_app_closing or !@import("room_frontend.zig").privateActionsAllowed()) return;
+    if (webView2OwnsShell(idx)) {
+        sh.browser_pin_entry_pending = false;
+        var buf: [512]u8 = undefined;
+        const current: ?[]const u8 = currentWebView2Url(idx, &buf) catch |err| if (err == error.TooLong) null else {
+            @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+            return;
+        };
+        const pin = sh.browser_pinned_url[0..sh.browser_pinned_url_len];
+        if ((if (current) |url| !std.mem.eql(u8, url, pin) else true) and !navigateWebView2(pin)) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
         return;
     }
-    _ = CloseHandle(pi.hThread);
-
-    const WAIT_OBJ0_POLL: DWORD = 0x00000000;
-    if (WaitForSingleObject(pi.hProcess, 3000) != WAIT_OBJ0_POLL) {
-        _ = TerminateProcess(pi.hProcess, 1);
-        _ = WaitForSingleObject(pi.hProcess, 1000);
+    if (sh.browser_pin_navigation_token == sh.browser_pin_entry_token) return;
+    @import("focus.zig").cancelPendingNativeBrowserFocus();
+    if (sh.browser_hwnd == null or IsWindow(sh.browser_hwnd) == 0) {
+        var pin: [512]u8 = undefined;
+        const len = sh.browser_pinned_url_len;
+        @memcpy(pin[0..len], sh.browser_pinned_url[0..len]);
+        sh.browser_pin_entry_pending = false;
+        sh.browser_pin_navigation_token = sh.browser_pin_entry_token;
+        const token = sh.browser_pin_entry_token;
+        navigateBrowserPaneWithIntent(idx, pin[0..len], .select_preserve_focus);
+        if (sh.browser_hwnd == null and sh.browser_launch_tick == 0) {
+            finishPinnedNavigation(shell_id, token);
+            @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+        }
+        return;
     }
-    _ = CloseHandle(pi.hProcess);
-
-    var out_buf: [2048]u8 = undefined;
-    var out_len: usize = 0;
-    while (out_len < out_buf.len) {
-        var bytes_read: DWORD = 0;
-        if (ReadFile(read_pipe, out_buf[out_len..].ptr, @intCast(out_buf.len - out_len), &bytes_read, null) == 0 or bytes_read == 0) break;
-        out_len += @intCast(bytes_read);
+    if (sh.browser_window_id == 0) {
+        startBrowserWindowResolve(idx);
+        return;
     }
-    _ = CloseHandle(read_pipe);
-    if (out_len == 0) return;
+    if (requestBrowserUrl(shell_id, .ensure_pin)) {
+        sh.browser_pin_entry_pending = false;
+    } else {
+        @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+    }
+}
 
-    var parsed = json_reader.parse(std.heap.page_allocator, out_buf[0..out_len]) catch return;
-    defer parsed.deinit();
-    const url = json_reader.string(json_reader.field(zsbReplyTab(parsed.value), "url")) orelse return;
-    if (url.len == 0 or url.len >= app_state.g_browser_url_poll_result.len) return;
+pub fn returnToPinnedBrowserPage(shell_id: u32) void {
+    recoverBrowserUrlQuery();
+    const idx = findShellById(shell_id) orelse return;
+    const sh = &app_state.shells[idx];
+    if (sh.browser_pin_entry_token != 0 and sh.browser_pin_navigation_token == sh.browser_pin_entry_token) {
+        var busy = sh.browser_launch_tick != 0;
+        if (browser_url_query_inflight_owner) |*job| {
+            if (job.purpose == .navigate_pin and job.shell_id == shell_id and job.entry_token == sh.browser_pin_entry_token) busy = true;
+        }
+        if (browser_url_query_deferred) |job| {
+            if (job.purpose == .navigate_pin and job.shell_id == shell_id and job.entry_token == sh.browser_pin_entry_token) busy = true;
+        }
+        const now = GetTickCount64();
+        for (app_state.g_browser_resolve_inflight) |entry| {
+            if (entry.shell_id == shell_id and now < entry.started + BROWSER_RESOLVE_STALE_MS) busy = true;
+        }
+        if (busy) return;
+        finishPinnedNavigation(shell_id, sh.browser_pin_entry_token);
+    }
+    if (browser_url_query_inflight_owner) |*job| {
+        if (job.purpose == .ensure_pin and job.shell_id == shell_id and browserUrlQueryOwner(job) != null) return;
+    }
+    if (browser_url_query_deferred) |job| {
+        if (job.purpose == .ensure_pin and job.shell_id == shell_id and browserUrlQueryOwner(job) != null) return;
+    }
+    cancelPinnedBrowserEntry(shell_id);
+    sh.browser_open_failed = false;
+    armPinnedBrowserEntry(shell_id);
+    consumePinnedBrowserEntry(shell_id);
+}
 
-    @memcpy(app_state.g_browser_url_poll_result[0..url.len], url);
-    app_state.g_browser_url_poll_result_len = @intCast(url.len);
-    if (app_state.g_main_hwnd != null) _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_URL_UPDATE, @intCast(app_state.g_browser_url_poll_shell_id), 0);
+pub fn currentWebView2Url(idx: u32, out: *[512]u8) ![]const u8 {
+    if (!webView2OwnsShell(idx)) return error.Unavailable;
+    const get_source = app_state.g_webview2_get_source orelse return error.Unavailable;
+    var wide: [512]u16 = undefined;
+    const len = get_source(&wide, wide.len);
+    if (len == -2) return error.TooLong;
+    if (len <= 0 or len >= wide.len) return error.Unavailable;
+    var utf8: [2048]u8 = undefined;
+    const n = std.unicode.utf16LeToUtf8(&utf8, wide[0..@intCast(len)]) catch return error.Unavailable;
+    if (n >= out.len) return error.TooLong;
+    @memcpy(out[0..n], utf8[0..n]);
+    return out[0..n];
+}
+
+fn savePinnedBrowserUrl(idx: u32, url: []const u8) bool {
+    const previous = app_state.shells[idx].browser_pinned_url;
+    const previous_len = app_state.shells[idx].browser_pinned_url_len;
+    @memset(&app_state.shells[idx].browser_pinned_url, 0);
+    @memcpy(app_state.shells[idx].browser_pinned_url[0..url.len], url);
+    app_state.shells[idx].browser_pinned_url_len = @intCast(url.len);
+    if (@import("session.zig").saveSessionQueued()) return true;
+    app_state.shells[idx].browser_pinned_url = previous;
+    app_state.shells[idx].browser_pinned_url_len = previous_len;
+    @import("console.zig").showHeaderNoticeAscii("Could not save this pinned page", 4000, true);
+    return false;
+}
+
+pub fn canPinBrowserPage(shell_id: u32) bool {
+    if (app_state.g_app_closing or app_state.g_account_locked or !@import("room_frontend.zig").privateActionsAllowed()) return false;
+    const idx = findShellById(shell_id) orelse return false;
+    if (webView2OwnsShell(idx)) return app_state.g_webview2_get_source != null;
+    const sh = &app_state.shells[idx];
+    return sh.browser_enabled and !sh.browser_open_failed and !sh.browser_suspended and sh.browser_window_id > 0 and sh.browser_hwnd != null and IsWindow(sh.browser_hwnd) != 0;
+}
+
+pub fn pinBrowserPage(shell_id: u32) void {
+    if (app_state.g_app_closing or app_state.g_account_locked or !@import("room_frontend.zig").privateActionsAllowed()) return;
+    cancelPinnedBrowserEntry(shell_id);
+    const idx = findShellById(shell_id) orelse return;
+    if (webView2OwnsShell(idx)) {
+        var buf: [512]u8 = undefined;
+        const url = currentWebView2Url(idx, &buf) catch |err| {
+            @import("console.zig").showHeaderNoticeAscii(if (err == error.TooLong) "This page address is too long" else "Could not read this page", 4000, true);
+            return;
+        };
+        if (!json_reader.validPinnedUrl(url)) {
+            @import("console.zig").showHeaderNoticeAscii("Could not pin this page", 4000, true);
+            return;
+        }
+        if (!savePinnedBrowserUrl(idx, url)) return;
+        repositionActive();
+        updateBrowserVisibility();
+        _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+        return;
+    }
+    if (!requestBrowserUrl(shell_id, .pin_page)) @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+}
+
+pub fn clearPinnedBrowserPage(shell_id: u32) void {
+    if (app_state.g_app_closing or app_state.g_account_locked or !@import("room_frontend.zig").privateActionsAllowed()) return;
+    const idx = findShellById(shell_id) orelse return;
+    cancelPinnedBrowserEntry(shell_id);
+    app_state.shells[idx].browser_pin_revision = 0;
+    if (browser_url_query_deferred) |pending| {
+        if (pending.shell_id == shell_id) {
+            browser_url_query_deferred = null;
+            std.heap.page_allocator.destroy(pending);
+        }
+    }
+    if (!savePinnedBrowserUrl(idx, "")) return;
+    repositionActive();
+    updateBrowserVisibility();
+    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+}
+
+pub fn handleBrowserUrlQueryDone(raw: usize) void {
+    if (raw == 0) return;
+    const job: *BrowserUrlQueryJob = @ptrFromInt(raw);
+    if (job.id != browser_url_query_inflight) {
+        std.heap.page_allocator.destroy(job);
+        return;
+    }
+    browser_url_query_inflight = 0;
+    browser_url_query_inflight_owner = null;
+    if (job.purpose == .navigate_pin) {
+        browser_pin_send_allowed.store(0, .release);
+        const valid = browserUrlQueryOwner(job) != null;
+        finishPinnedNavigation(job.shell_id, job.entry_token);
+        if (valid and job.result != .success) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+        std.heap.page_allocator.destroy(job);
+        if (browser_url_query_deferred != null) startDeferredBrowserUrlQuery();
+        return;
+    }
+    if (browserUrlQueryOwner(job)) |idx| {
+        const url = job.url[0..job.url_len];
+        if (job.purpose == .pin_page) {
+            if (job.result == .too_long) {
+                @import("console.zig").showHeaderNoticeAscii("This page address is too long", 4000, true);
+            } else if (job.result != .success or !json_reader.validPinnedUrl(url)) {
+                @import("console.zig").showHeaderNoticeAscii("Could not pin this page", 4000, true);
+            } else {
+                if (savePinnedBrowserUrl(idx, url)) {
+                    repositionActive();
+                    updateBrowserVisibility();
+                    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+                }
+            }
+        } else if (job.purpose == .ensure_pin) {
+            if (job.result == .failed) {
+                @import("console.zig").showHeaderNoticeAscii("Could not read this page", 4000, true);
+            } else if (job.result == .too_long or !std.mem.eql(u8, url, job.pin[0..job.pin_len])) {
+                app_state.shells[idx].browser_pin_navigation_token = job.entry_token;
+                job.purpose = .navigate_pin;
+                job.result = .failed;
+                if (startBrowserUrlQuery(job)) return;
+                finishPinnedNavigation(job.shell_id, job.entry_token);
+                @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+            }
+        } else if (job.result == .success and !(std.mem.startsWith(u8, url, "data:text/html") and std.mem.indexOf(u8, url, "ZSPANE") != null)) {
+            const old = app_state.shells[idx].browser_url[0..app_state.shells[idx].browser_url_len];
+            if (!std.mem.eql(u8, old, url)) {
+                @memcpy(app_state.shells[idx].browser_url[0..url.len], url);
+                app_state.shells[idx].browser_url_len = @intCast(url.len);
+                if (idx == app_state.active_shell) {
+                    rememberActiveBrowserTabUrl();
+                    if (app_state.g_urlbar_hwnd != null) _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 0);
+                    _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
+                }
+            }
+        }
+    }
+    std.heap.page_allocator.destroy(job);
+    if (browser_url_query_deferred != null) startDeferredBrowserUrlQuery();
 }
 
 pub fn pollBrowserUrlTick() void {
+    recoverBrowserUrlQuery();
     if (app_state.active_shell >= app_state.shell_count) return;
     if (!app_state.shells[app_state.active_shell].browser_enabled) return;
     if (app_state.shells[app_state.active_shell].browser_hwnd == null) return;
@@ -1353,15 +1740,7 @@ pub fn pollBrowserUrlTick() void {
         startBrowserWindowResolve(app_state.active_shell);
         return;
     }
-    if (app_state.g_browser_url_poll_pending) return;
-    app_state.g_browser_url_poll_pending = true;
-    app_state.g_browser_url_poll_shell_id = app_state.shells[app_state.active_shell].shell_id;
-    app_state.g_browser_url_poll_window_id = app_state.shells[app_state.active_shell].browser_window_id;
-    const t = std.Thread.spawn(.{}, browserUrlPollThread, .{app_state.shells[app_state.active_shell].browser_profile_token}) catch {
-        app_state.g_browser_url_poll_pending = false;
-        return;
-    };
-    t.detach();
+    _ = requestBrowserUrl(app_state.shells[app_state.active_shell].shell_id, .poll);
 }
 
 fn normalizeBrowserUrl(s: []const u8, buf: []u8) []const u8 {
@@ -1399,9 +1778,41 @@ pub fn navigateBrowserPane(idx: u32, raw_url: []const u8) void {
     navigateBrowserPaneWithActivation(idx, raw_url, false);
 }
 
+fn windowsQuotedArgument(out: []u8, text: []const u8) ?[]const u8 {
+    var pos: usize = 0;
+    if (out.len == 0) return null;
+    out[pos] = '"';
+    pos += 1;
+    var slashes: usize = 0;
+    for (text) |c| {
+        if (c == '\\') {
+            slashes += 1;
+            continue;
+        }
+        const count = if (c == '"') slashes * 2 + 1 else slashes;
+        if (pos + count + 1 >= out.len) return null;
+        @memset(out[pos .. pos + count], '\\');
+        pos += count;
+        out[pos] = c;
+        pos += 1;
+        slashes = 0;
+    }
+    if (pos + slashes * 2 + 1 > out.len) return null;
+    @memset(out[pos .. pos + slashes * 2], '\\');
+    pos += slashes * 2;
+    out[pos] = '"';
+    return out[0 .. pos + 1];
+}
+
 pub fn navigateBrowserPaneWithActivation(idx: u32, raw_url: []const u8, activate: bool) void {
+    navigateBrowserPaneWithIntent(idx, raw_url, if (activate) .select_and_focus else .background);
+}
+
+fn navigateBrowserPaneWithIntent(idx: u32, raw_url: []const u8, intent: app_state.BrowserNavigationIntent) void {
     if (idx >= app_state.shell_count) return;
+    const activate = intent != .background;
     if (webView2OwnsShell(idx)) {
+        if (intent == .select_preserve_focus) return;
         _ = openWebView2Tab(raw_url, activate);
         _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         return;
@@ -1416,9 +1827,11 @@ pub fn navigateBrowserPaneWithActivation(idx: u32, raw_url: []const u8, activate
     const detached = input_buf[0..trimmed.len];
     var norm_buf: [BROWSER_PENDING_URL_CAP]u8 = undefined;
     const url = normalizeBrowserUrl(detached, &norm_buf);
-    const store_len: u32 = @intCast(@min(url.len, app_state.shells[idx].browser_url.len - 1));
-    @memcpy(app_state.shells[idx].browser_url[0..store_len], url[0..store_len]);
-    app_state.shells[idx].browser_url_len = store_len;
+    if (intent != .select_preserve_focus) {
+        const store_len: u32 = @intCast(@min(url.len, app_state.shells[idx].browser_url.len - 1));
+        @memcpy(app_state.shells[idx].browser_url[0..store_len], url[0..store_len]);
+        app_state.shells[idx].browser_url_len = store_len;
+    }
 
     if (!app_state.shells[idx].browser_enabled or
         app_state.shells[idx].browser_hwnd == null or
@@ -1427,38 +1840,53 @@ pub fn navigateBrowserPaneWithActivation(idx: u32, raw_url: []const u8, activate
         @memset(app_state.shells[idx].browser_pending_url[0..], 0);
         @memcpy(app_state.shells[idx].browser_pending_url[0..url.len], url);
         app_state.shells[idx].browser_pending_url_len = @intCast(url.len);
+        app_state.shells[idx].browser_pending_intent = intent;
         app_state.shells[idx].browser_enabled = true;
         app_state.shells[idx].browser_hwnd = null;
         app_state.shells[idx].browser_docking = false;
         if (idx == app_state.active_shell) {
-            launchBrowserForShell(idx);
+            if (intent == .select_preserve_focus) launchBrowserForShellFromRequest(idx) else launchBrowserForShell(idx);
             repositionActive();
             updateBrowserVisibility();
-            if (activate) @import("focus.zig").requestNativeBrowserFocus();
+            if (intent == .select_and_focus) @import("focus.zig").requestNativeBrowserFocus();
             _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
         }
         return;
     }
 
-    if (app_state.shells[idx].browser_window_id == 0) {
+    if (app_state.shells[idx].browser_window_id == 0 and intent != .select_preserve_focus) {
         focusBrowserThenConsole(idx);
     }
     if (app_state.shells[idx].browser_window_id != 0) {
+        if (intent == .select_preserve_focus) {
+            const sh = &app_state.shells[idx];
+            const token = sh.browser_pin_entry_token;
+            if (idx != app_state.active_shell or token == 0 or sh.browser_pin_navigation_token != token or
+                !std.mem.eql(u8, url, sh.browser_pinned_url[0..sh.browser_pinned_url_len]) or !requestBrowserUrl(sh.shell_id, .navigate_pin)) {
+                finishPinnedNavigation(sh.shell_id, token);
+                @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+            }
+            return;
+        }
         var cmd_buf: [WIN32_COMMAND_LINE_CAP]u8 = undefined;
+        var quoted_buf: [BROWSER_PENDING_URL_CAP * 2 + 2]u8 = undefined;
+        const quoted = windowsQuotedArgument(&quoted_buf, url) orelse return;
         const activate_flag: []const u8 = if (activate) " --activate" else "";
-        const cmd = std.fmt.bufPrint(&cmd_buf, "\"{s}\" --window {d} navigate \"{s}\"{s}", .{ bridgeExePath(), app_state.shells[idx].browser_window_id, url, activate_flag }) catch {
+        const cmd = std.fmt.bufPrint(&cmd_buf, "\"{s}\" --window {d} navigate {s}{s}", .{ bridgeExePath(), app_state.shells[idx].browser_window_id, quoted, activate_flag }) catch {
             debugLog("browser navigate: command too long; refusing desktop Edge fallback");
             return;
         };
         spawnBrowserCliForShell(idx, cmd);
         app_state.shells[idx].browser_pending_url_len = 0;
+        app_state.shells[idx].browser_pending_intent = .background;
         if (app_state.g_browser_pending_activate_sid == app_state.shells[idx].shell_id) app_state.g_browser_pending_activate_sid = 0;
     } else {
         const pending_len = @min(url.len, BROWSER_PENDING_URL_CAP - 1);
         @memset(app_state.shells[idx].browser_pending_url[0..], 0);
         @memcpy(app_state.shells[idx].browser_pending_url[0..pending_len], url[0..pending_len]);
         app_state.shells[idx].browser_pending_url_len = @intCast(pending_len);
-        if (activate) app_state.g_browser_pending_activate_sid = app_state.shells[idx].shell_id;
+        app_state.shells[idx].browser_pending_intent = intent;
+        if (intent == .select_and_focus) app_state.g_browser_pending_activate_sid = app_state.shells[idx].shell_id;
         debugLog("browser navigate: pane windowId still resolving; navigation deferred");
     }
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
@@ -1509,6 +1937,12 @@ pub fn setBrowserUrlFromSearch(idx: u32) void {
     app_state.shells[idx].browser_url_len = @intCast(len);
 }
 
+fn activeBrowserShowsUrlBar() bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    const sh = &app_state.shells[app_state.active_shell];
+    return sh.browser_pinned_url_len != 0 or (!sh.browser_native and !webView2OwnsActiveShell());
+}
+
 pub fn calcBrowserLayout() ?BrowserLayout {
     if (app_state.g_main_hwnd == null or IsIconic(app_state.g_main_hwnd) != 0) return null;
     var rc: RECT = std.mem.zeroes(RECT);
@@ -1525,7 +1959,7 @@ pub fn calcBrowserLayout() ?BrowserLayout {
     const browser_area_h = panes.browser.bottom - browser_top;
     const pbottom = panes.browser.bottom;
     if (console_w <= 20 or browser_w <= 20 or console_h <= 20) return null;
-    const ubh = if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_native) 0 else browserUrlBarH();
+    const ubh = if (activeBrowserShowsUrlBar()) browserUrlBarH() else 0;
     if (browser_area_h <= ubh + 20) return null;
     return BrowserLayout{
         .console_x = console_x,
@@ -2346,14 +2780,27 @@ pub fn startBrowserWindowResolve(idx: u32) void {
         !app_state.shells[idx].browser_enabled or app_state.shells[idx].browser_open_failed) return;
     const shell_id = app_state.shells[idx].shell_id;
     const now = GetTickCount64();
-    const slot = browserResolveSlot(&app_state.g_browser_resolve_inflight, shell_id, now) orelse return;
-    const job = std.heap.page_allocator.create(BrowserResolveJob) catch return;
-    job.* = .{ .shell_id = shell_id, .profile = app_state.shells[idx].browser_profile_token, .connection_id = app_state.shells[idx].browser_connection_id };
+    const slot = browserResolveSlot(&app_state.g_browser_resolve_inflight, shell_id, now) orelse {
+        for (app_state.g_browser_resolve_inflight) |entry| {
+            if (entry.shell_id == shell_id and now < entry.started + BROWSER_RESOLVE_STALE_MS) return;
+        }
+        app_state.shells[idx].browser_pin_entry_pending = false;
+        finishPinnedNavigation(shell_id, app_state.shells[idx].browser_pin_navigation_token);
+        return;
+    };
+    const job = std.heap.page_allocator.create(BrowserResolveJob) catch {
+        app_state.shells[idx].browser_pin_entry_pending = false;
+        finishPinnedNavigation(shell_id, app_state.shells[idx].browser_pin_navigation_token);
+        return;
+    };
+    job.* = .{ .shell_id = shell_id, .profile = app_state.shells[idx].browser_profile_token, .connection_id = app_state.shells[idx].browser_connection_id, .pin_entry_token = app_state.shells[idx].browser_pin_entry_token };
     const nonce_len = @min(@as(usize, app_state.shells[idx].browser_bind_nonce_len), job.nonce.len);
     if (nonce_len > 0) @memcpy(job.nonce[0..nonce_len], app_state.shells[idx].browser_bind_nonce[0..nonce_len]);
     job.nonce_len = nonce_len;
     const thread = std.Thread.spawn(.{}, browserWindowResolveWorker, .{job}) catch {
         std.heap.page_allocator.destroy(job);
+        app_state.shells[idx].browser_pin_entry_pending = false;
+        finishPinnedNavigation(shell_id, app_state.shells[idx].browser_pin_navigation_token);
         return;
     };
     thread.detach();
@@ -2447,24 +2894,33 @@ pub fn handleBrowserWindowResolved(job: *BrowserResolveJob) void {
     if (app_state.g_app_closing or app_state.g_account_locked) return;
     const idx = findShellById(shell_id) orelse return;
     if (!browserConnectionMatches(&app_state.shells[idx], job.connection_id)) return;
+    const current = app_state.shells[idx].browser_bind_nonce[0..app_state.shells[idx].browser_bind_nonce_len];
+    if (!std.mem.eql(u8, current, job.nonce[0..job.nonce_len]) or app_state.shells[idx].browser_window_id != 0) return;
     if (job.window_id <= 0) {
+        const sh = &app_state.shells[idx];
+        const token = sh.browser_pin_navigation_token;
+        if (job.pin_entry_token != 0 and sh.browser_pin_entry_token == job.pin_entry_token and (sh.browser_pin_entry_pending or token == job.pin_entry_token)) {
+            sh.browser_pin_entry_pending = false;
+            finishPinnedNavigation(shell_id, job.pin_entry_token);
+            if (idx == app_state.active_shell) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+        }
         if (verboseLoggingEnabled()) debugLog2("[browser-resolve] pending profile=", if (browserProfileToken(idx).len > 0) browserProfileToken(idx) else "shared");
         return;
     }
     const bh = app_state.shells[idx].browser_hwnd orelse return;
     if (IsWindow(bh) == 0 or app_state.shells[idx].browser_window_id != 0) return;
-    const current = app_state.shells[idx].browser_bind_nonce[0..app_state.shells[idx].browser_bind_nonce_len];
-    if (!std.mem.eql(u8, current, job.nonce[0..job.nonce_len])) return;
     bindBrowserWindowIdForShell(idx, job.window_id);
+    const pin_entry_waiting = app_state.shells[idx].browser_pin_entry_pending;
+    if (pin_entry_waiting) consumePinnedBrowserEntry(shell_id);
     if (app_state.shells[idx].browser_pending_url_len > 0) {
         var url_buf: [BROWSER_PENDING_URL_CAP]u8 = undefined;
         const len: usize = app_state.shells[idx].browser_pending_url_len;
         @memcpy(url_buf[0..len], app_state.shells[idx].browser_pending_url[0..len]);
-        const activate = app_state.g_browser_pending_activate_sid == shell_id;
-        app_state.g_browser_pending_activate_sid = 0;
-        if (resolvedNavigateUrl(url_buf[0..len], job.nonce_len > 0)) |url| navigateBrowserPaneWithActivation(idx, url, activate);
-    } else if (resolvedNavigateUrl("", job.nonce_len > 0)) |url| {
-        navigateBrowserPaneWithActivation(idx, url, false);
+        const intent = app_state.shells[idx].browser_pending_intent;
+        if (app_state.g_browser_pending_activate_sid == shell_id) app_state.g_browser_pending_activate_sid = 0;
+        if (resolvedNavigateUrl(url_buf[0..len], job.nonce_len > 0)) |url| navigateBrowserPaneWithIntent(idx, url, intent);
+    } else if (!pin_entry_waiting) {
+        if (resolvedNavigateUrl("", job.nonce_len > 0)) |url| navigateBrowserPaneWithActivation(idx, url, false);
     }
     if (idx == app_state.active_shell) {
         repositionActive();
@@ -3000,7 +3456,7 @@ pub fn adoptBrowserTick() void {
             _ = EnumWindows(&enumCloseStrayZspane, 0);
             if (target == app_state.active_shell) {
                 repositionActive();
-                if (!app_state.g_edit_is_browser_urlbar) {
+                if (!app_state.g_edit_is_browser_urlbar and app_state.shells[target].browser_pending_intent != .select_preserve_focus) {
                     focusBrowserThenConsole(target);
                     const target_url = if (app_state.shells[target].browser_pending_url_len > 0)
                         app_state.shells[target].browser_pending_url[0..app_state.shells[target].browser_pending_url_len]
@@ -3038,6 +3494,13 @@ pub fn adoptBrowserTick() void {
         if (close_ctx.found_hwnd != null) _ = PostMessageW(close_ctx.found_hwnd, WM_CLOSE, 0, 0);
         _ = EnumWindows(&enumCloseStrayZspane, 0);
         app_state.g_browser_adopt_nonce_len = 0;
+        const sh = &app_state.shells[target];
+        const token = sh.browser_pin_navigation_token;
+        if (sh.browser_pin_entry_pending or token != 0) {
+            sh.browser_pin_entry_pending = false;
+            finishPinnedNavigation(sh.shell_id, token);
+            if (target == app_state.active_shell) @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
+        }
         debugLog("browser adopt timed out");
         if (target == app_state.active_shell and app_state.g_main_hwnd != null) _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
     }
@@ -3081,6 +3544,77 @@ pub fn revealPaintedChatBrowser() void {
     setBrowserWindowPosAsync(bh, null, target.left, target.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
 }
 
+const BrowserPinToolInfo = extern struct {
+    cbSize: u32,
+    uFlags: u32,
+    hwnd: HANDLE,
+    uId: usize,
+    rect: RECT,
+    hinst: HANDLE,
+    lpszText: ?[*:0]const u16,
+    lParam: isize,
+    lpReserved: ?*anyopaque,
+};
+var browser_urlbar_owner_sid: u32 = 0;
+var browser_pin_tooltip: HANDLE = null;
+var browser_pin_tooltip_text: [560]u16 = @splat(0);
+var browser_pin_tool_registered = false;
+var browser_pin_controls_initialized = false;
+
+fn updateBrowserPinTooltip(layout: BrowserLayout) void {
+    const bar = app_state.g_urlbar_hwnd orelse return;
+    if (browser_pin_tooltip == null or IsWindow(browser_pin_tooltip) == 0) {
+        const controls = if (!browser_pin_controls_initialized) LoadLibraryA("comctl32.dll") else null;
+        browser_pin_controls_initialized = true;
+        if (controls != null) {
+            const InitOptions = extern struct { size: u32, classes: u32 };
+            const InitControls = *const fn (*const InitOptions) callconv(WINAPI) BOOL;
+            if (GetProcAddress(controls, "InitCommonControlsEx")) |proc| {
+                const init: InitControls = @ptrCast(@alignCast(proc));
+                const options = InitOptions{ .size = @sizeOf(InitOptions), .classes = 0xff };
+                _ = init(&options);
+            }
+        }
+        browser_pin_tooltip = CreateWindowExW(WS_EX_TOPMOST, L("tooltips_class32"), null, WS_POPUP | 1, 0, 0, 0, 0, bar, null, GetModuleHandleW(null), null);
+        browser_pin_tool_registered = false;
+    }
+    const tip = browser_pin_tooltip orelse return;
+    const prefix = L("Return to pinned page: ");
+    const prefix_len = "Return to pinned page: ".len;
+    @memcpy(browser_pin_tooltip_text[0..prefix_len], prefix[0..prefix_len]);
+    const sh = &app_state.shells[app_state.active_shell];
+    const n = std.unicode.utf8ToUtf16Le(browser_pin_tooltip_text[prefix_len .. browser_pin_tooltip_text.len - 1], sh.browser_pinned_url[0..sh.browser_pinned_url_len]) catch 0;
+    browser_pin_tooltip_text[prefix_len + n] = 0;
+    _ = SetWindowTextW(bar, if (sh.browser_pinned_url_len == 0) L("Address") else @ptrCast(&browser_pin_tooltip_text));
+    var local = layout;
+    local.urlbar_x = 0;
+    local.urlbar_y = 0;
+    var info = BrowserPinToolInfo{ .cbSize = @sizeOf(BrowserPinToolInfo), .uFlags = 0x10, .hwnd = bar, .uId = 1, .rect = browserPinButtonRect(local), .hinst = null, .lpszText = @ptrCast(&browser_pin_tooltip_text), .lParam = 0, .lpReserved = null };
+    if (browserPinButtonWidth() == 0) {
+        if (browser_pin_tool_registered) _ = SendMessageW(tip, 0x0433, 0, @bitCast(@intFromPtr(&info)));
+        browser_pin_tool_registered = false;
+    } else if (browser_pin_tool_registered) {
+        _ = SendMessageW(tip, 0x0434, 0, @bitCast(@intFromPtr(&info)));
+        _ = SendMessageW(tip, 0x0439, 0, @bitCast(@intFromPtr(&info)));
+    } else {
+        browser_pin_tool_registered = SendMessageW(tip, 0x0432, 0, @bitCast(@intFromPtr(&info))) != 0;
+    }
+}
+
+fn positionBrowserUrlBar(layout: BrowserLayout) void {
+    if (!activeBrowserShowsUrlBar() or app_state.g_urlbar_hwnd == null or IsWindow(app_state.g_urlbar_hwnd) == 0) return;
+    browser_urlbar_owner_sid = app_state.shells[app_state.active_shell].shell_id;
+    updateBrowserPinTooltip(layout);
+    _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 0);
+    var pt = POINT{ .x = layout.urlbar_x, .y = layout.urlbar_y };
+    if (ClientToScreen(app_state.g_main_hwnd, &pt) != 0) {
+        _ = SetWindowPos(app_state.g_urlbar_hwnd, HWND_TOPMOST, pt.x, pt.y, layout.urlbar_w, layout.urlbar_h, SWP_NOACTIVATE);
+    }
+    if (app_state.g_edit_is_browser_urlbar and app_state.g_edit_hwnd != null) {
+        _ = SetWindowPos(app_state.g_edit_hwnd, null, 6 + browserUrlTextInset(), 3, @max(1, layout.urlbar_w - 12 - browserUrlTextInset() - browserPinButtonWidth()), layout.urlbar_h - 6, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
 pub fn positionActiveBrowser() void {
     const timing_started = switch_timing.start();
     defer switch_timing.record(.position, timing_started);
@@ -3092,7 +3626,8 @@ pub fn positionActiveBrowser() void {
     if (app_state.g_browser_switch_preparing) return;
     if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_docking) return;
     if (webView2OwnsActiveShell()) {
-        hideAllBrowserChrome();
+        hideBrowserEdgeMasks();
+        if (calcBrowserLayout()) |layout| positionBrowserUrlBar(layout);
         return;
     }
     if (app_state.active_shell >= app_state.shell_count or app_state.g_main_hwnd == null) {
@@ -3149,15 +3684,7 @@ pub fn positionActiveBrowser() void {
             thread.detach();
         }
     }
-    if (app_state.active_shell < app_state.shell_count and !app_state.shells[app_state.active_shell].browser_native and app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0) {
-        var upt = POINT{ .x = layout.urlbar_x, .y = layout.urlbar_y };
-        if (ClientToScreen(app_state.g_main_hwnd, &upt) != 0) {
-            _ = SetWindowPos(app_state.g_urlbar_hwnd, HWND_TOPMOST, upt.x, upt.y, layout.urlbar_w, layout.urlbar_h, SWP_NOACTIVATE);
-        }
-        if (app_state.g_edit_is_browser_urlbar and app_state.g_edit_hwnd != null) {
-            _ = SetWindowPos(app_state.g_edit_hwnd, null, 6 + browserUrlTextInset(), 3, layout.urlbar_w - 12 - browserUrlTextInset(), layout.urlbar_h - 6, SWP_NOZORDER | SWP_NOACTIVATE);
-        }
-    }
+    positionBrowserUrlBar(layout);
     if (verboseLoggingEnabled()) {
         var rb: RECT = std.mem.zeroes(RECT);
         _ = GetWindowRect(bh, &rb);
@@ -3236,6 +3763,7 @@ fn browserPaneMayOccupyLayout(idx: u32) bool {
 }
 
 pub fn hideBrowserFloatingChrome() void {
+    if (browser_pin_tooltip != null and IsWindow(browser_pin_tooltip) != 0) _ = SendMessageW(browser_pin_tooltip, 0x041c, 0, 0);
     if (app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0) {
         if (IsWindowVisible(app_state.g_urlbar_hwnd) != 0) _ = ShowWindow(app_state.g_urlbar_hwnd, SW_HIDE);
     }
@@ -3405,6 +3933,7 @@ pub fn parkInactiveBrowserPanes() void {
 
 fn forgetCrashedBrowserPane(idx: u32, now: u64) void {
     if (idx >= app_state.shell_count) return;
+    if (app_state.shells[idx].browser_pin_navigation_token != 0) cancelPinnedBrowserEntry(app_state.shells[idx].shell_id);
     if (app_state.shells[idx].browser_hwnd) |bh| {
         if (IsWindow(bh) != 0) _ = PostMessageW(bh, WM_CLOSE, 0, 0);
     }
@@ -3567,11 +4096,16 @@ pub fn updateBrowserVisibility() void {
 
     if (webView2OwnsActiveShell()) {
         cancelBrowserVisibilitySettle();
-        hideAllBrowserChrome();
+        hideBrowserEdgeMasks();
+        if (activeBrowserShowsUrlBar() and !browserChromeHiddenForOverlay() and IsIconic(app_state.g_main_hwnd) == 0 and foregroundIsOurs()) {
+            ensureUrlBarWindow();
+            if (calcBrowserLayout()) |layout| positionBrowserUrlBar(layout);
+            if (app_state.g_urlbar_hwnd != null) _ = ShowWindow(app_state.g_urlbar_hwnd, SW_SHOWNOACTIVATE);
+        } else if (app_state.g_urlbar_hwnd != null) _ = ShowWindow(app_state.g_urlbar_hwnd, SW_HIDE);
         return;
     }
 
-    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_native) {
+    if (!activeBrowserShowsUrlBar()) {
         if (app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0)
             _ = ShowWindow(app_state.g_urlbar_hwnd, SW_HIDE);
     } else {
@@ -3609,7 +4143,7 @@ pub fn updateBrowserVisibility() void {
             if (!browser_was_visible) parkBrowserWindow(bh);
             positionActiveBrowser();
             if (!browser_was_visible and app_state.shells[app_state.active_shell].browser_native) armBrowserEdgeMaskRaise();
-            if (!app_state.shells[app_state.active_shell].browser_native and app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0) {
+            if (activeBrowserShowsUrlBar() and app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0) {
                 if (IsWindowVisible(app_state.g_urlbar_hwnd) == 0) _ = ShowWindow(app_state.g_urlbar_hwnd, SW_SHOWNOACTIVATE);
             }
             if (app_state.g_main_hwnd != null) {
@@ -3629,7 +4163,7 @@ pub fn updateBrowserVisibility() void {
     if (app_state.shells[app_state.active_shell].browser_hwnd == null and !app_state.g_restoring and
         !app_state.shells[app_state.active_shell].browser_open_failed and app_state.shells[app_state.active_shell].browser_launch_tick == 0)
     {
-        if (app_state.g_chat_active) launchBrowserForShellFromRequest(app_state.active_shell) else launchBrowserForShell(app_state.active_shell);
+        if (app_state.g_chat_active or app_state.shells[app_state.active_shell].browser_pending_intent == .select_preserve_focus) launchBrowserForShellFromRequest(app_state.active_shell) else launchBrowserForShell(app_state.active_shell);
     }
 }
 
@@ -3641,7 +4175,7 @@ pub fn relaunchActiveRestoredBrowserPane() void {
         forgetCrashedBrowserPane(app_state.active_shell, GetTickCount64());
     }
     if (app_state.shells[app_state.active_shell].browser_launch_tick != 0) return;
-    launchBrowserForShell(app_state.active_shell);
+    if (app_state.shells[app_state.active_shell].browser_pin_entry_pending) launchBrowserForShellFromRequest(app_state.active_shell) else launchBrowserForShell(app_state.active_shell);
     repositionActive();
     updateBrowserVisibility();
     armBrowserVisibilitySettle(20);
@@ -3699,6 +4233,7 @@ test "IGSH-523 cancelled launches reuse expired slots and evict oldest when full
 
 pub fn closeBrowserForShell(idx: u32) void {
     if (idx >= app_state.shell_count) return;
+    cancelPinnedBrowserEntry(app_state.shells[idx].shell_id);
     if (app_state.shells[idx].browser_hwnd == null and app_state.shells[idx].browser_bind_nonce_len > 0) {
         const now = GetTickCount64();
         const slot = cancelledBrowserLaunchSlot(&app_state.g_cancelled_browser_launches, now);
@@ -3899,6 +4434,7 @@ fn resetBrowserConnection(sh: *Shell) void {
     sh.browser_window_id = 0;
     sh.browser_bind_nonce_len = 0;
     sh.browser_pending_url_len = 0;
+    sh.browser_pending_intent = .background;
 }
 
 fn browserConnectionMatches(sh: *const Shell, connection_id: u64) bool {
@@ -4181,6 +4717,20 @@ fn browserNavButtonGap() i32 {
     return uiScaled(2);
 }
 
+fn browserPinButtonWidth() i32 {
+    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_pinned_url_len == 0) return 0;
+    return browserNavButtonW();
+}
+
+fn browserPinButtonRect(layout: BrowserLayout) RECT {
+    return .{
+        .left = layout.urlbar_x + layout.urlbar_w - 6 - browserPinButtonWidth(),
+        .top = layout.urlbar_y + 3,
+        .right = layout.urlbar_x + layout.urlbar_w - 6,
+        .bottom = layout.urlbar_y + layout.urlbar_h - 3,
+    };
+}
+
 fn browserUrlTextInset() i32 {
     return 2 + browserNavButtonW() * 2 + browserNavButtonGap() + 8;
 }
@@ -4199,7 +4749,7 @@ fn browserNavButtonRect(layout: BrowserLayout, forward: bool) RECT {
 }
 
 fn paintBrowserUrlBarLayout(hdc: HANDLE, layout: BrowserLayout) void {
-    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_native) return;
+    if (!activeBrowserShowsUrlBar()) return;
     if (layout.urlbar_h <= 0) return;
 
     const bg_color = customColorOr("tab_bg", if (app_state.g_light_theme) RGB(240, 240, 240) else if (app_state.g_edge_gray_theme) RGB(45, 45, 48) else if (app_state.g_mid_theme) RGB(50, 50, 53) else RGB(32, 32, 35));
@@ -4229,7 +4779,7 @@ fn paintBrowserUrlBarLayout(hdc: HANDLE, layout: BrowserLayout) void {
 
     _ = SelectObject(hdc, uiFontSubtitle());
     _ = SetBkMode(hdc, TRANSPARENT);
-    const nav_ready = activeBrowserHwndLive() != null and app_state.shells[app_state.active_shell].browser_window_id != 0;
+    const nav_ready = webView2OwnsActiveShell() or (activeBrowserHwndLive() != null and app_state.shells[app_state.active_shell].browser_window_id != 0);
     _ = SetTextColor(hdc, if (nav_ready)
         customColorOr("tab_text", if (app_state.g_light_theme) RGB(50, 50, 58) else RGB(210, 210, 220))
     else
@@ -4239,10 +4789,10 @@ fn paintBrowserUrlBarLayout(hdc: HANDLE, layout: BrowserLayout) void {
     _ = DrawTextW(hdc, L("\u{2039}"), -1, &back_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
     _ = DrawTextW(hdc, L("\u{203A}"), -1, &fwd_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
 
-    const url_slice = browserUrlDisplaySlice(app_state.active_shell);
+    var source_buf: [512]u8 = undefined;
+    const url_slice = if (webView2OwnsActiveShell()) currentWebView2Url(app_state.active_shell, &source_buf) catch "" else browserUrlDisplaySlice(app_state.active_shell);
     var wurl: [512]u16 = undefined;
-    const wurl_len = @min(url_slice.len, wurl.len - 1);
-    for (0..wurl_len) |ci| wurl[ci] = url_slice[ci];
+    const wurl_len = std.unicode.utf8ToUtf16Le(wurl[0 .. wurl.len - 1], url_slice) catch 0;
     wurl[wurl_len] = 0;
 
     _ = SetTextColor(hdc, if (nav_ready)
@@ -4252,10 +4802,19 @@ fn paintBrowserUrlBarLayout(hdc: HANDLE, layout: BrowserLayout) void {
     var text_rc = RECT{
         .left = layout.urlbar_x + pad_x + browserUrlTextInset(),
         .top = layout.urlbar_y + pad_y,
-        .right = layout.urlbar_x + layout.urlbar_w - pad_x - 4,
+        .right = layout.urlbar_x + layout.urlbar_w - pad_x - 4 - browserPinButtonWidth(),
         .bottom = layout.urlbar_y + layout.urlbar_h - pad_y,
     };
     _ = DrawTextW(hdc, @ptrCast(&wurl), -1, &text_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+    if (browserPinButtonWidth() > 0) {
+        var pin_rc = browserPinButtonRect(layout);
+        const icon_font = @import("fonts.zig").messageMenuIconFont();
+        const old_font = SelectObject(hdc, icon_font);
+        _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(0, 95, 184) else RGB(96, 176, 255));
+        _ = DrawTextW(hdc, L("\u{E718}"), -1, &pin_rc, DT_SINGLELINE | DT_VCENTER | DT_CENTER | DT_NOPREFIX);
+        _ = SelectObject(hdc, old_font);
+        _ = DeleteObject(icon_font);
+    }
 }
 
 fn paintBrowserUrlBar(_hdc: HANDLE) void {
@@ -4263,16 +4822,14 @@ fn paintBrowserUrlBar(_hdc: HANDLE) void {
 }
 
 fn browserUrlBarHit(x: i32, y: i32) bool {
-    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_native) return false;
-    if (app_state.active_shell >= app_state.shell_count or !app_state.shells[app_state.active_shell].browser_enabled) return false;
+    if (!activeBrowserShowsUrlBar() or !browserSlotReserved()) return false;
     const layout = calcBrowserLayout() orelse return false;
     return x >= layout.urlbar_x and x < layout.urlbar_x + layout.urlbar_w and
         y >= layout.urlbar_y and y < layout.urlbar_y + layout.urlbar_h;
 }
 
 fn browserNavButtonHit(x: i32, y: i32, forward: bool) bool {
-    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_native) return false;
-    if (app_state.active_shell >= app_state.shell_count or !app_state.shells[app_state.active_shell].browser_enabled) return false;
+    if (!activeBrowserShowsUrlBar() or !browserSlotReserved()) return false;
     const layout = calcBrowserLayout() orelse return false;
     const rc = browserNavButtonRect(layout, forward);
     return x >= rc.left and x < rc.right and y >= rc.top and y < rc.bottom;
@@ -4945,7 +5502,7 @@ fn positionBrowserEdgeMasks(layout: BrowserLayout) void {
 }
 
 fn ensureUrlBarWindow() void {
-    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_native) return;
+    if (!activeBrowserShowsUrlBar()) return;
     if (app_state.g_main_hwnd == null) return;
     if (app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0) return;
     app_state.g_urlbar_hwnd = null;
@@ -4999,9 +5556,7 @@ fn urlBarWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
             const hdc = BeginPaint(hwnd, &ps);
             defer _ = EndPaint(hwnd, &ps);
             if (hdc == null) return 0;
-            if (app_state.g_edit_is_browser_urlbar and app_state.g_edit_hwnd != null) return 0;
-            if (app_state.active_shell >= app_state.shell_count) return 0;
-            if (!app_state.shells[app_state.active_shell].browser_enabled) return 0;
+            if (app_state.active_shell >= app_state.shell_count or !browserSlotReserved()) return 0;
             var client_rc: RECT = std.mem.zeroes(RECT);
             _ = GetClientRect(hwnd, &client_rc);
             const w = client_rc.right;
@@ -5016,6 +5571,7 @@ fn urlBarWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
             return 0;
         },
         WM_LBUTTONDOWN => {
+            if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].shell_id != browser_urlbar_owner_sid) return 0;
             const mx = GET_X(lp);
             const my = GET_Y(lp);
             var client_rc: RECT = std.mem.zeroes(RECT);
@@ -5027,14 +5583,23 @@ fn urlBarWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
             sl.urlbar_y = 0;
             sl.urlbar_w = w;
             sl.urlbar_h = h;
+            const pin_rc = browserPinButtonRect(sl);
+            if (browserPinButtonWidth() > 0 and mx >= pin_rc.left and mx < pin_rc.right and my >= pin_rc.top and my < pin_rc.bottom) {
+                returnToPinnedBrowserPage(browser_urlbar_owner_sid);
+                return 0;
+            }
             const back_rc = browserNavButtonRect(sl, false);
             if (mx >= back_rc.left and mx < back_rc.right and my >= back_rc.top and my < back_rc.bottom) {
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_BACK, 0, 0);
+                if (webView2OwnsActiveShell()) {
+                    if (app_state.g_webview2_back) |back| back();
+                } else _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_BACK, 0, 0);
                 return 0;
             }
             const fwd_rc = browserNavButtonRect(sl, true);
             if (mx >= fwd_rc.left and mx < fwd_rc.right and my >= fwd_rc.top and my < fwd_rc.bottom) {
-                _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_FORWARD, 0, 0);
+                if (webView2OwnsActiveShell()) {
+                    if (app_state.g_webview2_forward) |forward| forward();
+                } else _ = PostMessageW(app_state.g_main_hwnd, WM_APP_BROWSER_FORWARD, 0, 0);
                 return 0;
             }
             if (mx >= 0 and mx < w and my >= 0 and my < h) {
@@ -5048,11 +5613,11 @@ fn urlBarWndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAP
 
 pub fn startBrowserUrlBarEdit() void {
     if (!focusGuard(app_state.g_main_hwnd)) return;
-    if (app_state.active_shell >= app_state.shell_count or app_state.shells[app_state.active_shell].browser_native) return;
+    if (!activeBrowserShowsUrlBar()) return;
     commitRename();
     if (app_state.active_shell >= app_state.shell_count) return;
-    if (!app_state.shells[app_state.active_shell].browser_enabled) return;
-    if (app_state.shells[app_state.active_shell].browser_hwnd == null or IsWindow(app_state.shells[app_state.active_shell].browser_hwnd) == 0) {
+    if (!app_state.shells[app_state.active_shell].browser_enabled and !webView2OwnsActiveShell()) return;
+    if (!webView2OwnsActiveShell() and (app_state.shells[app_state.active_shell].browser_hwnd == null or IsWindow(app_state.shells[app_state.active_shell].browser_hwnd) == 0)) {
         app_state.shells[app_state.active_shell].browser_hwnd = null;
         app_state.shells[app_state.active_shell].browser_docking = false;
         ensureBrowserDefaultUrl(app_state.active_shell);
@@ -5069,7 +5634,7 @@ pub fn startBrowserUrlBarEdit() void {
     app_state.g_edit_sync_remote_name = false;
     const edit_x: i32 = 6 + browserUrlTextInset();
     const edit_y: i32 = 3;
-    const edit_w = layout.urlbar_w - 12 - browserUrlTextInset();
+    const edit_w = @max(1, layout.urlbar_w - 12 - browserUrlTextInset() - browserPinButtonWidth());
     const edit_h = layout.urlbar_h - 6;
     const edit_parent = if (app_state.g_urlbar_hwnd != null and IsWindow(app_state.g_urlbar_hwnd) != 0) app_state.g_urlbar_hwnd else app_state.g_main_hwnd;
     app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, edit_x, edit_y, edit_w, edit_h, edit_parent, null, null, null);
@@ -5078,10 +5643,10 @@ pub fn startBrowserUrlBarEdit() void {
         const GWLP_WNDPROC: i32 = -4;
         app_state.g_edit_orig_proc = GetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC);
         _ = SetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC, @bitCast(@intFromPtr(&editSubclassProc)));
-        const url_slice = browserUrlDisplaySlice(app_state.active_shell);
+        var source_buf: [512]u8 = undefined;
+        const url_slice = if (webView2OwnsActiveShell()) currentWebView2Url(app_state.active_shell, &source_buf) catch "" else browserUrlDisplaySlice(app_state.active_shell);
         var wurl: [512]u16 = std.mem.zeroes([512]u16);
-        const wurl_len = @min(url_slice.len, wurl.len - 1);
-        for (0..wurl_len) |ci| wurl[ci] = url_slice[ci];
+        const wurl_len = std.unicode.utf8ToUtf16Le(wurl[0 .. wurl.len - 1], url_slice) catch 0;
         wurl[wurl_len] = 0;
         _ = SetWindowTextW(app_state.g_edit_hwnd, @ptrCast(&wurl));
         _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 1);
@@ -5190,6 +5755,7 @@ fn loadWebView2Bridge() bool {
     app_state.g_webview2_close_tab = @ptrCast(@alignCast(GetProcAddress(module, "wv2_close_tab")));
     app_state.g_webview2_has_focus = @ptrCast(@alignCast(GetProcAddress(module, "wv2_has_focus")));
     app_state.g_webview2_get_host = @ptrCast(@alignCast(GetProcAddress(module, "wv2_get_host")));
+    app_state.g_webview2_get_source = @ptrCast(@alignCast(GetProcAddress(module, "wv2_get_source")));
     return app_state.g_webview2_create != null and app_state.g_webview2_set_bounds != null and
         app_state.g_webview2_focus != null and app_state.g_webview2_close != null and
         app_state.g_webview2_set_visible != null and app_state.g_webview2_navigate != null and
@@ -5202,6 +5768,7 @@ pub fn positionWebView2() void {
     if (!webView2OwnsActiveShell() or app_state.g_main_hwnd == null) return;
     const set_bounds = app_state.g_webview2_set_bounds orelse return;
     const layout = calcBrowserLayout() orelse return;
+    positionBrowserUrlBar(layout);
     set_bounds(
         layout.browser_x,
         layout.browser_y,
@@ -5235,13 +5802,15 @@ fn navigateWebView2(raw_url: []const u8) bool {
     const url = normalizeBrowserUrl(trimmed, &norm_buf);
     if (url.len + 1 > 2048) return false;
     var wide: [2048]u16 = std.mem.zeroes([2048]u16);
-    for (url, 0..) |c, i| wide[i] = @intCast(c);
+    const wide_len = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], url) catch return false;
+    wide[wide_len] = 0;
     navigate(@ptrCast(&wide));
     if (findShellById(app_state.g_webview2_owner_shell_id)) |idx| {
         const n = @min(url.len, app_state.shells[idx].browser_url.len);
         @memcpy(app_state.shells[idx].browser_url[0..n], url[0..n]);
         app_state.shells[idx].browser_url_len = n;
     }
+    if (app_state.g_urlbar_hwnd != null) _ = InvalidateRect(app_state.g_urlbar_hwnd, null, 0);
     return true;
 }
 
@@ -5253,7 +5822,8 @@ pub fn openWebView2Tab(raw_url: []const u8, focus_when_ready: bool) bool {
     const url = if (trimmed.len == 0) "about:blank" else normalizeBrowserUrl(trimmed, &norm_buf);
     if (url.len + 1 > 2048) return false;
     var wide: [2048]u16 = std.mem.zeroes([2048]u16);
-    for (url, 0..) |c, i| wide[i] = @intCast(c);
+    const wide_len = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], url) catch return false;
+    wide[wide_len] = 0;
     if (open_tab(@ptrCast(&wide), if (focus_when_ready and app_state.g_focus_user_action_tick != 0 and focusGuard(app_state.g_main_hwnd)) 1 else 0) == 0) return false;
     if (findShellById(app_state.g_webview2_owner_shell_id)) |idx| {
         const n = @min(url.len, app_state.shells[idx].browser_url.len);
@@ -5305,6 +5875,7 @@ pub fn toggleWebView2() void {
     writeWebView2SessionFilesForShell(app_state.active_shell);
     syncMouseHookForUrlClicks();
     repositionActive();
+    updateBrowserVisibility();
     requestWebView2Focus();
     _ = InvalidateRect(app_state.g_main_hwnd, null, 0);
 }

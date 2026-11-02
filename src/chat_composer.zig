@@ -1764,6 +1764,7 @@ pub fn openChatView() void {
         debugLog("[view] open skipped: no frame or no active tab");
         return;
     }
+    if (!app_state.g_chat_active and !app_state.g_startup_progress and !app_state.g_restoring and !app_state.g_account_applying) @import("browser_pane.zig").armPinnedBrowserEntry(app_state.shells[app_state.active_shell].shell_id);
     if (app_state.g_chat_browser_swap.shell_id == 0) {
         app_state.g_chat_switch_started = GetTickCount64();
         app_state.g_chat_switch_content_sid = app_state.shells[app_state.active_shell].shell_id;
@@ -1812,6 +1813,7 @@ pub fn closeChatView() void {
     @import("chat_find_ui.zig").close(false);
     chatAcClose();
     if (!app_state.g_chat_active) return;
+    if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].chat_view_on) @import("browser_pane.zig").cancelPinnedBrowserEntry(app_state.shells[app_state.active_shell].shell_id);
     _ = @import("chat_session.zig").chatReadMark(false);
     chatDraftFlush();
     app_state.g_chat_active = false;
