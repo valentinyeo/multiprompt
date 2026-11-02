@@ -86,7 +86,7 @@ export function checkFragments(base, head, changed) {
     const lines = fragmentLines(file, head[file]);
     if (changed.includes(file) && lines.some(line => !productChange(line))) throw new Error(`${file}: write a specific user-visible change; omit notes for checks, tests or pipeline work`);
   }
-  const appChanged = changed.some(file => file.startsWith('src/') &&
+  const appChanged = changed.some(file => (file.startsWith('src/') || file.startsWith('extension/')) &&
     (!file.endsWith('.zig') || !(file in base) || !(file in head) || runtimeZigTokens(base[file]) !== runtimeZigTokens(head[file])));
   if (appChanged && !changed.some(file => !(file in base) && file in head && file.startsWith('changelog.d/') && file !== 'changelog.d/README.md')) {
     throw new Error('App code changed: add changelog.d/<TICKET>-<slug>.md with at least one plain product line');

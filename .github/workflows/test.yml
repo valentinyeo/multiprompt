@@ -207,7 +207,7 @@ jobs:
         run: bash -e -o pipefail tools/classify-test-paths.sh
       - name: Test plain changelog fragments and update card notes
         if: steps.paths.outputs.heavy == 'true'
-        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js
+        run: node --test tools/changelog-fragments.test.js tools/update-card-notes.test.js tools/update-card-restart.test.js tools/check-release-note.test.mjs
       - name: Verify responsive startup ordering and original regression controls
         run: node --test tools/startup-responsive.test.js tools/test-workflow-structure.test.mjs tools/account-host-removal.test.js tools/composer-band.test.js
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -226,6 +226,10 @@ jobs:
           else
             node tools/version-stamp.mjs check HEAD^ HEAD
           fi
+      - name: Check a shipped change carries a release note
+        if: steps.paths.outputs.heavy == 'true' && matrix.group == 1
+        shell: bash
+        run: node tools/check-release-note.mjs
       - name: Test release update source regressions
         if: steps.paths.outputs.heavy == 'true' && steps.rule.outputs.kind != 'STAMP'
         shell: pwsh
