@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
+    [Parameter(Mandatory=$true)][ValidateSet('settings-panel', 'appearance', 'app-icon', 'sessions', 'session-restore', 'tmux-binding', 'workspaces', 'workspace-focus', 'inbox', 'inbox-order', 'command-palette', 'link-picker', 'session-open', 'favorites-groups', 'chat-first-paint', 'chat-send-latency', 'browser-switch-speed', 'chat-switch-speed', 'browser-pane-stuck', 'browser-pane-locked', 'browser-corners', 'group-rail', 'pane-layout', 'title-bar', 'window-controls', 'chat-tables', 'chat-code-font', 'chat-working', 'chat-composer-text', 'chat-skill-pill', 'chat-options', 'composer-buttons', 'chat-dictation', 'safe-updates', 'chat-view', 'chat-view-everywhere', 'chat-focus', 'chat-delivery', 'chat-messages-only', 'chat-full-history', 'browser-emulation', 'status-card', 'palette-order', 'browser-own-profile', 'remind-me', 'tab-names', 'session-tabs', 'relaunch-saved-sessions')][string]$Feature,
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$ExpectedVersion,
     [Parameter(Mandatory=$true)][string]$ExpectedHash,
@@ -283,6 +283,18 @@ try {
         Set-Content -Encoding UTF8 -LiteralPath (Join-Path $Evidence 'seed-session.json') -Value $remoteSeedJson
         $result.seedBoundary = 'The harness writes the saved-tab file once before the first launch: stand-in tmux tabs on a stand-in SSH host, each backed by a seeded Claude transcript of 400 question and answer rounds with tool calls, code blocks and tables. Only SSH is replaced; transcript reading, caching, layout and switching run in the real app.'
     }
+    if ($Feature -eq 'inbox-order') {
+        $seedDir = Join-Path $scratch 'roaming/ZigShell'
+        New-Item -ItemType Directory -Force $seedDir | Out-Null
+        $seedTabs = @(
+            @{ kind = 'cmd'; name = 'Inbox Older'; manual = $true; shell_id = 1; att = $true; la = [DateTime]::UtcNow.AddMinutes(-20).ToFileTimeUtc() },
+            @{ kind = 'cmd'; name = 'Inbox Newer'; manual = $true; shell_id = 2; la = [DateTime]::UtcNow.AddMinutes(-5).ToFileTimeUtc() }
+        )
+        $seed = @{ active_tab = 1; single_window = $true; tabs = $seedTabs }
+        [IO.File]::WriteAllText((Join-Path $seedDir 'session.json'), (ConvertTo-Json -InputObject $seed -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        Save-Json $seed 'seed-session.json'
+        $result.seedBoundary = 'Two local CMD sessions with seeded activity times; a scripted notification simulates an update, not a cloud reply.'
+    }
     if ($Feature -eq 'tab-names') {
         $seedFolder = Join-Path $scratch 'GitHub'
         New-Item -ItemType Directory -Force -Path $seedFolder, (Join-Path $scratch 'roaming/ZigShell') | Out-Null
@@ -320,7 +332,7 @@ try {
     $job = New-Object VerifyJob
     if ($Feature -eq 'session-restore') {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
-    } elseif ($Feature -in @('browser-own-profile', 'tab-names')) {
+    } elseif ($Feature -in @('browser-own-profile', 'tab-names', 'inbox-order')) {
         $process = $job.Start($Exe, $scratch, (Join-Path $Evidence 'stdout.log'), (Join-Path $Evidence 'stderr.log'), '--single-window')
     } elseif ($Feature -eq 'relaunch-saved-sessions') {
         $relaunchSeed = New-RelaunchSeed
@@ -467,6 +479,9 @@ try {
         }
         'inbox' {
             . (Join-Path $PSScriptRoot 'control-feature-inbox.ps1')
+        }
+        'inbox-order' {
+            . (Join-Path $PSScriptRoot 'control-feature-inbox-order.ps1')
         }
         'remind-me' {
             . (Join-Path $PSScriptRoot 'control-feature-remind-me.ps1')

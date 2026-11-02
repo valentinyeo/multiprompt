@@ -707,15 +707,40 @@ fn inboxRowLess(a: InboxRow, b: InboxRow) bool {
         const kb = frequent.orderKey(b.visits.optional() orelse &.{}, now_ms, if (b.input != 0) b.input else null);
         if (ka != kb) return frequent.bottomOrder(ka, kb);
     }
+    if (app_state.g_inbox_tab != frequent.frequent_split) {
+        const ka = @max(a.la, a.lv);
+        const kb = @max(b.la, b.lv);
+        if (ka != kb) return ka > kb;
+    }
     if (a.att != b.att) return a.att;
     const a_act = (a.act == 1);
     const b_act = (b.act == 1);
     if (a_act != b_act) return a_act;
-    const ka = a.la;
-    const kb = b.la;
-    if (ka != kb) return ka > kb;
+    if (a.la != b.la) return a.la > b.la;
     if (a.ws != b.ws) return a.ws < b.ws;
     return a.sid < b.sid;
+}
+
+test "Inbox sorts displayed recency before attention and activity" {
+    const saved_tab = app_state.g_inbox_tab;
+    defer app_state.g_inbox_tab = saved_tab;
+    app_state.g_inbox_tab = frequent.all_split;
+
+    var older: InboxRow = .{};
+    older.sid = 1;
+    older.la = 100;
+    older.att = true;
+    older.act = 1;
+    var newer: InboxRow = .{};
+    newer.sid = 2;
+    newer.la = 200;
+    try std.testing.expect(inboxRowLess(newer, older));
+    try std.testing.expect(!inboxRowLess(older, newer));
+
+    older.la = 300;
+    try std.testing.expect(inboxRowLess(older, newer));
+    newer.lv = 400;
+    try std.testing.expect(inboxRowLess(newer, older));
 }
 
 fn sortInboxRows() void {
