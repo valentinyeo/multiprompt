@@ -109,9 +109,7 @@ const commitRename = @import("rename.zig").commitRename;
 const clearSearchBackdrop = @import("rename.zig").clearSearchBackdrop;
 const uiScaled = @import("drawing.zig").uiScaled;
 const uiFontInboxTitle = @import("drawing.zig").uiFontInboxTitle;
-const uiFontInboxSub = @import("drawing.zig").uiFontInboxSub;
 const browserInboxState = @import("drawing.zig").browserInboxState;
-const drawAgentIcon = @import("drawing.zig").drawAgentIcon;
 const paintInboxButtonTooltip = @import("drawing.zig").paintInboxButtonTooltip;
 const paintInboxButton = @import("drawing.zig").paintInboxButton;
 const updateSearchResults = @import("command_palette.zig").updateSearchResults;
@@ -171,6 +169,10 @@ fn inboxSubtitle(shell: *const Shell, out: *[64]u8) u32 {
         }
         return @intCast(n);
     }
+    return inboxCwd(shell, out);
+}
+
+fn inboxCwd(shell: *const Shell, out: *[64]u8) u32 {
     const wide_len: usize = shell.inbox_cwd_len;
     if (wide_len > 0 and wide_len <= shell.inbox_cwd.len and shell.cached_cwd_len == @min(wide_len, 511)) {
         const wide = shell.inbox_cwd[0..wide_len];
@@ -416,10 +418,27 @@ pub fn publishInboxStateNow() void {
         var sb: [64]u8 = undefined;
         const sl = inboxSubtitle(&app_state.shells[i], &sb);
         appendJsonEscaped(&json, &pos, sb[0..sl]);
+        var cwd_buf: [64]u8 = undefined;
+        const cwd_len = inboxCwd(&app_state.shells[i], &cwd_buf);
+        if (cwd_len > 0) {
+            const cwd_field = "\",\"cwd\":\"";
+            @memcpy(json[pos .. pos + cwd_field.len], cwd_field);
+            pos += cwd_field.len;
+            appendJsonEscaped(&json, &pos, inboxUtf8Prefix(cwd_buf[0..cwd_len], 63));
+        }
         const o4 = "\",\"kind\":";
         @memcpy(json[pos .. pos + o4.len], o4);
         pos += o4.len;
         pos += writeUintTo(json[pos..], @intFromEnum(app_state.shells[i].kind));
+        const appearance = @import("bot_avatar.zig").forShell(&app_state.shells[i]);
+        const face_field = ",\"avatar_face\":";
+        @memcpy(json[pos .. pos + face_field.len], face_field);
+        pos += face_field.len;
+        pos += writeUintTo(json[pos..], appearance.face);
+        const color_field = ",\"avatar_color\":";
+        @memcpy(json[pos .. pos + color_field.len], color_field);
+        pos += color_field.len;
+        pos += writeUintTo(json[pos..], appearance.color);
         const o5 = ",\"act\":";
         @memcpy(json[pos .. pos + o5.len], o5);
         pos += o5.len;
@@ -647,6 +666,12 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
         app_state.g_inbox_rows[ri].la = la;
         app_state.g_inbox_rows[ri].lv = lv_val;
         app_state.g_inbox_rows[ri].ag = @truncate(sag);
+        const face = json_reader.uintDefault(o, "avatar_face", 255);
+        const color = json_reader.uintDefault(o, "avatar_color", 255);
+        if (face < 20 and color < @import("bot_avatar.zig").colors.len) {
+            app_state.g_inbox_rows[ri].avatar_face = @intCast(face);
+            app_state.g_inbox_rows[ri].avatar_color = @intCast(color);
+        }
         app_state.g_inbox_rows[ri].br = @intCast(@min(sbr, @as(u64, 2)));
         app_state.g_inbox_rows[ri].eta_deadline_tick = sed;
         app_state.g_inbox_rows[ri].eta_total_ms = set;
@@ -655,6 +680,7 @@ fn loadInboxFile(path: []const u8, live: *const ZigShellWindowList) void {
         const sl2 = @min(ssl, @as(u32, 63));
         @memcpy(app_state.g_inbox_rows[ri].sub[0..sl2], ssub[0..sl2]);
         app_state.g_inbox_rows[ri].sub_len = sl2;
+        app_state.g_inbox_rows[ri].cwd_len = json_reader.copyString(o, "cwd", &app_state.g_inbox_rows[ri].cwd);
         const pvl2 = @min(spvl, @as(u32, 95));
         @memcpy(app_state.g_inbox_rows[ri].pv[0..pvl2], spv[0..pvl2]);
         app_state.g_inbox_rows[ri].pv_len = pvl2;
@@ -929,8 +955,73 @@ test "muted sessions never show in the inbox" {
     try std.testing.expect(inboxRowVisible(&row));
 }
 
-pub fn inboxListTop() i32 {
-    return if (app_state.g_inbox_filter_active) 90 else 54;
+const InboxLayout = struct {
+    left: i32,
+    right: i32,
+    top: i32,
+    stride: i32,
+    row_height: i32,
+    max_rows: u32,
+    scroll: u32,
+};
+
+const InboxNameBounds = struct {
+    left: i32,
+    right: i32,
+    workspace_right: i32,
+    show_age: bool,
+};
+
+fn inboxNameBounds(layout: InboxLayout, row: *const InboxRow) InboxNameBounds {
+    const left = @min(layout.right, layout.left + uiScaled(62));
+    const content_right = @max(left, layout.right - uiScaled(14));
+    const has_time = row.la != 0 or row.lv != 0;
+    const age_right_padding: i32 = if (has_time) 100 else 30;
+    const show_age = (row.att or has_time) and content_right - left >= uiScaled(age_right_padding - 14 + 80);
+    const workspace_right = if (show_age) @max(left, layout.right - uiScaled(age_right_padding)) else content_right;
+    const has_workspace = row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].name_len > 0;
+    const workspace_space = if (has_workspace and workspace_right - left >= uiScaled(156)) uiScaled(76) else 0;
+    return .{ .left = left, .right = workspace_right - workspace_space, .workspace_right = workspace_right, .show_age = show_age };
+}
+
+fn inboxLayout(w: i32, h: i32) InboxLayout {
+    const width = @max(0, @min(uiScaled(920), w - uiScaled(24)));
+    const top = uiScaled(if (app_state.g_inbox_filter_active) 112 else 72);
+    const stride = @max(1, uiScaled(58));
+    const row_height = @max(1, uiScaled(56));
+    const available = @max(0, h - top - uiScaled(40));
+    const max_rows: u32 = if (available >= row_height) @intCast(1 + @divFloor(available - row_height, stride)) else 0;
+    const scroll = if (max_rows > 0 and app_state.g_inbox_sel >= max_rows) app_state.g_inbox_sel - max_rows + 1 else 0;
+    return .{ .left = @divTrunc(w - width, 2), .right = @divTrunc(w - width, 2) + width, .top = top, .stride = stride, .row_height = row_height, .max_rows = max_rows, .scroll = scroll };
+}
+
+pub fn inboxMouseClick(hwnd: HANDLE, x: i32, y: i32) void {
+    if (y >= uiScaled(18) and y < uiScaled(50)) {
+        for (0..app_state.g_inbox_split_tab_count) |i| {
+            if (x >= app_state.g_inbox_split_xs[i] and x < app_state.g_inbox_split_xe[i]) {
+                const tab = app_state.g_inbox_split_ids[i];
+                if (inboxSplitVisible(tab)) {
+                    app_state.g_inbox_tab = tab;
+                    app_state.g_inbox_sel = 0;
+                    _ = InvalidateRect(hwnd, null, 0);
+                }
+                return;
+            }
+        }
+        return;
+    }
+    var rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(hwnd, &rc);
+    const layout = inboxLayout(rc.right, rc.bottom);
+    if (x < layout.left or x >= layout.right or y < layout.top or layout.max_rows == 0) return;
+    const offset = y - layout.top;
+    const row: u32 = @intCast(@divFloor(offset, layout.stride));
+    if (row >= layout.max_rows or @mod(offset, layout.stride) >= layout.row_height) return;
+    const target = layout.scroll + row;
+    if (target < inboxVisibleCount()) {
+        app_state.g_inbox_sel = target;
+        inboxJump(hwnd);
+    }
 }
 
 pub fn inboxSplitVisible(tab: u32) bool {
@@ -1099,6 +1190,15 @@ fn startInboxRename() void {
         return;
     };
 
+    var rc: RECT = std.mem.zeroes(RECT);
+    _ = GetClientRect(app_state.g_main_hwnd, &rc);
+    const layout = inboxLayout(rc.right, rc.bottom);
+    const name = inboxNameBounds(layout, row);
+    const edit_w = name.right - name.left;
+    if (layout.max_rows == 0 or edit_w < uiScaled(48)) {
+        showHeaderNoticeAscii("Zoom out to rename", 2500, true);
+        return;
+    }
     commitRename();
     _ = KillTimer(app_state.g_main_hwnd, TIMER_REFOCUS);
     app_state.g_edit_tab = idx;
@@ -1110,22 +1210,10 @@ fn startInboxRename() void {
     app_state.g_edit_is_inbox = true;
     app_state.g_edit_sync_remote_name = true;
 
-    var rc: RECT = std.mem.zeroes(RECT);
-    _ = GetClientRect(app_state.g_main_hwnd, &rc);
-    const row_h: i32 = uiScaled(32);
-    const list_top: i32 = 54;
-    const footer_h: i32 = 30;
-    const avail = rc.bottom - list_top - footer_h;
-    const max_rows: u32 = if (avail > row_h) @intCast(@divFloor(avail, row_h)) else 1;
-    const scroll_row: u32 = if (app_state.g_inbox_sel >= max_rows) app_state.g_inbox_sel - max_rows + 1 else 0;
-    const y = list_top + @as(i32, @intCast(app_state.g_inbox_sel - scroll_row)) * row_h;
-    const name_right: i32 = @max(@as(i32, 180), @min(@as(i32, 560), @divTrunc(rc.right * 40, 100)));
-    var name_left: i32 = 44;
-    if (row.ag != 0) name_left += 22;
-    const edit_w = @max(name_right - name_left, 100);
-    const edit_h = @max(row_h - 8, 24);
+    const y = layout.top + @as(i32, @intCast(app_state.g_inbox_sel - layout.scroll)) * layout.stride;
+    const edit_h = uiScaled(22);
 
-    app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, name_left, y + 4, edit_w, edit_h, app_state.g_main_hwnd, null, null, null);
+    app_state.g_edit_hwnd = CreateWindowExW(0, L("EDIT"), null, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, name.left, y + uiScaled(6), edit_w, edit_h, app_state.g_main_hwnd, null, null, null);
     if (app_state.g_edit_hwnd != null) {
         const GWLP_WNDPROC: i32 = -4;
         app_state.g_edit_orig_proc = GetWindowLongPtrW(app_state.g_edit_hwnd, GWLP_WNDPROC);
@@ -1223,17 +1311,42 @@ pub fn drawInboxTab(hdc: HANDLE, x: *i32, y: i32, label: []const u8, count: u32,
     x.* += adv + 14;
 }
 
-fn inboxHeaderLabel(ws_idx: u32, out: *[96]u16) usize {
-    const ws = app_state.g_inbox_ws[ws_idx];
-    var n: usize = 0;
-    const nl = @min(ws.name_len, @as(u32, 90));
-    for (0..nl) |i| {
-        var c = ws.name[i];
-        if (c >= 'a' and c <= 'z') c -= 32;
-        out[n] = if (c >= 32 and c < 127) @as(u16, c) else '?';
-        n += 1;
+const InboxTab = struct {
+    id: u32,
+    label: []const u8,
+    count: u32,
+    width: i32 = 0,
+};
+
+fn inboxTextWidth(hdc: HANDLE, text: []const u16) i32 {
+    if (text.len == 0) return 0;
+    var rc = RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 };
+    _ = DrawTextW(hdc, text.ptr, @intCast(text.len), &rc, DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT);
+    return rc.right - rc.left;
+}
+
+fn inboxFade(hdc: HANDLE, left: i32, right: i32, bottom: i32, bg: DWORD, selected_top: i32, selected_bottom: i32) void {
+    const win = @import("win32.zig");
+    const Blend = struct {
+        extern "gdi32" fn GdiAlphaBlend(HANDLE, i32, i32, i32, i32, HANDLE, i32, i32, i32, i32, win.BLENDFUNCTION) callconv(win.WINAPI) win.BOOL;
+    };
+    const dc = win.CreateCompatibleDC(hdc) orelse return;
+    defer _ = win.DeleteDC(dc);
+    const bitmap = win.CreateCompatibleBitmap(hdc, 1, 1) orelse return;
+    defer _ = DeleteObject(bitmap);
+    const old = SelectObject(dc, bitmap);
+    defer _ = SelectObject(dc, old);
+    const brush = CreateSolidBrush(bg);
+    defer _ = DeleteObject(brush);
+    _ = FillRect(dc, &RECT{ .left = 0, .top = 0, .right = 1, .bottom = 1 }, brush);
+    const height = @min(uiScaled(90), @max(0, bottom));
+    var i: i32 = 0;
+    while (i < height) : (i += 1) {
+        const y = bottom - height + i;
+        if (y >= selected_top and y < selected_bottom) continue;
+        const alpha: u8 = @intCast(@divTrunc(255 * i, height));
+        _ = Blend.GdiAlphaBlend(hdc, left, y, right - left, 1, dc, 0, 0, 1, 1, .{ .source_constant_alpha = alpha, .alpha_format = 0 });
     }
-    return n;
 }
 
 pub fn paintInbox(hdc: HANDLE) void {
@@ -1241,264 +1354,263 @@ pub fn paintInbox(hdc: HANDLE) void {
     _ = GetClientRect(app_state.g_main_hwnd, &rc);
     const w = rc.right;
     const h = rc.bottom;
-
-    const bg = themeConsoleBg();
+    const bg = if (app_state.g_multiprompt_theme and !app_state.g_light_theme) RGB(0, 0, 0) else themeConsoleBg();
     const bg_br = CreateSolidBrush(bg);
     _ = FillRect(hdc, &rc, bg_br);
     _ = DeleteObject(bg_br);
-
-    const font_title = uiFontInboxTitle();
-    const font_subtitle = uiFontInboxSub();
-    const old_font = SelectObject(hdc, font_title);
-    _ = SetBkMode(hdc, TRANSPARENT);
-
-    const fg_dim: DWORD = if (app_state.g_light_theme) RGB(110, 110, 110) else if (app_state.g_mid_theme or app_state.g_edge_gray_theme) RGB(255, 255, 255) else RGB(150, 150, 150);
-    const fg_bright: DWORD = if (app_state.g_light_theme) RGB(20, 20, 20) else if (app_state.g_mid_theme or app_state.g_edge_gray_theme) RGB(255, 255, 255) else RGB(235, 235, 235);
-    const blue: DWORD = customColorOr("attention", RGB(60, 120, 220));
-
-    var total_attn: u32 = 0;
-    for (0..app_state.g_inbox_row_count) |ri| {
-        if (app_state.g_inbox_rows[ri].att) total_attn += 1;
+    const bold_font = @import("win32.zig").CreateFontW(uiScaled(-14), 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 4, 0, L(@import("fonts.zig").UI_MEDIUM_FACE));
+    defer {
+        if (bold_font != null) _ = DeleteObject(bold_font);
     }
-    const any_attn = total_attn > 0;
-    var tx: i32 = 44;
-    const tab_y: i32 = 14;
-    app_state.g_inbox_split_tab_count = 0;
+    const semibold = if (bold_font != null) bold_font else @import("drawing.zig").uiFontBot(.name);
+    const old_font = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
+    _ = SetBkMode(hdc, TRANSPARENT);
+    defer _ = SelectObject(hdc, old_font);
+
+    const bright: DWORD = if (app_state.g_light_theme) RGB(30, 30, 30) else RGB(242, 242, 242);
+    const muted: DWORD = if (app_state.g_light_theme) RGB(100, 100, 100) else RGB(138, 138, 138);
+    const faint: DWORD = if (app_state.g_light_theme) RGB(105, 105, 105) else RGB(110, 110, 110);
+    const tab_text: DWORD = if (app_state.g_light_theme) RGB(85, 85, 85) else RGB(170, 170, 170);
+    const selected_bg: DWORD = if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(53, 53, 53);
+    const blue = RGB(137, 180, 248);
     ensureInboxSplitVisible();
+    const vis = inboxVisibleCount();
+    if (vis > 0 and app_state.g_inbox_sel >= vis) app_state.g_inbox_sel = vis - 1;
+    const layout = inboxLayout(w, h);
+
+    var tabs: [INBOX_MAX_SPLIT_TABS]InboxTab = undefined;
+    var tab_count: usize = 0;
     const builtins = frequent.builtinSplits(app_state.g_layout_settings orelse .{});
     for (builtins.slice()) |split| {
-        switch (split) {
-            frequent.frequent_split => {
-                var total: u32 = 0;
-                var unread: u32 = 0;
-                const now_ms = frequent.unixMs(nowFileTime() / 10_000);
-                for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |row| {
-                    if (!inboxFrequent(row, now_ms)) continue;
-                    total += 1;
-                    if (row.att) unread += 1;
-                }
-                const tx_before = tx;
-                drawInboxTab(hdc, &tx, tab_y, "Frequent", if (app_state.g_unread_only) unread else total, null, app_state.g_inbox_tab == frequent.frequent_split, fg_bright, fg_dim, unread > 0, blue, 5, blue);
-                app_state.g_inbox_split_xs[app_state.g_inbox_split_tab_count] = tx_before;
-                app_state.g_inbox_split_xe[app_state.g_inbox_split_tab_count] = tx;
-                app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = frequent.frequent_split;
-                app_state.g_inbox_split_tab_count += 1;
-            },
-            frequent.all_split => {
-                const tx_before = tx;
-                drawInboxTab(hdc, &tx, tab_y, "All", if (app_state.g_unread_only) total_attn else app_state.g_inbox_row_count, null, app_state.g_inbox_tab == frequent.all_split, fg_bright, fg_dim, any_attn, blue, 5, blue);
-                if (app_state.g_inbox_split_tab_count < INBOX_MAX_SPLIT_TABS) {
-                    app_state.g_inbox_split_xs[app_state.g_inbox_split_tab_count] = tx_before;
-                    app_state.g_inbox_split_xe[app_state.g_inbox_split_tab_count] = tx;
-                    app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = frequent.all_split;
-                    app_state.g_inbox_split_tab_count += 1;
-                }
-            },
-            frequent.favorites_split => {
-                var total: u32 = 0;
-                var unread: u32 = 0;
-                for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |row| {
-                    if (!row.favorite) continue;
-                    total += 1;
-                    if (row.att) unread += 1;
-                }
-                const tx_before = tx;
-                drawInboxTab(hdc, &tx, tab_y, "Favorites", if (app_state.g_unread_only) unread else total, null, app_state.g_inbox_tab == frequent.favorites_split, fg_bright, fg_dim, unread > 0, blue, 5, blue);
-                app_state.g_inbox_split_xs[app_state.g_inbox_split_tab_count] = tx_before;
-                app_state.g_inbox_split_xe[app_state.g_inbox_split_tab_count] = tx;
-                app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = frequent.favorites_split;
-                app_state.g_inbox_split_tab_count += 1;
-            },
-            else => unreachable,
+        var count: u32 = 0;
+        const now_ms = frequent.unixMs(nowFileTime() / 10_000);
+        for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |row| {
+            if (app_state.g_unread_only and !row.att) continue;
+            if (split == frequent.frequent_split and !inboxFrequent(row, now_ms)) continue;
+            if (split == frequent.favorites_split and !row.favorite) continue;
+            count += 1;
+        }
+        if (tab_count < tabs.len) {
+            tabs[tab_count] = .{ .id = split, .label = if (split == frequent.frequent_split) "Frequent" else if (split == frequent.favorites_split) "Favorites" else "All", .count = count };
+            tab_count += 1;
         }
     }
     for (0..app_state.g_inbox_ws_count) |wi| {
-        if (!inboxSplitVisible(frequent.workspaceSplit(@intCast(wi)))) continue;
-        const ws = app_state.g_inbox_ws[wi];
-        const tx_before2 = tx;
-        drawInboxTab(hdc, &tx, tab_y, ws.name[0..ws.name_len], if (app_state.g_unread_only) ws.attn else ws.total, null, app_state.g_inbox_tab == frequent.workspaceSplit(@intCast(wi)), fg_bright, fg_dim, ws.attn > 0, blue, 5, blue);
-        if (app_state.g_inbox_split_tab_count < INBOX_MAX_SPLIT_TABS) {
-            app_state.g_inbox_split_xs[app_state.g_inbox_split_tab_count] = tx_before2;
-            app_state.g_inbox_split_xe[app_state.g_inbox_split_tab_count] = tx;
-            app_state.g_inbox_split_ids[app_state.g_inbox_split_tab_count] = frequent.workspaceSplit(@intCast(wi));
-            app_state.g_inbox_split_tab_count += 1;
-        }
+        const id = frequent.workspaceSplit(@intCast(wi));
+        if (!inboxSplitVisible(id) or tab_count >= tabs.len) continue;
+        const ws = &app_state.g_inbox_ws[wi];
+        tabs[tab_count] = .{ .id = id, .label = ws.name[0..ws.name_len], .count = if (app_state.g_unread_only) ws.attn else ws.total };
+        tab_count += 1;
     }
-    var div_rc = RECT{ .left = 16, .top = tab_y + 28, .right = w - 16, .bottom = tab_y + 29 };
-    const div_br = CreateSolidBrush(customColorOr("separator", if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(52, 52, 52)));
-    _ = FillRect(hdc, &div_rc, div_br);
-    _ = DeleteObject(div_br);
+    var selected_tab: usize = 0;
+    for (tabs[0..tab_count], 0..) |*tab, i| {
+        var label: [96]u16 = undefined;
+        const len = json_reader.wide(tab.label, &label);
+        var count_buf: [16]u8 = undefined;
+        const count_text = std.fmt.bufPrint(&count_buf, "{d}", .{tab.count}) catch "";
+        var count_wide: [16]u16 = undefined;
+        const count_len = asciiToU16(count_text, &count_wide);
+        _ = SelectObject(hdc, if (tab.id == app_state.g_inbox_tab) semibold else @import("drawing.zig").uiFontBot(.name));
+        const label_width = inboxTextWidth(hdc, label[0..len]);
+        _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+        tab.width = uiScaled(28 + 6) + label_width + inboxTextWidth(hdc, count_wide[0..count_len]);
+        if (tab.id == app_state.g_inbox_tab) selected_tab = i;
+    }
+    const width = @max(0, layout.right - layout.left);
+    const tabs_left = @max(layout.left, @import("browser_pane.zig").inboxButtonRect(true).right + uiScaled(8));
+    const tabs_width = @max(0, layout.right - tabs_left);
+    var first: usize = 0;
+    var used: i32 = 0;
+    for (tabs[0..tab_count], 0..) |tab, i| {
+        if (i > selected_tab) break;
+        used += tab.width;
+        while (used > tabs_width and first < i) : (first += 1) used -= tabs[first].width;
+    }
+    var x = tabs_left;
+    app_state.g_inbox_split_tab_count = 0;
+    for (tabs[first..tab_count]) |tab| {
+        if (x >= layout.right) break;
+        const right = @min(layout.right, x + tab.width);
+        const active = tab.id == app_state.g_inbox_tab;
+        if (active) @import("smooth.zig").fillRoundRect(hdc, .{ .left = x, .top = uiScaled(18), .right = right, .bottom = uiScaled(50) }, uiScaled(16), selected_bg);
+        var label: [96]u16 = undefined;
+        const len = json_reader.wide(tab.label, &label);
+        _ = SelectObject(hdc, if (active) semibold else @import("drawing.zig").uiFontBot(.name));
+        _ = SetTextColor(hdc, if (active) bright else tab_text);
+        const label_left = x + uiScaled(14);
+        const label_width = inboxTextWidth(hdc, label[0..len]);
+        var label_rc = RECT{ .left = label_left, .top = uiScaled(18), .right = @max(label_left, right - uiScaled(14)), .bottom = uiScaled(50) };
+        _ = @import("dwrite_text.zig").draw(hdc, &label, @intCast(len), &label_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        var count_buf: [16]u8 = undefined;
+        const count_text = std.fmt.bufPrint(&count_buf, "{d}", .{tab.count}) catch "";
+        var count_wide: [16]u16 = undefined;
+        const count_len = asciiToU16(count_text, &count_wide);
+        const count_left = label_left + label_width + uiScaled(6);
+        if (count_left < right - uiScaled(14)) {
+            _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+            _ = SetTextColor(hdc, if (app_state.g_light_theme) RGB(110, 110, 110) else RGB(120, 120, 120));
+            var count_rc = RECT{ .left = count_left, .top = uiScaled(18), .right = right - uiScaled(14), .bottom = uiScaled(50) };
+            _ = @import("dwrite_text.zig").draw(hdc, &count_wide, @intCast(count_len), &count_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        }
+        const ti = app_state.g_inbox_split_tab_count;
+        app_state.g_inbox_split_xs[ti] = x;
+        app_state.g_inbox_split_xe[ti] = right;
+        app_state.g_inbox_split_ids[ti] = tab.id;
+        app_state.g_inbox_split_tab_count += 1;
+        x = right;
+    }
 
-    if (app_state.g_inbox_filter_active) {
-        var search_rc = RECT{ .left = 22, .top = 50, .right = w - 22, .bottom = 82 };
-        const search_br = CreateSolidBrush(if (app_state.g_light_theme) RGB(242, 246, 252) else RGB(28, 34, 44));
-        _ = FillRect(hdc, &search_rc, search_br);
-        _ = DeleteObject(search_br);
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, blue);
-        var find_rc = RECT{ .left = 32, .top = 50, .right = 132, .bottom = 82 };
-        _ = DrawTextW(hdc, L("Find Inbox"), -1, &find_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-        var query_rc = RECT{ .left = 142, .top = 50, .right = w - 34, .bottom = 82 };
+    if (app_state.g_inbox_filter_active and width > 0) {
+        const search = RECT{ .left = layout.left, .top = uiScaled(64), .right = layout.right, .bottom = uiScaled(100) };
+        @import("smooth.zig").fillRoundRect(hdc, search, uiScaled(18), if (app_state.g_light_theme) RGB(205, 205, 205) else RGB(46, 46, 46));
+        @import("smooth.zig").fillRoundRect(hdc, .{ .left = search.left + uiScaled(1), .top = search.top + uiScaled(1), .right = search.right - uiScaled(1), .bottom = search.bottom - uiScaled(1) }, uiScaled(17), if (app_state.g_light_theme) RGB(250, 250, 250) else RGB(31, 31, 31));
+        _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
+        _ = SetTextColor(hdc, if (app_state.g_inbox_filter_len > 0) bright else muted);
+        var query = RECT{ .left = search.left + uiScaled(14), .top = search.top, .right = search.right - uiScaled(14), .bottom = search.bottom };
         if (app_state.g_inbox_filter_len > 0) {
-            _ = SetTextColor(hdc, fg_bright);
-            _ = DrawTextW(hdc, @ptrCast(&app_state.g_inbox_filter_buf), @intCast(app_state.g_inbox_filter_len), &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            _ = @import("dwrite_text.zig").draw(hdc, &app_state.g_inbox_filter_buf, @intCast(app_state.g_inbox_filter_len), &query, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         } else {
-            _ = SetTextColor(hdc, fg_dim);
-            _ = DrawTextW(hdc, L("Type a session, workspace, path, agent, or preview..."), -1, &query_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            _ = DrawTextW(hdc, L("Search Inbox"), -1, &query, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
         }
     }
 
-    const row_h: i32 = uiScaled(32);
-    const list_top = inboxListTop();
-    const footer_h: i32 = 30;
-    const avail = h - list_top - footer_h;
-    const max_rows: u32 = if (avail > row_h) @intCast(@divFloor(avail, row_h)) else 1;
-
-    const vis = inboxVisibleCount();
-    if (app_state.g_inbox_sel >= vis and vis > 0) app_state.g_inbox_sel = vis - 1;
-    var scroll_row: u32 = 0;
-    if (app_state.g_inbox_sel >= max_rows) scroll_row = app_state.g_inbox_sel - max_rows + 1;
-
-    if (vis == 0) {
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, fg_dim);
-        var empty_rc = RECT{ .left = 24, .top = list_top + 12, .right = w - 24, .bottom = list_top + 44 };
-        _ = DrawTextW(hdc, if (app_state.g_inbox_filter_active and app_state.g_inbox_filter_len > 0) L("No Inbox sessions match this search.") else if (app_state.g_inbox_tab == frequent.favorites_split) L("No favorites yet. Press Alt+S on a session to add it.") else if (app_state.g_inbox_tab == frequent.frequent_split) L("No frequently visited sessions yet.") else L("No shells here. All caught up."), -1, &empty_rc, DT_SINGLELINE | DT_NOPREFIX);
+    if (vis == 0 and layout.max_rows > 0) {
+        _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.name));
+        _ = SetTextColor(hdc, muted);
+        var empty = RECT{ .left = layout.left + uiScaled(10), .top = layout.top + uiScaled(12), .right = layout.right, .bottom = layout.top + uiScaled(40) };
+        _ = DrawTextW(hdc, if (app_state.g_inbox_filter_active and app_state.g_inbox_filter_len > 0) L("No Inbox sessions match this search.") else if (app_state.g_inbox_tab == frequent.favorites_split) L("No favorites yet. Press Alt+S on a session to add it.") else if (app_state.g_inbox_tab == frequent.frequent_split) L("No frequently visited sessions yet.") else L("No shells here. All caught up."), -1, &empty, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
     }
-
-    var y: i32 = list_top;
-    var vrow: u32 = 0;
+    var visible: u32 = 0;
     var drawn: u32 = 0;
-    const eta_col_right = w - 90;
-    const eta_col_left = eta_col_right - uiScaled(132);
-    const preview_right = eta_col_left - uiScaled(8);
-    const eta_bar_w = uiScaled(60);
-    const name_right: i32 = @max(@as(i32, 180), @min(@as(i32, 560), @divTrunc(w * 40, 100)));
-    const ws_left: i32 = name_right + 14;
-    const ws_right: i32 = ws_left + 150;
-    const cwd_left: i32 = ws_right + 14;
-    for (0..app_state.g_inbox_row_count) |i| {
-        const row = &app_state.g_inbox_rows[i];
+    for (app_state.g_inbox_rows[0..app_state.g_inbox_row_count]) |*row| {
         if (!inboxRowVisible(row)) continue;
-        const this_vrow = vrow;
-        vrow += 1;
-        if (this_vrow < scroll_row) continue;
-        if (drawn >= max_rows) break;
-
-        const selected = (this_vrow == app_state.g_inbox_sel);
-        if (selected) {
-            var sel_rc = RECT{ .left = 12, .top = y, .right = w - 12, .bottom = y + row_h };
-            const sel_br = CreateSolidBrush(if (app_state.g_multiprompt_theme) customColorOr("active_tab_bg", RGB(25, 26, 27)) else if (app_state.g_light_theme) RGB(225, 235, 250) else RGB(34, 44, 60));
-            _ = FillRect(hdc, &sel_rc, sel_br);
-            _ = DeleteObject(sel_br);
-            var bar_rc = RECT{ .left = 12, .top = y, .right = 15, .bottom = y + row_h };
-            const bar_br = CreateSolidBrush(blue);
-            _ = FillRect(hdc, &bar_rc, bar_br);
-            _ = DeleteObject(bar_br);
-        }
-
-        var name_left: i32 = 44;
-        if (row.att or row.ag != 0) {
-            var ag_rc = RECT{ .left = name_left, .top = y, .right = name_left + 18, .bottom = y + row_h };
-            if (row.att) {
-                drawAttentionDot(hdc, @divTrunc(ag_rc.left + ag_rc.right, 2), @divTrunc(ag_rc.top + ag_rc.bottom, 2), 4, blue);
-            } else {
-                drawAgentIcon(hdc, &ag_rc, row.ag, row.act == 1);
-            }
-            name_left += 22;
-        }
-        _ = SelectObject(hdc, font_title);
-        _ = SetTextColor(hdc, if (selected or row.att) fg_bright else fg_dim);
-        var name_rc = RECT{ .left = name_left, .top = y, .right = name_right, .bottom = y + row_h };
-        var nbuf: [193]u16 = undefined;
-        const nl2 = json_reader.wide(row.name[0..row.name_len], &nbuf);
-        _ = @import("dwrite_text.zig").draw(hdc, &nbuf, @intCast(nl2), &name_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        _ = SelectObject(hdc, font_subtitle);
-        _ = SetTextColor(hdc, fg_dim);
-        var ws_rc = RECT{ .left = ws_left, .top = y, .right = ws_right, .bottom = y + row_h };
-        var wbuf: [64]u16 = undefined;
-        const wsrc = &app_state.g_inbox_ws[row.ws];
-        const wl2 = json_reader.wide(wsrc.name[0..wsrc.name_len], &wbuf);
-        _ = @import("dwrite_text.zig").draw(hdc, &wbuf, @intCast(wl2), &ws_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        _ = SetTextColor(hdc, fg_dim);
-        const has_pv = row.pv_len > 0;
-        const sub_right: i32 = if (has_pv) @min(cwd_left + 200, preview_right) else preview_right;
-        var sub_rc = RECT{ .left = cwd_left, .top = y, .right = sub_right, .bottom = y + row_h };
-        var sbuf: [64]u16 = undefined;
-        const sl2 = json_reader.wide(row.sub[0..row.sub_len], &sbuf);
-        _ = @import("dwrite_text.zig").draw(hdc, &sbuf, @intCast(sl2), &sub_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-
-        if (has_pv) {
-            const pv_left: i32 = sub_right + 14;
-            if (pv_left < preview_right - 40) {
-                _ = SetTextColor(hdc, fg_dim);
-                var pv_rc = RECT{ .left = pv_left, .top = y, .right = preview_right, .bottom = y + row_h };
-                var pbuf: [96]u16 = undefined;
-                const pl = json_reader.wide(row.pv[0..row.pv_len], &pbuf);
-                _ = @import("dwrite_text.zig").draw(hdc, &pbuf, @intCast(pl), &pv_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-            }
-        }
-
-        if (app_state.g_eta_numbers_on and row.eta_deadline_tick != 0) {
-            var eta_buf: [16]u8 = undefined;
-            const remaining_ms: i64 = etaRemainingMs(row.eta_deadline_tick, GetTickCount64());
-            const eta_txt = formatEtaRemaining(remaining_ms, &eta_buf);
-            if (eta_txt.len > 0) {
-                var eta_wbuf: [16]u16 = undefined;
-                const eta_wlen = asciiToU16(eta_txt, &eta_wbuf);
-                _ = SetTextColor(hdc, if (remaining_ms < 0) etaOverdueColor() else fg_dim);
-                var eta_rc = RECT{ .left = eta_col_left + eta_bar_w + uiScaled(8), .top = y, .right = eta_col_right, .bottom = y + row_h };
-                _ = DrawTextW(hdc, @ptrCast(&eta_wbuf), @intCast(eta_wlen), &eta_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
-            }
-        }
-
-        var tbuf: [24]u16 = undefined;
-        const tl = inboxRelTime(@max(row.la, row.lv), &tbuf);
-        _ = SetTextColor(hdc, fg_dim);
-        var time_rc = RECT{ .left = w - 84, .top = y, .right = w - 16, .bottom = y + row_h };
-        _ = DrawTextW(hdc, @ptrCast(&tbuf), @intCast(tl), &time_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_RIGHT);
-
-        if (app_state.g_eta_progress_on and row.eta_total_ms > 0 and row.eta_deadline_tick != 0) {
-            const remaining_ms = etaRemainingMs(row.eta_deadline_tick, GetTickCount64());
-            const overdue = remaining_ms < 0;
-            const frac = if (overdue) @as(f32, 1) else etaFillFraction(etaElapsedMs(row.eta_total_ms, remaining_ms), row.eta_total_ms);
-            const bar_top = y + @divTrunc(row_h - uiScaled(4), 2);
-            var track_rc = RECT{ .left = eta_col_left, .top = bar_top, .right = eta_col_left + eta_bar_w, .bottom = bar_top + uiScaled(4) };
-            const track_br = CreateSolidBrush(customColorOr("separator", if (app_state.g_light_theme) RGB(225, 225, 225) else RGB(52, 52, 52)));
-            _ = FillRect(hdc, &track_rc, track_br);
-            _ = DeleteObject(track_br);
-            const fill_w: i32 = @intFromFloat(@as(f32, @floatFromInt(eta_bar_w)) * frac);
-            if (fill_w > 0) {
-                var fill_rc = RECT{ .left = eta_col_left, .top = bar_top, .right = eta_col_left + fill_w, .bottom = bar_top + uiScaled(4) };
-                const fill_br = CreateSolidBrush(if (overdue) etaOverdueColor() else customColorOr("accent", RGB(79, 168, 255)));
-                _ = FillRect(hdc, &fill_rc, fill_br);
-                _ = DeleteObject(fill_br);
-            }
-        }
-
-        y += row_h;
+        const index = visible;
+        visible += 1;
+        if (index < layout.scroll) continue;
+        if (drawn >= layout.max_rows) break;
+        const y = layout.top + @as(i32, @intCast(drawn)) * layout.stride;
         drawn += 1;
+        if (index == app_state.g_inbox_sel) @import("smooth.zig").fillRoundRect(hdc, .{ .left = layout.left, .top = y, .right = layout.right, .bottom = y + layout.row_height }, uiScaled(12), selected_bg);
+        if (width < uiScaled(80)) continue;
+        const avatar_rc = RECT{ .left = layout.left + uiScaled(10), .top = y + uiScaled(8), .right = layout.left + uiScaled(50), .bottom = y + uiScaled(48) };
+        if (row.ag != 0) {
+            const avatar = @import("bot_avatar.zig");
+            var appearance = avatar.Appearance.forSession(row.name[0..row.name_len]);
+            if (row.avatar_face != null and row.avatar_color != null) appearance = .{ .face = row.avatar_face.?, .color = row.avatar_color.? };
+            if (row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
+                if (findShellById(row.sid)) |idx| appearance = avatar.forShell(&app_state.shells[idx]);
+            }
+            avatar.draw(hdc, avatar_rc, appearance);
+        } else {
+            @import("smooth.zig").fillEllipse(hdc, avatar_rc, if (app_state.g_light_theme) RGB(180, 180, 180) else RGB(46, 46, 46));
+            @import("smooth.zig").fillEllipse(hdc, .{ .left = avatar_rc.left + uiScaled(1), .top = avatar_rc.top + uiScaled(1), .right = avatar_rc.right - uiScaled(1), .bottom = avatar_rc.bottom - uiScaled(1) }, if (app_state.g_light_theme) RGB(235, 235, 235) else RGB(31, 31, 31));
+            _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+            _ = SetTextColor(hdc, muted);
+            var terminal = avatar_rc;
+            _ = DrawTextW(hdc, L(">_"), -1, &terminal, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | @import("win32.zig").DT_CENTER);
+        }
+        const name = inboxNameBounds(layout, row);
+        const text_left = name.left;
+        var name_buf: [193]u16 = undefined;
+        const name_len = json_reader.wide(row.name[0..row.name_len], &name_buf);
+        _ = SelectObject(hdc, if (row.att) semibold else @import("drawing.zig").uiFontBot(.name));
+        _ = SetTextColor(hdc, bright);
+        const name_width = inboxTextWidth(hdc, name_buf[0..name_len]);
+        const name_right = @min(name.right, text_left + name_width);
+        var name_rc = RECT{ .left = text_left, .top = y + uiScaled(8), .right = name_right, .bottom = y + uiScaled(27) };
+        _ = @import("dwrite_text.zig").draw(hdc, &name_buf, @intCast(name_len), &name_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        if (name.workspace_right > name.right and name_right + uiScaled(8) < name.workspace_right) {
+            const ws = &app_state.g_inbox_ws[row.ws];
+            var ws_buf: [64]u16 = undefined;
+            const ws_len = json_reader.wide(ws.name[0..ws.name_len], &ws_buf);
+            _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
+            _ = SetTextColor(hdc, faint);
+            var ws_rc = RECT{ .left = name_right + uiScaled(8), .top = y + uiScaled(8), .right = name.workspace_right, .bottom = y + uiScaled(27) };
+            _ = @import("dwrite_text.zig").draw(hdc, &ws_buf, @intCast(ws_len), &ws_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+        }
+        if (name.show_age) {
+            var time_buf: [24]u16 = undefined;
+            const time_len = inboxRelTime(@max(row.la, row.lv), &time_buf);
+            _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+            _ = SetTextColor(hdc, muted);
+            var time_rc = RECT{ .left = @max(text_left, layout.right - uiScaled(90)), .top = y + uiScaled(8), .right = layout.right - uiScaled(if (row.att) 34 else 14), .bottom = y + uiScaled(27) };
+            _ = @import("dwrite_text.zig").draw(hdc, &time_buf, @intCast(time_len), &time_rc, DT_SINGLELINE | DT_NOPREFIX | DT_RIGHT);
+            if (row.att) drawAttentionDot(hdc, layout.right - uiScaled(18), y + uiScaled(17), @max(1, uiScaled(4)), blue);
+        }
+        const eta_valid = row.act == 1 and row.eta_total_ms > 0 and row.eta_deadline_tick != 0;
+        const show_eta = eta_valid and (app_state.g_eta_numbers_on or app_state.g_eta_progress_on) and width >= uiScaled(320);
+        const preview_right = if (show_eta) layout.right - uiScaled(146) else layout.right - uiScaled(14);
+        const pv = row.pv[0..row.pv_len];
+        var clean = true;
+        var escape_debris = pv.len > 0;
+        var has_separator = false;
+        for (pv) |c| {
+            if (c < 32 or c == 127) clean = false;
+            if (c == ';') has_separator = true;
+            if (!std.ascii.isDigit(c) and c != ';' and c != ':' and c != '[' and c != '?' and c != 'c' and c != 'm') escape_debris = false;
+        }
+        if (escape_debris and has_separator) clean = false;
+        const sub = row.sub[0..row.sub_len];
+        var cwd: [64]u8 = undefined;
+        var fallback: []const u8 = if (row.cwd_len > 0) row.cwd[0..row.cwd_len] else if (std.mem.startsWith(u8, sub, "tmux: ")) "" else sub;
+        if (row.ws < app_state.g_inbox_ws_count and app_state.g_inbox_ws[row.ws].hwnd == @intFromPtr(app_state.g_main_hwnd)) {
+            if (findShellById(row.sid)) |idx| {
+                const cwd_len = inboxCwd(&app_state.shells[idx], &cwd);
+                fallback = cwd[0..cwd_len];
+            }
+        }
+        const preview = if (pv.len > 0 and clean) pv else fallback;
+        var preview_buf: [96]u16 = undefined;
+        const preview_len = json_reader.wide(preview, &preview_buf);
+        _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.preview));
+        _ = SetTextColor(hdc, muted);
+        var preview_rc = RECT{ .left = text_left, .top = y + uiScaled(29), .right = @max(text_left, preview_right), .bottom = y + uiScaled(48) };
+        _ = @import("dwrite_text.zig").draw(hdc, &preview_buf, @intCast(preview_len), &preview_rc, DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        if (show_eta) {
+            const remaining = etaRemainingMs(row.eta_deadline_tick, GetTickCount64());
+            const bar_right = layout.right - uiScaled(14);
+            const bar_left = bar_right - uiScaled(60);
+            if (app_state.g_eta_progress_on) {
+                const track = RECT{ .left = bar_left, .top = y + uiScaled(36), .right = bar_right, .bottom = y + uiScaled(40) };
+                @import("smooth.zig").fillRoundRect(hdc, track, uiScaled(2), selected_bg);
+                const frac = if (remaining < 0) @as(f32, 1) else etaFillFraction(etaElapsedMs(row.eta_total_ms, remaining), row.eta_total_ms);
+                const fill: i32 = @intFromFloat(@as(f32, @floatFromInt(bar_right - bar_left)) * frac);
+                @import("smooth.zig").fillRoundRect(hdc, .{ .left = bar_left, .top = track.top, .right = bar_left + fill, .bottom = track.bottom }, uiScaled(2), if (remaining < 0) etaOverdueColor() else blue);
+            }
+            if (app_state.g_eta_numbers_on) {
+                var eta_buf: [16]u8 = undefined;
+                const eta = formatEtaRemaining(remaining, &eta_buf);
+                var text_buf: [32]u8 = undefined;
+                const text = if (remaining < 0) eta else std.fmt.bufPrint(&text_buf, "{s} left", .{eta}) catch eta;
+                var eta_wide: [32]u16 = undefined;
+                const eta_len = asciiToU16(text, &eta_wide);
+                _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
+                _ = SetTextColor(hdc, if (remaining < 0) etaOverdueColor() else muted);
+                var eta_rc = RECT{ .left = layout.right - uiScaled(146), .top = y + uiScaled(29), .right = if (app_state.g_eta_progress_on) bar_left - uiScaled(8) else bar_right, .bottom = y + uiScaled(48) };
+                _ = @import("dwrite_text.zig").draw(hdc, &eta_wide, @intCast(eta_len), &eta_rc, DT_SINGLELINE | DT_NOPREFIX | DT_RIGHT | DT_END_ELLIPSIS);
+            }
+        }
     }
-
-    _ = SelectObject(hdc, font_subtitle);
-    _ = SetTextColor(hdc, fg_dim);
-    var ft_rc = RECT{ .left = 22, .top = h - footer_h, .right = w - 16, .bottom = h - 6 };
-    if (app_state.g_inbox_filter_active) {
-        _ = DrawTextW(hdc, L("Type to reduce   Backspace edit   Up/Down move   Enter open   Esc clear search"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+    if (width > 0 and h > uiScaled(40)) {
+        const selected_top = if (vis > 0 and layout.max_rows > 0) layout.top + @as(i32, @intCast(app_state.g_inbox_sel - layout.scroll)) * layout.stride else -1;
+        inboxFade(hdc, layout.left, layout.right, h - uiScaled(30), bg, selected_top, if (selected_top >= 0) selected_top + layout.row_height else -1);
+    }
+    _ = SelectObject(hdc, @import("drawing.zig").uiFontBot(.pinned));
+    _ = SetTextColor(hdc, faint);
+    var footer = RECT{ .left = layout.left, .top = @max(0, h - uiScaled(30)), .right = layout.right, .bottom = h };
+    const hint = if (app_state.g_inbox_filter_active)
+        (if (app_state.g_unread_only) L("Unread only · Esc clear") else L("Esc clear search · Enter open · Up/Down move"))
+    else if (app_state.g_unread_only)
+        L("Unread only · Enter open · Ctrl+F search · E wait · U mark read · F2 rename · Esc close")
+    else
+        L("Enter open · Ctrl+F search · E wait · U mark read · F2 rename · Esc close");
+    if (app_state.g_cap_msg_len > 0 and app_state.g_cap_msg_until > GetTickCount64()) {
+        _ = DrawTextW(hdc, &app_state.g_cap_msg_text, @intCast(app_state.g_cap_msg_len), &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | @import("win32.zig").DT_CENTER);
     } else {
-        _ = DrawTextW(hdc, L("Ctrl+F or / search   Tab split   j/k or Alt+J/K move   F2 rename   e or Alt+E wait   z undo   u toggle read   Enter open   q/Esc close"), -1, &ft_rc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        _ = DrawTextW(hdc, hint, -1, &footer, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS | @import("win32.zig").DT_CENTER);
     }
-    if (app_state.g_unread_only and !app_state.g_inbox_filter_active) {
-        _ = SetTextColor(hdc, blue);
-        var uo_rc = RECT{ .left = w - 200, .top = h - footer_h, .right = w - 16, .bottom = h - 6 };
-        _ = DrawTextW(hdc, L("UNREAD ONLY"), -1, &uo_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
-    }
-
     paintInboxButton(hdc, true);
     paintInboxButtonTooltip(hdc, true);
-    _ = SelectObject(hdc, old_font);
 }
 
 pub fn openInbox(hwnd: HANDLE) void {

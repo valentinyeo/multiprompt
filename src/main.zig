@@ -1212,7 +1212,7 @@ const deleteInboxStateFile = @import("inbox.zig").deleteInboxStateFile;
 const loadInboxModel = @import("inbox.zig").loadInboxModel;
 const toggleFavorite = @import("inbox.zig").toggleFavorite;
 const inboxRowVisible = @import("inbox.zig").inboxRowVisible;
-const inboxListTop = @import("inbox.zig").inboxListTop;
+const inboxMouseClick = @import("inbox.zig").inboxMouseClick;
 const inboxSplitVisible = @import("inbox.zig").inboxSplitVisible;
 const inboxVisibleCount = @import("inbox.zig").inboxVisibleCount;
 const inboxNthVisible = @import("inbox.zig").inboxNthVisible;
@@ -1224,7 +1224,6 @@ const closeInboxFilter = @import("inbox.zig").closeInboxFilter;
 const toggleInbox = @import("inbox.zig").toggleInbox;
 const armInboxStepContext = @import("inbox.zig").armInboxStepContext;
 const jumpToInboxRow = @import("inbox.zig").jumpToInboxRow;
-const inboxJump = @import("inbox.zig").inboxJump;
 const inboxStepJump = @import("inbox.zig").inboxStepJump;
 const refreshNextUnreadCache = @import("inbox.zig").refreshNextUnreadCache;
 const jumpToFirstUnreadThread = @import("inbox.zig").jumpToFirstUnreadThread;
@@ -1910,41 +1909,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
 
             if (app_state.g_inbox_active) {
-                const inbox_list_top = inboxListTop();
-                const inbox_tab_strip_bot: i32 = 54;
-                if (my >= 0 and my < inbox_tab_strip_bot) {
-                    var tab_hit: ?u32 = null;
-                    for (0..app_state.g_inbox_split_tab_count) |ti| {
-                        if (mx >= app_state.g_inbox_split_xs[ti] and mx < app_state.g_inbox_split_xe[ti]) {
-                            tab_hit = app_state.g_inbox_split_ids[ti];
-                            break;
-                        }
-                    }
-                    if (tab_hit) |new_tab| {
-                        if (inboxSplitVisible(new_tab)) {
-                            app_state.g_inbox_tab = new_tab;
-                            app_state.g_inbox_sel = 0;
-                            _ = InvalidateRect(hwnd, null, 0);
-                        }
-                    }
-                } else if (my >= inbox_list_top) {
-                    var client_rc2: RECT = std.mem.zeroes(RECT);
-                    _ = GetClientRect(hwnd, &client_rc2);
-                    const inbox_h = client_rc2.bottom;
-                    const inbox_row_h: i32 = uiScaled(32);
-                    const inbox_footer_h: i32 = 30;
-                    const inbox_avail = inbox_h - inbox_list_top - inbox_footer_h;
-                    const inbox_max_rows: u32 = if (inbox_avail > inbox_row_h) @intCast(@divFloor(inbox_avail, inbox_row_h)) else 1;
-                    const inbox_vis = inboxVisibleCount();
-                    var inbox_scroll_row: u32 = 0;
-                    if (app_state.g_inbox_sel >= inbox_max_rows) inbox_scroll_row = app_state.g_inbox_sel - inbox_max_rows + 1;
-                    const clicked_vrow: u32 = @intCast(@divFloor(my - inbox_list_top, inbox_row_h));
-                    const target_vrow = inbox_scroll_row + clicked_vrow;
-                    if (target_vrow < inbox_vis) {
-                        app_state.g_inbox_sel = target_vrow;
-                        inboxJump(hwnd);
-                    }
-                }
+                inboxMouseClick(hwnd, mx, my);
                 return 0;
             }
 
