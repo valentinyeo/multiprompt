@@ -164,7 +164,7 @@ test "all pure decision combinations" {
         for ([_]bool{ false, true }) |chat| {
             for ([_]bool{ false, true }) |saved| {
                 for ([_]bool{ false, true }) |covered| {
-                    try std.testing.expectEqual(active and !chat and !saved and !covered, shellConsoleVisibilityAllowed(active, chat, saved, covered));
+                    try std.testing.expectEqual(active and !chat and !covered, shellConsoleVisibilityAllowed(active, chat, saved, covered));
                 }
             }
         }
@@ -186,7 +186,7 @@ test "URL picker close cannot put raw SSH console over chat; debug logs identify
     _ = showShellConsole(0, SW_SHOW, "focus");
     try std.testing.expectEqual(@as(usize, 0), log_len);
 }
-test "restore, delayed focus and adoption respect remembered views and pins" {
+test "restore, delayed focus and adoption keep the console under a live chat only" {
     g_restoring = true;
     defer g_restoring = false;
     for ([_]bool{ false, true }) |pinned| {
@@ -197,8 +197,7 @@ test "restore, delayed focus and adoption respect remembered views and pins" {
                 g_chat_active = chat;
                 for ([_][]const u8{ "restoreSession", "wndProc.WM_APP_FOCUS", "wndProc.WM_APP_FOCUS_SHELL", "respawnShellInPlace", "wndProc.WM_COPYDATA", "main.adopt" }) |site| {
                     _ = showShellConsole(0, SW_SHOWNOACTIVATE, site);
-                    const want_chat = remembered;
-                    try std.testing.expectEqual(!chat and !want_chat, visible);
+                    try std.testing.expectEqual(!chat, visible);
                 }
             }
         }
@@ -206,11 +205,11 @@ test "restore, delayed focus and adoption respect remembered views and pins" {
     g_chat_active = false;
     shells[0].chat_view_on = false;
 }
-test "ISSUE-611 remembered chat hides during startup but a later per-session shell return works" {
+test "ISSUE-611 a remembered chat does not hide the console during startup and a live chat does" {
     shells[0].chat_view_on = true;
     g_startup_progress = true;
     _ = showShellConsole(0, SW_SHOW, "main.adopt");
-    try std.testing.expect(!visible);
+    try std.testing.expect(visible);
     g_startup_progress = false;
     g_chat_active = true;
     _ = showShellConsole(0, SW_SHOW, "focus");
