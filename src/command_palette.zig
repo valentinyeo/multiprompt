@@ -5733,3 +5733,59 @@ test "IGSH-1266 pick repo typing filters paths case insensitively" {
     try std.testing.expect(repoPathMatchesQuery("/home/x/projects/multiprompt", query[0..0]));
     try std.testing.expect(!repoPathMatchesQuery("/home/x/projects/other", query[0..]));
 }
+fn seedWorkspaceFolder(name: []const u8, path: []const u8) void {
+    app_state.g_custom_cmds_count = 0;
+    var entry = CustomCmd{};
+    entry.is_default = true;
+    entry.kind = .vps;
+    std.mem.copyForwards(u8, entry.workspace[0..name.len], name);
+    entry.workspace_len = @intCast(name.len);
+    std.mem.copyForwards(u8, entry.cwd[0..path.len], path);
+    entry.cwd_len = @intCast(path.len);
+    app_state.g_custom_cmds[0] = entry;
+    app_state.g_custom_cmds_count = 1;
+}
+
+fn seedWorkspaceName(slot: u8, name: []const u8) void {
+    app_state.g_ws_names[slot] = std.mem.zeroes([32]u8);
+    std.mem.copyForwards(u8, app_state.g_ws_names[slot][0..name.len], name);
+    app_state.g_ws_name_len[slot] = @intCast(name.len);
+}
+
+test "IGSH-1527 the catch-all Other workspace never takes a saved folder" {
+    const saved_name = app_state.g_ws_names[0];
+    const saved_len = app_state.g_ws_name_len[0];
+    defer {
+        app_state.g_ws_names[0] = saved_name;
+        app_state.g_ws_name_len[0] = saved_len;
+        app_state.g_custom_cmds_count = 0;
+    }
+    seedWorkspaceName(0, "Other");
+    seedWorkspaceFolder("Other", "/home/x/projects");
+    var host: u8 = 0;
+    var path: [256]u8 = undefined;
+    var len: u32 = 0;
+    var program: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    try std.testing.expect(!workspaceConfiguredTerminalFolder(0, &host, &path, &len, &program, &program_len));
+    try std.testing.expect(folderEntryIndexFor("Other") != null);
+}
+
+test "IGSH-1527 a named workspace keeps its saved folder" {
+    const saved_name = app_state.g_ws_names[0];
+    const saved_len = app_state.g_ws_name_len[0];
+    defer {
+        app_state.g_ws_names[0] = saved_name;
+        app_state.g_ws_name_len[0] = saved_len;
+        app_state.g_custom_cmds_count = 0;
+    }
+    seedWorkspaceName(0, "Main");
+    seedWorkspaceFolder("Main", "/home/x/projects/repo-new");
+    var host: u8 = 0;
+    var path: [256]u8 = undefined;
+    var len: u32 = 0;
+    var program: [128]u8 = undefined;
+    var program_len: u32 = 0;
+    try std.testing.expect(workspaceConfiguredTerminalFolder(0, &host, &path, &len, &program, &program_len));
+    try std.testing.expectEqualStrings("/home/x/projects/repo-new", path[0..len]);
+}
