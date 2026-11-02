@@ -389,13 +389,14 @@ test("Ctrl+K reconnects each Claude telemetry profile separately", () => {
     "credential values must never be printed");
 });
 
-test("Claude reconnect assessment distinguishes provider errors from auth failures", () => {
+test("Claude reconnect assessment distinguishes provider errors from auth failures", t => {
   const result = childProcess.spawnSync(
     process.platform === "win32" ? "pwsh.exe" : "pwsh",
     ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
       path.join(__dirname, "usage-telemetry", "test_reconnect_accounts.ps1")],
     { encoding: "utf8", env: { ...process.env, APPDATA: process.env.APPDATA || require("node:os").tmpdir() } },
   );
+  if (result.error?.code === "ENOENT" && process.platform !== "win32") return t.skip("PowerShell reconnect assessment runs on Windows CI");
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   assert.match(result.stdout, /Reconnect account assessment: PASS/);
 });
