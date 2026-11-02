@@ -18,7 +18,7 @@ fn linkComputer(b: *std.Build, module: *std.Build.Module, target: std.Build.Reso
     module.addAnonymousImport("computer_webview2_license", .{ .root_source_file = b.path("vendor/webview2/LICENSE.txt") });
     module.addAnonymousImport("computer_webview2_notice", .{ .root_source_file = b.path("vendor/webview2/NOTICE.txt") });
     module.addAnonymousImport("computer_windows_header_license", .{ .root_source_file = b.path("vendor/webview2/WIN32METADATA-LICENSE") });
-    module.addCSourceFile(.{ .file = b.path("src/computer_view.cpp"), .flags = &.{ "-std=c++17", "-fno-exceptions", "-fno-rtti", "-fms-extensions", "-D_WIN32_WINNT=0x0A00" } });
+    module.addCSourceFile(.{ .file = b.path("src/computer_view.cpp"), .flags = &.{ "-std=c++17", "-fno-exceptions", "-fno-rtti", "-fms-extensions" } });
     module.addIncludePath(b.path("vendor/webview2/include"));
     module.link_libcpp = true;
     module.linkSystemLibrary("ole32", .{});

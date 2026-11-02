@@ -47,7 +47,9 @@ function viewer() {
     window: { chrome: { webview: { postMessage(message) { sent.push(message); }, addEventListener(name, fn) { receive = fn; } } }, addEventListener(event, fn) { windowEvents.set(event, fn); } },
     requestAnimationFrame(fn) { frames.push(fn); },
   };
-  const source = fs.readFileSync(path.join(__dirname, '../assets/computer/adapter.js'), 'utf8').replace(/^import .*;\n/gm, '');
+  const file = path.join(__dirname, '../assets/computer/adapter.js');
+  const source = (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '').replace(/^import .*;\n/gm, '');
+  assert.ok(source.length > 0, 'the Computer page script ships with the app');
   vm.runInNewContext(source, context, { filename: 'computer-adapter.js' });
   const words = { computer: 'Computer', connecting: 'Connecting', live: 'Live', sleeping: 'Sleeping', reconnecting: 'Reconnecting', lost: 'Lost', take_control: 'Take control', give_back: 'Give back', in_control: 'You are in control', retry: 'Retry', full_width: 'Full width' };
   const send = (command, generation = '1', extra = {}) => receive({ data: { token: 'capability', command, generation, ...extra } });

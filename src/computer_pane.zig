@@ -260,7 +260,7 @@ fn closeJob() void {
     machine.job = null;
 }
 
-fn suspend(now: u64) void {
+fn sleepView(now: u64) void {
     revoke();
     machine.full_width = false;
     if (machine.phase == .stopping) return;
@@ -355,7 +355,7 @@ pub fn sync() void {
     if (app.g_search_active or app.g_popup_menu_active or app.g_move_size_active or !@import("focus.zig").foregroundIsOurs()) revoke();
     if (!allowed()) {
         machine.visible = false;
-        suspend(now);
+        sleepView(now);
         if ((app.g_account_locked or app.g_account_applying) and !account_suppressed) {
             known_targets = @splat(.{});
             machine.target = null;
@@ -379,7 +379,7 @@ pub fn sync() void {
                 machine.owner = owner;
                 send("transfer", std.fmt.bufPrint(&extra, ",\"previous\":\"{d}\"", .{previous}) catch unreachable);
             } else {
-                suspend(now);
+                sleepView(now);
                 machine.owner = null;
                 machine.target = null;
                 machine.attempts = 0;
@@ -519,7 +519,7 @@ pub export fn mp_computer_event(generation: u64, event: c_uint) void {
 pub fn prepareClose() bool {
     closing_requested = true;
     machine.visible = false;
-    suspend(w.GetTickCount64());
+    sleepView(w.GetTickCount64());
     if (machine.phase != .stopping) return true;
     if (!timer_armed) timer_armed = w.SetTimer(app.g_main_hwnd, TIMER, 50, null) != 0;
     return !timer_armed;

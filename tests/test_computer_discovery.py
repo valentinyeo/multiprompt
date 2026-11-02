@@ -7,9 +7,17 @@ import unittest
 from unittest.mock import patch
 
 
-spec = importlib.util.spec_from_file_location('computer_discovery', Path(__file__).resolve().parents[1] / 'assets/computer/discover.py')
-discovery = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(discovery)
+def load_discovery():
+    path = Path(__file__).resolve().parents[1] / 'assets/computer/discover.py'
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location('computer_discovery', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+discovery = load_discovery()
 
 
 def proxy(viewer=12345, target=23456, host='127.0.0.1'):
@@ -19,6 +27,9 @@ def proxy(viewer=12345, target=23456, host='127.0.0.1'):
 
 
 class MappingTests(unittest.TestCase):
+    def setUp(self):
+        self.assertIsNotNone(discovery, 'the Computer discovery script ships with the app')
+
     def test_mapping_uses_the_active_literal_ports_not_a_host_default(self):
         self.assertEqual(discovery.proxy_mapping(proxy()), (12345, 23456))
         self.assertEqual(discovery.proxy_mapping(proxy(34567, 45678)), (34567, 45678))

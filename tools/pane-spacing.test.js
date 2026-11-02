@@ -568,3 +568,9 @@ test "selected session is gray and distinct from its sidebar" {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Computer owns the right pane slot and its saved split while it is open', () => {
+  assert.match(fn(browser, 'browserSlotReserved'), /@import\("computer_pane\.zig"\)\.selected\(\)/);
+  assert.match(fn(browser, 'browserSplitPermilleForActiveShell'), /@import\("computer_pane\.zig"\)\.splitPermille\(\)/);
+  assert.match(fn(layout, 'activePaneRects'), /browserSlotReserved\(\)/);
+});

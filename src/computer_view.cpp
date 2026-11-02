@@ -375,7 +375,7 @@ extern "C" int mp_computer_create(HWND parent) {
     auto self = std::make_shared<View>(); view = self; self->parent = parent;
     if (!computer_sta_process_lifetime) computer_sta_process_lifetime = SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
     self->com = computer_sta_process_lifetime;
-    WNDCLASSW cls{}; cls.hInstance = GetModuleHandleW(nullptr); cls.lpfnWndProc = hostProc; cls.lpszClassName = L"MultipromptPrivateComputer"; cls.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    WNDCLASSW cls{}; cls.hInstance = GetModuleHandleW(nullptr); cls.lpfnWndProc = hostProc; cls.lpszClassName = L"MultipromptPrivateComputer"; cls.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
     RegisterClassW(&cls);
     self->host = CreateWindowExW(WS_EX_NOACTIVATE, cls.lpszClassName, L"", WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0,0,1,1,parent,nullptr,cls.hInstance,nullptr);
     self->token = nonce();
