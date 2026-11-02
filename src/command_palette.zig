@@ -1962,10 +1962,15 @@ test "IGSH-1266 a refused pick says which step refused it" {
     try std.testing.expect(g_pick_row_gone);
 }
 
-fn adoptHostThread(job: *AdoptHostJob) void {
-    defer job.finished.store(true, .release);
+fn finishAdoptHostJob(job: *AdoptHostJob) void {
     const a = std.heap.page_allocator;
-    defer a.destroy(job);
+    a.destroy(job);
+    job.finished.store(true, .release);
+}
+
+fn adoptHostThread(job: *AdoptHostJob) void {
+    defer finishAdoptHostJob(job);
+    const a = std.heap.page_allocator;
     var buf: [512]u8 = undefined;
     const request = adoptHostRequest(job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len], &buf) orelse return;
     var response: std.ArrayList(u8) = .empty;
@@ -2002,10 +2007,15 @@ pub fn startAdoptHost(tab: usize) bool {
     return true;
 }
 
-fn moveChatThread(job: *MoveChatJob) void {
-    defer job.finished.store(true, .release);
+fn finishMoveChatJob(job: *MoveChatJob) void {
     const a = std.heap.page_allocator;
-    defer a.destroy(job);
+    a.destroy(job);
+    job.finished.store(true, .release);
+}
+
+fn moveChatThread(job: *MoveChatJob) void {
+    defer finishMoveChatJob(job);
+    const a = std.heap.page_allocator;
     var buf: [512]u8 = undefined;
     const target: @import("agent_host.zig").MoveTarget = if (job.target == 1) .terminal else .chat;
     const request = @import("agent_host.zig").moveRequest(&buf, target, job.id, job.host, job.sid[0..job.sid_len], job.tmux[0..job.tmux_len], job.cwd[0..job.cwd_len]) orelse return;
@@ -2022,6 +2032,18 @@ fn moveChatThread(job: *MoveChatJob) void {
 
 pub fn canMoveHostChat(ai_agent: u8, claude_sid_len: usize, tmux_len: usize) bool {
     return ai_agent == 1 and claude_sid_len == 36 and tmux_len > 0;
+}
+
+test "IGSH-1447 a finished move chat job is released without a write after the release" {
+    const job = try std.heap.page_allocator.create(MoveChatJob);
+    job.* = .{};
+    finishMoveChatJob(job);
+}
+
+test "IGSH-1447 a finished adopt job is released without a write after the release" {
+    const job = try std.heap.page_allocator.create(AdoptHostJob);
+    job.* = .{};
+    finishAdoptHostJob(job);
 }
 
 test "IGSH-1266 only a Claude chat with a session and a terminal can move between the two" {
