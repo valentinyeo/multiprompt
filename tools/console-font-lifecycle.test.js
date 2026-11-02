@@ -399,6 +399,9 @@ fn closeFind(_: bool) void {}
 fn chatAcClose() void {}
 fn chatDraftFlush() void {}
 fn chatReadMark(_: bool) bool { return false; }
+fn consumePinnedBrowserEntry(_: u32) void {}
+fn cancelPinnedBrowserEntry(_: u32) void {}
+fn armPinnedBrowserEntry(_: u32) void {}
 fn chatHistoryStreamsKeep(_: u32) void {}
 fn syncWorking() void {}
 fn chatSelectionClear() void {}
@@ -660,7 +663,7 @@ test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold aft
     fs.cpSync(path.join(root, 'src/fonts'), path.join(dir, 'fonts'), { recursive: true });
     copyZig(['workspace_view.zig', 'chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(file, (harness()).replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("browser_pane.zig").consumePinnedBrowserEntry', 'consumePinnedBrowserEntry').replaceAll('@import("browser_pane.zig").cancelPinnedBrowserEntry', 'cancelPinnedBrowserEntry').replaceAll('@import("browser_pane.zig").armPinnedBrowserEntry', 'armPinnedBrowserEntry'));
     const result = spawnSync(process.env.ZIG || path.join(os.homedir(), 'zig/zig'), ['test', file], {
       encoding: 'utf8', timeout: 120000,
     });

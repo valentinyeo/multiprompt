@@ -58,6 +58,7 @@ const CancelledBrowserLaunch = struct {
 var g_cancelled_browser_launches = [_]CancelledBrowserLaunch{.{}} ** 7;
 var g_browser_resolve_inflight = [_]struct { shell_id: u32 = 0 }{.{}} ** 7;
 var g_browser_pending_activate_sid: u32 = 0;
+const BrowserNavigationIntent = enum { background, select_preserve_focus, select_and_focus };
 var g_slot_placeholder_since: u64 = 0;
 const TIMER_WEBVIEW2_FOCUS = 2;
 const TIMER_REFOCUS = 3;
@@ -76,6 +77,7 @@ const Shell = struct {
     browser_url: [512]u8 = @splat(0),
     browser_url_len: u32 = 0,
     browser_docking: bool = false,
+    browser_pending_intent: BrowserNavigationIntent = .background,
     browser_launch_tick: u64 = 0,
     browser_first_launch_tick: u64 = 0,
     browser_connection_id: u64 = 0,

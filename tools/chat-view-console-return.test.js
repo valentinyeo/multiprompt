@@ -86,6 +86,9 @@ fn closeFind(_: bool) void {}
 fn chatAcClose() void {}
 fn chatDraftFlush() void {}
 fn chatReadMark(_: bool) bool { return false; }
+fn consumePinnedBrowserEntry(_: u32) void {}
+fn cancelPinnedBrowserEntry(_: u32) void {}
+fn armPinnedBrowserEntry(_: u32) void {}
 var stream_stops: usize = 0;
 fn chatHistoryStreamsKeep(shell_id: u32) void { std.debug.assert(shell_id == 0); stream_stops += 1; }
 fn syncWorking() void {}
@@ -201,7 +204,7 @@ test('production Chat View exits reveal, lay out and focus without ordinary cons
   try {
     copyZig(['chat_view.zig'], dir);
     const file = path.join(dir, 'test.zig');
-    fs.writeFileSync(file, (harness(source)).replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
+    fs.writeFileSync(file, (harness(source)).replaceAll('@import("chat_session.zig").chatHistoryStreamsKeep', 'chatHistoryStreamsKeep').replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary').replaceAll('@import("browser_pane.zig").consumePinnedBrowserEntry', 'consumePinnedBrowserEntry').replaceAll('@import("browser_pane.zig").cancelPinnedBrowserEntry', 'cancelPinnedBrowserEntry').replaceAll('@import("browser_pane.zig").armPinnedBrowserEntry', 'armPinnedBrowserEntry'));
     const result = spawnSync(zig, ['test', file], { encoding: 'utf8', timeout: 120000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0, result.stdout + result.stderr);

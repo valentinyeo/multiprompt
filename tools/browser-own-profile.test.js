@@ -70,7 +70,7 @@ test('IGSH-672 an opted-in pane keeps its own browser for launch, reuse, command
   assert.ok(launch.indexOf('assignBrowserProfileForLaunch(idx);') >= 0);
   assert.ok(launch.indexOf('assignBrowserProfileForLaunch(idx);') < launch.indexOf('isolatedBrowserHasLivePane(idx)'));
   assert.match(body(pane, 'isolatedBrowserHasLivePane'), /if \(!std\.mem\.eql\(u8, &app_state\.shells\[i\]\.browser_profile_token, &app_state\.shells\[skip_idx\]\.browser_profile_token\)\) continue;/);
-  for (const name of ['requestInactivePaneWindow', 'bindBrowserWindowIdForShell', 'navigateBrowserPaneWithActivation']) {
+  for (const name of ['requestInactivePaneWindow', 'bindBrowserWindowIdForShell', 'navigateBrowserPaneWithIntent']) {
     assert.match(body(pane, name), /spawnBrowserCliForShell\(idx, /, name);
     assert.doesNotMatch(body(pane, name), /spawnBrowserCliHidden\(/, name);
   }
