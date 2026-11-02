@@ -20,22 +20,23 @@ function menuModel(source) {
   const copy = source.match(/fn chatContextCopyTarget\([^]*?return (.+);\n\}/)[1]
     .replace(/if \((\w+)\) \.(\w+) else /g, '$1 ? "$2" : ')
     .replace(/\.(\w+)$/g, '"$1"');
-  const items = new Function('selected', 'message', 'reply', 'link', 'unsent', 'waiting', `return [${actions}].filter(item => item !== null)`);
+  const items = new Function('offer', 'selected', 'message', 'reply', 'link', 'unsent', 'waiting', `return [${actions}].filter(item => item !== null)`);
   const target = new Function('selected', 'message', `return ${copy}`);
-  return (...input) => ({ items: items(...input), target: target(...input) });
+  return (offer, selected, message, reply, link, unsent, waiting) => ({ items: items(offer, selected, message, reply, link, unsent, waiting), target: target(selected, message) });
 }
 
 test('IGSH-718 production pure item expressions preserve ordering and selection priority', () => {
   const menu = menuModel(chat);
-  assert.deepEqual(menu(false, true, true, false, false), { items: ['reply', 'copy'], target: 'message' });
-  assert.deepEqual(menu(false, true, false, false, false).items, ['copy']);
-  assert.equal(menu(true, true, true, false, false).target, 'selection');
-  assert.equal(menu(true, false, false, false, false).target, 'selection');
-  assert.deepEqual(menu(false, true, true, true, false).items, ['reply', 'copy', 'copy_link']);
-  assert.deepEqual(menu(false, true, true, false, true).items, ['reply', 'copy', 'send_again', 'remove']);
-  assert.deepEqual(menu(false, true, true, true, true).items, ['reply', 'copy', 'copy_link', 'send_again', 'remove']);
-  assert.deepEqual(menu(false, true, true, false, false, true).items, ['reply', 'copy', 'cancel_queued']);
-  assert.equal(menu(false, false, false, false, false).target, 'nothing');
+  assert.deepEqual(menu(false, false, true, true, false, false), { items: ['reply', 'copy'], target: 'message' });
+  assert.deepEqual(menu(true, true, true, true, false, false).items, ['add_to_chat', 'reply', 'copy']);
+  assert.deepEqual(menu(false, false, true, false, false, false).items, ['copy']);
+  assert.equal(menu(false, true, true, true, false, false).target, 'selection');
+  assert.equal(menu(false, true, false, false, false, false).target, 'selection');
+  assert.deepEqual(menu(false, false, true, true, true, false).items, ['reply', 'copy', 'copy_link']);
+  assert.deepEqual(menu(false, false, true, true, false, true).items, ['reply', 'copy', 'send_again', 'remove']);
+  assert.deepEqual(menu(false, false, true, true, true, true).items, ['reply', 'copy', 'copy_link', 'send_again', 'remove']);
+  assert.deepEqual(menu(false, false, true, true, false, false, true).items, ['reply', 'copy', 'cancel_queued']);
+  assert.equal(menu(false, false, false, false, false, false).target, 'nothing');
   assert.throws(() => menuModel(chat.replace('fn chatContextMenuItems(', 'fn removedMenu(')));
 });
 
@@ -50,7 +51,7 @@ test('cancelling a held message cannot copy an assistant request ID', () => {
 test('IGSH-718 and IGSH-892 native popups share the chat bubble theme with icons, mnemonics and existing contextual actions', () => {
   const handler = chat.slice(chat.indexOf('fn chatMessageMenu('), chat.indexOf('fn chatNavEligible('));
   assert.doesNotMatch(handler, /Copy Message|Select All|2 => chatSelectAll|3 => chatCopyTextToClipboard/);
-  assert.match(chat, /const TrackPopupMenu = @import\("fonts.zig"\).trackMessagePopupMenu/);
+  assert.match(chat, /@import\("message_menu\.zig"\)\.track\(/);
   assert.match(handler, /reply_text != null, link_text != null, unsent_actions, waiting/);
   assert.match(handler, /pendingActions\(app_state.g_chat_outbox.items\[ei\].state\).send_again/);
   assert.match(handler, /items.copy_target == .selection\) selection_text else message_text/);

@@ -29,21 +29,24 @@ test('IGSH-992 the composer routes Up Down Enter Esc to message focus without co
   assert.match(sub, /chatNavKey\(nav_action\)/);
   assert.match(sub, /GetWindowTextLengthW\(hwnd\) == 0/);
   assert.match(sub, /g_chat_ac\.open/);
-  assert.match(sub, /nav_action == \.open\) dropPendingEnterChar\(hwnd\)/, 'Enter must drop its own WM_CHAR so the quote is not sent');
-  assert.match(fn(composer, 'dropPendingEnterChar'), /PeekMessageW\(&pending, hwnd, 0x0102, 0x0102, 1\)/);
+  assert.match(sub, /nav_action == \.open\) dropPendingActivationChar\(hwnd, 0x0D\)/, 'Enter must drop its own WM_CHAR so the quote is not sent');
+  const drop = fn(composer, 'dropPendingActivationChar');
+  assert.match(drop, /PeekMessageW\(&pending, hwnd, char_msg, char_msg, 0\)/);
+  assert.match(drop, /PeekMessageW\(&pending, hwnd, char_msg, char_msg, 1\)/);
+  assert.match(drop, /activationCharMatches\(key, pending\.wParam\)/);
   assert.match(sub, /g_chat_nav_active and \(msg == 0x0201 or msg == 0x0102[^]*chatNavClear\(\)/, 'typing, pasting and clicking return to the box');
 });
 
 test('IGSH-992 Enter opens the same menu as right-click through one shared function', () => {
   const render = read('src/chat_render.zig');
-  assert.match(render, /WM_RBUTTONDOWN => \{\s*if \(app_state\.g_chat_find_open[^]*?return chatMessageMenu\(hwnd, msg, wp, lp, null\);/);
+  assert.match(render, /WM_RBUTTONDOWN => \{\s*if \(app_state\.g_chat_find_open[^]*?return chatMessageMenu\(hwnd, msg, wp, lp, null, selection_offer\);/);
   const menu = fn(render, 'chatMessageMenu');
-  assert.match(menu, /TrackPopupMenu\(/);
+  assert.match(menu, /@import\("message_menu\.zig"\)\.track\(/);
   assert.match(menu, /chatContextMenuItems\(/);
   assert.match(menu, /selectChatReply\(/);
   assert.match(menu, /keyboard_block/);
   const nav = fn(render, 'chatNavKey');
-  assert.match(nav, /chatMessageMenu\(hwnd, WM_KEYDOWN, 0x0D, lp, index\)/);
+  assert.match(nav, /chatMessageMenu\(hwnd, WM_KEYDOWN, 0x0D, lp, index, false\)/);
 });
 
 test('IGSH-992 focus skips tool rows, scrolls into view and draws a ring with no status text', () => {
