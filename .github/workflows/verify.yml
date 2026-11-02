@@ -956,11 +956,11 @@ jobs:
             if (Test-Path -LiteralPath (Join-Path $env:RUNNER_TEMP $name)) { throw "Footer fixture cleanup failed: $name" }
           }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar'
+        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar' || env.FEATURE == 'live-chat-pane'
         with:
           node-version: 22
       - name: Install isolated Chrome for Testing driver
-        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar'
+        if: env.FEATURE == 'browser-emulation' || env.FEATURE == 'browser-switch-speed' || env.FEATURE == 'chat-switch-speed' || env.FEATURE == 'browser-own-profile' || env.FEATURE == 'title-bar' || env.FEATURE == 'live-chat-pane'
         shell: pwsh
         run: |
           npm install --prefix "$env:RUNNER_TEMP/browser-verify" puppeteer@24.31.0
