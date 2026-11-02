@@ -4989,7 +4989,7 @@ def paced(frames):
     for frame in frames:
         emit(frame)
         if (frame.get('event') or {}).get('type') == 'content_block_delta':
-            time.sleep(0.12)
+            time.sleep(float(os.environ.get('FAKE_AGENT_PACE') or 0.12))
 
 def finish(subtype='success', stop_reason='end_turn', cost=0.01):
     emit(dict(type='result', subtype=subtype, stop_reason=stop_reason, session_id='native-fixture',
@@ -5286,6 +5286,8 @@ class AgentHostStreamTest(AgentHostTest):
 
     def test_a_hosted_turn_streams_thinking_text_and_its_end_into_the_event_log(self):
         self.fake('stream')
+        os.environ['FAKE_AGENT_PACE'] = '0.5'
+        self.addCleanup(os.environ.pop, 'FAKE_AGENT_PACE', None)
         self.seed(text='say hello')
         self.dispatch()
         ended = self.wait_for(lambda: self.events('turn.ended'))
