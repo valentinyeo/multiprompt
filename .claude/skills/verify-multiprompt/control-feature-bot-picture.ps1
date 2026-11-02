@@ -38,74 +38,45 @@
                     $script:botPicker -ne [IntPtr]::Zero
                 } 'real Windows picture picker owned by the main window' 30
             }
+            function Get-BotPickerWindows {
+                return @([VerifyNative]::DesktopWindows() | Where-Object { $_['class'] -ceq '#32770' -and [IntPtr]([long]($_['rootOwner'])) -eq $script:window })
+            }
             function Wait-BotPickerClosed {
-                Wait-Until {
-                    @([VerifyNative]::DesktopWindows() | Where-Object { $_['class'] -ceq '#32770' -and [IntPtr]([long]($_['rootOwner'])) -eq $script:window }).Count -eq 0
-                } 'picture picker closed' 30
+                Wait-Until { @(Get-BotPickerWindows).Count -eq 0 } 'picture picker closed' 30
             }
-            function Get-BotFilePickerEdits {
-                $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($script:botPicker)
-                $editType = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
-                $found = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, $editType))
-                $ordered = @()
-                foreach ($id in @('1148', '1152')) { foreach ($item in $found) { if ($item.Current.AutomationId -ceq $id) { $ordered += $item } } }
-                foreach ($item in $found) { if ($item.Current.AutomationId -notin @('1148', '1152')) { $ordered += $item } }
-                return $ordered
+            function Assert-BotFilePickerForeground {
+                $deadline = [DateTime]::UtcNow.AddSeconds(20)
+                while ([DateTime]::UtcNow -lt $deadline) {
+                    if ([VerifyNative]::GetForegroundWindow() -eq $script:botPicker) { return }
+                    [void][VerifyNative]::AllowSetForegroundWindow([uint32]$process.Id)
+                    [void][VerifyNative]::SetForegroundWindow($script:botPicker)
+                    Start-Sleep -Milliseconds 150
+                }
+                throw 'The picture picker did not take the foreground; refusing to type into another window'
             }
-            function Get-BotFilePickerDialogue {
-                $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($script:botPicker)
-                $all = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition))
-                return @(foreach ($item in $all) {
-                    @{ name = $item.Current.Name; class = $item.Current.ClassName; automationId = $item.Current.AutomationId; type = $item.Current.ControlType.ProgrammaticName; focusable = $item.Current.IsKeyboardFocusable }
-                })
-            }
-            function Set-BotFilePickerPath([string]$Path) {
-                [void][VerifyNative]::SetForegroundWindow($script:botPicker)
-                Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:botPicker } 'picture picker focused before typing the path' 20
-                $attempts = 0
-                while ($attempts -lt 30) {
-                    $attempts++
-                    $edits = @(Get-BotFilePickerEdits)
-                    foreach ($edit in $edits) {
-                        $pattern = $null
-                        try { $pattern = [System.Windows.Automation.ValuePattern]$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern) } catch { $pattern = $null }
-                        if ($null -eq $pattern) { continue }
-                        try { $pattern.SetValue($Path) } catch { continue }
-                        if ($pattern.Current.Value -ceq $Path) {
-                            $script:botPickerSelector = ('value pattern on automationId ' + $edit.Current.AutomationId + ' ' + $edit.Current.ClassName)
-                            $script:botPickerInput = 'value pattern'
-                            return
-                        }
-                    }
-                    Start-Sleep -Milliseconds 250
+            function Enter-BotPicturePath([string]$Path) {
+                Assert-BotFilePickerForeground
+                Press @(0x12, 0x4E) 'Alt+N: focus the picture picker file name field'
+                $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+                if ($focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Edit) {
+                    throw ('The picture picker focused ' + $focused.Current.ControlType.ProgrammaticName + ' ' + $focused.Current.ClassName + ' name=' + $focused.Current.Name + ' instead of a text field')
                 }
-                Save-Json (Get-BotFilePickerDialogue) 'picture-picker.uia.json'
-                $typed = $null
-                foreach ($edit in @(Get-BotFilePickerEdits)) {
-                    if (-not $edit.Current.IsKeyboardFocusable) { continue }
-                    try { $edit.SetFocus() } catch { continue }
-                    Start-Sleep -Milliseconds 200
-                    if ([System.Windows.Automation.AutomationElement]::FocusedElement.Current.AutomationId -ceq $edit.Current.AutomationId) { $typed = $edit; break }
-                }
-                if ($null -eq $typed) {
-                    Press @(0x12, 0x4E) 'Alt+N: focus the file name field'
-                }
-                $script:botPickerSelector = 'keyboard typing into the focused picker field'
-                $script:botPickerInput = 'focused edit typing'
+                Press @(0x11, 0x41) 'Ctrl+A: clear the picture picker file name field'
                 Type-Text $Path
-                $leaf = Split-Path -Leaf $Path
+                $script:botPickerSelector = 'windows picker file name edit'
+                $script:botPickerInput = 'Alt+N, Ctrl+A then the typed path'
+                Press @(0x0D) 'Enter: pick the picture'
                 try {
-                    Wait-Until {
-                        foreach ($edit in @(Get-BotFilePickerEdits)) {
-                            $value = $null
-                            try { $value = ([System.Windows.Automation.ValuePattern]$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value } catch { $value = $null }
-                            if ($null -ne $value -and $value.Contains($leaf)) { return $true }
-                        }
-                        return $false
-                    } 'typed path appears in the picture picker file name field' 10
+                    Wait-BotPickerClosed
                 } catch {
-                    Save-Json (Get-BotFilePickerDialogue) 'picture-picker.uia.json'
-                    throw 'The typed path never reached the picture picker file name field'
+                    if (@(Get-BotPickerWindows).Count -eq 0) { return }
+                    Record 'The picker stayed open; retype the path with Select All'
+                    Assert-BotFilePickerForeground
+                    Press @(0x12, 0x4E) 'Alt+N: focus the picture picker file name field again'
+                    Press @(0x11, 0x41) 'Ctrl+A: replace the previous picker text'
+                    Type-Text $Path
+                    Press @(0x0D) 'Enter: pick the picture again'
+                    Wait-BotPickerClosed
                 }
             }
             function Get-BotSavedPicture {
@@ -188,10 +159,8 @@
             $result.checks += $uploadCheck
             Invoke-BotPictureMenu 'upload image' 'Enter: Upload image' 'action'
             Wait-BotFilePicker
-            Set-BotFilePickerPath $fixture
+            Enter-BotPicturePath $fixture
             $result.fileDialog = @{ windowClass = '#32770'; owner = 'main window root owner'; selector = $script:botPickerSelector; input = $script:botPickerInput; path = $fixture }
-            Press @(0x0D) 'Enter: pick the picture'
-            Wait-BotPickerClosed
             Wait-Until { (Get-BotSavedPicture) -gt 0 } 'saved active tab carries a copied picture number' 30
             Press @(0x1B) 'Esc: close the bot-look palette after picking'
             $uploadedPicture = Get-BotSavedPicture
@@ -224,9 +193,7 @@
             Set-Content -LiteralPath $broken -Value 'This file is text, not a picture.' -Encoding ASCII
             Invoke-BotPictureMenu 'upload image' 'Enter: Upload image'
             Wait-BotFilePicker
-            Set-BotFilePickerPath $broken
-            Press @(0x0D) 'Enter: pick the unreadable picture'
-            Wait-BotPickerClosed
+            Enter-BotPicturePath $broken
             $noticeLog = Join-Path $scratch 'roaming/ZigShell/debug.log'
             Wait-Until {
                 $noticeText = Read-SharedText $noticeLog
