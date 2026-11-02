@@ -710,6 +710,7 @@ const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFS
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
+const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
 const SEARCH_SHELLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SHELLS_MENU_OFFSET;
 const SEARCH_SNIPPETS_MENU_OFFSET = @import("app_state.zig").SEARCH_SNIPPETS_MENU_OFFSET;
@@ -909,6 +910,7 @@ const remindPresetDue = @import("reminders.zig").remindPresetDue;
 const parseReminderDue = @import("reminders.zig").parseReminderDue;
 const spawnCustomCmd = @import("command_palette.zig").spawnCustomCmd;
 const spawnWorkspaceTmuxSession = @import("command_palette.zig").spawnWorkspaceTmuxSession;
+const spawnWorkspacePlainClaudeSession = @import("command_palette.zig").spawnWorkspacePlainClaudeSession;
 const spawnCodexTmuxSession = @import("command_palette.zig").spawnCodexTmuxSession;
 const spawnPiTmuxSession = @import("command_palette.zig").spawnPiTmuxSession;
 const spawnWorkspaceTerminalSession = @import("command_palette.zig").spawnWorkspaceTerminalSession;
@@ -3620,7 +3622,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             }
             if (app_state.g_all_sessions_active) closeAllSessions(hwnd);
             if (app_state.g_inbox_active) closeInbox(hwnd);
-            if (spawnWorkspaceTmuxSession()) {
+            if (if (wp == 1) spawnWorkspacePlainClaudeSession() else spawnWorkspaceTmuxSession()) {
                 applyPendingGroup();
                 _ = InvalidateRect(hwnd, null, 0);
                 app_state.g_refocus_remaining = 4;
@@ -5798,6 +5800,14 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     clearSearchBackdrop();
                     showActiveShellAfterOverlay();
                     _ = PostMessageW(hwnd, WM_APP_NEW_TAB_DEFAULT, 0, 0);
+                    return 0;
+                }
+                if (target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET) {
+                    app_state.g_search_active = false;
+                    app_state.g_shell_focused = true;
+                    clearSearchBackdrop();
+                    showActiveShellAfterOverlay();
+                    _ = PostMessageW(hwnd, WM_APP_NEW_TAB_DEFAULT, 1, 0);
                     return 0;
                 }
                 if (target == SEARCH_NEW_PI_CHAT_OFFSET) {

@@ -217,8 +217,9 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Ctrl+Shift+G | Show usage, servers, and app version. Cycle collapsed cards. |
 | Ctrl+K -&gt; Usage and servers / collapsed status cards | Show usage, servers, and app version. Cycle collapsed cards. |
 | Alt+T | New workspace tmux tab, Claude by default (optional configured program) |
-| Ctrl+T | New Claude session in this workspace folder, in the terminal (also Alt+T outside the palette and the sidebar plus) |
-| Ctrl+K -&gt; New Claude session | Start a Claude session in this workspace folder in the terminal; same as Ctrl+T and the sidebar plus |
+| Ctrl+T | New Claude live chat in this workspace folder (also Alt+T outside the palette and the sidebar plus) |
+| Ctrl+K -&gt; New Claude session | Start a Claude live chat in this workspace folder; same as Ctrl+T and the sidebar plus |
+| Ctrl+K -&gt; New Claude in terminal | Start Claude the old way, typed into a terminal in this workspace folder |
 | Ctrl+K -&gt; New Codex chat | Open a Codex session in this workspace folder |
 | Ctrl+K -&gt; New Pi chat | Open a Pi session in this workspace folder |
 | Ctrl+K -&gt; New terminal | Open a plain tmux tab in this workspace folder, no agent |

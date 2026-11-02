@@ -18,7 +18,10 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   const end = palette.indexOf('pub fn activeRemoteContextForCodexTmux(');
   assert.ok(start >= 0 && end > start, 'spawnWorkspaceTmuxSession must exist');
   const body = palette.slice(start, end);
-  assert.match(body, /if \(agent_host\.eligible\(program\)\) agent_host\.mintSessionId\(&sid_buf\) else null/);
+  assert.match(body, /if \(!plain_claude and agent_host\.eligible\(program\)\) agent_host\.mintSessionId\(&sid_buf\) else null/);
+  assert.match(body, /pub fn spawnWorkspaceTmuxSession\(\) bool \{\s*g_plain_claude = false;/, 'Ctrl+T always opens a live chat');
+  assert.match(body, /pub fn spawnWorkspacePlainClaudeSession\(\) bool \{\s*g_plain_claude = true;/, 'the old terminal Claude stays available from Ctrl+K');
+  assert.match(body, /const plain_claude = g_plain_claude;\s*g_plain_claude = false;/, 'the old terminal choice is used once');
   assert.match(body, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse \{/);
   assert.match(body, /var host_buf: \[WORKSPACE_HOST_LAUNCH_MAX\]u8 = undefined;/);
   assert.match(body, /if \(launch_cmd\.len > app_state\.g_pending_tmux_cmd\.len\)/, 'the pending command buffer must be checked before the copy');

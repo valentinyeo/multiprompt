@@ -258,6 +258,7 @@ const SEARCH_CODEX_TMUX_OFFSET = @import("app_state.zig").SEARCH_CODEX_TMUX_OFFS
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
+const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
 const SEARCH_SHELLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SHELLS_MENU_OFFSET;
 const SEARCH_SNIPPETS_MENU_OFFSET = @import("app_state.zig").SEARCH_SNIPPETS_MENU_OFFSET;
@@ -2779,7 +2780,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                     const is_usage_login = is_usage_login_primary or is_usage_login_inne;
                     const is_endtmux = result_idx == SEARCH_END_TMUX_OFFSET;
                     const is_reopen = result_idx == SEARCH_REOPEN_OFFSET;
-                    const is_new_session_row = result_idx == SEARCH_NEW_CLAUDE_CHAT_OFFSET or result_idx == SEARCH_NEW_PI_CHAT_OFFSET or result_idx == SEARCH_NEW_TERMINAL_OFFSET or result_idx == SEARCH_OPEN_SESSION_MENU_OFFSET or result_idx == SEARCH_SHELLS_MENU_OFFSET;
+                    const is_new_session_row = result_idx == SEARCH_NEW_CLAUDE_CHAT_OFFSET or result_idx == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or result_idx == SEARCH_NEW_PI_CHAT_OFFSET or result_idx == SEARCH_NEW_TERMINAL_OFFSET or result_idx == SEARCH_OPEN_SESSION_MENU_OFFSET or result_idx == SEARCH_SHELLS_MENU_OFFSET;
                     const is_pick_repo_row = result_idx >= SEARCH_PICK_REPO_ROW_OFFSET and result_idx < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS;
                     const is_pick_repo_back = result_idx == SEARCH_PICK_REPO_BACK_OFFSET;
                     const is_urlpick = result_idx == SEARCH_URLPICK_OFFSET;
@@ -3871,6 +3872,7 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             SEARCH_NEW_CLAUDE_CHAT_OFFSET => L("New Claude session"),
                             SEARCH_NEW_PI_CHAT_OFFSET => L("New Pi chat"),
                             SEARCH_NEW_TERMINAL_OFFSET => L("New terminal"),
+                            SEARCH_NEW_CLAUDE_TERMINAL_OFFSET => L("New Claude in terminal"),
                             SEARCH_OPEN_SESSION_MENU_OFFSET => L("Open session\u{2026}"),
                             else => L("More shells\u{2026}"),
                         };
