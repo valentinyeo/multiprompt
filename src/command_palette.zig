@@ -1595,9 +1595,10 @@ pub fn workspaceFolderCurrent(ws: u8, out: *[256]u8, out_len: *u32) bool {
 }
 
 fn workspaceConfiguredTerminalFolder(ws: u8, out_host: *u8, out_path: *[256]u8, out_len: *u32, out_program: *[128]u8, out_program_len: *u32) bool {
-    loadCustomCommandsIfChanged();
     var ws_buf: [32]u8 = undefined;
     const ws_name = workspaceDisplayName(ws, &ws_buf);
+    if (@import("workspaces.zig").isOtherWorkspaceName(ws_name)) return false;
+    loadCustomCommandsIfChanged();
     const idx = folderEntryIndexFor(ws_name) orelse return false;
     const c = &app_state.g_custom_cmds[idx];
     const cwd = c.cwd[0..c.cwd_len];
@@ -5733,6 +5734,7 @@ test "IGSH-1266 pick repo typing filters paths case insensitively" {
     try std.testing.expect(repoPathMatchesQuery("/home/x/projects/multiprompt", query[0..0]));
     try std.testing.expect(!repoPathMatchesQuery("/home/x/projects/other", query[0..]));
 }
+
 fn seedWorkspaceFolder(name: []const u8, path: []const u8) void {
     app_state.g_custom_cmds_count = 0;
     var entry = CustomCmd{};
@@ -5769,6 +5771,29 @@ test "IGSH-1527 the catch-all Other workspace never takes a saved folder" {
     var program_len: u32 = 0;
     try std.testing.expect(!workspaceConfiguredTerminalFolder(0, &host, &path, &len, &program, &program_len));
     try std.testing.expect(folderEntryIndexFor("Other") != null);
+}
+
+test "IGSH-1527 the catch-all Other workspace asks for the repo before it starts" {
+    const saved_name = app_state.g_ws_names[0];
+    const saved_len = app_state.g_ws_name_len[0];
+    const saved_single = app_state.g_single_window;
+    const saved_active = app_state.g_active_workspace;
+    defer {
+        app_state.g_ws_names[0] = saved_name;
+        app_state.g_ws_name_len[0] = saved_len;
+        app_state.g_single_window = saved_single;
+        app_state.g_active_workspace = saved_active;
+        app_state.g_custom_cmds_count = 0;
+        closePickRepo();
+    }
+    app_state.g_single_window = false;
+    app_state.g_active_workspace = 0;
+    seedWorkspaceName(0, "Other");
+    seedWorkspaceFolder("Other", "/home/x/projects");
+    const before = app_state.shell_count;
+    try std.testing.expect(!spawnWorkspaceSession(false, false));
+    try std.testing.expect(app_state.g_search_pick_repo_mode);
+    try std.testing.expectEqual(before, app_state.shell_count);
 }
 
 test "IGSH-1527 a named workspace keeps its saved folder" {
