@@ -169,7 +169,7 @@ class AccountDesktop(unittest.TestCase):
         self.assertNotIn('layoutSshExec', MAIN)
         self.assertNotIn('session_layout_sync', MAIN)
         self.assertNotIn('g_layout_pending', MAIN)
-        self.assertIn('publishSessionLayout()', function(MAIN, 'saveSession'))
+        self.assertIn('publishSessionLayout()', function(MAIN, 'saveSessionQueued'))
 
     def test_palette_help_and_wiki_use_the_same_commands(self):
         rows = MAIN.split('const SHORTCUT_ROWS =', 1)[1].split('\n};', 1)[0]

@@ -1328,6 +1328,13 @@ fn browserUrlQueryOwner(job: *const BrowserUrlQueryJob) ?u32 {
     return idx;
 }
 
+pub const BrowserQuerySend = *const fn (std.mem.Allocator, ?i64, []const u8, []const u8, []const u8, ?u64, ?*const std.atomic.Value(u64), u64) anyerror![]u8;
+var browser_query_send: ?BrowserQuerySend = null;
+
+pub fn useBrowserQuerySender(send: BrowserQuerySend) void {
+    browser_query_send = send;
+}
+
 fn browserUrlQueryWorker(job: *BrowserUrlQueryJob) void {
     crash_recorder.guardThread();
     const allocator = std.heap.page_allocator;
@@ -1345,7 +1352,8 @@ fn browserUrlQueryWorker(job: *BrowserUrlQueryJob) void {
             if (browser_pin_send_allowed.load(.acquire) != job.id) break :query;
         }
         const method: []const u8 = if (job.purpose == .navigate_pin) "navigate" else "tabs";
-        const reply = @import("bridge.zig").requestBrowserForWindowCancellable(allocator, job.window_id, job.effective_profile[0..job.effective_profile_len], method, fields_buf[0..fields_len], GetTickCount64() + 3000, if (job.purpose == .navigate_pin) &browser_pin_send_allowed else null, job.id) catch break :query;
+        const send = browser_query_send orelse break :query;
+        const reply = send(allocator, job.window_id, job.effective_profile[0..job.effective_profile_len], method, fields_buf[0..fields_len], GetTickCount64() + 3000, if (job.purpose == .navigate_pin) &browser_pin_send_allowed else null, job.id) catch break :query;
         defer allocator.free(reply);
         var parsed = json_reader.parse(allocator, reply) catch break :query;
         defer parsed.deinit();

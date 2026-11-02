@@ -8728,6 +8728,7 @@ pub fn main(init: std.process.Init) void {
     debugLog("launch process-start version=" ++ APP_VERSION ++ (if (IS_DEV) " dev" else ""));
     if (update_check.runRelaunchHelperIfRequested()) return;
 
+    @import("browser_pane.zig").useBrowserQuerySender(@import("bridge.zig").requestBrowserForWindowCancellable);
     defer @import("fonts.zig").unregister();
     if (!@import("fonts.zig").register()) return;
     @import("fonts.zig").bindMenuTheme(.{
