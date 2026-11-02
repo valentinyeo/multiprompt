@@ -22,13 +22,13 @@ test('IGSH-1266 a workspace folder is declared once and the last entry wins', ()
 
 test('IGSH-1266 no declared folder opens Pick repo instead of guessing', () => {
   const palette = read('src/command_palette.zig');
-  const start = palette.indexOf('fn spawnWorkspaceSession(with_agent: bool) bool {');
+  const start = palette.indexOf('fn spawnWorkspaceSession(with_agent: bool, plain_claude: bool) bool {');
   assert.ok(start >= 0, 'the new-session path must exist');
   const body = palette.slice(start, palette.indexOf('\nfn ', start + 10));
   assert.ok(!body.includes('workspacePrimaryRepo'), 'a workspace with no folder must not guess a repo');
-  assert.match(body, /pickRepoOpen\(with_agent, false, workspaceHostForNewTab\(workspace\)\);/,
+  assert.match(body, /pickRepoOpen\(with_agent, false, workspaceHostForNewTab\(workspace\), plain_claude\);/,
     'it must open the Pick repo list for this session kind');
-  assert.match(body, /return spawnWorkspaceSessionAt\(host, cwd_buf\[0\.\.cwd_len\], program_buf\[0\.\.program_len\], with_agent\);/,
+  assert.match(body, /return spawnWorkspaceSessionAt\(host, cwd_buf\[0\.\.cwd_len\], program_buf\[0\.\.program_len\], with_agent, plain_claude\);/,
     'a declared folder still starts the session there');
   assert.match(palette, /pub fn pickRepoFilteredRows\(out: \[\]RepoRow\) u32 \{/);
   assert.match(palette, /pub fn pickRepoChoose\(target: usize\) bool \{/);

@@ -89,6 +89,7 @@ const SEARCH_REOPEN_OFFSET = @import("app_state.zig").SEARCH_REOPEN_OFFSET;
 const SEARCH_NEW_CLAUDE_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_CHAT_OFFSET;
 const SEARCH_NEW_PI_CHAT_OFFSET = @import("app_state.zig").SEARCH_NEW_PI_CHAT_OFFSET;
 const SEARCH_NEW_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_TERMINAL_OFFSET;
+const SEARCH_NEW_CLAUDE_TERMINAL_OFFSET = @import("app_state.zig").SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
 const SEARCH_OPEN_SESSION_MENU_OFFSET = @import("app_state.zig").SEARCH_OPEN_SESSION_MENU_OFFSET;
 const SEARCH_SHELLS_MENU_OFFSET = @import("app_state.zig").SEARCH_SHELLS_MENU_OFFSET;
 const SEARCH_URLPICK_OFFSET = @import("app_state.zig").SEARCH_URLPICK_OFFSET;
@@ -497,7 +498,7 @@ pub const PICK_REPO_LABEL = "Pick repo...";
 pub const SET_FOLDER_LABEL = "Set workspace folder...";
 
 fn newSessionRowOrder(target: usize) u16 {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| {
         if (row == target) return @intCast(i + 1);
     }
@@ -505,10 +506,11 @@ fn newSessionRowOrder(target: usize) u16 {
 }
 
 test "IGSH-1266 new session rows keep the approved order" {
-    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
+    const rows = [_]usize{ SEARCH_NEW_CLAUDE_CHAT_OFFSET, SEARCH_NEW_CLAUDE_TERMINAL_OFFSET, SEARCH_CODEX_TMUX_OFFSET, SEARCH_NEW_PI_CHAT_OFFSET, SEARCH_NEW_TERMINAL_OFFSET, SEARCH_PICK_REPO_OFFSET, SEARCH_SET_FOLDER_OFFSET, SEARCH_OPEN_SESSION_MENU_OFFSET, SEARCH_REOPEN_OFFSET, SEARCH_SHELLS_MENU_OFFSET };
     for (rows, 0..) |row, i| try std.testing.expectEqual(@as(u16, @intCast(i + 1)), newSessionRowOrder(row));
     try std.testing.expectEqual(@as(u16, 0), newSessionRowOrder(SEARCH_SETTINGS_OFFSET));
     try std.testing.expectEqualStrings("New Claude session", palettePrimaryLabel(SEARCH_NEW_CLAUDE_CHAT_OFFSET) orelse "");
+    try std.testing.expectEqualStrings("New Claude in terminal", palettePrimaryLabel(SEARCH_NEW_CLAUDE_TERMINAL_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Codex chat", palettePrimaryLabel(SEARCH_CODEX_TMUX_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New Pi chat", palettePrimaryLabel(SEARCH_NEW_PI_CHAT_OFFSET) orelse "");
     try std.testing.expectEqualStrings("New terminal", palettePrimaryLabel(SEARCH_NEW_TERMINAL_OFFSET) orelse "");
@@ -654,6 +656,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == room.edit_room_target) return "Edit room";
     if (target >= app_state.SEARCH_ROOM_ROW_OFFSET and target < app_state.SEARCH_ROOM_ROW_OFFSET + app_state.MAX_ROOM_PALETTE_ROWS) return room.paletteRoomName(target - app_state.SEARCH_ROOM_ROW_OFFSET);
     if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET) return "New Claude session";
+    if (target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET) return "New Claude in terminal";
     if (target == SEARCH_CODEX_TMUX_OFFSET) return "New Codex chat";
     if (target == SEARCH_NEW_PI_CHAT_OFFSET) return "New Pi chat";
     if (target == SEARCH_NEW_TERMINAL_OFFSET) return "New terminal";
@@ -858,6 +861,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_ARCHIVE_OFFSET => "archive session",
         SEARCH_REOPEN_OFFSET => "reopen closed tab restore undo",
         SEARCH_NEW_CLAUDE_CHAT_OFFSET => "new claude session chat terminal tab agent",
+        SEARCH_NEW_CLAUDE_TERMINAL_OFFSET => "new claude in terminal shell old plain",
         SEARCH_NEW_PI_CHAT_OFFSET => "new pi chat session",
         SEARCH_NEW_TERMINAL_OFFSET => "new terminal shell plain",
         SEARCH_PICK_REPO_OFFSET => "pick repo choose repository folder repo",
@@ -1210,7 +1214,7 @@ pub fn paletteGroupOf(target: usize) ?u8 {
     if (target == SEARCH_CLOSE_DISCONNECTED_OFFSET) return 0;
     if (paletteRowIsSession(target)) return 0;
     if (target >= SEARCH_NEW_OFFSET and target < SEARCH_NEW_OFFSET + NUM_BUTTONS) return 0;
-    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
+    if (target == SEARCH_NEW_CLAUDE_CHAT_OFFSET or target == SEARCH_NEW_CLAUDE_TERMINAL_OFFSET or target == SEARCH_NEW_PI_CHAT_OFFSET or target == SEARCH_NEW_TERMINAL_OFFSET or
         target == SEARCH_OPEN_SESSION_MENU_OFFSET or target == SEARCH_SHELLS_MENU_OFFSET or
         target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET or target == SEARCH_PICK_REPO_BACK_OFFSET or
         (target >= SEARCH_PICK_REPO_ROW_OFFSET and target < SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS)) return 0;
@@ -1635,19 +1639,21 @@ pub fn workspaceHostForNewTab(ws: u8) u8 {
     return 0;
 }
 
-pub fn pickRepoOpen(with_agent: bool, for_folder: bool, host: u8) void {
+pub fn pickRepoOpen(with_agent: bool, for_folder: bool, host: u8, plain_claude: bool) void {
     app_state.g_search_snippet_mode = false;
     app_state.g_search_shells_mode = false;
     app_state.g_search_open_session_mode = false;
     app_state.g_search_pick_repo_mode = true;
     app_state.g_search_pick_repo_folder_mode = for_folder;
     app_state.g_search_pick_repo_with_agent = with_agent;
+    app_state.g_search_pick_repo_plain_claude = plain_claude;
     app_state.g_search_pick_repo_host = host;
 }
 
 pub fn closePickRepo() void {
     app_state.g_search_pick_repo_mode = false;
     app_state.g_search_pick_repo_folder_mode = false;
+    app_state.g_search_pick_repo_plain_claude = false;
 }
 
 fn appendJsonEscaped(out: []u8, pos: *usize, text: []const u8) bool {
@@ -1736,6 +1742,10 @@ fn saveWorkspaceFolder(host: u8, path: []const u8) bool {
 }
 
 pub fn pickRepoChoose(target: usize) bool {
+    const for_folder = app_state.g_search_pick_repo_folder_mode;
+    const with_agent = app_state.g_search_pick_repo_with_agent;
+    const plain_claude = app_state.g_search_pick_repo_plain_claude;
+    closePickRepo();
     g_pick_row_gone = false;
     g_start_fail = .none;
     if (target < SEARCH_PICK_REPO_ROW_OFFSET or target >= SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
@@ -1753,9 +1763,6 @@ pub fn pickRepoChoose(target: usize) bool {
     }
     const path = rows[idx].path[0..rows[idx].path_len];
     const host = rows[idx].host;
-    const for_folder = app_state.g_search_pick_repo_folder_mode;
-    const with_agent = app_state.g_search_pick_repo_with_agent;
-    closePickRepo();
     if (for_folder) {
         const saved = saveWorkspaceFolder(host, path);
         if (!saved) @import("diagnostics.zig").debugLog("[pick] workspace folder could not be saved");
@@ -1767,7 +1774,7 @@ pub fn pickRepoChoose(target: usize) bool {
     var cwd_len: u32 = 0;
     var slot_host: u8 = 0;
     if (workspaceConfiguredTerminalFolder(activeWorkspaceSlot(), &slot_host, &cwd_buf, &cwd_len, &program_buf, &program_len)) {}
-    return spawnWorkspaceSessionAt(host, path, program_buf[0..program_len], with_agent);
+    return spawnWorkspaceSessionAt(host, path, program_buf[0..program_len], with_agent, plain_claude);
 }
 
 fn customCmdMatchesQuery(idx: usize, query: []const u16) bool {
@@ -1894,6 +1901,28 @@ fn buildWorkspaceTmuxSessionName(out: *[64]u8) []const u8 {
     return std.fmt.bufPrint(out, "term-{x}", .{GetTickCount64()}) catch "term";
 }
 
+fn buildLiveChatSessionName(out: *[64]u8) []const u8 {
+    return std.fmt.bufPrint(out, "live-{x}", .{GetTickCount64()}) catch "live";
+}
+
+pub fn newTabOpensChatView(program: []const u8) bool {
+    return @import("agent_host.zig").eligible(program);
+}
+
+test "IGSH-1447 a new Claude tab opens as a live chat and other tabs open as terminals" {
+    try std.testing.expect(newTabOpensChatView("claude"));
+    try std.testing.expect(newTabOpensChatView("claude-code"));
+    try std.testing.expect(newTabOpensChatView(workspaceSessionProgram("", true)));
+    try std.testing.expect(!newTabOpensChatView(""));
+    try std.testing.expect(!newTabOpensChatView("codex"));
+    try std.testing.expect(!newTabOpensChatView("pi"));
+    try std.testing.expect(!newTabOpensChatView("bash"));
+    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("codex", true)));
+    try std.testing.expect(!newTabOpensChatView(workspaceSessionProgram("", false)));
+    var out: [64]u8 = undefined;
+    try std.testing.expect(std.mem.startsWith(u8, buildLiveChatSessionName(&out), "live-"));
+}
+
 test "workspace tmux program runs after shell startup and neutral fallback stays unchanged" {
     var out: [512]u8 = undefined;
     const launched = buildWorkspaceTmuxLaunchCmd(&out, "term-test", "~/project", "claude") orelse return error.TestUnexpectedResult;
@@ -1925,7 +1954,8 @@ test "IGSH-1447 a new Claude session spawns exactly the terminal launch command"
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings(expected, spawned);
     try std.testing.expect(std.mem.indexOf(u8, spawned, "tmux attach -t term-abc") != null);
-    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id") == null);
 
     const codex = workspaceLaunchCommand("codex", "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
@@ -2125,7 +2155,8 @@ test "IGSH-1266 a new tab starts Claude unless the workspace names a program" {
     const expected = agent_host.launchCommand(&expected_buf, "term-abc", "~/projects", sid) orelse
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings(expected, spawned);
-    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "host start claude ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id") == null);
 
     const neutral = workspaceLaunchCommand(workspaceSessionProgram("claude", false), "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
@@ -2133,14 +2164,18 @@ test "IGSH-1266 a new tab starts Claude unless the workspace names a program" {
 }
 
 pub fn spawnWorkspaceTmuxSession() bool {
-    return spawnWorkspaceSession(true);
+    return spawnWorkspaceSession(true, false);
+}
+
+pub fn spawnWorkspacePlainClaudeSession() bool {
+    return spawnWorkspaceSession(true, true);
 }
 
 pub fn spawnWorkspaceTerminalSession() bool {
-    return spawnWorkspaceSession(false);
+    return spawnWorkspaceSession(false, false);
 }
 
-fn spawnWorkspaceSession(with_agent: bool) bool {
+fn spawnWorkspaceSession(with_agent: bool, plain_claude: bool) bool {
     var host: u8 = 0;
     var cwd_buf: [256]u8 = undefined;
     var cwd_len: u32 = 0;
@@ -2148,9 +2183,9 @@ fn spawnWorkspaceSession(with_agent: bool) bool {
     var program_len: u32 = 0;
     const workspace = activeWorkspaceSlot();
     if (workspaceConfiguredTerminalFolder(workspace, &host, &cwd_buf, &cwd_len, &program_buf, &program_len)) {
-        return spawnWorkspaceSessionAt(host, cwd_buf[0..cwd_len], program_buf[0..program_len], with_agent);
+        return spawnWorkspaceSessionAt(host, cwd_buf[0..cwd_len], program_buf[0..program_len], with_agent, plain_claude);
     }
-    pickRepoOpen(with_agent, false, workspaceHostForNewTab(workspace));
+    pickRepoOpen(with_agent, false, workspaceHostForNewTab(workspace), plain_claude);
     return false;
 }
 
@@ -2162,7 +2197,7 @@ pub const StartFail = enum { none, capacity, launch_command, spawn_shell };
 pub var g_start_fail: StartFail = .none;
 pub var g_pick_row_gone: bool = false;
 
-fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []const u8, with_agent: bool) bool {
+fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []const u8, with_agent: bool, plain_claude: bool) bool {
     g_start_fail = .none;
     const workspace = activeWorkspaceSlot();
     const program = workspaceSessionProgram(configured_program, with_agent);
@@ -2174,11 +2209,12 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
         return false;
     }
 
-    var session_buf: [64]u8 = undefined;
-    const session = buildWorkspaceTmuxSessionName(&session_buf);
     const agent_host = @import("agent_host.zig");
     var sid_buf: [36]u8 = undefined;
-    const host_sid: ?[]const u8 = if (agent_host.eligible(program)) agent_host.mintSessionId(&sid_buf) else null;
+    const host_sid: ?[]const u8 = if (!plain_claude and agent_host.eligible(program)) agent_host.mintSessionId(&sid_buf) else null;
+    const live_chat = host_sid != null and newTabOpensChatView(program);
+    var session_buf: [64]u8 = undefined;
+    const session = if (live_chat) buildLiveChatSessionName(&session_buf) else buildWorkspaceTmuxSessionName(&session_buf);
     var cmd_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
     var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
     const launch_cmd = workspaceLaunchCommand(program, session, cwd, host_sid, &host_buf, &cmd_buf) orelse {
@@ -2194,7 +2230,9 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
     app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
     app_state.g_pending_tmux_host = host;
+    app_state.g_pending_chat_view = live_chat;
     const ok = spawnShellWithSession(.tmux, session, null, null);
+    app_state.g_pending_chat_view = false;
     app_state.g_pending_tmux_host = 0;
     app_state.g_pending_tmux_cmd_len = 0;
     if (!ok) {
@@ -2217,6 +2255,7 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
         @memcpy(app_state.shells[ns].cached_cwd[0..n], cwd[0..n]);
         app_state.shells[ns].cached_cwd_len = @intCast(n);
         publishInboxState();
+        if (live_chat and app_state.active_shell == ns and !app_state.g_chat_active) @import("chat_composer.zig").openChatView();
         saveSession();
     }
     return ok;
@@ -3265,6 +3304,12 @@ pub fn updateSearchResults() void {
         const remote_folder = workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len);
         if (keywordsMatchAll("new claude session chat terminal tab agent ctrl t", app_state.g_search_buf[0..app_state.g_search_len])) {
             app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CLAUDE_CHAT_OFFSET;
+            app_state.g_search_result_count += 1;
+        }
+        if (app_state.g_search_result_count < app_state.g_search_results.len and
+            keywordsMatchAll("new claude in terminal shell old plain", app_state.g_search_buf[0..app_state.g_search_len]))
+        {
+            app_state.g_search_results[app_state.g_search_result_count] = SEARCH_NEW_CLAUDE_TERMINAL_OFFSET;
             app_state.g_search_result_count += 1;
         }
         if (remote_folder and app_state.g_search_result_count < app_state.g_search_results.len and
@@ -5586,14 +5631,25 @@ test "IGSH-1266 declared folder wins and a later entry for the same workspace re
 test "IGSH-1266 no declared folder opens the pick repo list and spawns nothing" {
     app_state.g_custom_cmds_count = 0;
     defer closePickRepo();
-    try std.testing.expect(!spawnWorkspaceSession(false));
+    try std.testing.expect(!spawnWorkspaceSession(false, false));
     try std.testing.expect(app_state.g_search_pick_repo_mode);
     try std.testing.expect(!app_state.g_search_pick_repo_folder_mode);
     try std.testing.expectEqual(@as(u32, 0), app_state.shell_count);
 }
 
+test "repo picker keeps terminal intent only for its current request" {
+    defer closePickRepo();
+    pickRepoOpen(true, false, 0, true);
+    try std.testing.expect(app_state.g_search_pick_repo_plain_claude);
+    closePickRepo();
+    try std.testing.expect(!app_state.g_search_pick_repo_plain_claude);
+    pickRepoOpen(true, false, 0, true);
+    pickRepoOpen(true, false, 0, false);
+    try std.testing.expect(!app_state.g_search_pick_repo_plain_claude);
+}
+
 test "IGSH-1266 Esc closes the pick repo list and starts no tab" {
-    pickRepoOpen(true, true, 0);
+    pickRepoOpen(true, true, 0, false);
     const before = app_state.shell_count;
     closePickRepo();
     try std.testing.expect(!app_state.g_search_pick_repo_mode);

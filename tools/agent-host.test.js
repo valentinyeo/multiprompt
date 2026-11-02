@@ -18,7 +18,13 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   const end = palette.indexOf('pub fn activeRemoteContextForCodexTmux(');
   assert.ok(start >= 0 && end > start, 'spawnWorkspaceTmuxSession must exist');
   const body = palette.slice(start, end);
-  assert.match(body, /if \(agent_host\.eligible\(program\)\) agent_host\.mintSessionId\(&sid_buf\) else null/);
+  assert.match(body, /if \(!plain_claude and agent_host\.eligible\(program\)\) agent_host\.mintSessionId\(&sid_buf\) else null/);
+  assert.match(body, /pub fn spawnWorkspaceTmuxSession\(\) bool \{\s*return spawnWorkspaceSession\(true, false\);/, 'Ctrl+T always opens a live chat');
+  assert.match(body, /pub fn spawnWorkspacePlainClaudeSession\(\) bool \{\s*return spawnWorkspaceSession\(true, true\);/, 'the old terminal Claude stays available from Ctrl+K');
+  assert.match(body, /spawnWorkspaceSessionAt\(host, cwd_buf\[0\.\.cwd_len\], program_buf\[0\.\.program_len\], with_agent, plain_claude\)/);
+  assert.match(body, /pickRepoOpen\(with_agent, false, workspaceHostForNewTab\(workspace\), plain_claude\)/);
+  assert.match(palette, /const plain_claude = app_state\.g_search_pick_repo_plain_claude;\s*closePickRepo\(\);/);
+  assert.match(palette, /spawnWorkspaceSessionAt\(host, path, program_buf\[0\.\.program_len\], with_agent, plain_claude\)/);
   assert.match(body, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse \{/);
   assert.match(body, /var host_buf: \[WORKSPACE_HOST_LAUNCH_MAX\]u8 = undefined;/);
   assert.match(body, /if \(launch_cmd\.len > app_state\.g_pending_tmux_cmd\.len\)/, 'the pending command buffer must be checked before the copy');
@@ -39,22 +45,29 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.match(palette.slice(codex, codexEnd), /tmux send-keys -t /);
 });
 
-test('IGSH-1447 Ctrl+T runs Claude in the terminal with a known session id and marks the terminal as owner so no hidden host starts', () => {
+test('IGSH-1447 Ctrl+T opens a live chat parked on an idle wait with no shell and no terminal Claude', () => {
   const host = read('src/agent_host.zig');
   const launch = host.slice(host.indexOf('pub fn launchCommand('));
   const format = launch.match(/std\.fmt\.bufPrint\(out, "([^"]*)"/);
   const args = launch.match(/\.\{ ([^}]*?) \}\) catch null;/);
   assert.ok(format && args, 'the launch command must be readable');
   const mode = host.match(/const mode = "([^"]*)";/);
-  const values = { session: 'term-abc', cwd: '~/projects', sid: 'ffffffff-ffff-4fff-bfff-ffffffffffff', mode: mode ? mode[1] : '', READER: '~/.multiprompt-runtime/reader.py' };
+  const values = { session: 'live-abc', cwd: '~/projects', sid: 'ffffffff-ffff-4fff-bfff-ffffffffffff', mode: mode ? mode[1] : '', READER: '~/.multiprompt-runtime/reader.py' };
   const parts = format[1].split('{s}');
   const ordered = args[1].split(',').map((value) => value.trim());
   assert.equal(parts.length - 1, ordered.length, 'every format hole must have one argument');
   const command = parts.reduce((text, part, index) => text + (index > 0 ? values[ordered[index - 1]] : '') + part, '');
   assert.equal(command,
-    "tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux term-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host handover claude ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; tmux send-keys -t term-abc 'cd ~/projects && claude --session-id ffffffff-ffff-4fff-bfff-ffffffffffff --permission-mode bypassPermissions' Enter; tmux attach -t term-abc");
-  assert.ok(!command.includes('host start'), 'a new tab must not start Claude hidden behind a plain shell');
-  assert.ok(command.indexOf('host handover') < command.indexOf('send-keys'), 'the terminal must own the chat before Claude starts in it');
+    "tmux new-session -d -s live-abc -c ~/projects 'python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux live-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host start claude ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; exec sleep infinity' 2>/dev/null; tmux attach -t live-abc");
+  assert.ok(!command.includes('handover'), 'the terminal must never own a live chat');
+  assert.ok(!command.includes('send-keys'), 'nothing is typed into a shell');
+  assert.ok(!command.includes('claude --session-id'), 'Claude must not run in the terminal');
+  assert.ok(!command.includes('"'), 'the command is wrapped in double quotes for ssh');
+
+  const palette = read('src/command_palette.zig');
+  assert.match(palette, /const live_chat = host_sid != null and newTabOpensChatView\(program\);/);
+  assert.match(palette, /app_state\.g_pending_chat_view = live_chat;/);
+  assert.match(palette, /if \(live_chat\) buildLiveChatSessionName/);
 });
 
 test('IGSH-1266 mp-send ships inside the runtime bundle and is published next to the reader', () => {
