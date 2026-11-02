@@ -73,6 +73,7 @@
                             Press @(0x12, 0x43) 'Alt+C: show new local console'
                         }
                         Wait-WorkspaceSurface $localState.active_workspace $localTab $false
+                        $localConsole = [VerifyNative]::GetForegroundWindow()
                         $prefix = Join-Path $scratch ('local-route-' + $mode)
                         Type-Text ('"' + $localAgent + '" ' + $mode + ' "' + $prefix + '"')
                         Press @(0x0D) 'Enter: launch console-backed Claude stand-in'
@@ -127,7 +128,9 @@
                                         @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { $_.Current.ProcessId -eq $process.Id -and -not $_.Current.IsOffscreen }).Count -eq 1
                                     } "$stage shows the owned transcript"
                                 } else {
-                                    Wait-WorkspaceSurface $journeyState.active_workspace $localTab $false
+                                    Wait-Until {
+                                        [VerifyNative]::GetForegroundWindow() -eq $localConsole -and [VerifyNative]::Class($localConsole) -ceq 'ConsoleWindowClass' -and [VerifyNative]::GetAncestor($localConsole, 3) -eq $script:window -and [VerifyNative]::IsWindowVisible($localConsole)
+                                    } "$stage shows the original owned console"
                                 }
                                 $journey.steps += @{ stage = $stage; chat = $chat; shellId = $journeyId; fixturePid = $fixturePid; fixtureStartUtc = $fixtureStart }
                                 Save-Json $journey 'running-claude-switch.json'
