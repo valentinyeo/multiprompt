@@ -3046,7 +3046,7 @@ pub fn updateSearchResults() void {
         }
         if (tc_idx) |ti| {
             if (app_state.g_search_result_count < app_state.g_search_results.len) {
-                const chat_str: []const u8 = if (app_state.shells[ti].chat_view_on) "Switch to Terminal" else "Switch to Live Chat";
+                const chat_str: []const u8 = if (app_state.shells[ti].chat_view_on) "Switch to shell" else "Switch to chat view";
                 if (app_state.g_search_len == 0 or labelsMatchQuery(&.{ chat_str, "chat view", "live chat", "switch", "terminal", "alt c" }, app_state.g_search_buf[0..app_state.g_search_len])) {
                     app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_CHAT_VIEW;
                     app_state.g_search_result_count += 1;

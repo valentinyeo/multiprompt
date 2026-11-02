@@ -1445,14 +1445,6 @@ fn showPickRepoFailure(saving_folder: bool) void {
     }
 }
 
-fn toggleChatViewOrMove() void {
-    if (app_state.active_shell < app_state.shell_count) {
-        const wanted = !app_state.g_chat_active;
-        if (@import("command_palette.zig").startMoveChat(app_state.active_shell, if (wanted) 0 else 1)) return;
-    }
-    toggleChatView();
-}
-
 fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
     if (freeze_recorder.heartbeat(msg, wp)) return 0;
     freeze_recorder.note(msg, app_state.active_shell, if (app_state.g_inbox_active) .inbox else if (app_state.g_all_sessions_active) .sessions else if (app_state.g_search_active) .search else if (app_state.g_shortcuts_active) .shortcuts else if (app_state.g_changelog_active) .changelog else if (app_state.g_browser_focus_mode) .browser else if (app_state.g_chat_active) .chat else .terminal);
@@ -3766,7 +3758,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         },
         WM_APP_CHAT_TOGGLE => {
             if (!@import("room_frontend.zig").privateActionsAllowed()) return 0;
-            toggleChatViewOrMove();
+            toggleChatView();
             return 0;
         },
         WM_APP_CHAT_HANDOVER => {
@@ -6947,7 +6939,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                         app_state.g_shell_focused = true;
                         clearSearchBackdrop();
                         _ = @import("console.zig").switchToShellByUser(ti);
-                        toggleChatViewOrMove();
+                        toggleChatView();
                         _ = InvalidateRect(hwnd, null, 0);
                         _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     }
