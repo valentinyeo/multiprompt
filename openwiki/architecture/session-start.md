@@ -34,7 +34,8 @@ instead of a tab.
 
 `workspaceSessionProgram` then picks the program: an explicit `alt_t` wins, and
 with no `alt_t` the tab starts `claude`, so a plain new tab is a Claude session
-on the app-owned host (`agent_host.eligible` is true and `launchCommand` runs).
+running in the terminal with a known session id (`agent_host.eligible` is true
+and `launchCommand` runs).
 `spawnWorkspaceTerminalSession` is the same spawn with no program, kept for the
 neutral tab; `Ctrl+K` reaches a plain shell today through `New Host 1 VPS
 Shell`.
@@ -211,7 +212,8 @@ tests, `tools/chat-tmux-send-test.py` (delivery through the reader),
 The host contract is `openwiki/architecture/agent-host.md`. One chat is one agent
 session id; the runtime owns at most one host process per chat and speaks the
 agent CLI's `--print --input-format stream-json --output-format stream-json`
-protocol. Nothing is typed into a terminal.
+protocol. A new tab starts Claude in the terminal; the host runs only after
+"Switch to Live Chat".
 
 ### New session, in order
 
@@ -221,16 +223,17 @@ protocol. Nothing is typed into a terminal.
 2. When it is, the app mints the session id itself (`mintSessionId`, a version 4
    UUID) before anything is spawned, and builds one remote command with
    `agent_host.launchCommand`: create the tmux session, run `host enable` and
-   `host start` from the selected runtime file, then attach. No `send-keys`, no
-   program typed into a pane, no reliance on a hook to discover the id later.
+   `host handover` from the selected runtime file, type
+   `claude --session-id <sid>` into the pane, then attach. Handover marks the
+   terminal as the owner, so dispatch never starts a hidden host next to the
+   terminal Claude, and no hook is needed to discover the id later.
 3. The tab records the minted id as the chat's `sid` at spawn time, so Chat View
-   has an identity from the first paint and accepts typing immediately. Messages
-   sent before the host is up are rows in the shared store keyed by that id; the
-   host drains them once it is ready, and a retry after reconnect is idempotent by
-   message id.
-4. Delivery no longer runs through a terminal prompt box, so a draft, a
-   permission prompt or a TUI repaint cannot refuse a message. `draft_present`
-   and `draft_not_cleared` disappear from the Claude path.
+   has an identity from the first paint. Once the chat moves to Live Chat,
+   messages are rows in the shared store keyed by that id; the host drains them
+   once it is ready, and a retry after reconnect is idempotent by message id.
+4. While the chat runs on the host, delivery does not run through a terminal
+   prompt box, so a draft, a permission prompt or a TUI repaint cannot refuse a
+   message.
 5. The terminal is the tab's visible content. A new tab no longer opens the
    chat: `Ctrl+T`, `Alt+T`, the sidebar plus and the palette row all land in the
    terminal, and the chat opens only when asked for. The switch is the existing
@@ -249,11 +252,13 @@ protocol. Nothing is typed into a terminal.
 ### Switch
 
 - `src/agent_host.zig` `ENABLED` is on. A program whose name starts with `claude`
-  starts on the app-owned host; every other program keeps the terminal start.
+  gets a minted session id and an enabled, handed-over host config; every other
+  program keeps the plain terminal start.
 - The per-chat `~/.local/state/multiprompt/agent-host/<key>.config.json`
-  `enabled` flag decides whether `message_dispatch` hands the row to the host
-  instead of the connector. The start command writes it, so a new Claude session
-  is on. A chat with no such file — anything created before this change — keeps
+  `enabled` flag, together with the absence of the terminal owner file, decides
+  whether `message_dispatch` hands the row to the host instead of the connector.
+  The start command writes both, so a new Claude session stays in the terminal
+  until it is moved. A chat with no such file — anything created before this change — keeps
   the connector path.
 
 ### Workspace folder and Pick repo

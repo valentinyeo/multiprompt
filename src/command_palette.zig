@@ -1911,7 +1911,7 @@ pub fn workspaceLaunchCommand(program: []const u8, session: []const u8, cwd: []c
     return buildWorkspaceTmuxLaunchCmd(command_out, session, cwd, program);
 }
 
-test "IGSH-1266 a new Claude session spawns exactly the host launch command" {
+test "IGSH-1447 a new Claude session spawns exactly the terminal launch command" {
     var host_buf: [1024]u8 = undefined;
     var command_buf: [512]u8 = undefined;
     const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
@@ -1922,7 +1922,7 @@ test "IGSH-1266 a new Claude session spawns exactly the host launch command" {
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings(expected, spawned);
     try std.testing.expect(std.mem.indexOf(u8, spawned, "tmux attach -t term-abc") != null);
-    try std.testing.expect(std.mem.indexOf(u8, spawned, "send-keys") == null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
 
     const codex = workspaceLaunchCommand("codex", "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
@@ -2122,7 +2122,7 @@ test "IGSH-1266 a new tab starts Claude unless the workspace names a program" {
     const expected = agent_host.launchCommand(&expected_buf, "term-abc", "~/projects", sid) orelse
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings(expected, spawned);
-    try std.testing.expect(std.mem.indexOf(u8, spawned, "send-keys") == null);
+    try std.testing.expect(std.mem.indexOf(u8, spawned, "claude --session-id ffffffff-ffff-4fff-bfff-ffffffffffff") != null);
 
     const neutral = workspaceLaunchCommand(workspaceSessionProgram("claude", false), "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;

@@ -37,19 +37,22 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.match(palette.slice(codex, codexEnd), /tmux send-keys -t /);
 });
 
-test('IGSH-1266 the host start command starts the host and never types into a pane', () => {
+test('IGSH-1447 Ctrl+T runs Claude in the terminal with a known session id and marks the terminal as owner so no hidden host starts', () => {
   const host = read('src/agent_host.zig');
-  const start = host.indexOf('pub fn launchCommand(');
-  const body = host.slice(start, host.indexOf('test "IGSH-1266 session ids'));
-  assert.match(body, /python3 \{s\} host enable claude \{s\} --tmux \{s\} --cwd \{s\}\{s\}/);
-  assert.match(body, /python3 \{s\} host start claude \{s\} --tmux \{s\} --cwd \{s\}\{s\}/);
-  assert.match(body, /const mode = " --permission-mode bypassPermissions";/);
-  assert.equal((body.match(/\{s\} --tmux \{s\} --cwd \{s\}\{s\}/g) || []).length, 2,
-    'both host commands must pass the permission mode the other Claude starts already use');
-  assert.equal((body.match(/, mode,/g) || []).length, 2, 'the mode must reach both host commands');
-  assert.match(body, /tmux new-session -d -s \{s\} -c \{s\}/);
-  assert.match(body, /tmux attach -t \{s\}/);
-  assert.ok(!body.includes('send-keys'), 'the Claude start must not type into a pane');
+  const launch = host.slice(host.indexOf('pub fn launchCommand('));
+  const format = launch.match(/std\.fmt\.bufPrint\(out, "([^"]*)"/);
+  const args = launch.match(/\.\{ ([^}]*?) \}\) catch null;/);
+  assert.ok(format && args, 'the launch command must be readable');
+  const mode = host.match(/const mode = "([^"]*)";/);
+  const values = { session: 'term-abc', cwd: '~/projects', sid: 'ffffffff-ffff-4fff-bfff-ffffffffffff', mode: mode ? mode[1] : '', READER: '~/.multiprompt-runtime/reader.py' };
+  const parts = format[1].split('{s}');
+  const ordered = args[1].split(',').map((value) => value.trim());
+  assert.equal(parts.length - 1, ordered.length, 'every format hole must have one argument');
+  const command = parts.reduce((text, part, index) => text + (index > 0 ? values[ordered[index - 1]] : '') + part, '');
+  assert.equal(command,
+    "tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; python3 ~/.multiprompt-runtime/reader.py host enable claude ffffffff-ffff-4fff-bfff-ffffffffffff --tmux term-abc --cwd ~/projects --permission-mode bypassPermissions >/dev/null 2>&1; python3 ~/.multiprompt-runtime/reader.py host handover claude ffffffff-ffff-4fff-bfff-ffffffffffff >/dev/null 2>&1; tmux send-keys -t term-abc 'cd ~/projects && claude --session-id ffffffff-ffff-4fff-bfff-ffffffffffff --permission-mode bypassPermissions' Enter; tmux attach -t term-abc");
+  assert.ok(!command.includes('host start'), 'a new tab must not start Claude hidden behind a plain shell');
+  assert.ok(command.indexOf('host handover') < command.indexOf('send-keys'), 'the terminal must own the chat before Claude starts in it');
 });
 
 test('IGSH-1266 mp-send ships inside the runtime bundle and is published next to the reader', () => {
