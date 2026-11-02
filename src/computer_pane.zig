@@ -292,7 +292,7 @@ fn startJob(remote_port: u16, profile: ?ProfileKey) bool {
     var pos: usize = 0;
     if (!@import("console.zig").appendSshExe(&prefix, &pos)) return false;
     const alias = @import("console.zig").tmuxSshTarget(owner.host);
-    const script = @import("computer_assets").discovery;
+    const script = @import("computer/resources.zig").discovery;
     const handle = mp_computer_ssh_start(&prefix, pos, alias.ptr, alias.len, script.ptr, script.len, remote_port, if (profile) |*key| key else null) orelse return false;
     machine.job = .{ .handle = handle, .generation = machine.generation, .owner = owner, .target = if (remote_port == 0) null else machine.target };
     machine.phase = if (remote_port == 0) .discover else .forward;
@@ -582,23 +582,23 @@ test "IGSH-1087 target identity includes resolved profile user display and servi
 
 pub export fn mp_computer_asset(name: [*]const u8, length: usize, size: *usize) ?[*]const u8 {
     if (std.mem.eql(u8, name[0..length], "vendor/webview2/WIN32METADATA-LICENSE")) {
-        const data = @embedFile("computer_windows_header_license");
+        const data = @embedFile("computer/vendor/webview2/WIN32METADATA-LICENSE");
         size.* = data.len;
         return data.ptr;
     }
     inline for (.{ "LICENSE.txt", "NOTICE.txt" }) |path| {
         if (std.mem.eql(u8, name[0..length], "vendor/webview2/" ++ path)) {
-            const data = if (comptime std.mem.eql(u8, path, "LICENSE.txt")) @embedFile("computer_webview2_license") else @embedFile("computer_webview2_notice");
+            const data = if (comptime std.mem.eql(u8, path, "LICENSE.txt")) @embedFile("computer/vendor/webview2/LICENSE.txt") else @embedFile("computer/vendor/webview2/NOTICE.txt");
             size.* = data.len;
             return data.ptr;
         }
     }
-    return @import("computer_assets").asset(name[0..length], size);
+    return @import("computer/resources.zig").asset(name[0..length], size);
 }
 
 pub export fn mp_computer_loader(size: *usize, hash: *[*:0]const u8) ?[*]const u8 {
     const arm = @import("builtin").cpu.arch == .aarch64;
-    const data = @embedFile("computer_loader");
+    const data = if (comptime @import("builtin").cpu.arch == .aarch64) @embedFile("computer/vendor/webview2/arm64/WebView2Loader.dll") else @embedFile("computer/vendor/webview2/x64/WebView2Loader.dll");
     hash.* = if (arm) "0f753606aaa25e21b6c6f4c270ab4a9831029e75c1741d9f27a434961ee6b657" else "2f965e10aed3b356a408978a0e6d74eb86e3e722dd008fa9ad39f68884479e85";
     size.* = data.len;
     return data.ptr;

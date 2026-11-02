@@ -7752,7 +7752,8 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             return DefWindowProcW(hwnd, msg, wp, lp);
         },
         WM_SETFOCUS => {
-            const allowed = !computer.controlling() and focusGuardComposerRepairAllowed();
+            if (computer.controlling()) return DefWindowProcW(hwnd, msg, wp, lp);
+            const allowed = focusGuardComposerRepairAllowed();
             if (allowed) _ = SetFocus(app_state.g_chat_composer_hwnd);
             altqLog("composer_focus site=setfocus allowed={} pending={} focus={X} chat={}", .{ allowed, app_state.g_native_browser_focus_pending_shell_id, altqPtr(GetFocus()), app_state.g_chat_active });
             return DefWindowProcW(hwnd, msg, wp, lp);

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 
 def load_discovery():
-    path = Path(__file__).resolve().parents[1] / 'assets/computer/discover.py'
+    path = Path(__file__).resolve().parents[1] / 'src/computer/discover.py'
     if not path.is_file():
         return None
     spec = importlib.util.spec_from_file_location('computer_discovery', path)
