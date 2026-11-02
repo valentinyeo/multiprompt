@@ -1358,7 +1358,7 @@ pub fn paintInbox(hdc: HANDLE) void {
     const bg_br = CreateSolidBrush(bg);
     _ = FillRect(hdc, &rc, bg_br);
     _ = DeleteObject(bg_br);
-    const bold_font = @import("win32.zig").CreateFontW(uiScaled(-14), 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 4, 0, L(@import("fonts.zig").UI_MEDIUM_FACE));
+    const bold_font = @import("fonts.zig").create(uiScaled(-14), 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 4, 0, L(@import("fonts.zig").UI_MEDIUM_FACE));
     defer {
         if (bold_font != null) _ = DeleteObject(bold_font);
     }

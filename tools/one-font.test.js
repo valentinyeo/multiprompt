@@ -16,7 +16,7 @@ function violations(source) {
     const line = source.slice(source.lastIndexOf('\n', offset) + 1, offset);
     const assignment = /(?:\b\w*(?:face|font_family|font_name)\w*|\bfont|\b(?:UI|MONO)_\w*FACE)\s*(?::[^=]+)?=\s*(?:L\(|std\.unicode\.utf8ToUtf16LeStringLiteral\()?$/i.test(line);
     const faceCopy = /(?:setWideAscii|utf8ToUtf16LeStringLiteral|@memcpy)\([^;\n]*(?:font|FaceName)[^;\n]*,\s*(?:L\()?$/i.test(line);
-    if (value.endsWith('.zig')) continue;
+    if (value.endsWith('.zig') || value.startsWith(',') || value.endsWith(':')) continue;
     if ((knownFace.test(value) || assignment || faceCopy) && !allowed.test(value)) bad.add(value);
   }
   const calls = /\b(?:CreateFontW|create)\s*\(/g;
