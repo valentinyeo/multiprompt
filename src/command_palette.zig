@@ -1963,9 +1963,8 @@ test "IGSH-1266 a refused pick says which step refused it" {
 }
 
 fn finishAdoptHostJob(job: *AdoptHostJob) void {
-    const a = std.heap.page_allocator;
-    a.destroy(job);
     job.finished.store(true, .release);
+    std.heap.page_allocator.destroy(job);
 }
 
 fn adoptHostThread(job: *AdoptHostJob) void {
@@ -2008,9 +2007,8 @@ pub fn startAdoptHost(tab: usize) bool {
 }
 
 fn finishMoveChatJob(job: *MoveChatJob) void {
-    const a = std.heap.page_allocator;
-    a.destroy(job);
     job.finished.store(true, .release);
+    std.heap.page_allocator.destroy(job);
 }
 
 fn moveChatThread(job: *MoveChatJob) void {
