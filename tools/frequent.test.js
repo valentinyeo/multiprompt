@@ -156,9 +156,8 @@ fn paintRows() void {
         const y = layout.top + @as(i32, @intCast(drawn)) * layout.stride;
         drawn += 1;
         const name = inboxNameBounds(layout, row);
-        const len = @min(@as(usize, row.name_len), drawn_names[drawn_count].len);
         drawn_names[drawn_count] = .{0} ** 64;
-        @memcpy(drawn_names[drawn_count][0..len], row.name[0..len]);
+        _ = asciiToU16(row.name[0..@min(row.name_len, row.name.len)], &drawn_names[drawn_count]);
         drawn_y[drawn_count] = y;
         drawn_left[drawn_count] = name.left;
         drawn_count += 1;
@@ -338,7 +337,9 @@ test('v2 only explicit user navigation arms looks and switches never stamp used'
   for (const msg of ['WM_APP_NEXT_TAB', 'WM_APP_PREV_TAB', 'WM_APP_SWITCH_TAB']) assert.match(between(`        ${msg} =>`, '\n        WM_APP_', main), /switchToShellByUser/);
   assert.match(main, /switchToShellByUser\(tab_idx\)/);
   assert.match(main, /switchToShellByUser\(@intCast\(target\)\)/);
-  assert.doesNotMatch(between('        WM_APP_NEXT_UNREAD =>', '\n        WM_APP_', main), /switchToShellByUser/);
+  const nextUnread = between('        WM_APP_NEXT_UNREAD =>', '\n        WM_APP_', main);
+  assert.match(nextUnread, /switchToShellByUser\(idx\)/);
+  assert.doesNotMatch(nextUnread, /stampSessionUse/);
   assert.match(between('pub fn jumpToInboxRow(', 'fn jumpToInboxRowSelected(', inbox), /jumpToInboxRowSelected\(ri, false\)/);
   assert.match(between('pub fn inboxJump(', 'pub fn inboxStepJump(', inbox), /jumpToInboxRowSelected\(ri, true\)/);
   assert.doesNotMatch(between('pub fn inboxStepJump(', 'pub fn refreshNextUnreadCache(', inbox), /sessionFrontSelected|switchToShellByUser|Selected\(ri, true\)/);
@@ -364,9 +365,12 @@ test('v2 shared fixture is byte-identical and Frequent stays first with selected
   assert.deepEqual(fixture.expected, ['beta', 'alpha', 'gamma']);
   assert.ok(fixture.layout.tabs.every(tab => tab.tmux_host === 0));
   const paint = between('fn paintInbox(', 'fn openInbox(');
-  assert.ok(paint.indexOf('"Frequent"') < paint.indexOf('"All"'));
-  assert.ok(paint.indexOf('"All"') < paint.indexOf('"Favorites"'));
-  assert.match(read('src/session.zig'), /migrateSplit/);
-  assert.ok(read('src/sidebar.zig').includes('L("Inbox: Frequent")'));
+  assert.match(paint, /const builtins = frequent\.builtinSplits\(/);
+  assert.match(paint, /for \(builtins\.slice\(\)\) \|split\|/);
+  assert.match(read('src/frequent.zig'), /const order: \[3\]u32 = if \(settings\.frequent_first\) \.\{ frequent_split, all_split, favorites_split \} else \.\{ all_split, favorites_split, frequent_split \};/);
+  assert.match(read('src/session.zig'), /frequent\.zig"\)\.migrateSplit\(/);
+  assert.match(read('src/frequent.zig'), /pub fn migrateSplit\(tab: u32, visits_order: bool\) u32/);
+  assert.ok(read('src/sidebar.zig').includes('L(ui_words.palette_inbox_frequent)'));
+  assert.ok(read('src/ui_words.zon').includes('.palette_inbox_frequent = "Inbox: frequent"'));
   assert.ok(read('src/shortcuts.zig').includes('.a = "Ctrl+K -> Inbox: Frequent"'));
 });

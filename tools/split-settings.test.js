@@ -97,6 +97,7 @@ ${normalize(toggle)}
 fn paintSplits() void {
     const hdc: usize = 0;
     const layout = InboxLayout{ .left = 0, .right = 1000, .top = 72, .stride = 58, .row_height = 56, .max_rows = 13, .scroll = 0 };
+    ensureInboxSplitVisible();
 ${normalize(paint)}
 }
 ${normalize(navigationTest)}
