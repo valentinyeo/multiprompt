@@ -288,7 +288,9 @@ function chatHandoffHarness(text) {
   const open = fn(text, 'openChatView')
     .replaceAll('@import("focus.zig").parkMainWindowBeforeActiveShellRemoval', 'parkMainWindowBeforeActiveShellRemoval')
     .replaceAll('@import("win32.zig").TIMER_CHAT_BROWSER_SWAP', 'TIMER_CHAT_BROWSER_SWAP')
-    .replaceAll('@import("chat_switch.zig").paint_deadline_ms', '30');
+    .replaceAll('@import("chat_switch.zig").paint_deadline_ms', '30')
+    .replaceAll('@import("room_frontend.zig").privateActionsAllowed()', 'true')
+    .replaceAll('@import("browser_pane.zig").armPinnedBrowserEntry', 'armPinnedBrowserEntry');
   return `const std = @import("std");
 const HANDLE = ?usize;
 const SW_HIDE = 0;
@@ -316,6 +318,7 @@ var g_shell_focused = true;
 var g_chat_active = false;
 var g_startup_progress = false;
 var g_restoring = false;
+var g_account_applying = false;
 var g_voice_deferred_text: [0]struct { shell_id: u32, len: usize, text: [1]u16 } = .{};
 var foreground: HANDLE = 10;
 var focused: HANDLE = 10;
@@ -335,6 +338,7 @@ var g_chat_foreground_retries: u32 = 0;
 var g_ws_switch_focus_grace: u64 = 0;
 var g_refocus_waiting_for_alt_release = false;
 fn altqLog(comptime _: []const u8, _: anytype) void {}
+fn armPinnedBrowserEntry(_: u32) void {}
 fn altqPtr(hwnd: HANDLE) usize { return hwnd orelse 0; }
 fn GetFocus() HANDLE { return focused; }
 fn GetAsyncKeyState(_: i32) i16 { return if (alt_held) -32768 else 0; }
