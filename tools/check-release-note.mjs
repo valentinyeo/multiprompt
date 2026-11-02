@@ -52,7 +52,8 @@ function run() {
   try {
     kind = checkReleaseNote(readTree(tag), readTree('HEAD'), changed, lines);
   } catch (error) {
-    throw new Error(`${error.message} since ${tag}, or add a "No-Note: <reason>" line to a commit message for a change with no visible effect`);
+    const files = changed.filter(shipped).slice(0, 5).join(', ');
+    throw new Error(`${error.message} since ${tag} (${files}), or add a "No-Note: <reason>" line to a commit message for a change with no visible effect`);
   }
   console.log(`${kind} ${tag}`);
 }

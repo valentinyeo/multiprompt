@@ -65,6 +65,7 @@ test('a shipped change since the last release fails without a new fragment', t =
   assert.equal(result.status, 1, result.stdout);
   assert.match(result.stderr, /App code changed: add changelog\.d/);
   assert.match(result.stderr, /v0\.28\.735/);
+  assert.match(result.stderr, /src\/main\.zig/);
   assert.match(result.stderr, /No-Note/);
 });
 
