@@ -106,7 +106,7 @@
                             }
                             if ($ancestorId -ne $process.Id) { throw 'Claude stand-in is not a descendant of the owned app' }
                             $fixtureStart = (Get-Process -Id $fixturePid).StartTime.ToUniversalTime().ToString('o')
-                            $journey = @{ name = 'running-claude-stand-in-switch'; passed = $false; scope = 'local console stand-in, not a real Claude conversation or cloud delivery'; appPid = $process.Id; fixturePid = $fixturePid; fixtureParentPid = $parentId; fixtureStartUtc = $fixtureStart; shellId = $journeyId; activeTab = $localTab; tabIds = $journeyIds; steps = @() }
+                            $journey = @{ name = 'running-claude-stand-in-switch'; passed = $false; scope = 'local console stand-in, not a real Claude conversation or cloud delivery'; appPid = $process.Id; fixturePid = $fixturePid; fixtureParentPid = $parentId; fixtureStartUtc = $fixtureStart; shellId = $journeyId; activeTab = $localTab; tabIds = $journeyIds; steps = @(); contextTargets = @() }
                             $result.checks += $journey
                             $checkJourney = {
                                 param([string]$stage, [bool]$chat)
@@ -149,16 +149,58 @@
                                 $label = if ($chat) { 'Switch to chat view' } else { 'Switch to shell' }
                                 Focus-Palette 'switch to terminal' 6305
                                 Snapshot $(if ($chat) { 'running-claude-palette-chat' } else { 'running-claude-palette-shell' })
+                                $paintBoundary = @(Get-Content $debugLog).Count
                                 Press @(0x0D) "Enter: $label for the current tab"
                                 & $checkJourney $(if ($chat) { 'palette-chat' } else { 'palette-shell' }) $chat
                             }
                             foreach ($chat in @($true, $false)) {
                                 $label = if ($chat) { 'Switch to chat view' } else { 'Switch to shell' }
+                                $state = Read-Session
+                                if ($null -eq $state -or $state.active_workspace -ne $journeyState.active_workspace -or $state.active_tab -ne $localTab -or [int]$state.active_shell_id -ne $journeyId -or (@($state.tabs | ForEach-Object { [int]$_.shell_id }) -join ',') -cne ($journeyIds -join ',')) { throw 'Context target changed the selected session or tab list' }
+                                for ($i = 0; $i -lt $journeyIds.Count; $i++) {
+                                    $expectedView = if ($i -eq $localTab) { -not $chat } else { $otherViews[$i] }
+                                    if ([bool]($state.tabs[$i].PSObject.Properties['cv'] -and $state.tabs[$i].cv) -ne $expectedView) { throw 'Context target view state changed' }
+                                }
+                                $indices = @(for ($i = 0; $i -lt @($state.tabs).Count; $i++) { if ([int]$state.tabs[$i].shell_id -eq $journeyId) { $i } })
+                                if ($indices.Count -ne 1) { throw 'Context target SID is not unique' }
+                                $targetIndex = [int]$indices[0]
+                                $shot = if ($chat) { 'running-claude-pre-context-chat' } else { 'running-claude-pre-context-shell' }
+                                Snapshot $shot
+                                $lines = @(Get-Content $debugLog)
+                                if ($lines.Count -lt $paintBoundary) { throw 'Debug log changed across the paint boundary' }
+                                $pair = $null
+                                for ($i = $paintBoundary; $i -lt $lines.Count; $i++) {
+                                    if ($lines[$i] -match ('\[sidebar-avatar\] target=' + $targetIndex + ' face=(\d+) color=(\d+)$')) {
+                                        $face = $Matches[1]; $color = $Matches[2]
+                                        if ($i + 1 -ge $lines.Count -or $lines[$i + 1] -notmatch ('\[bots\] face=' + $face + ' color=' + $color + ' rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)$')) { throw 'Context target paint pair is incomplete or ambiguous' }
+                                        $pair = @{ avatar = $lines[$i]; bots = $lines[$i + 1]; left = [int]$Matches[1]; top = [int]$Matches[2]; right = [int]$Matches[3]; bottom = [int]$Matches[4] }
+                                    }
+                                }
+                                if ($null -eq $pair) { throw 'No fresh SID-qualified context target paint pair' }
+                                $client = New-Object VerifyNative+Rect
+                                $snapshotPath = Join-Path $scratch 'roaming/ZigShell/session.json.launch.json'
+                                if (-not [VerifyNative]::GetClientRect($script:window, [ref]$client) -or -not (Test-Path $snapshotPath)) { throw 'Context target client or sidebar geometry unavailable' }
+                                $sidebar = Get-Content $snapshotPath -Raw | ConvertFrom-Json
+                                if (-not $sidebar.PSObject.Properties['sidebar_width'] -or ($sidebar.PSObject.Properties['sidebar_collapsed'] -and $sidebar.sidebar_collapsed) -or ($state.PSObject.Properties['sidebar_collapsed'] -and $state.sidebar_collapsed) -or ($state.PSObject.Properties['hide_sidebar'] -and $state.hide_sidebar) -or [int]$sidebar.sidebar_width -lt 100) { throw 'Context target sidebar geometry unavailable' }
+                                $scale = if ($state.PSObject.Properties['ui_scale']) { [int]$state.ui_scale } else { 100 }
+                                $dpi = [VerifyNative]::GetDpiForWindow($script:window)
+                                $sidebarRight = [Math]::Floor([int]$sidebar.sidebar_width * $dpi * $scale / 9600.0)
+                                if ($dpi -eq 0 -or $scale -le 0 -or $pair.left -lt $client.Left -or $pair.top -lt $client.Top -or $pair.right -le $pair.left -or $pair.bottom -le $pair.top -or $pair.right -gt $client.Right -or $pair.bottom -gt $client.Bottom -or $pair.right -gt $sidebarRight) { throw 'Context target rectangle outside the client sidebar' }
+                                $x = [int][Math]::Floor(($pair.left + $pair.right) / 2.0)
+                                $y = [int][Math]::Floor(($pair.top + $pair.bottom) / 2.0)
+                                $journey.contextTargets += @{ shellId = $journeyId; index = $targetIndex; avatarLine = $pair.avatar; botsLine = $pair.bots; rect = @($pair.left, $pair.top, $pair.right, $pair.bottom); center = @($x, $y); screenshot = ($shot + '.png') }
+                                Save-Json $journey 'running-claude-switch.json'
                                 Doctor
                                 Assert-Foreground
                                 $rowsBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count
+                                $state = Read-Session
+                                if ($null -eq $state -or $state.active_workspace -ne $journeyState.active_workspace -or $state.active_tab -ne $localTab -or [int]$state.active_shell_id -ne $journeyId -or (@($state.tabs | ForEach-Object { [int]$_.shell_id }) -join ',') -cne ($journeyIds -join ',') -or [int]$state.tabs[$targetIndex].shell_id -ne $journeyId) { throw 'Context target changed before input' }
+                                for ($i = 0; $i -lt $journeyIds.Count; $i++) {
+                                    $expectedView = if ($i -eq $localTab) { -not $chat } else { $otherViews[$i] }
+                                    if ([bool]($state.tabs[$i].PSObject.Properties['cv'] -and $state.tabs[$i].cv) -ne $expectedView) { throw 'Context target view state changed before input' }
+                                }
                                 Record 'Right-click the running stand-in tab row'
-                                [VerifyNative]::RightClickClient($script:window, 100, (127 + 38 * $localTab))
+                                [VerifyNative]::RightClickClient($script:window, $x, $y)
                                 Wait-Until { @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count -gt $rowsBefore } 'tab actions palette opened'
                                 $readyBefore = @(Get-Content $debugLog | Where-Object { $_ -match ('\[palette\] ready chars=' + $label.Length + ' count=\d+ target=7114$') }).Count
                                 Type-Text $label
@@ -166,6 +208,7 @@
                                     @(Get-Content $debugLog | Where-Object { $_ -match ('\[palette\] ready chars=' + $label.Length + ' count=\d+ target=7114$') }).Count -gt $readyBefore
                                 } 'current tab switch action selected'
                                 Snapshot $(if ($chat) { 'running-claude-context-chat' } else { 'running-claude-context-shell' })
+                                $paintBoundary = @(Get-Content $debugLog).Count
                                 Press @(0x0D) "Enter: $label from the tab menu"
                                 & $checkJourney $(if ($chat) { 'context-chat' } else { 'context-shell' }) $chat
                             }
