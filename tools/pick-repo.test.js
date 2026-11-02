@@ -5,7 +5,6 @@ const test = require('node:test');
 const { readChangelogEntry } = require('./changelog-entry');
 
 const read = (file) => fs.readFileSync(file, 'utf8');
-const { readChangelogEntry } = require('./changelog-entry');
 
 test('IGSH-1266 a workspace folder is declared once and the last entry wins', () => {
   const palette = read('src/command_palette.zig');
@@ -80,4 +79,74 @@ test('IGSH-1266 the pick rows paint their ellipsis on the wide text path', () =>
   assert.match(read('src/command_palette.zig'), /pub const PICK_REPO_LABEL = "Pick repo\.\.\.";/);
   assert.doesNotMatch(sidebar, /drawAscii\(hdc, pickRepoLabel/,
     'a UTF-8 ellipsis drawn as ASCII paints as mojibake');
+});
+
+test('IGSH-1266 the launch buffers hold every path the launch accepts', () => {
+  const palette = read('src/command_palette.zig');
+  const host = read('src/agent_host.zig');
+  const state = read('src/app_state.zig');
+
+  const number = (source, pattern, what) => {
+    const found = source.match(pattern);
+    assert.ok(found, what);
+    return Number(found[1]);
+  };
+  const pathCap = number(palette, /fn remotePathSafeForShell\(path: \[\]const u8\) bool \{\s*if \(path\.len == 0 or path\.len > (\d+)\) return false;/, 'the shell path cap must exist');
+  const hostPathCap = number(host, /fn safePath\(value: \[\]const u8\) bool \{\s*if \(value\.len == 0 or value\.len > (\d+)\) return false;/, 'the host path cap must exist');
+  const nameCap = number(host, /fn safeName\(value: \[\]const u8\) bool \{\s*if \(value\.len == 0 or value\.len > (\d+)\) return false;/, 'the session name cap must exist');
+  const hostMax = number(palette, /pub const WORKSPACE_HOST_LAUNCH_MAX: usize = (\d+);/, 'the host buffer size must be named');
+  const pendingMax = number(state, /pub var g_pending_tmux_cmd: \[(\d+)\]u8 = std\.mem\.zeroes/, 'the pending command buffer must exist');
+  const reader = host.match(/pub const READER = "([^"]+)";/);
+  assert.ok(reader, 'the runtime path must be named once');
+  const mode = host.match(/const mode = "([^"]*)";/);
+  assert.ok(mode, 'the permission mode must be named once');
+
+  const launch = host.slice(host.indexOf('pub fn launchCommand('));
+  const format = launch.match(/std\.fmt\.bufPrint\(out, "([^"]*)"/);
+  assert.ok(format, 'the host launch format must be readable');
+  const args = launch.match(/\.\{ ([^}]*?) \}\) catch null;/);
+  assert.ok(args, 'the host launch arguments must be readable');
+  const caps = {
+    session: nameCap,
+    cwd: Math.min(pathCap, hostPathCap),
+    READER: reader[1].length,
+    sid: 36,
+    mode: mode[1].length,
+  };
+  const parts = format[1].split('{s}');
+  const ordered = args[1].split(',').map((value) => value.trim());
+  assert.equal(parts.length - 1, ordered.length, 'every format hole must have one argument');
+  let worst = parts[0].length;
+  ordered.forEach((arg, index) => {
+    assert.ok(caps[arg] !== undefined, `unknown launch argument ${arg}`);
+    worst += caps[arg] + parts[index + 1].length;
+  });
+
+  assert.ok(hostMax >= worst, `the host buffer ${hostMax} must hold ${worst} bytes of launch command`);
+  assert.ok(pendingMax >= worst, `the pending command buffer ${pendingMax} must hold ${worst} bytes`);
+  assert.match(palette, /fn buildWorkspaceTmuxLaunchCmd\(out: \[\]u8,/,
+    'the plain terminal command must take its size from the caller, not a fixed 512 bytes');
+});
+
+test('IGSH-1266 a pick that starts nothing says which step refused it', () => {
+  const palette = read('src/command_palette.zig');
+  const main = read('src/main.zig');
+  assert.doesNotMatch(main, /Pick repo: nothing chosen/, 'the catch-all message hid the real reason');
+  assert.match(main, /if \(!picked\) showPickRepoFailure\(saving_folder\);/, 'every refusal must go through the reason helper');
+  assert.match(main, /\.capacity => \{\},/, 'a capacity refusal already shows its own notice and must not be overwritten');
+  assert.match(main, /Pick repo: that row is gone; open the list again/);
+  assert.match(main, /Pick repo: that folder path cannot start a session/);
+  assert.match(main, /Pick repo: the new tab did not start/);
+  assert.match(main, /Set workspace folder: could not save/);
+
+  const chosen = palette.slice(palette.indexOf('pub fn pickRepoChoose(target: usize) bool {'), palette.indexOf('fn customCmdMatchesQuery('));
+  assert.match(chosen, /g_pick_row_gone = true;/, 'a row that is gone must be named');
+  assert.match(chosen, /debugLog\("\[pick\] chosen row is no longer in the repo list"\)/);
+  const spawnAt = palette.slice(palette.indexOf('fn spawnWorkspaceSessionAt('), palette.indexOf('fn workspaceFolderForNewChat('));
+  assert.match(spawnAt, /g_start_fail = \.capacity;/);
+  assert.match(spawnAt, /g_start_fail = \.launch_command;/);
+  assert.match(spawnAt, /g_start_fail = \.spawn_shell;/);
+  assert.match(spawnAt, /debugLog\("\[pick\] new workspace session refused: launch command does not fit"\)/);
+  assert.match(spawnAt, /debugLog\("\[pick\] new workspace session refused: shell spawn"\)/);
+  assert.doesNotMatch(spawnAt, /orelse return false;/, 'no step may fail without naming itself');
 });

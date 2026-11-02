@@ -17,8 +17,10 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.ok(start >= 0 && end > start, 'spawnWorkspaceTmuxSession must exist');
   const body = palette.slice(start, end);
   assert.match(body, /if \(agent_host\.eligible\(program\)\) agent_host\.mintSessionId\(&sid_buf\) else null/);
-  assert.match(body, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse return false;/);
-  assert.ok(body.indexOf('var host_buf: [1024]u8') < body.indexOf('workspaceLaunchCommand'), 'the host buffer must outlive the command');
+  assert.match(body, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse \{/);
+  assert.match(body, /var host_buf: \[WORKSPACE_HOST_LAUNCH_MAX\]u8 = undefined;/);
+  assert.match(body, /if \(launch_cmd\.len > app_state\.g_pending_tmux_cmd\.len\)/, 'the pending command buffer must be checked before the copy');
+  assert.ok(body.indexOf('var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8') < body.indexOf('workspaceLaunchCommand'), 'the host buffer must outlive the command');
   assert.match(body, /claude_sid_len = @intCast\(sid_len\)/);
 
   const command = palette.indexOf('pub fn workspaceLaunchCommand(');

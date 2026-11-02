@@ -1425,6 +1425,24 @@ fn clearSelectionForClick(hwnd: HANDLE, mx: i32, my: i32) void {
     if (clearTabSelection()) invalidateSidebar();
 }
 
+fn showPickRepoFailure(saving_folder: bool) void {
+    const palette = @import("command_palette.zig");
+    if (saving_folder) {
+        showHeaderNoticeAscii("Set workspace folder: could not save", 4000, true);
+        return;
+    }
+    if (palette.g_pick_row_gone) {
+        showHeaderNoticeAscii("Pick repo: that row is gone; open the list again", 4000, true);
+        return;
+    }
+    switch (palette.g_start_fail) {
+        .capacity => {},
+        .launch_command => showHeaderNoticeAscii("Pick repo: that folder path cannot start a session", 5000, true),
+        .spawn_shell => showHeaderNoticeAscii("Pick repo: the new tab did not start", 5000, true),
+        .none => showHeaderNoticeAscii("Pick repo: nothing started", 4000, true),
+    }
+}
+
 fn toggleChatViewOrMove() void {
     if (app_state.active_shell < app_state.shell_count) {
         const wanted = !app_state.g_chat_active;
@@ -4966,7 +4984,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     applyPendingGroup();
                     showActiveShellAfterOverlay();
                     if (saving_folder and picked) showHeaderNoticeAscii("Workspace folder saved; new tabs start there", 3000, false);
-                    if (!picked) showHeaderNoticeAscii("Pick repo: nothing chosen", 3000, false);
+                    if (!picked) showPickRepoFailure(saving_folder);
                     _ = InvalidateRect(hwnd, null, 0);
                     _ = SetTimer(hwnd, TIMER_REFOCUS, 50, null);
                     return 0;

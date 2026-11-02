@@ -1729,17 +1729,31 @@ fn saveWorkspaceFolder(host: u8, path: []const u8) bool {
 }
 
 pub fn pickRepoChoose(target: usize) bool {
-    if (target < SEARCH_PICK_REPO_ROW_OFFSET or target >= SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) return false;
+    g_pick_row_gone = false;
+    g_start_fail = .none;
+    if (target < SEARCH_PICK_REPO_ROW_OFFSET or target >= SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
+        g_pick_row_gone = true;
+        @import("diagnostics.zig").debugLog("[pick] chosen row is outside the repo list");
+        return false;
+    }
     var rows: [MAX_REPO_ROWS]RepoRow = [_]RepoRow{.{}} ** MAX_REPO_ROWS;
     const count = pickRepoFilteredRows(rows[0..]);
     const idx = target - SEARCH_PICK_REPO_ROW_OFFSET;
-    if (idx >= count) return false;
+    if (idx >= count) {
+        g_pick_row_gone = true;
+        @import("diagnostics.zig").debugLog("[pick] chosen row is no longer in the repo list");
+        return false;
+    }
     const path = rows[idx].path[0..rows[idx].path_len];
     const host = rows[idx].host;
     const for_folder = app_state.g_search_pick_repo_folder_mode;
     const with_agent = app_state.g_search_pick_repo_with_agent;
     closePickRepo();
-    if (for_folder) return saveWorkspaceFolder(host, path);
+    if (for_folder) {
+        const saved = saveWorkspaceFolder(host, path);
+        if (!saved) @import("diagnostics.zig").debugLog("[pick] workspace folder could not be saved");
+        return saved;
+    }
     var program_buf: [128]u8 = undefined;
     var program_len: u32 = 0;
     var cwd_buf: [256]u8 = undefined;
@@ -1849,7 +1863,7 @@ fn remotePathSafeForShell(path: []const u8) bool {
     return true;
 }
 
-fn buildWorkspaceTmuxLaunchCmd(out: *[512]u8, session: []const u8, cwd: []const u8, program: []const u8) ?[]const u8 {
+fn buildWorkspaceTmuxLaunchCmd(out: []u8, session: []const u8, cwd: []const u8, program: []const u8) ?[]const u8 {
     if (!remotePathSafeForShell(cwd) or (program.len > 0 and !altTProgramSafe(program))) return null;
     var len: usize = 0;
     if (!appendAsciiBuf(out, &len, "tmux new-session -d -s ")) return null;
@@ -1883,7 +1897,7 @@ test "workspace tmux program runs after shell startup and neutral fallback stays
 }
 
 pub fn workspaceLaunchCommand(program: []const u8, session: []const u8, cwd: []const u8, host_sid: ?[]const u8,
-    host_out: *[1024]u8, command_out: *[512]u8) ?[]const u8
+    host_out: []u8, command_out: []u8) ?[]const u8
 {
     const agent_host = @import("agent_host.zig");
     if (host_sid) |sid| {
@@ -1915,6 +1929,35 @@ test "IGSH-1266 a new Claude session spawns exactly the host launch command" {
     const neutral = workspaceLaunchCommand("", "term-abc", "~/projects", null, &host_buf, &command_buf) orelse
         return error.TestUnexpectedResult;
     try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
+}
+
+test "IGSH-1266 a repo path at the launch cap still starts a workspace session" {
+    var cwd_buf: [220]u8 = undefined;
+    const head: []const u8 = "/srv/projects/";
+    @memcpy(cwd_buf[0..head.len], head);
+    @memset(cwd_buf[head.len..], 'x');
+    const cwd = cwd_buf[0..];
+    try std.testing.expect(remotePathSafeForShell(cwd));
+
+    var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
+    var term_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
+    const sid = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+
+    const hosted = workspaceLaunchCommand("claude", "term-13dcf6f", cwd, sid, &host_buf, &term_buf) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(hosted.len <= app_state.g_pending_tmux_cmd.len);
+
+    const typed = workspaceLaunchCommand("", "term-13dcf6f", cwd, null, &host_buf, &term_buf) orelse
+        return error.TestUnexpectedResult;
+    try std.testing.expect(typed.len <= app_state.g_pending_tmux_cmd.len);
+    try std.testing.expect(std.mem.indexOf(u8, typed, cwd) != null);
+}
+
+test "IGSH-1266 a refused pick says which step refused it" {
+    g_start_fail = .none;
+    g_pick_row_gone = false;
+    try std.testing.expect(!pickRepoChoose(SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS));
+    try std.testing.expect(g_pick_row_gone);
 }
 
 fn adoptHostThread(job: *AdoptHostJob) void {
@@ -2084,26 +2127,53 @@ fn spawnWorkspaceSession(with_agent: bool) bool {
     return false;
 }
 
+pub const WORKSPACE_HOST_LAUNCH_MAX: usize = 1536;
+pub const WORKSPACE_TERM_LAUNCH_MAX: usize = 1024;
+
+pub const StartFail = enum { none, capacity, launch_command, spawn_shell };
+
+pub var g_start_fail: StartFail = .none;
+pub var g_pick_row_gone: bool = false;
+
 fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []const u8, with_agent: bool) bool {
+    g_start_fail = .none;
     const workspace = activeWorkspaceSlot();
     const program = workspaceSessionProgram(configured_program, with_agent);
     if (program.len > 0 and commandCreatesAgentWorkload(program) and
-        !capacityAdmitNewAgent(host, workspace, "new workspace session")) return false;
+        !capacityAdmitNewAgent(host, workspace, "new workspace session"))
+    {
+        g_start_fail = .capacity;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: host capacity");
+        return false;
+    }
 
     var session_buf: [64]u8 = undefined;
     const session = buildWorkspaceTmuxSessionName(&session_buf);
     const agent_host = @import("agent_host.zig");
     var sid_buf: [36]u8 = undefined;
     const host_sid: ?[]const u8 = if (agent_host.eligible(program)) agent_host.mintSessionId(&sid_buf) else null;
-    var cmd_buf: [512]u8 = undefined;
-    var host_buf: [1024]u8 = undefined;
-    const launch_cmd = workspaceLaunchCommand(program, session, cwd, host_sid, &host_buf, &cmd_buf) orelse return false;
+    var cmd_buf: [WORKSPACE_TERM_LAUNCH_MAX]u8 = undefined;
+    var host_buf: [WORKSPACE_HOST_LAUNCH_MAX]u8 = undefined;
+    const launch_cmd = workspaceLaunchCommand(program, session, cwd, host_sid, &host_buf, &cmd_buf) orelse {
+        g_start_fail = .launch_command;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: launch command does not fit");
+        return false;
+    };
+    if (launch_cmd.len > app_state.g_pending_tmux_cmd.len) {
+        g_start_fail = .launch_command;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: pending command buffer too small");
+        return false;
+    }
     @memcpy(app_state.g_pending_tmux_cmd[0..launch_cmd.len], launch_cmd);
     app_state.g_pending_tmux_cmd_len = @intCast(launch_cmd.len);
     app_state.g_pending_tmux_host = host;
     const ok = spawnShellWithSession(.tmux, session, null, null);
     app_state.g_pending_tmux_host = 0;
     app_state.g_pending_tmux_cmd_len = 0;
+    if (!ok) {
+        g_start_fail = .spawn_shell;
+        @import("diagnostics.zig").debugLog("[pick] new workspace session refused: shell spawn");
+    }
 
     if (ok and app_state.shell_count > 0) {
         const ns: usize = app_state.shell_count - 1;

@@ -26,7 +26,8 @@ test("Alt+T starts only the configured program in a fresh workspace tmux session
   const spawnAt = functionBody("spawnWorkspaceSessionAt", "workspaceFolderForNewChat");
   assert.match(spawnAt, /workspaceSessionProgram\(configured_program, with_agent\)/,
     "an explicit alt_t program wins and Claude is the default");
-  assert.match(spawnAt, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse return false;/);
+  assert.match(spawnAt, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse \{/);
+  assert.match(spawnAt, /var cmd_buf: \[WORKSPACE_TERM_LAUNCH_MAX\]u8 = undefined;/);
   const chooser = functionBody("workspaceLaunchCommand", "workspaceSessionProgram");
   assert.match(chooser, /return buildWorkspaceTmuxLaunchCmd\(command_out, session, cwd, program\);/,
     "a program that is not a Claude workload must still start through the typed tmux command");
