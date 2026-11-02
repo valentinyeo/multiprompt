@@ -54,15 +54,15 @@ test('favorite action saves and immediately publishes both true and false states
   const publisher = between('fn publishInboxStateNow(', 'fn deleteInboxStateFile(');
   assert.ok(publisher.includes('if (shells[i].favorite) ",\\"favorite\\":true" else ",\\"favorite\\":false"'));
   assert.match(between('fn loadInboxFile(', 'fn inboxRowLess('), /\.favorite = json_reader\.boolTrue\(o, "favorite"\)/);
-  assert.match(between('fn inboxRowVisible(', 'fn inboxListTop('), /favoriteSplitMatches\(g_inbox_tab, r.ws, r.favorite\)/);
+  assert.match(between('fn inboxRowVisible(', 'fn inboxNameBounds('), /favoriteSplitMatches\(g_inbox_tab, r.ws, r.favorite\)/);
 });
 
 test('Favorites split follows Frequent and ALL by default and shares configured split navigation', () => {
   const paint = between('fn paintInbox(', 'fn openInbox(');
-  assert.ok(paint.indexOf('"Frequent"') < paint.indexOf('"All"'));
-  assert.ok(paint.indexOf('"All"') < paint.indexOf('"Favorites"'));
-  assert.ok(paint.indexOf('"Favorites"') < paint.indexOf('for (0..g_inbox_ws_count)'));
-  assert.match(paint, /if \(g_unread_only\) unread else total/);
+  const splits = fs.readFileSync(path.join(__dirname, '../src/frequent.zig'), 'utf8');
+  assert.match(splits, /if \(settings\.frequent_first\) \.\{ frequent_split, all_split, favorites_split \}/);
+  assert.ok(paint.indexOf('.label = if (split == frequent.frequent_split) "Frequent"') < paint.indexOf('for (0..g_inbox_ws_count)'));
+  assert.match(paint, /if \(g_unread_only\) ws\.attn else ws\.total/);
   assert.match(paint, /No favorites yet\. Press Alt\+S on a session to add it\./);
   const keys = between('fn handleInboxKey(', 'fn ');
   assert.match(keys, /moveInboxSplit\(wp == 2, false\)/);

@@ -26,18 +26,18 @@ test("Inbox ETA deadline and total survive the published JSON row", () => {
     const number = json.match(new RegExp(`"${key}":([0-9]+)`));
     assert.equal(BigInt(number[1]), shell[member]);
   }
-  assert.match(paint, /g_eta_numbers_on and row\.eta_deadline_tick != 0/);
-  assert.match(paint, /g_eta_progress_on and row\.eta_total_ms > 0 and row\.eta_deadline_tick != 0/);
+  assert.match(paint, /eta_valid and \(g_eta_numbers_on or g_eta_progress_on\) and width >= uiScaled\(320\)/);
+  assert.match(paint, /const eta_valid = row\.act == 1 and row\.eta_total_ms > 0 and row\.eta_deadline_tick != 0;/);
   assert.match(paint, /etaFillFraction\(etaElapsedMs\(row\.eta_total_ms, remaining_ms\), row\.eta_total_ms\)/);
-  assert.match(paint, /FillRect\(hdc, &fill_rc, fill_br\)/);
+  assert.match(paint, /fillRoundRect\(hdc, \.\{ \.left = bar_left, \.top = track\.top, \.right = bar_left \+ fill, \.bottom = track\.bottom \}/);
 });
 
 test("Inbox ETA uses a fixed DPI-scaled bar and text column without moving previews", () => {
-  assert.match(paint, /const eta_col_left = eta_col_right - uiScaled\(132\)/);
-  assert.match(paint, /const eta_bar_w = uiScaled\(60\)/);
-  assert.match(paint, /const preview_right = eta_col_left - uiScaled\(8\)/);
-  assert.match(paint, /\.right = preview_right, \.bottom = y \+ row_h/);
-  assert.match(paint, /\.left = eta_col_left, \.top = bar_top/);
-  assert.match(paint, /\.left = eta_col_left \+ eta_bar_w \+ uiScaled\(8\)/);
+  assert.match(paint, /const bar_right = layout\.right - uiScaled\(14\);/);
+  assert.match(paint, /const bar_left = bar_right - uiScaled\(60\);/);
+  assert.match(paint, /const preview_right = if \(show_eta\) layout\.right - uiScaled\(146\) else layout\.right - uiScaled\(14\);/);
+  assert.match(paint, /\.right = @max\(text_left, preview_right\), \.bottom = y \+ uiScaled\(48\)/);
+  assert.match(paint, /const track = RECT\{ \.left = bar_left, \.top = y \+ uiScaled\(36\), \.right = bar_right, \.bottom = y \+ uiScaled\(40\) \};/);
+  assert.match(paint, /\.left = layout\.right - uiScaled\(146\), \.top = y \+ uiScaled\(29\)/);
   assert.doesNotMatch(paint, /\.top = y \+ row_h - 3/);
 });
