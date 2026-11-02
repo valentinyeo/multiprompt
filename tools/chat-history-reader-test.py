@@ -4344,9 +4344,9 @@ class AgentHostTest(unittest.TestCase):
         with patch.dict(os.environ, dict(TMUX='/tmp/other,1,0', TMUX_PANE='%9')), \
                 patch.object(reader.subprocess, 'Popen') as popen:
             reader.host_agent_start(self.provider, self.sid)
-        env = popen.call_args.kwargs['env']
-        self.assertEqual(env['ZSB_SESSION'], self.tmux, 'the browser bridge finds the pane by this session name')
-        self.assertEqual(env['MULTIPROMPT_TAB'], self.tmux)
+        env = popen.call_args.kwargs.get('env') or {}
+        self.assertEqual(env.get('ZSB_SESSION'), self.tmux, 'the browser bridge finds the pane by this session name')
+        self.assertEqual(env.get('MULTIPROMPT_TAB'), self.tmux)
         self.assertNotIn('TMUX', env, 'a stray tmux would point the bridge at another session')
         self.assertNotIn('TMUX_PANE', env)
 
