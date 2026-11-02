@@ -2,7 +2,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const test = require('node:test');
 
-const read = (file) => fs.readFileSync(file, 'utf8');
+const { readChangelogEntry } = require('./changelog-entry');
+
+const read = (file) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
 
 const CONTROL_FLAGS = ['--remote-debugging-pipe', '--enable-unsafe-extension-debugging', '--disable-sync', '--load-extension'];
 
@@ -60,5 +62,5 @@ test('IGSH-1507 Sign in to Google is reachable from Ctrl+K, the tab actions and 
   assert.match(read('src/ui_words.zon'), /\.tab_context_google_signin = "Sign in to Google in this profile",/);
   assert.match(read('src/shortcuts.zig'), /Ctrl\+K \\u\{2192\} Sign in to Google in this profile/);
   assert.match(read('openwiki/operations/keyboard-shortcuts.md'), /Sign in to Google in this profile/);
-  assert.match(read('changelog.d/IGSH-1507-google-sign-in.md'), /Google sign-in/);
+  assert.match(readChangelogEntry('IGSH-1507'), /Google sign-in/);
 });
