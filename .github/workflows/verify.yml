@@ -242,15 +242,25 @@ jobs:
           ref: ${{ inputs.revision || github.sha }}
           persist-credentials: false
           fetch-depth: 0
+      - name: Restore Zig toolchain
+        if: inputs.tag == ''
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ${{ runner.temp }}/zig-x86_64-windows-0.16.0
+          key: ${{ runner.os }}-zig-toolchain-0.16.0
       - name: Install Zig 0.16.0
         if: inputs.tag == ''
         shell: pwsh
         run: |
-          $zip = "$env:RUNNER_TEMP/zig.zip"
-          Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
-          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw 'Zig checksum mismatch' }
-          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP
-          "$env:RUNNER_TEMP/zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          if (-not (Test-Path "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0\zig.exe")) {
+            $zip = "$env:RUNNER_TEMP\zig.zip"
+            Invoke-WebRequest https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip -OutFile $zip
+            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+            if ($hash -ne '68659eb5f1e4eb1437a722f1dd889c5a322c9954607f5edcf337bc3684a75a7e') { throw "zig checksum mismatch: $hash" }
+            tar -xf $zip -C $env:RUNNER_TEMP
+            if ($LASTEXITCODE -ne 0) { throw 'zig extraction failed' }
+          }
+          "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
       - name: Identify the shared executable revision
         if: inputs.tag == ''
         shell: pwsh
