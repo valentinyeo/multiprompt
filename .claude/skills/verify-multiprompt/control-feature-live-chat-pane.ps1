@@ -82,6 +82,15 @@ try {
     Wait-Until { foreach ($chat in $chats) { try { if (-not (Invoke-WebRequest -UseBasicParsing $chat.page).Content.Contains($chat.marker)) { return $false } } catch { return $false } }; $true } 'both live chat test pages'
     $one = $chats[0]
     $two = $chats[1]
+    $showPage = {
+        param([hashtable]$Chat, [string]$Step)
+        $tabsReply = Invoke-Zsb @('tabs') $script:liveChatPort ($Step + '-tabs') -Session $Chat.tmux
+        $want = ([string]$Chat.page).TrimEnd('/')
+        $match = @($tabsReply.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $want })
+        if ($match.Count -ne 1) { throw ($Step + ': this chat pane holds no tab for ' + $Chat.page) }
+        [void](Invoke-Zsb @('activate', [string]$match[0].id) $script:liveChatPort ($Step + '-activate') -Session $Chat.tmux)
+        return $match[0]
+    }
     Press @(0x11, (0x31 + $one.index)) ('Ctrl+' + ($one.index + 1) + ': select ' + $one.name)
     Wait-Until { $inbox = Read-Inbox; $null -ne $inbox -and $inbox.active_shell_id -eq $one.shellId } ($one.name + ' selected')
     Palette 'open browser'
@@ -99,11 +108,14 @@ try {
     Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'main window foreground'
     $oneStatus = Invoke-Zsb @('status') $script:liveChatPort 'chat-one-status' -Session $one.tmux
     if ($oneStatus.session -cne $one.tmux -or $oneStatus.pane -cne 'open' -or $oneStatus.windowId -le 0) { throw ('zsb status from the ' + $one.tmux + ' chat did not find that chat pane: ' + (ConvertTo-Json -InputObject $oneStatus -Compress)) }
+    $onePane = Invoke-Zsb @('pane-info') $script:liveChatPort 'chat-one-pane-info' -Session $one.tmux
+    if ($onePane.tab_name -cne $one.name -or [int]$onePane.shell_id -ne $one.shellId) { throw ('pane-info from the ' + $one.tmux + ' chat named another tab: ' + (ConvertTo-Json -InputObject $onePane -Compress)) }
     $oneNavigate = Invoke-Zsb @('navigate', $one.page) $script:liveChatPort 'chat-one-navigate' -Session $one.tmux
-    if ($oneNavigate.ok -ne $true) { throw ('zsb navigate from the ' + $one.tmux + ' chat failed') }
-    Wait-Until { [VerifyNative]::Title([VerifyNative]::PaneWindow($script:window)).Contains($one.marker) } ($one.name + ' pane shows ' + $one.marker) 25
+    if (([string]$oneNavigate.result.tab.url).TrimEnd('/') -cne ([string]$one.page).TrimEnd('/') -or $oneNavigate.result.tab.title -cne $one.marker) { throw ('zsb navigate from the ' + $one.tmux + ' chat did not reach that chat pane: ' + (ConvertTo-Json -InputObject $oneNavigate -Compress)) }
+    $oneShown = & $showPage $one 'chat-one-show'
+    Wait-Until { [VerifyNative]::PaneVisible($script:window) } ($one.name + ' pane is on screen') 25
     Snapshot 'chat-one-page'
-    $result.checks += @{ name = 'chat-one-agent-path'; session = $one.tmux; tab = $one.shellId; status = $oneStatus; page = $one.page; paneTitle = [VerifyNative]::Title([VerifyNative]::PaneWindow($script:window)) }
+    $result.checks += @{ name = 'chat-one-agent-path'; session = $one.tmux; tab = $one.shellId; status = $oneStatus; paneInfo = $onePane; navigated = $oneNavigate.result.tab; shown = $oneShown; page = $one.page }
     Wait-Until {
         $pane = Read-BrowserPaneFor $two.shellId
         $null -ne $pane -and $pane.PSObject.Properties['browser_state'] -and $pane.browser_state -eq 'closed' -and $pane.browser_connection_id -eq 0
@@ -113,29 +125,31 @@ try {
     Wait-Until { $inbox = Read-Inbox; $null -ne $inbox -and $inbox.active_shell_id -eq $two.shellId } ($two.name + ' selected')
     Wait-Until { -not [VerifyNative]::PaneVisible($script:window) } ($two.name + ' shows no browser pane from the other chat') 20
     $twoStatus = Invoke-Zsb @('status') $script:liveChatPort 'chat-two-status' -Session $two.tmux
-    if ($twoStatus.session -cne $two.tmux -or $twoStatus.pane -cne 'closed') { throw ('zsb status from the ' + $two.tmux + ' chat did not report its own closed pane') }
+    if ($twoStatus.session -cne $two.tmux -or $twoStatus.pane -cne 'closed') { throw ('zsb status from the ' + $two.tmux + ' chat did not report its own closed pane: ' + (ConvertTo-Json -InputObject $twoStatus -Compress)) }
     Snapshot 'chat-two-without-page'
-    Palette 'open browser'
-    Press @(0x0D) ('Enter: open ' + $two.name + ' browser pane')
+    $twoOpen = Invoke-Zsb @('open', $two.page) $script:liveChatPort 'chat-two-open' -Session $two.tmux -AllowPlainOk
     Wait-Until {
         $pane = Read-BrowserPaneFor $two.shellId
         $null -ne $pane -and $pane.browser_state -eq 'connected' -and $pane.browser_window_id -gt 0 -and [VerifyNative]::PaneVisible($script:window)
-    } ($two.name + ' pane docked with an extension window id') 25
+    } ($two.name + ' pane opened by its own zsb open') 25
     [void][VerifyNative]::SetForegroundWindow($script:window)
     Wait-Until { [VerifyNative]::GetAncestor([VerifyNative]::GetForegroundWindow(), 2) -eq $script:window } 'main window foreground'
-    $twoNavigate = Invoke-Zsb @('navigate', $two.page) $script:liveChatPort 'chat-two-navigate' -Session $two.tmux
-    if ($twoNavigate.ok -ne $true) { throw ('zsb navigate from the ' + $two.tmux + ' chat failed') }
-    Wait-Until { [VerifyNative]::Title([VerifyNative]::PaneWindow($script:window)).Contains($two.marker) } ($two.name + ' pane shows ' + $two.marker) 25
+    $twoShown = & $showPage $two 'chat-two-show'
+    Wait-Until { [VerifyNative]::PaneVisible($script:window) } ($two.name + ' pane is on screen') 25
     Snapshot 'chat-two-own-page'
     Save-Json (Read-BrowserPaneFor $two.shellId) 'pane-chat-two-connected.json'
-    $result.checks += @{ name = 'chat-two-own-page'; session = $two.tmux; tab = $two.shellId; page = $two.page; paneTitle = [VerifyNative]::Title([VerifyNative]::PaneWindow($script:window)) }
+    $result.checks += @{ name = 'chat-two-own-page'; session = $two.tmux; tab = $two.shellId; open = $twoOpen; shown = $twoShown; page = $two.page }
     Press @(0x11, (0x31 + $one.index)) ('Ctrl+' + ($one.index + 1) + ': return to ' + $one.name)
     Wait-Until { $inbox = Read-Inbox; $null -ne $inbox -and $inbox.active_shell_id -eq $one.shellId } ($one.name + ' selected again')
-    Wait-Until { [VerifyNative]::Title([VerifyNative]::PaneWindow($script:window)).Contains($one.marker) } ($one.name + ' pane kept ' + $one.marker) 25
+    $oneTabs = Invoke-Zsb @('tabs') $script:liveChatPort 'chat-one-tabs-after' -Session $one.tmux
+    $want = ([string]$one.page).TrimEnd('/')
+    $kept = @($oneTabs.result.tabs | Where-Object { $_.url -and ([string]$_.url).TrimEnd('/') -ceq $want -and $_.active -eq $true })
+    if ($kept.Count -ne 1) { throw ('The ' + $one.tmux + ' chat lost its own page after the other chat opened one') }
     $oneAgain = Invoke-Zsb @('status') $script:liveChatPort 'chat-one-status-after' -Session $one.tmux
     if ($oneAgain.pane -cne 'open' -or $oneAgain.windowId -le 0) { throw ('The ' + $one.tmux + ' chat lost its own pane after the other chat opened one') }
+    Wait-Until { [VerifyNative]::PaneVisible($script:window) } ($one.name + ' pane is on screen again') 25
     Snapshot 'chat-one-keeps-page'
-    $result.checks += @{ name = 'chats-keep-their-own-pages'; first = $one.tmux; second = $two.tmux; firstStatusAfter = $oneAgain; firstPage = $one.page; secondPage = $two.page }
+    $result.checks += @{ name = 'chats-keep-their-own-pages'; first = $one.tmux; second = $two.tmux; firstStatusAfter = $oneAgain; keptTab = $kept[0]; firstPage = $one.page; secondPage = $two.page }
     $result.chatBoundary.verified = $true
     $result.chatBoundary.observed = @{ chats = @($chats | ForEach-Object { @{ tmux = $_.tmux; tab = $_.shellId; page = $_.page } }); port = $script:liveChatPort }
     Save-Json (Read-Session) 'session-live-chats-after.json'

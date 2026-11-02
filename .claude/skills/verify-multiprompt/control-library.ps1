@@ -616,7 +616,7 @@ function Palette([string]$Query) {
     Type-Text $Query
 }
 
-function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name, [string]$Session = 'workspace') {
+function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name, [string]$Session = 'workspace', [switch]$AllowPlainOk) {
     Doctor
     Assert-Foreground
     Record ('zsb ' + $Session + ' ' + ($Arguments -join ' '))
@@ -644,6 +644,7 @@ function Invoke-Zsb([string[]]$Arguments, [int]$Port, [string]$Name, [string]$Se
         } while ($count -gt 0)
         $raw = [Text.Encoding]::UTF8.GetString($reply.ToArray())
         [IO.File]::WriteAllText((Join-Path $Evidence ($Name + '.reply.json')), $raw)
+        if ($AllowPlainOk -and $raw.Trim() -ceq 'ok') { return @{ ok = $true; acknowledgement = $raw.Trim() } }
         $response = $raw | ConvertFrom-Json
         if ($response.ok -ne $true) { throw "zsb rejected $Name`: $raw" }
         return $response
