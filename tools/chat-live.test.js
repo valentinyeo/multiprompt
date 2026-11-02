@@ -45,7 +45,8 @@ test('D1 the live channel is opened only for a hosted agent chat and feeds the m
 
 test('D1 the live tail renders inside the same transcript buffer the view reads', () => {
   const session = read('src/chat_session.zig');
-  assert.match(session, /const live_tail = @import\("chat_live\.zig"\)\.tailFor\(shell_id, app_state\.g_chat_capture\[len\.\.\], len, &live_blocks\);/);
+  assert.match(session, /const seen: \[\]const @import\("chat_markdown\.zig"\)\.Block = if \(from_file\) entry\.\?\.history\.blocks\.items else &\.\{\};/);
+  assert.match(session, /const live_tail = @import\("chat_live\.zig"\)\.tailFor\(shell_id, app_state\.g_chat_capture\[len\.\.\], len, &live_blocks, seen\);/);
   assert.match(session, /app_state\.g_chat_last_len = total;/);
   assert.match(session, /app_state\.g_chat_block_count \+= live_tail\.blocks;/);
 });

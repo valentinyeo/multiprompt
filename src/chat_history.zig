@@ -62,8 +62,10 @@ pub const History = struct {
         const recorded = style.timestamp(stamp);
         for (self.blocks.items[first_block..]) |*block| block.stamp_ms = @import("chat_echo.zig").stampMs(stamp);
         const message_id = if (id.len == 0) 0 else std.hash.Wyhash.hash(std.hash.Wyhash.hash(0, if (self.read_sid[0] != 0) &self.read_sid else &self.sid), id);
+        const row_key = if (id.len == 0) 0 else md.rowKey(id);
         for (self.blocks.items[first_block..]) |*block| {
             block.message_id = message_id;
+            block.row_key = row_key;
             block.reaction_reference = @import("chat_reaction.zig").reference(id);
             block.source_offset = source_offset;
             block.source_end = source_end;

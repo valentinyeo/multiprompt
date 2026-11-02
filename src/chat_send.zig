@@ -1349,6 +1349,20 @@ fn chatConfirmedHas(key: []const u8, block_norm: []const u16, stamp_ms: i64, mes
     return false;
 }
 
+pub fn chatEchoRowLanded(e: ChatOutboxEntry) bool {
+    const wire = std.mem.sliceTo(&e.message_wire_id, 0);
+    if (wire.len == 0) return false;
+    const shell = chatOutboxShellForKey(e.key[0..@as(usize, e.key_len)]) orelse return false;
+    if (shell >= app_state.shell_count) return false;
+    var keys: [@import("chat_live.zig").SENT_KEYS]u64 = @splat(0);
+    const n = @import("chat_live.zig").sentRowKeys(app_state.shells[shell].shell_id, wire, &keys);
+    if (n == 0) return false;
+    for (keys[0..n]) |key| {
+        if (!@import("chat_markdown.zig").drawnOnce(key, app_state.g_chat_blocks[0..app_state.g_chat_block_count])) return true;
+    }
+    return false;
+}
+
 pub fn chatEchoBlockConfirmed(buf: []const u16, block: ChatBlock) bool {
     if (app_state.active_shell >= app_state.shell_count or app_state.g_chat_confirmed.items.len == 0) return false;
     var key_buf: [CHAT_OUTBOX_KEY_CAP]u8 = undefined;
