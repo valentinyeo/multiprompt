@@ -33,7 +33,7 @@ const state = struct {
   pub const Shell = struct {
     tmux_session: [64]u8 = @splat(0), tmux_session_len: u32 = 0,
     name: [64]u16 = @splat(0), name_len: u32 = 0, workspace: u8 = 0,
-    face: ?u8 = null, color: ?u8 = null,
+    face: ?u8 = null, color: ?u8 = null, picture: u64 = 0,
   };
   pub var g_lws_count: u32 = 9;
   pub var g_ws_colors: [9]?u8 = @splat(null);

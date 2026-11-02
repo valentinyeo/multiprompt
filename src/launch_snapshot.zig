@@ -18,6 +18,7 @@ pub const Row = struct {
     favorite: bool = false,
     face: ?u8 = null,
     color: ?u8 = null,
+    picture: u64 = 0,
     muted: bool = false,
     unread: bool = false,
     last_active: u64 = 0,

@@ -222,6 +222,7 @@ pub const AppearanceTabTransfer = extern struct {
     face: u8,
     color: u8,
     pending_mask: u8,
+    picture: u64,
 };
 
 pub const BrowserTabTransfer = extern struct {
@@ -327,6 +328,7 @@ pub const Shell = struct {
     favorite: bool = false,
     face: ?u8 = null,
     color: ?u8 = null,
+    picture: u64 = 0,
     last_used: u64 = 0,
     input: u64 = 0,
     visits: @import("frequent.zig").Visits = .{},
@@ -1655,6 +1657,8 @@ pub const SEARCH_TABCTX_BOT_COLOR: usize = 7188;
 pub const SEARCH_TABCTX_PIN_PAGE: usize = 7189;
 pub const SEARCH_TABCTX_UNPIN_PAGE: usize = 7190;
 pub const SEARCH_TABCTX_GOOGLE_SIGNIN: usize = 7191;
+pub const SEARCH_BOT_PICTURE_UPLOAD: usize = 7193;
+pub const SEARCH_BOT_PICTURE_RESET: usize = 7194;
 pub const SEARCH_BOT_FACE_OFFSET: usize = 7140;
 pub const BOT_FACE_COUNT: usize = 21;
 pub const SEARCH_BOT_COLOR_OFFSET: usize = 7161;
@@ -2320,6 +2324,7 @@ pub const SavedTab = struct {
     favorite: bool = false,
     face: ?u8 = null,
     color: ?u8 = null,
+    picture: u64 = 0,
     last_used: u64 = 0,
     input: u64 = 0,
     visits: @import("frequent.zig").Visits = .{},

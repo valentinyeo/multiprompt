@@ -2287,7 +2287,8 @@ pub fn detachTabToExistingWindow(idx: u32, target_hwnd: HANDLE, preserve_group: 
     appearance_transfer.legacy = transfer;
     appearance_transfer.face = shell.face orelse 20;
     appearance_transfer.color = shell.color orelse 7;
-    const extended = shell.face != null or shell.color != null;
+    appearance_transfer.picture = shell.picture;
+    const extended = shell.face != null or shell.color != null or shell.picture != 0;
     browser_transfer.appearance = appearance_transfer;
     browser_transfer.has_appearance = @intFromBool(extended);
     const has_pin = shell.browser_pinned_url_len > 0;
@@ -3911,6 +3912,10 @@ fn exportSlotSessionFile(slot: u8) bool {
             const field = std.fmt.bufPrint(json_buf[pos..], ",\"color\":{d}", .{color}) catch return false;
             pos += field.len;
         }
+        if (app_state.shells[i].picture != 0) {
+            const field = std.fmt.bufPrint(json_buf[pos..], ",\"picture\":{d}", .{app_state.shells[i].picture}) catch return false;
+            pos += field.len;
+        }
         if (app_state.shells[i].starred_group_id != 0) {
             const key = ",\"starred_group_id\":";
             @memcpy(json_buf[pos .. pos + key.len], key);
@@ -4501,6 +4506,7 @@ pub fn absorbWorkspaceIntoSlots(id: []const u8, fallback_name: []const u8) bool 
             app_state.shells[idx].favorite = tabs[t].favorite;
             app_state.shells[idx].face = tabs[t].face;
             app_state.shells[idx].color = tabs[t].color;
+            app_state.shells[idx].picture = tabs[t].picture;
             @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
             app_state.shells[idx].last_used = tabs[t].last_used;
             app_state.shells[idx].input = tabs[t].input;

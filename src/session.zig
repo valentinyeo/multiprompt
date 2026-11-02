@@ -394,6 +394,10 @@ pub fn saveSessionTo(path: []const u8, workspace_filter: ?u8) bool {
             const field = std.fmt.bufPrint(json_buf[pos..], ",\"color\":{d}", .{color}) catch return false;
             pos += field.len;
         }
+        if (app_state.shells[i].picture != 0) {
+            const field = std.fmt.bufPrint(json_buf[pos..], ",\"picture\":{d}", .{app_state.shells[i].picture}) catch return false;
+            pos += field.len;
+        }
         if (app_state.shells[i].starred_group_id != 0) {
             const key = ",\"starred_group_id\":";
             @memcpy(json_buf[pos .. pos + key.len], key);
@@ -1011,6 +1015,7 @@ pub fn preserveFailedRemoteSavedTab(tab: *const SavedTab) ?u32 {
     shell.favorite = tab.favorite;
     shell.face = tab.face;
     shell.color = tab.color;
+    shell.picture = tab.picture;
     shell.last_used = tab.last_used;
     shell.input = tab.input;
     shell.visits = tab.visits;
@@ -1495,6 +1500,7 @@ pub fn spawnSavedTab(tab: *const SavedTab, claude_resume: workspace_snooze.Claud
     app_state.shells[idx].favorite = tabs[t].favorite;
     app_state.shells[idx].face = tabs[t].face;
     app_state.shells[idx].color = tabs[t].color;
+    app_state.shells[idx].picture = tabs[t].picture;
     @import("account_desktop.zig").applyPendingAppearance(@intCast(idx));
     app_state.shells[idx].last_used = tabs[t].last_used;
     app_state.shells[idx].input = tabs[t].input;

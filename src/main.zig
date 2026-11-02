@@ -4938,6 +4938,21 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                     }
                     return 0;
                 }
+                if (target == app_state.SEARCH_BOT_PICTURE_UPLOAD or target == app_state.SEARCH_BOT_PICTURE_RESET) {
+                    const shell_id = app_state.g_bot_look_sid;
+                    if (findShellById(shell_id)) |shell_idx| {
+                        if (@import("bot_look.zig").eligible(shell_idx)) {
+                            _ = SendMessageW(hwnd, WM_APP_SEARCH_CLOSE, 0, 0);
+                            if (target == app_state.SEARCH_BOT_PICTURE_UPLOAD) {
+                                @import("bot_picture.zig").choose(shell_id);
+                            } else {
+                                @import("bot_picture.zig").reset(shell_id);
+                            }
+                            _ = InvalidateRect(hwnd, null, 1);
+                        }
+                    }
+                    return 0;
+                }
                 if (app_state.g_bot_look_mode != .none and
                     ((target >= app_state.SEARCH_BOT_FACE_OFFSET and target < app_state.SEARCH_BOT_FACE_OFFSET + app_state.BOT_FACE_COUNT) or
                     (target >= app_state.SEARCH_BOT_COLOR_OFFSET and target < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT))) {
@@ -8533,6 +8548,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                             if (appearance) |extended| {
                                 new_shell.face = if (extended.face < 20) extended.face else null;
                                 new_shell.color = if (extended.color < 7) extended.color else null;
+                                new_shell.picture = extended.picture;
                             }
                             new_shell.last_used = transfer.last_used;
                             new_shell.input = transfer.input;

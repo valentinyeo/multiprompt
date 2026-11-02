@@ -175,6 +175,7 @@ pub fn sessionTabs(root: std.json.Value, tabs: anytype, max_workspaces: u8) u32 
         const color = uintDefault(obj, "color", 7);
         tab.face = if (face < 20) @intCast(face) else null;
         tab.color = if (color < 7) @intCast(color) else null;
+        tab.picture = uintDefault(obj, "picture", 0);
         tab.kind = if (std.mem.eql(u8, kind, "pwsh")) .pwsh else if (std.mem.eql(u8, kind, "vps")) .vps else if (std.mem.eql(u8, kind, "tmux")) .tmux else if (std.mem.eql(u8, kind, "vps2")) .vps2 else if (std.mem.eql(u8, kind, "bash")) .bash else if (std.mem.eql(u8, kind, "gitbash")) .gitbash else .cmd;
         tab.name_len = copyWide(obj, "name", &tab.name);
         tab.tmux_session_len = copyString(obj, "tmux_session", &tab.tmux_session);
