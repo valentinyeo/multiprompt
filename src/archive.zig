@@ -492,7 +492,7 @@ pub fn resurrectArchivedByKey(hwnd: HANDLE, host: u8, session: []const u8) bool 
     const ar_idx = findArchivedEntry(host, session) orelse return false;
     const ar_copy = app_state.g_archived.items[ar_idx];
     const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
-    if (!capacityAdmitNewAgent(host, workspace, "Claude resurrection")) return false;
+    if (!capacityAdmitNewAgent(host, workspace, .automatic, "Claude resurrection")) return false;
     var ar_run = ar_copy;
     ar_run.tmux_identity = @splat(0);
     ar_run.tmux_identity_len = 0;

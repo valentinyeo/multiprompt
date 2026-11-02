@@ -1826,7 +1826,7 @@ pub fn spawnCustomCmd(idx: usize) bool {
             const host: u8 = if (c.kind == .vps2) 1 else 0;
             const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
             if (c.startup_cmd_len > 0 and commandCreatesAgentWorkload(c.startup_cmd[0..c.startup_cmd_len]) and
-                !capacityAdmitNewAgent(host, workspace, c.label[0..c.label_len]))
+                !capacityAdmitNewAgent(host, workspace, .user, c.label[0..c.label_len]))
                 return false;
             if (c.startup_cmd_len > 0) {
                 const n = @min(@as(usize, c.startup_cmd_len), app_state.g_pending_spawn_cmd.len);
@@ -2140,7 +2140,7 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
     const workspace = activeWorkspaceSlot();
     const program = workspaceSessionProgram(configured_program, with_agent);
     if (program.len > 0 and commandCreatesAgentWorkload(program) and
-        !capacityAdmitNewAgent(host, workspace, "new workspace session"))
+        !capacityAdmitNewAgent(host, workspace, .user, "new workspace session"))
     {
         g_start_fail = .capacity;
         @import("diagnostics.zig").debugLog("[pick] new workspace session refused: host capacity");
@@ -2244,7 +2244,7 @@ pub fn spawnCodexTmuxSession() bool {
     if (!workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len)) return false;
     const cwd = cwd_buf[0..@as(usize, @intCast(cwd_len))];
     const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
-    if (!capacityAdmitNewAgent(host, workspace, "new Codex session")) return false;
+    if (!capacityAdmitNewAgent(host, workspace, .user, "new Codex session")) return false;
 
     var session_buf: [64]u8 = undefined;
     const session = buildCodexTmuxSessionName(&session_buf);
@@ -2284,7 +2284,7 @@ pub fn spawnPiTmuxSession() bool {
     if (!workspaceFolderForNewChat(&host, &cwd_buf, &cwd_len)) return false;
     const cwd = cwd_buf[0..@as(usize, @intCast(cwd_len))];
     const workspace = if (app_state.g_single_window) app_state.g_active_workspace else 0;
-    if (!capacityAdmitNewAgent(host, workspace, "new Pi session")) return false;
+    if (!capacityAdmitNewAgent(host, workspace, .user, "new Pi session")) return false;
 
     var session_buf: [64]u8 = undefined;
     const session = buildWorkspaceTmuxSessionName(&session_buf);

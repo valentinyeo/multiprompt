@@ -270,7 +270,10 @@ pub fn sidebarStickyCardHitTest(my: i32) bool {
     return my >= rect.top and my < rect.bottom;
 }
 
-fn capacityAdmissionFor(state: CapacityState, host_busy: u16, host_limit: u16) CapacityAdmission {
+pub const AdmissionOrigin = enum { user, automatic };
+
+fn capacityAdmissionFor(origin: AdmissionOrigin, state: CapacityState, host_busy: u16, host_limit: u16) CapacityAdmission {
+    _ = origin;
     if (state == .red or state == .critical) return .block_host_pressure;
     if (host_limit > 0 and host_busy >= host_limit) return .block_host_busy;
     if (state == .amber) return .warn;
@@ -285,7 +288,7 @@ fn capacityAuditPath(buf: *[512]u8) ?[]const u8 {
     return buf[0 .. appdata_len + rest.len];
 }
 
-fn auditCapacityAdmission(host: u8, workspace: u8, decision: CapacityAdmission, label: []const u8) void {
+fn auditCapacityAdmission(host: u8, workspace: u8, origin: AdmissionOrigin, decision: CapacityAdmission, label: []const u8) void {
     var path_buf: [512]u8 = undefined;
     const path = capacityAuditPath(&path_buf) orelse return;
     const h = win32OpenAppend(path) orelse return;
@@ -303,17 +306,19 @@ fn auditCapacityAdmission(host: u8, workspace: u8, decision: CapacityAdmission, 
     writeAuditU64(h, hostBusyAgentCount(host));
     win32WriteAll(h, "\tworkspace_busy=");
     writeAuditU64(h, workspaceBusyAgentCount(workspace));
+    win32WriteAll(h, "\torigin=");
+    win32WriteAll(h, @tagName(origin));
     win32WriteAll(h, "\t");
     writeAuditEscapedBytes(h, label);
     win32WriteAll(h, "\r\n");
 }
 
-pub fn capacityAdmitNewAgent(host: u8, workspace: u8, label: []const u8) bool {
+pub fn capacityAdmitNewAgent(host: u8, workspace: u8, origin: AdmissionOrigin, label: []const u8) bool {
     const state = effectiveCapacityState(host);
     const host_busy = hostBusyAgentCount(host);
     const host_limit = if (host < app_state.g_capacity_policy.host_busy_limit.len) app_state.g_capacity_policy.host_busy_limit[host] else 0;
-    const decision = capacityAdmissionFor(state, host_busy, host_limit);
-    auditCapacityAdmission(host, workspace, decision, label);
+    const decision = capacityAdmissionFor(origin, state, host_busy, host_limit);
+    auditCapacityAdmission(host, workspace, origin, decision, label);
 
     var msg_buf: [128]u8 = undefined;
     switch (decision) {
@@ -432,10 +437,17 @@ test "capacity metrics classify normalized load memory and PSI" {
 }
 
 test "capacity admission blocks host pressure and host saturation only" {
-    try std.testing.expectEqual(CapacityAdmission.allow, capacityAdmissionFor(.green, 2, 8));
-    try std.testing.expectEqual(CapacityAdmission.warn, capacityAdmissionFor(.amber, 2, 8));
-    try std.testing.expectEqual(CapacityAdmission.block_host_pressure, capacityAdmissionFor(.red, 0, 8));
-    try std.testing.expectEqual(CapacityAdmission.block_host_busy, capacityAdmissionFor(.green, 8, 8));
+    try std.testing.expectEqual(CapacityAdmission.allow, capacityAdmissionFor(.automatic, .green, 2, 8));
+    try std.testing.expectEqual(CapacityAdmission.warn, capacityAdmissionFor(.automatic, .amber, 2, 8));
+    try std.testing.expectEqual(CapacityAdmission.block_host_pressure, capacityAdmissionFor(.automatic, .red, 0, 8));
+    try std.testing.expectEqual(CapacityAdmission.block_host_busy, capacityAdmissionFor(.automatic, .green, 8, 8));
+}
+
+test "IGSH-1447 a hand-started session opens on a busy host and only critical blocks it" {
+    try std.testing.expectEqual(CapacityAdmission.warn, capacityAdmissionFor(.user, .red, 0, 8));
+    try std.testing.expectEqual(CapacityAdmission.block_host_pressure, capacityAdmissionFor(.user, .critical, 0, 8));
+    try std.testing.expectEqual(CapacityAdmission.block_host_pressure, capacityAdmissionFor(.automatic, .red, 0, 8));
+    try std.testing.expectEqual(CapacityAdmission.warn, capacityAdmissionFor(.automatic, .amber, 2, 8));
 }
 
 test "sidebar VPS stats prefer the active host and classify resident agents" {
