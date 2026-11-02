@@ -51,6 +51,25 @@ test('IGSH-1266 the update card never shows the empty release filler', async () 
   assert.doesNotMatch(JSON.stringify(releaseNotes(source, 'v0.28.1400')), /Checks and fixes/);
 });
 
+test('IGSH-1266 release 1339 states its real change instead of the filler', async () => {
+  const { execFileSync } = require('node:child_process');
+  const { buildChangelog } = await import('./version-stamp.mjs');
+  const { releaseNotes } = await import('./release-notes.mjs');
+  const sha = execFileSync('git', ['rev-parse', 'v0.28.1339^{commit}'], { cwd: root, encoding: 'utf8' }).trim();
+  const files = {
+    'src/main.zig': 'pub const APP_VERSION = "0.28.883";\n',
+    'src/changelog.zig': 'const SOURCE_CHANGELOG = [_]ChangelogEntry{\n    .{ .ver = "0.28.883", .items = &.{\n        .{ .text = "Earlier.", .ticket = "IGSH-1" },\n    } },\n};\n',
+  };
+  const history = [{ tag: 'v0.28.1338', files }, { tag: 'v0.28.1339', files, sha }];
+  const generated = buildChangelog(files, 'v0.28.1341', history, [{ sha: 'new', subject: 'IGSH-1266: Keep the real line' }]);
+  const notes = releaseNotes(generated, 'v0.28.1341');
+  const release = notes.releases.find(item => item.version === '0.28.1339');
+  assert.deepEqual(release.changes, ['A failed move to the terminal keeps your chat open.']);
+  assert.deepEqual(release.tickets, ['https://app.hypertask.ai/detail/project-2060/1266']);
+  assert.deepEqual(notes.releases.find(item => item.version === '0.28.1341').changes, []);
+  assert.doesNotMatch(JSON.stringify(notes), /Checks and fixes/);
+});
+
 test('publication exports pending fragments after the release fold and handles older Zig string escapes', async () => {
   const { releaseNotes } = await import('./release-notes.mjs');
   const { stampTree } = await import('./version-stamp.mjs');

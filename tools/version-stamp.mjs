@@ -28,6 +28,7 @@ const reviewedReleases = {
   'v0.28.1046': ['1c5e0cccc66cf1c6f962746b4d23506ff0d366f5', { 'IGSH-1154': 'Queued sends avoid competing terminal handoffs.' }],
   'v0.28.1047': ['4ebe5f53eeda7d8a945cfb3af2598672a87c0218', { 'IGSH-1154': checks }],
   'v0.28.1048': ['e62769a0862c8518a68a74ea6bfc6030b03dad3b', { 'IGSH-1154': checks, 'IGSH-1239': checks }],
+  'v0.28.1339': ['1f91520248bd00bf99308dcec5717b3199574fdf', { 'IGSH-1266': 'A failed move to the terminal keeps your chat open.' }],
 };
 
 const checksOnly = checks;
