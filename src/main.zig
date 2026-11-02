@@ -4191,8 +4191,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
             app_state.g_bot_look_sid = 0;
             app_state.g_search_groupctx_mode = false;
             app_state.g_search_openall_host_mode = false;
-            app_state.g_search_pick_repo_mode = false;
-            app_state.g_search_pick_repo_folder_mode = false;
+            closePickRepo();
             app_state.g_tabctx_sid = 0;
             app_state.g_search_remind_input_mode = false;
             app_state.g_search_rename_input_mode = false;
@@ -4958,7 +4957,7 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
                 if (target == SEARCH_PICK_REPO_OFFSET or target == SEARCH_SET_FOLDER_OFFSET) {
                     debugLog("[pick] open list");
                     pickRepoOpen(target == SEARCH_PICK_REPO_OFFSET, target == SEARCH_SET_FOLDER_OFFSET,
-                        workspaceHostForNewTab(activeWorkspaceSlot()));
+                        workspaceHostForNewTab(activeWorkspaceSlot()), false);
                     app_state.g_search_workspace_mode = false;
                     app_state.g_search_theme_mode = false;
                     app_state.g_search_openall_host_mode = false;

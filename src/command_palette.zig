@@ -1639,19 +1639,21 @@ pub fn workspaceHostForNewTab(ws: u8) u8 {
     return 0;
 }
 
-pub fn pickRepoOpen(with_agent: bool, for_folder: bool, host: u8) void {
+pub fn pickRepoOpen(with_agent: bool, for_folder: bool, host: u8, plain_claude: bool) void {
     app_state.g_search_snippet_mode = false;
     app_state.g_search_shells_mode = false;
     app_state.g_search_open_session_mode = false;
     app_state.g_search_pick_repo_mode = true;
     app_state.g_search_pick_repo_folder_mode = for_folder;
     app_state.g_search_pick_repo_with_agent = with_agent;
+    app_state.g_search_pick_repo_plain_claude = plain_claude;
     app_state.g_search_pick_repo_host = host;
 }
 
 pub fn closePickRepo() void {
     app_state.g_search_pick_repo_mode = false;
     app_state.g_search_pick_repo_folder_mode = false;
+    app_state.g_search_pick_repo_plain_claude = false;
 }
 
 fn appendJsonEscaped(out: []u8, pos: *usize, text: []const u8) bool {
@@ -1740,6 +1742,10 @@ fn saveWorkspaceFolder(host: u8, path: []const u8) bool {
 }
 
 pub fn pickRepoChoose(target: usize) bool {
+    const for_folder = app_state.g_search_pick_repo_folder_mode;
+    const with_agent = app_state.g_search_pick_repo_with_agent;
+    const plain_claude = app_state.g_search_pick_repo_plain_claude;
+    closePickRepo();
     g_pick_row_gone = false;
     g_start_fail = .none;
     if (target < SEARCH_PICK_REPO_ROW_OFFSET or target >= SEARCH_PICK_REPO_ROW_OFFSET + MAX_REPO_ROWS) {
@@ -1757,9 +1763,6 @@ pub fn pickRepoChoose(target: usize) bool {
     }
     const path = rows[idx].path[0..rows[idx].path_len];
     const host = rows[idx].host;
-    const for_folder = app_state.g_search_pick_repo_folder_mode;
-    const with_agent = app_state.g_search_pick_repo_with_agent;
-    closePickRepo();
     if (for_folder) {
         const saved = saveWorkspaceFolder(host, path);
         if (!saved) @import("diagnostics.zig").debugLog("[pick] workspace folder could not be saved");
@@ -1771,7 +1774,7 @@ pub fn pickRepoChoose(target: usize) bool {
     var cwd_len: u32 = 0;
     var slot_host: u8 = 0;
     if (workspaceConfiguredTerminalFolder(activeWorkspaceSlot(), &slot_host, &cwd_buf, &cwd_len, &program_buf, &program_len)) {}
-    return spawnWorkspaceSessionAt(host, path, program_buf[0..program_len], with_agent);
+    return spawnWorkspaceSessionAt(host, path, program_buf[0..program_len], with_agent, plain_claude);
 }
 
 fn customCmdMatchesQuery(idx: usize, query: []const u16) bool {
@@ -2160,23 +2163,19 @@ test "IGSH-1266 a new tab starts Claude unless the workspace names a program" {
     try std.testing.expectEqualStrings("tmux new-session -d -s term-abc -c ~/projects 2>/dev/null; tmux attach -t term-abc", neutral);
 }
 
-var g_plain_claude: bool = false;
-
 pub fn spawnWorkspaceTmuxSession() bool {
-    g_plain_claude = false;
-    return spawnWorkspaceSession(true);
+    return spawnWorkspaceSession(true, false);
 }
 
 pub fn spawnWorkspacePlainClaudeSession() bool {
-    g_plain_claude = true;
-    return spawnWorkspaceSession(true);
+    return spawnWorkspaceSession(true, true);
 }
 
 pub fn spawnWorkspaceTerminalSession() bool {
-    return spawnWorkspaceSession(false);
+    return spawnWorkspaceSession(false, false);
 }
 
-fn spawnWorkspaceSession(with_agent: bool) bool {
+fn spawnWorkspaceSession(with_agent: bool, plain_claude: bool) bool {
     var host: u8 = 0;
     var cwd_buf: [256]u8 = undefined;
     var cwd_len: u32 = 0;
@@ -2184,9 +2183,9 @@ fn spawnWorkspaceSession(with_agent: bool) bool {
     var program_len: u32 = 0;
     const workspace = activeWorkspaceSlot();
     if (workspaceConfiguredTerminalFolder(workspace, &host, &cwd_buf, &cwd_len, &program_buf, &program_len)) {
-        return spawnWorkspaceSessionAt(host, cwd_buf[0..cwd_len], program_buf[0..program_len], with_agent);
+        return spawnWorkspaceSessionAt(host, cwd_buf[0..cwd_len], program_buf[0..program_len], with_agent, plain_claude);
     }
-    pickRepoOpen(with_agent, false, workspaceHostForNewTab(workspace));
+    pickRepoOpen(with_agent, false, workspaceHostForNewTab(workspace), plain_claude);
     return false;
 }
 
@@ -2198,7 +2197,7 @@ pub const StartFail = enum { none, capacity, launch_command, spawn_shell };
 pub var g_start_fail: StartFail = .none;
 pub var g_pick_row_gone: bool = false;
 
-fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []const u8, with_agent: bool) bool {
+fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []const u8, with_agent: bool, plain_claude: bool) bool {
     g_start_fail = .none;
     const workspace = activeWorkspaceSlot();
     const program = workspaceSessionProgram(configured_program, with_agent);
@@ -2212,8 +2211,6 @@ fn spawnWorkspaceSessionAt(host: u8, cwd: []const u8, configured_program: []cons
 
     const agent_host = @import("agent_host.zig");
     var sid_buf: [36]u8 = undefined;
-    const plain_claude = g_plain_claude;
-    g_plain_claude = false;
     const host_sid: ?[]const u8 = if (!plain_claude and agent_host.eligible(program)) agent_host.mintSessionId(&sid_buf) else null;
     const live_chat = host_sid != null and newTabOpensChatView(program);
     var session_buf: [64]u8 = undefined;
@@ -5634,14 +5631,25 @@ test "IGSH-1266 declared folder wins and a later entry for the same workspace re
 test "IGSH-1266 no declared folder opens the pick repo list and spawns nothing" {
     app_state.g_custom_cmds_count = 0;
     defer closePickRepo();
-    try std.testing.expect(!spawnWorkspaceSession(false));
+    try std.testing.expect(!spawnWorkspaceSession(false, false));
     try std.testing.expect(app_state.g_search_pick_repo_mode);
     try std.testing.expect(!app_state.g_search_pick_repo_folder_mode);
     try std.testing.expectEqual(@as(u32, 0), app_state.shell_count);
 }
 
+test "repo picker keeps terminal intent only for its current request" {
+    defer closePickRepo();
+    pickRepoOpen(true, false, 0, true);
+    try std.testing.expect(app_state.g_search_pick_repo_plain_claude);
+    closePickRepo();
+    try std.testing.expect(!app_state.g_search_pick_repo_plain_claude);
+    pickRepoOpen(true, false, 0, true);
+    pickRepoOpen(true, false, 0, false);
+    try std.testing.expect(!app_state.g_search_pick_repo_plain_claude);
+}
+
 test "IGSH-1266 Esc closes the pick repo list and starts no tab" {
-    pickRepoOpen(true, true, 0);
+    pickRepoOpen(true, true, 0, false);
     const before = app_state.shell_count;
     closePickRepo();
     try std.testing.expect(!app_state.g_search_pick_repo_mode);

@@ -19,9 +19,12 @@ test('IGSH-1266 new Claude sessions start on the app owned host and typing a com
   assert.ok(start >= 0 && end > start, 'spawnWorkspaceTmuxSession must exist');
   const body = palette.slice(start, end);
   assert.match(body, /if \(!plain_claude and agent_host\.eligible\(program\)\) agent_host\.mintSessionId\(&sid_buf\) else null/);
-  assert.match(body, /pub fn spawnWorkspaceTmuxSession\(\) bool \{\s*g_plain_claude = false;/, 'Ctrl+T always opens a live chat');
-  assert.match(body, /pub fn spawnWorkspacePlainClaudeSession\(\) bool \{\s*g_plain_claude = true;/, 'the old terminal Claude stays available from Ctrl+K');
-  assert.match(body, /const plain_claude = g_plain_claude;\s*g_plain_claude = false;/, 'the old terminal choice is used once');
+  assert.match(body, /pub fn spawnWorkspaceTmuxSession\(\) bool \{\s*return spawnWorkspaceSession\(true, false\);/, 'Ctrl+T always opens a live chat');
+  assert.match(body, /pub fn spawnWorkspacePlainClaudeSession\(\) bool \{\s*return spawnWorkspaceSession\(true, true\);/, 'the old terminal Claude stays available from Ctrl+K');
+  assert.match(body, /spawnWorkspaceSessionAt\(host, cwd_buf\[0\.\.cwd_len\], program_buf\[0\.\.program_len\], with_agent, plain_claude\)/);
+  assert.match(body, /pickRepoOpen\(with_agent, false, workspaceHostForNewTab\(workspace\), plain_claude\)/);
+  assert.match(palette, /const plain_claude = app_state\.g_search_pick_repo_plain_claude;\s*closePickRepo\(\);/);
+  assert.match(palette, /spawnWorkspaceSessionAt\(host, path, program_buf\[0\.\.program_len\], with_agent, plain_claude\)/);
   assert.match(body, /const launch_cmd = workspaceLaunchCommand\(program, session, cwd, host_sid, &host_buf, &cmd_buf\) orelse \{/);
   assert.match(body, /var host_buf: \[WORKSPACE_HOST_LAUNCH_MAX\]u8 = undefined;/);
   assert.match(body, /if \(launch_cmd\.len > app_state\.g_pending_tmux_cmd\.len\)/, 'the pending command buffer must be checked before the copy');

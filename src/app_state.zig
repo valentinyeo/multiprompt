@@ -1086,6 +1086,7 @@ pub var g_search_openall_host_mode: bool = false;
 pub var g_search_pick_repo_mode: bool = false;
 pub var g_search_pick_repo_folder_mode: bool = false;
 pub var g_search_pick_repo_with_agent: bool = true;
+pub var g_search_pick_repo_plain_claude: bool = false;
 pub var g_search_pick_repo_host: u8 = 0;
 pub var g_search_snippet_mode: bool = false;
 pub var g_search_shells_mode: bool = false;

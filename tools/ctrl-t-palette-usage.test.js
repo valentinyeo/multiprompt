@@ -21,7 +21,7 @@ function functionBody(name, nextName) {
 test("Alt+T starts only the configured program in a fresh workspace tmux session", () => {
   const spawn = functionBody("spawnWorkspaceSession", "spawnWorkspaceSessionAt");
   assert.match(spawn, /workspaceConfiguredTerminalFolder\(workspace, &host, &cwd_buf, &cwd_len, &program_buf, &program_len\)/);
-  assert.match(spawn, /pickRepoOpen\(with_agent, false, workspaceHostForNewTab\(workspace\)\)/,
+  assert.match(spawn, /pickRepoOpen\(with_agent, false, workspaceHostForNewTab\(workspace\), plain_claude\)/,
     "the repo picker must remain the neutral fallback");
   const spawnAt = functionBody("spawnWorkspaceSessionAt", "workspaceFolderForNewChat");
   assert.match(spawnAt, /workspaceSessionProgram\(configured_program, with_agent\)/,
