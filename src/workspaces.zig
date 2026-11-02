@@ -2141,7 +2141,7 @@ pub fn detachTabToNewWindow(idx: u32) void {
             if (app_state.g_webview2_active and app_state.g_webview2_owner_shell_id == shell.shell_id) {
                 @import("browser_pane.zig").closeWebView2();
             } else if (shell.browser_hwnd != null) {
-                _ = PostMessageW(shell.browser_hwnd, @import("win32.zig").WM_CLOSE, 0, 0);
+                _ = PostMessageW(shell.browser_hwnd, app_state.WM_CLOSE, 0, 0);
             }
         }
         if (app_state.g_job != null) {
