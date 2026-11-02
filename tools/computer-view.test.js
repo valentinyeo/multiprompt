@@ -4,6 +4,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+function read(relative) {
+  const file = path.join(__dirname, '..', relative);
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+}
+
 function viewer() {
   const sent = [], operations = [], frames = [], instances = [];
   const elements = new Map();
@@ -47,8 +52,7 @@ function viewer() {
     window: { chrome: { webview: { postMessage(message) { sent.push(message); }, addEventListener(name, fn) { receive = fn; } } }, addEventListener(event, fn) { windowEvents.set(event, fn); } },
     requestAnimationFrame(fn) { frames.push(fn); },
   };
-  const file = path.join(__dirname, '../assets/computer/adapter.js');
-  const source = (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '').replace(/^import .*;\n/gm, '');
+  const source = read('src/computer/adapter.js').replace(/^import .*;\n/gm, '');
   assert.ok(source.length > 0, 'the Computer page script ships with the app');
   vm.runInNewContext(source, context, { filename: 'computer-adapter.js' });
   const words = { computer: 'Computer', connecting: 'Connecting', live: 'Live', sleeping: 'Sleeping', reconnecting: 'Reconnecting', lost: 'Lost', take_control: 'Take control', give_back: 'Give back', in_control: 'You are in control', retry: 'Retry', full_width: 'Full width' };
@@ -196,8 +200,9 @@ test('Pinned Display increments its presentation counter only after a damaged dr
   const draws = [];
   const context2d = { drawImage(...args) { draws.push(args); }, fillRect() {} };
   const canvas = { width: 16, height: 16, style: {}, getContext() { return context2d; } };
-  const source = fs.readFileSync(path.join(__dirname, '../assets/computer/vendor/novnc/core/display.js'), 'utf8')
+  const source = read('src/computer/vendor/novnc/core/display.js')
     .replace(/^import .*;\n/gm, '').replace('export default class Display', 'globalThis.Display = class Display');
+  assert.ok(source.length > 0, 'the vendored display module ships with the app');
   const context = { Log: { Debug() {} }, navigator: { userAgent: 'unit fixture' }, document: { createElement() { return canvas; } } };
   vm.runInNewContext(source, context);
   const display = new context.Display(canvas);
@@ -216,11 +221,13 @@ test('Pinned Display increments its presentation counter only after a damaged dr
 
 function pinnedRFB() {
   const context = { EventTargetMixin: class {}, Log: { Debug() {} }, clearTimeout, CustomEvent: class { constructor(type) { this.type = type; } } };
-  const encodings = fs.readFileSync(path.join(__dirname, '../assets/computer/vendor/novnc/core/encodings.js'), 'utf8')
+  const encodings = read('src/computer/vendor/novnc/core/encodings.js')
     .replace('export const encodings', 'globalThis.encodings').replace('export function encodingName', 'function encodingName');
+  assert.ok(encodings.length > 0, 'the vendored encodings module ships with the app');
   vm.runInNewContext(encodings, context);
-  const source = fs.readFileSync(path.join(__dirname, '../assets/computer/vendor/novnc/core/rfb.js'), 'utf8')
+  const source = read('src/computer/vendor/novnc/core/rfb.js')
     .replace(/^import .*;\n/gm, '').replace('export default class RFB', 'globalThis.RFB = class RFB');
+  assert.ok(source.length > 0, 'the vendored RFB module ships with the app');
   vm.runInNewContext(source, context);
   return context;
 }

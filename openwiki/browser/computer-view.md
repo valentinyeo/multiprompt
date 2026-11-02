@@ -91,6 +91,6 @@ Retries reuse this instance's private runtime directory. That directory can rema
 
 Dependency sources and licenses:
 
-- `assets/computer/UPSTREAM.json`
-- `assets/computer/vendor/novnc/`
-- `vendor/webview2/PROVENANCE.txt`
+- `src/computer/UPSTREAM.json`
+- `src/computer/vendor/novnc/`
+- `src/computer/vendor/webview2/PROVENANCE.txt`

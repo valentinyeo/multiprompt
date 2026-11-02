@@ -664,6 +664,10 @@ fn queueDictationStopFromEnter() bool {
 
 var computer_consumed_keys = [_]bool{false} ** 256;
 
+pub fn releaseComputerKeys() void {
+    computer_consumed_keys = @splat(false);
+}
+
 fn computerAppMessage(vk: u32, ctrl: bool, shift: bool, alt: bool, win: bool) ?u32 {
     if (win) return null;
     if (alt and !ctrl) return switch (vk) {
@@ -697,10 +701,7 @@ test "IGSH-1087 private typing bypasses chat and shell shortcuts except delibera
 }
 
 pub fn keyboardHookProc(nCode: i32, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRESULT {
-    if (app_state.g_account_locked) {
-        computer_consumed_keys = @splat(false);
-        return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
-    }
+    if (app_state.g_account_locked) return CallNextHookEx(app_state.g_hook, nCode, wp, lp);
     app_state.g_last_kb_hook_tick = GetTickCount64();
     if (nCode == HC_ACTION) {
         if (app_state.g_power_deep_idle and app_state.g_main_hwnd != null) {

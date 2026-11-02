@@ -928,7 +928,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
         SEARCH_CHAT_AC_OFFSET => "chat view insert command or skill browse ctrl slash",
         SEARCH_SKILLS_BACK_OFFSET => "back",
         SEARCH_COMPUTER_TOGGLE_OFFSET, SEARCH_COMPUTER_CONTROL_OFFSET, SEARCH_COMPUTER_WIDTH_OFFSET, SEARCH_COMPUTER_RETRY_OFFSET => @import("computer_pane.zig").actionLabel(target),
-        SEARCH_BROWSER_TOGGLE_OFFSET => if (@import("computer_pane.zig").selected()) @import("ui_words.zon").computer_return_browser else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) "retry browser pane" else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) "close browser pane" else "open browser pane",
+        SEARCH_BROWSER_TOGGLE_OFFSET => if (@import("computer_pane.zig").selected()) words.computer_return_browser else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_open_failed) "retry browser pane" else if (app_state.active_shell < app_state.shell_count and app_state.shells[app_state.active_shell].browser_hwnd == null and app_state.shells[app_state.active_shell].browser_launch_tick != 0) "close browser pane" else "open browser pane",
         SEARCH_BROWSER_URL_OFFSET => "browser open url",
         SEARCH_BROWSER_INSTRUCT_OFFSET => "browser: insert agent instructions",
         SEARCH_BROWSER_FOCUS_URL_OFFSET => "browser: focus address bar",

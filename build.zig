@@ -11,15 +11,9 @@ fn linkColorEmoji(b: *std.Build, module: *std.Build.Module) void {
     module.linkSystemLibrary("dwrite", .{});
 }
 
-fn linkComputer(b: *std.Build, module: *std.Build.Module, target: std.Build.ResolvedTarget) void {
-    const arch = switch (target.result.cpu.arch) { .x86_64 => "x64", .aarch64 => "arm64", else => @panic("Computer requires x64 or arm64") };
-    module.addAnonymousImport("computer_assets", .{ .root_source_file = b.path("assets/computer/resources.zig"), .target = target });
-    module.addAnonymousImport("computer_loader", .{ .root_source_file = b.path(b.fmt("vendor/webview2/{s}/WebView2Loader.dll", .{arch})) });
-    module.addAnonymousImport("computer_webview2_license", .{ .root_source_file = b.path("vendor/webview2/LICENSE.txt") });
-    module.addAnonymousImport("computer_webview2_notice", .{ .root_source_file = b.path("vendor/webview2/NOTICE.txt") });
-    module.addAnonymousImport("computer_windows_header_license", .{ .root_source_file = b.path("vendor/webview2/WIN32METADATA-LICENSE") });
+fn linkComputer(b: *std.Build, module: *std.Build.Module) void {
     module.addCSourceFile(.{ .file = b.path("src/computer_view.cpp"), .flags = &.{ "-std=c++17", "-fno-exceptions", "-fno-rtti", "-fms-extensions" } });
-    module.addIncludePath(b.path("vendor/webview2/include"));
+    module.addIncludePath(b.path("src/computer/vendor/webview2/include"));
     module.link_libcpp = true;
     module.linkSystemLibrary("ole32", .{});
     module.linkSystemLibrary("uuid", .{});
@@ -72,7 +66,7 @@ pub fn build(b: *std.Build) void {
     });
 
     linkColorEmoji(b, exe.root_module);
-    linkComputer(b, exe.root_module, target);
+    linkComputer(b, exe.root_module);
     if (b.option(bool, "symbols", "Retain native profiling symbols") orelse false) exe.root_module.strip = false;
     exe.root_module.addObject(revision_object);
     exe.subsystem = .Windows;
@@ -123,7 +117,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     linkColorEmoji(b, dev_exe.root_module);
-    linkComputer(b, dev_exe.root_module, target);
+    linkComputer(b, dev_exe.root_module);
     dev_exe.root_module.addObject(revision_object);
     dev_exe.subsystem = .Windows;
     dev_exe.stack_size = MAIN_STACK_SIZE;
