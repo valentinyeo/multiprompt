@@ -169,10 +169,10 @@ test('ISSUE-521 ended overlay and palette restart the same named host session ex
   assert.match(drawing, /"Session ended"/);
   assert.match(drawing, /L\("Start new session"\)/);
   const cmd = body('makeCmdLine', read('console.zig'));
-  assert.match(cmd, /tmux_identity\.zig"\)\.attachCommand\(&attach_buf, tmux_session\.\?, tmux_identity, new_session, app_state\.g_pending_tmux_hidden\)/);
+  assert.match(cmd, /tmux_identity\.zig"\)\.attachCommand\(&attach_buf, tmux_session\.\?, tmux_identity, new_session\)/);
   const attach = body('attachCommand', read('tmux_identity.zig'));
-  assert.match(attach, /try writer\.writeAll\(if \(create\) "tmux new-session -A " else "tmux attach "\);/);
-  assert.match(attach, /if \(hidden\) try writer\.writeAll\("-f ignore-size "\);/);
+  assert.match(attach, /try writer\.writeAll\(if \(create\) "tmux new-session -A -s " else "tmux attach -t "\);/);
+  assert.doesNotMatch(attach, /ignore-size/);
   assert.match(attach, /try quote\(&writer,/);
   assert.match(body('sshReconnectNow', send), /if \(was_ended\) shell\.tmux_identity_len = 0/);
   assert.match(body('respawnShellInPlace', read('console.zig')), /saved_ssh_reconnect\.create_session/);
