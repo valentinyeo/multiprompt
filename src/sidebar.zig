@@ -452,6 +452,12 @@ fn displayedGroupColor(gidx: u32) DWORD {
     return customColorOr("muted", if (app_state.g_light_theme) RGB(130, 134, 140) else RGB(145, 149, 157));
 }
 
+fn selectedSessionBackground() DWORD {
+    const base = themeSidebarBg();
+    if (!LOOK_UNIFIED) return themeConsoleBg();
+    return if (app_state.g_light_theme) tintColor(base, RGB(0, 0, 0), 1, 9) else tintColor(base, RGB(255, 255, 255), 1, 9);
+}
+
 pub fn tintColor(base: DWORD, color: DWORD, num: u32, den: u32) DWORD {
     const br = base & 0xFF;
     const bg = (base >> 8) & 0xFF;
@@ -2071,7 +2077,7 @@ fn paintChatSidebarRow(hdc: HANDLE, column: RECT, y: i32, index: u32) void {
     }
     avatar.draw(hdc, avatar_rect, appearance);
     if (shell.favorite) {
-        const background = if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) (if (LOOK_UNIFIED) (if (app_state.g_light_theme) RGB(214, 214, 214) else RGB(58, 58, 58)) else themeConsoleBg()) else themeSidebarBg();
+        const background = if (index == app_state.active_shell and !@import("room_frontend.zig").isActive()) selectedSessionBackground() else themeSidebarBg();
         drawStarBadge(hdc, avatar_rect, 36, background);
     }
     if (shell.needs_attention or shell.disconnected) {

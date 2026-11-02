@@ -139,7 +139,8 @@ test('ISSUE-498 dictation started in A completes in A while B is active', () => 
   const ready = body('handleDictationReady');
   const appReady = ready.replaceAll('app_state.', '');
   const branchStart = appReady.lastIndexOf('\n    if (g_chat_active and g_chat_composer_hwnd != null)');
-  const marker = appReady.indexOf('\n    if (dictationTargetIsBrowser())');
+  const gate = appReady.indexOf('\n    if (!dictation_private_capture)');
+  const marker = gate >= 0 ? gate : appReady.indexOf('\n    if (dictationTargetIsBrowser())');
   const toggle = body('toggleDictation');
   const captureStart = toggle.indexOf('    g_dictation_draft_owner_len = 0;');
   const capture = captureStart < 0 ? '' : toggle.slice(captureStart, toggle.indexOf('    g_dictation_recording.store(true', captureStart)).replaceAll('@import("chat_composer.zig").', '');

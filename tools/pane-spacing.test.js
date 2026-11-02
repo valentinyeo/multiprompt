@@ -530,16 +530,18 @@ ${fn(sidebar, 'tintColor')}
 const LOOK_UNIFIED = true;
 const active_shell: u32 = 0;
 const index: u32 = 0;
-fn themeConsoleBg() DWORD { return RGB(40, 40, 40); }
-fn themeSidebarBg() DWORD { return RGB(36, 36, 36); }
+var stub_bg: DWORD = 0;
+fn themeConsoleBg() DWORD { return stub_bg; }
+fn themeSidebarBg() DWORD { return stub_bg; }
+${fn(sidebar, 'selectedSessionBackground')}
 fn selectedBackground(sidebar_bg: DWORD) DWORD {
-    _ = sidebar_bg;
-    ${statement(sidebar, 'const background = if (index == app_state.active_shell')}
-    return background;
+    stub_bg = sidebar_bg;
+    return selectedSessionBackground();
 }
 test "selected session is gray and distinct from its sidebar" {
     for ([_]u32{0, 36, 51, 60, 243}) |base| {
         g_amoled_theme = base == 0;
+        g_light_theme = base >= 200;
         const color = selectedBackground(RGB(base, base, base));
         const r = color & 255;
         const g = (color >> 8) & 255;
