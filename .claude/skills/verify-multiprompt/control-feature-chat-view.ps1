@@ -88,6 +88,89 @@
                             $inbox = Read-Inbox
                             @($inbox.shells | Where-Object { $_.sid -eq $localState.tabs[$localTab].shell_id -and $_.PSObject.Properties['ag'] -and $_.ag -eq 1 }).Count -eq 1
                         } 'local claude.exe detected as Claude for the direct input route' -Seconds 45
+                        if ($mode -eq 'typed') {
+                            $journeyState = Read-Session
+                            $journeyId = [int]$journeyState.tabs[$localTab].shell_id
+                            $journeyIds = @($journeyState.tabs | ForEach-Object { [int]$_.shell_id })
+                            $otherViews = @($journeyState.tabs | ForEach-Object { [bool]($_.PSObject.Properties['cv'] -and $_.cv) })
+                            $fixturePid = [int]$ready.pid
+                            $fixture = Get-CimInstance Win32_Process -Filter "ProcessId = $fixturePid"
+                            if ($null -eq $fixture -or $fixture.ExecutablePath -ine $localAgent -or $fixturePid -eq $process.Id) { throw 'Ready file did not identify the local Claude stand-in process' }
+                            $parentId = [int]$fixture.ParentProcessId
+                            $ancestorId = $parentId
+                            for ($depth = 0; $depth -lt 8 -and $ancestorId -ne $process.Id -and $ancestorId -gt 0; $depth++) {
+                                $ancestor = Get-CimInstance Win32_Process -Filter "ProcessId = $ancestorId"
+                                if ($null -eq $ancestor) { break }
+                                $ancestorId = [int]$ancestor.ParentProcessId
+                            }
+                            if ($ancestorId -ne $process.Id) { throw 'Claude stand-in is not a descendant of the owned app' }
+                            $fixtureStart = (Get-Process -Id $fixturePid).StartTime.ToUniversalTime().ToString('o')
+                            $journey = @{ name = 'running-claude-stand-in-switch'; passed = $false; scope = 'local console stand-in, not a real Claude conversation or cloud delivery'; appPid = $process.Id; fixturePid = $fixturePid; fixtureParentPid = $parentId; fixtureStartUtc = $fixtureStart; shellId = $journeyId; activeTab = $localTab; tabIds = $journeyIds; steps = @() }
+                            $result.checks += $journey
+                            $checkJourney = {
+                                param([string]$stage, [bool]$chat)
+                                Wait-Until {
+                                    $state = Read-Session
+                                    $null -ne $state -and $state.active_tab -eq $localTab -and [bool]($state.tabs[$localTab].PSObject.Properties['cv'] -and $state.tabs[$localTab].cv) -eq $chat
+                                } "$stage saved the requested view"
+                                $state = Read-Session
+                                if ($state.active_workspace -ne $journeyState.active_workspace -or $state.active_tab -ne $localTab -or [int]$state.active_shell_id -ne $journeyId -or (@($state.tabs | ForEach-Object { [int]$_.shell_id }) -join ',') -cne ($journeyIds -join ',')) { throw "$stage changed the selected session or tab list" }
+                                for ($i = 0; $i -lt $journeyIds.Count; $i++) {
+                                    if ($i -ne $localTab -and [bool]($state.tabs[$i].PSObject.Properties['cv'] -and $state.tabs[$i].cv) -ne $otherViews[$i]) { throw "$stage changed another tab's view" }
+                                }
+                                $live = Get-CimInstance Win32_Process -Filter "ProcessId = $fixturePid"
+                                if ($null -eq $live -or $live.ExecutablePath -ine $localAgent -or [int]$live.ParentProcessId -ne $parentId -or (Get-Process -Id $fixturePid).StartTime.ToUniversalTime().ToString('o') -cne $fixtureStart) { throw "$stage restarted or lost the Claude stand-in" }
+                                if ($chat) {
+                                    Wait-Until {
+                                        $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
+                                        $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ZigShellChatTranscript')
+                                        @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition) | Where-Object { $_.Current.ProcessId -eq $process.Id -and -not $_.Current.IsOffscreen }).Count -eq 1
+                                    } "$stage shows the owned transcript"
+                                } else {
+                                    Wait-WorkspaceSurface $journeyState.active_workspace $localTab $false
+                                }
+                                $journey.steps += @{ stage = $stage; chat = $chat; shellId = $journeyId; fixturePid = $fixturePid; fixtureStartUtc = $fixtureStart }
+                                Save-Json $journey 'running-claude-switch.json'
+                            }
+                            & $checkJourney 'before' $false
+                            Snapshot 'running-claude-before'
+                            Press @(0x12, 0x43) 'Alt+C: switch running stand-in to chat'
+                            & $checkJourney 'alt-chat' $true
+                            Snapshot 'running-claude-chat'
+                            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+                            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'Alt+C debounce before shell'
+                            Press @(0x12, 0x43) 'Alt+C: return running stand-in to shell'
+                            & $checkJourney 'alt-shell' $false
+                            Snapshot 'running-claude-shell'
+                            foreach ($chat in @($true, $false)) {
+                                $label = if ($chat) { 'Switch to chat view' } else { 'Switch to shell' }
+                                Focus-Palette 'switch to terminal' 6305
+                                Snapshot $(if ($chat) { 'running-claude-palette-chat' } else { 'running-claude-palette-shell' })
+                                Press @(0x0D) "Enter: $label for the current tab"
+                                & $checkJourney $(if ($chat) { 'palette-chat' } else { 'palette-shell' }) $chat
+                            }
+                            foreach ($chat in @($true, $false)) {
+                                $label = if ($chat) { 'Switch to chat view' } else { 'Switch to shell' }
+                                Doctor
+                                Assert-Foreground
+                                $rowsBefore = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count
+                                Record 'Right-click the running stand-in tab row'
+                                [VerifyNative]::RightClickClient($script:window, 100, (127 + 38 * $localTab))
+                                Wait-Until { @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count -gt $rowsBefore } 'tab actions palette opened'
+                                $readyBefore = @(Get-Content $debugLog | Where-Object { $_ -match ('\[palette\] ready chars=' + $label.Length + ' count=\d+ target=7114$') }).Count
+                                Type-Text $label
+                                Wait-Until {
+                                    @(Get-Content $debugLog | Where-Object { $_ -match ('\[palette\] ready chars=' + $label.Length + ' count=\d+ target=7114$') }).Count -gt $readyBefore
+                                } 'current tab switch action selected'
+                                Snapshot $(if ($chat) { 'running-claude-context-chat' } else { 'running-claude-context-shell' })
+                                Press @(0x0D) "Enter: $label from the tab menu"
+                                & $checkJourney $(if ($chat) { 'context-chat' } else { 'context-shell' }) $chat
+                            }
+                            $journey.passed = $true
+                            Save-Json $journey 'running-claude-switch.json'
+                            $toggleReady = [DateTime]::UtcNow.AddMilliseconds(1600)
+                            Wait-Until { [DateTime]::UtcNow -ge $toggleReady } 'switch debounce before local input route'
+                        }
                         Press @(0x12, 0x43) 'Alt+C: open local agent Chat View'
                         Wait-Until {
                             $root = [System.Windows.Automation.AutomationElement]::FromHandle($script:window)
