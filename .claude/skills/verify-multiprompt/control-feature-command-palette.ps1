@@ -105,10 +105,11 @@
             $pickTabsAfter = @((Read-Session).tabs).Count
             if ($pickTabsAfter -ne $pickTabsBefore) { throw ('Pick repo changed the tab count: ' + $pickTabsBefore + ' -> ' + $pickTabsAfter) }
             $result.checks += @{ name = 'pick-repo-list'; row = 'pick-repo-row.png'; list = 'pick-repo-list.png'; back = 'pick-repo-back.png'; tabsBefore = $pickTabsBefore; tabsAfter = $pickTabsAfter; escapeLeavesTabs = $true; repoRows = $repoRows; repo = $repoFolder }
-            $repoListsBefore = ([regex]::Matches(((Get-Content $repoLog -Raw) -join ''), '\[palette\] rows chars=0 count=2 ids=6702 6710')).Count
+            $repoLogPath = Join-Path $scratch 'roaming/ZigShell/debug.log'
+            $repoListsBefore = ([regex]::Matches(((Get-Content $repoLogPath -Raw) -join ''), '\[palette\] rows chars=0 count=2 ids=6702 6710')).Count
             Palette 'pick repo'
             Press @(0x0D) 'Enter: reopen Pick repo'
-            Wait-Until { ([regex]::Matches(((Get-Content $repoLog -Raw) -join ''), '\[palette\] rows chars=0 count=2 ids=6702 6710')).Count -gt $repoListsBefore } 'Pick repo list reopened'
+            Wait-Until { ([regex]::Matches(((Get-Content $repoLogPath -Raw) -join ''), '\[palette\] rows chars=0 count=2 ids=6702 6710')).Count -gt $repoListsBefore } 'Pick repo list reopened'
             Press @(0x0D) 'Enter: open the harness folder repo'
             Wait-Until { @((Read-Session).tabs).Count -eq $pickTabsBefore + 1 } 'Pick repo opened one new tab'
             $openedTabs = @((Read-Session).tabs)
