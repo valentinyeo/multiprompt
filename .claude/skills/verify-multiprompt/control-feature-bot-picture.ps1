@@ -61,15 +61,15 @@
             }
             function Get-BotPickerEdit {
                 $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($script:botPicker)
-                $combo = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ComboBox)
-                $edit = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
-                $box = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Children, $combo)
-                if ($null -ne $box) {
-                    $inner = $box.FindFirst([System.Windows.Automation.TreeScope]::Children, $edit)
-                    if ($null -ne $inner) { $script:botPickerSelector = 'file name edit inside the file name combo'; return $inner }
+                $editClass = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'Edit')
+                $comboClass = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty, 'ComboBoxEx32')
+                $combo = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Children, $comboClass)
+                if ($null -ne $combo) {
+                    $inner = $combo.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editClass)
+                    if ($null -ne $inner) { $script:botPickerSelector = 'Edit inside the ComboBoxEx32 file name box'; return $inner }
                 }
-                $direct = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Children, $edit)
-                if ($null -ne $direct) { $script:botPickerSelector = 'file name edit'; return $direct }
+                $direct = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Children, $editClass)
+                if ($null -ne $direct) { $script:botPickerSelector = 'Edit child of the picker'; return $direct }
                 return $null
             }
             function Enter-BotPicturePath([string]$Path) {
@@ -77,7 +77,7 @@
                 $edit = Get-BotPickerEdit
                 if ($null -eq $edit) {
                     Save-Json (Get-BotPickerChildren) 'picture-picker-children.json'
-                    throw 'The picture picker exposes no file name field among its own children'
+                    throw 'The picture picker exposes no Edit inside its ComboBoxEx32 file name box'
                 }
                 $pattern = $null
                 try { $pattern = [System.Windows.Automation.ValuePattern]$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern) } catch { $pattern = $null }
