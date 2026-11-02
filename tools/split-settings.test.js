@@ -19,7 +19,13 @@ const state = read('src/app_state.zig');
 const offsets = state.match(/pub const SEARCH_(?:SHOW_FREQUENT|FREQUENT_FIRST|SHOW_FAVORITES|SHOW_ALL)_OFFSET: usize = \d+;/g).join('\n');
 const toggle = between(main, '                if (target == SEARCH_SHOW_FREQUENT_OFFSET', '                if (target == SEARCH_INBOX_FREQUENT_OFFSET)');
 const serialize = between(session, '    if (app_state.g_layout_settings) |settings| {', '    const split_state =');
-const paint = between(inbox, '    var total_attn: u32 = 0;', '    var div_rc = RECT{ .left = 16, .top = tab_y + 28,');
+const paint = between(inbox, '    var tabs: [INBOX_MAX_SPLIT_TABS]InboxTab = undefined;', '    if (app_state.g_inbox_filter_active and width > 0) {')
+  .replace('    const width = @max(0, layout.right - layout.left);\n', '')
+  .replaceAll('@import("drawing.zig").uiFontBot(', 'uiFontBot(')
+  .replaceAll('@import("smooth.zig").fillRoundRect(', 'fillRoundRect(')
+  .replaceAll('@import("dwrite_text.zig").draw(', 'drawText(')
+  .replaceAll('@import("browser_pane.zig").inboxButtonRect(true).right', 'tabsOrigin()')
+  .replace('    var x = tabs_left;', '    var x: i32 = tabs_left;');
 const navigationTest = inbox.slice(inbox.indexOf('test "ISSUE-423 hidden selection'));
 const harness = `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -49,7 +55,29 @@ var saved_len: usize = 0;
 fn InvalidateRect(_: usize, _: ?*anyopaque, _: i32) i32 { return 1; }
 fn nowFileTime() u64 { return 0; }
 fn inboxFrequent(_: anytype, _: u64) bool { return false; }
-fn drawInboxTab(_: usize, x: *i32, _: i32, _: []const u8, _: u32, _: ?usize, _: bool, _: u32, _: u32, _: bool, _: u32, _: i32, _: u32) void { x.* += 50; }
+const InboxTab = struct { id: u32, label: []const u8, count: u32, width: i32 = 0 };
+const InboxLayout = struct { left: i32, right: i32, top: i32, stride: i32, row_height: i32, max_rows: u32, scroll: u32 };
+const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
+const json_reader = @import("json_reader.zig");
+const DT_SINGLELINE: u32 = 1;
+const DT_VCENTER: u32 = 2;
+const DT_NOPREFIX: u32 = 4;
+const DT_END_ELLIPSIS: u32 = 8;
+const semibold: usize = 0;
+const selected_bg: u32 = 0;
+const bright: u32 = 0;
+const tab_text: u32 = 0;
+var g_light_theme = false;
+fn uiScaled(n: i32) i32 { return n; }
+fn uiFontBot(_: anytype) usize { return 0; }
+fn inboxTextWidth(_: usize, text: []const u16) i32 { return @intCast(text.len * 7); }
+fn asciiToU16(text: []const u8, out: []u16) usize { for (text, 0..) |c, i| out[i] = c; return text.len; }
+fn tabsOrigin() i32 { return 0; }
+fn fillRoundRect(_: usize, _: RECT, _: i32, _: u32) void {}
+fn drawText(_: usize, _: [*]const u16, _: i32, _: *RECT, _: u32) i32 { return 0; }
+fn SelectObject(_: usize, _: usize) usize { return 0; }
+fn SetTextColor(_: usize, _: u32) u32 { return 0; }
+fn RGB(_: u8, _: u8, _: u8) u32 { return 0; }
 ${normalize(between(inbox, 'pub fn inboxSplitVisible(', 'pub fn inboxVisibleCount('))}
 fn saveSessionTo(json_buf: []u8) bool {
     const prefix = "{\\\"workspaces\\\":[],\\\"tabs\\\":[]";
@@ -68,9 +96,7 @@ ${normalize(toggle)}
 }
 fn paintSplits() void {
     const hdc: usize = 0;
-    const fg_bright: u32 = 0;
-    const fg_dim: u32 = 0;
-    const blue: u32 = 0;
+    const layout = InboxLayout{ .left = 0, .right = 1000, .top = 72, .stride = 58, .row_height = 56, .max_rows = 13, .scroll = 0 };
 ${normalize(paint)}
 }
 ${normalize(navigationTest)}
@@ -111,7 +137,7 @@ test "ISSUE-423 production toggles persist exact flags and painted hit boxes sha
 function execute(mutate = source => source) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-split-settings-'));
   try {
-    copyZig(['frequent.zig', 'session_layout.zig'], dir);
+    copyZig(['frequent.zig', 'session_layout.zig', 'json_reader.zig'], dir);
     fs.writeFileSync(path.join(dir, 'integration.zig'), (mutate(harness)).replaceAll('@import("chat_session.zig").chatReadMark', 'chatReadMark').replaceAll('@import("chat_session.zig").chatReadBoundary', 'chatReadBoundary'));
     return spawnSync(process.env.ZIG || 'zig', ['test', '-j1', path.join(dir, 'integration.zig'), '--test-filter', 'ISSUE-423'], { encoding: 'utf8', timeout: 120000 });
   } finally {

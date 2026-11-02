@@ -13,7 +13,7 @@ function between(start, end, text = source) {
   return text.slice(a, b);
 }
 const normalize = text => text.replaceAll('pub fn ', 'fn ').replaceAll('app_state.', '').replaceAll('@import("inbox.zig").nowFileTime()', 'nowFileTime()').replaceAll('@import("account_desktop.zig").publishSessionLayout()', 'publishSessionLayout()').replaceAll('@import("account_desktop.zig").accountPush()', 'accountPush()');
-const painting = between('    var y: i32 = list_top;', '    _ = SelectObject(hdc, font_subtitle);\n    _ = SetTextColor(hdc, fg_dim);\n    var ft_rc', read('src/inbox.zig')).replaceAll('@import("dwrite_text.zig").draw(', 'drawText(');
+const painting = between('const InboxLayout = struct {', '\npub fn inboxMouseClick(', read('src/inbox.zig'));
 const harness = `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
 var g_chat_read_boundary: ReadBoundary = .{};
@@ -84,6 +84,7 @@ fn inboxFilterMatches(_: *const InboxRow) bool { return true; }
 const RECT = struct { left: i32, top: i32, right: i32, bottom: i32 };
 const HANDLE = ?*anyopaque;
 var g_inbox_sel: u32 = 0;
+var g_inbox_filter_active = false;
 var g_multiprompt_theme = false;
 var g_light_theme = false;
 var g_eta_numbers_on = false;
@@ -101,6 +102,7 @@ const DT_END_ELLIPSIS: u32 = 8;
 const DT_RIGHT: u32 = 16;
 var drawn_names: [6][64]u16 = undefined;
 var drawn_y: [6]i32 = undefined;
+var drawn_left: [6]i32 = undefined;
 var drawn_count: usize = 0;
 fn uiScaled(n: i32) i32 { return n; }
 fn RGB(_: u8, _: u8, _: u8) u32 { return 0; }
@@ -140,13 +142,27 @@ fn etaElapsedMs(_: u64, _: i64) u64 { return 0; }
   between('const favoriteSplitMatches =', 'fn toggleFavorite(') +
   between('fn inboxRowVisible(', 'test "cached inbox navigation') +
   between('fn inboxVisibleCount(', 'fn rememberInboxRow(') + `
-fn paintRows() void {
-    const list_top: i32 = 54;
-    const row_h: i32 = 32;
-    const w: i32 = 1000;
-    const scroll_row: u32 = 0;
-    const max_rows: u32 = 20;
 ` + normalize(painting) + `
+fn paintRows() void {
+    const layout = inboxLayout(1000, 900);
+    var visible: u32 = 0;
+    var drawn: u32 = 0;
+    for (g_inbox_rows[0..g_inbox_row_count]) |*row| {
+        if (!inboxRowVisible(row)) continue;
+        const index = visible;
+        visible += 1;
+        if (index < layout.scroll) continue;
+        if (drawn >= layout.max_rows) break;
+        const y = layout.top + @as(i32, @intCast(drawn)) * layout.stride;
+        drawn += 1;
+        const name = inboxNameBounds(layout, row);
+        const len = @min(@as(usize, row.name_len), drawn_names[drawn_count].len);
+        drawn_names[drawn_count] = .{0} ** 64;
+        @memcpy(drawn_names[drawn_count][0..len], row.name[0..len]);
+        drawn_y[drawn_count] = y;
+        drawn_left[drawn_count] = name.left;
+        drawn_count += 1;
+    }
 }
 test "v2 production stamp every input and publish once per synced minute" {
     shells[0] = .{};
@@ -257,7 +273,8 @@ test "v2 fixture production paint puts beta alpha gamma on screen and gamma at g
         var wide: [64]u16 = .{0} ** 64;
         _ = asciiToU16(name, &wide);
         try std.testing.expectEqualSlices(u16, &wide, &drawn_names[i]);
-        try std.testing.expectEqual(@as(i32, 54) + @as(i32, @intCast(i)) * 32, drawn_y[i]);
+        try std.testing.expectEqual(inboxLayout(1000, 900).top + @as(i32, @intCast(i)) * inboxLayout(1000, 900).stride, drawn_y[i]);
+        try std.testing.expectEqual(inboxNameBounds(inboxLayout(1000, 900), &g_inbox_rows[i]).left, drawn_left[i]);
     }
     try std.testing.expect(drawn_y[2] > drawn_y[1]);
 }
