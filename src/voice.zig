@@ -2258,6 +2258,13 @@ pub fn handleDictationReady() void {
         return;
     }
 
+    if (app_state.g_dictation_draft_owner_len > 0) {
+        @import("chat_composer.zig").chatDraftAppend(app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len], transcript);
+        dictationAudit("target-chat-composer", transcript.len);
+        @import("chat_composer.zig").chatDictationSendFlush(send_queued);
+        return;
+    }
+
     if (!dictation_private_capture) {
         if (dictation_external_target == null or @import("win32.zig").GetForegroundWindow() != dictation_external_target) return;
         if (!setUnicodeClipboardTextWithRetry(transcript)) return;
@@ -2279,13 +2286,6 @@ pub fn handleDictationReady() void {
         }
         app_state.g_voice_state = .waiting;
         invalidateChatHeader();
-        return;
-    }
-
-    if (app_state.g_dictation_draft_owner_len > 0) {
-        @import("chat_composer.zig").chatDraftAppend(app_state.g_dictation_draft_owner[0..app_state.g_dictation_draft_owner_len], transcript);
-        dictationAudit("target-chat-composer", transcript.len);
-        @import("chat_composer.zig").chatDictationSendFlush(send_queued);
         return;
     }
 

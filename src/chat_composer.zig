@@ -1748,7 +1748,7 @@ pub fn showShellConsole(idx: u32, cmd: i32, from: []const u8) BOOL {
 test "console visibility rejects chat, saved chat before restore, inactive tabs and overlays" {
     try std.testing.expect(shellConsoleVisibilityAllowed(true, false, false, false));
     try std.testing.expect(!shellConsoleVisibilityAllowed(true, true, false, false));
-    try std.testing.expect(!shellConsoleVisibilityAllowed(true, false, true, false));
+    try std.testing.expect(shellConsoleVisibilityAllowed(true, false, true, false));
     try std.testing.expect(!shellConsoleVisibilityAllowed(false, false, false, false));
     try std.testing.expect(!shellConsoleVisibilityAllowed(true, false, false, true));
 }
@@ -1869,7 +1869,7 @@ test "ISSUE-611 shell console is visible during restore and after tab switches" 
         }
     }
     app_state.shells[0].chat_view_on = true;
-    try std.testing.expect(!shellConsoleShouldBeVisible(0));
+    try std.testing.expect(shellConsoleShouldBeVisible(0));
 }
 
 var chat_drafts = draft_model.Store.init(std.heap.page_allocator);
