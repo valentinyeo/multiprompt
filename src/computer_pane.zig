@@ -252,6 +252,7 @@ fn setState(state: State) void {
 pub fn revoke() void {
     if (!machine.controlling) return;
     machine.controlling = false;
+    @import("shortcuts.zig").releaseComputerKeys();
     send("control", ",\"enabled\":false");
 }
 

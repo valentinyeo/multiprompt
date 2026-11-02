@@ -127,6 +127,7 @@ fn DrawTextW(_: HANDLE, text: [*]const u16, len: i32, rc: *RECT, _: u32) i32 {
     }
     return 1;
 }
+const computer = struct { fn sync() void {} };
 fn inboxRelTime(_: u64, _: []u16) usize { return 0; }
 fn etaRemainingMs(_: u64, _: u64) i64 { return 0; }
 fn formatEtaRemaining(_: i64, _: []u8) []const u8 { return ""; }
@@ -374,4 +375,8 @@ test('v2 shared fixture is byte-identical and Frequent stays first with selected
   assert.ok(read('src/sidebar.zig').includes('L(ui_words.palette_inbox_frequent)'));
   assert.ok(read('src/ui_words.zon').includes('.palette_inbox_frequent = "Inbox: frequent"'));
   assert.ok(read('src/shortcuts.zig').includes('.a = "Ctrl+K -> Inbox: Frequent"'));
+});
+
+test('Computer follows a session front change', () => {
+  assert.match(read('src/main.zig'), /pub fn sessionFrontChanged\(\) void \{\s*computer\.sync\(\);/);
 });
