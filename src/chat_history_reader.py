@@ -2913,7 +2913,17 @@ def host_agent_start(provider, sid):
                                             "--include-partial-messages", "--permission-prompt-tool", "stdio"]
     command += ["--resume", sid] if host_transcript_exists(provider, sid) else ["--session-id", sid]
     return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            cwd=host_cwd(provider, sid), start_new_session=True)
+                            cwd=host_cwd(provider, sid), env=host_agent_env(provider, sid), start_new_session=True)
+
+
+def host_agent_env(provider, sid):
+    env = dict(os.environ)
+    name = host_chat_name(provider, sid)
+    if name:
+        for key in ("TMUX", "TMUX_PANE"):
+            env.pop(key, None)
+        env.update(ZSB_SESSION=name, MULTIPROMPT_TAB=name)
+    return env
 
 
 def host_agent_recorded_pid(provider, sid):
@@ -5274,7 +5284,7 @@ elif __name__ == "__main__":
 
 '''
 READER_SOURCE = 'CONNECTOR_SOURCES = ' + repr(globals().get('CONNECTOR_SOURCES', {})) + '\n' + READER_SOURCE
-RUNTIME_GENERATION = 49
+RUNTIME_GENERATION = 50
 
 if __name__ == '__main__':
     import base64 as _base64
