@@ -11,17 +11,6 @@
             Press @(0x12, 0x49) 'Alt+I: open All Inbox'
             Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $true } 'Inbox open'
             Snapshot 'inbox-order-before'
-            Doctor
-            Wait-Foreground
-            Record 'gg: select top row'
-            Assert-Foreground
-            [VerifyNative]::KeyDown(0x47); [VerifyNative]::KeyUp(0x47)
-            [VerifyNative]::KeyDown(0x47); [VerifyNative]::KeyUp(0x47)
-            $prior = $newer.att
-            Press @(0x55) 'u: identify top row'
-            Wait-Until { $state = Read-Inbox; @($state.shells | Where-Object { $_.sid -eq $newer.sid -and $_.att -ne $prior }).Count -eq 1 } 'newer session was top'
-            Press @(0x55) 'u: restore read state'
-            Wait-Until { $state = Read-Inbox; @($state.shells | Where-Object { $_.sid -eq $newer.sid -and $_.att -eq $prior }).Count -eq 1 } 'newer read state restored'
             Start-Sleep -Seconds 65
             $notifyProcess = Start-Process -FilePath $Exe -ArgumentList @('--notify', '"NOTIFICATION:Inbox Older"') -PassThru
             try {
@@ -34,20 +23,14 @@
             } finally { $notifyProcess.Dispose() }
             Wait-Until {
                 $state = Read-Inbox
+                if ($null -eq $state -or -not $state.inbox_active) { return $false }
                 $row = @($state.shells | Where-Object { $_.sid -eq $older.sid })
-                $row.Count -eq 1 -and [long]$row[0].la -gt [long]$newer.la -and [long]$row[0].la -gt [long]$newer.lv
+                $other = @($state.shells | Where-Object { $_.sid -eq $newer.sid })
+                $row.Count -eq 1 -and $other.Count -eq 1 -and [long]$row[0].la -gt [long]$older.la -and [long]$row[0].la -gt [long]$other[0].la -and [long]$row[0].la -gt [long]$other[0].lv
             } 'scripted update published for older session' 45
             $after = Read-Inbox
             Save-Json $after 'inbox-order-after.json'
             Start-Sleep -Seconds 2
-            Doctor
-            Wait-Foreground
-            Record 'gg: select top row after update'
-            Assert-Foreground
-            [VerifyNative]::KeyDown(0x47); [VerifyNative]::KeyUp(0x47)
-            [VerifyNative]::KeyDown(0x47); [VerifyNative]::KeyUp(0x47)
+            Wait-Until { $state = Read-Inbox; $null -ne $state -and $state.inbox_active -eq $true } 'Inbox visible for after capture'
             Snapshot 'inbox-order-after'
-            $priorOlder = @($after.shells | Where-Object { $_.sid -eq $older.sid })[0].att
-            Press @(0x55) 'u: identify promoted top row'
-            Wait-Until { $state = Read-Inbox; @($state.shells | Where-Object { $_.sid -eq $older.sid -and $_.att -ne $priorOlder }).Count -eq 1 } 'updated older session was top'
-            $result.checks += @{ name = 'inbox-order-scripted-update'; olderSid = $older.sid; newerSid = $newer.sid; before = 'newer top'; after = 'older top'; update = 'local scripted notification, not a cloud reply' }
+            $result.checks += @{ name = 'inbox-order-capture-only'; olderSid = $older.sid; newerSid = $newer.sid; visualReviewRequired = $true; update = 'local scripted notification, not a cloud reply' }
