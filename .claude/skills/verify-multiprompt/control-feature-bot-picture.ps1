@@ -54,25 +54,52 @@
                 }
                 throw 'The picture picker did not take the foreground; refusing to type into another window'
             }
+            function Get-BotPickerChildren {
+                $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($script:botPicker)
+                $all = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition))
+                return @(foreach ($item in $all) { @{ name = $item.Current.Name; class = $item.Current.ClassName; automationId = $item.Current.AutomationId; type = $item.Current.ControlType.ProgrammaticName } })
+            }
+            function Get-BotPickerEdit {
+                $dialog = [System.Windows.Automation.AutomationElement]::FromHandle($script:botPicker)
+                $combo = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ComboBox)
+                $edit = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)
+                $box = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Children, $combo)
+                if ($null -ne $box) {
+                    $inner = $box.FindFirst([System.Windows.Automation.TreeScope]::Children, $edit)
+                    if ($null -ne $inner) { $script:botPickerSelector = 'file name edit inside the file name combo'; return $inner }
+                }
+                $direct = $dialog.FindFirst([System.Windows.Automation.TreeScope]::Children, $edit)
+                if ($null -ne $direct) { $script:botPickerSelector = 'file name edit'; return $direct }
+                return $null
+            }
             function Enter-BotPicturePath([string]$Path) {
                 Assert-BotFilePickerForeground
-                Press @(0x12, 0x4E) 'Alt+N: focus the picture picker file name field'
-                $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-                if ($focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Edit) {
-                    throw ('The picture picker focused ' + $focused.Current.ControlType.ProgrammaticName + ' ' + $focused.Current.ClassName + ' name=' + $focused.Current.Name + ' instead of a text field')
+                $edit = Get-BotPickerEdit
+                if ($null -eq $edit) {
+                    Save-Json (Get-BotPickerChildren) 'picture-picker-children.json'
+                    throw 'The picture picker exposes no file name field among its own children'
                 }
-                Press @(0x11, 0x41) 'Ctrl+A: clear the picture picker file name field'
-                Type-Text $Path
-                $script:botPickerSelector = 'windows picker file name edit'
-                $script:botPickerInput = 'Alt+N, Ctrl+A then the typed path'
+                $pattern = $null
+                try { $pattern = [System.Windows.Automation.ValuePattern]$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern) } catch { $pattern = $null }
+                if ($null -ne $pattern) {
+                    $pattern.SetValue($Path)
+                    Wait-Until { $pattern.Current.Value -ceq $Path } 'picture picker file name field carries the requested path' 20
+                    $script:botPickerInput = 'value pattern on the file name field'
+                } else {
+                    try { $edit.SetFocus() } catch { throw ('The picture picker file name field refused focus: ' + $_.Exception.Message) }
+                    Press @(0x11, 0x41) 'Ctrl+A: clear the picture picker file name field'
+                    Type-Text $Path
+                    $script:botPickerInput = 'focused file name field typing'
+                }
                 Press @(0x0D) 'Enter: pick the picture'
                 try {
                     Wait-BotPickerClosed
                 } catch {
                     if (@(Get-BotPickerWindows).Count -eq 0) { return }
-                    Record 'The picker stayed open; retype the path with Select All'
+                    Record 'The picker stayed open; retype the path once more'
                     Assert-BotFilePickerForeground
-                    Press @(0x12, 0x4E) 'Alt+N: focus the picture picker file name field again'
+                    $again = Get-BotPickerEdit
+                    if ($null -ne $again) { try { $again.SetFocus() } catch { } }
                     Press @(0x11, 0x41) 'Ctrl+A: replace the previous picker text'
                     Type-Text $Path
                     Press @(0x0D) 'Enter: pick the picture again'
