@@ -127,6 +127,7 @@ const PendingWrite = struct {
 };
 
 var g_writer_thread_started = false;
+var g_writer_in_flight = false;
 var g_writer_pending: [MAX_PENDING_WRITES]PendingWrite = [_]PendingWrite{.{}} ** MAX_PENDING_WRITES;
 
 fn writerGate() *@import("app_state.zig").SpinMutex {
@@ -170,6 +171,7 @@ fn writerLoop() void {
             @memcpy(path[0..slot.path_len], slot.path[0..slot.path_len]);
             path_len = slot.path_len;
             payload = slot.bytes;
+            g_writer_in_flight = true;
             slot.bytes = null;
             slot.path_len = 0;
             break;
@@ -178,6 +180,9 @@ fn writerLoop() void {
         if (payload) |bytes| {
             _ = writeFileAtomicSync(path[0..path_len], bytes);
             std.heap.page_allocator.free(bytes);
+            while (!gate.tryLock()) Sleep(1);
+            g_writer_in_flight = false;
+            gate.unlock();
         } else {
             Sleep(20);
         }
@@ -216,8 +221,11 @@ pub fn flushPendingWrites() void {
     const gate = writerGate();
     const deadline = GetTickCount64() + 2000;
     while (GetTickCount64() < deadline) {
-        while (!gate.tryLock()) Sleep(1);
-        const empty = queueEmptyLocked();
+        while (!gate.tryLock()) {
+            if (GetTickCount64() >= deadline) return;
+            Sleep(1);
+        }
+        const empty = queueEmptyLocked() and !g_writer_in_flight;
         gate.unlock();
         if (empty) return;
         Sleep(5);
