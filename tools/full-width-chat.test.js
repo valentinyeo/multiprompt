@@ -210,3 +210,7 @@ test('ISSUE-440 palette, restoration and terminal return retain the same indepen
   assert.ok(body(source, 'repositionActive').indexOf('if (g_chat_active)') < body(source, 'repositionActive').indexOf('activePaneContentRect(rc)'));
   assert.match(body(source, 'chatViewLayout'), /activePaneContentRect\(rc\)/);
 });
+
+test('the Computer wiring this suite depends on is in place', () => {
+  require('./fixtures/computer-wiring')(assert);
+});

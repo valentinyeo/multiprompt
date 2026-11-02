@@ -34,7 +34,7 @@ function harness() {
   const declaration = state.match(new RegExp(`pub const ${offset}: usize = \\d+;`));
   assert.ok(declaration, 'Missing Close All Browser Panes command offset');
   const production = ['cancelledBrowserLaunchSlot', 'resetBrowserConnection', 'closeBrowserForShell', 'closeWebView2', 'webView2OwnsShell', 'webView2OwnsActiveShell', 'shellZsbSessionKey']
-    .map(name => fn(browser, name)).join('\n\n');
+    .map(name => fn(browser, name)).join('\n\n').replaceAll('@import("computer_pane.zig").', 'computer.');
   const matching = ['u16ToLower', 'asciiContainsQueryInsensitive', 'labelsMatchQuery'].map(name => fn(palette, name)).join('\n\n');
   return `const std = @import("std");
 const ReadBoundary = struct { index: ?usize = null, unknown: bool = false };
@@ -45,6 +45,7 @@ fn chatReadBoundary() ReadBoundary { return .{}; }
 fn cancelPinnedBrowserEntry(_: u32) void {}
 fn chatReadMark(_: bool) bool { return false; }
 const app_state = @This();
+const computer = struct { fn selected() bool { return false; } };
 const HANDLE = ?usize;
 const WM_CLOSE = 16;
 const TIMER_BROWSER_PLACEHOLDER = 4;
@@ -340,4 +341,8 @@ test('extracted production close-all handler releases native panes and WebView2 
 
 test('IGSH-1126 close-all no longer maintains a browser opening delay', () => {
   assert.doesNotMatch(main, /g_browser_shortcut_open_guard/);
+});
+
+test('the Computer wiring this suite depends on is in place', () => {
+  require('./fixtures/computer-wiring')(assert);
 });

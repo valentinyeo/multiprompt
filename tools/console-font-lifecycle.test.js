@@ -134,6 +134,10 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 const app_state = @This();
+const computer = struct {
+    fn selected() bool { return false; }
+    fn toggleFullWidth() void {}
+};
 const switch_timing = struct {
     fn start() u64 { return 0; }
     fn record(comptime _: enum { console_shown, reposition, focus }, _: u64) void {}
@@ -674,4 +678,8 @@ test('extracted production console lifecycle keeps Nordwand Mono MP SemiBold aft
   } finally {
     if (!process.env.CONSOLE_FONT_TEST_KEEP) fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the Computer wiring this suite depends on is in place', () => {
+  require('./fixtures/computer-wiring')(assert);
 });

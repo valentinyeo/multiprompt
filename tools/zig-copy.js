@@ -44,6 +44,7 @@ function copyZig(roots, dest, srcDir = path.join(__dirname, '../src')) {
     }
     for (const match of source.matchAll(/\/\/[^\r\n]*|"(?:\\.|[^"\\])*"|@embedFile\s*\(\s*"([^"\r\n]+)"\s*\)/g)) {
       if (!match[1]) continue;
+      if (!match[1].includes('/') && !match[1].includes('.')) continue;
       const asset = path.resolve(path.dirname(file), match[1]);
       const relativeAsset = path.relative(srcDir, asset);
       if (relativeAsset === '..' || relativeAsset.startsWith(`..${path.sep}`) || path.isAbsolute(relativeAsset)) throw new Error(`Embed outside source root: ${match[1]}`);

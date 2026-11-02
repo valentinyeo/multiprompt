@@ -574,3 +574,7 @@ test('Computer owns the right pane slot and its saved split while it is open', (
   assert.match(fn(browser, 'browserSplitPermilleForActiveShell'), /@import\("computer_pane\.zig"\)\.splitPermille\(\)/);
   assert.match(fn(layout, 'activePaneRects'), /browserSlotReserved\(\)/);
 });
+
+test('the Computer wiring this suite depends on is in place', () => {
+  require('./fixtures/computer-wiring')(assert);
+});

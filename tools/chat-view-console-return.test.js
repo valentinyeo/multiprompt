@@ -40,6 +40,10 @@ var g_chat_read_divider_y: i32 = 0;
 var g_chat_scrolled_up = false;
 fn chatReadBoundary() ReadBoundary { return .{}; }
 const app_state = @This();
+const computer = struct {
+    fn selected() bool { return false; }
+    fn toggleFullWidth() void {}
+};
 const HANDLE = ?usize;
 const BOOL = i32;
 const SW_HIDE = 0;
@@ -213,4 +217,8 @@ test('production Chat View exits reveal, lay out and focus without ordinary cons
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the Computer wiring this suite depends on is in place', () => {
+  require('./fixtures/computer-wiring')(assert);
 });

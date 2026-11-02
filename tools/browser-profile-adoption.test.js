@@ -174,3 +174,7 @@ test('Windows journey covers shared and own session switches, Alt+Q and both pro
   assert.match(control, /function Assert-WorkspaceBrowser/);
   assert.match(control, /browser_window_id -gt 0/);
 });
+
+test('the Computer wiring this suite depends on is in place', () => {
+  require('./fixtures/computer-wiring')(assert);
+});
