@@ -85,7 +85,10 @@ test('upload payload uses the existing service schema without messages, paths or
   const source = fs.readFileSync(file, 'utf8');
   zig(`const std = @import("std");
 ${declaration(source, 'pub const Kind = enum')};
+${declaration(source, 'pub const Module = enum')};
+${declaration(source, 'pub const FreezeContext = union')};
 ${declaration(source, 'pub fn payload(')}
+${declaration(source, 'fn contextualPayload(')}
 test "service payload and private input rejection" {
     var out: [8192]u8 = undefined;
     for ([_]Kind{.freeze, .crash, .blank_chat}) |kind| {

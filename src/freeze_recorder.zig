@@ -31,8 +31,8 @@ const MemoryInfo = extern struct {
     kind: u32,
 };
 const Module = struct { base: usize = 0, size: usize = 0 };
-const module_names = .{ "multiprompt.exe", "ntdll.dll", "kernelbase.dll", "kernel32.dll", "user32.dll", "win32u.dll", "gdi32.dll", "gdi32full.dll", "dwrite.dll" };
-var g_modules: [module_names.len]Module = @splat(.{});
+const module_fields = std.meta.fields(upload.Module);
+var g_modules: [module_fields.len]Module = @splat(.{});
 
 extern "kernel32" fn QueryUnbiasedInterruptTime(*u64) callconv(.winapi) i32;
 
@@ -100,7 +100,7 @@ pub fn start(window: win.HANDLE, version: []const u8) void {
     g_window = window;
     g_version = version;
     inline for (0..g_modules.len) |i| {
-        const handle = if (i == 0) win.GetModuleHandleW(null) else win.GetModuleHandleW(std.unicode.utf8ToUtf16LeStringLiteral(module_names[i]));
+        const handle = if (i == 0) win.GetModuleHandleW(null) else win.GetModuleHandleW(std.unicode.utf8ToUtf16LeStringLiteral(module_fields[i].name));
         const base = @intFromPtr(handle);
         if (base != 0) {
             const pe: [*]const u8 = @ptrFromInt(base);
@@ -214,16 +214,16 @@ fn capture() Location {
 }
 
 fn instruction(b: *crash.Buf, ip: usize) void {
-    inline for (g_modules, module_names) |module, name| {
+    inline for (g_modules, module_fields) |module, field| {
         if (module.base != 0 and ip >= module.base and ip - module.base < module.size) {
-            b.print("instruction: {s}+0x{X}\n", .{ name, ip - module.base });
+            b.print("instruction: {s}+0x{X}\n", .{ field.name, ip - module.base });
             return;
         }
     }
     b.add("instruction: unavailable\n");
 }
 
-fn record(kind: upload.Kind, unresponsive_ms: u64) void {
+fn record(kind: upload.FreezeKind, unresponsive_ms: u64) void {
     const location = capture();
     var memory: [8192]u8 = undefined;
     var b: crash.Buf = .{ .data = &memory };
@@ -244,7 +244,17 @@ fn record(kind: upload.Kind, unresponsive_ms: u64) void {
     var name_buf: [96]u8 = undefined;
     const name = std.fmt.bufPrint(&name_buf, "{s}-{d}-{d}-{d}.txt", .{ if (kind == .freeze) "freeze" else "blank-chat", timestamp, win.GetCurrentProcessId(), win.GetTickCount64() }) catch return;
     crash.writeDiagnosticReport(name, b.slice(), kind == .freeze);
-    upload.queue(kind, g_version, @intCast(timestamp), 0, location.rvas[0..location.count]);
+    var context: upload.FreezeContext = .unavailable;
+    if (location.captured) {
+        context = .{ .captured = null };
+        for (g_modules, 0..) |module, i| {
+            if (module.base != 0 and location.ip >= module.base and location.ip - module.base < module.size) {
+                context = .{ .captured = .{ .module = @enumFromInt(i), .rva = location.ip - module.base } };
+                break;
+            }
+        }
+    }
+    upload.queueFreeze(kind, g_version, @intCast(timestamp), location.rvas[0..location.count], context);
 }
 
 test "freeze threshold, one report per stall, recovery permits a later report" {

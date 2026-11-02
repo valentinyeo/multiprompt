@@ -3,6 +3,12 @@ const win = @import("win32.zig");
 const client = @import("account_client.zig");
 const INVALID = std.math.maxInt(usize);
 pub const Kind = enum { freeze, crash, blank_chat };
+pub const FreezeKind = enum { freeze, blank_chat };
+pub const Module = enum { @"multiprompt.exe", @"ntdll.dll", @"kernelbase.dll", @"kernel32.dll", @"user32.dll", @"win32u.dll", @"gdi32.dll", @"gdi32full.dll", @"dwrite.dll" };
+pub const FreezeContext = union(enum) {
+    unavailable,
+    captured: ?struct { module: Module, rva: usize },
+};
 extern "kernel32" fn AcquireSRWLockExclusive(*usize) callconv(.winapi) void;
 extern "kernel32" fn ReleaseSRWLockExclusive(*usize) callconv(.winapi) void;
 extern "kernel32" fn CreateThread(?*anyopaque, usize, *const fn (?*anyopaque) callconv(.winapi) u32, ?*anyopaque, u32, ?*u32) callconv(.winapi) win.HANDLE;
@@ -65,11 +71,27 @@ pub fn stop() void {
 }
 
 pub fn payload(out: []u8, id: []const u8, kind: Kind, version: []const u8, timestamp: i64, code: u32, rvas: []const usize) ?[]const u8 {
+    return contextualPayload(out, id, kind, version, timestamp, code, rvas, null);
+}
+
+fn contextualPayload(out: []u8, id: []const u8, kind: Kind, version: []const u8, timestamp: i64, code: u32, rvas: []const usize, context: ?FreezeContext) ?[]const u8 {
     if (id.len < 8 or id.len > 64 or version.len == 0 or version.len > 64) return null;
     for (id) |c| if (!std.ascii.isAlphanumeric(c) and c != '-') return null;
     for (version) |c| if (!std.ascii.isAlphanumeric(c) and c != '.' and c != '-') return null;
     var trace: [2048]u8 = undefined;
-    var written = std.fmt.bufPrint(&trace, "exception_code: 0x{X}\\nstack_rvas:\\n", .{code}) catch return null;
+    var written = std.fmt.bufPrint(&trace, "exception_code: 0x{X}\\n", .{code}) catch return null;
+    if (context) |capture| {
+        const details = switch (capture) {
+            .unavailable => std.fmt.bufPrint(trace[written.len..], "thread_context: unavailable\\nsampled_instruction: unavailable\\n", .{}),
+            .captured => |sample| if (sample) |location|
+                std.fmt.bufPrint(trace[written.len..], "thread_context: captured\\nsampled_instruction: {s}+0x{X}\\n", .{ @tagName(location.module), location.rva })
+            else
+                std.fmt.bufPrint(trace[written.len..], "thread_context: captured\\nsampled_instruction: unmapped\\n", .{}),
+        } catch return null;
+        written = trace[0 .. written.len + details.len];
+    }
+    const heading = std.fmt.bufPrint(trace[written.len..], "stack_rvas:\\n", .{}) catch return null;
+    written = trace[0 .. written.len + heading.len];
     for (rvas[0..@min(rvas.len, 24)]) |rva| {
         const line = std.fmt.bufPrint(trace[written.len..], "  0x{X}\\n", .{rva}) catch return null;
         written = trace[0 .. written.len + line.len];
@@ -78,10 +100,18 @@ pub fn payload(out: []u8, id: []const u8, kind: Kind, version: []const u8, times
 }
 
 pub fn queue(kind: Kind, version: []const u8, timestamp: i64, code: u32, rvas: []const usize) void {
+    queueContext(kind, version, timestamp, code, rvas, null);
+}
+
+pub fn queueFreeze(kind: FreezeKind, version: []const u8, timestamp: i64, rvas: []const usize, context: FreezeContext) void {
+    queueContext(switch (kind) { .freeze => .freeze, .blank_chat => .blank_chat }, version, timestamp, 0, rvas, context);
+}
+
+fn queueContext(kind: Kind, version: []const u8, timestamp: i64, code: u32, rvas: []const usize, context: ?FreezeContext) void {
     var id_buf: [64]u8 = undefined;
     const id = std.fmt.bufPrint(&id_buf, "{s}-{d}-{d}-{d}", .{ if (kind == .blank_chat) "blank" else @tagName(kind), timestamp, win.GetCurrentProcessId(), win.GetTickCount64() }) catch return;
     var bytes: [8192]u8 = undefined;
-    const body = payload(&bytes, id, kind, version, timestamp, code, rvas) orelse return;
+    const body = contextualPayload(&bytes, id, kind, version, timestamp, code, rvas, context) orelse return;
     var name_buf: [96]u8 = undefined;
     const name = std.fmt.bufPrint(&name_buf, "upload-{s}.json", .{id}) catch return;
     var temp_buf: [100]u8 = undefined;
@@ -162,4 +192,59 @@ test "upload payload contains only typed diagnostic values" {
     try std.testing.expectEqualStrings("exception_code: 0x0\nstack_rvas:\n  0x1234\n  0x5678\n", parsed.value.object.get("stack_trace").?.string);
     try std.testing.expect(payload(&out, "bad\"-name", .crash, "0.28.1", 1, 0, &.{}) == null);
     try std.testing.expect(payload(&out, "crash-12345", .crash, "private/path", 1, 0, &.{}) == null);
+}
+
+test "freeze context appears in the reported JSON without changing its keys" {
+    var out: [8192]u8 = undefined;
+    const cases = [_]struct { context: FreezeContext, trace: []const u8 }{
+        .{ .context = .unavailable, .trace = "exception_code: 0x0\nthread_context: unavailable\nsampled_instruction: unavailable\nstack_rvas:\n  0x1234\n" },
+        .{ .context = .{ .captured = null }, .trace = "exception_code: 0x0\nthread_context: captured\nsampled_instruction: unmapped\nstack_rvas:\n  0x1234\n" },
+        .{ .context = .{ .captured = .{ .module = .@"ntdll.dll", .rva = 0x9876 } }, .trace = "exception_code: 0x0\nthread_context: captured\nsampled_instruction: ntdll.dll+0x9876\nstack_rvas:\n  0x1234\n" },
+    };
+    for (cases) |case| {
+        const body = contextualPayload(&out, "freeze-12345", .freeze, "0.28.1", 123, 0, &.{0x1234}, case.context).?;
+        const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, body, .{});
+        defer parsed.deinit();
+        const object = parsed.value.object;
+        try std.testing.expectEqual(@as(usize, 7), object.count());
+        for ([_][]const u8{ "id", "captured_at", "app_version", "android_version", "thread", "summary", "stack_trace" }) |key| try std.testing.expect(object.contains(key));
+        try std.testing.expectEqualStrings("Windows freeze", object.get("summary").?.string);
+        try std.testing.expectEqualStrings(case.trace, object.get("stack_trace").?.string);
+    }
+    const blank = contextualPayload(&out, "blank-12345", .blank_chat, "0.28.1", 123, 0, &.{}, .unavailable).?;
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, blank, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("Windows blank_chat", parsed.value.object.get("summary").?.string);
+}
+
+test "legacy payloads remain byte exact" {
+    var out: [8192]u8 = undefined;
+    try std.testing.expectEqualStrings("{\"id\":\"freeze-12345\",\"captured_at\":123,\"app_version\":\"0.28.1\",\"android_version\":\"Windows\",\"thread\":\"main\",\"summary\":\"Windows freeze\",\"stack_trace\":\"exception_code: 0x0\\nstack_rvas:\\n  0x1234\\n\"}", payload(&out, "freeze-12345", .freeze, "0.28.1", 123, 0, &.{0x1234}).?);
+    try std.testing.expectEqualStrings("{\"id\":\"crash-12345\",\"captured_at\":123,\"app_version\":\"0.28.1\",\"android_version\":\"Windows\",\"thread\":\"main\",\"summary\":\"Windows crash\",\"stack_trace\":\"exception_code: 0xC0000005\\nstack_rvas:\\n  0x1234\\n\"}", payload(&out, "crash-12345", .crash, "0.28.1", 123, 0xC0000005, &.{0x1234}).?);
+}
+
+test "freeze payload bounds and canonical module names" {
+    var out: [8192]u8 = undefined;
+    const names = [_][]const u8{ "multiprompt.exe", "ntdll.dll", "kernelbase.dll", "kernel32.dll", "user32.dll", "win32u.dll", "gdi32.dll", "gdi32full.dll", "dwrite.dll" };
+    inline for (std.meta.fields(Module), names) |field, name| {
+        const context: FreezeContext = .{ .captured = .{ .module = @enumFromInt(field.value), .rva = 0x42 } };
+        const body = contextualPayload(&out, "freeze-12345", .freeze, "0.28.1", 123, 0, &.{}, context).?;
+        const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, body, .{});
+        defer parsed.deinit();
+        var expected: [256]u8 = undefined;
+        const trace = try std.fmt.bufPrint(&expected, "exception_code: 0x0\nthread_context: captured\nsampled_instruction: {s}+0x42\nstack_rvas:\n", .{name});
+        try std.testing.expectEqualStrings(trace, parsed.value.object.get("stack_trace").?.string);
+    }
+    const context: FreezeContext = .{ .captured = .{ .module = .@"user32.dll", .rva = 0x1042 - 0x1000 } };
+    const equivalent: FreezeContext = .{ .captured = .{ .module = .@"user32.dll", .rva = 0x9042 - 0x9000 } };
+    const candidates = [_]usize{0xABC} ** 25;
+    var other: [8192]u8 = undefined;
+    const body = contextualPayload(&out, "freeze-12345", .freeze, "0.28.1", 123, 0, &candidates, context).?;
+    const same = contextualPayload(&other, "freeze-12345", .freeze, "0.28.1", 123, 0, &candidates, equivalent).?;
+    try std.testing.expectEqualStrings(body, same);
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, body, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 24), std.mem.count(u8, parsed.value.object.get("stack_trace").?.string, "  0xABC\n"));
+    var small: [32]u8 = undefined;
+    try std.testing.expect(contextualPayload(&small, "freeze-12345", .freeze, "0.28.1", 123, 0, &candidates, context) == null);
 }
