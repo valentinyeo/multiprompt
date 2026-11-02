@@ -40,12 +40,10 @@ fn quote(writer: *std.Io.Writer, value: []const u8) !void {
     try writer.writeByte('\'');
 }
 
-pub fn attachCommand(buf: []u8, session: []const u8, identity: []const u8, create: bool, hidden: bool) ![]const u8 {
+pub fn attachCommand(buf: []u8, session: []const u8, identity: []const u8, create: bool) ![]const u8 {
     var writer = std.Io.Writer.fixed(buf);
     if (identity.len == 0) {
-        try writer.writeAll(if (create) "tmux new-session -A " else "tmux attach ");
-        if (hidden) try writer.writeAll("-f ignore-size ");
-        try writer.writeAll(if (create) "-s " else "-t ");
+        try writer.writeAll(if (create) "tmux new-session -A -s " else "tmux attach -t ");
         var target: [66]u8 = undefined;
         try quote(&writer, if (create) session else try std.fmt.bufPrint(&target, "={s}", .{session}));
         if (create and std.mem.startsWith(u8, session, "live-")) try writer.writeAll(" 'exec sleep infinity'");
@@ -64,8 +62,7 @@ pub fn attachCommand(buf: []u8, session: []const u8, identity: []const u8, creat
         try writer.writeByte(' ');
         const session_id = identity[(std.mem.lastIndexOfScalar(u8, identity, ':') orelse unreachable) + 1 ..];
         var attach: [96]u8 = undefined;
-        const flag: []const u8 = if (hidden) "-f ignore-size " else "";
-        try quote(&writer, try std.fmt.bufPrint(&attach, "attach-session {s}-t '{s}'", .{ flag, session_id }));
+        try quote(&writer, try std.fmt.bufPrint(&attach, "attach-session -t '{s}'", .{session_id}));
         try writer.writeByte(' ');
         try quote(&writer, "display-message -p 'Saved terminal session changed; refusing to attach.'");
     }
@@ -150,38 +147,25 @@ test "IGSH-985 generation probe is exact, validated and not overwritten by a pre
 
 test "IGSH-985 guarded attach checks generation and addresses immutable session ID in one server command" {
     var buf: [2048]u8 = undefined;
-    const command = try attachCommand(&buf, "remote", "1700:123:$7", true, false);
+    const command = try attachCommand(&buf, "remote", "1700:123:$7", true);
     try std.testing.expect(std.mem.startsWith(u8, command, "tmux if-shell -F -t '=remote:' "));
     try std.testing.expect(std.mem.indexOf(u8, command, "#{==:#{start_time}:#{pid}:#{session_id},1700:123:$7}") != null);
     try std.testing.expect(std.mem.indexOf(u8, command, "attach-session -t ") != null);
     try std.testing.expect(std.mem.indexOf(u8, command, "new-session") == null);
     try std.testing.expect(std.mem.indexOf(u8, command, "refusing to attach") != null);
-    try std.testing.expectError(error.InvalidIdentity, attachCommand(&buf, "remote", "bad", false, false));
+    try std.testing.expectError(error.InvalidIdentity, attachCommand(&buf, "remote", "bad", false));
 }
 
 test "IGSH-985 first attach is exact and shell metacharacters remain quoted" {
     var buf: [2048]u8 = undefined;
-    try std.testing.expectEqualStrings("tmux attach -t '=remote'", try attachCommand(&buf, "remote", "", false, false));
-    try std.testing.expectEqualStrings("tmux new-session -A -s 'remote'", try attachCommand(&buf, "remote", "", true, false));
-    try std.testing.expectEqualStrings("tmux attach -t '=a'\\''b'", try attachCommand(&buf, "a'b", "", false, false));
+    try std.testing.expectEqualStrings("tmux attach -t '=remote'", try attachCommand(&buf, "remote", "", false));
+    try std.testing.expectEqualStrings("tmux new-session -A -s 'remote'", try attachCommand(&buf, "remote", "", true));
+    try std.testing.expectEqualStrings("tmux attach -t '=a'\\''b'", try attachCommand(&buf, "a'b", "", false));
 }
 
 test "IGSH-1447 a recreated live chat session parks on an idle wait instead of a shell" {
     var buf: [2048]u8 = undefined;
-    try std.testing.expectEqualStrings("tmux new-session -A -s 'live-abc' 'exec sleep infinity'", try attachCommand(&buf, "live-abc", "", true, false));
-    try std.testing.expectEqualStrings("tmux attach -t '=live-abc'", try attachCommand(&buf, "live-abc", "", false, false));
-    try std.testing.expectEqualStrings("tmux new-session -A -s 'term-abc'", try attachCommand(&buf, "term-abc", "", true, false));
-}
-
-test "a hidden client never sizes the session window for the tab the user is on" {
-    var buf: [2048]u8 = undefined;
-    try std.testing.expectEqualStrings("tmux attach -f ignore-size -t '=remote'", try attachCommand(&buf, "remote", "", false, true));
-    try std.testing.expectEqualStrings("tmux new-session -A -f ignore-size -s 'remote'", try attachCommand(&buf, "remote", "", true, true));
-    const guarded = try attachCommand(&buf, "remote", "1700:123:$7", true, true);
-    try std.testing.expect(std.mem.indexOf(u8, guarded, "attach-session -f ignore-size -t '\\''$7'\\'''") != null);
-    const visible = try attachCommand(&buf, "remote", "1700:123:$7", true, false);
-    try std.testing.expect(std.mem.indexOf(u8, visible, "attach-session -t '\\''$7'\\'''") != null);
-    try std.testing.expect(std.mem.indexOf(u8, visible, "ignore-size") == null);
-    const plain = try attachCommand(&buf, "remote", "", false, false);
-    try std.testing.expect(std.mem.indexOf(u8, plain, "ignore-size") == null);
+    try std.testing.expectEqualStrings("tmux new-session -A -s 'live-abc' 'exec sleep infinity'", try attachCommand(&buf, "live-abc", "", true));
+    try std.testing.expectEqualStrings("tmux attach -t '=live-abc'", try attachCommand(&buf, "live-abc", "", false));
+    try std.testing.expectEqualStrings("tmux new-session -A -s 'term-abc'", try attachCommand(&buf, "term-abc", "", true));
 }
