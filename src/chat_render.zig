@@ -2724,6 +2724,10 @@ fn gdipImgLoad() bool {
     return true;
 }
 
+pub fn pictureImagesReady() bool {
+    return gdipLoad() and gdipImgLoad();
+}
+
 fn chatImgDrawThumb(hdc: HANDLE, rc: RECT, radius: i32, thumb: HANDLE) bool {
     if (!gdipLoad() or !gdipImgLoad()) return false;
     const api = &app_state.g_gdip_api;

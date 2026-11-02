@@ -659,6 +659,8 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == app_state.SEARCH_WORKSPACE_COLOR_OFFSET) return words.workspace_color;
     if (target == app_state.SEARCH_TABCTX_BOT_FACE) return words.bot_face;
     if (target == app_state.SEARCH_TABCTX_BOT_COLOR) return words.bot_color;
+    if (target == app_state.SEARCH_BOT_PICTURE_UPLOAD) return words.bot_upload_image ++ " picture photo avatar file";
+    if (target == app_state.SEARCH_BOT_PICTURE_RESET) return words.bot_reset_picture ++ " remove clear photo avatar auto face";
     if (target >= app_state.SEARCH_BOT_FACE_OFFSET and target < app_state.SEARCH_BOT_FACE_OFFSET + app_state.BOT_FACE_COUNT) return @import("bot_look.zig").faces[target - app_state.SEARCH_BOT_FACE_OFFSET];
     if (target >= app_state.SEARCH_BOT_COLOR_OFFSET and target < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT) return @import("bot_look.zig").colors[target - app_state.SEARCH_BOT_COLOR_OFFSET];
     const room = @import("room_frontend.zig");
@@ -2935,6 +2937,23 @@ pub fn updateSearchResults() void {
     if (app_state.g_bot_look_mode != .none or app_state.g_workspace_color_target != null) {
         app_state.g_search_results[0] = SEARCH_TABCTX_BACK;
         app_state.g_search_result_count = 1;
+        if (app_state.g_bot_look_mode != .none) {
+            const bot_words = @import("ui_words.zon");
+            const query = app_state.g_search_buf[0..app_state.g_search_len];
+            if (app_state.g_search_result_count < app_state.g_search_results.len and
+                asciiContainsQueryInsensitive(bot_words.bot_upload_image ++ " picture photo avatar file", query))
+            {
+                app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_BOT_PICTURE_UPLOAD;
+                app_state.g_search_result_count += 1;
+            }
+            const has_picture = if (findShellById(app_state.g_bot_look_sid)) |bot_idx| app_state.shells[bot_idx].picture != 0 else false;
+            if (has_picture and app_state.g_search_result_count < app_state.g_search_results.len and
+                asciiContainsQueryInsensitive(bot_words.bot_reset_picture ++ " remove clear photo avatar auto face", query))
+            {
+                app_state.g_search_results[app_state.g_search_result_count] = app_state.SEARCH_BOT_PICTURE_RESET;
+                app_state.g_search_result_count += 1;
+            }
+        }
         const labels: []const []const u8 = if (app_state.g_bot_look_mode == .face) &@import("bot_look.zig").faces else &@import("bot_look.zig").colors;
         const offset = if (app_state.g_bot_look_mode == .face) app_state.SEARCH_BOT_FACE_OFFSET else app_state.SEARCH_BOT_COLOR_OFFSET;
         for (labels, 0..) |label, i| {

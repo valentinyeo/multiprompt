@@ -4361,10 +4361,11 @@ pub fn paintSidebar(hdc: HANDLE) void {
                             _ = DrawTextW(hdc, @ptrCast(&cc_hint), @intCast(chl), &cc_hint_rc, DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOPREFIX);
                         }
                     } else if (result_idx == app_state.SEARCH_TABCTX_BOT_FACE or result_idx == app_state.SEARCH_TABCTX_BOT_COLOR or
+                        result_idx == app_state.SEARCH_BOT_PICTURE_UPLOAD or result_idx == app_state.SEARCH_BOT_PICTURE_RESET or
                         (result_idx >= app_state.SEARCH_BOT_FACE_OFFSET and result_idx < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT)) {
                         const face_choice = result_idx >= app_state.SEARCH_BOT_FACE_OFFSET and result_idx < app_state.SEARCH_BOT_FACE_OFFSET + app_state.BOT_FACE_COUNT;
                         const color_choice = result_idx >= app_state.SEARCH_BOT_COLOR_OFFSET and result_idx < app_state.SEARCH_BOT_COLOR_OFFSET + app_state.BOT_COLOR_COUNT;
-                        const label: []const u8 = if (face_choice) @import("bot_look.zig").faces[result_idx - app_state.SEARCH_BOT_FACE_OFFSET] else if (color_choice) @import("bot_look.zig").colors[result_idx - app_state.SEARCH_BOT_COLOR_OFFSET] else if (result_idx == app_state.SEARCH_TABCTX_BOT_FACE) ui_words.bot_face else ui_words.bot_color;
+                        const label: []const u8 = if (face_choice) @import("bot_look.zig").faces[result_idx - app_state.SEARCH_BOT_FACE_OFFSET] else if (color_choice) @import("bot_look.zig").colors[result_idx - app_state.SEARCH_BOT_COLOR_OFFSET] else if (result_idx == app_state.SEARCH_TABCTX_BOT_FACE) ui_words.bot_face else if (result_idx == app_state.SEARCH_TABCTX_BOT_COLOR) ui_words.bot_color else if (result_idx == app_state.SEARCH_BOT_PICTURE_UPLOAD) ui_words.bot_upload_image else ui_words.bot_reset_picture;
                         var wide: [96]u16 = undefined;
                         const len = std.unicode.utf8ToUtf16Le(&wide, label) catch 0;
                         const workspace_slot = if (color_choice) @import("command_palette.zig").workspaceColorTargetSlot() else null;

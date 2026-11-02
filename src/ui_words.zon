@@ -255,4 +255,7 @@
     .bot_color_rose = "Rose",
     .bot_color_mint = "Mint",
     .bot_look_save_error = "Could not save bot look",
+    .bot_upload_image = "Upload image",
+    .bot_reset_picture = "Reset picture",
+    .bot_picture_error = "Could not read that picture",
 }

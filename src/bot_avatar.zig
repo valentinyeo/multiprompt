@@ -6,6 +6,7 @@ const state = @import("app_state.zig");
 pub const Appearance = struct {
     face: u8,
     color: u8,
+    picture: u64 = 0,
 
     pub fn forSession(name: []const u8) Appearance {
         var hash: u32 = 2166136261;
@@ -15,7 +16,9 @@ pub const Appearance = struct {
 };
 
 pub fn forShell(shell: *const state.Shell) Appearance {
-    return forShellWithFace(shell, shell.face);
+    var appearance = forShellWithFace(shell, shell.face);
+    appearance.picture = shell.picture;
+    return appearance;
 }
 
 pub fn forShellWithFace(shell: *const state.Shell, face: ?u8) Appearance {
@@ -129,18 +132,22 @@ pub fn draw(dc: w.HANDLE, rect: w.RECT, appearance: Appearance) void {
     const len: usize = @intCast(width * height * samples * samples);
     @memset(pixels[0..len], colors[appearance.color % colors.len]);
     const head = headBounds(preset.shape, @floatFromInt(width * samples), @floatFromInt(height * samples));
-    const vb = Box{ .x = head.x + head.width * 0.14, .y = head.y + head.height * 0.34, .width = head.width * 0.72, .height = head.height * 0.36, .radius = head.height * 0.18 };
-    rounded(surface, vb, visor);
-    const y = vb.y + vb.height / 2;
-    const e = vb.height * 0.42;
-    if (preset.eyes == .one) {
-        eye(surface, .one, vb.x + vb.width / 2, y, e);
-    } else {
-        eye(surface, if (preset.eyes == .wink) .dots else preset.eyes, vb.x + vb.width * 0.32, y, e);
-        eye(surface, if (preset.eyes == .wink) .dashes else preset.eyes, vb.x + vb.width * 0.68, y, e);
+    const circle = headBounds(.circle, @floatFromInt(width * samples), @floatFromInt(height * samples));
+    const picture = appearance.picture != 0 and @import("bot_picture.zig").drawInto(surface, circle, appearance.picture);
+    if (!picture) {
+        const vb = Box{ .x = head.x + head.width * 0.14, .y = head.y + head.height * 0.34, .width = head.width * 0.72, .height = head.height * 0.36, .radius = head.height * 0.18 };
+        rounded(surface, vb, visor);
+        const y = vb.y + vb.height / 2;
+        const e = vb.height * 0.42;
+        if (preset.eyes == .one) {
+            eye(surface, .one, vb.x + vb.width / 2, y, e);
+        } else {
+            eye(surface, if (preset.eyes == .wink) .dots else preset.eyes, vb.x + vb.width * 0.32, y, e);
+            eye(surface, if (preset.eyes == .wink) .dashes else preset.eyes, vb.x + vb.width * 0.68, y, e);
+        }
     }
     _ = w.GdiFlush();
-    smooth.resolveRounded(pixels[0..len], @intCast(width), @intCast(height), samples, head);
+    smooth.resolveRounded(pixels[0..len], @intCast(width), @intCast(height), samples, if (picture) circle else head);
     const Blend = struct {
         extern "gdi32" fn GdiAlphaBlend(w.HANDLE, i32, i32, i32, i32, w.HANDLE, i32, i32, i32, i32, w.BLENDFUNCTION) callconv(w.WINAPI) w.BOOL;
     };
