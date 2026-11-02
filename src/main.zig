@@ -1459,6 +1459,12 @@ fn wndProc(hwnd: HANDLE, msg: UINT, wp: WPARAM, lp: LPARAM) callconv(WINAPI) LRE
         update_release.ready();
         return 0;
     }
+    if (msg == @import("win32.zig").WM_APP_APP_SAVE_FAILED) {
+        if (@import("file_io.zig").g_save_failure_pending.swap(false, .acq_rel) and hwnd == app_state.g_main_hwnd and hwnd != null and !app_state.g_app_closing and @import("win32.zig").IsWindow(hwnd) != 0) {
+            @import("console.zig").showHeaderNoticeAscii(@import("ui_words.zon").app_changes_save_error, 4000, false);
+        }
+        return 0;
+    }
     defer if (msg != WM_DESTROY and msg != 0x0082) sessionFrontChanged();
     const prior_focus_action = app_state.g_focus_user_action_tick;
     app_state.g_focus_user_action_tick = focusGuardDispatchTick(msg, wp, lp);

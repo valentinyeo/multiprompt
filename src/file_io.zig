@@ -58,13 +58,18 @@ pub fn win32OpenAppend(path: []const u8) ?HANDLE {
 }
 
 pub fn win32WriteAll(h: HANDLE, bytes: []const u8) void {
+    _ = win32WriteAllChecked(h, bytes);
+}
+
+fn win32WriteAllChecked(h: HANDLE, bytes: []const u8) bool {
     var total: usize = 0;
     while (total < bytes.len) {
         const chunk_len: DWORD = @intCast(@min(bytes.len - total, @as(usize, std.math.maxInt(DWORD))));
         var written: DWORD = 0;
-        if (WriteFile(h, bytes[total..].ptr, chunk_len, &written, null) == 0 or written == 0) return;
+        if (WriteFile(h, bytes[total..].ptr, chunk_len, &written, null) == 0 or written == 0) return false;
         total += written;
     }
+    return true;
 }
 
 pub fn win32ReadAll(h: HANDLE, buf: []u8) usize {
@@ -124,8 +129,10 @@ const PendingWrite = struct {
     path: [520]u8 = std.mem.zeroes([520]u8),
     path_len: usize = 0,
     bytes: ?[]u8 = null,
+    notify_hwnd: HANDLE = null,
 };
 
+pub var g_save_failure_pending = std.atomic.Value(bool).init(false);
 var g_writer_thread_started = false;
 var g_writer_in_flight = false;
 var g_writer_pending: [MAX_PENDING_WRITES]PendingWrite = [_]PendingWrite{.{}} ** MAX_PENDING_WRITES;
@@ -164,6 +171,7 @@ fn writerLoop() void {
         var path: [520]u8 = undefined;
         var path_len: usize = 0;
         var payload: ?[]u8 = null;
+        var notify_hwnd: HANDLE = null;
         const gate = writerGate();
         while (!gate.tryLock()) Sleep(1);
         for (&g_writer_pending) |*slot| {
@@ -171,6 +179,7 @@ fn writerLoop() void {
             @memcpy(path[0..slot.path_len], slot.path[0..slot.path_len]);
             path_len = slot.path_len;
             payload = slot.bytes;
+            notify_hwnd = slot.notify_hwnd;
             g_writer_in_flight = true;
             slot.bytes = null;
             slot.path_len = 0;
@@ -178,7 +187,10 @@ fn writerLoop() void {
         }
         gate.unlock();
         if (payload) |bytes| {
-            _ = writeFileAtomicSync(path[0..path_len], bytes);
+            if (!writeFileAtomicSync(path[0..path_len], bytes) and notify_hwnd != null and !g_save_failure_pending.swap(true, .acq_rel)) {
+                const w = @import("win32.zig");
+                if (@import("app_state.zig").FocusNative.PostMessageW(notify_hwnd, w.WM_APP_APP_SAVE_FAILED, 0, 0) == 0) g_save_failure_pending.store(false, .release);
+            }
             std.heap.page_allocator.free(bytes);
             while (!gate.tryLock()) Sleep(1);
             g_writer_in_flight = false;
@@ -213,6 +225,8 @@ fn queueWrite(path: []const u8, bytes: []const u8) bool {
     @memcpy(slot.path[0..path.len], path);
     slot.path_len = path.len;
     slot.bytes = copy;
+    const app_state = @import("app_state.zig");
+    slot.notify_hwnd = if (app_state.g_app_closing) null else app_state.g_main_hwnd;
     return true;
 }
 
@@ -250,9 +264,9 @@ pub fn writeFileAtomicSync(path: []const u8, bytes: []const u8) bool {
     {
         const h = CreateFileW(tmp_w.ptr, GENERIC_WRITE, 0, null, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
         if (h == INVALID_HANDLE_VALUE_PTR) return false;
-        win32WriteAll(h, bytes);
-        _ = FlushFileBuffers(h);
-        _ = CloseHandle(h);
+        defer _ = CloseHandle(h);
+        if (!win32WriteAllChecked(h, bytes)) return false;
+        if (FlushFileBuffers(h) == 0) return false;
     }
 
     var path_wbuf: [520]u16 = undefined;

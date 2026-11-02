@@ -11,6 +11,7 @@
   "settings_upload_key": "Screencast2 upload key",
   "settings_release_notes": "Release notes",
   "settings_key_save_error": "This key could not be saved. Check file permissions and try again.",
+  "app_changes_save_error": "Some app changes could not be saved",
   "action_cancel": "Cancel",
   "action_save": "Save",
   "settings_section_look": "LOOK",
