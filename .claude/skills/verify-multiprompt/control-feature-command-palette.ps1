@@ -66,12 +66,10 @@
             [VerifyNative]::RightClickClient($script:window, 100, 127)
             Wait-Until { @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=' }).Count -gt $tabRowsBefore } 'tab actions palette opened'
             Type-Text 'move chat'
-            Wait-Until {
-                $rows = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=9 ' })
-                $rows.Count -gt 0 -and $rows[-1] -match '\b7186\b'
-            } 'tab actions offer the move row'
+            Wait-Until { @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=9 ' }).Count -gt 0 } 'tab actions filtered by move chat'
             $moveRows = @(Get-Content $debugLog | Where-Object { $_ -match '\[palette\] rows chars=9 ' })
-            $result.checks += @{ name = 'move-chat-row'; rows = $moveRows[-1]; shot = 'move-chat-row.png' }
+            if ($moveRows[-1] -match '\b7186\b') { throw 'A plain terminal tab without a Claude chat offered Move chat to new mode' }
+            $result.checks += @{ name = 'move-chat-row-hidden-on-plain-tab'; rows = $moveRows[-1]; shot = 'move-chat-row.png' }
             Snapshot 'move-chat-row'
             Press @(0x1B) 'Esc: close tab actions'
             Remove-Item -LiteralPath $commandsPath -Force
