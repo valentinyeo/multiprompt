@@ -56,6 +56,16 @@ function writeRoomFrontend(dir) {
   fs.writeFileSync(path.join(dir, 'room_frontend.zig'), roomFrontend);
 }
 
+const voice = `const std = @import("std");
+
+pub fn voiceManualFrontChanged() void {}
+pub fn voiceStopSpeaking() void {}
+`;
+
+function writeVoice(dir) {
+  fs.writeFileSync(path.join(dir, "voice.zig"), voice);
+}
+
 const accountDesktop = `pub fn applyPendingAppearance(_: u32) void {}
 `;
 
@@ -65,7 +75,8 @@ function writeAccountDesktop(dir) {
 
 function writeAll(dir) {
   writeRoomFrontend(dir);
+  writeVoice(dir);
   writeAccountDesktop(dir);
 }
 
-module.exports = { roomFrontend, accountDesktop, writeRoomFrontend, writeAccountDesktop, writeAll };
+module.exports = { roomFrontend, voice, accountDesktop, writeRoomFrontend, writeVoice, writeAccountDesktop, writeAll };

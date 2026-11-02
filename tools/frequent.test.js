@@ -284,6 +284,7 @@ function runHarness(mutate = x => x) {
   try {
     copyZig(['frequent.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'session_layout.zig', 'workspace_view.zig', 'dwrite_text.zig'], dir);
     require('./fixtures/inline-stubs').writeRoomFrontend(dir);
+    require('./fixtures/inline-stubs').writeVoice(dir);
     fs.mkdirSync(path.join(dir, 'fixtures'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixture.json'));
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixtures/issue-415-frequent.json'));
