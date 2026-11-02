@@ -6,6 +6,7 @@ const GetMessageTime = @import("win32.zig").GetMessageTime;
 const std = @import("std");
 const json_reader = @import("json_reader.zig");
 const browser_own_profile = @import("browser_own_profile.zig");
+const browser_signin = @import("browser_signin.zig");
 const LOOK_UNIFIED = @import("main.zig").LOOK_UNIFIED;
 const BROWSER_EDGE_MASKS = @import("main.zig").BROWSER_EDGE_MASKS;
 const crash_recorder = @import("crash_recorder.zig");
@@ -1717,6 +1718,11 @@ pub fn handleBrowserUrlQueryDone(raw: usize) void {
                 @import("console.zig").showHeaderNoticeAscii("Could not open this page", 4000, true);
             }
         } else if (job.result == .success and !(std.mem.startsWith(u8, url, "data:text/html") and std.mem.indexOf(u8, url, "ZSPANE") != null)) {
+            if (offerPlainSigninForRejectedPage(idx, url)) {
+                std.heap.page_allocator.destroy(job);
+                if (browser_url_query_deferred != null) startDeferredBrowserUrlQuery();
+                return;
+            }
             const old = app_state.shells[idx].browser_url[0..app_state.shells[idx].browser_url_len];
             if (!std.mem.eql(u8, old, url)) {
                 @memcpy(app_state.shells[idx].browser_url[0..url.len], url);
@@ -1902,6 +1908,7 @@ fn navigateBrowserPaneWithIntent(idx: u32, raw_url: []const u8, intent: app_stat
 
 pub fn openBrowserPaneForShell(idx: u32, raw_url: []const u8) void {
     if (idx >= app_state.shell_count) return;
+    app_state.shells[idx].browser_signin_offered = false;
     if (app_state.shells[idx].browser_open_failed) closeBrowserForShell(idx);
     const url = std.mem.trim(u8, raw_url, &[_]u8{ '\r', '\n', ' ', '\t' });
     if (url.len > 0) {
@@ -4237,6 +4244,40 @@ test "IGSH-523 cancelled launches reuse expired slots and evict oldest when full
     try std.testing.expectEqual(@as(usize, 1), cancelledBrowserLaunchSlot(&launches, 2000));
     launches[1].deadline = 4000;
     try std.testing.expectEqual(@as(usize, 0), cancelledBrowserLaunchSlot(&launches, 1000));
+}
+
+pub fn signInGoogleForShell(idx: u32) bool {
+    if (idx >= app_state.shell_count) return false;
+    const own_token = browserProfileToken(idx);
+    if (own_token.len == 0) return false;
+    var dir_buf: [1024]u8 = undefined;
+    const dir = ownBrowserUserDataDir(&dir_buf, own_token);
+    if (dir.len == 0) return false;
+    var cmd_buf: [2048]u8 = undefined;
+    const cmd = browser_signin.plainProfileLaunch(&cmd_buf, browserExePath(), dir, browserProfile()) orelse return false;
+    app_state.shells[idx].browser_enabled = false;
+    closeBrowserForShell(idx);
+    spawnBrowserCliHidden(cmd);
+    showHeaderNoticeAscii("Sign in to Google in the plain window, then close it", 8000, false);
+    saveSession();
+    return true;
+}
+
+pub fn signInGoogleForActiveTab() bool {
+    if (app_state.active_shell >= app_state.shell_count) return false;
+    if (!signInGoogleForShell(app_state.active_shell)) {
+        showHeaderNoticeAscii("Sign in to Google needs a Chrome profile tab", 5000, true);
+        return false;
+    }
+    return true;
+}
+
+fn offerPlainSigninForRejectedPage(idx: u32, url: []const u8) bool {
+    if (app_state.shells[idx].browser_signin_offered) return false;
+    if (!browser_signin.rejectedSigninUrl(url)) return false;
+    if (browserProfileToken(idx).len == 0) return false;
+    app_state.shells[idx].browser_signin_offered = true;
+    return signInGoogleForShell(idx);
 }
 
 pub fn closeBrowserForShell(idx: u32) void {

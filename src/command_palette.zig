@@ -249,6 +249,7 @@ const SEARCH_TABCTX_CHAT_DENY = @import("app_state.zig").SEARCH_TABCTX_CHAT_DENY
 const SEARCH_TABCTX_CHAT_STOP = @import("app_state.zig").SEARCH_TABCTX_CHAT_STOP;
 const SEARCH_TABCTX_CHAT_TAB_URL = @import("app_state.zig").SEARCH_TABCTX_CHAT_TAB_URL;
 const SEARCH_TABCTX_ADOPT_HOST = @import("app_state.zig").SEARCH_TABCTX_ADOPT_HOST;
+const SEARCH_TABCTX_GOOGLE_SIGNIN = @import("app_state.zig").SEARCH_TABCTX_GOOGLE_SIGNIN;
 const SEARCH_TABCTX_FAVORITE = @import("app_state.zig").SEARCH_TABCTX_FAVORITE;
 const SEARCH_TABCTX_GROUP_ADD_OFFSET = @import("app_state.zig").SEARCH_TABCTX_GROUP_ADD_OFFSET;
 const SEARCH_MOBILE_OFFSET = @import("app_state.zig").SEARCH_MOBILE_OFFSET;
@@ -670,6 +671,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
     if (target == SEARCH_TABCTX_CHAT_ALLOW) return "chat view allow";
     if (target == SEARCH_TABCTX_CHAT_ALWAYS) return "chat view always allow";
     if (target == SEARCH_TABCTX_ADOPT_HOST) return "Move chat to new mode";
+    if (target == SEARCH_TABCTX_GOOGLE_SIGNIN) return "Sign in to Google in this profile";
     if (target == SEARCH_TABCTX_RECONNECT) return "Reconnect restart session reattach tab";
     if (target == SEARCH_TABCTX_CHAT_DENY) return "chat view deny";
     if (target == SEARCH_TABCTX_CHAT_STOP) return "chat view stop the agent interrupt escape";
@@ -689,6 +691,7 @@ fn palettePrimaryLabel(target: usize) ?[]const u8 {
             SEARCH_TABCTX_GROUP_NEW => "add to new group",
             SEARCH_TABCTX_GROUP_REMOVE => "remove from group",
             SEARCH_TABCTX_ADOPT_HOST => "move chat to new mode",
+            SEARCH_TABCTX_GOOGLE_SIGNIN => "sign in to google account chrome profile",
             SEARCH_TABCTX_GROUP_NEW_TAB_IN => "new chat in this group",
             SEARCH_TABCTX_MOVE_NEW_WS => "move to new workspace",
             SEARCH_TABCTX_CLEAR_SEL => "clear tab selection",
@@ -2930,6 +2933,13 @@ pub fn updateSearchResults() void {
                     labelsMatchQuery(&.{ "Move chat to new mode", "adopt", "convert", "transition" }, app_state.g_search_buf[0..app_state.g_search_len]))
                 {
                     app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_ADOPT_HOST;
+                    app_state.g_search_result_count += 1;
+                }
+                if (@import("browser_pane.zig").browserProfileToken(ti).len > 0 and
+                    app_state.g_search_result_count < app_state.g_search_results.len and
+                    labelsMatchQuery(&.{ "Sign in to Google in this profile", "google", "sign in", "account" }, app_state.g_search_buf[0..app_state.g_search_len]))
+                {
+                    app_state.g_search_results[app_state.g_search_result_count] = SEARCH_TABCTX_GOOGLE_SIGNIN;
                     app_state.g_search_result_count += 1;
                 }
             }

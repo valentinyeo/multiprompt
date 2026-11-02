@@ -399,6 +399,7 @@ pub const SHORTCUT_ROWS = [_]ShortcutRow{
     .{ .a = "Alt+R", .b = "Read the agent's last reply aloud again, right now, even with Voice Mode off", .header = false },
     .{ .a = "Alt+[ / Alt+]", .b = "Read previous / next agent reply aloud; Chat View follows the spoken reply", .header = false },
     .{ .a = "Alt+W", .b = "Open a URL in a new pane tab and focus the browser", .header = false },
+    .{ .a = "Ctrl+K \u{2192} Sign in to Google in this profile", .b = "Open this profile in a plain window without the control channel so Google accepts the sign-in; also offered when Google rejects the sign-in page", .header = false },
     .{ .a = "Alt+A", .b = "Toggle the Edge browser pane for this tab", .header = false },
     .{ .a = "Alt+Shift+A", .b = "Retry a browser pane that could not connect (Ctrl+K: Retry Browser Pane)", .header = false },
     .{ .a = "Ctrl+Shift+S", .b = "Screenshot browser tab, paste link + space, focus Chat View composer or shell", .header = false },

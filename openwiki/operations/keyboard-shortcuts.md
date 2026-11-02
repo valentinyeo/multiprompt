@@ -285,6 +285,7 @@ Opening multiprompt is locked until device login is validated and the initial se
 | Alt+R | Read the agent's last reply aloud again, right now, even with Voice Mode off |
 | Alt+[ / Alt+] | Read previous / next agent reply aloud; Chat View follows the spoken reply |
 | Alt+W | Open a URL in a new pane tab and focus the browser |
+| Ctrl+K → Sign in to Google in this profile | Open this profile in a plain window without the control channel so Google accepts the sign-in; also offered when Google rejects the sign-in page |
 | Alt+A | Toggle the Edge browser pane for this tab |
 | Alt+Shift+A | Retry a browser pane that could not connect (Ctrl+K: Retry Browser Pane) |
 | Ctrl+Shift+S | Screenshot browser tab, paste link + space, focus Chat View composer or shell |

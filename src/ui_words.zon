@@ -103,6 +103,7 @@
     .palette_theme_edge_grey = "Edge Grey",
     .palette_theme_dev_blue = "Dev Blue",
     .tab_context_move_chat_mode = "Move chat to new mode",
+    .tab_context_google_signin = "Sign in to Google in this profile",
     .tab_context_switch_to_live_chat = "Switch to Live Chat",
     .tab_context_switch_to_terminal = "Switch to Terminal",
     .tab_context_unfavorite = "Unfavorite",
