@@ -315,6 +315,7 @@ var g_browser_focus_mode = false;
 var g_shell_focused = true;
 var g_chat_active = false;
 var g_startup_progress = false;
+var g_restoring = false;
 var g_voice_deferred_text: [0]struct { shell_id: u32, len: usize, text: [1]u16 } = .{};
 var foreground: HANDLE = 10;
 var focused: HANDLE = 10;
