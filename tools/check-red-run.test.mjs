@@ -109,7 +109,7 @@ test "native proof" {
 const after = 1;
 `;
 
-  test('native chat test edits require Windows execution, not fake portable proof', t => {
+  test('native Zig test edits require Windows execution, not fake portable proof', t => {
     const f = fixture(t);
     f.write('src/chat_render.zig', nativeSource);
     const base = f.commit();
@@ -117,7 +117,7 @@ const after = 1;
     f.commit();
     const result = f.run(base);
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stdout, /native chat test edits only; Windows tests still required/);
+    assert.match(result.stdout, /native Zig test edits only; Windows tests still required/);
     assert.doesNotMatch(result.stdout, /RED PROVEN|TEST_ONLY_PROVEN/);
   });
 
@@ -168,16 +168,34 @@ const after = 1;
     assert.match(result.stdout, /RED PROVEN tools\/chat.test.cjs/);
   });
 
-  test('other Zig files do not receive native chat admission', t => {
+  test('native test-block edits in any source file require Windows execution', t => {
     const f = fixture(t);
     f.write('src/other.zig', nativeSource);
     const base = f.commit();
     f.write('src/other.zig', nativeSource.replace('_ = value;', '_ = value;\n    try @import("std").testing.expect(true);'));
     f.commit();
     const result = f.run(base);
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /No changed regression tests/);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /native Zig test edits only; Windows tests still required/);
+    assert.doesNotMatch(result.stdout, /RED PROVEN|TEST_ONLY_PROVEN/);
   });
+
+  for (const [name, update] of [
+    ['code outside the test blocks', source => source.replace('const after = 1;', 'const after = 2;')],
+    ['a renamed test', source => source.replace('test "native proof"', 'test "other proof"')],
+    ['an added test', source => source.replace('const after = 1;', 'test "extra" {}\nconst after = 1;')],
+  ]) {
+    test(`native admission still refuses ${name} in another source file`, t => {
+      const f = fixture(t);
+      f.write('src/other.zig', nativeSource);
+      const base = f.commit();
+      f.write('src/other.zig', update(nativeSource));
+      f.commit();
+      const result = f.run(base);
+      assert.notEqual(result.status, 0, result.stdout + result.stderr);
+      assert.match(result.stderr, /No changed regression tests/);
+    });
+  }
 
   test('a genuine changed regression fails only on merge-base production source', t => {
     const f = fixture(t);

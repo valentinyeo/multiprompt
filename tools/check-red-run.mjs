@@ -81,16 +81,22 @@ function nativeTestParts(source) {
   return { names, outside: pieces.join('') };
 }
 
-function nativeChatTestsOnly() {
-  const file = 'src/chat_render.zig';
-  if (!changed.includes(file) || !changed.every(name => name === file || docs.test(name))) return false;
-  try {
-    const before = nativeTestParts(fs.readFileSync(path.join(red, file), 'utf8'));
-    const after = nativeTestParts(fs.readFileSync(path.join(green, file), 'utf8'));
-    return before.names.length > 0 && JSON.stringify(before.names) === JSON.stringify(after.names) && before.outside === after.outside;
-  } catch {
-    return false;
+function nativeZigTestsOnly() {
+  const zig = /^src\/[^/]+\.zig$/;
+  if (!changed.length) return false;
+  if (!changed.every(name => docs.test(name) || (zig.test(name) && present.includes(name)))) return false;
+  const files = changed.filter(name => zig.test(name));
+  for (const file of files) {
+    if (!fs.existsSync(path.join(red, file)) || !fs.existsSync(path.join(green, file))) return false;
+    try {
+      const before = nativeTestParts(fs.readFileSync(path.join(red, file), 'utf8'));
+      const after = nativeTestParts(fs.readFileSync(path.join(green, file), 'utf8'));
+      if (!(before.names.length > 0 && JSON.stringify(before.names) === JSON.stringify(after.names) && before.outside === after.outside)) return false;
+    } catch {
+      return false;
+    }
   }
+  return true;
 }
 
 function run(file, dir) {
@@ -117,8 +123,8 @@ try {
     const stampPaths = /^(?:src\/(?:main|changelog)\.zig|changelog\.d\/[^/]+)$/;
     if (changed.length && changed.every(file => stampPaths.test(file)) && classifyTrees(snapshot(red), snapshot(green), changed) === 'STAMP') {
       console.log('RED_RUN_NOT_REQUIRED verified mechanical release stamp');
-    } else if (nativeChatTestsOnly()) {
-      console.log('RED_RUN_NOT_REQUIRED native chat test edits only; Windows tests still required');
+    } else if (nativeZigTestsOnly()) {
+      console.log('RED_RUN_NOT_REQUIRED native Zig test edits only; Windows tests still required');
     } else {
       if (!tests.length) throw new Error('No changed regression tests. Add a portable .test.js, .test.mjs, .test.cjs or Python regression that fails on merge-base source.');
       const inputs = changed.filter(file => /^(?:tools\/fixtures\/|tools\/[^/]*fixture[^/]*$|tests\/fixtures\/)/.test(file));
