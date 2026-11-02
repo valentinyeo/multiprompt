@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <d2d1.h>
 #include <dwrite.h>
+#include <dwrite_3.h>
+#include <new>
 #include <limits.h>
 #include <stdint.h>
 #include <string.h>
@@ -353,4 +355,167 @@ extern "C" int mp_draw_color_text(HDC dc, const wchar_t *input, unsigned length,
     HeapFree(GetProcessHeap(), 0, positions);
     if (shortened) HeapFree(GetProcessHeap(), 0, shortened);
     return metrics.tmHeight;
+}
+
+template <typename T> struct DialogCom {
+    T *value = nullptr;
+    ~DialogCom() { if (value) value->Release(); }
+};
+
+struct DialogLayout {
+    DialogCom<IDWriteFactory> factory;
+    DialogCom<IDWriteFactory3> factory3;
+    DialogCom<IDWriteGdiInterop> interop;
+    DialogCom<IDWriteFontFace> face;
+    DialogCom<IDWriteFontFaceReference> reference;
+    DialogCom<IDWriteFontSetBuilder> builder;
+    DialogCom<IDWriteFontSet> set;
+    DialogCom<IDWriteFontCollection1> collection;
+    DialogCom<IDWriteFont> font;
+    DialogCom<IDWriteFontFamily> family;
+    DialogCom<IDWriteLocalizedStrings> names;
+    DialogCom<IDWriteFont> matching;
+    DialogCom<IDWriteFontFace> matching_face;
+    DialogCom<IDWriteFontFaceReference> matching_reference;
+    DialogCom<IDWriteTextFormat> format;
+    DialogCom<IDWriteTextLayout> layout;
+    DialogCom<IDWriteTextLayout2> layout2;
+    DialogCom<IDWriteFontFallback> fallback;
+    wchar_t *name = nullptr;
+    int height = 0;
+    ~DialogLayout() { if (name) HeapFree(GetProcessHeap(), 0, name); }
+};
+
+static bool dialogFaceReference(IDWriteFactory3 *factory, IDWriteFontFace *face, IDWriteFontFaceReference **reference) {
+    DialogCom<IDWriteFontFace3> face3;
+    if (SUCCEEDED(face->QueryInterface(__uuidof(IDWriteFontFace3), reinterpret_cast<void **>(&face3.value))) &&
+        face3.value && SUCCEEDED(face3.value->GetFontFaceReference(reference)) && *reference &&
+        (*reference)->GetFontFaceIndex() == face->GetIndex() && (*reference)->GetSimulations() == face->GetSimulations()) return true;
+    if (*reference) { (*reference)->Release(); *reference = nullptr; }
+    UINT32 count = 0;
+    if (FAILED(face->GetFiles(&count, nullptr)) || count != 1) return false;
+    DialogCom<IDWriteFontFile> file;
+    if (FAILED(face->GetFiles(&count, &file.value)) || count != 1 || !file.value) return false;
+#ifdef __MINGW32__
+    return SUCCEEDED(factory->CreateFontFaceReference_(file.value, face->GetIndex(), face->GetSimulations(), reference)) && *reference;
+#else
+    return SUCCEEDED(factory->CreateFontFaceReference(file.value, face->GetIndex(), face->GetSimulations(), reference)) && *reference;
+#endif
+}
+
+extern "C" void *mp_dialog_layout_create(HDC dc, const wchar_t *text, unsigned length, int width, int *height) {
+    if (!dc || !text || !height || width <= 0 || length > INT_MAX || GetMapMode(dc) != MM_TEXT) return nullptr;
+    TEXTMETRICW metrics;
+    if (!GetTextMetricsW(dc, &metrics) || metrics.tmHeight <= metrics.tmInternalLeading) return nullptr;
+    DialogLayout *r = new (std::nothrow) DialogLayout;
+    if (!r) return nullptr;
+    bool ok = false;
+    do {
+        if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown **>(&r->factory.value))) || !r->factory.value) break;
+        if (FAILED(r->factory.value->QueryInterface(__uuidof(IDWriteFactory3), reinterpret_cast<void **>(&r->factory3.value))) || !r->factory3.value) break;
+        if (FAILED(r->factory.value->GetGdiInterop(&r->interop.value)) || !r->interop.value) break;
+        if (FAILED(r->interop.value->CreateFontFaceFromHdc(dc, &r->face.value)) || !r->face.value) break;
+        if (!dialogFaceReference(r->factory3.value, r->face.value, &r->reference.value)) break;
+        if (FAILED(r->factory3.value->CreateFontSetBuilder(&r->builder.value)) || !r->builder.value) break;
+        if (FAILED(r->builder.value->AddFontFaceReference(r->reference.value))) break;
+        if (FAILED(r->builder.value->CreateFontSet(&r->set.value)) || !r->set.value) break;
+        if (FAILED(r->factory3.value->CreateFontCollectionFromFontSet(r->set.value, &r->collection.value)) || !r->collection.value) break;
+        if (FAILED(r->collection.value->GetFontFromFontFace(r->face.value, &r->font.value)) || !r->font.value) break;
+        if (FAILED(r->font.value->GetFontFamily(&r->family.value)) || !r->family.value) break;
+        if (FAILED(r->family.value->GetFamilyNames(&r->names.value)) || !r->names.value || !r->names.value->GetCount()) break;
+        UINT32 name_length = 0;
+        if (FAILED(r->names.value->GetStringLength(0, &name_length)) || name_length == UINT_MAX ||
+            static_cast<size_t>(name_length) + 1 > SIZE_MAX / sizeof(wchar_t)) break;
+        r->name = static_cast<wchar_t *>(HeapAlloc(GetProcessHeap(), 0, (static_cast<size_t>(name_length) + 1) * sizeof(wchar_t)));
+        if (!r->name || FAILED(r->names.value->GetString(0, r->name, name_length + 1))) break;
+        const auto weight = r->font.value->GetWeight();
+        const auto stretch = r->font.value->GetStretch();
+        const auto style = r->font.value->GetStyle();
+        if (FAILED(r->family.value->GetFirstMatchingFont(weight, stretch, style, &r->matching.value)) || !r->matching.value) break;
+        if (FAILED(r->matching.value->CreateFontFace(&r->matching_face.value)) || !r->matching_face.value) break;
+        if (!dialogFaceReference(r->factory3.value, r->matching_face.value, &r->matching_reference.value) ||
+            !r->reference.value->Equals(r->matching_reference.value)) break;
+        const float em = static_cast<float>(metrics.tmHeight - metrics.tmInternalLeading);
+        if (FAILED(r->factory.value->CreateTextFormat(r->name, r->collection.value, weight, style, stretch, em, L"", &r->format.value)) || !r->format.value) break;
+        if (FAILED(r->format.value->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP))) break;
+        if (FAILED(r->factory.value->CreateTextLayout(text, length, r->format.value, static_cast<float>(width), 10000000.0f, &r->layout.value)) || !r->layout.value) break;
+        if (FAILED(r->layout.value->QueryInterface(__uuidof(IDWriteTextLayout2), reinterpret_cast<void **>(&r->layout2.value))) || !r->layout2.value) break;
+        if (FAILED(r->factory3.value->GetSystemFontFallback(&r->fallback.value)) || !r->fallback.value ||
+            FAILED(r->layout2.value->SetFontFallback(r->fallback.value))) break;
+        DWRITE_TEXT_METRICS measured;
+        if (FAILED(r->layout.value->GetMetrics(&measured)) || !std::isfinite(measured.height) || measured.height < 0 || measured.height >= 10000000.0f) break;
+        r->height = length ? static_cast<int>(std::ceil(measured.height)) : 0;
+        *height = r->height;
+        ok = true;
+    } while (false);
+    if (!ok) { delete r; return nullptr; }
+    return r;
+}
+
+extern "C" void mp_dialog_layout_release(void *layout) {
+    delete static_cast<DialogLayout *>(layout);
+}
+
+extern "C" int mp_dialog_layout_draw(void *raw, HDC dc, const RECT *bounds, const RECT *client, unsigned long color) {
+    auto *r = static_cast<DialogLayout *>(raw);
+    if (!r || !dc || !bounds || !client) return 0;
+    if (bounds->right <= bounds->left || bounds->bottom <= bounds->top) return 1;
+    if (client->right <= client->left || client->bottom <= client->top) return 0;
+    RECT clip, visible;
+    const int clip_type = GetClipBox(dc, &clip);
+    if (clip_type == ERROR) return 0;
+    if (clip_type == NULLREGION || !IntersectRect(&visible, bounds, client) || !IntersectRect(&visible, &visible, &clip)) return 1;
+    const long long width64 = static_cast<long long>(visible.right) - visible.left;
+    const long long height64 = static_cast<long long>(visible.bottom) - visible.top;
+    const long long origin_x = static_cast<long long>(bounds->left) - visible.left;
+    const long long origin_y = static_cast<long long>(bounds->top) - visible.top;
+    if (width64 <= 0 || height64 <= 0 || width64 > 16777216 || height64 > 16777216 ||
+        height64 > INT_MAX / (width64 * 4) ||
+        origin_x < -16777216 || origin_x > 16777216 || origin_y < -16777216 || origin_y > 16777216) return 0;
+    const int width = static_cast<int>(width64), height = static_cast<int>(height64);
+    struct Bitmap {
+        HDC dc = nullptr;
+        HBITMAP bitmap = nullptr;
+        HGDIOBJ old = nullptr;
+        ~Bitmap() {
+            if (dc && old && old != HGDI_ERROR) SelectObject(dc, old);
+            if (bitmap) DeleteObject(bitmap);
+            if (dc) DeleteDC(dc);
+        }
+    } image;
+    image.dc = CreateCompatibleDC(dc);
+    if (!image.dc) return 0;
+    BITMAPINFO info = {};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void *pixels = nullptr;
+    image.bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+    if (!image.bitmap || !pixels) return 0;
+    image.old = SelectObject(image.dc, image.bitmap);
+    if (!image.old || image.old == HGDI_ERROR) return 0;
+    memset(pixels, 0, static_cast<size_t>(width64 * height64 * 4));
+    DialogCom<ID2D1Factory> factory;
+    DialogCom<ID2D1DCRenderTarget> target;
+    DialogCom<ID2D1SolidColorBrush> brush;
+    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &factory.value)) || !factory.value) return 0;
+    const auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+    if (FAILED(factory.value->CreateDCRenderTarget(&properties, &target.value)) || !target.value) return 0;
+    target.value->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+    if (FAILED(target.value->CreateSolidColorBrush(D2D1::ColorF(GetRValue(color) / 255.0f, GetGValue(color) / 255.0f, GetBValue(color) / 255.0f), &brush.value)) || !brush.value) return 0;
+    const RECT local = {0, 0, width, height};
+    if (!GdiFlush() || FAILED(target.value->BindDC(image.dc, &local))) return 0;
+    target.value->BeginDraw();
+    target.value->Clear(D2D1::ColorF(0, 0, 0, 0));
+    target.value->PushAxisAlignedClip(D2D1::RectF(0, 0, static_cast<float>(width), static_cast<float>(height)), D2D1_ANTIALIAS_MODE_ALIASED);
+    target.value->DrawTextLayout(D2D1::Point2F(static_cast<float>(origin_x), static_cast<float>(origin_y)),
+        r->layout.value, brush.value, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT);
+    target.value->PopAxisAlignedClip();
+    if (FAILED(target.value->EndDraw())) return 0;
+    const BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    return AlphaBlend(dc, visible.left, visible.top, width, height, image.dc, 0, 0, width, height, blend) ? 1 : 0;
 }

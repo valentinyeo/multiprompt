@@ -1,6 +1,7 @@
 const std = @import("std");
 const w = @import("win32.zig");
 const fonts = @import("fonts.zig");
+const dwrite = @import("dwrite_text.zig");
 const smooth = @import("smooth.zig");
 const focus = @import("focus.zig");
 const app_state = @import("app_state.zig");
@@ -84,17 +85,46 @@ fn closeResult(state: *const State) i32 {
 }
 
 fn paint(dc: w.HANDLE, state: *State, bounds: w.RECT) void {
+    const width = bounds.right - bounds.left;
+    const height = bounds.bottom - bounds.top;
+    if (width <= 0 or height <= 0) return;
+    const memory = w.CreateCompatibleDC(dc) orelse {
+        _ = paintFrame(dc, state, bounds, false);
+        return;
+    };
+    defer _ = w.DeleteDC(memory);
+    const bitmap = w.CreateCompatibleBitmap(dc, width, height) orelse {
+        _ = paintFrame(dc, state, bounds, false);
+        return;
+    };
+    defer _ = w.DeleteObject(bitmap);
+    const old = w.SelectObject(memory, bitmap);
+    if (old == null or @intFromPtr(old.?) == std.math.maxInt(usize)) {
+        _ = paintFrame(dc, state, bounds, false);
+        return;
+    }
+    defer _ = w.SelectObject(memory, old);
+    if (!paintFrame(memory, state, bounds, true) and !paintFrame(memory, state, bounds, false)) {
+        _ = paintFrame(dc, state, bounds, false);
+        return;
+    }
+    if (w.BitBlt(dc, bounds.left, bounds.top, width, height, memory, bounds.left, bounds.top, w.GDI_SRCCOPY) == 0) {
+        _ = paintFrame(dc, state, bounds, false);
+    }
+}
+
+fn paintFrame(dc: w.HANDLE, state: *State, bounds: w.RECT, color: bool) bool {
     const light = app_state.g_light_theme;
     const panel: u32 = if (light) 0xfafafa else 0x181818;
     const outline: u32 = if (light) 0xdedede else 0x2e2e2e;
     const text: u32 = if (light) 0x202020 else 0xf2f2f2;
     const hint: u32 = if (light) 0x606060 else 0x8a8a8a;
     if (state.backdrop) |backdrop| {
-        _ = w.BitBlt(dc, 0, 0, bounds.right, bounds.bottom, backdrop.dc, 0, 0, 0x00CC0020);
+        if (w.BitBlt(dc, 0, 0, bounds.right, bounds.bottom, backdrop.dc, 0, 0, 0x00CC0020) == 0) return false;
     } else {
-        const brush = w.CreateSolidBrush(if (light) 0xeaeaea else 0x101010);
-        _ = w.FillRect(dc, &bounds, brush);
-        _ = w.DeleteObject(brush);
+        const brush = w.CreateSolidBrush(if (light) 0xeaeaea else 0x101010) orelse return false;
+        defer _ = w.DeleteObject(brush);
+        if (w.FillRect(dc, &bounds, brush) == 0) return false;
     }
     _ = w.SetBkMode(dc, w.TRANSPARENT);
     const title_font = fonts.create(-state.px(18), 0, 0, 0, 600, 0, 0, 0, 0, 0, 0, 5, 0, null);
@@ -103,14 +133,35 @@ fn paint(dc: w.HANDLE, state: *State, bounds: w.RECT) void {
     defer _ = w.DeleteObject(body_font);
     const old_font = w.SelectObject(dc, title_font);
     defer _ = w.SelectObject(dc, old_font);
-    const width = @min(state.px(440), bounds.right - state.px(16));
-    var title_rc = w.RECT{ .left = 0, .top = 0, .right = width - state.px(48), .bottom = 0 };
-    _ = w.DrawTextW(dc, state.title.ptr, @intCast(state.title.len), &title_rc, w.DT_CALCRECT | w.DT_WORDBREAK | w.DT_NOPREFIX);
-    const title_h = title_rc.bottom;
-    _ = w.SelectObject(dc, body_font);
-    var body = w.RECT{ .left = 0, .top = 0, .right = width - state.px(48), .bottom = 0 };
-    _ = w.DrawTextW(dc, state.text.ptr, @intCast(state.text.len), &body, w.DT_CALCRECT | w.DT_WORDBREAK | w.DT_NOPREFIX);
-    const body_h = body.bottom;
+    if (color and (title_font == null or body_font == null or old_font == null or @intFromPtr(old_font.?) == std.math.maxInt(usize))) return false;
+    const width = @max(0, @min(state.px(440), bounds.right - state.px(16)));
+    const text_width = @max(0, width - state.px(48));
+    var title_layout: ?dwrite.DialogLayout = null;
+    var body_layout: ?dwrite.DialogLayout = null;
+    defer if (title_layout) |layout| layout.release();
+    defer if (body_layout) |layout| layout.release();
+    var title_rc = w.RECT{ .left = 0, .top = 0, .right = text_width, .bottom = 0 };
+    var body = title_rc;
+    var title_h: i32 = 0;
+    var body_h: i32 = 0;
+    if (color) {
+        title_layout = dwrite.DialogLayout.create(dc, state.title, text_width) orelse return false;
+        const previous = w.SelectObject(dc, body_font);
+        if (previous == null or @intFromPtr(previous.?) == std.math.maxInt(usize)) return false;
+        body_layout = dwrite.DialogLayout.create(dc, state.text, text_width) orelse return false;
+        title_h = title_layout.?.height;
+        body_h = body_layout.?.height;
+    } else {
+        if (text_width > 0) {
+            _ = w.DrawTextW(dc, state.title.ptr, @intCast(state.title.len), &title_rc, w.DT_CALCRECT | w.DT_WORDBREAK | w.DT_NOPREFIX);
+            title_h = title_rc.bottom;
+        }
+        _ = w.SelectObject(dc, body_font);
+        if (text_width > 0) {
+            _ = w.DrawTextW(dc, state.text.ptr, @intCast(state.text.len), &body, w.DT_CALCRECT | w.DT_WORDBREAK | w.DT_NOPREFIX);
+            body_h = body.bottom;
+        }
+    }
     const height = title_h + body_h + state.px(120);
     const left = @divFloor(bounds.right - width, 2);
     const top = @max(state.px(8), @divFloor(bounds.bottom - height, 2));
@@ -125,11 +176,19 @@ fn paint(dc: w.HANDLE, state: *State, bounds: w.RECT) void {
     _ = w.SelectObject(dc, title_font);
     _ = w.SetTextColor(dc, text);
     title_rc = .{ .left = left + state.px(24), .top = top + state.px(24), .right = left + width - state.px(24), .bottom = top + state.px(24) + title_h };
-    _ = w.DrawTextW(dc, state.title.ptr, @intCast(state.title.len), &title_rc, w.DT_WORDBREAK | w.DT_NOPREFIX);
+    if (color) {
+        if (!title_layout.?.draw(dc, title_rc, bounds, text)) return false;
+    } else if (text_width > 0) {
+        _ = w.DrawTextW(dc, state.title.ptr, @intCast(state.title.len), &title_rc, w.DT_WORDBREAK | w.DT_NOPREFIX);
+    }
     _ = w.SelectObject(dc, body_font);
     _ = w.SetTextColor(dc, hint);
     body = .{ .left = title_rc.left, .top = title_rc.bottom + state.px(8), .right = title_rc.right, .bottom = title_rc.bottom + state.px(8) + body_h };
-    _ = w.DrawTextW(dc, state.text.ptr, @intCast(state.text.len), &body, w.DT_WORDBREAK | w.DT_NOPREFIX);
+    if (color) {
+        if (!body_layout.?.draw(dc, body, bounds, hint)) return false;
+    } else if (text_width > 0) {
+        _ = w.DrawTextW(dc, state.text.ptr, @intCast(state.text.len), &body, w.DT_WORDBREAK | w.DT_NOPREFIX);
+    }
     var x = state.card.right - state.px(24);
     var i = state.buttons.len;
     while (i > 0) {
@@ -154,6 +213,7 @@ fn paint(dc: w.HANDLE, state: *State, bounds: w.RECT) void {
         _ = w.DrawTextW(dc, button.label, -1, &label, w.DT_SINGLELINE | w.DT_VCENTER | w.DT_CENTER | w.DT_NOPREFIX);
         x -= button_width + state.px(8);
     }
+    return true;
 }
 
 fn wndProc(hwnd: w.HANDLE, msg: w.UINT, wp: w.WPARAM, lp: w.LPARAM) callconv(w.WINAPI) w.LRESULT {

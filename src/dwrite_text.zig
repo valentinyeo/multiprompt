@@ -255,6 +255,31 @@ fn ensureTarget(hdc: w.HANDLE, width: u32, height: u32) bool {
     return target != null and target.?.v.setPixelsPerDip(target.?, 1) >= 0;
 }
 
+const DialogLayoutHandle = opaque {};
+extern "c" fn mp_dialog_layout_create(w.HANDLE, [*]const u16, u32, i32, *i32) ?*DialogLayoutHandle;
+extern "c" fn mp_dialog_layout_release(*DialogLayoutHandle) void;
+extern "c" fn mp_dialog_layout_draw(*DialogLayoutHandle, w.HANDLE, *const w.RECT, *const w.RECT, u32) c_int;
+
+pub const DialogLayout = struct {
+    handle: *DialogLayoutHandle,
+    height: i32,
+
+    pub fn create(dc: w.HANDLE, text: []const u16, width: i32) ?DialogLayout {
+        if (text.len > std.math.maxInt(i32) or width <= 0) return null;
+        var height: i32 = 0;
+        const handle = mp_dialog_layout_create(dc, text.ptr, @intCast(text.len), width, &height) orelse return null;
+        return .{ .handle = handle, .height = height };
+    }
+
+    pub fn release(self: DialogLayout) void {
+        mp_dialog_layout_release(self.handle);
+    }
+
+    pub fn draw(self: DialogLayout, dc: w.HANDLE, bounds: w.RECT, client: w.RECT, color: u32) bool {
+        return mp_dialog_layout_draw(self.handle, dc, &bounds, &client, color) != 0;
+    }
+};
+
 const PositionedContext = struct {
     text: []const u16,
     advances: []const f32,
