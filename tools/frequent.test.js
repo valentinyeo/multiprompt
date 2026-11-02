@@ -113,8 +113,8 @@ fn SetTextColor(_: HANDLE, _: u32) u32 { return 0; }
 fn drawAttentionDot(_: HANDLE, _: i32, _: i32, _: i32, _: u32) void {}
 fn drawAgentIcon(_: HANDLE, _: *RECT, _: u8, _: bool) void {}
 fn asciiToU16(s: []const u8, out: []u16) usize { for (s, 0..) |c, i| out[i] = c; return s.len; }
-fn drawText(hdc: HANDLE, text: [*]const u16, len: i32, rc: *RECT, flags: u32) i32 {
-    return DrawTextW(hdc, text, len, rc, flags);
+fn drawText(target: HANDLE, text: [*]const u16, len: i32, rc: *RECT, flags: u32) i32 {
+    return DrawTextW(target, text, len, rc, flags);
 }
 fn DrawTextW(_: HANDLE, text: [*]const u16, len: i32, rc: *RECT, _: u32) i32 {
     if (rc.left == 44 and rc.right == 400) {
@@ -267,6 +267,7 @@ function runHarness(mutate = x => x) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mp-frequent-'));
   try {
     copyZig(['frequent.zig', 'json_reader.zig', 'archive_rules.zig', 'voice_filter.zig', 'session_layout.zig', 'workspace_view.zig', 'dwrite_text.zig'], dir);
+    require('./fixtures/inline-stubs').writeRoomFrontend(dir);
     fs.mkdirSync(path.join(dir, 'fixtures'), { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixture.json'));
     fs.copyFileSync(path.join(__dirname, 'fixtures/issue-415-frequent.json'), path.join(dir, 'fixtures/issue-415-frequent.json'));
